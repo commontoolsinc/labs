@@ -50,10 +50,40 @@ function neededJobIds(job: string): string[] {
   );
 }
 
+const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+
 async function workflow(name: string): Promise<string> {
-  return await Deno.readTextFile(
-    new URL(`../.github/workflows/${name}`, import.meta.url),
+  return await Deno.readTextFile(new URL(name, workflowDirectory));
+}
+
+async function workflowNames(): Promise<string[]> {
+  const names: string[] = [];
+  for await (const entry of Deno.readDir(workflowDirectory)) {
+    if (entry.isFile && /\.ya?ml$/.test(entry.name)) names.push(entry.name);
+  }
+  return names.sort();
+}
+
+// Drops YAML comments. A `#` after whitespace ends a plain scalar, so what is
+// left on a line is the value the workflow actually carries. Applied before
+// looking for commands, so that a comment naming a command is not read as one
+// and a comment after a command is not read as part of it.
+function withoutComments(contents: string): string {
+  return contents.replaceAll(/(^|\s)#.*$/gm, "$1");
+}
+
+function deployInvocations(contents: string): string[] {
+  return [...contents.matchAll(/^ +script: (\/opt\/cf\/deploy\.sh.*)$/gm)].map(
+    (match) => match[1],
   );
+}
+
+// Splits a command the way a shell would count its words, except that a
+// `${{ ... }}` workflow expression holds spaces and still stands for one word.
+// The expression is matched to its first `}}` so that one containing a brace,
+// as `${{ format('{0}', github.sha) }}` does, still comes out as one word.
+function commandWords(command: string): string[] {
+  return [...command.matchAll(/\$\{\{.*?\}\}|\S+/g)].map((match) => match[0]);
 }
 
 function workflowTriggers(contents: string): string {
@@ -161,4 +191,58 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
       "            ${{ env.IMAGE }}:${{ github.sha }}\n" +
       "            ${{ env.IMAGE }}:latest\n",
   );
+});
+
+Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () => {
+  // The bastion's /opt/cf/deploy.sh takes an environment name and a
+  // 40-character commit SHA, and nothing else. Hand it a third argument, an
+  // environment it does not know, or a revision that is not a full SHA, and it
+  // prints its usage and exits 1, failing the deploy job. That script belongs
+  // to the infra repository, so nothing else here sees it and the call sites
+  // are checked instead. docs/development/deploying.md covers the seam.
+  const environments = ["estuary", "toolshed", "rapids"];
+  // The revision has to expand to a full SHA, which is a property of what the
+  // expression reads rather than of the expression itself. `github.ref_name`
+  // would look just as much like a revision here and fail on the bastion, so
+  // the expressions whose value is a full SHA are named.
+  const revisions = ["${{ github.sha }}", "${{ steps.resolve.outputs.sha }}"];
+
+  const callers: string[] = [];
+  for (const name of await workflowNames()) {
+    const contents = withoutComments(await workflow(name));
+    const mentions = [...contents.matchAll(/\/opt\/cf\/deploy\.sh/g)].length;
+    if (mentions === 0) continue;
+    callers.push(name);
+
+    // Invocations are found by their one-line `script:` value. Counting the
+    // mentions of the script separately catches a call site written some other
+    // way, which would otherwise go unchecked.
+    const invocations = deployInvocations(contents);
+    assertEquals(
+      invocations.length,
+      mentions,
+      `${name}: every deploy.sh call belongs on a single script: line`,
+    );
+
+    for (const invocation of invocations) {
+      const args = commandWords(invocation).slice(1);
+      assertEquals(args.length, 2, `${name}: wrong arity in \`${invocation}\``);
+      assert(
+        args[0].startsWith("${{") || environments.includes(args[0]),
+        `${name}: unknown environment in \`${invocation}\``,
+      );
+      assert(
+        revisions.includes(args[1]),
+        `${name}: \`${args[1]}\` is not known to be a full SHA, in ` +
+          `\`${invocation}\``,
+      );
+    }
+  }
+
+  // Every workflow that calls the script is checked, so a new one is covered
+  // without being listed. The two that call it today are named to catch the
+  // case where the search comes back empty and the loop above does nothing.
+  for (const name of ["deno.yml", "deploy-production.yml"]) {
+    assert(callers.includes(name), `${name}: no deploy.sh call found`);
+  }
 });
