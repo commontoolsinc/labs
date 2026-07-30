@@ -97,10 +97,10 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // `#favorites` resolves against the identity's HOME space. `Runtime`
+      // derives that DID from the storage manager's signer, which is this
+      // space's signer, so there is nothing to pass here.
       experimental: {},
-      // `#favorites` resolves against the identity's HOME space; this runtime's
-      // space is that home space.
-      userIdentityDID: space,
     });
   });
   afterEach(async () => {
@@ -161,6 +161,7 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     // appear while already running.
     const seedTx = rt.edit();
     hostCell.withTx(seedTx).key("favorites").set([
+      // Post-#4197: discovery tags are plural, and the row is keyed by id.
       {
         cell: thingCell,
         tags: [],
@@ -169,6 +170,15 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
         // property carrying `undefined` is a value of the wrong type, not an
         // omission, and the row is rejected for that instead.
         id: "favorite-1",
+      },
+      // Pre-#4197: a single `tag`, no `tags`, and no keyed `id`. Both vintages
+      // are in real storage, so a projection that requires EITHER tag field
+      // breaks one of them — this row is what keeps a future "fix" to a
+      // required `tags: string[]` from passing.
+      {
+        cell: thingCell,
+        tag: "#thing",
+        userTags: [],
       },
     ] as never);
     await seedTx.commit();
@@ -196,13 +206,19 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     expect(JSON.stringify(managerCell.getAsQueryResult()))
       .not.toContain("No favorites yet.");
 
-    // The swap. A second compilation of the same source under a fresh cause
-    // yields a distinct identity, so repointing re-stages the stored argument
-    // and validates it against the pattern's schema — the production path when
-    // the auto-update moves a running piece to new source.
+    // The swap. Identity is content-addressed, so v2 has to differ in SOURCE —
+    // a fresh transaction over identical bytes would compile to the same
+    // identity and move nothing. The difference is the pattern's name, which
+    // makes the swap positively observable below: without that, a run where
+    // the pointer move silently did nothing would pass on "no errors" alone.
     const v2Tx = rt.edit();
     const v2 = await rt.patternManager.compilePattern(
-      programOf(`${managerSource}\n// swap\n`),
+      programOf(
+        managerSource.replace(
+          `[NAME]: "Favorites Manager"`,
+          `[NAME]: "Favorites Manager v2"`,
+        ),
+      ),
       { space, tx: v2Tx },
     );
     const v2Ref = rt.patternManager.getArtifactEntryRef(v2)!;
@@ -220,6 +236,11 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     // the scheduler re-threw on every pass, and that loop starved the cell
     // reads the links depend on.
     expect(actionErrors).toEqual([]);
+    // The swap really landed: a no-op pointer move would leave the old name and
+    // make the no-errors assertion above vacuous.
+    expect(
+      (managerCell.getAsQueryResult() as Record<string, unknown>)["$NAME"],
+    ).toBe("Favorites Manager v2");
     expect(JSON.stringify(managerCell.getAsQueryResult()))
       .not.toContain("No favorites yet.");
   });
