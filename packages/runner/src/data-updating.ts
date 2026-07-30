@@ -691,7 +691,10 @@ export function normalizeAndDiff(
       }
     }
     newValue = attachCfcLabelViewToSigilLink(
-      newValue.getAsLink({ includeSchema: true }),
+      createSigilLinkFromParsedLink(newValue.getAsNormalizedFullLink(), {
+        base: link,
+        includeSchema: true,
+      }),
       carriedCfcLabelView,
     );
   }
@@ -713,7 +716,7 @@ export function normalizeAndDiff(
   }
 
   // If we're about to create a reference to ourselves, no-op
-  if (areMaybeLinkAndNormalizedLinkSame(newValue, link)) {
+  if (areMaybeLinkAndNormalizedLinkSame(newValue, link, link)) {
     diffLogger.debug(
       "diff",
       () =>
