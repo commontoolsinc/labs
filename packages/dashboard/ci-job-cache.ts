@@ -5,6 +5,7 @@
 import { dashboardCacheFile } from "./history-files.ts";
 
 export const CI_JOB_CACHE_DAYS = 60;
+export const CI_JOB_HISTORY_SAMPLING_VERSION = 2;
 
 const DAY_MS = 86_400_000;
 const STORE_VERSION = 1;
@@ -23,6 +24,7 @@ export interface CachedCiGanttStep {
 }
 
 export interface CachedCiGanttJob {
+  attempt?: number;
   name: string;
   status: string;
   conclusion: string | null;
@@ -64,6 +66,7 @@ export interface CachedCiHistoryRefresh {
   workflow: string;
   days: number;
   refreshedAt: number;
+  samplingVersion?: number;
   successfulRunTimes: number[];
   sampledRuns: CachedCiRunReference[];
   failedRunCount: number;
@@ -121,7 +124,9 @@ const isCachedGanttStep = (value: unknown): value is CachedCiGanttStep => {
 const isCachedGanttJob = (value: unknown): value is CachedCiGanttJob => {
   if (typeof value !== "object" || value === null) return false;
   const job = value as CachedCiGanttJob;
-  return typeof job.name === "string" && typeof job.status === "string" &&
+  return (job.attempt === undefined ||
+      Number.isInteger(job.attempt) && job.attempt > 0) &&
+    typeof job.name === "string" && typeof job.status === "string" &&
     isNullableString(job.conclusion) && isNullableString(job.started_at) &&
     isNullableString(job.completed_at) && Array.isArray(job.steps) &&
     job.steps.every(isCachedGanttStep);
@@ -160,6 +165,9 @@ const isCachedRefresh = (
     typeof refresh.workflow === "string" &&
     Number.isInteger(refresh.days) && refresh.days > 0 &&
     Number.isFinite(refresh.refreshedAt) && refresh.refreshedAt >= 0 &&
+    (refresh.samplingVersion === undefined ||
+      Number.isInteger(refresh.samplingVersion) &&
+        refresh.samplingVersion > 0) &&
     Array.isArray(refresh.successfulRunTimes) &&
     refresh.successfulRunTimes.every(Number.isFinite) &&
     Array.isArray(refresh.sampledRuns) &&
@@ -509,6 +517,7 @@ export class CiJobHistoryStore {
       refreshKey(repo, workflow, days),
     );
     return refresh && refresh.refreshedAt <= Date.now() &&
+        refresh.samplingVersion === CI_JOB_HISTORY_SAMPLING_VERSION &&
         (!invalidation || refresh.refreshedAt > invalidation.invalidatedAt)
       ? refresh
       : undefined;
@@ -533,10 +542,17 @@ export class CiJobHistoryStore {
     failedRunCount: number,
     failedRunTimes: number[],
     stale: boolean,
+    samplingVersion: number | null = CI_JOB_HISTORY_SAMPLING_VERSION,
   ): void {
     if (!Number.isFinite(refreshedAt) || refreshedAt < 0) return;
     if (!Number.isInteger(failedRunCount) || failedRunCount < 0) {
       throw new Error("CI job history refresh has an invalid failure count.");
+    }
+    if (
+      samplingVersion !== null &&
+      (!Number.isInteger(samplingVersion) || samplingVersion <= 0)
+    ) {
+      throw new Error("CI job history refresh has an invalid sampling version.");
     }
     const key = refreshKey(repo, workflow, days);
     const current = this.#refreshes.get(key);
@@ -546,6 +562,7 @@ export class CiJobHistoryStore {
       workflow,
       days,
       refreshedAt,
+      ...(samplingVersion === null ? {} : { samplingVersion }),
       successfulRunTimes: successfulRunTimes.filter(Number.isFinite).sort(
         (a, b) => a - b,
       ),

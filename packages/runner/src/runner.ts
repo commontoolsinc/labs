@@ -113,6 +113,8 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
   getArtifactEntryRef,
+  getPatternProgram,
+  getPatternSourcePath,
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
@@ -1515,6 +1517,26 @@ export class Runner {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: entryRef.identity,
         symbol: entryRef.symbol,
+      });
+      // Same condition as the durable stamp, deliberately: an observer that
+      // saw instantiations the store does not label would report update
+      // targets that cannot be found again, and one that missed a labelled
+      // root would under-report. That includes the KEYLESS case —
+      // `entryRefForPattern` always yields a ref, minting a `keyless:<hash>`
+      // session pointer when there is no content-addressed one, and that
+      // pointer is stamped durably like any other. So keyless roots are
+      // reported here; whether one is an UPGRADE target is a separate judgment
+      // its consumer makes (a `keyless:` identity can never equal a content
+      // identity, so it is not one).
+      this.runtime.onPatternInstantiated?.({
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
+        // The source path stamped at module-index time is the reliable one: a
+        // pattern reloaded BY IDENTITY carries no program, so a nested
+        // instantiation would otherwise arrive sourceless. Fall back to the
+        // program for a hand-built pattern, which has one but was never indexed.
+        main: getPatternSourcePath(pattern) ?? getPatternProgram(pattern)?.main,
+        cell: resultCell.getAsNormalizedFullLink(),
       });
     }
 

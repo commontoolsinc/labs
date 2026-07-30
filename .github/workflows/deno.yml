@@ -148,8 +148,10 @@ jobs:
       #
       # What it does NOT yet catch (measured, and tracked as stage 5 in
       # docs/plans/pattern-update-state-continuity.md): a MOVED storage key.
-      # The committed vintages hold a freshly set-up root and the replay
-      # compares no values, so `.for('x')` → `.for('y')` replays clean here.
+      # The committed vintages DO hold real data — capture drives a pattern
+      # through its own tests — but the replay asks only whether the migration
+      # applied, never whether the values survived it, so `.for('x')` →
+      # `.for('y')` replays clean here.
       # `packages/piece/test/state-continuity.test.ts` covers that class.
       - name: 🔁 Replay pinned vintages under today's source
         run: deno task pattern-vintage
@@ -1101,10 +1103,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
+    # A release artifact must not outlive a failed pattern-migration gate.
+    # Production deploys consume this artifact without rerunning those gates.
     needs:
       [
         "test",
         "check",
+        "pattern-compat",
+        "pattern-vintage",
+        "baselines-append-only",
         "build-toolshed",
         "build-bg-piece-service",
         "build-cf",
@@ -1386,7 +1393,7 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/cf/deploy.sh rapids ${{ github.sha }} --skip-clusterduck
+          script: /opt/cf/deploy.sh rapids ${{ github.sha }}
 
   # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:

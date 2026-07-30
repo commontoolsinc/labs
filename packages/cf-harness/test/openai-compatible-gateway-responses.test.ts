@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
 import {
   OpenAICompatibleGatewayModelClient,
@@ -10,6 +10,10 @@ import {
   WEB_SEARCH_SUBAGENT_MODEL,
   WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS,
 } from "../src/contracts/subagent.ts";
+import {
+  addFirstUserPromptCacheBreakpoint,
+  type ResponsesInputItem,
+} from "../src/model/responses-protocol.ts";
 
 const GATEWAY = "https://gateway.test";
 
@@ -376,6 +380,171 @@ Deno.test("prompt_cache_key is bounded to the provider limit", async () => {
   // Short ids are passed through untouched.
   await client.complete(turn({ runId: "run-short" }));
   assertEquals(captured[2].body.prompt_cache_key, "run-short");
+});
+
+Deno.test("cache affinity, explicit breakpoint, and reasoning are configurable", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    completedResponse([{
+      type: "message",
+      id: "msg_cache",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "ok", annotations: [] }],
+    }]),
+  ]);
+
+  await client.complete(turn({
+    runId: "ephemeral-run-id",
+    cacheAffinityKey: "stable-chat-session",
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
+  }));
+
+  const body = captured[0].body;
+  assertEquals(body.prompt_cache_key, "stable-chat-session");
+  assertEquals(body.prompt_cache_options, {
+    mode: "explicit",
+    ttl: "30m",
+  });
+  assertEquals(body.reasoning, { effort: "low" });
+  const input = body.input as Array<Record<string, unknown>>;
+  const content = input[0].content as Array<Record<string, unknown>>;
+  assertEquals(content[content.length - 1].prompt_cache_breakpoint, {
+    mode: "explicit",
+  });
+});
+
+Deno.test("explicit cache breakpoint selects the last cacheable user block", () => {
+  const original: ResponsesInputItem[] = [
+    {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "earlier" }],
+    },
+    {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_image", image_url: "data:image/png;base64,AA==" },
+        { type: "input_file", file_id: "file_123" },
+        { type: "unsupported_test_block" },
+      ],
+    },
+  ];
+
+  const withBreakpoint = addFirstUserPromptCacheBreakpoint(
+    original,
+    "test provider",
+  );
+  const content = withBreakpoint[1].content as ResponsesInputItem[];
+  assertEquals(content[1].prompt_cache_breakpoint, { mode: "explicit" });
+  assertEquals(content[2].prompt_cache_breakpoint, undefined);
+  assertEquals(original, [
+    {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "earlier" }],
+    },
+    {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_image", image_url: "data:image/png;base64,AA==" },
+        { type: "input_file", file_id: "file_123" },
+        { type: "unsupported_test_block" },
+      ],
+    },
+  ]);
+
+  const imageOnly = addFirstUserPromptCacheBreakpoint(
+    [{
+      type: "message",
+      role: "user",
+      content: [{
+        type: "input_image",
+        image_url: "data:image/png;base64,AA==",
+      }],
+    }],
+    "test provider",
+  );
+  const imageContent = imageOnly[0].content as ResponsesInputItem[];
+  assertEquals(imageContent[0].prompt_cache_breakpoint, { mode: "explicit" });
+});
+
+Deno.test("explicit cache breakpoint requires cacheable user content", () => {
+  assertThrows(
+    () =>
+      addFirstUserPromptCacheBreakpoint([{
+        type: "message",
+        role: "user",
+        content: [{ type: "unsupported_test_block" }],
+      }], "test provider"),
+    Error,
+    "test provider explicit prompt caching requires a cacheable user content block",
+  );
+});
+
+Deno.test("GPT-5.6 cache controls fail before sending an older model", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [completedResponse([])]);
+
+  await assertRejects(
+    () =>
+      client.complete(turn({
+        model: "gpt-5.4",
+        promptCacheMode: "explicit",
+      })),
+    Error,
+    "prompt cache mode explicit requires a GPT-5.6 model",
+  );
+  assertEquals(captured.length, 0);
+});
+
+Deno.test("unsupported GPT-5.6 reasoning effort fails before sending", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [completedResponse([])]);
+
+  await assertRejects(
+    () => client.complete(turn({ reasoningEffort: "ultra" })),
+    Error,
+    "reasoning effort ultra is not supported by gpt-5.6-terra",
+  );
+  assertEquals(captured.length, 0);
+});
+
+Deno.test("Responses usage includes cache details and an estimated cost", async () => {
+  const captured: Captured[] = [];
+  const response = completedResponse([{
+    type: "message",
+    id: "msg_usage",
+    role: "assistant",
+    status: "completed",
+    content: [{ type: "output_text", text: "ok", annotations: [] }],
+  }]) as Record<string, unknown>;
+  response.usage = {
+    input_tokens: 2_000,
+    input_tokens_details: {
+      cached_tokens: 1_200,
+      cache_write_tokens: 600,
+    },
+    output_tokens: 300,
+    output_tokens_details: { reasoning_tokens: 200 },
+    total_tokens: 2_300,
+  };
+  const client = clientWith(captured, [response]);
+
+  const result = await client.complete(turn());
+
+  assertEquals(result.usage, {
+    inputTokens: 2_000,
+    cachedInputTokens: 1_200,
+    cacheWriteTokens: 600,
+    outputTokens: 300,
+    reasoningTokens: 200,
+    totalTokens: 2_300,
+    estimatedCostUsd: 0.007175,
+  });
 });
 
 Deno.test("a turn without a system message sends no instructions", async () => {

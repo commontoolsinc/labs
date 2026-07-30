@@ -18,6 +18,7 @@ import {
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
 
 const signer = await Identity.fromPassphrase("test llm-dialog outbox");
 const space = signer.did();
@@ -130,7 +131,7 @@ describe("llmDialog outbox mechanism", () => {
       const addMessage = await result.key("addMessage").pull();
       addMessage.send({ role: "user", content: prompt });
 
-      await waitForMessages(result, 2);
+      await waitForLlmMessages(runtime, result, 2);
 
       expect(outboxEffects.length).toBeGreaterThan(0);
       expect(outboxEffects[0].kind).toBe("llmDialog-start");
@@ -142,25 +143,3 @@ describe("llmDialog outbox mechanism", () => {
     }
   });
 });
-
-function waitForMessages(result: any, expectedCount: number) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(
-        new Error(
-          `Timeout waiting for ${expectedCount} messages and pending=false`,
-        ),
-      );
-    }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
-      if (pending === false && messages?.length === expectedCount) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
-}

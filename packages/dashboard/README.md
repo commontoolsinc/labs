@@ -183,7 +183,7 @@ surveillance tool.
 | production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard without direct tailnet access can route this check through `PROD_PROXY` or point `PROD_URL` at another truthful health source | `PROD_URL`, `PROD_PROXY` (optional) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
-| cloud spend | BigQuery billing export, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
+| cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
 | benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
@@ -196,6 +196,11 @@ The **labs ci** and **loom ci** headlines use the most recent completed
 workflow attempt. While GitHub reruns a workflow, the prior attempt's conclusion
 remains visible and the tile marks the activity as **build rerunning**. A new
 workflow run still appears as **next build running**.
+
+The **labs ci duration** and **loom ci duration** tiles use successful main push
+runs. Each duration starts when GitHub creates the workflow run for the landed
+commit and ends when that run finishes, so it includes runner queueing and
+reruns.
 
 ## Credentials
 
@@ -311,13 +316,36 @@ dataset.
 6. For local development instead, grant those two roles to a service account,
    download a key for it, and set `GCP_SA_KEY` to the file's contents.
 
-The tile sums the raw `cost` column, i.e. total spend across every project tied
-to the exported billing account, gross of credits. It shows the estimated
-full-month spend as its headline and the actual month-to-date value in the
-header. The estimate uses every settled day in the current month. During the
-first half of the month, it fills that rate window from the prior month's tail
-until it covers 14 days or reaches the first available billing day. The chart
-shows up to 45 complete UTC days and highlights the part used for the estimate.
+The tile covers every project tied to the exported billing account. Its figures
+are money that account actually pays: the export's `cost` column plus the credits
+the same rows carry, which are negative amounts. Every kind of credit counts —
+promotional credits, committed- and sustained-use discounts, and the free tier —
+because none of them is money the account pays. The credit is not a figure the
+tile reports on its own; it is simply absent from the spend, in the same way that
+the usage GitHub's plan includes is absent from the ci-spend figures.
+
+It shows the estimated full-month spend as its headline and the actual
+month-to-date value in the header. The estimate uses every settled day in the
+current month. During the first half of the month, it fills that rate window from
+the prior month's tail until it covers 14 days or reaches the first available
+billing day. The chart shows up to 45 finished UTC days and highlights the part
+used for the estimate.
+
+A day is finished when the export has stopped adding to it, which the tile reads
+from the export's own progress: a day counts as finished once a later day's usage
+has been written since that day was last written to. This matters because the
+export lands a day's usage in batches and goes on adding to a day well into the
+following one, so a day it has not finished holds only part of that day's cost.
+Such a day belongs in the month-to-date total, where it is a running figure, and
+not in the rate behind the projection or at the end of the chart, where it would
+read as spend falling away. When the export has finished no day for more than
+four days the tile goes gray and says how far behind it is, rather than
+projecting a month from stale history.
+
+A promotional credit is finite, so the spend the tile reports rises when a grant
+runs out even though nothing about the usage changed. How much of a grant is left
+is not in the billing export: Google publishes it only in the console's billing
+credits page.
 
 ### `OPENAI_ADMIN_KEY`
 
@@ -502,7 +530,7 @@ Notes:
     Cache entries written before CPU identity was stored are fetched again.
     Each completed artifact check is persisted before it is counted as
     finished. Only new runs and attempts are fetched after the first fill or a
-    server restart. The shortest-view buckets are about 16 minutes wide. The
+    server restart. The shortest-view buckets are about 8 minutes wide. The
     first cache fill can therefore download more artifacts.
   - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
     line per CPU for **every** benchmark. The lines share a calendar-time axis.
@@ -514,8 +542,12 @@ Notes:
     max) and whether to group by source **file** or sort by latest **duration**
     or **trend**. A "hide green" checkbox drops the steady ones. A slider from 1
     through 45 days changes the visible calendar range. The displayed samples
-    are spread across at most 90 time buckets, so a shorter window uses more of
-    the collected samples per day. Keyboard arrows adjust the window without
+    are spread across at most 200 time buckets, so a shorter window uses more of
+    the collected samples per day. Each graph chooses its vertical scale after
+    ignoring the two lowest and two highest displayed values; those points stay
+    in the line but no longer determine the scale, so they may clip instead of
+    flattening the rest of the history. A graph with fewer than 20 values uses
+    its complete range. Keyboard arrows adjust the window without
     moving focus. Enter applies the range immediately. Another selector carries
     the range into its own navigation, and leaving the controls applies it
     directly. Each row shows one latest value and trend from the CPU with the
@@ -540,19 +572,24 @@ Notes:
     base name used by `scripts/ci-gantt.ts` are shown together. Each group starts
     with a slowest-shard line, followed by the individual shard lines. The
     slider covers 1 through 45 days. It keeps every successful main build when
-    there are at most 90, then uses about 90 time buckets and keeps the newest
-    build in each bucket for larger sets. A coverage label compares the sampled
-    builds shown with every successful main build in the selected range. The
-    view can group by job or sort every line by latest duration or robust trend.
+    there are at most 200. Larger sets keep exactly 200 builds spread evenly
+    through the chronological run sequence. A coverage label compares the
+    sampled builds shown with every successful main build in the selected
+    range. The view can group by job or sort every line by latest duration or
+    robust trend. Its graphs use the same vertical-scale trimming as runtime
+    benchmark history.
     It renders cached history immediately. The progress panel remains visible
     as Idle between collections, then shows live collection progress with
     cached, queued, requested, responded, outstanding, and failed run counts.
+    On both history pages, a failed collection remains in the Idle panel until
+    a later collection for that history view succeeds.
     Open runtime benchmark and CI history pages check for newer server data once
     a minute. An open Gantt regenerates every 30 minutes and whenever its tab
     becomes visible. CI refreshes share a 30-minute GitHub freshness window, so
-    multiple pages do not repeat the same API reads. Moving the window slider
-    starts or joins the matching collection without cancelling wider-window
-    work already in progress.
+    multiple pages do not repeat the same API reads. Runtime and CI history
+    checks wait through the same window after GitHub rejects a collection.
+    Moving the window slider starts or joins the matching collection without
+    cancelling wider-window work already in progress.
   - Every GitHub API request made by the three performance views reserves rate
     capacity before it starts. Each guarded request batch reads GitHub's current
     rate-limit status before reserving. Collection stops before projected
@@ -572,6 +609,8 @@ Notes:
     CI history and the detailed `/bench?view=gantt` view use the same entries.
     The three performance views share one selector and preserve the applicable
     repository, range, sort, and runtime statistic while moving between them.
+    They also share the styles for their page header, selector, controls,
+    progress panel, time axis, and history rows.
     The next collection loads those timings before reading GitHub, so it only
     fetches jobs for new sampled runs, uncached Gantt runs, and new attempts.
     Cached history remains visible when no GitHub token is configured or a

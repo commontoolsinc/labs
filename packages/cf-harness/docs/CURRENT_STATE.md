@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-07-22
+Last verified: 2026-07-30
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -45,6 +45,11 @@ The current package provides:
 - explicit skill preload, indexed supporting-resource reads, and exact
   allowlisted Deno/Bash skill scripts;
 - transcript-based resume and durable run artifacts;
+- per-turn and aggregate token/cache usage in run reports, operator output,
+  batch metadata, and interactive turn-completion events;
+- stable interactive prompt-cache affinity, configurable reasoning effort, and
+  opt-in GPT-5.6 gateway cache controls; the ChatGPT/Codex subscription backend
+  uses implicit caching because it rejects the API `prompt_cache_options` field;
 - interactive NDJSON stdio sessions with optional SQLite session, turn, event,
   replay, cancellation, and restore state;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
@@ -101,6 +106,14 @@ mode.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
   sanitized, but a future opaque artifact-handle layer would further reduce path
   and placement coupling.
+- `estimatedCostUsd` is available only for known GPT-5.6 gateway models when the
+  response includes cache reads and writes. It uses public OpenAI pricing;
+  gateway markup, subscription quota accounting, and provider invoices remain
+  outside the harness. `estimateWithheldReason` distinguishes missing provider
+  detail, unknown models, invalid counters, subscription pricing, and incomplete
+  aggregate estimates. Aggregate dollar costs are omitted unless every included
+  usage record reports one, so a partial cost is never presented as the whole
+  run's.
 
 ## Verification
 

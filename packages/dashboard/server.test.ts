@@ -46,6 +46,7 @@ function sourceRun(id: number, title: string): Run {
     event: "push",
     head_sha: `sha-${id}`,
     display_title: title,
+    created_at: new Date(Date.now() - id * 60_000).toISOString(),
     run_started_at: new Date(Date.now() - id * 60_000).toISOString(),
     updated_at: new Date().toISOString(),
     html_url: "",
