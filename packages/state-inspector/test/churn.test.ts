@@ -253,6 +253,38 @@ Deno.test("a window bound SQLite cannot read is refused, not treated as quiet", 
   });
 });
 
+Deno.test("an empty or backwards window is refused, not reported as quiet", () => {
+  // Two perfectly readable bounds in the wrong order match no commits and hit
+  // the same false all-clear as an unparseable one. `until` is exclusive, so
+  // equal bounds are empty too.
+  withStore((commit) => {
+    commit("2026-07-22 10:00:00", ["of:topic"]);
+  }, (space) => {
+    for (
+      const [since, until] of [
+        ["2026-07-22 11:00:00", "2026-07-22 10:00:00"], // backwards
+        ["2026-07-22 10:00:00", "2026-07-22 10:00:00"], // empty
+      ]
+    ) {
+      assertThrows(
+        () => commitChurn(space, { bucketSeconds: 60, since, until }),
+        Error,
+        "is not before",
+      );
+    }
+    // A window that IS ordered still works, including one holding no commits —
+    // that is a real observation, not a mistake.
+    assertEquals(
+      commitChurn(space, {
+        bucketSeconds: 60,
+        since: "2026-07-22 12:00:00",
+        until: "2026-07-22 13:00:00",
+      }).totals.commits,
+      0,
+    );
+  });
+});
+
 Deno.test("a commit with no revisions still counts as a commit", () => {
   // LEFT JOIN, not JOIN: an empty commit is real activity and a fan-out over
   // revisions must not inflate the commit count either.

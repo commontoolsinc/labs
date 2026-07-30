@@ -101,9 +101,11 @@ immediately afterwards — sees the restored one. Pass two would run against pas
 one's state while `cf space verify` reported the clone pristine, which is
 exactly what the two-pass procedure exists to rule out.
 
-`cf space reset` refuses while anything still holds the working copy, so this is
-enforced rather than remembered. Restart the server (step 2) before the next
-pass.
+`cf space reset` refuses while anything still holds the working copy, so
+forgetting is loud rather than silent. Treat that as a tripwire, not a
+guarantee: it cannot stop a server that opens the store in the instant between
+the check and the restore, and no external check can. **Stopping the server is
+what makes the reset correct.** Restart it (step 2) before the next pass.
 
 ## Reading the verdict
 

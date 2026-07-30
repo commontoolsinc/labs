@@ -325,6 +325,69 @@ describe("cf space", () => {
     });
   });
 
+  it("refuses a redirect that downgrades to plaintext http", async () => {
+    // Validating only the URL an operator typed proves nothing about where the
+    // bytes came from: `fetch` follows redirects itself and reports only the
+    // final response, so a permitted origin that 302s elsewhere would carry the
+    // whole space over the redirected transport, having passed the check.
+    await withFixture(async ({ clone }) => {
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: "http://example.com/snapshot.sqlite" },
+          }),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/snapshot.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain("refusing to download");
+      } finally {
+        await server.shutdown();
+      }
+    });
+  });
+
+  it("follows a permitted redirect and clones what it lands on", async () => {
+    // The other half: refusing the downgrade must not refuse redirects as
+    // such, or `--from <s3-url>` — the whole reason the flag takes a URL —
+    // stops working the first time a bucket redirects.
+    await withFixture(async ({ snapshot, clone }) => {
+      const body = await Deno.readFile(snapshot);
+      const target = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () => new Response(body),
+      );
+      const redirector = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(null, {
+            status: 302,
+            // Relative, so this also pins that a bare `Location` resolves
+            // against the URL it came from rather than being taken verbatim.
+            headers: {
+              location: `http://127.0.0.1:${target.addr.port}/s.sqlite`,
+            },
+          }),
+      );
+      try {
+        const result = await cf(
+          `space clone ${SPACE} ` +
+            `--from http://127.0.0.1:${redirector.addr.port}/go --to ${clone}`,
+        );
+        expect(result.code).toBe(0);
+        expect((await cf(`space verify ${clone}`)).code).toBe(0);
+      } finally {
+        await redirector.shutdown();
+        await target.shutdown();
+      }
+    });
+  });
+
   it("refuses to pull a whole-space snapshot over plaintext http", async () => {
     // A snapshot is the entire contents of a space — the same confidentiality
     // judgement that keeps the dump endpoint off in production. Loopback is
@@ -335,6 +398,107 @@ describe("cf space", () => {
       );
       expect(result.code).not.toBe(0);
       expect(text(result.stderr)).toContain("refusing to download");
+    });
+  });
+
+  it("accepts https and fails on the network, not on the transport check", async () => {
+    // The guard must let the transport it exists to require actually through.
+    // Nothing listens on this port, so the request fails at connect — the point
+    // is that it got as far as connecting.
+    await withFixture(async ({ clone }) => {
+      const result = await cf(
+        `space clone ${SPACE} --from https://127.0.0.1:9/s.sqlite --to ${clone}`,
+      );
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).not.toContain("refusing to download");
+    });
+  });
+
+  it("gives up on a redirect loop instead of following it forever", async () => {
+    await withFixture(async ({ clone }) => {
+      let hops = 0;
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        (request) => {
+          hops++;
+          return new Response(null, {
+            status: 302,
+            headers: { location: new URL(request.url).pathname + "x" },
+          });
+        },
+      );
+      try {
+        const result = await cf(
+          `space clone ${SPACE} ` +
+            `--from http://127.0.0.1:${server.addr.port}/go --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain("redirects");
+        // Bounded, and bounded by the hop limit rather than by exhaustion.
+        expect(hops).toBeLessThanOrEqual(6);
+      } finally {
+        await server.shutdown();
+      }
+    });
+  });
+
+  it("warns that an ambiguous id could hide a change to it", async () => {
+    // An id one manifest calls generated and another calls named is counted as
+    // generated and excluded, so a change to it never reaches the verdict.
+    // Nothing gates on this, which makes saying it the whole protection.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const manifestPath = `${clone}/clone.json`;
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+      manifest.fingerprint.ambiguous = 1;
+      await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("would not show");
+    });
+  });
+
+  it("says so when a clone cannot report what its BASELINE excluded", async () => {
+    // An entity excluded from the baseline is absent from the "before" side, so
+    // if it is still excluded now the diff cannot compare it at all and a change
+    // to it is silent. That blind spot belongs to the baseline and never shows
+    // up in a working-copy count — and on a clone predating the recording its
+    // size is unknown, which is a weaker claim than zero and must not render as
+    // zero.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+
+      const manifestPath = `${clone}/clone.json`;
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+      expect(manifest.fingerprint.unhashable).toBe(0);
+      delete manifest.fingerprint.unhashable;
+      delete manifest.fingerprint.ambiguous;
+      await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("predates uncertainty recording");
+    });
+  });
+
+  it("reports uncertainty the BASELINE carried, not just the working copy", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+
+      // Stand in for a baseline that excluded entities: the working copy is
+      // untouched, so nothing on the "after" side would mention them.
+      const manifestPath = `${clone}/clone.json`;
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+      manifest.fingerprint.unhashable = 2;
+      await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      const out = text(result.stdout);
+      expect(out).toContain("content    unchanged");
+      expect(out).toContain("in the BASELINE");
+      expect(out).toContain("2 entities could not be hashed");
     });
   });
 

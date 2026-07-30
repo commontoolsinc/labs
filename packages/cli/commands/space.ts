@@ -25,6 +25,7 @@ import {
   resetClone,
   resolveSpace,
   verifyClone,
+  type VerifyResult,
 } from "@commonfabric/state-inspector";
 import { contentFingerprint } from "@commonfabric/state-inspector";
 import { hasJsonArgument } from "../lib/json-output.ts";
@@ -86,6 +87,42 @@ function assertConfidentialTransport(url: string): void {
 }
 
 /**
+ * How many redirects to follow. A cycle guard, not a retry budget: each hop is
+ * a different URL, and a server that keeps redirecting is misconfigured rather
+ * than slow.
+ */
+const MAX_REDIRECTS = 5;
+
+/**
+ * `fetch`, checking the transport of EVERY hop.
+ *
+ * `fetch` follows redirects itself and reports only the final response, so
+ * validating the URL an operator typed proves nothing about where the bytes
+ * came from: an https URL that 302s to plaintext http would put the whole space
+ * on the wire in the clear, having passed the check. Following by hand is the
+ * only way the refusal can cover the request that actually carries the body.
+ */
+async function fetchFollowingRedirects(url: string): Promise<Response> {
+  let current = url;
+  for (let hop = 0;; hop++) {
+    assertConfidentialTransport(current);
+    const response = await fetch(current, { redirect: "manual" });
+    const location = response.headers.get("location");
+    const redirected = response.status >= 300 && response.status < 400 &&
+      location !== null;
+    if (!redirected) return response;
+    await response.body?.cancel();
+    if (hop === MAX_REDIRECTS) {
+      throw new Error(
+        `could not download ${url}: more than ${MAX_REDIRECTS} redirects.`,
+      );
+    }
+    // Resolve against the current URL: a `Location` may be relative.
+    current = new URL(location, current).toString();
+  }
+}
+
+/**
  * Download a remote snapshot to a temp file so `--from` can take a URL.
  *
  * Returns the staging directory alongside the path so the caller can remove it:
@@ -101,8 +138,7 @@ function assertConfidentialTransport(url: string): void {
 async function fetchSnapshot(
   url: string,
 ): Promise<{ path: string; stagingDir: string }> {
-  assertConfidentialTransport(url);
-  const response = await fetch(url);
+  const response = await fetchFollowingRedirects(url);
   if (!response.ok || response.body === null) {
     await response.body?.cancel();
     throw new Error(`could not download ${url}: HTTP ${response.status}`);
@@ -156,6 +192,38 @@ function uncertaintyNote(
     );
   }
   return notes.map((n) => `${indent}⚠ ${n}\n`).join("");
+}
+
+/**
+ * The uncertainty lines for a verify, covering BOTH sides of the comparison.
+ *
+ * Reporting only the working copy's counts would hide the case the diff is
+ * least able to see. An entity excluded from the BASELINE is absent from the
+ * "before" side, so if it is still excluded now the diff cannot compare it at
+ * all and a change to it is silent — that blind spot belongs to the baseline
+ * and does not show up in a working-copy count. An older clone that never
+ * recorded the numbers is the same situation with the size unknown, which is a
+ * weaker claim than zero and must not render as zero.
+ */
+function verifyUncertaintyNote(u: VerifyResult["uncertainty"]): string {
+  const working = uncertaintyNote(
+    u.unhashable.working,
+    u.ambiguous.working,
+    "",
+  );
+  const { unhashable, ambiguous } = u;
+  if (unhashable.manifest === null || ambiguous.manifest === null) {
+    return working +
+      `⚠ this clone predates uncertainty recording, so how much its BASELINE ` +
+      `excluded is unknown; re-clone for a verdict that can say\n`;
+  }
+  const baseline = uncertaintyNote(unhashable.manifest, ambiguous.manifest, "");
+  if (baseline === "") return working;
+  return working +
+    baseline.replace(
+      /^⚠ /gm,
+      "⚠ in the BASELINE: ",
+    );
 }
 
 export const space = new Command()
@@ -287,11 +355,7 @@ export const space = new Command()
           `content    ${fingerprint.match ? "unchanged" : "CHANGED"}\n` +
           `commits    ${counts.manifest.commits} → ${counts.working.commits}\n` +
           `revisions  ${counts.manifest.revisions} → ${counts.working.revisions}\n` +
-          uncertaintyNote(
-            result.uncertainty.unhashable.working,
-            result.uncertainty.ambiguous.working,
-            "",
-          ) +
+          verifyUncertaintyNote(result.uncertainty) +
           `\n` +
           (!result.baselineIntact
             ? "BASELINE CORRUPTED — the pristine snapshot no longer matches the " +

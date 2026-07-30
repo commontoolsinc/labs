@@ -158,7 +158,8 @@ fixed recipe. The recurring debugging questions and where they resolve:
   because overwriting authored content is a change rather than a removal. Stop
   the server before `reset`: unlinking the database does not reach a process
   holding it open, so `reset` refuses rather than let a served clone keep
-  serving the discarded attempt. Full procedure:
+  serving the discarded attempt — a tripwire for a forgotten stop, not a
+  substitute for it. Full procedure:
   `docs/development/space-clone-rehearsal.md`.
   `cf space fingerprint <space>` runs the content check alone against any store.
   Compiler-generated internal cells are excluded by default: a pattern update

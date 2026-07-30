@@ -263,6 +263,16 @@ export async function createClone(
  * a rehearsal would then run against pass one's state while `cf space verify`
  * reported the clone pristine, which is the failure mode the whole two-pass
  * procedure exists to rule out.
+ *
+ * That check is a TRIPWIRE, not mutual exclusion. It catches the case that
+ * actually happens — an operator who forgot to stop a toolshed that is already
+ * serving the clone — and cannot prevent one that opens the store in the
+ * instant between the probe and the unlink. No external check can: a process
+ * that opens a SQLite file takes no lock in doing so, so there is no state to
+ * hold against it, and holding our own lock across the unlink would be worse
+ * (the probe connection would then rewrite `-wal`/`-shm` beside the freshly
+ * restored copy on close). Stopping the server is what makes a reset correct;
+ * this makes forgetting to loud rather than silent.
  */
 export async function resetClone(dir: string): Promise<CloneManifest> {
   const manifest = await readManifest(dir);
@@ -280,7 +290,10 @@ export async function resetClone(dir: string): Promise<CloneManifest> {
 }
 
 /**
- * Refuse if any process still holds the working copy open.
+ * Refuse if any process still holds the working copy open, as of now.
+ *
+ * "As of now" is the honest scope — see the tripwire note on {@link resetClone}
+ * for why nothing stronger is available from outside the server.
  *
  * The probe is the hazard itself rather than a proxy for it: take SQLite's
  * exclusive lock, which in WAL mode cannot be granted while another connection

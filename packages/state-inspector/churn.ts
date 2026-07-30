@@ -126,6 +126,16 @@ export function commitChurn(
   // it would be used for. Refuse instead.
   const sinceEpoch = parseStoreTime(db, "since", options.since);
   const untilEpoch = parseStoreTime(db, "until", options.until);
+  // Same failure with two readable bounds: an empty or backwards interval also
+  // matches no commits, and also renders as a quiet window rather than as the
+  // mistake it is. `until` is exclusive, so equal bounds are empty too.
+  if (sinceEpoch !== null && untilEpoch !== null && sinceEpoch >= untilEpoch) {
+    throw new Error(
+      `--since ${JSON.stringify(options.since)} is not before --until ` +
+        `${JSON.stringify(options.until)}, so the window is empty — which ` +
+        `would report as a quiet space rather than as a bad window.`,
+    );
+  }
 
   // `strftime('%s', …)` yields NULL for a value it cannot parse as a time, which
   // is how untimed rows are separated from real zero-activity buckets. It also

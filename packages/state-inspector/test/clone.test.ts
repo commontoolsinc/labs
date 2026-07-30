@@ -314,6 +314,33 @@ Deno.test("reset refuses while a server still holds the working copy", async () 
   });
 });
 
+Deno.test("reset restores a working copy that was deleted outright", async () => {
+  // Nothing to hold open, and nothing to unlink. The probe must not treat an
+  // absent file as a reason to fail — and must not create one just to ask.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.remove(clonePaths(clone, SPACE).workingPath);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
+Deno.test("reset works when the working path cannot be opened at all", async () => {
+  // The probe fails at open rather than at lock — a different branch from a
+  // file that opens and turns out not to be a database, and the same verdict:
+  // whatever is in the way, restoring from pristine is the remedy.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    await Deno.remove(paths.workingPath);
+    await Deno.mkdir(paths.workingPath);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
 Deno.test("reset still works on a working copy that is not a database", async () => {
   // The mirror image of the guard above: a probe that refuses whenever it
   // cannot take the lock would refuse hardest on a corrupt working copy, which

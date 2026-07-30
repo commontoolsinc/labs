@@ -241,7 +241,8 @@ Stopping the server first is not tidiness: a reset unlinks the database, which
 does not reach a process that already holds it open. A running toolshed would
 keep serving pass one's state while `cf space verify` reported the clone
 pristine. `cf space reset` refuses while the store is held, so a forgotten stop
-fails loudly instead of silently invalidating the pass.
+fails loudly instead of silently invalidating the pass — but that check is a
+tripwire, not a lock. The stop is what makes the reset correct.
 
 Two consecutive clean passes before going live — see the generic runbook's
 "Before going live" for what makes a pass clean, which is more than this
