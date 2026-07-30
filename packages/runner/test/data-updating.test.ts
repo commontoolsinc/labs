@@ -1380,6 +1380,43 @@ describe("data-updating", () => {
       expect(selfLink?.path).toEqual([]);
     });
 
+    it("draws no anchor id for an addUnique candidate rejected as duplicate", () => {
+      // A candidate `addUnique` rejects never reaches the write, so it draws
+      // no id. (The annotation scheme anchored all candidates before
+      // filtering, so a rejected duplicate still consumed one.)
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique duplicate draws nothing",
+        reactives: new Set(),
+      });
+      try {
+        const c = runtime.getCell<{ v: number }[]>(
+          space,
+          "addUnique duplicate draws nothing",
+          undefined,
+          tx,
+        );
+        // Seed an INLINE element via a raw write, so a plain candidate can
+        // match it by content.
+        c.setRaw([{ v: 1 }]);
+        c.addUnique({ v: 1 });
+        expect(frame.generatedIdCounter).toBe(0);
+        expect((c.getRaw() as unknown[]).length).toBe(1);
+
+        // An accepted candidate draws. The rewrite carries the existing
+        // inline element through the anchoring write as well, so it anchors
+        // too -- one draw for each object in the written array.
+        c.addUnique({ v: 2 });
+        const raw = c.getRaw() as unknown[];
+        expect(raw.length).toBe(2);
+        expect(frame.generatedIdCounter).toBe(2);
+        expect(parseLink(raw[0], c)?.id).not.toBe(undefined);
+        expect(parseLink(raw[1], c)?.id).not.toBe(undefined);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
     it("anchors an object written over an array element's write redirect", () => {
       // The element slot's current value is a write redirect. Writing a plain
       // object there under a frame must still anchor it into a document of

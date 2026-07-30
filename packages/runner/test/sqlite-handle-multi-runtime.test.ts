@@ -266,7 +266,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     expect(collectSigilLinks(raw)).toEqual([]);
 
     // db.exec's rev bump must keep it self-contained too: it writes from a
-    // handler frame, where a whole-value set would [ID]-split the term list
+    // handler frame, where a whole-value set would entity-split the term list
     // right back into linked docs. Only the `rev` leaf may change.
     await seedDbFile(runtimeA, resultCell);
     await runtimeA.idle();
