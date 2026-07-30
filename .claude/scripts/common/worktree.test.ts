@@ -1,6 +1,9 @@
 import { assertEquals } from "@std/assert";
 import {
+  argumentRegion,
+  gitAddInvocation,
   isGitCommit,
+  shellWords,
   splitAtGitSubcommand,
   targetDirArgs,
   withoutQuotedSpans,
@@ -235,6 +238,50 @@ Deno.test("withoutQuotedSpans hides message text from flag scans", () => {
   );
 });
 
+Deno.test("gitAddInvocation resolves the add on its own terms", () => {
+  // A quoted pathspec must survive. Blanking quotes here produced no arguments
+  // at all, so the file was never checked and the commit went through.
+  assertEquals(
+    gitAddInvocation('git add "packages/foo.ts" && git commit -m x')?.words,
+    ["packages/foo.ts"],
+  );
+  // A pathspec containing a separator is one word, not two commands.
+  assertEquals(
+    gitAddInvocation(`git add 'a&b.ts' && git commit -m x`)?.words,
+    ["a&b.ts"],
+  );
+  // The add's directory is where the *add* runs, not where the commit does.
+  assertEquals(
+    gitAddInvocation("git add foo.ts && cd sub && git commit -m x")?.dirArgs,
+    [],
+  );
+  assertEquals(
+    gitAddInvocation("cd sub && git add foo.ts && cd .. && git commit -m x")
+      ?.dirArgs,
+    ["-C", "sub"],
+  );
+  // And its own `-C` still counts.
+  assertEquals(
+    gitAddInvocation("git -C /a add -A && git -C /a commit -m x")?.dirArgs,
+    ["-C", "/a"],
+  );
+  // No add in the command at all.
+  assertEquals(gitAddInvocation("git commit -m x"), null);
+  // A `git add` named only inside the message is not an add.
+  assertEquals(gitAddInvocation("git commit -m 'run git add -A'"), null);
+});
+
+Deno.test("shellWords splits on the mask and unquotes", () => {
+  assertEquals(shellWords(`  -A  "a b.ts"  'c&d.ts'  plain.ts `), [
+    "-A",
+    "a b.ts",
+    "c&d.ts",
+    "plain.ts",
+  ]);
+  assertEquals(argumentRegion(" foo.ts && git commit"), " foo.ts ");
+  assertEquals(argumentRegion(` 'a&b.ts' && git commit`), ` 'a&b.ts' `);
+});
+
 Deno.test("splitAtGitSubcommand keeps each pattern in its own region", () => {
   const { before, options, after } = splitAtGitSubcommand(
     "cd /a && git -C /b commit -m 'git add -A'",
@@ -251,6 +298,7 @@ Deno.test("splitAtGitSubcommand keeps each pattern in its own region", () => {
   );
   // No match leaves the whole string as `before`, so callers scan nothing new.
   assertEquals(splitAtGitSubcommand("git status", "commit"), {
+    matched: false,
     before: "git status",
     options: "",
     after: "",

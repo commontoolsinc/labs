@@ -20,11 +20,10 @@
 import {
   commitTargetWorktree,
   env,
+  gitAddInvocation,
   isGitCommit,
   sameRepository,
   splitAtGitCommit,
-  splitAtGitSubcommand,
-  targetDirArgs,
   withoutQuotedSpans,
 } from "./common/worktree.ts";
 import { checkFiles } from "./common/checks.ts";
@@ -97,18 +96,11 @@ function git(...args: string[]): Promise<string[]> {
   return gitFrom(worktree, args);
 }
 
-// The same redirects the command applies to git. Needed to resolve any paths
-// written on a `git add`, which are relative to the shell's directory.
-const dirArgs = targetDirArgs(cmd) ?? [];
-
-// The `git add` in this command, if any, and its arguments up to the next
-// command separator, message text removed. Parsed with the same globals-aware
-// matcher as the commit, because `git -C <dir> add -A && git -C <dir> commit`
-// is how staging for another worktree is normally written — and a plain
-// /git\s+add/ does not see it, which left that whole flow unchecked.
-const addArgs = withoutQuotedSpans(
-  splitAtGitSubcommand(splitAtGitCommit(cmd).before, "add").after,
-).split(/\s*(?:&&|\|\||;|\n)/)[0].trim();
+// The `git add` in this command, if any: where it runs and what it stages.
+// Resolved at the add's own position, with its own directory redirects — the
+// add and the commit need not run in the same place, and reusing the commit's
+// looked for the file somewhere it never was.
+const add = gitAddInvocation(cmd);
 
 async function getFilesToCommit(): Promise<string[]> {
   // Already staged by an earlier tool call.
@@ -136,14 +128,17 @@ async function getFilesToCommit(): Promise<string[]> {
   // and lost any path followed by a `;`. `--dry-run` writes nothing — verified
   // against a scratch repo, the index is untouched — and prints one
   // `add '<repo-relative path>'` per file.
-  if (addArgs) {
-    const args = addArgs.split(/\s+/).filter(Boolean);
+  if (add && add.words.length > 0) {
     for (
       const line of await gitFrom(fallbackCwd, [
-        ...dirArgs,
+        ...add.dirArgs,
         "add",
         "--dry-run",
-        ...args,
+        // Everything after this is a pathspec, never an option — so a file
+        // named `--cached` cannot become a flag we did not intend to pass.
+        ...add.words.filter((w) => w.startsWith("-")),
+        "--",
+        ...add.words.filter((w) => !w.startsWith("-")),
       ])
     ) {
       const m = line.match(/^add '(.*)'$/);

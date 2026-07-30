@@ -202,18 +202,19 @@ export function isGitCommit(cmd: string): boolean {
 export function splitAtGitSubcommand(
   cmd: string,
   subcommand: string,
-): { before: string; options: string; after: string } {
+): { matched: boolean; before: string; options: string; after: string } {
   // Located on the masked copy so quoted text cannot be the match, but sliced
   // out of the original so callers get real values back. The mask preserves
   // length, which is what makes those two the same offsets.
   const masked = maskQuotedSpans(cmd);
   const m = masked.match(gitSubcommand(subcommand));
   if (!m || m.index === undefined) {
-    return { before: cmd, options: "", after: "" };
+    return { matched: false, before: cmd, options: "", after: "" };
   }
   const optionsStart = m.index + m[0].length - (m[1] ?? "").length -
     subcommand.length;
   return {
+    matched: true,
     before: cmd.slice(0, m.index),
     options: cmd.slice(optionsStart, optionsStart + (m[1] ?? "").length),
     after: cmd.slice(m.index + m[0].length),
@@ -223,8 +224,112 @@ export function splitAtGitSubcommand(
 /** `cmd` split around its `git … commit`. */
 export function splitAtGitCommit(
   cmd: string,
-): { before: string; options: string; after: string } {
+): { matched: boolean; before: string; options: string; after: string } {
   return splitAtGitSubcommand(cmd, "commit");
+}
+
+/**
+ * The argument region of a command: everything up to the first separator that
+ * is not inside quotes.
+ *
+ * Found on the mask so `git add 'a&b.ts'` is one argument rather than two
+ * commands.
+ */
+export function argumentRegion(text: string): string {
+  const sep = maskQuotedSpans(text).search(/[;\n&|]/);
+  return sep === -1 ? text : text.slice(0, sep);
+}
+
+/**
+ * Shell words in `text`, with one layer of quoting removed.
+ *
+ * Split on the mask, so a quoted argument containing spaces stays one word, and
+ * read back out of the original, so the word itself survives. Blanking quotes
+ * before splitting is what erased them: `git add "packages/foo.ts"` produced no
+ * arguments at all, the file was never checked, and the commit sailed through.
+ */
+export function shellWords(text: string): string[] {
+  const masked = maskQuotedSpans(text);
+  return [...masked.matchAll(/\S+/g)].map((m) =>
+    expand(text.slice(m.index, m.index + m[0].length))
+  );
+}
+
+/**
+ * The `-C` arguments in effect after `prefix` has run — every `cd` and `pushd`
+ * it contains, in order.
+ *
+ * `null` for the shapes a regex cannot read; see targetDirArgs.
+ *
+ * Taken at a point in the command, not once for the whole thing, because
+ * different git invocations in one command run in different directories:
+ * `git add foo.ts && cd sub && git commit` stages from here and commits from
+ * there, and resolving the add with the commit's directory looked for the file
+ * in the wrong place and quietly dropped it.
+ */
+export function dirArgsAt(prefix: string): string[] | null {
+  const masked = maskQuotedSpans(prefix);
+
+  // Two shapes a regex cannot read, where guessing produced a *confidently
+  // wrong* tree rather than no answer:
+  //
+  // Parentheses. A `cd` inside `( … )` or `$( … )` does not outlive the
+  // subshell, so `(cd /a && git add -A) && git commit` must not resolve to
+  // /a — but `(cd /a && git commit)` must. Telling those apart means knowing
+  // whether the commit shares the subshell, which is parsing, not matching.
+  //
+  // Heredocs. Their body is data, and a line of data reading `cd /elsewhere`
+  // is not a command.
+  //
+  // So refuse. Skipping a check is a cost; asserting the wrong branch's errors
+  // against someone's commit is the bug this module exists to remove.
+  if (/[()]/.test(masked)) return null;
+  if (masked.includes("<<")) return null;
+  // `popd` returns to a directory we never saw pushed. Nothing to compose.
+  if (/(?:^|[;&|{\n])\s*popd\b/.test(masked)) return null;
+
+  const args: string[] = [];
+
+  // A command boundary is required so `--author "cd fred"` cannot masquerade as
+  // one. A newline is such a boundary: agents write commit sequences as
+  // multi-line scripts, and while `\n` was missing every `cd` after the first
+  // line was invisible — the original bug, surviving in its most common form.
+  // `{` counts too; unlike `(` a brace group runs in the current shell, so its
+  // `cd` holds. `pushd` moves the shell the same way `cd` does.
+  //
+  // Matched against the mask and read out of the original by index, so a quoted
+  // path arrives intact while quoted prose cannot pose as a command.
+  for (
+    const m of masked.matchAll(
+      /(?:^|[;&|{\n])\s*(?:cd|pushd)\s+([^\s;&|}]+)/dg,
+    )
+  ) {
+    const span = m.indices?.[1];
+    if (!span) continue;
+    args.push("-C", expand(prefix.slice(span[0], span[1])));
+  }
+
+  return args;
+}
+
+/**
+ * Where a `git add` in `cmd` runs and what it will be given, or null when the
+ * command has no `git add` (or steers it somewhere unmodellable).
+ */
+export function gitAddInvocation(
+  cmd: string,
+): { dirArgs: string[]; words: string[] } | null {
+  const beforeCommit = splitAtGitCommit(cmd).before;
+  const add = splitAtGitSubcommand(beforeCommit, "add");
+  if (!add.matched) return null;
+
+  const dirArgs = dirArgsAt(add.before);
+  if (dirArgs === null) return null;
+  for (const m of add.options.matchAll(/-C\s+("[^"]*"|'[^']*'|[^\s]+)/g)) {
+    dirArgs.push("-C", expand(m[1]));
+  }
+
+  return { dirArgs, words: shellWords(argumentRegion(add.after)) };
 }
 
 /**
@@ -250,60 +355,14 @@ export function targetDirArgs(cmd: string): string[] | null {
   // silently disable the hook by describing it.
   if (/--git-dir|--work-tree/.test(options)) return null;
 
-  // Two shapes a regex cannot read, where guessing produced a *confidently
-  // wrong* tree rather than no answer:
-  //
-  // Parentheses. A `cd` inside `( … )` or `$( … )` does not outlive the
-  // subshell, so `(cd /a && git add -A) && git commit` must not resolve to
-  // /a — but `(cd /a && git commit)` must. Telling those apart means knowing
-  // whether the commit shares the subshell, which is parsing, not matching.
-  //
-  // Heredocs. Their body is data, and a line of data reading `cd /elsewhere`
-  // is not a command. Only `before` matters: `git commit -F - <<'EOF'` keeps
-  // its heredoc after the commit, where we never look.
-  //
-  // So refuse. Skipping a check is a cost; asserting the wrong branch's errors
-  // against someone's commit is the bug this module exists to remove.
-  const maskedPrefix = maskQuotedSpans(prefix);
-  if (/[()]/.test(maskedPrefix)) return null;
-  if (maskedPrefix.includes("<<")) return null;
-  // `popd` returns to a directory we never saw pushed. Nothing to compose.
-  if (/(?:^|[;&|{\n])\s*popd\b/.test(maskedPrefix)) return null;
-
-  const args: string[] = [];
-
-  // Every `cd` before the commit, in order — not just the last. They compose:
-  // `cd /a && cd sub` ends in /a/sub, and taking only `cd sub` resolved it
-  // against whatever directory the hook happened to start in. Passing them all
-  // to git reproduces the composition exactly, absolute paths overriding
-  // earlier ones just as they do in a shell.
-  //
-  // A command boundary is required so `--author "cd fred"` cannot masquerade as
-  // one. A newline is such a boundary: agents write commit sequences as
-  // multi-line scripts, and while `\n` was missing every `cd` after the first
-  // line was invisible — the original bug, surviving in its most common form.
-  // `{` counts too; unlike `(` a brace group runs in the current shell, so its
-  // `cd` holds. `pushd` moves the shell the same way `cd` does.
-  //
-  // Matched against the mask and read out of the original by index, so a quoted
-  // path arrives intact while quoted prose cannot pose as a command.
-  for (
-    const m of maskedPrefix.matchAll(
-      /(?:^|[;&|{\n])\s*(?:cd|pushd)\s+([^\s;&|}]+)/dg,
-    )
-  ) {
-    const span = m.indices?.[1];
-    if (!span) continue;
-    args.push("-C", expand(prefix.slice(span[0], span[1])));
-  }
+  // Only `before` is scanned for directory changes: `git commit -F - <<'EOF'`
+  // keeps its heredoc after the commit, where a `cd` could not affect it.
+  const args = dirArgsAt(prefix);
+  if (args === null) return null;
 
   // Then each `-C` the commit itself carries, in order. git rejects a glued
   // `-C<path>` ("unknown option"), so a space is required here too.
-  for (
-    const m of options.matchAll(
-      /-C\s+("[^"]*"|'[^']*'|[^\s]+)/g,
-    )
-  ) {
+  for (const m of options.matchAll(/-C\s+("[^"]*"|'[^']*'|[^\s]+)/g)) {
     args.push("-C", expand(m[1]));
   }
 
