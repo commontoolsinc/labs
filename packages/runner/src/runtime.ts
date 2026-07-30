@@ -1309,8 +1309,20 @@ export class Runtime {
    * Any unawaited tx.commit() calls will be canceled when
    * storageManager.close() tears down storage sessions. Callers
    * should await all pending commits before calling dispose().
+   *
+   * `closeStorage: false` leaves the storage manager OPEN for a caller that
+   * OWNS it and is still using it — a second runtime sharing the same store, or
+   * one that reads the store after this runtime is done writing to it. Every
+   * other step still runs, which is the point: quiescing the WRITER is what
+   * makes a subsequent read of the store a statement about a state this runtime
+   * actually reached. `idle()` and `synced()` cannot substitute, because they
+   * say nothing about the background work that only teardown stops —
+   * `patternUpdater`'s source checks and the runner's pointer-commit
+   * roll-forwards both live outside the scheduler and can still commit.
    */
-  async dispose(): Promise<void> {
+  async dispose(
+    { closeStorage = true }: { closeStorage?: boolean } = {},
+  ): Promise<void> {
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {
@@ -1339,7 +1351,7 @@ export class Runtime {
     this.moduleRegistry.clear();
 
     // Cancel all storage operations
-    await this.storageManager.close();
+    if (closeStorage) await this.storageManager.close();
 
     // Wait for any pending operations
     await this.scheduler.idle();

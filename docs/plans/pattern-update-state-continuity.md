@@ -243,6 +243,17 @@ Things this stage settled that the plan had wrong or open:
   materialize could snapshot a space missing the very state the tier replays.
   Downstream cases would go red, but several layers from the cause. It is now
   `editWithRetry` with the result asserted.
+- The runtime that WRITES a fixture is torn down before the snapshot, and that
+  takes a `dispose({ closeStorage: false })` to express: the store belongs to
+  the capture, which needs it open to flush, so the runner cannot use a plain
+  `dispose()`. What it buys over the per-step `idle()`/`synced()` is the
+  background work that lives OUTSIDE the scheduler — `patternUpdater`'s source
+  checks and the runner's pointer-commit roll-forwards, which no settle covers.
+  Measured on both required fixtures: quiescing the writer at the snapshot point
+  runs no further scheduler action and adds no commit, so this is the contract
+  made structural rather than a bug fixed. It matters because the alternative is
+  a snapshot whose completeness depends on which of two runtimes won a race, and
+  the tier's whole claim is that a fixture holds a state the pattern reached.
 
 On `setPattern` versus `PatternUpdater`: the replay drives the updater's path,
 because that is what the field actually runs. The difference is the whole

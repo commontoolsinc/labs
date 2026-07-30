@@ -364,6 +364,10 @@ export interface TestRunnerOptions {
    * The caller OWNS the lifecycle: the runner will not close this storage
    * manager, because the snapshot happens after the run and needs the store
    * open to flush through `synced()`.
+   *
+   * The RUNTIME is still torn down (`dispose({ closeStorage: false })`), which
+   * is what makes reading the store afterwards a statement about the state the
+   * run reached: the runtime that wrote it can no longer commit into it.
    */
   storageHost?: {
     identity: Identity;
@@ -1896,17 +1900,24 @@ export async function runTestPattern(
     // 6. Cleanup
     continuousUiCancel?.();
     continuousUiCancel = undefined;
-    await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
-      engine.dispose();
-    });
-    // A caller-supplied store is the CALLER's to close: the vintage capture
-    // snapshots after this returns and needs the store open to flush.
-    if (options.storageHost === undefined) {
-      await withPhase(
-        ["runTestPattern", "cleanup", "storageClose"],
-        () => storageManager.close(),
-      );
-    }
+    // Tear the whole runtime down, not just its engine. What that buys beyond
+    // `engine.dispose()` is that the runtime STOPS WRITING: `runner.stopAll()`,
+    // `patternUpdater.dispose()` and the pointer-commit settle stop and drain
+    // the background work that lives OUTSIDE the scheduler, so no per-step
+    // `idle()`/`synced()` covers it. That matters most for a caller-supplied
+    // store, which outlives this call and gets READ afterwards — the vintage
+    // capture snapshots it — because a snapshot taken while the writer can
+    // still commit records whatever happened to have landed by then rather
+    // than the state the run reached.
+    //
+    // `closeStorage` is what makes disposing possible here at all: a
+    // caller-supplied store is the CALLER's to close, and the capture needs it
+    // open to flush the snapshot through `synced()`.
+    await withPhase(
+      ["runTestPattern", "cleanup", "runtimeDispose"],
+      () =>
+        runtime.dispose({ closeStorage: options.storageHost === undefined }),
+    );
   }
 }
 
