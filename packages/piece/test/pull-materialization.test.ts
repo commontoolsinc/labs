@@ -1976,6 +1976,62 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("preserves missing-path diagnostics for an absent asCell slot", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell"] },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await withInputRootPullSpy(manager, piece, async (rootPulls) => {
+      await expect(controller.input.get(["handle"])).rejects.toThrow(
+        'Cannot access path "handle" - property "handle" not found',
+      );
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
+  it("preserves explicit undefined for an asCell slot", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              anyOf: [{ type: "number" }, { type: "undefined" }],
+              asCell: ["cell"],
+            },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: undefined },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await withInputRootPullSpy(manager, piece, async (rootPulls) => {
+      expect(await controller.input.get(["handle"])).toBeUndefined();
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
   it("materializes piece results before setInput returns", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),

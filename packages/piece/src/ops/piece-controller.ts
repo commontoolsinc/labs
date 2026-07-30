@@ -2295,12 +2295,19 @@ class PiecePropIo implements PieceCellIo {
 
         await selectedCell.pull();
         if (isAsCellProjection) {
+          // An asCell projection materializes even an explicit `undefined` as
+          // a Cell, so inspect the stored slot before resolving the handle.
+          // Falling back preserves the root read's absent-vs-undefined rules.
+          if (selectedCell.getRaw() === undefined) {
+            return await this.#getFromRoot(targetCell, path);
+          }
           const handle = selectedCell.resolveAsCell().asSchema(
             consumeAsCellProjectionSchema(selectedCell.schema!),
           );
-          await handle.pull();
           if (isLast) {
-            return cellWithScopedLinkRequiredsRelaxed(handle).get();
+            const readableHandle = cellWithScopedLinkRequiredsRelaxed(handle);
+            await readableHandle.pull();
+            return readableHandle.get();
           }
           selectedCell = handle;
           continue;
