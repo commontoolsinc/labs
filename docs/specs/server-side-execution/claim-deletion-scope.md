@@ -53,6 +53,51 @@ from demand + delivery.
 §6c is retired: the owner accepted the cost shift and clarified the
 inversion as an algorithm (client-passivity §5h.4).
 
+**Correction 3 — the `candidateKeys` fork is NOT a fork. The enumeration
+already exists; the blocker is a FILTER on top of it.** Slice 1
+(`768aab2dc`) stopped at what it read as a tension between the deletion
+list and Correction 2: replacing `contextRank` for `candidateKeys` "needs
+a demand-driven 'which lanes want this piece' enumeration", i.e. the
+fan-out machinery we are told not to build. Investigated at the owner's
+prompt — it does not need building:
+
+```ts
+// executor-worker.ts:1300  — this IS the enumeration
+openUserLaneKeys: (pieceId) => {
+  if (laneDemands.size === 0) return undefined;
+  const lanes: string[] = [];
+  for (const [contextKey, lane] of laneDemands) {
+    if (laneDemandCoversPiece(lane, pieceId)) lanes.push(contextKey);
+  }
+  return lanes;
+},
+```
+
+It walks the demand map and returns every lane whose demand covers the
+piece — demand-driven, per-piece, already using the demand-closure roll-up
+(`3a48d6731`; its docblock cites D2/§5h.4). `candidateLaneKeys`
+(`action-transaction-router.ts:703-719`) then throws most of it away:
+
+```ts
+for (const laneKey of laneKeys) {
+  if (laneKeyRank(laneKey) === rank) keys.add(laneKey);   // ← the filter
+}
+```
+
+**So the next step is a DELETION, not a build: drop the rank filter.**
+Every lane that wants the piece gets a run — which is verbatim "we run all
+scopes on the server". That disposes of `laneKeyRank` (this is its only
+substantive use), the `rank: "user" | "session"` parameter, and CA9's rank
+filter — whose thrash was never measured (see the CA9 verdict). And it
+dissolves the tension with Correction 2 completely, because nothing new is
+built.
+
+One loose end for whoever takes it: the `laneKeys === undefined` branch
+(`:709-713`, when no lane demands exist) falls back to the sponsor's user
+key for rank `user` and `[]` for `session` — the pre-lane wire path
+(C1.5a). Dropping the rank parameter needs a story for that fallback.
+Small, but do not delete it by accident.
+
 **Two findings that reframe the arc, both verified by the orchestrator:**
 
 1. **The executor ALREADY runs the whole demanded closure, unconditionally,
