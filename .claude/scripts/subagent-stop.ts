@@ -155,9 +155,14 @@ const canonicalWorktree = canonical(worktree) ?? worktree;
 const prefix = canonicalWorktree.endsWith("/")
   ? canonicalWorktree
   : `${canonicalWorktree}/`;
-const resolved = activity.files.map(canonical).filter((f): f is string =>
-  f !== null
-);
+// A deleted scratch file has no real path, but it is not "somewhere else" — and
+// saying so sent an accurate report about the wrong thing. Fall back to the raw
+// path when it is plainly inside and free of `..`, and let checkFiles report it
+// as no longer on disk.
+const resolved = activity.files.map((f) =>
+  canonical(f) ??
+    (f.startsWith(prefix) && !f.split("/").includes("..") ? f : null)
+).filter((f): f is string => f !== null);
 const changed = resolved
   .filter((f) => f.startsWith(prefix))
   .map((f) => f.slice(prefix.length))
@@ -183,7 +188,9 @@ if (changed.length === 0) {
 const { checked, missing, inapplicable, partial, unavailable, errors } =
   await checkFiles(worktree, changed);
 
-if (unavailable.length > 0) console.error(unavailable.join("\n\n"));
+if (unavailable.length > 0) {
+  console.error(unavailable.map((u) => u.message).join("\n\n"));
+}
 
 if (errors.length > 0) {
   console.error(
@@ -216,9 +223,12 @@ const LABELS: Array<[flag: string, name: string]> = [
   ["lint", "lint"],
   ["check", "type check"],
 ];
-const ran = LABELS.filter(([flag]) => !inapplicable.includes(flag)).map((
-  [, name],
-) => name);
+// A check that could not be launched did not run, so it must not appear in a
+// list of checks that passed: that is a non-verdict presented as approval.
+const notRun = new Set([...inapplicable, ...unavailable.map((u) => u.check)]);
+const ran = LABELS.filter(([flag]) => !notRun.has(flag)).map(([, name]) =>
+  name
+);
 
 let context = `Checks passed on ${checked.length} file(s) changed by this ` +
   `subagent` + (ran.length > 0 ? ` (${ran.join(", ")}).` : ".");

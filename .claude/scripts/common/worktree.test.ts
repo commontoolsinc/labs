@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
   argumentRegion,
+  commitsAllTracked,
   gitAddInvocations,
   isGitCommit,
   shellWords,
@@ -120,7 +121,10 @@ const TARGET_DIR_CASES: Array<
       "/a",
     ],
   ],
-  ["grep for the phrase is not a commit", "rg 'git commit' docs/", []],
+  // Not a commit at all, so there is no commit whose directory to report: null,
+  // meaning "no answer", rather than [] meaning "here, with no redirects".
+  // Unreachable through the hook, which gates on isGitCommit first.
+  ["grep for the phrase is not a commit", "rg 'git commit' docs/", null],
   // An escaped quote must not end the span early: the tail would be unmasked,
   // and text carrying its own separator was read as commands again.
   [
@@ -184,6 +188,10 @@ const IS_COMMIT_CASES: Array<[cmd: string, want: boolean]> = [
 ];
 
 Deno.test("isGitCommit does not backtrack exponentially", () => {
+  // The ceiling below is deliberately absurd for a linear parse (microseconds).
+  // A tighter one would be a wall-clock invariant on shared CI, which is flaky;
+  // this only trips on the 2^N blowup it exists for, which measured 9.6 SECONDS
+  // at 26 tokens. Correctness is asserted separately, above and below.
   // An optional value on every option gave N options 2^N readings, and a failed
   // match explored them all: 24 tokens took 1.6s on a hook that runs on every
   // Bash call. This shape is the one that triggered it.
@@ -195,8 +203,10 @@ Deno.test("isGitCommit does not backtrack exponentially", () => {
   const start = performance.now();
   assertEquals(isGitCommit(cmd), false);
   const elapsed = performance.now() - start;
-  if (elapsed > 250) {
-    throw new Error(`took ${elapsed.toFixed(0)}ms; expected well under 250ms`);
+  if (elapsed > 3000) {
+    throw new Error(
+      `took ${elapsed.toFixed(0)}ms; exponential backtracking has returned`,
+    );
   }
 });
 
@@ -314,6 +324,28 @@ Deno.test("gitAddInvocations resolves each add on its own terms", () => {
   // No add in the command, and an add named only inside the message.
   assertEquals(gitAddInvocations("git commit -m x"), []);
   assertEquals(gitAddInvocations("git commit -m 'run git add -A'"), []);
+});
+
+Deno.test("commitsAllTracked reads flags, not attached values", () => {
+  // Real `-a` forms.
+  for (const f of ["-a", "-am", "-va", "--all", "-a -m x"]) {
+    assertEquals(commitsAllTracked(` ${f} `), true, f);
+  }
+  // An attached message value is a value, not more flags. `git commit -mdata`
+  // read as `-a` swept every tracked change and blocked on unrelated errors.
+  for (const f of ["-mdata", "-ma", "-m x", "--amend", "-Fafile", "-m", "-v"]) {
+    assertEquals(commitsAllTracked(` ${f} `), false, f);
+  }
+});
+
+Deno.test("over the option bound, a commit is still recognised", () => {
+  // The bounded regex gives up past 12 globals. Giving up there once meant
+  // isGitCommit said false and the hook skipped the commit silently; now the
+  // linear scan still sees it, and targetDirArgs refuses rather than guessing.
+  const many = Array.from({ length: 20 }, (_, i) => `-c k${i}=v${i}`).join(" ");
+  const cmd = `git ${many} commit -m x`;
+  assertEquals(isGitCommit(cmd), true);
+  assertEquals(targetDirArgs(cmd), null);
 });
 
 Deno.test("shellWords splits on the mask and unquotes", () => {

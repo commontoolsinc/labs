@@ -18,6 +18,7 @@
  */
 
 import {
+  commitsAllTracked,
   commitTargetWorktree,
   env,
   gitAddInvocations,
@@ -115,9 +116,7 @@ async function getFilesToCommit(): Promise<string[]> {
   // every untracked file in the tree on the list — in the main worktree, 6000
   // of them including whole nested checkouts — and blocked the commit on files
   // it would never have touched.
-  if (
-    /(?:^|\s)(?:--all(?:\s|$)|-[a-zA-Z]*a[a-zA-Z]*(?:\s|$))/.test(commitFlags)
-  ) {
+  if (commitsAllTracked(commitFlags)) {
     files.push(...await git("diff", "--name-only", "--diff-filter=d", "HEAD"));
   }
 
@@ -140,6 +139,16 @@ async function getFilesToCommit(): Promise<string[]> {
       );
       continue;
     }
+    // An add can be steered somewhere else entirely: `git -C /other add -A &&
+    // git commit`. Its paths are relative to *that* worktree, so folding them in
+    // here would check — and block on — files this commit has never heard of.
+    const addWorktree = (await gitFrom(fallbackCwd, [
+      ...add.dirArgs,
+      "rev-parse",
+      "--show-toplevel",
+    ]))[0];
+    if (addWorktree !== worktree) continue;
+
     for (
       const line of await gitFrom(fallbackCwd, [
         ...add.dirArgs,
@@ -194,7 +203,9 @@ console.error(`Running pre-commit checks in ${worktree} ...`);
 const { checked, missing, inapplicable, partial, unavailable, errors } =
   await checkFiles(worktree, files);
 
-if (unavailable.length > 0) console.error(unavailable.join("\n\n"));
+if (unavailable.length > 0) {
+  console.error(unavailable.map((u) => u.message).join("\n\n"));
+}
 
 if (errors.length > 0) {
   console.error(errors.join("\n\n"));
@@ -210,7 +221,8 @@ if (checked.length === 0) {
   );
   Deno.exit(0);
 }
-const ran = ["fmt", "lint", "check"].filter((c) => !inapplicable.includes(c));
+const notRun = new Set([...inapplicable, ...unavailable.map((u) => u.check)]);
+const ran = ["fmt", "lint", "check"].filter((c) => !notRun.has(c));
 let summary = `Pre-commit checks passed on ${checked.length} file(s)`;
 summary += ran.length > 0 ? ` (${ran.join(", ")}).` : ".";
 if (inapplicable.length > 0) {

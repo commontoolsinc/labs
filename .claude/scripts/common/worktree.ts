@@ -216,9 +216,34 @@ function maskQuotedSpans(text: string): string {
   );
 }
 
+/**
+ * A backtracking-free `git … commit` check, by walking tokens.
+ *
+ * The bounded regex above is fast but gives up past its option limit, and giving
+ * up there meant `isGitCommit` returned false and the hook skipped the commit in
+ * silence — the one outcome this file is built to avoid. The bound cannot simply
+ * be lifted: measured unbounded, the residual ambiguity between a value-taking
+ * option and a boolean one still runs past 300 seconds. So the regex keeps its
+ * bound for structure, and this decides, in linear time, whether there is a
+ * commit here at all.
+ */
+function looksLikeGitCommit(masked: string): boolean {
+  const tokens = masked.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== "git" && !tokens[i].endsWith("/git")) continue;
+    let j = i + 1;
+    while (j < tokens.length && tokens[j].startsWith("-")) {
+      j += VALUE_OPTIONS.includes(tokens[j]) ? 2 : 1;
+    }
+    if (tokens[j] === "commit") return true;
+  }
+  return false;
+}
+
 /** True when `cmd` contains a `git commit`, however git is steered to it. */
 export function isGitCommit(cmd: string): boolean {
-  return GIT_COMMIT.test(maskQuotedSpans(cmd));
+  const masked = maskQuotedSpans(cmd);
+  return GIT_COMMIT.test(masked) || looksLikeGitCommit(masked);
 }
 
 /**
@@ -378,7 +403,6 @@ const SAFE_ADD_LONG = new Set([
   "--ignore-errors",
   "--ignore-removal",
   "--no-ignore-removal",
-  "--refresh",
   "--renormalize",
   "--sparse",
   "--no-warn-embedded-repo",
@@ -387,11 +411,26 @@ const SAFE_ADD_LONG = new Set([
 /** Short clusters of safe flags only: all, update, force, dry-run, verbose. */
 const SAFE_ADD_SHORT = /^-[Aufnv]+$/;
 
+/**
+ * `--refresh` is deliberately absent, and its absence is the third correction to
+ * this guard. It writes the index under `--dry-run` in the racily-clean case —
+ * content matching the index with a stale mtime, which is exactly what a fresh
+ * checkout or a `touch` leaves behind. Isolated in a scratch repo: with content
+ * changed it is inert, with content unchanged the index file is rewritten. An
+ * earlier probe missed it by changing the content first.
+ *
+ * Every name here was verified individually rather than assumed, because the
+ * previous two versions of this guard were each wrong about a flag nobody had
+ * run.
+ */
 function isSafeAddFlag(flag: string): boolean {
   if (SAFE_ADD_SHORT.test(flag)) return true;
-  const name = flag.split("=")[0];
-  if (name === "--chmod") return true;
-  return SAFE_ADD_LONG.has(name);
+  // `--chmod` only in its attached form. Separated (`--chmod +x`), the value is
+  // an argument we would classify as a pathspec and move after `--`, leaving
+  // git with a `--chmod` that has lost its parameter: it fails, the file list
+  // comes back empty, and the commit goes unchecked.
+  if (flag.startsWith("--chmod=")) return true;
+  return SAFE_ADD_LONG.has(flag);
 }
 
 export interface GitAddInvocation {
@@ -470,7 +509,12 @@ export function gitAddInvocations(cmd: string): GitAddInvocation[] | null {
 export function targetDirArgs(cmd: string): string[] | null {
   // The options between `git` and `commit` are the only place a `-C` can affect
   // the commit; `before` is the only place a `cd` can.
-  const { before: prefix, options } = splitAtGitCommit(cmd);
+  const { matched, before: prefix, options } = splitAtGitCommit(cmd);
+
+  // No structural parse — the commit is past the option bound, or there is none.
+  // Either way we have no idea where it lands, and the caller reports that
+  // rather than resolving from a prefix we never located.
+  if (!matched) return null;
 
   // An explicit tree override changes the answer completely and has forms we
   // deliberately do not try to model. Refuse rather than answer wrongly — but
@@ -533,6 +577,30 @@ function expand(raw: string): string {
  * would never have touched, which is the failure this whole change is about.
  * Flags after the message (`git commit -m "x" -a`) still register.
  */
+/**
+ * True when a commit's flags stage all tracked changes (`-a` / `--all`).
+ *
+ * Short flags are read cluster by cluster, stopping at the first one that takes
+ * an attached value, because everything after it *is* that value. `git commit
+ * -mdata` is a valid attached message, and a pattern looking for `a` anywhere in
+ * a dash-token read it as `-a`: the hook then pulled in every tracked change in
+ * the tree and blocked the commit on an unrelated unstaged error. `-ma msg`
+ * likewise means a message of "a", not `-a`.
+ *
+ * `commitFlags` must already have had its quoted spans removed.
+ */
+export function commitsAllTracked(commitFlags: string): boolean {
+  if (/(?:^|\s)--all(?:\s|$)/.test(commitFlags)) return true;
+  const VALUE_TAKING = "mFcCtSu";
+  for (const m of commitFlags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
+    for (const ch of m[1]) {
+      if (ch === "a") return true;
+      if (VALUE_TAKING.includes(ch)) break;
+    }
+  }
+  return false;
+}
+
 export function withoutQuotedSpans(text: string): string {
   // Built on the same mask, not a second copy of the quote grammar: two
   // spellings of "what is quoted" would drift, and this one guards the flag

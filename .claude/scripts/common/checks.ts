@@ -167,7 +167,7 @@ export interface CheckOutcome {
   /** Checks that saw only some of the files, as "fmt (2 of 5)". */
   partial: string[];
   /** Checks that could not be launched at all. Report, never block. */
-  unavailable: string[];
+  unavailable: Array<{ check: string; message: string }>;
   /** One entry per failing check, plus a remedy line for formatting. */
   errors: string[];
 }
@@ -242,7 +242,7 @@ export async function checkFiles(
   const errors: string[] = [];
   const inapplicable: string[] = [];
   const partial: string[] = [];
-  const unavailable: string[] = [];
+  const unavailable: Array<{ check: string; message: string }> = [];
   for (const [label, expected, result] of runs) {
     if (result === "no-targets") {
       inapplicable.push(label);
@@ -255,7 +255,7 @@ export async function checkFiles(
     } else if (result.soft) {
       // A check that could not be launched is not a verdict on the code. Surface
       // it, but never block on it.
-      unavailable.push(result.failure);
+      unavailable.push({ check: label, message: result.failure });
     } else {
       errors.push(result.failure);
     }
