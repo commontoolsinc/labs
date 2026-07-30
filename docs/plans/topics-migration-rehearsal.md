@@ -56,15 +56,29 @@ to cross-version write storms. The run is therefore *two* legacy→current
 transitions, and #4997's dangling-author and recursive-crossref fixes have to
 hold for both.
 
-Reproduce the grouping at any time with:
+Reproduce the grouping — and get the FID list itself — from the snapshot. This
+is the migration manifest: run it before pass one, check the output in, and diff
+against it before the live attempt.
 
 ```bash
-deno task cf inspect piece <space> <topic-fid>   # per piece
+# every piece in the space, with the pattern identity it currently carries
+deno task cf inspect entities $DB --kind piece --json \
+  | jq -r '.[].id' \
+  | while read -r id; do
+      deno task cf inspect piece $DB "$id" --json \
+        | jq -r '[.id, (.pattern.identity // "unresolved"), (.pattern.filename // "-")] | @tsv'
+    done | sort -k2 > topics-manifest.tsv
+
+# the 74 in scope: the board plus everything on either topic generation
+grep -E 'PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY|-85Wmyd9iwUjbpwnTYR2YolxkMUHup9WHY6YsRUDA1E|WpIRvAWL_WW45Q89ekZAlHWLObhQ16NDmQzvv_q2aI8' \
+  topics-manifest.tsv | cut -f2 | sort | uniq -c   # expect 39 / 34 / 1
 ```
 
-or read `patternIdentity` from each topic document directly — the board's
-`topics` input holds wrapper cells, so follow each wrapper's `result` link one
-hop to reach the piece that carries `patternIdentity`.
+The count check is the point: the space holds 319 pieces across 150 identities,
+so "did I migrate the right 74?" is a question the manifest answers and a
+hand-copied list does not. It is also the rollback record — the second column is
+the source id to `setsrc` back to, which the Going-live section requires be
+captured before starting.
 
 **Upgrading to:** `packages/patterns/topics/{topic,main}.tsx` at current `main`
 (#4997's legacy-safety fixes plus #4991's body-at-create and thrown
@@ -93,16 +107,25 @@ a sustained plateau rather than a burst.
 
 ## Open decisions — resolve before running
 
-1. **Starting state.** The Risks section says rehearse **old→populate→new**.
-   A clone of today's board is already mid-state: 73 legacy-schema topics under
-   a pre-rework board. Options: (a) migrate the clone as-is, which rehearses the
-   *actual* transition that will happen live; (b) build a synthetic old→new
-   sequence in a scratch space, which tests the transition in isolation but not
-   against real data. **(a) is what #4997's rehearsal did** and what the tooling
-   is built for. Confirm this reading before running.
+1. ~~**Starting state.**~~ **Resolved: (a), migrate a clone of the current
+   production snapshot as-is.** The Risks section says rehearse
+   **old→populate→new**, but a clone of today's board is already mid-state: 73
+   legacy-schema topics under a pre-rework board. Migrating it rehearses the
+   *actual* transition that will happen live, which is what a rehearsal is for;
+   it is what #4997's rehearsal did and what the tooling is built for. A
+   synthetic old→populate→new sequence in a scratch space is worth having as
+   compatibility coverage, but it cannot substitute — it tests the transition in
+   isolation and not against real data, and the failures this migration is
+   guarding against (two live generations, results read by a parent) are
+   properties of the real store.
 2. ~~**Which pattern revision** to `setsrc`.~~ **Resolved 2026-07-29: latest
    `main`.** It is the transition that will actually happen, and #4997's
    legacy-safety fixes are what make the legacy→current jump survivable.
+   **Pin the SHA at pass one and reuse it** for pass two and the live run
+   (`git rev-parse HEAD`, recorded beside the manifest). "Latest `main`" moves,
+   and two passes against different sources are not two passes of the same
+   rehearsal — the whole point of resetting between them is that the only thing
+   varying is the attempt.
 3. **Whether one clean pass is enough.** The generic runbook asks for two
    consecutive clean passes; a 1.0 GB clone makes each attempt ~15 s of clone
    plus the migration itself. Cheap enough to keep the bar at two.
@@ -114,12 +137,28 @@ Clone and serve per the generic runbook. Then:
 ### Baseline
 
 ```bash
-deno task cf space verify <clone>                    # record fingerprint + counts
-deno task cf inspect churn <did> --bucket 60         # confirm a quiet window
+CLONE=~/clones/topics
+DB=$CLONE/engine-v3/engine-v3/did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk.sqlite
+
+deno task cf space verify $CLONE                     # record fingerprint + counts
+deno task cf inspect churn $DB --bucket 60 \
+  --until "$(date -u '+%Y-%m-%d %H:%M:%S')"          # confirm a quiet window
 ```
 
+The churn read takes the clone's **database path**, not the DID: the clone lives
+outside the directories `cf inspect` searches, and naming the space would
+resolve to whichever same-DID store discovery finds — usually this checkout's
+`cache/memory`, silently. `--until` is what makes a quiet window observable
+rather than assumed (generic runbook, "Reading the verdict").
+
 Record: topic count (expect 73), comment and link totals, the content
-fingerprint, and `max(seq)`.
+fingerprint, and `max(seq)`. The first two come from the baseline fingerprint
+dump the generic runbook's authored-content check already produces:
+
+```bash
+deno task cf space fingerprint $CLONE/pristine/<did>.sqlite --json > /tmp/before.json
+jq '[.perEntity[] | .kind] | group_by(.) | map({(.[0]): length}) | add' /tmp/before.json
+```
 
 ### Migrate — children first, board last, serially
 
@@ -149,9 +188,18 @@ run, and the verification below is the only thing that is.
 ### Verify
 
 ```bash
-deno task cf space verify <clone>                    # nonzero exit if content moved
-deno task cf inspect churn <did> --bucket 60 --since '<start>'
+# --expect-migration is REQUIRED here: without it, verify is strict and exits
+# nonzero on any change at all — which every successful migration is, because
+# each piece's result value is rewritten.
+deno task cf space verify $CLONE --expect-migration
+deno task cf inspect churn $DB --bucket 60 \
+  --since '<start>' --until "$(date -u '+%Y-%m-%d %H:%M:%S')"
 ```
+
+Then the authored-content check from the generic runbook ("Checking authored
+content — the step that is not optional"). It is not optional here either:
+`--expect-migration` gates on removal, and overwriting a topic body is a change,
+so this run's own gate cannot see the failure mode that matters most.
 
 Then the acceptance items from the implementation plan's live checklist, which
 `cf space verify` cannot cover because they are semantic:
@@ -174,17 +222,44 @@ Then the acceptance items from the implementation plan's live checklist, which
   half-migration on its own: leaving generation B behind changes no authored
   content, so the fingerprint is unmoved and the counts merely grow.
 
-`cf space verify` reporting `content unchanged` while commit counts grow is the
-expected result: a migration writes, and generated cells are excluded from the
-fingerprint precisely because they rotate.
+The expected `cf space verify` result is **`content CHANGED` with `removed 0`**,
+and the per-kind tally confined to pieces and their derived cells. Generated
+cells are excluded from the fingerprint because they rotate, but *results* are
+not — and a schema update rewrites every piece's result — so `content unchanged`
+after this migration would mean the migration did not land, not that it landed
+cleanly.
 
 ### Reset and repeat
 
 ```bash
-deno task cf space reset <clone>
+./scripts/stop-local-dev.sh --port-offset 10     # required, see below
+deno task cf space reset $CLONE
+# then restart per the generic runbook's step 2 before the next pass
 ```
 
-Two consecutive clean passes before going live.
+Stopping the server first is not tidiness: a reset unlinks the database, which
+does not reach a process that already holds it open. A running toolshed would
+keep serving pass one's state while `cf space verify` reported the clone
+pristine. `cf space reset` refuses while the store is held, so a forgotten stop
+fails loudly instead of silently invalidating the pass.
+
+Two consecutive clean passes before going live — see the generic runbook's
+"Before going live" for what makes a pass clean, which is more than this
+command's exit code.
+
+### If the run stops partway
+
+Resource exhaustion wedged the server in the first real rehearsal, and it will
+happen again on a 1 GB store. The migration is durable: already-migrated pieces
+stay migrated. To resume, re-read which pieces still carry an old identity and
+continue from there rather than restarting the pass:
+
+```bash
+deno task cf inspect piece $DB <topic-fid>     # `pattern:` line carries the identity
+```
+
+Only start a fresh pass (stop, reset, restart) if you cannot account for every
+piece — a pass whose midpoint is unknown is not one of the two clean passes.
 
 ## Going live
 

@@ -64,28 +64,99 @@ function fromFileUrl(url: string): string {
 }
 
 /**
+ * Reject a snapshot URL that would put a whole space on the wire in the clear.
+ *
+ * A snapshot is the entire contents of a space — the same confidentiality
+ * judgement that keeps the dump endpoint hard-off in production — so plaintext
+ * transport is refused rather than merely discouraged in the help text.
+ * Loopback is the exception: it never leaves the machine, and the tests serve
+ * fixtures over it.
+ */
+function assertConfidentialTransport(url: string): void {
+  const parsed = new URL(url);
+  if (parsed.protocol === "https:") return;
+  const loopback = parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "::1" || parsed.hostname === "localhost";
+  if (parsed.protocol === "http:" && loopback) return;
+  throw new ValidationError(
+    `refusing to download a snapshot over ${parsed.protocol}//: a whole-space ` +
+      `snapshot is the entire contents of the space. Use https, or copy the ` +
+      `file down yourself and pass a path.`,
+  );
+}
+
+/**
  * Download a remote snapshot to a temp file so `--from` can take a URL.
  *
  * Returns the staging directory alongside the path so the caller can remove it:
  * a real snapshot is gigabytes, and leaving one per invocation in the system
  * temp directory would be a quiet disk leak.
+ *
+ * Cleanup on the failure paths belongs HERE, not with the caller: once this
+ * function throws it has never returned the directory, so no caller can be
+ * holding a handle to remove. A stream that dies mid-download — the likeliest
+ * failure at gigabyte scale, and the one a non-2xx check cannot catch — would
+ * otherwise strand a partial file the size of however much arrived.
  */
 async function fetchSnapshot(
   url: string,
 ): Promise<{ path: string; stagingDir: string }> {
+  assertConfidentialTransport(url);
   const response = await fetch(url);
   if (!response.ok || response.body === null) {
+    await response.body?.cancel();
     throw new Error(`could not download ${url}: HTTP ${response.status}`);
   }
   const stagingDir = await Deno.makeTempDir({ prefix: "cf-space-clone-" });
   const path = `${stagingDir}/snapshot.sqlite`;
-  using file = await Deno.open(path, { write: true, create: true });
-  await response.body.pipeTo(file.writable);
+  try {
+    const file = await Deno.open(path, { write: true, create: true });
+    // `pipeTo` closes the destination on success and aborts it on failure, so
+    // the handle needs no separate disposal — and must not be given one, since
+    // closing an already-closed file is itself an error.
+    await response.body.pipeTo(file.writable);
+  } catch (error) {
+    await Deno.remove(stagingDir, { recursive: true }).catch(() => {});
+    throw error;
+  }
   return { path, stagingDir };
 }
 
 const bytes = (n: number): string =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : `${(n / 1e6).toFixed(1)} MB`;
+
+/**
+ * The line that says how much of the store the fingerprint could not speak for.
+ *
+ * Printed only when there is something to say, but never suppressed when there
+ * is: a verdict computed over an unknown fraction of a space reads exactly like
+ * one computed over all of it, and this is the only place that difference
+ * becomes visible to an operator.
+ */
+function uncertaintyNote(
+  unhashable: number | null | undefined,
+  ambiguous: number | null | undefined,
+  indent: string,
+): string {
+  const notes: string[] = [];
+  if (unhashable) {
+    notes.push(
+      `${unhashable} entit${
+        unhashable === 1 ? "y" : "ies"
+      } could not be hashed and ` +
+        `${unhashable === 1 ? "is" : "are"} absent from this verdict`,
+    );
+  }
+  if (ambiguous) {
+    notes.push(
+      `${ambiguous} id(s) generated in one manifest and named in another, ` +
+        `counted as generated — a change to ${
+          ambiguous === 1 ? "it" : "them"
+        } would not show`,
+    );
+  }
+  return notes.map((n) => `${indent}⚠ ${n}\n`).join("");
+}
 
 export const space = new Command()
   .name("space")
@@ -164,10 +235,22 @@ export const space = new Command()
           `  content    ${manifest.fingerprint.hash}\n` +
           `             ${manifest.fingerprint.entities} entities fingerprinted, ` +
           `${manifest.fingerprint.excludedGenerated} generated cells excluded\n` +
+          uncertaintyNote(
+            manifest.fingerprint.unhashable,
+            manifest.fingerprint.ambiguous,
+            "             ",
+          ) +
           `  working    ${paths.workingPath}\n\n` +
-          `serve it (NOT the live store — note the port offset):\n` +
-          `  MEMORY_DIR="file://${targetDir}/" ./scripts/start-local-dev.sh --port-offset 10\n\n` +
-          `then, per attempt:\n` +
+          // HOST is pinned to loopback: the toolshed defaults to 0.0.0.0, and a
+          // clone keeps the source space's DID, so a clone bound to every
+          // interface is a second store answering to production's identity on
+          // the network. The port offset separates it from a local production
+          // server; only the host binding keeps it off the network entirely.
+          `serve it (NOT the live store — note the host and port):\n` +
+          `  HOST=127.0.0.1 MEMORY_DIR="file://${targetDir}/" ` +
+          `./scripts/start-local-dev.sh --port-offset 10\n\n` +
+          `then, per attempt (stop the server before resetting — a reset ` +
+          `cannot reach a process that already holds the store open):\n` +
           `  cf space verify ${targetDir}\n` +
           `  cf space reset  ${targetDir}`,
       );
@@ -203,7 +286,13 @@ export const space = new Command()
           `added      ${diff.added}\n` +
           `content    ${fingerprint.match ? "unchanged" : "CHANGED"}\n` +
           `commits    ${counts.manifest.commits} → ${counts.working.commits}\n` +
-          `revisions  ${counts.manifest.revisions} → ${counts.working.revisions}\n\n` +
+          `revisions  ${counts.manifest.revisions} → ${counts.working.revisions}\n` +
+          uncertaintyNote(
+            result.uncertainty.unhashable.working,
+            result.uncertainty.ambiguous.working,
+            "",
+          ) +
+          `\n` +
           (!result.baselineIntact
             ? "BASELINE CORRUPTED — the pristine snapshot no longer matches the " +
               "manifest; do not reset to it."

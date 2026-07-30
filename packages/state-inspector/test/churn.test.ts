@@ -176,6 +176,83 @@ Deno.test("--since / --until bound the window, inclusive/exclusive", () => {
   });
 });
 
+Deno.test("the curve covers the window asked for, not just its writes", () => {
+  // "The rate returns to baseline AND STAYS THERE" is the runbook's settle
+  // condition, and a curve that stops at its own last write can never show it:
+  // a storm that has just stopped ends on its busiest bucket by construction.
+  // `until` is the observation boundary — pass the moment you stopped watching
+  // and the trailing quiet is reported rather than left to be assumed.
+  withStore((commit) => {
+    commit("2026-07-22 10:00:00", ["of:topic"]);
+    for (let i = 0; i < 50; i++) commit("2026-07-22 10:01:00", ["of:storm"]);
+  }, (space) => {
+    const bare = commitChurn(space, { bucketSeconds: 60 });
+    assertEquals(
+      bare.buckets.map((b) => b.commits),
+      [1, 50],
+      "unbounded, the curve ends on the storm and proves nothing about after",
+    );
+
+    const observed = commitChurn(space, {
+      bucketSeconds: 60,
+      until: "2026-07-22 10:05:00",
+    });
+    assertEquals(
+      observed.buckets.map((b) => b.commits),
+      [1, 50, 0, 0, 0],
+      "the quiet minutes through the boundary are reported, not implied",
+    );
+    // `until` is exclusive, so 10:05 itself is not materialized — a zero there
+    // would be an artifact of the bound rather than an observation.
+    assertEquals(observed.to, "2026-07-22 10:04:00");
+    // ...and the settle is legible: writes stopped well before we stopped
+    // watching. That comparison is impossible without both numbers.
+    assertEquals(observed.lastCommit, "2026-07-22 10:01:00");
+    assertEquals(observed.totals, bare.totals, "widening adds no writes");
+
+    // `since` widens the leading edge the same way, so a baseline observation
+    // shows the quiet it is claiming.
+    const before = commitChurn(space, {
+      bucketSeconds: 60,
+      since: "2026-07-22 09:58:00",
+    });
+    assertEquals(before.buckets.map((b) => b.commits), [0, 0, 1, 50]);
+    assertEquals(before.from, "2026-07-22 09:58:00");
+  });
+});
+
+Deno.test("a window bound SQLite cannot read is refused, not treated as quiet", () => {
+  // An unreadable bound compares as NULL and therefore matches NO commits, so
+  // the report would say "no timed commits in window" — indistinguishable from
+  // a genuinely quiet space. That is a false all-clear on the one check this
+  // command exists to support, and the runbook has operators typing these
+  // bounds by hand.
+  withStore((commit) => {
+    commit("2026-07-22 10:00:00", ["of:topic"]);
+  }, (space) => {
+    for (const bound of ["since", "until"] as const) {
+      const error = assertThrows(
+        () => commitChurn(space, { bucketSeconds: 60, [bound]: "yesterday" }),
+        Error,
+        `--${bound}`,
+      );
+      assert(
+        /report the window as quiet/.test(error.message),
+        `the message must say what silently goes wrong, got: ${error.message}`,
+      );
+    }
+    // A readable bound still works, so the check is not just refusing anything
+    // unusual: an ISO timestamp is accepted alongside the store's own format.
+    assertEquals(
+      commitChurn(space, {
+        bucketSeconds: 60,
+        since: "2026-07-22T09:00:00Z",
+      }).totals.commits,
+      1,
+    );
+  });
+});
+
 Deno.test("a commit with no revisions still counts as a commit", () => {
   // LEFT JOIN, not JOIN: an empty commit is real activity and a fan-out over
   // revisions must not inflate the commit count either.

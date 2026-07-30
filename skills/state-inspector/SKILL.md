@@ -142,14 +142,24 @@ fixed recipe. The recurring debugging questions and where they resolve:
   burst from the same writes spread over a week — churn is the shape-in-time
   view: a storm starting, and a settle completing. Use it before and after a
   `setsrc` on a populated space; `--bucket`/`--since`/`--until` frame the
-  window. It reports rates and never judges them — what counts as "settled" is
-  yours to decide.
+  window. Pass `--until` with the moment you stopped watching: the curve then
+  covers the window you asked about rather than ending at the last write, which
+  is the difference between showing a storm and showing it SETTLE. It reports
+  rates and never judges them — what counts as "settled" is yours to decide.
 - _"Did a migration preserve this space's content?"_ → `cf space` (a sibling
   command, not `inspect` — a clone exists to be written to, so it lives outside
   inspect's read-only contract). `cf space clone <did> --from <snapshot> --to
-  <dir>` builds a writable rehearsal copy plus a manifest; `verify` reports
-  whether durable content still matches the baseline (exiting nonzero when it
-  does not) and `reset` restores it for the next attempt.
+  <dir>` builds a writable rehearsal copy plus a manifest; `verify` reports what
+  moved against that baseline and `reset` restores it for the next attempt.
+  Two things decide whether a rehearsal means anything, and both are easy to get
+  wrong: `verify` is strict by default (any change exits nonzero, right for an
+  untouched clone, wrong after a migration — pass `--expect-migration`, which
+  gates on entities REMOVED instead), and it cannot see a clobber either way,
+  because overwriting authored content is a change rather than a removal. Stop
+  the server before `reset`: unlinking the database does not reach a process
+  holding it open, so `reset` refuses rather than let a served clone keep
+  serving the discarded attempt. Full procedure:
+  `docs/development/space-clone-rehearsal.md`.
   `cf space fingerprint <space>` runs the content check alone against any store.
   Compiler-generated internal cells are excluded by default: a pattern update
   rotates their identities on purpose, so counting them would change the

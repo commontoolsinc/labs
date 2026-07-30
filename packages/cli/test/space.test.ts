@@ -15,6 +15,21 @@ import { cf, withEnv } from "./utils.ts";
 /** `CliResult` streams are line arrays; join before substring assertions. */
 const text = (lines: string[]): string => lines.join("\n");
 
+/**
+ * Staging directories `--from <url>` may have created, by name.
+ *
+ * Callers compare a before/after set rather than asserting the system temp
+ * directory holds none: it is shared, so an unrelated leftover would fail that
+ * spuriously and forever.
+ */
+async function stagingDirs(): Promise<Set<string>> {
+  const found = new Set<string>();
+  for await (const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")) {
+    if (entry.name.startsWith("cf-space-clone-")) found.add(entry.name);
+  }
+  return found;
+}
+
 const SPACE = "did:key:z6MkCliCloneTest";
 const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
 const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
@@ -242,18 +257,6 @@ describe("cf space", () => {
     // snapshot across operators. A real snapshot is gigabytes, so the staging
     // copy must not survive the command.
     await withFixture(async ({ snapshot, clone }) => {
-      // Compare staging directories before and after rather than asserting the
-      // system temp directory holds none: it is shared, so an unrelated
-      // leftover would fail this spuriously and forever.
-      const stagingDirs = async (): Promise<Set<string>> => {
-        const found = new Set<string>();
-        for await (
-          const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")
-        ) {
-          if (entry.name.startsWith("cf-space-clone-")) found.add(entry.name);
-        }
-        return found;
-      };
       const before = await stagingDirs();
 
       const body = await Deno.readFile(snapshot);
@@ -277,6 +280,61 @@ describe("cf space", () => {
       const after = await stagingDirs();
       const leaked = [...after].filter((name) => !before.has(name));
       expect(leaked).toEqual([]);
+    });
+  });
+
+  it("cleans up staging when the download dies mid-stream", async () => {
+    // The failure a status check cannot catch: headers say 200, then the
+    // connection drops. At the gigabyte scale `--from <url>` exists for, the
+    // partial file stranded in the system temp directory is however much
+    // arrived — so cleanup has to live where the failure does, not with a
+    // caller that never received a directory to clean.
+    await withFixture(async ({ snapshot, clone }) => {
+      const before = await stagingDirs();
+
+      const body = await Deno.readFile(snapshot);
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          // Promise a full-length body and deliver a prefix, so the truncation
+          // surfaces on the CLIENT as a short read. Erroring the stream instead
+          // would work too, but the server-side abort prints a stack trace into
+          // every run of this suite.
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(body.slice(0, 512));
+                controller.close();
+              },
+            }),
+            { headers: { "content-length": String(body.length) } },
+          ),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/snapshot.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+      } finally {
+        await server.shutdown();
+      }
+
+      const leaked = [...await stagingDirs()].filter((n) => !before.has(n));
+      expect(leaked).toEqual([]);
+    });
+  });
+
+  it("refuses to pull a whole-space snapshot over plaintext http", async () => {
+    // A snapshot is the entire contents of a space — the same confidentiality
+    // judgement that keeps the dump endpoint off in production. Loopback is
+    // exempt (it never leaves the machine) and the tests above rely on that.
+    await withFixture(async ({ clone }) => {
+      const result = await cf(
+        `space clone ${SPACE} --from http://example.com/s.sqlite --to ${clone}`,
+      );
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).toContain("refusing to download");
     });
   });
 
