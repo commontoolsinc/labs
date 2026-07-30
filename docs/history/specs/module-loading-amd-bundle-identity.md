@@ -1,6 +1,6 @@
 ---
 status: historical
-created: 2026-05-31
+created: 2026-07-30
 archived: 2026-07-30
 reason: "Snapshot of the removed AMD bundle pipeline and the bundle-grained identity problem that motivated content-addressed module loading."
 superseded-by: docs/specs/module-loading.md
@@ -10,9 +10,11 @@ superseded-by: docs/specs/module-loading.md
 
 This is the record of the pipeline that
 [module-loading.md](../../specs/module-loading.md) replaced, and of the identity
-defect that motivated the replacement. It was written as that spec's "Current
-System Overview" and "Problem Statement" sections and is preserved here because
-the defect — not the pipeline — is what the shipped design is shaped around.
+defect that motivated the replacement. The body below is that spec's "Current
+System Overview" and "Problem Statement" sections, written when the spec was
+first added on 2026-05-31 and extracted here unchanged when the spec was brought
+up to date. It is preserved because the defect — not the pipeline — is what the
+shipped design is shaped around.
 
 None of the code described below exists any more. The AMD bundle pipeline
 (bundler, whole-bundle verifier, `Engine.compile`/`Engine.evaluate`) and the AMD
