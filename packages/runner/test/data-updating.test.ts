@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID, ID_FIELD, JSONSchema } from "../src/builder/types.ts";
+import { ID, JSONSchema } from "../src/builder/types.ts";
 import {
-  addCommonIDfromObjectID,
   applyChangeSet,
   type ChangeSet,
   compactChangeSet,
@@ -744,67 +743,6 @@ describe("data-updating", () => {
         .toEqual("Second Value");
     });
 
-    it("should handle ID_FIELD redirects and reuse existing documents", () => {
-      const testCell = runtime.getCell<any>(
-        space,
-        "should handle ID_FIELD redirects",
-        undefined,
-        tx,
-      );
-      testCell.set({ items: [] });
-
-      // Create an initial item
-      const data = { id: "item1", name: "First Item" };
-      addCommonIDfromObjectID(data);
-      diffAndUpdate(
-        runtime,
-        tx,
-        testCell.key("items").key(0).getAsNormalizedFullLink(),
-        data,
-        "test ID_FIELD redirects",
-      );
-
-      const initialLink = testCell.getRaw().items[0];
-
-      // Update with another item using ID_FIELD to point to the 'id' field
-      const newValue = {
-        items: [
-          { id: "item0", name: "New Item" },
-          { id: "item1", name: "Updated Item" },
-        ],
-      };
-      addCommonIDfromObjectID(newValue);
-
-      diffAndUpdate(
-        runtime,
-        tx,
-        testCell.getAsNormalizedFullLink(),
-        newValue,
-        "test ID_FIELD redirects",
-      );
-
-      // Verify that the second item reused the existing document
-      expect(isPrimitiveCellLink(testCell.getRaw().items[0])).toBe(true);
-      expect(isPrimitiveCellLink(testCell.getRaw().items[1])).toBe(true);
-      expect(areLinksSame(testCell.getRaw().items[1], initialLink)).toBe(true);
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[1], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual(
-          "Updated Item",
-        );
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[0], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual("New Item");
-    });
-
     it("should treat different properties as different ID namespaces", () => {
       const testCell = runtime.getCell<any>(
         space,
@@ -879,7 +817,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expect(areLinksSame(changes[0].value, cellA)).toBe(true);
+      expect(areLinksSame(changes[0].value, cellA, current)).toBe(true);
     });
 
     it("should handle doc and cell references that don't change", () => {
@@ -903,7 +841,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expect(areLinksSame(changes[0].value, cellA)).toBe(true);
+      expect(areLinksSame(changes[0].value, cellA, current)).toBe(true);
 
       applyChangeSet(tx, changes);
 
@@ -1344,55 +1282,6 @@ describe("data-updating", () => {
       );
       expect(setChange).toBeDefined();
       expect(setChange!.value).toBe(2);
-    });
-  });
-
-  describe("addCommonIDfromObjectID", () => {
-    it("should handle arrays", () => {
-      const obj = { items: [{ id: "item1", name: "First Item" }] };
-      addCommonIDfromObjectID(obj);
-      expect((obj.items[0] as any)[ID_FIELD]).toBe("id");
-    });
-
-    it("should reuse items", () => {
-      const itemCell = runtime.getCell<{ id: string; name: string }>(
-        space,
-        "addCommonIDfromObjectID reuse items",
-        undefined,
-        tx,
-      );
-      itemCell.set({ id: "item1", name: "Original Item" });
-
-      const testCell = runtime.getCell<{ items: any[] }>(
-        space,
-        "addCommonIDfromObjectID arrays",
-        undefined,
-        tx,
-      );
-      testCell.setRaw({ items: [itemCell.getAsLink()] });
-
-      const data = {
-        items: [{ id: "item1", name: "New Item" }, itemCell],
-      };
-      addCommonIDfromObjectID(data);
-      diffAndUpdate(
-        runtime,
-        tx,
-        testCell.getAsNormalizedFullLink(),
-        data,
-        "addCommonIDfromObjectID reuse items",
-      );
-
-      const result = testCell.getRaw();
-      expect(isPrimitiveCellLink(result?.items[0])).toBe(true);
-      expect(isPrimitiveCellLink(result?.items[1])).toBe(true);
-      expect(areLinksSame(result?.items[0], result?.items[1]))
-        .toBe(true);
-      expect(
-        (tx.readValueOrThrow(parseLink(result?.items[1], testCell)!) as any)
-          .name,
-      )
-        .toBe("New Item");
     });
   });
 

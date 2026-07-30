@@ -25,6 +25,11 @@ import {
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
+  schemaWithUnknownsRelaxed,
+  strandedKeys,
+} from "../packages/piece/test/state-continuity-harness.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
   companionFileName,
   companionSpace,
   vintageCompanionDir,
@@ -350,7 +355,7 @@ describe("reporting", () => {
     expect(summary).toBe(
       "Replayed 2 vintage(s): 12 recorded instantiation(s), all mappable to " +
         "a file; 5 upgrade target(s), 3 changed since capture, 3 updated " +
-        "cleanly.",
+        "cleanly with no state stranded.",
     );
   });
 
@@ -451,5 +456,270 @@ describe("path and error helpers", () => {
     // rejection assertion pass for nothing.
     expect(describeError(new Error("boom"))).toBe("boom");
     expect(describeError("plain string")).toBe("plain string");
+  });
+});
+
+describe("stranded-state comparison", () => {
+  it("reports a key whose value the update stopped preserving", () => {
+    // The class the gate exists for. A moved storage key leaves the contract
+    // untouched and the data unreachable, so the value is the only witness.
+    expect(strandedKeys(
+      { journal: [{ event: "created" }], items: ["a"] },
+      { journal: [], items: ["a"] },
+    )).toEqual(["journal"]);
+  });
+
+  it("does not report a key the update ADDED", () => {
+    // Adding a field is what `Default<>` is for. Only keys present BEFORE are
+    // compared; treating a new key as loss would fail every additive change.
+    expect(strandedKeys({ items: ["a"] }, { items: ["a"], favorites: [] }))
+      .toEqual([]);
+  });
+
+  it("reports a key that disappeared entirely", () => {
+    expect(strandedKeys({ items: ["a"] }, {})).toEqual(["items"]);
+  });
+
+  it("treats a missing after-state as everything stranded", () => {
+    // A materialize that produced no readable root lost all of it; saying
+    // "nothing changed" there would be the quietest possible false green.
+    expect(strandedKeys({ a: 1, b: 2 }, undefined)).toEqual(["a", "b"]);
+  });
+
+  it("compares by value, not identity", () => {
+    expect(strandedKeys({ a: [1, 2] }, { a: [1, 2] })).toEqual([]);
+    expect(strandedKeys({ a: [1, 2] }, { a: [2, 1] })).toEqual(["a"]);
+  });
+
+  it("does not treat an empty before-state as a finding", () => {
+    // A vintage whose root held nothing has nothing to strand. The "did it
+    // restore" control is what catches an empty fixture; this must not
+    // double-report it as data loss.
+    expect(strandedKeys({}, { items: ["a"] })).toEqual([]);
+  });
+
+  it("does not compare the RENDERINGS", () => {
+    // `$UI` and its variants are recomputed by the setup, and the stored
+    // rendering and a fresh one are not the same artifact — measured on the
+    // committed `default-app.tsx` fixture, a COMMENT-only edit to
+    // `piece-grid.tsx` reports `$UI` as stranded. Comparing them says nothing
+    // about data and reds every pattern edit.
+    expect(strandedKeys(
+      { $UI: { children: [null] }, $TILE_UI: { a: 1 }, $CHIP_UI: 1, items: [] },
+      { $UI: { children: [[]] }, $TILE_UI: { a: 2 }, $CHIP_UI: 2, items: [] },
+    )).toEqual([]);
+  });
+
+  it("does not compare a RENDERING that sits under no `$UI` key", () => {
+    // The name list cannot reach this one. A transformer hoist
+    // (`__cfPattern_N`, the body of a `map`) is a recorded instantiation in its
+    // own right, and its whole result is a vnode — keys `type`/`name`/`props`/
+    // `children`, no `$UI` anywhere. Measured on the committed
+    // `default-app.tsx` fixture, which records two of them: a UI-only edit
+    // inside that map body reported `children` stranded on both and took the
+    // gate to exit 1, for a change that stores nothing.
+    const row = (label: string) => ({
+      type: "vnode",
+      name: "tr",
+      props: {},
+      children: [{ type: "vnode", name: "td", props: {}, children: [label] }],
+    });
+    expect(strandedKeys(row("🗑️"), row("✕"))).toEqual([]);
+    // ...and nested inside state, where the name list cannot reach it either.
+    expect(strandedKeys(
+      { items: [{ label: "a", view: row("🗑️") }] },
+      { items: [{ label: "a", view: row("✕") }] },
+    )).toEqual([]);
+  });
+
+  it("still reports a key whose RENDERING became data, or data a rendering", () => {
+    // The reduction is not a blanket skip of anything vnode-shaped: it says
+    // "two renderings are the same artifact", not "this key is exempt".
+    const view = { type: "vnode", name: "tr", props: {}, children: [] };
+    expect(strandedKeys({ preview: view }, { preview: ["a"] }))
+      .toEqual(["preview"]);
+    expect(strandedKeys({ preview: ["a"] }, { preview: view }))
+      .toEqual(["preview"]);
+  });
+
+  it("still compares $NAME, which is derived but stable", () => {
+    // The exclusion is the renderings, NOT derived values in general: `$NAME`
+    // stayed equal across both measured UI-only edits, and it is a cheap tell
+    // that the data behind it went missing.
+    expect(strandedKeys({ $NAME: "Home (2)" }, { $NAME: "Home (0)" }))
+      .toEqual(["$NAME"]);
+  });
+
+  it("compares a fabric value by its CONTENTS", () => {
+    // The quietest failure this comparison could have. A fabric special object
+    // keeps its state in private fields, so a structural comparison sees two
+    // objects with no properties and calls them equal whatever they hold —
+    // `deepEqual` documents exactly that. Reduced to a tagged content hash
+    // first, so a changed one is a finding and an unchanged one is not.
+    const held = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const identical = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const different = new FabricBytes(new Uint8Array([9, 9, 9]));
+    expect(strandedKeys({ blob: held }, { blob: identical })).toEqual([]);
+    expect(strandedKeys({ blob: held }, { blob: different })).toEqual(["blob"]);
+  });
+
+  it("survives a value that points back at itself", () => {
+    // A materialized root can be cyclic — the live cell at every stream
+    // position reaches the runtime, which reaches itself. Left in, the
+    // comparison recurses until the stack ends and takes every remaining
+    // fixture down with it.
+    const before: Record<string, unknown> = { items: ["a"] };
+    before.self = before;
+    const after: Record<string, unknown> = { items: ["a"] };
+    after.self = after;
+    expect(strandedKeys(before, after)).toEqual([]);
+  });
+});
+
+describe("stranded-state comparison is a SUBSET check", () => {
+  it("does not report a nested object that gained a field", () => {
+    // The false positive the cross-space case surfaced. An update may ADD, and
+    // additions are not only top-level: a nested pattern gaining a defaulted
+    // field turns {note, owner} into {note, owner, addedLater: []} several
+    // levels down. Comparing for equality reds a perfectly compatible change.
+    expect(strandedKeys(
+      { child: { note: "captured", owner: "v" } },
+      { child: { owner: "v", note: "captured", addedLater: [] } },
+    )).toEqual([]);
+  });
+
+  it("still reports a nested value that CHANGED", () => {
+    expect(strandedKeys(
+      { child: { note: "captured" } },
+      { child: { note: "different" } },
+    )).toEqual(["child"]);
+  });
+
+  it("still reports a nested key that DISAPPEARED", () => {
+    expect(strandedKeys({ child: { note: "captured" } }, { child: {} }))
+      .toEqual(["child"]);
+  });
+
+  it("allows an array to grow but not to lose or reorder", () => {
+    // Appending is an addition. Truncating loses data, and reordering moves an
+    // element out from under a reader that knew its index.
+    expect(strandedKeys({ xs: [1, 2] }, { xs: [1, 2, 3] })).toEqual([]);
+    expect(strandedKeys({ xs: [1, 2] }, { xs: [1] })).toEqual(["xs"]);
+    expect(strandedKeys({ xs: [1, 2] }, { xs: [2, 1] })).toEqual(["xs"]);
+  });
+
+  it("does NOT subset a reduction — a cell is an identity, not a shape", () => {
+    // `{"[cell]": {space, id, path}}` is what a cell- or stream-valued key
+    // reduces to, and its `path` is an array. Left to the subset rule, a
+    // longer path is a superset and so "preserved": a stream that moved from
+    // the document root to `["value"]` in the SAME document would read clean,
+    // which is the moved-storage class this whole comparison exists for.
+    const at = (path: string[]) => ({
+      "[cell]": { space: "did:key:zA", id: "of:fid1:one", path },
+    });
+    expect(strandedKeys({ touch: at([]) }, { touch: at([]) })).toEqual([]);
+    expect(strandedKeys({ touch: at([]) }, { touch: at(["value"]) }))
+      .toEqual(["touch"]);
+    expect(strandedKeys({ touch: at(["a"]) }, { touch: at(["b"]) }))
+      .toEqual(["touch"]);
+  });
+
+  it("treats a before-value of `undefined` as nothing to strand", () => {
+    // The before state is read under the root's stored schema, and a
+    // schema-driven read enumerates the keys the schema DECLARES whether or not
+    // the document holds them — measured on the committed `home.tsx` fixture,
+    // `defaultProfile` reads as `undefined` because that root predates any
+    // profile being created. An update that starts filling one in — a
+    // `Default<>` added to a field already declared — added data rather than
+    // stranding it.
+    expect(strandedKeys({ defaultProfile: undefined }, { defaultProfile: "v" }))
+      .toEqual([]);
+    // The other direction is still loss: something was there, and is not now.
+    expect(strandedKeys({ defaultProfile: "v" }, { defaultProfile: undefined }))
+      .toEqual(["defaultProfile"]);
+  });
+});
+
+/**
+ * The read the comparison rests on, and the one place it could go silently
+ * blind: a value the schema does not resolve arrives here as `undefined`, which
+ * the rule above then reads as "held nothing".
+ */
+describe("relaxing the stored schema's `unknown` positions", () => {
+  it("drops an `unknown` type wherever it sits", () => {
+    // Both spellings, because a pattern reaches them differently: a DECLARED
+    // `unknown` field lowers to the first, and an index signature
+    // (`[key: string]: unknown`, which `system/default-app.tsx` declares) to
+    // the second. Measured on the committed `default-app.tsx` fixture, the
+    // second is what hid `recentPieces`, `summaryIndex` and `trackRecent`.
+    expect(schemaWithUnknownsRelaxed({
+      type: "object",
+      properties: { note: { type: "unknown" } },
+      additionalProperties: { type: "unknown" },
+    })).toEqual({
+      type: "object",
+      properties: { note: {} },
+      additionalProperties: {},
+    });
+  });
+
+  it("drops a union that INCLUDES `unknown`, which constrains nothing", () => {
+    expect(schemaWithUnknownsRelaxed({ type: ["string", "unknown"] }))
+      .toEqual({});
+    // ...and leaves a union that does not.
+    expect(schemaWithUnknownsRelaxed({ type: ["string", "null"] }))
+      .toEqual({ type: ["string", "null"] });
+  });
+
+  it("keeps every other keyword, so a stream still reduces to its document", () => {
+    // What makes this a RELAXATION rather than a different read. Reading under
+    // a bare `{}` would resolve the same keys, but without `asCell` a stream
+    // comes back as its VALUE instead of the document it points at — and a
+    // field that moved to a different doc is the class this comparison exists
+    // for.
+    expect(schemaWithUnknownsRelaxed({
+      asCell: ["stream"],
+      type: "unknown",
+      ifc: { classification: ["secret"] },
+    })).toEqual({ asCell: ["stream"], ifc: { classification: ["secret"] } });
+  });
+
+  it("relaxes inside `$defs`, which is where a `$ref` lands", () => {
+    expect(schemaWithUnknownsRelaxed({
+      $ref: "#/$defs/Row",
+      $defs: {
+        Row: { type: "object", properties: { v: { type: "unknown" } } },
+      },
+    })).toEqual({
+      $ref: "#/$defs/Row",
+      $defs: { Row: { type: "object", properties: { v: {} } } },
+    });
+  });
+
+  it("keeps a property that is NAMED `type`", () => {
+    // The keyword and a property name are the same string. Dropping on the key
+    // alone would delete the property, which is a schema the document no longer
+    // matches rather than a relaxed one.
+    expect(schemaWithUnknownsRelaxed({
+      type: "object",
+      properties: { type: { type: "unknown" } },
+      required: ["type"],
+    })).toEqual({
+      type: "object",
+      properties: { type: {} },
+      required: ["type"],
+    });
+  });
+
+  it("leaves a schema with no `unknown` in it alone", () => {
+    const schema = {
+      type: "object",
+      properties: { items: { type: "array", items: { type: "string" } } },
+      required: ["items"],
+    };
+    expect(schemaWithUnknownsRelaxed(schema)).toEqual(schema);
+    // Booleans are schemas too, and neither is an object to walk.
+    expect(schemaWithUnknownsRelaxed(true)).toBe(true);
+    expect(schemaWithUnknownsRelaxed(false)).toBe(false);
   });
 });

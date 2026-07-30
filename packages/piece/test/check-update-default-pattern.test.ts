@@ -2437,10 +2437,12 @@ describe("checkAndUpdateDefaultPattern", () => {
     // The repair's own failure contract: when the one-shot setup repair
     // cannot commit, the ORIGINAL start error must surface (not the repair's),
     // and the doc must be left exactly as it was — the next boot's repair
-    // attempt still heals it. Driven at the runSynced boundary because the
-    // in-process failure classes (arg validation) are skipped for an
-    // unchanged identity (samePattern), so a commit-layer failure is the
-    // realistic remaining one.
+    // attempt still heals it. Driven at the runSynced boundary with a
+    // commit-layer stub: this root's pointer names V3 while its setup marker
+    // still names V1, so the in-process argument re-stage DOES run here — it
+    // just passes, since the stored argument satisfies both schemas. A
+    // commit-layer failure is what reliably exercises the fail-closed path
+    // without also asserting the argument contract.
     await setupHome({ systemPatternAutoUpdate: true });
     await controller.recreateDefaultPattern({
       customProgram: {

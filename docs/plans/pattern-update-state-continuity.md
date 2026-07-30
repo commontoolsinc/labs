@@ -12,14 +12,14 @@ root names the artifact it holds and the file that artifact was authored in, so
 nested sub-patterns are validated too — coverage they can never get from their
 own vintage, having none.
 
-Stage 5 remains: the gate still asserts "the update still APPLIES", not "the
-data survives". The fixtures now hold data a change can strand; what is missing
-is the VALUE comparison that would notice. Tier 1 — the schema gate — merged as
-[#5144].
+Stage 5's value comparison is now built: the gate asserts that the data
+SURVIVES an update, not merely that the update applies. What remains of stage 5
+is migration coverage. Tier 1 — the schema gate — merged as [#5144].
 
 This plan takes the pattern-update regime from "the contract still type-checks"
 to "the new pattern can still read what the old one wrote".
 
+[#3830]: https://github.com/commontoolsinc/labs/pull/3830
 [#5144]: https://github.com/commontoolsinc/labs/pull/5144
 [#5148]: https://github.com/commontoolsinc/labs/pull/5148
 [#5196]: https://github.com/commontoolsinc/labs/pull/5196
@@ -56,11 +56,13 @@ Three facts make that non-optional:
   data is simply gone. A document is precisely the thing a schema check does
   not have.
 - **Tier 1 hands one class back on purpose.** Over an OPEN argument object it
-  lets a candidate name a new optional field of any type, on the stated ground
-  that the runner validates merged durable arguments before committing such an
-  update. Measured: on the production repair path it does not. A value the old
-  version stored legally becomes unreadable, with nothing raised anywhere. Two
-  tiers each assuming the other covers a class is how it stays uncovered.
+  lets a candidate name a new optional field of any type, on the ground that the
+  runner validates merged durable arguments in the setup transaction before
+  committing such an update. That makes the waiver only as good as the runtime
+  guard's reach, and two tiers each assuming the other covers a class is how a
+  class stays uncovered. So the guard is pinned on every update route by
+  `packages/runner/test/pattern-update-argument-validation.test.ts`, and this
+  tier replays it from a vintage a real prior version wrote.
 
 The motivating incident is the 2026-07-22 estuary brick: a home root doc
 predating six separately-added required fields, where "first-absence-wins, so
@@ -91,7 +93,12 @@ Measured on branch `tier2`, not assumed:
 | A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
-| The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0. The replay compares no values — which, now that a captured vintage holds real handler-written data, is the whole of the remaining gap. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
+| The gate CATCHES a moved storage key | measured by mutation on the ACTUAL `home.tsx`: renaming `.for("journal")` exits 1 with "APPLIED CLEANLY but stranded state the vintage held: journal (was [{\"eventType\":\"piece:created\",…}], now [])", restoring exits 0. The pinned limit in `tasks/pattern-vintage-run.test.ts` is now INVERTED, which is what it was written to receive |
+| A materialized root is NOT plain data | measured on the committed `home.tsx` fixture: at each of its six stream positions the read yields a live cell whose own properties reach the runtime, so a generic deep copy of it is CYCLIC. Before that was reduced, a UI-only edit to `home.tsx` did not merely misreport — `JSON.stringify` in the failure text threw and the gate ended with no verdict. Both sides are now reduced by shape first: a cell to the document it points at, a fabric special object to a tagged content hash (`deepEqual` compares those by own properties, of which they have none), a cycle to a marker |
+| The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded by NAME. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
+| A NAME cannot find every rendering | measured on the same fixture, which records two `map`-body hoists (`__cfPattern_2`) whose whole result is a vnode — keys `type`/`name`/`props`/`children`, no `$UI` to exclude: a UI-only edit inside that map body reported `children` stranded on both roots and exited 1 for a change that stores nothing. A rendering is now also reduced by SHAPE (`type: "vnode"`, which is what the runner's own `vnodeSchema` requires), so it is out of the comparison wherever it sits. Re-measured: that edit exits 0, the moved-key mutation still exits 1 |
+| A schema-less read is not empty, it is NON-DETERMINISTIC | measured on the committed `home.tsx` fixture: a schema-less read returns every key, and materializes `$UI`, which the stored schema VERBATIM (`unknown` at that key) leaves `undefined`. The reason to read under the root's own stored `schema` meta is that a schema-driven read pulls exactly what the schema descends into, where a schema-less one resolves what happens to be resident — the shape of [#3830]. Relaxing that schema's `unknown` positions, per the row below, keeps the read schema-driven while reaching the same keys |
+| The stored schema verbatim reads back LESS than the document holds | measured on the committed `default-app.tsx` fixture, whose declared output carries an index signature: `recentPieces`, `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream) are stored under `additionalProperties: {"type": "unknown"}` and a schema-driven read resolves NOTHING at an `unknown` position, so all three read `undefined` — which the comparison cannot tell from "the document does not hold this", and so treats as nothing to lose. Red/green on the real tree: DROPPING `trackRecent` from `default-app.tsx`'s result replayed `3 updated cleanly with no state stranded`, and after the read relaxes `type: "unknown"` on both sides it exits 1 naming the key. Re-measured for false reds: a comment-only edit to EVERY file the two fixtures name — all 14 targets changed, the whole comparison surface exercised — is `14 updated cleanly` |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed`, `candidates` and `targets`, and requires all three positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
@@ -111,8 +118,14 @@ Measured on branch `tier2`, not assumed:
 | Tier 1 is blind to a storage-key move | measured: result schemas byte-identical, no issue raised, replayed data empty |
 | Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **five of six** (the sixth takes no snapshot); undoing `.for('itemList')` reds the storage-move case; giving the argument candidate a COMPATIBLE type reds the argument case |
 | A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, and the argument case carries the same control for the same reason |
-| Tier 1 **defers** the open-argument evolution class to a runtime guard that the update path does not reach | measured: over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…"), on the doc comment's promise that "the runner validates the piece's merged durable arguments against the new schema". On the production repair call it does not — the update lands with no refusal and `{count:"seven"}` stops being readable through the new schema. `Runner.validateArgument` → `validateSchemaValue` DOES reject the pair in isolation |
-| The miss takes TWO gates, not one | measured (symbols in `runner.ts`; line numbers drift): `applySetupState` re-stages only in its `else if (!sameStoredSetup)` branch, and `setupInternal` computes `sameStoredSetup = samePattern && !validationOptions.reapplyStoredSetup` — so stamping `patternIdentity` first defeats it, **but forcing that gate open with `reapplyStoredSetup: true` still yields no refusal**. A pattern swap supplies no argument, so the re-stage hands `updateAndValidateArgument` its `argument === undefined ? { unresolvedLinkRaw: nextArgument } : {}` option and validates link-bearing slots as opaque. That leniency is deliberate (CT-1917) and swallows this too, which is why the auto-update hot-swap — `swapToPattern` inside `startCore` passes `sameStoredSetup: false` outright, but likewise no supplied argument — is not a way out either |
+| Tier 1 **defers** the open-argument evolution class to a runtime guard, and that guard now fires on both update routes | over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…") on the ground that the runner validates the piece's merged durable arguments. Measured on both routes: the hot-swap refused it already; the roll-forward materialize now does too, with `updated arguments do not match the candidate schema: count: value does not match type number`, and the captured bytes survive the refusal. Guarded in `packages/runner/test/pattern-update-argument-validation.test.ts` (both routes, plus the cold-link control) and replayed from a captured vintage in `state-continuity.test.ts` |
+| The `{ unresolvedLinkRaw }` leniency draws the link/plain line by itself | measured: `overlayUnresolvedLinkPlaceholders` substitutes the opaque placeholder only where the *raw* value at that slot is a cell link that materialized to nothing, so a plain wrong-typed value reaches `validateSchemaValue` and is rejected, under both write shapes (argument supplied at `run()`, and argument written through the root's `argument` meta the way the capture does). Validating an update strictly therefore costs nothing in CT-1917 deferral, and needs no change to this path. An investigation record of a superseded reading of this mechanism is in [`docs/history/plans/pattern-update-open-argument-investigation.md`](../history/plans/pattern-update-open-argument-investigation.md) |
+| A repair path cannot tell an update from a replay by the pattern POINTER | the roll-forward materialize commits the candidate's identity and then calls `runSynced` (`pieces-controller.ts`), and `PatternUpdater`'s instantiated mode moves the pointer with no setup at all, leaving a root that boots through the cold-start setup repair. Both reach setup with the pointer already naming the pattern being installed, so `samePattern` is true for what is an update. `patternSetupIdentity` — stamped only once setup has staged an identity's schema, arguments, internal cells and result projection — is the signal that survives, and `PatternUpdater` already used it for the same purpose (`setupNeedsRepair`). Now read in `setupInternal` via `storedSetupMarker`, which returns `"matches" | "other" | "absent"` — three states rather than a boolean, because an absent marker is not evidence that the running graph is this pattern and must not be read as one. The routes that hand setup a pattern the pointer does not name yet (`PatternUpdater`'s default-root apply, `cf piece setsrc`) were recognized as changes already, which is why they validated before this change |
+| An ABSENT setup marker still skips the re-stage, and that currently covers most roots | deliberate, and the residual: a root written before the marker existed cannot be told from a pending update, and re-staging every such root would validate and rewrite defaults over arguments no update is touching. The window is one setup wide per root and needs a pre-stamped pointer, so an ordinary identity change (`samePattern` false) validates regardless. What the arithmetic understates: `patternSetupIdentity` was introduced 2026-07-24, so a root written before then is exempt for its first repair-route update — and aged roots are exactly the population likeliest to hold an argument a new schema cannot read. This tier does NOT cover them: a capture runs setup through the current runner, so a captured vintage is always marked. The exemption is pinned as a decision in `pattern-update-argument-validation.test.ts` (marker stripped, update admitted, marker written on the way through so the exemption closes behind itself) |
+| Re-staging widens the repair transaction's conflict set | the re-stage reads the stored argument and `validateArgument` materializes it, and `ignoreReadForScheduling` suppresses scheduling only — it is not `ignoreReadForCommit` — so both reads join the commit's conflict set on paths that previously did neither. Accepted rather than closed, with the mitigation stated narrowly: the `runSynced` callers reach `applySetupState` inside an `editWithRetry`, so a conflict retries rather than failing the repair, and `runSynced` pre-syncs the cells it is about to set up — but `swapToPattern` uses a bare `edit()`, and the marker read itself sits in `setupInternal` and so joins every setup's conflict set, including a caller-managed transaction that does not retry. The nested-piece repair opts out of the re-stage entirely, so it adds neither read. Not reproduced; recorded because the internal-cell code one screen up avoids exactly this hazard for its own probe read |
+| A cold replica can accept an update a synced one refuses | follows from the CT-1917 deferral: a link slot that materializes to nothing is deferred, while the same slot on a replica that HAS synced a wrong-typed target is refused. The asymmetry is inherent to deferring — "not yet synced" is indistinguishable from "empty" — and is survivable because a refusal is recoverable rather than terminal: the synced replica escalates to the roll-forward backstop instead of leaving the root unopenable. Not reproduced across two replicas |
+| A RUNNING piece reaches setup through a second gate, and it needs the same signal | measured: with the pointer pre-stamped and no argument supplied, `maybeReuseRunningSetup` returns before `applySetupState`, so a repair over a live piece reported success without validating. Reachable in ordinary sequence — a refused hot-swap is LOGGED, leaving the piece running the old version under a pointer that already names the candidate. Both gates now derive from one `SetupStateReuse` value. The running piece is VALIDATED IN PLACE rather than re-staged: only the pattern watcher can cancel live nodes and instantiate new ones, so staging there would leave the piece's projection reading as the new version while its handlers still drive the old one's cells, and would stamp the completion marker forward — erasing the mismatch a later repair needs. Measured on the way in: staging moved the live value to the new version's without its graph ever running |
+| A refused update leaves the pointer on the rejected candidate, so the refusal must be RECOVERABLE | the identity stamp and the materialize are separate transactions, so only the second aborts: the root names the candidate while `patternSetupIdentity` still names the version that staged the state, and re-running that identity refuses identically. Rolling the pointer back is not the fix — the roll-forward is reached precisely because the previously pinned pattern could not be set up either. Instead the refusal is classified (`isStoredArgumentSchemaRefusal`) and escalated to the same roll-forward backstop a CFC migration rejection takes, since "the pinned version cannot read this root" is exactly the runnability failure that backstop exists for. Without the classification the boot repair discards the error and rethrows the ORIGINAL start failure, so the operator reads a stream-marker stack for an argument problem |
 | Tier 1 also catches field REMOVAL, disjoint TYPE change, and a field moved between nesting levels | read off `schema-compatibility.ts` (messages, not line numbers, are the durable anchor): removal → "existing `<role>` field was removed" (rendered: `result.status: existing result field was removed`); disjoint type → "type … is not accepted by the candidate schema"; a nesting move is *seen* as a removal and reports as one. So none of those is a second Tier-2-only class — they are contract changes. The storage-move stays the only stranding class a contract check structurally cannot see |
 | Two roots in ONE space store would collide on a single fixed cause | `getCell` derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that derivation does not include the space. Fixed by keying the cause per pattern (`vintageRoot(…, key)`); see the stage-3 note below |
 
@@ -631,28 +644,140 @@ worth naming before they bite:
 
 ### 5. Value comparison, and migration coverage
 
-With stage 4's fixtures holding real data, the gate can finally ask the
-question it is named for.
-
-- [ ] **Compare VALUES on replay**, not just "was the commit refused". Both
+- [x] **Compare VALUES on replay**, not just "was the commit refused". Both
       halves are needed and neither is sufficient: a vintage with no data has
       nothing to strand, and a replay that only checks for a refusal would not
-      notice if it did. Inverting the pinned limit in
-      `tasks/pattern-vintage-run.test.ts` — the case that currently asserts a
-      moved `.for()` key goes UNCAUGHT — is the acceptance test.
-- [ ] Replay the vintage's OWN source first as a control, so an empty read is
-      attributable to the change rather than to a fixture that never restored.
-      `state-continuity.test.ts` shows the shape, and stage 3 already learned
-      this the hard way: an unrestored fixture reads exactly like a stranded
-      one.
+      notice if it did.
+- [x] Read the vintage under the root's OWN stored schema, so the comparison
+      sees the data as the version that wrote it did — relaxed at its `unknown`
+      positions, which resolve to `undefined` whatever the document holds
+- [x] Reduce both sides to something comparable before comparing — a live cell
+      to the document it points at, a fabric special object to a content hash, a
+      cycle to a marker
+- [x] Invert the pinned `moved storage key goes uncaught` case — the acceptance
+      test this stage was written to receive
 - [ ] Trigger on memory-engine schema change; promote the affected captures to
-      pinned rather than recapturing, since a dump regenerated after a
-      migration proves nothing — the pre-migration state is the artifact.
+      pinned rather than recapturing, since a dump regenerated after a migration
+      proves nothing — the pre-migration state is the artifact
 - [ ] Breadth across shapes rather than depth per pattern, since the selection
-      rule here is a memory change rather than a pattern change.
+      rule there is a memory change rather than a pattern change
 
-Gate: a change that strands data fails even when it applies cleanly, and a
-memory migration cannot land without replaying pre-migration stores.
+Gate: **met for the stranding half.** Measured on the real `home.tsx`, renaming
+`.for("journal")` now exits 1 with `APPLIED CLEANLY but stranded state the
+vintage held: journal (was [{"eventType":"piece:created",…}], now [])`, and
+restoring returns exit 0. Migration coverage remains open.
+
+Six measurements decided the design, five of them against expectation:
+
+- **A materialized root is not plain data.** At every `asCell`/`asStream`
+  position it holds a live cell whose own properties reach the runtime, so a
+  generic deep copy of `home.tsx`'s root is cyclic and every stream key compares
+  unequal to itself. Both sides are reduced by SHAPE before comparison: a cell
+  to the document it points at, a fabric special object to a tagged content
+  hash, a cycle to a marker.
+- **The renderings ARE the noise, and only they.** `$UI` and its variants are
+  recomputed by the setup and the stored rendering never matches a fresh one — a
+  comment-only edit to `piece-grid.tsx` reported `$UI` stranded. They are
+  excluded; `$NAME` is derived too, stayed equal across the same edits, and is
+  compared.
+- **A name cannot find every rendering.** A transformer hoist — the body of a
+  `map`, recorded as its own instantiation — has a whole result that IS a vnode,
+  under no `$UI` at all: the committed `default-app.tsx` fixture holds two, with
+  keys `type`/`name`/`props`/`children`. Measured, a UI-only edit inside that map
+  body reported `children` stranded on both and exited 1 for a change that stores
+  nothing. A rendering is now reduced by SHAPE (`type: "vnode"`) wherever it
+  sits, and the name list stays for the case the shape check cannot see — the
+  `note.tsx` measurement above is one side carrying the tag against one side that
+  does not. Re-measured after: that edit exits 0, the moved-key mutation still
+  exits 1.
+- **The "before" read wants the root's stored schema for determinism**, not
+  because a schema-less read comes back empty. Measured, it comes back fuller —
+  and depends on what is resident, which is the wrong property for a fixture
+  replay.
+- **The stored schema verbatim reads back LESS than the document holds, and the
+  shortfall is silent.** A schema-driven read resolves nothing at a
+  `{"type": "unknown"}` position, so such a key comes back `undefined` whatever
+  is stored there — indistinguishable from a key the document does not hold,
+  which the comparison correctly treats as nothing to lose. `unknown` is what a
+  declared `unknown` field and an INDEX SIGNATURE both lower to, the second as
+  `additionalProperties: {"type": "unknown"}`, and `system/default-app.tsx`
+  declares one. Measured on the committed fixture, that hid `recentPieces`,
+  `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream) —
+  and DROPPING `trackRecent` from the returned result replayed
+  `3 updated cleanly with no state stranded`. The read now relaxes the `type`
+  keyword where it says `unknown`, on both sides, and that mutation is named.
+  Only `type` is dropped: `asCell` has to survive, or a stream resolves to its
+  value and the moved-document class goes with it.
+- **The comparison is one-directional.** Only keys present BEFORE are checked.
+  An update may legitimately ADD a field — that is what `Default<>` is for — so
+  a new key is not a finding; an existing key whose value changed is.
+
+What a green run does NOT cover, stated so it is not read as more than it is:
+
+- A root whose every key is a rendering (`profile-picker.tsx` returns only
+  `$UI`) has nothing left for the value comparison to look at, and so does a
+  root that IS one (a `map`-body hoist). Both still have to survive the refusal,
+  completion and reads-as-something checks.
+- A cell- or stream-valued key is compared as the DOCUMENT it points at, not by
+  that document's contents. A field that moved to a different doc is caught; a
+  field whose own doc was emptied in place, under the same id, is not.
+- The before-read sees what the root's stored schema RESOLVES, which is still
+  not everything the document holds even with `unknown` relaxed. Measured after
+  the relaxation, one shortfall remains on the committed fixtures: a root whose
+  schema declares neither the key nor any `additionalProperties` — `$NAME` on
+  `backlinks-index.tsx`, `summary-index.tsx` and `profile-picker.tsx`. Both are
+  derived names rather than stored state, so nothing measured today is lost;
+  what matters is that a key the schema does not reach still arrives as
+  `undefined`, which the comparison reads as nothing to lose.
+- The value comparison runs only for a target whose identity CHANGED, which is
+  the same condition the auto-updater fires on. On an unchanged tree it runs
+  zero times — measured, `0 changed` on both committed fixtures — so the
+  mutations above are the only thing keeping it honest.
+
+**Open, and it will bite eventually:** the comparison fails on any change to a
+non-rendering key, including a deliberate data migration that reformats a field.
+There are none today, and failing loudly is the right default for a gate whose
+subject is data loss — but the first real migration will need a way to declare
+"this key is expected to change, here is the shape it becomes". Deliberately
+not built speculatively; the shape of the escape hatch should be decided by the
+migration that needs it. Measured against the changes that are routine today, it
+is quiet: an additive defaulted field on a nested pattern (`note.tsx`), a
+comment-only edit to `default-app.tsx` (3 changed, 3 clean), a UI-only edit to
+`home.tsx`'s header (1 changed, 1 clean), and a UI-only edit inside
+`default-app.tsx`'s own `map` body all exit 0. The strongest version of that
+measurement, because it leaves nothing unexercised: a comment-only edit to
+EVERY file the two committed fixtures name changes all 14 targets at once, and
+exits 0 with `14 updated cleanly with no state stranded`.
+
+### What stage 5 does NOT compare
+
+The replay compares a root's RESULT only. Its **argument document** is never
+compared, and the harness header says results-only "measures half the surface".
+`vintageArgumentLink` / `readVintageArgument` exist and are used by
+`packages/piece/test/state-continuity.test.ts`, so the reach is already built —
+`replayVintage` simply does not use it.
+
+An argument-side REFUSAL is still caught (the completion-marker check fires), so
+this is not a hole in "the update applied". It is a hole in "the data survived":
+an argument value that silently stops being readable passes. That matters more
+than it looks, because Tier 1 hands the open-argument evolution class to a
+runtime validator that measurably does not fire — so nothing checks it today.
+Closing it is the natural next increment.
+
+Three further limits, all measured, all in the gate as shipped:
+
+- **A field emptied IN PLACE under the same document id.** A live cell reduces
+  to the document it points at, so a field that MOVED document is caught and one
+  emptied where it stands is not.
+- **A key the schema declares neither by name nor via `additionalProperties`.**
+  `unknown`-typed positions are now relaxed and read (that was a silent pass —
+  dropping `trackRecent` from `default-app.tsx` exited 0 before the fix), but a
+  key the schema does not mention at all stays invisible. Measured: `$NAME` on
+  three roots, all derived names.
+- **A target whose every comparable key is a rendering** reports "updated
+  cleanly with no state stranded" having compared nothing, and the output cannot
+  distinguish that from a real check. Three of fourteen targets today
+  (`profile-picker.tsx`, and the two map-body hoists).
 
 ## Open questions
 
@@ -666,21 +791,12 @@ memory migration cannot land without replaying pre-migration stores.
   or whether the fallback needs pinning too.
 - **Where does the replay run?** It needs a real runtime and is heavier than
   Tier 1. Its own job, or folded into an existing one.
-- **Should the open-argument class be FIXED rather than pinned?** Stage 2
-  pins the current behaviour — the update lands and the stored value stops
-  being readable. But Tier 1 waives that class specifically because the runner
-  is supposed to validate merged durable arguments, so the honest resolutions
-  are to make the validator reachable on this path or to stop waiving it in
-  Tier 1. Pinning it is a description, not an endorsement.
-
-  What makes this harder than "route the repair through the validator": the
-  second gate is the `{ unresolvedLinkRaw }` leniency every no-supplied-argument
-  swap takes, and that leniency exists for a real reason (CT-1917 — a nested
-  piece whose argument lives in a host doc that has not synced must not fail
-  the swap). So the fix has to separate "this slot is a link I cannot read yet"
-  from "this slot is a plain value of the wrong type", rather than tighten the
-  path wholesale. Whoever picks this up should start there, not at
-  `sameStoredSetup`.
+- **Does the open-argument residual need closing?** The class itself is
+  validated on every update route, but a root carrying no `patternSetupIdentity`
+  marker at all still skips the re-stage: absence cannot be told from a pending
+  update. The window is one setup wide per root and needs a pre-stamped pointer,
+  so it is narrow enough to leave open — closing it means deciding what a root
+  with no marker and an unreadable argument should do at boot.
 
 ## References
 

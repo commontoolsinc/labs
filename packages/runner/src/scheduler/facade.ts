@@ -1244,6 +1244,27 @@ export class Scheduler {
         // terminal failure) and then re-check: a landed commit can dirty
         // readers and re-trigger scheduler work.
         this.runtime.storageManager.pendingCommitsSettled().then(recheck);
+      } else if (this.disposed) {
+        // Every branch below parks on `idlePromises`, which only the execute
+        // loop drains — and `execute()` returns immediately once disposed. So
+        // parking here would park FOREVER, which is how a caller that disposed
+        // the scheduler by hand made `Runtime.dispose()` hang: its teardown
+        // awaits `scheduler.idle()`. A disposed scheduler will never run
+        // anything again, so quiescence is already final and resolving is the
+        // honest answer rather than the convenient one.
+        //
+        // Below the branches with a wake source of their own, deliberately: a
+        // running execute, background tasks, held wakes and in-flight commits
+        // all resolve off their own promise and re-check, so they still settle
+        // on a disposed scheduler and this cannot cut them short.
+        //
+        // Note this covers the parking branches WHOLESALE rather than fixing
+        // the reachable one. Clearing `scheduled` in dispose() would let the
+        // "nothing scheduled" branch resolve most of these, but only while
+        // `hasRunnablePullWork()` is false — that branch re-queues execution
+        // and parks when it is true, so the hang would come back for a
+        // scheduler disposed with pull work outstanding.
+        resolve();
       } else if (
         this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
@@ -1805,6 +1826,30 @@ export class Scheduler {
     }
     this.triggerIndex.clear();
     this.wakeShaper.dispose();
+    // Release waiters already parked when dispose arrived. The branch in
+    // waitForQuiescence covers idle() calls made AFTER this point; it cannot
+    // reach these, and nothing else will — `execute()` is the only other drain
+    // and it is now a no-op. Same contract the wake shaper's own dispose keeps
+    // for its drain waiters, one line up. Drained in place rather than by
+    // reassigning the field: createExecuteContinuationState() hands this exact
+    // array out, so a swap would leave any live continuation state draining the
+    // detached one.
+    //
+    // Routed back through waitForQuiescence rather than resolved here, because
+    // dispose does NOT cancel a run already under way — `execute()` tests
+    // `disposed` only on entry. Every parking branch is reached with
+    // `runningPromise` unset, so a waiter parked while execution was merely
+    // SCHEDULED is still parked once the run begins; resolving it directly
+    // would report quiescence with an action, and its commit, still going. The
+    // re-check waits on that promise and only then takes the disposed branch,
+    // which is exactly the guarantee the branch documents. It cannot re-park:
+    // the disposed branch sits above every push to this list.
+    const parked = this.idlePromises.splice(0);
+    if (parked.length > 0) {
+      this.waitForQuiescence(false).then(() => {
+        for (const resolve of parked) resolve();
+      });
+    }
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);
