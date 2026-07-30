@@ -18,7 +18,6 @@ import {
   getIdentity,
   isValidDID,
   isValidPieceId,
-  setBGPiece,
 } from "../src/utils.ts";
 import {
   BackgroundPieceService,
