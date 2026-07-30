@@ -413,31 +413,44 @@ export async function readVintageState(
   vintage: VintageRuntime,
   cellId: string,
 ): Promise<Record<string, unknown> | undefined> {
-  const raw = vintage.runtime.getCellFromEntityId(
-    vintage.space as never,
-    cellId as never,
-    [],
-    undefined as never,
-  );
-  await raw.sync();
-  const storedSchema = raw.getMetaRaw("schema");
-  if (storedSchema === undefined) return undefined;
-  const typed = vintage.runtime.getCellFromEntityId(
-    vintage.space as never,
-    cellId as never,
-    [],
-    storedSchema as never,
-  );
-  await typed.sync();
-  const value = typed.get();
-  if (value === undefined || value === null) return undefined;
-  // `snapshotQueryResult`, not a JSON round-trip. The live value is a
-  // query-result proxy that re-reads through the transaction, so it has to be
-  // detached — but detaching via JSON is lossy on exactly the values a durable
-  // doc may hold: `FabricBytes` and epoch wrappers collapse to `{}` (so a
-  // change to one reads as no change), and a `bigint` throws and takes the
-  // whole gate down.
-  return snapshotQueryResult(value) as Record<string, unknown>;
+  try {
+    const raw = vintage.runtime.getCellFromEntityId(
+      vintage.space as never,
+      cellId as never,
+      [],
+      undefined as never,
+    );
+    await raw.sync();
+    const storedSchema = raw.getMetaRaw("schema");
+    if (storedSchema === undefined) return undefined;
+    const typed = vintage.runtime.getCellFromEntityId(
+      vintage.space as never,
+      cellId as never,
+      [],
+      storedSchema as never,
+    );
+    await typed.sync();
+    const value = typed.get();
+    // `snapshotQueryResult`, not a JSON round-trip. The live value is a
+    // query-result proxy that re-reads through the transaction, so it has to be
+    // detached — but detaching via JSON is lossy on exactly the values a durable
+    // doc may hold: `FabricBytes` and epoch wrappers collapse to `{}` (so a
+    // change to one reads as no change), and a `bigint` throws and takes the
+    // whole gate down.
+    const detached = snapshotQueryResult(value);
+    // Narrow rather than cast. A root is an object in practice, but asserting
+    // it would hand `strandedKeys` a non-object to enumerate — and "no keys"
+    // reads exactly like "nothing stranded".
+    if (typeof detached !== "object" || detached === null) return undefined;
+    return detached as Record<string, unknown>;
+  } catch {
+    // A cell that cannot be read is `undefined`, not a throw. The caller treats
+    // that as a FAILURE for this entry (a recorded root the fixture does not
+    // hold), which is the right verdict — but only if it can be reported. Left
+    // throwing, one unreadable cell would abort the whole vintage and take
+    // every remaining target and fixture with it.
+    return undefined;
+  }
 }
 
 /**
