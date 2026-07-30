@@ -1930,6 +1930,12 @@ export async function runTestPattern(
     // it wrote — so it is RAISED, not logged. A capture refused is recoverable;
     // a fixture silently missing state is the failure this whole path exists to
     // prevent.
+    //
+    // Losing the race ABANDONS the dispose rather than cancelling it: `settled()`
+    // takes no abort signal, so the drain runs on in the background and the
+    // steps after it never happen. Acceptable because the only path that can
+    // reach it has already failed — the capture is refused and its temp store
+    // and server are torn down by `captureVintage`'s own `finally`.
     const runnerOwnsStorage = options.storageHost === undefined;
     const teardown = withPhase(
       ["runTestPattern", "cleanup", "runtimeDispose"],

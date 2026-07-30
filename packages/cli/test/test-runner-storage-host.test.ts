@@ -5,8 +5,15 @@
  *
  * The caller this exists for is the pattern-vintage capture
  * (`tasks/pattern-vintage-run.ts`), which snapshots the store afterwards — so
- * "the store survives and holds what the pattern reached" is the contract, and
- * it is checked here rather than only through the gate that consumes it.
+ * the seam is checked here rather than only through the gate that consumes it.
+ *
+ * The read below goes through the SAME manager, so what it pins is "still open
+ * and its state still reachable through it", not durability: a regression that
+ * stopped flushing at teardown would leave this green. That is the right scope
+ * — the capture's own `snapshot()` does `idle()` + `synced()` before copying
+ * the file, so durability-at-return was never this seam's job. Durability is
+ * witnessed through an independent manager in
+ * `packages/runner/test/runtime-dispose-keep-storage.test.ts`.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
