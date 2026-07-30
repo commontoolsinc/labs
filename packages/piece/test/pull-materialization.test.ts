@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  type Cell,
   getPatternIdentityRef,
   getPatternRepository,
   getPieceSourceRevisions,
@@ -446,6 +447,29 @@ function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
   return runtime.unsafeTrustPattern(pattern, {
     reason: "piece pull materialization test fixture",
   });
+}
+
+async function withInputRootPullSpy<T>(
+  manager: PieceManager,
+  piece: Cell<unknown>,
+  action: (rootPulls: () => number) => Promise<T>,
+): Promise<T> {
+  const inputRoot = manager.getArgument(piece);
+  const originalGetArgument = manager.getArgument.bind(manager);
+  const originalPull = inputRoot.pull.bind(inputRoot);
+  let pullCount = 0;
+  manager.getArgument = (() => inputRoot) as typeof manager.getArgument;
+  inputRoot.pull = () => {
+    pullCount++;
+    return originalPull();
+  };
+
+  try {
+    return await action(() => pullCount);
+  } finally {
+    manager.getArgument = originalGetArgument;
+    inputRoot.pull = originalPull;
+  }
 }
 
 // Two-replica harness: a server that several emulated replicas can share, so a
@@ -1730,26 +1754,13 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     const controller = new PieceController(manager, piece);
-    const inputRoot = manager.getArgument(piece);
-    const originalGetArgument = manager.getArgument.bind(manager);
-    const originalPull = inputRoot.pull.bind(inputRoot);
-    let rootPulls = 0;
-    manager.getArgument = (() => inputRoot) as typeof manager.getArgument;
-    inputRoot.pull = () => {
-      rootPulls++;
-      return originalPull();
-    };
-
-    try {
+    await withInputRootPullSpy(manager, piece, async (rootPulls) => {
       expect(await controller.input.get(["input"])).toBe(5);
-      expect(rootPulls).toBe(0);
+      expect(rootPulls()).toBe(0);
 
       expect(await controller.input.get()).toEqual({ input: 5 });
-      expect(rootPulls).toBe(1);
-    } finally {
-      manager.getArgument = originalGetArgument;
-      inputRoot.pull = originalPull;
-    }
+      expect(rootPulls()).toBe(1);
+    });
   });
 
   it("pulls a selected asCell value without pulling the input root", async () => {
@@ -1786,23 +1797,137 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     const controller = new PieceController(manager, targetPiece);
-    const inputRoot = manager.getArgument(targetPiece);
-    const originalGetArgument = manager.getArgument.bind(manager);
-    const originalPull = inputRoot.pull.bind(inputRoot);
-    let rootPulls = 0;
-    manager.getArgument = (() => inputRoot) as typeof manager.getArgument;
-    inputRoot.pull = () => {
-      rootPulls++;
-      return originalPull();
-    };
-
-    try {
+    await withInputRootPullSpy(manager, targetPiece, async (rootPulls) => {
       expect(await controller.input.get(["handle"])).toBe(7);
-      expect(rootPulls).toBe(0);
-    } finally {
-      manager.getArgument = originalGetArgument;
-      inputRoot.pull = originalPull;
-    }
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("narrows a multi-segment input path without pulling the root", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            section: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+            },
+          },
+          required: ["section"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { section: { value: 7 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await withInputRootPullSpy(manager, piece, async (rootPulls) => {
+      expect(await controller.input.get(["section", "value"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("re-roots a narrow path through an intermediate asCell", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            details: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+            },
+          },
+          required: ["details"],
+        },
+        result: { details: { value: 7 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+              asCell: ["cell"],
+            },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: sourcePiece.key("details") },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+
+    await withInputRootPullSpy(manager, targetPiece, async (rootPulls) => {
+      expect(await controller.input.get(["handle", "value"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("preserves missing-path diagnostics through the narrow fallback", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await withInputRootPullSpy(manager, piece, async (rootPulls) => {
+      await expect(controller.input.get(["missing"])).rejects.toThrow(
+        'Cannot access path "missing" - property "missing" not found',
+      );
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
+  it("preserves schema-valid undefined through the narrow fallback", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              anyOf: [{ type: "number" }, { type: "undefined" }],
+            },
+          },
+          required: ["value"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { value: undefined },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await withInputRootPullSpy(manager, piece, async (rootPulls) => {
+      expect(await controller.input.get(["value"])).toBeUndefined();
+      expect(rootPulls()).toBe(1);
+    });
   });
 
   it("materializes piece results before setInput returns", async () => {
@@ -6957,6 +7082,83 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       // that threw "piece missing argument cell" pre-fix, so exercise it first.
       expect(await piece.input.get(["input"])).toBe(5);
       expect(await piece.result.get(["output"])).toBe(10);
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("a fresh replica preserves visible nested input beside a scoped link", async () => {
+    const sectionSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        inner: {
+          type: "object",
+          properties: {
+            plain: { type: "string" },
+            scoped: { type: "string" },
+          },
+          required: ["plain", "scoped"],
+        },
+      },
+      required: ["label"],
+    } as const satisfies JSONSchema;
+    const tx = writerRuntime.edit();
+    const scoped = writerRuntime.getCell<string>(
+      writerManager.getSpace(),
+      "nested-scoped-" + crypto.randomUUID(),
+      { type: "string" },
+      tx,
+      "session",
+    );
+    scoped.set("writer-only");
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerManager.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: { section: sectionSchema },
+          required: ["section"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {
+        section: {
+          label: "hello",
+          inner: { plain: "visible", scoped },
+        },
+      },
+      undefined,
+      { start: true },
+    );
+    await writerManager.synced();
+
+    const readerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerManager = new PieceManager(readerSession, readerRuntime);
+    try {
+      await readerManager.synced();
+      const readerPieces = new PiecesController(readerManager);
+      const readerPiece = await readerPieces.get(
+        entityRefToString(piece.entityId),
+        false,
+      );
+
+      expect(await readerPiece.input.get(["section"])).toEqual({
+        label: "hello",
+        inner: { plain: "visible" },
+      });
     } finally {
       await readerRuntime.dispose();
       await readerStorage.close();

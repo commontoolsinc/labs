@@ -1,6 +1,7 @@
 import {
   applyPieceSourceTransition,
   Cell,
+  cellAtPath,
   type CellPath,
   cellWithScopedLinkRequiredsRelaxed,
   ContextualFlowControl,
@@ -2258,21 +2259,33 @@ class PiecePropIo implements PieceCellIo {
       // started by pull() sends its path plus narrowed schema to Memory v2, so
       // this avoids traversing unrelated linked fields (an input can contain a
       // broad authoring graph even when the caller asks for one small durable
-      // field). A terminal asCell value is the selected field's handle; pull
-      // that handle to materialize its value without widening back to root.
+      // field). Traverse one segment at a time so an intermediate asCell value
+      // can re-root the remaining path, matching resolveCellPath.
       let selectedCell = targetCell;
-      for (const segment of path) {
-        selectedCell = selectedCell.key(
-          segment as keyof unknown,
-        ) as Cell<unknown>;
-      }
-      await selectedCell.pull();
-      const selected = selectedCell.get();
-      if (isCell(selected)) {
-        return await selected.pull();
-      }
-      if (selected !== undefined) {
-        return selected;
+      for (const [index, segment] of path.entries()) {
+        selectedCell = cellAtPath(selectedCell, [segment]);
+        const isLast = index === path.length - 1;
+        const isAsCellProjection = ContextualFlowControl.getAsCellValues(
+          selectedCell.schema,
+        ).length > 0;
+        // Ordinary inline ancestors need no read: extending their schema/path
+        // keeps the final query as narrow as possible. An asCell ancestor must
+        // be materialized so the rest of the path can move to its handle.
+        if (!isLast && !isAsCellProjection) continue;
+
+        await selectedCell.pull();
+        const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
+        if (selected === undefined) break;
+        if (isCell(selected)) {
+          if (isLast) {
+            return await selected.pull();
+          }
+          selectedCell = selected;
+        } else if (isLast) {
+          return selected;
+        } else {
+          break;
+        }
       }
       // Preserve the existing missing-path diagnostics and the distinction
       // between an absent field and a schema-valid undefined value. This slow
@@ -2320,10 +2333,7 @@ class PiecePropIo implements PieceCellIo {
       committedTargetCell = targetCell;
 
       // Build the path with transaction context
-      let txCell = targetCell.withTx(tx);
-      for (const segment of (path ?? [])) {
-        txCell = txCell.key(segment as keyof unknown) as Cell<unknown>;
-      }
+      const txCell = cellAtPath(targetCell.withTx(tx), path ?? []);
 
       const writePath = path ?? [];
       const writeTargetDiffers = (
