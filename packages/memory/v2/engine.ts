@@ -6909,6 +6909,37 @@ function schedulerStaticContextFloor(
 function schedulerRuntimeContextFloor(
   observation: SchedulerActionObservation,
   admittedForeignReadSpaces?: readonly string[],
+  options?: {
+    /**
+     * Treat an envelope ESCAPE — runtime writes the trusted summary does not
+     * bound — as evidence of nothing, instead of demoting to `session`.
+     *
+     * The `session` return below is overloaded: for a genuine session-scoped
+     * address it is a real scope, but for the three other disjuncts it is a
+     * fail-closed sentinel meaning "this run is not bounded by its summary".
+     * A sentinel is fine in an observation's OWN effective floor, which is
+     * where fail-closed belongs. It is NOT fine in the DURABLE floor, which
+     * records "the narrowest scope this action's DECLARED shape forces on
+     * EVERY principal" and is monotonic and permanent.
+     *
+     * Whether a run escapes its envelope is OBSERVER-SPECIFIC: a materializer
+     * instantiates its element sub-patterns on the first reconcile and not
+     * afterwards, so the same action escapes or does not escape depending on
+     * WHEN it ran. Recorded durably, one such run starves the action forever
+     * at every rank — broader claims are declined by the R7 issuance consult
+     * ({@link Server}'s floor guard) and any claim still issued fences
+     * `claim-context-mismatch`. Measured on the flagship group-chat probe
+     * (client-passivity §5h.3 follow-up, 2026-07-29): `cf:builtin/map:v1`
+     * carries zero session-scoped addresses in every summary and every
+     * observation and still holds a durable per-principal `session` floor.
+     *
+     * This is the same exemption C3.11 makes for the cross-space-read
+     * disjunct a few lines down, for the same reason. The escape itself stays
+     * policed where it belongs: a CLAIMED commit whose writes leave the
+     * envelope is rejected by {@link ExecutionActionFirewallError}.
+     */
+    admitEnvelopeEscape?: boolean;
+  },
 ): SchedulerContextScope {
   const ownerSpace = observation.ownerSpace;
   const addresses = schedulerObservationAddresses(observation);
@@ -6920,9 +6951,10 @@ function schedulerRuntimeContextFloor(
   if (
     ownerSpace === undefined ||
     (summary !== undefined &&
-      (schedulerRuntimeWritesExceedSummary(observation, summary, {
-        admitUserOutputWidening: true,
-      }) ||
+      ((options?.admitEnvelopeEscape !== true &&
+        schedulerRuntimeWritesExceedSummary(observation, summary, {
+          admitUserOutputWidening: true,
+        })) ||
         [...observation.reads, ...observation.shallowReads].some((address) =>
           normalizeSchedulerAddress(address).space !== ownerSpace &&
           // C3.5: a host-accepted claimed attempt's space-scoped foreign
@@ -7293,9 +7325,20 @@ function resolveSchedulerExecutionContext(
   const globalStaticFloor = ownForeignReadSpaces.length > 0
     ? schedulerStaticContextFloor(observation, ownForeignReadSpaces)
     : staticFloor;
-  const globalRuntimeFloor = ownForeignReadSpaces.length > 0
-    ? schedulerRuntimeContextFloor(observation, ownForeignReadSpaces)
-    : runtimeFloor;
+  // The envelope-escape disjunct is exempt from the DURABLE floor for exactly
+  // the reason the paragraph above gives for the crossesSpace demotion — it is
+  // observer-specific (a materializer's first reconcile instantiates children,
+  // later runs do not), and `session` there is a fail-closed sentinel rather
+  // than a scope. See {@link schedulerRuntimeContextFloor}'s
+  // `admitEnvelopeEscape`. This observation's own `runtimeFloor` above keeps
+  // the sentinel, so nothing this attempt could not do before becomes possible.
+  const globalRuntimeFloor = schedulerRuntimeContextFloor(
+    observation,
+    ownForeignReadSpaces.length > 0
+      ? ownForeignReadSpaces
+      : options.foreignReadAdmittedSpaces,
+    { admitEnvelopeEscape: true },
+  );
 
   // Static completeness applies to every principal for the fingerprint.
   upsertSchedulerContextFloor(engine, floorKey, "", globalStaticFloor);

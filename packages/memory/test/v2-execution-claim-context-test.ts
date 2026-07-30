@@ -188,6 +188,78 @@ const narrowFloorToUser = (engine: Engine.Engine): void => {
   });
 };
 
+/**
+ * Client evidence whose runtime writes ESCAPE the action's declared write
+ * envelope — the measured `cf:builtin/map:v1` shape (client-passivity §5h.3
+ * follow-up, 2026-07-29): a first reconcile instantiates the element
+ * sub-patterns, so the run's `actualChangedWrites` carry a whole child document
+ * that the action's three declared envelopes never named. NOTHING here is
+ * session-scoped; the only scoped surface is one PerUser read.
+ */
+const narrowFloorByEnvelopeEscape = (engine: Engine.Engine): void => {
+  const userRead: SchedulerObservationAddress = {
+    space: SPACE,
+    scope: "user",
+    id: "of:claim-context-user-input",
+    path: ["value"],
+  };
+  const declaredOutput = spaceAddress("of:claim-context-output");
+  // The child sub-pattern document map mints during reconcile. Outside every
+  // declared envelope, exactly as measured.
+  const childDocumentWrite: SchedulerObservationAddress = {
+    space: SPACE,
+    scope: "space",
+    id: "of:claim-context-child-instantiated",
+    path: ["argument"],
+  };
+  const observation: SchedulerActionObservation = {
+    version: 2,
+    ownerSpace: SPACE,
+    branch: "",
+    pieceId: PIECE_ID,
+    processGeneration: 1,
+    actionId: ACTION_ID,
+    actionKind: "computation",
+    implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+    runtimeFingerprint: RUNTIME_FINGERPRINT,
+    observedAtSeq: 0,
+    transactionKind: "action-run",
+    reads: [userRead],
+    shallowReads: [],
+    actualChangedWrites: [declaredOutput, childDocumentWrite],
+    currentKnownWrites: [declaredOutput],
+    materializerWriteEnvelopes: [],
+    completeActionScopeSummary: {
+      version: 1,
+      complete: true,
+      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+      piece: {
+        space: SPACE,
+        scope: "space",
+        id: PIECE_ID.slice("space:".length),
+        path: [],
+      },
+      reads: [userRead],
+      writes: [declaredOutput],
+      materializerWriteEnvelopes: [],
+      directOutputs: [declaredOutput],
+    },
+    status: "success",
+  };
+  Engine.applyCommit(engine, {
+    sessionId: "client-session",
+    space: SPACE,
+    principal: PRINCIPAL,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observation,
+    },
+  });
+};
+
 const applyClaimedObservationOnly = (
   engine: Engine.Engine,
   lease: ExecutionLease,
@@ -691,6 +763,171 @@ Deno.test("R7: the issuance-side floor consult reports the narrowed floor for th
         undefined,
       ),
       "space",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The durable floor must record what an action's DECLARED SHAPE forces on
+// every principal — never a transient, run-order-dependent property of one
+// observation.
+//
+// `schedulerRuntimeContextFloor` returns "session" for four different reasons,
+// and only one of them is a genuine session scope. One of the other three —
+// "this run's writes escaped its declared envelope"
+// (`schedulerRuntimeWritesExceedSummary`) — is a fail-closed sentinel meaning
+// "not bounded by its summary", and it is OBSERVER-SPECIFIC: whether a
+// materializer instantiates its children on a given run depends on WHEN that
+// run happened, not on the action's shape. Writing that sentinel to the
+// durable per-principal row makes it permanent and monotonic, so one first
+// reconcile starves the action forever at every rank: broader claims are
+// declined by the R7 issuance consult, and any claim that is somehow issued
+// fences `claim-context-mismatch`.
+//
+// C3.11 established exactly this rule for the sibling disjunct (the
+// cross-space-read demotion, engine.ts `resolveSchedulerExecutionContext`):
+// observer-specific narrowing stays in the observation's OWN effective floor
+// and is exempt from the durable global/principal write.
+//
+// Measured on the flagship group-chat probe (client-passivity §5h.3
+// follow-up, 2026-07-29): `cf:builtin/map:v1` carries ZERO session-scoped
+// addresses in every summary and every observation, yet its durable
+// per-principal floor is `session` — 5-9 resolutions per action of
+// staticFloor=space / runtimeFloor=space resolving to `session` purely from
+// the poisoned row, producing `claim-authority-lost` x4 and
+// `claim-key-mismatch` x2 in the user and session arms and
+// `commit-rejected:ExecutionLeaseFenceError` x2 in the space arm.
+// ---------------------------------------------------------------------------
+
+Deno.test("an envelope-escaping client run does not durably narrow the floor to session", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const claimKey = {
+      branch: "" as const,
+      pieceId: PIECE_ID,
+      actionId: ACTION_ID,
+      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+    };
+    narrowFloorByEnvelopeEscape(engine);
+    // The PerUser read is real evidence and floors the action at user rank.
+    // The envelope escape is not evidence of ANY scope, so it must not add a
+    // session row on top.
+    assertEquals(
+      Engine.schedulerClaimContextFloor(
+        engine,
+        claimKey,
+        USER_CONTEXT_KEY,
+      ),
+      "user",
+    );
+    // And no other principal inherits anything narrower either.
+    assertEquals(
+      Engine.schedulerClaimContextFloor(
+        engine,
+        claimKey,
+        OTHER_USER_CONTEXT_KEY,
+      ),
+      "user",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a later in-envelope run stays servable at user rank after an envelope-escaping client run", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    narrowFloorByEnvelopeEscape(engine);
+    const lease = acquire(engine, nowMs);
+    // The rank the executor classifies from this action's surfaces, and the
+    // rank the PerUser read genuinely forces: user. It must commit.
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    const applied = applyClaimedObservationOnly(
+      engine,
+      lease,
+      claim,
+      nowMs + 1,
+    );
+    assertEquals(
+      applied.schedulerObservationResults?.[0]?.executionContextKey,
+      USER_CONTEXT_KEY,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a genuine PerSession surface still narrows the durable floor to session", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const claimKey = {
+      branch: "" as const,
+      pieceId: PIECE_ID,
+      actionId: ACTION_ID,
+      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+    };
+    const sessionRead: SchedulerObservationAddress = {
+      space: SPACE,
+      scope: "session",
+      id: "of:claim-context-session-input",
+      path: ["value"],
+    };
+    Engine.applyCommit(engine, {
+      sessionId: "client-session",
+      space: SPACE,
+      principal: PRINCIPAL,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: {
+          version: 2,
+          ownerSpace: SPACE,
+          branch: "",
+          pieceId: PIECE_ID,
+          processGeneration: 1,
+          actionId: ACTION_ID,
+          actionKind: "computation",
+          implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+          runtimeFingerprint: RUNTIME_FINGERPRINT,
+          observedAtSeq: 0,
+          transactionKind: "action-run",
+          reads: [sessionRead],
+          shallowReads: [],
+          actualChangedWrites: [],
+          currentKnownWrites: [],
+          materializerWriteEnvelopes: [],
+          completeActionScopeSummary: {
+            version: 1,
+            complete: true,
+            implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+            runtimeFingerprint: RUNTIME_FINGERPRINT,
+            piece: {
+              space: SPACE,
+              scope: "space",
+              id: PIECE_ID.slice("space:".length),
+              path: [],
+            },
+            reads: [sessionRead],
+            writes: [],
+            materializerWriteEnvelopes: [],
+            directOutputs: [],
+          },
+          status: "success",
+        },
+      },
+    });
+    assertEquals(
+      Engine.schedulerClaimContextFloor(engine, claimKey, USER_CONTEXT_KEY),
+      "session",
     );
   } finally {
     Engine.close(engine);
