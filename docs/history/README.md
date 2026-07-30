@@ -87,9 +87,6 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
-- [cache-usage-investigation-2026-07-30.md](packages/cf-harness/cache-usage-investigation-2026-07-30.md)
-  — CF harness prompt-cache behavior and usage-accounting investigation, July
-  2026.
 - [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
   — active-repository syntax inventory and `cf view` support snapshot, July
   2026.
