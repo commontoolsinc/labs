@@ -611,8 +611,17 @@ export async function materializeOnCell(
   // `export { Row }` and `export { Row as RowAlias }` reported "setup did not
   // complete for …#Row: the root carries …#RowAlias" for a swap that in fact
   // succeeded, on the same artifact object.
-  const ref = runtime.patternManager.getArtifactEntryRef(pattern) ??
-    { identity: entryRef.identity, symbol: symbol ?? entryRef.symbol };
+  //
+  // Constrained to the identity just compiled. `setArtifactEntryRef` is
+  // first-write-wins over the whole session, so an artifact re-registered under a
+  // changed identity keeps its original ref — and stamping THAT would write a
+  // root's pointer to a version this replay did not compile. Taking the canonical
+  // ref only when its identity agrees keeps the alias fix (same module, different
+  // name) without inheriting a stale one.
+  const canonical = runtime.patternManager.getArtifactEntryRef(pattern);
+  const ref = canonical?.identity === entryRef.identity
+    ? canonical
+    : { identity: entryRef.identity, symbol: symbol ?? entryRef.symbol };
   const root = locate(vintage, pattern.resultSchema);
   await root.sync();
 
