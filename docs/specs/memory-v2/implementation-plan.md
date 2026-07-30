@@ -14,7 +14,7 @@ hash-addressed JSON facts plus subscription-id live updates to:
 ## Current Status
 
 This file and
-[10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+[10-implementation-guidance.md](10-implementation-guidance.md)
 are the authoritative implementation notes for the current code. They describe
 what is shipped now and what remains explicitly deferred, even where sections
 04-06 still describe the broader target design.
@@ -83,7 +83,7 @@ memory route.
 
 - Rewrite this file to reflect the actual execution plan.
 - Rewrite
-  [10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+  [10-implementation-guidance.md](10-implementation-guidance.md)
   so it no longer points implementers at `fact` / `value` tables, commit hashes,
   or invocation-id-scoped subscriptions.
 - Keep sections 01-06, 10, and this file aligned enough that the code can use
