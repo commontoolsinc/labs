@@ -637,7 +637,7 @@ export class PiecesController<T = unknown> {
       // no-op on the doc this repair exists for, and deliberately so — a root
       // whose identity moved without setup also carries a stale
       // `patternSetupIdentity`, so setup re-points the stored argument at the
-      // pattern's argument schema and validates it (`stagedByOtherVersion` in
+      // pattern's argument schema and validates it (`storedSetupMarker` in
       // the runner), which is the staging the skipped update never did. That
       // makes a stored argument the pinned pattern cannot read a REPAIR
       // failure, classified and escalated below rather than left to surface as

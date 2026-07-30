@@ -495,7 +495,7 @@ describe("pattern update over captured prior state", () => {
     // pointer-only comparison reported "same pattern" and skipped the re-stage.
     // `patternSetupIdentity` still named the version that staged the argument,
     // which is what tells an update from a same-version replay
-    // (`stagedByOtherVersion` in `runner.ts`).
+    // (`storedSetupMarker` in `runner.ts`).
     //
     // What the refusal must NOT be is wholesale strictness. A slot whose stored
     // value is a link that cannot be dereferenced right now stays deferred
