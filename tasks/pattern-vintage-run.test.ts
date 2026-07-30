@@ -463,11 +463,15 @@ describe("the vintage gate, end to end", () => {
     // like `cfc.ts`, whose names carry no leading slash).
     expect(unmappable).toBe(2);
     expect(failures).toHaveLength(2);
-    const details = failures.map((f) => f.detail).join("\n");
-    expect(details).toContain("__cfPattern_9");
-    expect(details).toContain("no source path");
-    expect(details).toContain("__cfPattern_10");
-    expect(details).toContain("is not repo-root-relative");
+    // Each reason bound to ITS entry. Asserting both strings against the joined
+    // text would pass just as well with the two reasons swapped, which is the
+    // mistake that reports the wrong diagnosis for the right count.
+    const reasonFor = (symbol: string) =>
+      failures.find((f) => f.detail.includes(symbol))?.detail;
+    expect(reasonFor("__cfPattern_9")).toContain("no source path");
+    expect(reasonFor("__cfPattern_10")).toContain(
+      '"cfc.ts" is not repo-root-relative',
+    );
   });
 
   describe("capture refuses a state the pattern never legitimately reaches", () => {
@@ -595,7 +599,11 @@ describe("the vintage gate, end to end", () => {
 
       const { changed, failures } = await replayAll(roots);
 
-      expect(changed).toBeGreaterThan(0);
+      // More than one, so a NESTED root was among them — the aliased artifact is
+      // one of those. `> 0` would stay green if a future change stopped
+      // materializing the nested roots and only the entry pattern was applied,
+      // which is the coverage this case exists to have.
+      expect(changed).toBeGreaterThan(1);
       expect(failures).toEqual([]);
     });
 

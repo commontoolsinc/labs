@@ -25,6 +25,7 @@ import {
   type VintageRef,
 } from "./pattern-vintage-lib.ts";
 import {
+  isPresentRootValue,
   materializeOnCell,
   openFileBackedRuntime,
   readVintageManifest,
@@ -102,7 +103,7 @@ export interface ReplayReport {
   /** Recorded instantiations that are legitimate upgrade targets. */
   targets: number;
   /**
-   * Recorded instantiations with NO source path — recorded but unaddressable.
+   * Recorded instantiations that cannot be mapped to a file to apply.
    *
    * Two shapes: no source path at all, and a path that is not repo-root-relative
    * (the evaluate loop records injected helper modules too). Each one also lands
@@ -284,11 +285,11 @@ export async function replayVintage(
       // promises both, so both are checked. Per TARGET, not once per fixture:
       // `vintageRootHasState` above is a pre-check on the well-known capture
       // root, which says nothing about the nested cell each entry names.
-      if (outcome.value === undefined) {
+      if (!isPresentRootValue(outcome.value)) {
         report.failures.push({
           ...where,
           detail: `updating ${entry.main} (${entry.symbol}) was not refused, ` +
-            `but the root now reads as undefined — the vintage's state is gone`,
+            `but the root now reads as nothing — the vintage's state is gone`,
         });
         continue;
       }
@@ -439,14 +440,14 @@ export async function captureVintage(
     // waiting for the replay to fail on it. The replay does fail closed, but it
     // would do so on whoever's PR next ran the gate; catching it here blames the
     // capture that created it, when the cause is still in hand.
-    const sourceless = entries.filter(
+    const unaddressable = entries.filter(
       (e) => e.main === undefined || !e.main.startsWith("/"),
     );
-    if (sourceless.length > 0) {
+    if (unaddressable.length > 0) {
       throw new Error(
-        `cannot capture ${patternKey}: ${sourceless.length} of ` +
+        `cannot capture ${patternKey}: ${unaddressable.length} of ` +
           `${entries.length} instantiation(s) cannot be mapped to a file (${
-            sourceless.map((e) => `${e.identity}#${e.symbol}`).join(", ")
+            unaddressable.map((e) => `${e.identity}#${e.symbol}`).join(", ")
           }), so the fixture would record roots the replay cannot map to a file`,
       );
     }

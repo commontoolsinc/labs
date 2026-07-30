@@ -408,6 +408,22 @@ export async function vintageArgumentLink(
  * fixture is named for — an identity check would reject every fixture the
  * capture produces.
  */
+/**
+ * Whether a root value counts as STATE rather than nothing.
+ *
+ * One predicate, shared by the pre-check below and by the replay's post-check on
+ * each migrated root — the two ask the same question, and answering it two ways
+ * is how "the root reads as something" comes to mean different things at the two
+ * ends of the same run.
+ */
+export function isPresentRootValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  // An object with no keys is what a fresh space yields for a doc nobody
+  // wrote, so it is not evidence either.
+  return typeof value !== "object" ||
+    Object.keys(value as Record<string, unknown>).length > 0;
+}
+
 export async function vintageRootHasState(
   vintage: VintageRuntime,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
@@ -419,11 +435,7 @@ export async function vintageRootHasState(
   );
   await root.sync();
   try {
-    const value = root.get();
-    if (value === undefined || value === null) return false;
-    // An object with no keys is what a fresh space yields for a doc nobody
-    // wrote, so it is not evidence either.
-    return typeof value !== "object" || Object.keys(value).length > 0;
+    return isPresentRootValue(root.get());
   } catch {
     // An absent doc reads as a throw rather than `undefined`, and for this
     // question the two are the same answer: nothing was captured here.
