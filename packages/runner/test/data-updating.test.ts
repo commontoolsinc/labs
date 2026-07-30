@@ -9,6 +9,7 @@ import {
   normalizeAndDiff,
   schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
@@ -1209,6 +1210,66 @@ describe("data-updating", () => {
     // Verify neither source nor destination cells were modified
     expect(sourceCell.get()).toEqual({ value: 99 });
     expect(destinationCell.get()).toEqual({ value: 42 });
+  });
+
+  describe("array-element anchoring in normalizeAndDiff", () => {
+    it("stores array-element objects inline when no anchor id source is supplied", () => {
+      // `diffAndUpdate` without an anchor id source is the frameless write:
+      // objects in arrays stay inline rather than becoming documents.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "no anchor source stores inline",
+        undefined,
+        tx,
+      );
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ name: "Ada" }],
+        "no anchor source stores inline",
+      );
+
+      const raw = testCell.getRaw() as unknown[];
+      expect(parseLink(raw[0])).toBe(undefined);
+      expect(raw[0]).toEqual({ name: "Ada" });
+    });
+
+    it("anchors an object written over an array element's write redirect", () => {
+      // The element slot's current value is a write redirect. Writing a plain
+      // object there under a frame must still anchor it into a document of
+      // its own -- eligibility comes from the written tree's structure and
+      // has to survive the alias-following re-entry -- with the redirect
+      // target ending up as a link to that document.
+      const targetCell = runtime.getCell<unknown>(
+        space,
+        "redirect anchor target",
+        undefined,
+        tx,
+      );
+      targetCell.set(undefined);
+      const arrayCell = runtime.getCell<unknown[]>(
+        space,
+        "redirect anchor array",
+        undefined,
+        tx,
+      );
+      arrayCell.setRaw([targetCell.getAsWriteRedirectLink()]);
+
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "redirect anchor context",
+        reactives: new Set(),
+      });
+      arrayCell.set([{ name: "Ada" }]);
+      popFrame(frame);
+
+      // The redirect target holds a link to the anchored document, and the
+      // content reads back through the array.
+      const targetRaw = targetCell.getRaw();
+      expect(parseLink(targetRaw, targetCell)?.id).not.toBe(undefined);
+      expect((arrayCell.get() as { name: string }[])[0].name).toBe("Ada");
+    });
   });
 
   describe("sparse array handling in normalizeAndDiff", () => {
