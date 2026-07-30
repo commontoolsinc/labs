@@ -177,6 +177,80 @@ const NESTED_ALIASED = aliased(false);
 const NESTED_ALIASED_FLIPPED = aliased(true);
 
 /**
+ * A subject that returns a key its declared output type never NAMES, riding an
+ * index signature instead — the shape `system/default-app.tsx` declares
+ * (`[key: string]: unknown`), and the reason its root's `recentPieces`,
+ * `summaryIndex` and `trackRecent` are stored under
+ * `additionalProperties: {"type": "unknown"}`.
+ *
+ * A schema-driven read resolves nothing at an `unknown` position, so such a key
+ * came back `undefined` however much state it held — indistinguishable from a
+ * key the document does not hold, which the comparison treats as nothing to
+ * lose. Measured on the committed `default-app.tsx` fixture: DROPPING
+ * `trackRecent` from the returned result replayed "3 updated cleanly with no
+ * state stranded".
+ *
+ * `notes` is written through a HANDLER rather than seeded, for the reason the
+ * cross-space child is: today's source seeds the fresh cell under the new name
+ * with the same literal, so a subject holding only what its source seeds cannot
+ * witness a moved storage key.
+ */
+const UNDECLARED_KEY = "vintage-gate-undeclared.tsx";
+
+const undeclaredSource = (storageKey: string, trailer = "") =>
+  [
+    "import { Confidential, Stream, Writable, handler, pattern } from 'commonfabric';",
+    "const ATOM = {",
+    "  type: 'https://commonfabric.org/cfc/atom/Resource',",
+    "  class: 'VintageGateUndeclared',",
+    "  subject: 'did:example:vintage-gate-undeclared',",
+    "} as const;",
+    "type Label = readonly [typeof ATOM];",
+    "const scribble = handler<{ text: string }, { notes: Writable<string[]> }>(",
+    "  ({ text }, { notes }) => { notes.push(text); },",
+    ");",
+    "export interface Output {",
+    "  [key: string]: unknown;",
+    "  owner: Confidential<Writable<string>, Label>;",
+    "  items: Writable<string[]>;",
+    "  scribble: Stream<{ text: string }>;",
+    "}",
+    "export default pattern<Record<string, never>, Output>(() => {",
+    "  const owner = new Writable<string>('v').for('owner');",
+    "  const items = new Writable<string[]>([]).for('items');",
+    `  const notes = new Writable<string[]>([]).for('${storageKey}');`,
+    "  return { owner, items, scribble: scribble({ notes }), notes };",
+    "});",
+    trailer,
+    "",
+  ].join("\n");
+
+/**
+ * The subject's own test. `items` carries the assertion because a capture
+ * refuses a run with none; `scribble` is what puts a value in the UNDECLARED
+ * key, which is the one the cases below are about.
+ */
+const undeclaredTest = [
+  "import { action, assert, pattern } from 'commonfabric';",
+  `import Subject from './${UNDECLARED_KEY}';`,
+  "export default pattern(() => {",
+  "  const subject = Subject({});",
+  "  const add = action(() => {",
+  "    subject.items.set([...subject.items.get(), 'captured']);",
+  "  });",
+  "  const added = assert(() => subject.items.get().length === 1);",
+  "  const write = action(() => {",
+  "    subject.scribble.send({ text: 'noted' });",
+  "  });",
+  "  return {",
+  "    tests: [{ action: add }, { assertion: added }, { action: write }],",
+  "    subject,",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
+/**
  * A subject whose child is instantiated in ANOTHER space — the shape
  * `system/profile-create.tsx` uses, where each profile lives in its own
  * `ProfileHome.inSpace()` space.
@@ -802,6 +876,59 @@ describe("the vintage gate, end to end", () => {
       expect(
         failures.some((f) => f.detail.includes('defines no "Row"')),
       ).toBe(true);
+    });
+  });
+
+  describe("a key the declared output type never names", () => {
+    const STAMP = new Date("2026-07-29T12:00:00.000Z");
+
+    const writeUndeclared = (source: string) =>
+      Deno.writeTextFile(`${dir}/patterns/${UNDECLARED_KEY}`, source);
+
+    beforeEach(async () => {
+      await writeUndeclared(undeclaredSource("notes"));
+      await Deno.writeTextFile(
+        `${dir}/patterns/${UNDECLARED_KEY.replace(/\.tsx$/, ".test.tsx")}`,
+        undeclaredTest,
+      );
+    });
+
+    it("CATCHES a moved storage key at an `unknown` position", async () => {
+      // The blind spot, closed. `notes` rides the index signature, so the root
+      // stores it under `additionalProperties: {"type": "unknown"}` and a
+      // schema-driven read resolves NOTHING there — the before value came back
+      // `undefined`, `isPreserved` read that as "held nothing", and the moved
+      // key replayed clean. Red/green on the real tree, not just here: dropping
+      // `trackRecent` from `system/default-app.tsx`'s result reported "3
+      // updated cleanly with no state stranded" against the committed fixture,
+      // and names the key once the read is relaxed.
+      await captureMissing(roots, [UNDECLARED_KEY], STAMP);
+      await writeUndeclared(undeclaredSource("notesMoved"));
+
+      const { failures } = await replayAll(roots);
+
+      expect(failures).toHaveLength(1);
+      // The SPECIFIC finding, with both values. A generic assertion would also
+      // pass on a refusal or an unreadable root, and the before value is what
+      // proves the handler's write was actually captured — a subject that only
+      // ever seeded `notes` would show `[]` on both sides and report nothing.
+      expect(failures[0].detail).toContain("APPLIED CLEANLY but stranded");
+      expect(failures[0].detail).toContain('notes (was ["noted"], now [])');
+    });
+
+    it("reports nothing when the key did not move", async () => {
+      // The green half, and the false-positive guard the relaxation needs: it
+      // makes the comparison SEE keys it could not before, so it also gets to
+      // manufacture findings about them. The two sources differ by a trailing
+      // comment — same storage, different identity, so the replay actually
+      // materializes instead of short-circuiting on an unchanged identity.
+      await captureMissing(roots, [UNDECLARED_KEY], STAMP);
+      await writeUndeclared(undeclaredSource("notes", "// touched"));
+
+      const { changed, failures } = await replayAll(roots);
+
+      expect(changed).toBeGreaterThan(0);
+      expect(failures).toEqual([]);
     });
   });
 

@@ -614,55 +614,87 @@ export function comparableState(value: unknown): unknown {
 }
 
 /**
- * A captured root's state, read the way the version that WROTE it saw it.
+ * `schema` with every `unknown` TYPE dropped, so a read descends where the
+ * declared type stopped it.
  *
- * Read under the root's OWN stored result schema, which it carries in meta — so
- * the writing version's view of its data is recoverable without its source, and
- * without this replay having to decide what that view should be.
+ * A schema-driven read resolves nothing at a `{"type": "unknown"}` position —
+ * `schemaTypeValidity` in `traverse.ts` answers `Unknown` there, and the value
+ * comes back `undefined` WHATEVER the document holds. That is the right answer
+ * for a reader; it is the wrong one for this comparison, because "the schema
+ * did not resolve it" then reads exactly like "the document does not hold it",
+ * and `isPreserved` treats the second as nothing to lose.
  *
- * The schema is what makes the read DETERMINISTIC rather than a report on what
- * happens to be resident. A schema-driven read pulls exactly what the schema
- * descends into; a schema-less `.get()` resolves whatever is already loaded,
- * which is the shape of bug that made a cross-space profile read as absent
- * (#3830). It is not that a schema-less read comes back empty — measured on the
- * committed `home.tsx` fixture it returns every key, and MORE of some of them:
- * `$UI` materializes, where under the stored schema (`unknown` at that key) it
- * reads as `undefined`. It is that what it returns depends on load order.
+ * It is not a corner. Measured on the committed fixtures, `unknown` is what a
+ * declared `unknown` field and an INDEX SIGNATURE both lower to — the second
+ * as `additionalProperties: {"type": "unknown"}` — and `default-app.tsx`
+ * declares `[key: string]: unknown` on its output. Its root holds `recentPieces`,
+ * `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream);
+ * under the stored schema verbatim all three read `undefined`, and a change
+ * that stranded any of them would have replayed clean.
  *
- * Returns a copy detached and reduced by `comparableState`: the live value is a
- * query-result proxy that re-reads through the transaction, so holding it across
- * a materialize would compare the new state against itself.
+ * Only the `type` keyword is dropped, and only where it says `unknown`. That is
+ * what keeps this a RELAXATION rather than a different read: `asCell`, `ifc`
+ * and every other keyword survive, so a stream still reduces to the document it
+ * points at (reading under a bare `{}` instead would resolve it to its value
+ * and lose the moved-document class this comparison exists for). The result is
+ * still a schema-driven read, so it is still deterministic — unlike a
+ * schema-less `.get()`, which resolves whatever is already loaded and is the
+ * shape of bug that made a cross-space profile read as absent (#3830).
  */
-export async function readVintageState(
+export function schemaWithUnknownsRelaxed(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(schemaWithUnknownsRelaxed);
+  if (typeof schema !== "object" || schema === null) return schema;
+  const relaxed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    // `type: "unknown"` and `type: [… "unknown" …]` both match anything, so
+    // dropping the keyword loses no constraint. Matched on the KEY as well as
+    // the value, so a property that happens to be NAMED `type` — whose value is
+    // a schema object, never the string — is recursed into rather than dropped.
+    if (
+      key === "type" &&
+      (value === "unknown" ||
+        (Array.isArray(value) && value.includes("unknown")))
+    ) {
+      continue;
+    }
+    relaxed[key] = schemaWithUnknownsRelaxed(value);
+  }
+  return relaxed;
+}
+
+/**
+ * A root's state under `schema`, detached and reduced so two of them can be
+ * compared.
+ *
+ * One spelling, used for the BEFORE state (under the root's stored schema) and
+ * for the AFTER state (under the candidate's compiled one). The two sides have
+ * to be read the same way or the comparison measures the reading rather than
+ * the data — a relaxation applied to one side alone would report every key it
+ * newly resolves as stranded.
+ *
+ * Returns a copy: the live value is a query-result proxy that re-reads through
+ * the transaction, so holding it across a materialize would compare the new
+ * state against itself. `comparableState`, not a JSON round-trip and not a
+ * generic deep copy — a JSON round-trip is lossy on exactly the values a
+ * durable doc may hold (`FabricBytes` and epoch wrappers collapse to `{}`, a
+ * `bigint` throws), and a generic copy drags the runtime object graph in behind
+ * every live cell.
+ */
+export async function readStateUnder(
   vintage: VintageRuntime,
   space: string,
   cellId: string,
+  schema: unknown,
 ): Promise<Record<string, unknown> | undefined> {
   try {
-    const raw = vintage.runtime.getCellFromEntityId(
+    const cell = vintage.runtime.getCellFromEntityId(
       space as never,
       cellId as never,
       [],
-      undefined as never,
+      schemaWithUnknownsRelaxed(schema) as never,
     );
-    await raw.sync();
-    const storedSchema = raw.getMetaRaw("schema");
-    if (storedSchema === undefined) return undefined;
-    const typed = vintage.runtime.getCellFromEntityId(
-      space as never,
-      cellId as never,
-      [],
-      storedSchema as never,
-    );
-    await typed.sync();
-    const value = typed.get();
-    // `comparableState`, not a JSON round-trip and not a generic deep copy. The
-    // live value is a query-result proxy that re-reads through the transaction,
-    // so it has to be detached — but a JSON round-trip is lossy on exactly the
-    // values a durable doc may hold (`FabricBytes` and epoch wrappers collapse
-    // to `{}`, a `bigint` throws), and a generic copy drags the runtime object
-    // graph in behind every live cell.
-    const detached = comparableState(value);
+    await cell.sync();
+    const detached = comparableState(cell.get());
     // Narrow rather than cast. A root is an object in practice, but asserting
     // it would hand `strandedKeys` a non-object to enumerate — and "no keys"
     // reads exactly like "nothing stranded".
@@ -676,6 +708,40 @@ export async function readVintageState(
     // every remaining target and fixture with it.
     return undefined;
   }
+}
+
+/**
+ * A captured root's state, read the way the version that WROTE it saw it.
+ *
+ * Read under the root's OWN stored result schema, which it carries in meta — so
+ * the writing version's view of its data is recoverable without its source, and
+ * without this replay having to decide what that view should be. Relaxed at its
+ * `unknown` positions first — see `schemaWithUnknownsRelaxed` for what that
+ * buys and why it is still the writer's own schema.
+ */
+export async function readVintageState(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<Record<string, unknown> | undefined> {
+  let storedSchema: unknown;
+  try {
+    const raw = vintage.runtime.getCellFromEntityId(
+      space as never,
+      cellId as never,
+      [],
+      undefined as never,
+    );
+    await raw.sync();
+    storedSchema = raw.getMetaRaw("schema");
+  } catch {
+    return undefined;
+  }
+  // No stored schema is not "read it some other way": the caller reports it,
+  // because a recorded root with none is a fixture that does not hold what it
+  // claims.
+  if (storedSchema === undefined) return undefined;
+  return await readStateUnder(vintage, space, cellId, storedSchema);
 }
 
 /**
@@ -737,11 +803,20 @@ function isReduction(value: unknown): boolean {
  * - **A before-value of `undefined` is not data.** The before state is read
  *   under the root's stored schema, and a schema-driven read enumerates the
  *   keys the schema declares whether or not the document holds them: measured
- *   on the committed fixtures, `defaultProfile` on `home.tsx` and
- *   `recentPieces`/`summaryIndex`/`trackRecent` on `default-app.tsx` all read
- *   as `undefined`. Comparing those would report an update that starts filling
- *   one in — adding a `Default<>` to a field already declared — as having
- *   stranded state that was never there. Held nothing, lost nothing.
+ *   on the committed fixtures, `defaultProfile` on `home.tsx` reads as
+ *   `undefined` because the root predates any profile being created.
+ *   Comparing that would report an update that starts filling it in — adding a
+ *   `Default<>` to a field already declared — as having stranded state that
+ *   was never there. Held nothing, lost nothing.
+ *
+ *   This branch is only honest because the read cannot ALSO return `undefined`
+ *   for a key the document does hold. It could, before
+ *   `schemaWithUnknownsRelaxed`: an `unknown` position resolves to `undefined`
+ *   whatever is stored there, and measured on the committed `default-app.tsx`
+ *   fixture that hid `recentPieces`, `summaryIndex` and `trackRecent` — three
+ *   keys holding real state, indistinguishable here from three keys holding
+ *   nothing. Whatever else changes, the two must not be allowed to collapse
+ *   again.
  */
 function isPreserved(before: unknown, after: unknown): boolean {
   if (before === undefined) return true;

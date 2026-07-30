@@ -95,7 +95,8 @@ Measured on branch `tier2`, not assumed:
 | A materialized root is NOT plain data | measured on the committed `home.tsx` fixture: at each of its six stream positions the read yields a live cell whose own properties reach the runtime, so a generic deep copy of it is CYCLIC. Before that was reduced, a UI-only edit to `home.tsx` did not merely misreport — `JSON.stringify` in the failure text threw and the gate ended with no verdict. Both sides are now reduced by shape first: a cell to the document it points at, a fabric special object to a tagged content hash (`deepEqual` compares those by own properties, of which they have none), a cycle to a marker |
 | The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded by NAME. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
 | A NAME cannot find every rendering | measured on the same fixture, which records two `map`-body hoists (`__cfPattern_2`) whose whole result is a vnode — keys `type`/`name`/`props`/`children`, no `$UI` to exclude: a UI-only edit inside that map body reported `children` stranded on both roots and exited 1 for a change that stores nothing. A rendering is now also reduced by SHAPE (`type: "vnode"`, which is what the runner's own `vnodeSchema` requires), so it is out of the comparison wherever it sits. Re-measured: that edit exits 0, the moved-key mutation still exits 1 |
-| A schema-less read is not empty, it is NON-DETERMINISTIC | measured on the committed `home.tsx` fixture: a schema-less read returns every key, and materializes `$UI`, which the stored schema (`unknown` at that key) leaves `undefined`. The reason to read under the root's own stored `schema` meta is that a schema-driven read pulls exactly what the schema descends into, where a schema-less one resolves what happens to be resident — the shape of [#3830] |
+| A schema-less read is not empty, it is NON-DETERMINISTIC | measured on the committed `home.tsx` fixture: a schema-less read returns every key, and materializes `$UI`, which the stored schema VERBATIM (`unknown` at that key) leaves `undefined`. The reason to read under the root's own stored `schema` meta is that a schema-driven read pulls exactly what the schema descends into, where a schema-less one resolves what happens to be resident — the shape of [#3830]. Relaxing that schema's `unknown` positions, per the row below, keeps the read schema-driven while reaching the same keys |
+| The stored schema verbatim reads back LESS than the document holds | measured on the committed `default-app.tsx` fixture, whose declared output carries an index signature: `recentPieces`, `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream) are stored under `additionalProperties: {"type": "unknown"}` and a schema-driven read resolves NOTHING at an `unknown` position, so all three read `undefined` — which the comparison cannot tell from "the document does not hold this", and so treats as nothing to lose. Red/green on the real tree: DROPPING `trackRecent` from `default-app.tsx`'s result replayed `3 updated cleanly with no state stranded`, and after the read relaxes `type: "unknown"` on both sides it exits 1 naming the key. Re-measured for false reds: a comment-only edit to EVERY file the two fixtures name — all 14 targets changed, the whole comparison surface exercised — is `14 updated cleanly` |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed`, `candidates` and `targets`, and requires all three positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
@@ -600,7 +601,8 @@ worth naming before they bite:
       nothing to strand, and a replay that only checks for a refusal would not
       notice if it did.
 - [x] Read the vintage under the root's OWN stored schema, so the comparison
-      sees the data as the version that wrote it did
+      sees the data as the version that wrote it did — relaxed at its `unknown`
+      positions, which resolve to `undefined` whatever the document holds
 - [x] Reduce both sides to something comparable before comparing — a live cell
       to the document it points at, a fabric special object to a content hash, a
       cycle to a marker
@@ -617,7 +619,7 @@ Gate: **met for the stranding half.** Measured on the real `home.tsx`, renaming
 vintage held: journal (was [{"eventType":"piece:created",…}], now [])`, and
 restoring returns exit 0. Migration coverage remains open.
 
-Five measurements decided the design, four of them against expectation:
+Six measurements decided the design, five of them against expectation:
 
 - **A materialized root is not plain data.** At every `asCell`/`asStream`
   position it holds a live cell whose own properties reach the runtime, so a
@@ -644,6 +646,20 @@ Five measurements decided the design, four of them against expectation:
   because a schema-less read comes back empty. Measured, it comes back fuller —
   and depends on what is resident, which is the wrong property for a fixture
   replay.
+- **The stored schema verbatim reads back LESS than the document holds, and the
+  shortfall is silent.** A schema-driven read resolves nothing at a
+  `{"type": "unknown"}` position, so such a key comes back `undefined` whatever
+  is stored there — indistinguishable from a key the document does not hold,
+  which the comparison correctly treats as nothing to lose. `unknown` is what a
+  declared `unknown` field and an INDEX SIGNATURE both lower to, the second as
+  `additionalProperties: {"type": "unknown"}`, and `system/default-app.tsx`
+  declares one. Measured on the committed fixture, that hid `recentPieces`,
+  `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream) —
+  and DROPPING `trackRecent` from the returned result replayed
+  `3 updated cleanly with no state stranded`. The read now relaxes the `type`
+  keyword where it says `unknown`, on both sides, and that mutation is named.
+  Only `type` is dropped: `asCell` has to survive, or a stream resolves to its
+  value and the moved-document class goes with it.
 - **The comparison is one-directional.** Only keys present BEFORE are checked.
   An update may legitimately ADD a field — that is what `Default<>` is for — so
   a new key is not a finding; an existing key whose value changed is.
@@ -657,11 +673,14 @@ What a green run does NOT cover, stated so it is not read as more than it is:
 - A cell- or stream-valued key is compared as the DOCUMENT it points at, not by
   that document's contents. A field that moved to a different doc is caught; a
   field whose own doc was emptied in place, under the same id, is not.
-- The before-read sees what the root's stored schema RESOLVES, which is not
-  everything the document holds: measured, `$UI` on `home.tsx` reads as
-  `undefined` under a stored schema that says `{"type": "unknown"}` there, while
-  a schema-less read materializes it. A key the stored schema leaves unresolved
-  is a key this comparison cannot speak for.
+- The before-read sees what the root's stored schema RESOLVES, which is still
+  not everything the document holds even with `unknown` relaxed. Measured after
+  the relaxation, one shortfall remains on the committed fixtures: a root whose
+  schema declares neither the key nor any `additionalProperties` — `$NAME` on
+  `backlinks-index.tsx`, `summary-index.tsx` and `profile-picker.tsx`. Both are
+  derived names rather than stored state, so nothing measured today is lost;
+  what matters is that a key the schema does not reach still arrives as
+  `undefined`, which the comparison reads as nothing to lose.
 - The value comparison runs only for a target whose identity CHANGED, which is
   the same condition the auto-updater fires on. On an unchanged tree it runs
   zero times — measured, `0 changed` on both committed fixtures — so the
@@ -677,7 +696,10 @@ migration that needs it. Measured against the changes that are routine today, it
 is quiet: an additive defaulted field on a nested pattern (`note.tsx`), a
 comment-only edit to `default-app.tsx` (3 changed, 3 clean), a UI-only edit to
 `home.tsx`'s header (1 changed, 1 clean), and a UI-only edit inside
-`default-app.tsx`'s own `map` body all exit 0.
+`default-app.tsx`'s own `map` body all exit 0. The strongest version of that
+measurement, because it leaves nothing unexercised: a comment-only edit to
+EVERY file the two committed fixtures name changes all 14 targets at once, and
+exits 0 with `14 updated cleanly with no state stranded`.
 
 ## Open questions
 

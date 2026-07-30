@@ -26,10 +26,10 @@ import {
   type VintageRef,
 } from "./pattern-vintage-lib.ts";
 import {
-  comparableState,
   isPresentRootValue,
   materializeOnCell,
   openFileBackedRuntime,
+  readStateUnder,
   readVintageManifest,
   readVintageState,
   strandedKeys,
@@ -477,12 +477,21 @@ export async function replayVintage(
         continue;
       }
       {
-        // Reduced ONCE, and the same reduction the comparison makes, so the
-        // report describes the values that were actually compared rather than
-        // the live root they were read from.
-        const after = comparableState(outcome.value) as
-          | Record<string, unknown>
-          | undefined;
+        // Re-read rather than reuse `outcome.value`, and through the SAME
+        // helper the before state came from. `outcome.value` is the root under
+        // the candidate's compiled schema verbatim, and that schema stops at
+        // its `unknown` positions exactly as the stored one does — so every key
+        // the before side newly resolves would come back `undefined` here and
+        // report as stranded. The two sides have to be read the same way or the
+        // comparison measures the reading. `outcome.resultSchema` is handed
+        // back for precisely this: the schema of the pattern that was actually
+        // materialized, rather than a second compile trusted to agree.
+        const after = await readStateUnder(
+          runtimeVintage,
+          entry.space,
+          entry.cellId,
+          outcome.resultSchema,
+        );
         const stranded = strandedKeys(before, after);
         if (stranded.length > 0) {
           report.stranded += stranded.length;

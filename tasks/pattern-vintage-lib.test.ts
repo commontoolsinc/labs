@@ -24,7 +24,10 @@ import {
   vintageFileName,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
-import { strandedKeys } from "../packages/piece/test/state-continuity-harness.ts";
+import {
+  schemaWithUnknownsRelaxed,
+  strandedKeys,
+} from "../packages/piece/test/state-continuity-harness.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   companionFileName,
@@ -624,15 +627,99 @@ describe("stranded-state comparison is a SUBSET check", () => {
   it("treats a before-value of `undefined` as nothing to strand", () => {
     // The before state is read under the root's stored schema, and a
     // schema-driven read enumerates the keys the schema DECLARES whether or not
-    // the document holds them — measured on the committed fixtures,
-    // `defaultProfile` on `home.tsx` and `recentPieces`/`summaryIndex`/
-    // `trackRecent` on `default-app.tsx` all read as `undefined`. An update
-    // that starts filling one in — a `Default<>` added to a field already
-    // declared — added data rather than stranding it.
+    // the document holds them — measured on the committed `home.tsx` fixture,
+    // `defaultProfile` reads as `undefined` because that root predates any
+    // profile being created. An update that starts filling one in — a
+    // `Default<>` added to a field already declared — added data rather than
+    // stranding it.
     expect(strandedKeys({ defaultProfile: undefined }, { defaultProfile: "v" }))
       .toEqual([]);
     // The other direction is still loss: something was there, and is not now.
     expect(strandedKeys({ defaultProfile: "v" }, { defaultProfile: undefined }))
       .toEqual(["defaultProfile"]);
+  });
+});
+
+/**
+ * The read the comparison rests on, and the one place it could go silently
+ * blind: a value the schema does not resolve arrives here as `undefined`, which
+ * the rule above then reads as "held nothing".
+ */
+describe("relaxing the stored schema's `unknown` positions", () => {
+  it("drops an `unknown` type wherever it sits", () => {
+    // Both spellings, because a pattern reaches them differently: a DECLARED
+    // `unknown` field lowers to the first, and an index signature
+    // (`[key: string]: unknown`, which `system/default-app.tsx` declares) to
+    // the second. Measured on the committed `default-app.tsx` fixture, the
+    // second is what hid `recentPieces`, `summaryIndex` and `trackRecent`.
+    expect(schemaWithUnknownsRelaxed({
+      type: "object",
+      properties: { note: { type: "unknown" } },
+      additionalProperties: { type: "unknown" },
+    })).toEqual({
+      type: "object",
+      properties: { note: {} },
+      additionalProperties: {},
+    });
+  });
+
+  it("drops a union that INCLUDES `unknown`, which constrains nothing", () => {
+    expect(schemaWithUnknownsRelaxed({ type: ["string", "unknown"] }))
+      .toEqual({});
+    // ...and leaves a union that does not.
+    expect(schemaWithUnknownsRelaxed({ type: ["string", "null"] }))
+      .toEqual({ type: ["string", "null"] });
+  });
+
+  it("keeps every other keyword, so a stream still reduces to its document", () => {
+    // What makes this a RELAXATION rather than a different read. Reading under
+    // a bare `{}` would resolve the same keys, but without `asCell` a stream
+    // comes back as its VALUE instead of the document it points at — and a
+    // field that moved to a different doc is the class this comparison exists
+    // for.
+    expect(schemaWithUnknownsRelaxed({
+      asCell: ["stream"],
+      type: "unknown",
+      ifc: { classification: ["secret"] },
+    })).toEqual({ asCell: ["stream"], ifc: { classification: ["secret"] } });
+  });
+
+  it("relaxes inside `$defs`, which is where a `$ref` lands", () => {
+    expect(schemaWithUnknownsRelaxed({
+      $ref: "#/$defs/Row",
+      $defs: {
+        Row: { type: "object", properties: { v: { type: "unknown" } } },
+      },
+    })).toEqual({
+      $ref: "#/$defs/Row",
+      $defs: { Row: { type: "object", properties: { v: {} } } },
+    });
+  });
+
+  it("keeps a property that is NAMED `type`", () => {
+    // The keyword and a property name are the same string. Dropping on the key
+    // alone would delete the property, which is a schema the document no longer
+    // matches rather than a relaxed one.
+    expect(schemaWithUnknownsRelaxed({
+      type: "object",
+      properties: { type: { type: "unknown" } },
+      required: ["type"],
+    })).toEqual({
+      type: "object",
+      properties: { type: {} },
+      required: ["type"],
+    });
+  });
+
+  it("leaves a schema with no `unknown` in it alone", () => {
+    const schema = {
+      type: "object",
+      properties: { items: { type: "array", items: { type: "string" } } },
+      required: ["items"],
+    };
+    expect(schemaWithUnknownsRelaxed(schema)).toEqual(schema);
+    // Booleans are schemas too, and neither is an object to walk.
+    expect(schemaWithUnknownsRelaxed(true)).toBe(true);
+    expect(schemaWithUnknownsRelaxed(false)).toBe(false);
   });
 });

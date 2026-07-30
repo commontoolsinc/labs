@@ -26,7 +26,10 @@
  * sees the data as the version that wrote it did, and compares only keys that
  * were present BEFORE: an update may legitimately ADD a field — that is what
  * `Default<>` is for — so a new key is not a finding, while an existing key
- * whose value changed is.
+ * whose value changed is. That schema is relaxed at its `unknown` positions
+ * first, on both sides: a schema-driven read resolves nothing there, so a key
+ * an index signature covers would otherwise arrive as `undefined` however much
+ * state it holds — indistinguishable from a key the document does not hold.
  *
  * It compares STATE, not renderings. `$UI` and its variants are recomputed by
  * the setup and the stored rendering never matches a fresh one, so comparing
