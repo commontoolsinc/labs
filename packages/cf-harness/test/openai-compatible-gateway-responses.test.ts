@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
 import {
   OpenAICompatibleGatewayModelClient,
@@ -10,6 +10,10 @@ import {
   WEB_SEARCH_SUBAGENT_MODEL,
   WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS,
 } from "../src/contracts/subagent.ts";
+import {
+  addFirstUserPromptCacheBreakpoint,
+  type ResponsesInputItem,
+} from "../src/model/responses-protocol.ts";
 
 const GATEWAY = "https://gateway.test";
 
@@ -409,6 +413,67 @@ Deno.test("cache affinity, explicit breakpoint, and reasoning are configurable",
   assertEquals(content[content.length - 1].prompt_cache_breakpoint, {
     mode: "explicit",
   });
+});
+
+Deno.test("explicit cache breakpoint selects the last cacheable user block", () => {
+  const original: ResponsesInputItem[] = [
+    {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "earlier" }],
+    },
+    {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_image", image_url: "data:image/png;base64,AA==" },
+        { type: "input_file", file_id: "file_123" },
+        { type: "unsupported_test_block" },
+      ],
+    },
+  ];
+
+  const withBreakpoint = addFirstUserPromptCacheBreakpoint(original);
+  const content = withBreakpoint[1].content as ResponsesInputItem[];
+  assertEquals(content[1].prompt_cache_breakpoint, { mode: "explicit" });
+  assertEquals(content[2].prompt_cache_breakpoint, undefined);
+  assertEquals(original, [
+    {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "earlier" }],
+    },
+    {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_image", image_url: "data:image/png;base64,AA==" },
+        { type: "input_file", file_id: "file_123" },
+        { type: "unsupported_test_block" },
+      ],
+    },
+  ]);
+
+  const imageOnly = addFirstUserPromptCacheBreakpoint([{
+    type: "message",
+    role: "user",
+    content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }],
+  }]);
+  const imageContent = imageOnly[0].content as ResponsesInputItem[];
+  assertEquals(imageContent[0].prompt_cache_breakpoint, { mode: "explicit" });
+});
+
+Deno.test("explicit cache breakpoint requires cacheable user content", () => {
+  assertThrows(
+    () =>
+      addFirstUserPromptCacheBreakpoint([{
+        type: "message",
+        role: "user",
+        content: [{ type: "unsupported_test_block" }],
+      }]),
+    Error,
+    "explicit prompt caching requires a cacheable user content block",
+  );
 });
 
 Deno.test("GPT-5.6 cache controls fail before sending an older model", async () => {

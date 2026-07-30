@@ -47,6 +47,7 @@ import type { HarnessModelClient } from "../src/model/client.ts";
 import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import { assertPromptCacheModeSupported } from "../src/model/responses-protocol.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -628,6 +629,79 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   assertStringIncludes(
     output.subagent.summary,
     "is not available from provider openai-codex",
+  );
+});
+
+Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model overrides", async () => {
+  let parentTurns = 0;
+  let childTurns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete: (request) => {
+      assertPromptCacheModeSupported(request.model, request.promptCacheMode);
+      if (request.model !== "gpt-5.6-terra") {
+        childTurns += 1;
+        return Promise.resolve({
+          assistant: { role: "assistant", content: "unexpected child success" },
+        });
+      }
+      parentTurns += 1;
+      return Promise.resolve({
+        assistant: parentTurns === 1
+          ? {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-web-search-cache-mode",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Search current documentation.",
+                  profile: "web_search",
+                }),
+              },
+            }],
+          }
+          : {
+            role: "assistant" as const,
+            content: "Parent handled the unsupported child configuration.",
+          },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    promptCacheMode: "explicit",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["web_search"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-child-cache-mode",
+      model: "gpt-5.6-terra",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: { status: string; summary: string };
+  };
+
+  assertEquals(
+    result.finalAssistantText,
+    "Parent handled the unsupported child configuration.",
+  );
+  assertEquals(parentTurns, 2);
+  assertEquals(childTurns, 0);
+  assertEquals(output.subagent.status, "failed");
+  assertStringIncludes(
+    output.subagent.summary,
+    "prompt cache mode explicit requires a GPT-5.6 model",
   );
 });
 

@@ -2833,8 +2833,7 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
-      ...(this.#promptCacheMode !== undefined &&
-          childModel.model.startsWith("gpt-5.6")
+      ...(this.#promptCacheMode !== undefined
         ? { promptCacheMode: this.#promptCacheMode }
         : {}),
       ...(this.#reasoningEffort !== undefined

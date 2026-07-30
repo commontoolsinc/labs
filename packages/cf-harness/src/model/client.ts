@@ -70,6 +70,17 @@ export interface HarnessModelUsage {
   estimatedCostUsd?: number;
 }
 
+export const HARNESS_MODEL_USAGE_FIELDS = [
+  "inputTokens",
+  "cachedInputTokens",
+  "cacheWriteTokens",
+  "outputTokens",
+  "reasoningTokens",
+  "totalTokens",
+  "costUsd",
+  "estimatedCostUsd",
+] as const satisfies readonly (keyof HarnessModelUsage)[];
+
 export interface HarnessModelTurnResult {
   assistant: HarnessAssistantTranscriptMessage;
   usage?: HarnessModelUsage;

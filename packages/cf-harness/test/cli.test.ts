@@ -375,6 +375,43 @@ Deno.test("parseCfHarnessCliArgs accepts cache and reasoning experiment controls
   assertEquals(parsed.promptCacheMode, "explicit");
 });
 
+Deno.test("parseCfHarnessCliArgs reads cache and reasoning defaults from the process environment", async () => {
+  const names = [
+    "CF_HARNESS_REASONING_EFFORT",
+    "CF_HARNESS_PROMPT_CACHE_MODE",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  try {
+    Deno.env.set("CF_HARNESS_REASONING_EFFORT", "medium");
+    Deno.env.set("CF_HARNESS_PROMPT_CACHE_MODE", "implicit");
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi", "--gateway-auth-mode", "none"],
+      { cwd: "/tmp/project" },
+    );
+
+    if ("help" in parsed) throw new Error("expected config result");
+    assertEquals(parsed.reasoningEffort, "medium");
+    assertEquals(parsed.promptCacheMode, "implicit");
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty reasoning effort flag", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--reasoning-effort", "  "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--reasoning-effort requires a non-empty value",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs resolves sandbox docker runtime from flag and environment", async () => {
   const fromFlag = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--sandbox-docker-runtime", "runc"],
@@ -3294,13 +3331,15 @@ Deno.test("formatCfHarnessCliResult summarizes cache usage and cost", () => {
     outputTokens: 100,
     reasoningTokens: 40,
     totalTokens: 2_100,
+    costUsd: 0.003456,
     estimatedCostUsd: 0.002345,
   };
 
   assertStringIncludes(
     formatCfHarnessCliResult(result),
     "usage: input=2000 cachedInput=1500 cacheWrite=200 output=100 " +
-      "reasoning=40 total=2100 cacheRead=75.0% estimatedCostUsd=0.002345",
+      "reasoning=40 total=2100 cacheRead=75.0% providerCostUsd=0.003456 " +
+      "estimatedCostUsd=0.002345",
   );
   assertEquals(createCfHarnessBatchResult(result, 50).usage, result.usage);
 });

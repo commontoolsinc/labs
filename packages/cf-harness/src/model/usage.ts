@@ -1,4 +1,7 @@
-import type { HarnessModelUsage } from "./client.ts";
+import {
+  HARNESS_MODEL_USAGE_FIELDS,
+  type HarnessModelUsage,
+} from "./client.ts";
 
 const finiteNonNegativeNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -64,23 +67,12 @@ export const normalizeOpenAIUsage = (
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 };
 
-const USAGE_FIELDS = [
-  "inputTokens",
-  "cachedInputTokens",
-  "cacheWriteTokens",
-  "outputTokens",
-  "reasoningTokens",
-  "totalTokens",
-  "costUsd",
-  "estimatedCostUsd",
-] as const satisfies readonly (keyof HarnessModelUsage)[];
-
 /** Sums all reported fields while preserving "not reported" as absent. */
 export const sumHarnessModelUsage = (
   entries: readonly (HarnessModelUsage | undefined)[],
 ): HarnessModelUsage | undefined => {
   const total: HarnessModelUsage = {};
-  for (const field of USAGE_FIELDS) {
+  for (const field of HARNESS_MODEL_USAGE_FIELDS) {
     const values = entries.flatMap((entry) => {
       const value = entry?.[field];
       return value === undefined ? [] : [value];
@@ -141,9 +133,28 @@ export const estimateOpenAIModelUsageCostUsd = (
     usage.cacheWriteTokens === undefined ||
     usage.outputTokens === undefined
   ) return undefined;
+  const tokenCounts = [
+    usage.inputTokens,
+    usage.cachedInputTokens,
+    usage.cacheWriteTokens,
+    usage.outputTokens,
+    ...(usage.reasoningTokens === undefined ? [] : [usage.reasoningTokens]),
+    ...(usage.totalTokens === undefined ? [] : [usage.totalTokens]),
+  ];
+  if (
+    tokenCounts.some((value) => !Number.isSafeInteger(value) || value < 0)
+  ) return undefined;
   const uncachedInputTokens = usage.inputTokens - usage.cachedInputTokens -
     usage.cacheWriteTokens;
   if (uncachedInputTokens < 0) return undefined;
+  if (
+    usage.totalTokens !== undefined &&
+    usage.totalTokens !== usage.inputTokens + usage.outputTokens
+  ) return undefined;
+  if (
+    usage.reasoningTokens !== undefined &&
+    usage.reasoningTokens > usage.outputTokens
+  ) return undefined;
   const longContextInputMultiplier = usage.inputTokens > 272_000 ? 2 : 1;
   const longContextOutputMultiplier = usage.inputTokens > 272_000 ? 1.5 : 1;
   return (

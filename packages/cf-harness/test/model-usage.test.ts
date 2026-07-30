@@ -74,6 +74,8 @@ Deno.test("GPT-5.6 Terra estimates distinguish reads, writes, and output", () =>
       cachedInputTokens: 1_200,
       cacheWriteTokens: 600,
       outputTokens: 300,
+      reasoningTokens: 200,
+      totalTokens: 2_300,
     }),
     (
       200 * 2.5 +
@@ -100,6 +102,45 @@ Deno.test("cost estimate is withheld for inconsistent cache detail", () => {
       inputTokens: 1_000,
       cachedInputTokens: 800,
       cacheWriteTokens: 300,
+      outputTokens: 100,
+    }),
+    undefined,
+  );
+});
+
+Deno.test("cost estimate is withheld for inconsistent total usage", () => {
+  assertEquals(
+    estimateOpenAIModelUsageCostUsd("gpt-5.6-terra", {
+      inputTokens: 1_000,
+      cachedInputTokens: 500,
+      cacheWriteTokens: 0,
+      outputTokens: 100,
+      totalTokens: 1_099,
+    }),
+    undefined,
+  );
+});
+
+Deno.test("cost estimate is withheld for impossible reasoning usage", () => {
+  assertEquals(
+    estimateOpenAIModelUsageCostUsd("gpt-5.6-terra", {
+      inputTokens: 1_000,
+      cachedInputTokens: 500,
+      cacheWriteTokens: 0,
+      outputTokens: 100,
+      reasoningTokens: 101,
+      totalTokens: 1_100,
+    }),
+    undefined,
+  );
+});
+
+Deno.test("cost estimate is withheld for invalid token counts", () => {
+  assertEquals(
+    estimateOpenAIModelUsageCostUsd("gpt-5.6-terra", {
+      inputTokens: 1_000.5,
+      cachedInputTokens: 500,
+      cacheWriteTokens: 0,
       outputTokens: 100,
     }),
     undefined,
