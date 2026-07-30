@@ -691,16 +691,16 @@ export class PiecesController<T = unknown> {
             }),
         );
       } catch (repairError) {
-        // Escalate to the RUNNABILITY backstop on EXACTLY one signal: the
-        // pinned pattern LOADS but its setup-commit was REJECTED BY THE CFC
-        // MIGRATION — the estuary case, where an old root's required field
-        // predates its `Default<>` or a handler stream predates its exemption.
-        // "Loadable" is not "runnable"; re-running the same identity can only
-        // fail identically, so roll the root forward to the space's CURRENT
-        // official pattern (which migrates the reused doc cleanly). This fires
-        // only on a failed migration, so a root that already runs — current
-        // official, or a custom root that migrates cleanly — never reaches it,
-        // and custom-root protection is preserved for free.
+        // Escalate to the RUNNABILITY backstop on TWO signals, and only those.
+        // The first: the pinned pattern LOADS but its setup-commit was REJECTED
+        // BY THE CFC MIGRATION — the estuary case, where an old root's required
+        // field predates its `Default<>` or a handler stream predates its
+        // exemption. "Loadable" is not "runnable"; re-running the same identity
+        // can only fail identically, so roll the root forward to the space's
+        // CURRENT official pattern (which migrates the reused doc cleanly).
+        // Neither signal fires for a root that already runs — current official,
+        // or a custom root that migrates cleanly — so custom-root protection is
+        // preserved for free.
         //
         // A refused STORED ARGUMENT is the same class of evidence and escalates
         // the same way. Setup re-points the argument at the pinned pattern's

@@ -252,14 +252,16 @@ describe("ensurePieceRunning", () => {
     await resultCell.pull();
 
     // Second call should also return true - ensurePieceRunning doesn't track
-    // previous calls because runtime.runSynced() is idempotent for already-running pieces
+    // previous calls: starting an already-running piece takes setup's reuse path
+    // and leaves the running graph alone
     const result2 = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
     expect(result2).toBe(true);
 
-    // The piece's lift should only have run once because runSynced is idempotent
+    // The piece's lift should only have run once: starting an already-running
+    // piece takes setup's reuse path and does not re-instantiate it
     expect(startCount).toBe(1);
   });
 
@@ -500,13 +502,15 @@ describe("queueEvent with auto-start", () => {
     expect(resultCell.getAsQueryResult()).toMatchObject({ doubled: 10 });
 
     // Send another event - ensurePieceRunning may be called again but
-    // runSynced is idempotent so the piece won't restart
+    // Starting an already-running piece takes the reuse path, so it does not
+    // restart
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     await runtime.idle();
     await runtime.idle();
 
-    // Lift should still only have run once because runSynced is idempotent
+    // Lift should still only have run once: the reuse path does not
+    // re-instantiate
     expect(liftRunCount).toBe(1);
   });
 

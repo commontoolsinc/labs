@@ -1044,8 +1044,8 @@ No cycle guard needed (≤3 hops, no recursion).
 Tests (`packages/runner/test/fabric-ref-resolution.test.ts`): build, in an
 in-process runtime: a pattern meta cell with `entryIdentity`; a fake piece
 cell carrying `meta("pattern")`/`meta("patternIdentity")` (use the real
-setters from runner.ts — find `setMetaRaw("pattern", …)` usage at
-runner.ts:901 and mirror it); slug → piece; slug → pattern meta directly;
+setters from runner.ts — find `setMetaRaw("patternIdentity", …)` usage in
+`applySetupState` and mirror it); slug → piece; slug → pattern meta directly;
 slug → plain data cell (error + chain); missing slug; `of:` directly to meta
 cell; piece with only legacy `patternId`; meta without `entryIdentity`
 (error message). Add a direct `pattern:` subpath test that proves the scope

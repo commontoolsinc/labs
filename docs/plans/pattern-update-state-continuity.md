@@ -529,7 +529,7 @@ Three ways to get the targets were compared:
    work twice.
 2. *Scan the restored store.* `setupInternal` already stamps `patternIdentity`
    on the result cell of every instantiated pattern that has an entry ref
-   (`runner.ts:1512`), and `run()` routes through it (`:2739`) — so pattern
+   (`runner.ts`, `applySetupState`), and `run()` routes through it — so pattern
    roots are self-labelling and no graph traversal is needed. But there is **no
    sanctioned way to enumerate them**: the `_` wildcard selector survives only
    as an optional field in `Select<>` and two comments in

@@ -227,7 +227,7 @@ relies on. Closing them is safe; what it costs is two commitments:
 4. **Rejection is a value.** Invalid input, wrong turn, precondition unmet — a
    typed error with a stable code. (Authorization is not the contract's job:
    CFC already rejects unauthorized commits and the runner surfaces the error,
-   `packages/runner/src/runner.ts:835-840`.)
+   `packages/runner/src/runner.ts:1107`.)
 5. **Address by identity, never by position.** Pass a child reference, or a
    client-rendered fid/path derived from one, never `{ index }`; indices shift
    under concurrent writes. A pattern need not and generally cannot manufacture
@@ -575,7 +575,7 @@ The result schema is part of the piece's public contract, and the repo already
 checks pattern schema evolution: `assertPatternSchemasBackwardCompatible`
 (`packages/piece/src/schema-compatibility.ts`) runs on every `setsrc` unless
 `--dangerously-allow-incompatible-schema` is passed
-(`packages/piece/src/ops/piece-controller.ts:2723-2724`). It checks arguments
+(`packages/piece/src/ops/piece-controller.ts:3199-3200`). It checks arguments
 and results in **opposite directions** (`:174-206`):
 
 - **Arguments**: previous ⊆ candidate. Inputs may widen but not narrow; a new
