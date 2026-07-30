@@ -443,11 +443,12 @@ export function createQueryResultProxy<T>(
             // A tail append records its intent so the commit emits a
             // tail-relative, mergeable operation rather than a position diffed
             // against a possibly-stale base. Any other in-place mutator (splice,
-            // unshift, sort, reverse, fill, ...) reshapes the array: if a
-            // mergeable push was recorded on it earlier in the transaction, the
-            // recorded tail no longer identifies the appended elements, so
-            // abandon the intent and let the whole-array diff carry the reshaped
-            // result.
+            // unshift, sort, reverse, fill, ...) reshapes the array: for any
+            // mergeable op recorded earlier in the transaction on this array —
+            // or on an array nested inside it, which this reshape rewrites just
+            // as surely — the recorded tail no longer identifies the appended
+            // elements, so abandon those intents and let the whole-array diff
+            // carry the reshaped result.
             if (prop === "push") {
               tx.recordMergeableOp?.(link, {
                 op: "append",

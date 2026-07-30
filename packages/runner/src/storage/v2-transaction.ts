@@ -1123,9 +1123,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!doc?.mergeableOps?.size) {
       return;
     }
-    const covered = [...doc.mergeableOps.values()]
-      .filter((intent) => isPrefixPath(address.path, intent.path))
-      .map((intent) => encodePointer(intent.path));
+    const covered = [...doc.mergeableOps.entries()]
+      .filter(([, intent]) => isPrefixPath(address.path, intent.path))
+      .map(([pathKey]) => pathKey);
     for (const pathKey of covered) {
       doc.mergeableOps.delete(pathKey);
       (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);

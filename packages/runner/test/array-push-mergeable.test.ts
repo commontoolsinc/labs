@@ -8,7 +8,10 @@ import type { Options } from "../src/storage/v2.ts";
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
-import { getDirectTransactionMergeableOpAddresses } from "../src/storage/transaction-inspection.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionNativeCommit,
+} from "../src/storage/transaction-inspection.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // A storage manager with its OWN per-space client replicas, loopback-connected
@@ -786,9 +789,13 @@ describe("mergeable array appends", () => {
   });
 
   // A whole-array set that REPLACES every element without changing the length,
-  // then a push. The replacement diffs as a whole-array cover candidate at the
-  // array path, which the tail op's suppression drops outright — so a length
-  // check alone would let the replacement vanish while the tail still committed.
+  // then a push. This one is deliberately NOT abandoned, and pins that: the
+  // replacement diffs into per-index candidates that all sit below the tail
+  // start, so they survive the op's suppression and commit alongside the append.
+  // Only a length change ahead of the tail leaves the diff unable to carry what
+  // the op cannot. (Characterization, not a regression guard — it holds on the
+  // unfixed code too. It is here so a future tightening of the guard to full
+  // prefix comparison has to justify losing this.)
   it("a same-length whole-array set then a push commits the replaced list", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -821,8 +828,10 @@ describe("mergeable array appends", () => {
   // An element edit alongside a push is the composition the fallback must NOT
   // swallow: the edit is a per-index candidate below the tail, it survives
   // suppression, and the push stays mergeable. This is the case that stops the
-  // guard from being tightened into "the prefix must be untouched".
-  it("an element edit then a push keeps the push mergeable and commits both", async () => {
+  // guard from being tightened into "the prefix must be untouched", and that
+  // pins the poison's direction — a write BENEATH an array must not reach the
+  // array's own intent.
+  it("a push then an element edit keeps the push mergeable and commits both", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -847,8 +856,11 @@ describe("mergeable array appends", () => {
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
-      cell.key(1).set("B");
+      // Push FIRST, so an intent exists when the edit's write fires the poison.
+      // The other order proves nothing: with no intent recorded yet there is
+      // nothing for a wrongly-widened poison to destroy.
       cell.push("d");
+      cell.key(1).set("B");
       await tx1.commit();
       await rt1.storageManager.synced();
 
@@ -1950,14 +1962,9 @@ describe("mergeable op guards and single-session branches", () => {
   // leave an unmarked read at the path anyway, so no commit outcome
   // distinguishes the two.
   it("a build-time abandon removes the intent from the transaction", async () => {
-    // The commit build runs on the inner transaction; the extended wrapper does
-    // not surface it. Asserting on the built commit rather than on the
-    // committed transaction matters: finishing a commit clears the intents
-    // anyway, so a post-commit assertion would pass either way.
-    const nativeCommitOf = (tx: unknown) =>
-      (("tx" in (tx as object) ? (tx as { tx: unknown }).tx : tx) as {
-        getNativeCommit(space: string): unknown;
-      }).getNativeCommit(space);
+    // Asserting on the built commit rather than on the committed transaction
+    // matters: finishing a commit clears the intents anyway, so a post-commit
+    // assertion would pass whether or not the build dropped them.
 
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
@@ -1980,10 +1987,36 @@ describe("mergeable op guards and single-session branches", () => {
 
     // Building the commit is what discovers the tail no longer describes the
     // local value, and it drops the intent rather than just skipping the op.
-    nativeCommitOf(tx);
+    getDirectTransactionNativeCommit(tx, space);
     expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
       [],
     );
+  });
+
+  // The other direction, and the one that pins the predicate: a write BENEATH an
+  // array (an element edit) must leave that array's intent alone. Asserted on
+  // the intents, and with the push FIRST — the durable value cannot discriminate
+  // here, because a concurrent append is add-wins and lands either way, and the
+  // reverse order records no intent for a wrongly-widened poison to destroy.
+  it("a write beneath an array leaves the array's intent intact", () => {
+    const docSchema = {
+      type: "object",
+      properties: { rows: { type: "array", items: { type: "string" } } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const cause = "beneath-no-poison";
+
+    const tx = rt.edit();
+    const doc = rt.getCell(space, cause, docSchema, tx);
+    doc.set({ rows: ["a", "b"] });
+    const rows = doc.key("rows") as unknown as Cell<string[]>;
+
+    rows.push("p");
+    rows.key(0).set("A");
+
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+    expect(doc.get()).toEqual({ rows: ["A", "b", "p"] });
   });
 
   // A sibling write must NOT poison a tail intent: only paths at or beneath the

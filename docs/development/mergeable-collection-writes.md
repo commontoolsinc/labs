@@ -285,7 +285,10 @@ first, since the op carries only the delta.
   intent is dropped and the commit emits the whole-array diff, which reflects the
   correct combined local value. That transaction's write to that path forfeits
   merge-friendliness (it commits as a value diff, so it can false-conflict under
-  contention) but is never silently corrupted. Three sites poison via
+  contention) rather than being silently corrupted. Read that as a description of
+  the poisoned path, not as a closed-class guarantee for every op — see "Known
+  gaps" at the end of this section for two shapes that still commit a value the
+  writer never saw. Three sites poison via
   `poisonMergeableOp`: `recordMergeableOp` on a second, different op kind; the
   query-result proxy on any non-`push` in-place mutator; and `Cell.set` on a
   whole-value overwrite covering a path that already carries an intent.
@@ -339,6 +342,33 @@ first, since the op carries only the delta.
   asserts a conflict outcome that depends on it. It is kept because the
   guarantee should not rest on that coincidence: nothing obliges a reshape to
   read what it overwrites.
+
+### Known gaps
+
+Two shapes still commit a value the writer never saw. Both are measured, both
+predate the tail-op checks above, and neither is caught by them. Treat this list
+as the honest boundary of "falls back rather than corrupts".
+
+- **`removeByValue` alongside any other change to the same array.** Its
+  suppression is `subtree: true` — the whole array path and everything under it —
+  and unlike the tail ops it has no commit-time check that the local value is
+  still what the op describes. So any other local change to that array is
+  swallowed. Measured, from a durable `["a","b","c"]`: `key(0).set("A")` then
+  `removeByValue("c")` gives a local `["A","b"]` and a durable `["a","b"]` — the
+  edit is gone; the reverse order loses it too; and `set(["p","q"])` then
+  `removeByValue("p")` gives a local `["q"]` against a durable `["a","b","c"]` —
+  the whole `set` vanishes. The first of these is the ordinary "edit one row and
+  delete another in the same handler" shape. Note that the deliberate decision
+  *not* to poison beneath a write is what lets it through: an element edit writes
+  beneath the array, so it leaves the `removeByValue` intent alive.
+
+- **Nested arrays where one tail op's payload contains another's target.** Push a
+  new array onto an outer array, then push into that inner array: the outer
+  append's payload is `array.slice(start)`, which already contains the inner
+  array *including* the element the inner append will add again, so the store
+  applies it twice. Measured: local `[["a"],["x","y"]]`, durable
+  `[["a"],["x","y","x","y"]]`. Each array's own length arithmetic is individually
+  consistent, so neither guard sees it.
 
 ## Conditional pushes stay protected: the read-set narrowing
 
