@@ -577,10 +577,21 @@ export async function materializeOnCell(
       symbol,
     ) as typeof entryPattern | undefined;
   if (selected === undefined) {
-    // Fails CLOSED rather than falling back to the entry pattern. A hoist
-    // symbol is positional, so an edit that adds an earlier `map` renumbers it
-    // — and a stored root naming a symbol today's module does not define is
-    // exactly the migration hazard worth reporting, not one to paper over.
+    // Fails CLOSED rather than falling back to the entry pattern: a stored root
+    // naming a symbol today's module does not define is a migration hazard to
+    // report, not one to paper over.
+    //
+    // ABSENCE is all this catches, and hoist symbols have a second failure mode
+    // it does not. `__cfPattern_N` is positional, so inserting an earlier `map`
+    // REBINDS the name instead of removing it — measured: with one `map` the
+    // hoist `__cfPattern_1` carried result `{shout}`, and after an earlier `map`
+    // was added the same name carried `{other}` while `{shout}` moved to
+    // `__cfPattern_2`. A root recorded as `__cfPattern_1` then resolves here to a
+    // DIFFERENT nested pattern and this branch never fires. The schema merge
+    // catches it only when the two bodies differ in shape. That is a property of
+    // positional addressing which `PatternUpdater` shares, not something this
+    // gate can fix; selecting the recorded symbol is still strictly better than
+    // applying the module's entry export to every nested root.
     return {
       error:
         `today's ${program.main} defines no "${symbol}"; the stored root ` +
@@ -591,10 +602,17 @@ export async function materializeOnCell(
     };
   }
   const pattern = selected;
-  const ref = {
-    identity: entryRef.identity,
-    symbol: symbol ?? entryRef.symbol,
-  };
+  // The ref the RUNNER will write, not the one the caller asked by. `setup()`
+  // stamps `getArtifactEntryRef(pattern)`, and that map is first-write-wins — so
+  // an artifact exported under two names has ONE canonical symbol, decided by
+  // export enumeration order, which need not be the name the fixture recorded.
+  // Deriving the stamp and the completion comparison from anything else makes a
+  // cosmetic export reorder read as a failed migration: measured, flipping
+  // `export { Row }` and `export { Row as RowAlias }` reported "setup did not
+  // complete for …#Row: the root carries …#RowAlias" for a swap that in fact
+  // succeeded, on the same artifact object.
+  const ref = runtime.patternManager.getArtifactEntryRef(pattern) ??
+    { identity: entryRef.identity, symbol: symbol ?? entryRef.symbol };
   const root = locate(vintage, pattern.resultSchema);
   await root.sync();
 

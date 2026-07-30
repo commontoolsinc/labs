@@ -140,6 +140,29 @@ const NESTED_ROW_RENAMED = NESTED_CHANGED
   .replace("export const Row =", "export const Renamed =")
   .replace("Row({ word })", "Renamed({ word })");
 
+/**
+ * The same artifact under TWO export names, and the same module with those two
+ * statements swapped. Only enumeration order differs, so the CANONICAL symbol
+ * flips while the artifact, the schemas and the state are all identical.
+ */
+const aliased = (aliasFirst: boolean) =>
+  nestedSource({
+    field: "  later: Writable<string[] | Default<[]>>;",
+    line: "  const later = new Writable<string[]>([]).for('later');",
+  })
+    .replace("export const Row =", "const Row =")
+    .replace(
+      "});\nexport interface Output {",
+      `});\n${
+        aliasFirst
+          ? "export { Row as RowAlias };\nexport { Row };"
+          : "export { Row };\nexport { Row as RowAlias };"
+      }\nexport interface Output {`,
+    );
+
+const NESTED_ALIASED = aliased(false);
+const NESTED_ALIASED_FLIPPED = aliased(true);
+
 const nestedTest = (key: string) =>
   [
     "import { action, assert, pattern } from 'commonfabric';",
@@ -415,6 +438,14 @@ describe("the vintage gate, end to end", () => {
           cellId: "of:fid1:unmappable",
           space: signer.did(),
         },
+        {
+          identity: pinned.identity,
+          symbol: "__cfPattern_10",
+          // An injected helper module's name: present, but not a repo path.
+          main: "cfc.ts",
+          cellId: "of:fid1:notrootrelative",
+          space: signer.did(),
+        },
       ]);
       // To a fresh path, not over the file this runtime opened FROM — sqlite
       // refuses that — then swapped in once the handles are closed.
@@ -427,10 +458,16 @@ describe("the vintage gate, end to end", () => {
 
     const { unmappable, failures } = await replayAll(roots);
 
-    expect(unmappable).toBe(1);
-    expect(failures).toHaveLength(1);
-    expect(failures[0].detail).toContain("carries NO source path");
-    expect(failures[0].detail).toContain("__cfPattern_9");
+    // Both shapes count: no source path at all, and a path that is not
+    // repo-root-relative (the evaluate loop records injected helper modules
+    // like `cfc.ts`, whose names carry no leading slash).
+    expect(unmappable).toBe(2);
+    expect(failures).toHaveLength(2);
+    const details = failures.map((f) => f.detail).join("\n");
+    expect(details).toContain("__cfPattern_9");
+    expect(details).toContain("no source path");
+    expect(details).toContain("__cfPattern_10");
+    expect(details).toContain("is not repo-root-relative");
   });
 
   describe("capture refuses a state the pattern never legitimately reaches", () => {
@@ -537,6 +574,28 @@ describe("the vintage gate, end to end", () => {
       // The identity really moved, so the materialize path actually ran — this
       // test would be vacuous if the replay had short-circuited.
       expect(changed).toBeGreaterThan(1);
+      expect(failures).toEqual([]);
+    });
+
+    it("a cosmetic export reorder is not a failed migration", async () => {
+      // One artifact exported under TWO names has a single CANONICAL symbol,
+      // and `setArtifactEntryRef` is first-write-wins — so which name is
+      // canonical depends on export enumeration order. The completion marker the
+      // runner stamps carries the canonical symbol, not the one the fixture
+      // recorded, so comparing against the recorded name reported a clean swap
+      // as "setup did not complete … the root carries …#RowAlias". Reordering
+      // two export statements must not read as a broken migration.
+      await writeNested(NESTED_ALIASED);
+      await captureMissing(
+        roots,
+        [NESTED_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      await writeNested(NESTED_ALIASED_FLIPPED);
+
+      const { changed, failures } = await replayAll(roots);
+
+      expect(changed).toBeGreaterThan(0);
       expect(failures).toEqual([]);
     });
 

@@ -68,6 +68,22 @@ describe("pattern source path", () => {
     expect(getPatternSourcePath("not-an-object")).toBeUndefined();
   });
 
+  it("refuses to stamp a value with no trusted-builder provenance", () => {
+    // The same gate `indexArtifact` and `recordModuleProvenance` apply, so this
+    // table's population matches the artifact index's rather than holding an
+    // entry for every plain exported constant. Without the gate this passes
+    // silently, which is why it is asserted rather than assumed.
+    const plain = { notAnArtifact: true };
+    setPatternSourcePath(plain, "/patterns/should-not-stick.tsx");
+    expect(getPatternSourcePath(plain)).toBeUndefined();
+
+    // And a pattern-SHAPED object with no brand — `__cf_data`-forged data is
+    // structurally `isPattern` but carries no provenance.
+    const forged = patternShape();
+    setPatternSourcePath(forged, "/patterns/forged.tsx");
+    expect(getPatternSourcePath(forged)).toBeUndefined();
+  });
+
   describe("end to end", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;

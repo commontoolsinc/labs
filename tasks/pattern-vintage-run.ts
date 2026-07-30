@@ -104,11 +104,12 @@ export interface ReplayReport {
   /**
    * Recorded instantiations with NO source path — recorded but unaddressable.
    *
-   * Each one also lands in `failures`, so a fixture holding any is a RED run
-   * rather than a green one with a caveat: the replay skips them, and a verdict
-   * that passes while silently covering fewer roots than the fixture holds is
-   * this tier's worst failure mode. Kept as a count so the summary can state the
-   * property positively ("all mappable") instead of by absence.
+   * Two shapes: no source path at all, and a path that is not repo-root-relative
+   * (the evaluate loop records injected helper modules too). Each one also lands
+   * in `failures`, so a fixture holding any is a RED run rather than a green one
+   * with a caveat — the replay skips them, and a verdict that passes while
+   * silently covering fewer roots than the fixture holds is this tier's worst
+   * failure mode. Kept as a count for the tests that pin that behaviour.
    */
   unmappable: number;
   /** Targets whose source CHANGED since capture — the actual migrations. */
@@ -178,7 +179,14 @@ export async function replayVintage(
     }
 
     const targets = manifest.entries.filter(isUpgradeTarget);
-    const unmappable = manifest.entries.filter((e) => e.main === undefined);
+    // Unaddressable, not merely un-targeted. Both shapes belong here: no source
+    // path at all, and a path that is not repo-root-relative — the evaluate loop
+    // records injected helper modules (`cfc.ts`) whose names carry no leading
+    // slash, and `${repoRoot}cfc.ts` is not a file. Counting only the first would
+    // let the second be skipped in silence while the verdict says "all mappable".
+    const unmappable = manifest.entries.filter(
+      (e) => e.main === undefined || !e.main.startsWith("/"),
+    );
     const report: ReplayReport = {
       candidates: manifest.entries.length,
       targets: targets.length,
@@ -197,8 +205,11 @@ export async function replayVintage(
       report.failures.push({
         ...where,
         detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
-          `carries NO source path, so it cannot be mapped to a file to apply — ` +
-          `it was recorded but NOT validated`,
+          `cannot be mapped to a file to apply (${
+            entry.main === undefined
+              ? "no source path"
+              : `"${entry.main}" is not repo-root-relative`
+          }) — it was recorded but NOT validated`,
       });
     }
 
@@ -216,10 +227,24 @@ export async function replayVintage(
         });
         continue;
       }
-      const pattern = await runtimeVintage.runtime.patternManager
-        .compilePattern(program as never, {
-          space: runtimeVintage.space as never,
+      // Guarded for the same reason `resolve` above is: this loop compiles EVERY
+      // recorded target's file, including nested sub-pattern modules, so one that
+      // no longer compiles — or exports no `default` — must be a reported finding
+      // for that entry, not an exception that aborts the remaining entries and
+      // every later fixture with them.
+      let pattern;
+      try {
+        pattern = await runtimeVintage.runtime.patternManager
+          .compilePattern(program as never, {
+            space: runtimeVintage.space as never,
+          });
+      } catch (error) {
+        report.failures.push({
+          ...where,
+          detail: `${entry.main} no longer compiles: ${describeError(error)}`,
         });
+        continue;
+      }
       const today = runtimeVintage.runtime.patternManager
         .getArtifactEntryRef(pattern)?.identity;
       // Unchanged identity, no migration to exercise. This is the common case
@@ -250,6 +275,20 @@ export async function replayVintage(
           detail:
             `updating ${entry.main} (${entry.symbol}) over this vintage ` +
             `was REFUSED:\n      ${outcome.error}`,
+        });
+        continue;
+      }
+      // A migration can apply without being refused and still leave the root
+      // reading as nothing — the state gone rather than rejected. "Not refused"
+      // and "the root still reads" are two claims, and the gate's own header
+      // promises both, so both are checked. Per TARGET, not once per fixture:
+      // `vintageRootHasState` above is a pre-check on the well-known capture
+      // root, which says nothing about the nested cell each entry names.
+      if (outcome.value === undefined) {
+        report.failures.push({
+          ...where,
+          detail: `updating ${entry.main} (${entry.symbol}) was not refused, ` +
+            `but the root now reads as undefined — the vintage's state is gone`,
         });
         continue;
       }
@@ -400,11 +439,13 @@ export async function captureVintage(
     // waiting for the replay to fail on it. The replay does fail closed, but it
     // would do so on whoever's PR next ran the gate; catching it here blames the
     // capture that created it, when the cause is still in hand.
-    const sourceless = entries.filter((e) => e.main === undefined);
+    const sourceless = entries.filter(
+      (e) => e.main === undefined || !e.main.startsWith("/"),
+    );
     if (sourceless.length > 0) {
       throw new Error(
         `cannot capture ${patternKey}: ${sourceless.length} of ` +
-          `${entries.length} instantiation(s) carry no source path (${
+          `${entries.length} instantiation(s) cannot be mapped to a file (${
             sourceless.map((e) => `${e.identity}#${e.symbol}`).join(", ")
           }), so the fixture would record roots the replay cannot map to a file`,
       );
