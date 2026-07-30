@@ -8,11 +8,18 @@ as work proceeds: check off exit criteria, record scope changes.
 (#5147): WS-D gains D5 (refuse an absent payload the verb provably cannot run
 without) and D6 (the default-relaxation helper moves next to the runner's
 validator so C5 shares it instead of re-implementing it), and WS-E records
-that pre-dispatch refusals must join the `VerbError` code taxonomy when codes
-reach the invocation surface, so agents branch on one signal. Later the same
-day, D5's open question was measured (see its bullet): absent events bypass
-default materialization entirely, narrowing D5's remaining choice to
-refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`.
+that pre-dispatch refusals must join the typed-rejection code taxonomy when
+codes reach the invocation surface, so agents branch on one signal. Later the
+same day, D5's open question was measured (see its bullet): absent events
+bypass default materialization entirely, narrowing D5's remaining choice to
+refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`. A third pass
+records the C1 review decisions: no bespoke `VerbError` — a separate
+`FabricError` effort is underway, the rule-4 carrier will derive from it, and
+C1 ships without one; `handler` carries the same explicit-only declared-result
+overloads as `action`, reversing the action-only record (both in WS-C); D5's
+absence rule settles as normalize-absent-to-`{}`; the reactive-readback claim
+is re-confirmed; and the compiled-pattern receipt readback is pinned as a
+runner test beside D4's fixture.
 
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
@@ -157,19 +164,67 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   one is. So the rule to author against is: publish as few names as the verb
   can live with, and make every later addition optional. The design doc's
   matching paragraph is corrected the same way.
-- **`action` is the sole result-authoring surface.** `handler()` produces
-  `HandlerFactory<T, E, void>`, so a returning verb written with `handler`
-  does not compile against a `Stream<E, R>` annotation. Deliberate: `action`
-  is the CTS-native surface a pattern author writes, `handler` the lower-level
-  escape hatch, and threading `R` through both would double a hand-maintained
-  mirror that already drifts. C2's returning-body error must point authors at
-  `action` rather than merely rejecting the body.
-- **api:** `action` overloads accept a return type (today both overloads type
+- **Both `action` and `handler` author results; the invariant is
+  explicit-only, not which surface.** Reversed in the C1 review (Berni,
+  2026-07-30) from an earlier action-only record: `handler` gains the same
+  declared-result overloads — `handler<E, T, R>(...)`, reached only by naming
+  all three type arguments — so a returning verb compiles against
+  `Stream<E, R>` from either surface. What survives from the old rationale is
+  the mirror-drift worry, converted into a test obligation: the overloads
+  exist in both hand-maintained halves (api `HandlerFunction`,
+  `builder/module.ts`), each pinned where its consumer touches it
+  (`handler-function-surface.test.ts` on the pattern-facing side,
+  `handler-overload-types.test.ts` on the builder side). The `=> any` forms
+  absorb every inferred callback first, so an incidental return still never
+  declares a result. C2's returning-body error points at declaring the
+  result, on whichever surface the author used.
+- ~~**api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void` — the `action()` overloads in
-  `packages/runner/src/builder/module.ts`); `Stream<T, R = void>`
+  `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
-  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
-  message }` type for rule 4's typed rejections.
+  keeps every existing `Stream<E>` use compiling.~~ — **done (C1)**.
+
+  **No bespoke `VerbError` — rule 4's typed carrier is deferred** (review,
+  2026-07-30): a separate `FabricError` effort is underway and the
+  verb-rejection type will derive from it rather than being its own class.
+  C1 briefly carried a `VerbError { code, message }` and dropped it. Until
+  the derived carrier exists, a rejection is a thrown `Error` whose message
+  reaches the caller as prose, and stable codes wait; WS-E's taxonomy bullet
+  binds to the derived type when it lands.
+
+  Verb-shaped type parameters read one way throughout: **`E`** the event,
+  **`R`** the declared result, **`T`** the handler's bound state where there
+  is one. `Handler`/`HandlerFactory`'s second parameter was spelled `R` while
+  it meant the event.
+
+  **A result is opt-in by explicit type argument — `action<E, R>(...)` —
+  never inferred.** A concise arrow body's completion value is whatever its
+  last call returns, and `Cell.set` returns the cell, so inference would
+  declare results nobody wrote. TypeScript cannot tell that from a deliberate
+  return, so overload 2 absorbs every callback and a result must be asked for
+  by name. Contextual typing does not reach it either: annotating the binding
+  still selects overload 2 and fails to assign — the intended catch.
+
+  **Type-level stream detection is brand-based** — `AnyStream`
+  (`AnyBrandedCell<any, "stream">`), with `StreamEventOf` / `StreamResultOf`
+  recovering the halves. A guard spelled `[T] extends [Stream<any>]` pins the
+  arity: it means `Stream<any, void>`, which a verb declaring a result does
+  not satisfy, so every such guard stopped matching the moment a result
+  existed. It failed silently and late — a value-less stream still matches,
+  and value-less is every stream in the tree today, so the workspace
+  type-checked clean while the break waited for the first `action<E, R>`
+  user. This converges the type layer on what the other two already do, which
+  is why neither broke: the runtime reads the cell kind, the schema generator
+  reads `CELL_BRAND`. Rewriting to `Stream<any, any>` was rejected — it
+  re-arms the same trap for a third parameter.
+
+  **Rebuild sites remain the fragile surface.** Pass-through guards preserve
+  `T` whole and are arity-independent now, but anything reconstructing a
+  stream still names both parameters, so a future axis would be dropped there
+  even though detection survives. The tripwire is
+  `stream-through-utilities.test.ts`: it asserts the api's own utilities
+  preserve a returning stream identically, and fails when a guard is
+  reverted.
 - **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
   alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
   only the schema layer interprets, which is tempting because it leaves
@@ -300,14 +355,20 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
-  reactive returns are readable in the receipt cell.
+  reactive returns are readable in the receipt cell. The plain half of that
+  readback is pinned at the runner already — `declared-result-e2e.test.ts`
+  compiles a declared-result pattern through the real pipeline and reads the
+  receipt back through `tx.handlingReceiptLink`, both flag states — landed
+  with C1 per review (2026-07-30) in addition to D4's fixture, which stays
+  the end-to-end criterion.
 - **The reactive half of that exit needs no new machinery** (Berni,
   2026-07-29): `await cell.pull()` on the receipt already ensures the pattern
   on that cell, if there is one, has run. The readback the CLI performs is
   therefore the same call for a plain return and a launched one, and the
   difference stays inside `pull()`. Recorded rather than assumed — the claim
   is the architect's about his own machinery, and this plan has not yet
-  exercised a reactive return end to end.
+  exercised a reactive return end to end. Re-confirmed by Berni in the C1
+  review round (2026-07-30).
 
 ### WS-D — invocation plumbing
 
@@ -429,10 +490,16 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   `undefined` and the receipt still spends the id even when every required
   property carries a default. Relaxation is therefore honest for present
   payloads and the wrong lens for the absence decision: an all-defaulted
-  `required` list does not make absence deliverable. D5 settles, at the
-  top of its PR, whether that corner refuses on **unrelaxed** `required`
-  or normalizes an absent payload to `{}` so defaults engage; the measured
-  behavior belongs in the helper's doc comment either way. Plumbing reuses
+  `required` list does not make absence deliverable. **Settled (Berni,
+  2026-07-30): normalize an absent payload to `{}`** where the verb's schema
+  is an object schema, so defaults engage and absence flows through the same
+  gate as any payload — `{}` fails the relaxed schema exactly when top-level
+  `required` survives relaxation, so the refusal set the rule above
+  describes is unchanged; what changes is the fail-open corner, which now
+  delivers a defaults-populated object instead of `undefined`. Boolean
+  `false` and non-object schemas keep today's absent-passes behavior —
+  normalization applies only where an object schema makes `{}` meaningful.
+  The measured behavior belongs in the helper's doc comment. Plumbing reuses
   `VerbInputValidationError` with a detail that says no payload was supplied
   and names the missing requirement ("send a payload" must read differently
   from "fix your payload"); both entry points (piece call and mounted exec)
@@ -487,9 +554,11 @@ open-world); the collection linked from the piece with pattern-declared range +
 default and read-and-expire.
 
 - **One rejection taxonomy.** Two "fix your input" signals exist ahead of
-  this workstream: `VerbInputValidationError` (CLI pre-dispatch refusal,
-  carries no code) and `VerbError { code }` (in-verb rule-4 rejection, C1).
-  When this workstream puts codes on the invocation surface, the
+  this workstream, and today neither carries a stable code:
+  `VerbInputValidationError` (CLI pre-dispatch refusal) and a thrown `Error`
+  in the verb body (rule 4's rejection, whose typed carrier is deferred to
+  derive from `FabricError` — see WS-C). When this workstream puts codes on
+  the invocation surface, the `FabricError`-derived rejection type and the
   pre-dispatch refusal must speak the same taxonomy — e.g. a reserved
   `INVALID_INPUT` code — so an agent branches one way, not two. Recorded so
   the convergence is a plan, not a rediscovery; no code field ships before
@@ -655,7 +724,7 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | A1 | topics: body at create + thrown rejections | S | — |
 | A2 | topics: reference-plus-summary discovery index | S | — |
 | B1 | cli: sink-based settlement, result cell address | S | — |
-| C1 | api: action return types, `Stream<T, R>`, VerbError | M | — |
+| C1 | api: action return types, `Stream<E, R>` (rejection carrier deferred to `FabricError`) | M | — |
 | C2 | ts-transformers: value-returning action lowering + CTS spec | M | C1 |
 | C3 | schema-generator: result schemas for streams + mapping spec | M | C1 |
 | C4 | runner: plain-return projection behind flag + registry entry | S | — |

@@ -667,10 +667,13 @@ the evolution reason previously given.
 
 ```tsx
 // Shown for illustration only.
-const addTopic = action(
-  ({ title, body }: AddTopicInput): AddTopicResult => {
+// The result is declared by explicit type arguments — never inferred from
+// the body, and a return-type annotation on the callback alone does not
+// declare one.
+const addTopic = action<AddTopicInput, AddTopicResult>(
+  ({ title, body }) => {
     const trimmed = (title ?? "").trim();
-    if (!trimmed) throw new VerbError("EMPTY_TITLE", "title must be non-empty");
+    if (!trimmed) throw new Error("title must be non-empty");
     const piece = Topic({ title: trimmed, body, mentionable: topics });
     topics.push(piece);
     return { topic: piece };
@@ -678,9 +681,13 @@ const addTopic = action(
 );
 ```
 
-`throw` becomes `status: "failed"` with the code; `return` becomes
-`status: "settled"` with the result. Only settlement is durable — a failed
-status is returned to the caller, not recorded (Retries and failure).
+`throw` becomes `status: "failed"`; `return` becomes `status: "settled"` with
+the result. Only settlement is durable — a failed status is returned to the
+caller, not recorded (Retries and failure). The typed-rejection carrier that
+puts a stable `code` beside the message is deliberately not minted as its own
+class: a separate `FabricError` effort is underway, and the verb-rejection
+type will derive from it. Until then a rejection is a plain thrown `Error`
+and the message is the whole signal.
 
 ### Verb discovery
 
