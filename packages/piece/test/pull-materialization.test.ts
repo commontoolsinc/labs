@@ -1885,6 +1885,52 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("re-roots through compound intermediate asCell schemas", async () => {
+    const detailsSchema = {
+      type: "object",
+      properties: {
+        kind: { const: "number" },
+        value: { type: "number" },
+      },
+      required: ["kind", "value"],
+    } as const satisfies JSONSchema;
+    const compoundCellSchema = {
+      anyOf: [
+        { ...detailsSchema, asCell: ["cell"] },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "text" },
+            value: { type: "string" },
+          },
+          required: ["kind", "value"],
+          asCell: ["cell"],
+        },
+      ],
+    } as const satisfies JSONSchema;
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { handle: compoundCellSchema },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: { kind: "number", value: 7 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+
+    await withInputRootPullSpy(manager, targetPiece, async (rootPulls) => {
+      expect(await controller.input.get(["handle", "value"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
   it("preserves missing-path diagnostics through the narrow fallback", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),

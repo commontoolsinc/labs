@@ -36,6 +36,7 @@ import {
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
 import type { CellKind, LinkScope } from "@commonfabric/api";
+import { SchemaObjectTraverser } from "@commonfabric/runner/traverse";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
@@ -2265,24 +2266,26 @@ class PiecePropIo implements PieceCellIo {
       for (const [index, segment] of path.entries()) {
         selectedCell = cellAtPath(selectedCell, [segment]);
         const isLast = index === path.length - 1;
-        const isAsCellProjection = ContextualFlowControl.getAsCellValues(
+        const isAsCellProjection = SchemaObjectTraverser.hasAsCell(
           selectedCell.schema,
-        ).length > 0;
+        );
         // Ordinary inline ancestors need no read: extending their schema/path
         // keeps the final query as narrow as possible. An asCell ancestor must
         // be materialized so the rest of the path can move to its handle.
         if (!isLast && !isAsCellProjection) continue;
 
         await selectedCell.pull();
+        if (isAsCellProjection) {
+          const handle = selectedCell.resolveAsCell();
+          if (isLast) return await handle.pull();
+          selectedCell = handle;
+          continue;
+        }
         const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
         if (selected === undefined) {
           return await this.#getFromRoot(targetCell, path);
         }
-        if (isLast) {
-          return isCell(selected) ? await selected.pull() : selected;
-        }
-        if (!isCell(selected)) return await this.#getFromRoot(targetCell, path);
-        selectedCell = selected;
+        return isCell(selected) ? await selected.pull() : selected;
       }
     }
     return await this.#getFromRoot(targetCell, path ?? []);
