@@ -135,6 +135,7 @@ export {
   getPatternSource,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
+  isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
   type PieceSourceRevision,
@@ -147,6 +148,7 @@ export {
   schemaHasDefaultValue,
   setPatternRepository,
   setPatternSource,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)

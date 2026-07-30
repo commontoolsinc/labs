@@ -6,6 +6,7 @@ import {
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
   getPieceSourceSnapshot,
+  isStoredArgumentSchemaRefusal,
   type JSONSchema,
   type ModuleByteCache,
   type PatternCoverageCollector,
@@ -67,9 +68,11 @@ export type UpdateOutcome = PatternUpdateOutcome;
  * A cold-start setup repair failed specifically because the CFC SCHEMA
  * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
  * the reused doc onto a now-required field that carries no default (the estuary
- * `favorites` case). This is the ONLY repair-failure class the runnability
- * backstop ({@link PiecesController.healDefaultRootByRollForward}) acts on;
- * every other failure stays fail-closed.
+ * `favorites` case). This is ONE of the two repair-failure classes the
+ * runnability backstop ({@link PiecesController.healDefaultRootByRollForward})
+ * acts on — the other is a refused stored argument
+ * ({@link isStoredArgumentSchemaRefusal}); every other failure stays
+ * fail-closed.
  *
  * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
  * runner emits it for prepared-digest races, unprepared transactions, and
@@ -628,11 +631,19 @@ export class PiecesController<T = unknown> {
       // covers docs ALREADY left in that state by an earlier session: their
       // identity compares current, so no further swap will ever fire.
       //
-      // run() (setup + start) is the sanctioned repair: with an unchanged
-      // pattern pointer the setup phase is idempotent — it only materializes
-      // missing internal cells and writes no argument (none supplied). Fail
-      // closed: if the repair cannot proceed or fails, surface the ORIGINAL
-      // start error; nothing is torn down or overwritten.
+      // run() (setup + start) is the sanctioned repair. With an unchanged
+      // pattern pointer the setup phase is near-idempotent: it materializes
+      // missing internal cells and supplies no argument. It is not a complete
+      // no-op on the doc this repair exists for, and deliberately so — a root
+      // whose identity moved without setup also carries a stale
+      // `patternSetupIdentity`, so setup re-points the stored argument at the
+      // pattern's argument schema and validates it (`storedSetupMarker` in
+      // the runner), which is the staging the skipped update never did. That
+      // makes a stored argument the pinned pattern cannot read a REPAIR
+      // failure, classified and escalated below rather than left to surface as
+      // an unreadable value at every later read. Fail closed: if the repair
+      // cannot proceed or fails for its own reasons, surface the ORIGINAL start
+      // error; nothing is torn down or overwritten.
       const runtime = this.#manager.runtime;
       const ref = getPatternIdentityRef(rootToStart);
       if (ref === undefined) throw startError;
@@ -680,30 +691,59 @@ export class PiecesController<T = unknown> {
             }),
         );
       } catch (repairError) {
-        // Escalate to the RUNNABILITY backstop on EXACTLY one signal: the
-        // pinned pattern LOADS but its setup-commit was REJECTED BY THE CFC
-        // MIGRATION — the estuary case, where an old root's required field
-        // predates its `Default<>` or a handler stream predates its exemption.
-        // "Loadable" is not "runnable"; re-running the same identity can only
-        // fail identically, so roll the root forward to the space's CURRENT
-        // official pattern (which migrates the reused doc cleanly). This fires
-        // only on a failed migration, so a root that already runs — current
-        // official, or a custom root that migrates cleanly — never reaches it,
-        // and custom-root protection is preserved for free.
+        // Escalate to the RUNNABILITY backstop on TWO signals, and only those.
+        // The first: the pinned pattern LOADS but its setup-commit was REJECTED
+        // BY THE CFC MIGRATION — the estuary case, where an old root's required
+        // field predates its `Default<>` or a handler stream predates its
+        // exemption. "Loadable" is not "runnable"; re-running the same identity
+        // can only fail identically, so roll the root forward to the space's
+        // CURRENT official pattern (which migrates the reused doc cleanly).
+        // Neither signal fires for a root that already runs — current official,
+        // or a custom root that migrates cleanly — so custom-root protection is
+        // preserved for free.
+        //
+        // A refused STORED ARGUMENT is the same class of evidence and escalates
+        // the same way. Setup re-points the argument at the pinned pattern's
+        // schema when the doc was staged by another version, and a refusal says
+        // that pattern cannot read its own root — re-running it refuses
+        // identically, so without this the root would be pinned to a version
+        // whose setup can never complete and the space would stop opening.
+        //
+        // Both classifiers read the error, not the document it came from, so a
+        // refusal raised while instantiating a NESTED piece under this root
+        // reads the same as one raised for the root itself. That is a property
+        // of classifying by message rather than by origin, and it is shared
+        // with the CFC trigger; narrowing it means carrying the failing
+        // document through the setup boundary.
         //
         // Any OTHER repair failure (transient storage/commit error, backend
         // unavailable, …) is NOT evidence the pinned pattern is wrong. It stays
         // FAIL-CLOSED: surface the ORIGINAL start error, change nothing, let
         // the next boot retry. This gate is what keeps a transient blip from
         // swapping a healthy root's identity out from under it.
-        if (!isCfcMigrationRejection(repairError)) {
+        const migrationRejected = isCfcMigrationRejection(repairError);
+        if (!migrationRejected && !isStoredArgumentSchemaRefusal(repairError)) {
+          // Log before discarding it. The thrown error is the ORIGINAL start
+          // failure, so a repair that failed for its own reason would otherwise
+          // leave the operator reading a stack about the symptom that triggered
+          // the repair rather than the reason the repair did not work.
+          pieceUpdateLogger.warn(
+            "cold-start-setup-repair-error",
+            () => [
+              "startEnsuredDefaultPattern: setup repair failed for an " +
+              "unrelated reason; surfacing the original start error",
+              `${ref.identity}#${ref.symbol}`,
+              repairError,
+            ],
+          );
           throw startError;
         }
         pieceUpdateLogger.warn(
           "cold-start-setup-repair-failed",
           () => [
-            "startEnsuredDefaultPattern: setup repair rejected by CFC " +
-            "migration; rolling forward",
+            `startEnsuredDefaultPattern: setup repair rejected by ${
+              migrationRejected ? "CFC migration" : "argument validation"
+            }; rolling forward`,
             `${ref.identity}#${ref.symbol}`,
             repairError,
           ],
@@ -729,11 +769,14 @@ export class PiecesController<T = unknown> {
 
   /**
    * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
-   * repair. Reached only when the pinned pattern's OWN setup repair was
-   * REJECTED BY THE CFC MIGRATION (gated by {@link isCfcMigrationRejection}) —
-   * a root that loads but cannot run (the estuary `favorites`/handler-stream
-   * case). Rolls the root forward to the space's CURRENT official pattern and
-   * materializes THAT over the reused doc.
+   * repair. Reached only when the pinned pattern's OWN setup repair failed in a
+   * way that re-running it cannot fix — a root that loads but cannot run.
+   * Exactly two signals qualify: the CFC migration rejected the commit (gated
+   * by {@link isCfcMigrationRejection} — the estuary `favorites`/handler-stream
+   * case), or setup refused the root's stored argument (gated by
+   * {@link isStoredArgumentSchemaRefusal} — the pinned version's schema cannot
+   * read its own document). Rolls the root forward to the space's CURRENT
+   * official pattern and materializes THAT over the reused doc.
    *
    * Outcome is one of exactly two, each legible — no operator left
    * reverse-engineering scattered `$stream`/`needs a default` messages:
@@ -768,10 +811,16 @@ export class PiecesController<T = unknown> {
     const officialUrlPath = deriveSystemPatternUrl(space, runtime);
     const msg = (error: unknown) =>
       error instanceof Error ? error.message : String(error);
+    // Name the check that actually refused. Two signals escalate to this heal —
+    // a CFC migration rejection and a refused stored argument — and reporting
+    // the second as a migration failure sends the reader to the wrong guard.
+    const pinnedFailure = isStoredArgumentSchemaRefusal(migrationError)
+      ? "could not read its stored argument"
+      : "failed CFC migration";
     const clearError = (reason: string, cause: unknown) =>
       new Error(
         `default-root heal failed for ${space}: pinned pattern ` +
-          `${pinnedRef.identity}#${pinnedRef.symbol} failed CFC migration ` +
+          `${pinnedRef.identity}#${pinnedRef.symbol} ${pinnedFailure} ` +
           `(${msg(migrationError)}) and roll-forward to official ` +
           `${officialUrlPath} ${reason}`,
         { cause },
@@ -829,8 +878,8 @@ export class PiecesController<T = unknown> {
     ) {
       throw clearError(
         `is already the pinned entry ${officialRef.identity}#` +
-          `${officialRef.symbol}, so the migration cannot be repaired by ` +
-          `rolling forward`,
+          `${officialRef.symbol}, so this cannot be repaired by rolling ` +
+          `forward`,
         migrationError,
       );
     }
@@ -939,8 +988,16 @@ export class PiecesController<T = unknown> {
           }),
       );
     } catch (materializeError) {
+      // The official pattern cannot take this doc either — the end of the line.
+      // Name which check refused rather than always saying "CFC migration": an
+      // argument refusal reaches here too, and reporting that as a migration
+      // failure sends the reader to the wrong guard.
       throw clearError(
-        `also failed CFC migration (${msg(materializeError)})`,
+        `also failed ${
+          isCfcMigrationRejection(materializeError)
+            ? "CFC migration"
+            : "to materialize"
+        } (${msg(materializeError)})`,
         materializeError,
       );
     }
