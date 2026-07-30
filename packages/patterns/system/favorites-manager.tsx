@@ -13,7 +13,7 @@ import {
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
-  tag: string;
+  tag?: string;
   userTags: Writable<string[]>;
   spaceName?: string;
   // Stable key the favorite entity is addressed by (the piece's identity),
