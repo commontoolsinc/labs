@@ -1829,6 +1829,42 @@ minter reachable from a builtin writes a meta path this survey missed. The
 enumeration above covers `makeResultCell` and the two other
 `setResultCell` callers, not every conceivable mint path.
 
+### 5h.5 The gating metric was wrong — count discarded work, not just unattempted work
+
+**Correction to §5h's own framing**, forced by the demand-closure roll-up
+(`3a48d6731`) and worth fixing because as written the metric penalises
+improvements.
+
+§5h established the **never-claimed set** as the arc's gate, measured by
+`candidateUnservedByCode`. That counter sees only one of the two ways an
+action fails to be served:
+
+| | what happened | where it shows |
+| --- | --- | --- |
+| **never attempted** | classifier declined up front; no run, no commit | `candidateUnservedByCode` |
+| **attempted, then discarded** | classified servable, claimed, **ran**, built a commit, sent it — and the engine rejected it | `actionFirewallRejects`, `commit-rejected:*` |
+
+**The second is strictly worse than the first** — it burns a run and a
+commit round trip to reach the same non-result — yet only the first is in
+the gate.
+
+So a change that moves work from the second column to the first makes the
+gate number **rise** while behaviour improves. That is exactly what
+`3a48d6731` did: aligning the classifier's write rule with the engine's
+(exact-lane, not chain-admitting) converted ~6 engine firewall rejects
+into 1 clean pre-commit unserve, and the session arm's
+`candidateUnservedByCode` went 4 → 7.
+
+**The gate is therefore `candidateUnservedByCode` PLUS
+`actionFirewallRejects` PLUS `commit-rejected:*`** — total work not
+served, however it failed. Quoting the first alone is what made a
+tightening look like a regression.
+
+**A related reading rule.** `settlementsCommitted` is the positive signal
+and should be quoted beside the negative one. In `3a48d6731` it went
+8 → 20 (user arm) and 15 → 28 (session arm) — nearly doubling the work
+actually served — which no unserved-count framing would have surfaced.
+
 ### 5h.4 D11 amended — run all scopes on the server; discover scope by running
 
 **Owner, 2026-07-29**, prompted by the `map` diagnosis arriving as "two
