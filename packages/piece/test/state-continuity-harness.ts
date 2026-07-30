@@ -545,6 +545,15 @@ export async function readVintageState(
 }
 
 /**
+ * The result keys that hold a RENDERING rather than state.
+ *
+ * Taken from the runner's own constants rather than spelled as strings here:
+ * the set of UI variants is the runtime's to define, and a copy would silently
+ * stop matching the day a variant is added.
+ */
+const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
+
+/**
  * Keys whose value the update did not preserve.
  *
  * Only keys present BEFORE are compared: an update may legitimately ADD a
@@ -616,13 +625,20 @@ export function strandedKeys(
 }
 
 /**
- * The result keys that hold a RENDERING rather than state.
+ * Whether a root value counts as STATE rather than nothing.
  *
- * Taken from the runner's own constants rather than spelled as strings here:
- * the set of UI variants is the runtime's to define, and a copy would silently
- * stop matching the day a variant is added.
+ * One predicate, shared by the pre-check below and by the replay's post-check on
+ * each migrated root — the two ask the same question, and answering it two ways
+ * is how "the root reads as something" comes to mean different things at the two
+ * ends of the same run.
  */
-const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
+export function isPresentRootValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  // An object with no keys is what a fresh space yields for a doc nobody
+  // wrote, so it is not evidence either.
+  return typeof value !== "object" ||
+    Object.keys(value as Record<string, unknown>).length > 0;
+}
 
 /**
  * Whether a restored fixture's root already holds state.
@@ -641,22 +657,6 @@ const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
  * fixture is named for — an identity check would reject every fixture the
  * capture produces.
  */
-/**
- * Whether a root value counts as STATE rather than nothing.
- *
- * One predicate, shared by the pre-check below and by the replay's post-check on
- * each migrated root — the two ask the same question, and answering it two ways
- * is how "the root reads as something" comes to mean different things at the two
- * ends of the same run.
- */
-export function isPresentRootValue(value: unknown): boolean {
-  if (value === undefined || value === null) return false;
-  // An object with no keys is what a fresh space yields for a doc nobody
-  // wrote, so it is not evidence either.
-  return typeof value !== "object" ||
-    Object.keys(value as Record<string, unknown>).length > 0;
-}
-
 export async function vintageRootHasState(
   vintage: VintageRuntime,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
