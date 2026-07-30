@@ -24,6 +24,7 @@ import {
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import { strandedKeys } from "../packages/piece/test/state-continuity-harness.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 const ID_A = "bafyaaaa";
 const ID_B = "bafybbbb";
@@ -416,5 +417,50 @@ describe("stranded-state comparison", () => {
     // restore" control is what catches an empty fixture; this must not
     // double-report it as data loss.
     expect(strandedKeys({}, { items: ["a"] })).toEqual([]);
+  });
+
+  it("does not compare the RENDERINGS", () => {
+    // `$UI` and its variants are recomputed by the setup, and the stored
+    // rendering and a fresh one are not the same artifact — measured on the
+    // committed `default-app.tsx` fixture, a COMMENT-only edit to
+    // `piece-grid.tsx` reports `$UI` as stranded. Comparing them says nothing
+    // about data and reds every pattern edit.
+    expect(strandedKeys(
+      { $UI: { children: [null] }, $TILE_UI: { a: 1 }, $CHIP_UI: 1, items: [] },
+      { $UI: { children: [[]] }, $TILE_UI: { a: 2 }, $CHIP_UI: 2, items: [] },
+    )).toEqual([]);
+  });
+
+  it("still compares $NAME, which is derived but stable", () => {
+    // The exclusion is the renderings, NOT derived values in general: `$NAME`
+    // stayed equal across both measured UI-only edits, and it is a cheap tell
+    // that the data behind it went missing.
+    expect(strandedKeys({ $NAME: "Home (2)" }, { $NAME: "Home (0)" }))
+      .toEqual(["$NAME"]);
+  });
+
+  it("compares a fabric value by its CONTENTS", () => {
+    // The quietest failure this comparison could have. A fabric special object
+    // keeps its state in private fields, so a structural comparison sees two
+    // objects with no properties and calls them equal whatever they hold —
+    // `deepEqual` documents exactly that. Reduced to a tagged content hash
+    // first, so a changed one is a finding and an unchanged one is not.
+    const held = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const identical = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const different = new FabricBytes(new Uint8Array([9, 9, 9]));
+    expect(strandedKeys({ blob: held }, { blob: identical })).toEqual([]);
+    expect(strandedKeys({ blob: held }, { blob: different })).toEqual(["blob"]);
+  });
+
+  it("survives a value that points back at itself", () => {
+    // A materialized root can be cyclic — the live cell at every stream
+    // position reaches the runtime, which reaches itself. Left in, the
+    // comparison recurses until the stack ends and takes every remaining
+    // fixture down with it.
+    const before: Record<string, unknown> = { items: ["a"] };
+    before.self = before;
+    const after: Record<string, unknown> = { items: ["a"] };
+    after.self = after;
+    expect(strandedKeys(before, after)).toEqual([]);
   });
 });

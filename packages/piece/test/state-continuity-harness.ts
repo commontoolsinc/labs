@@ -47,14 +47,21 @@ import {
 } from "../../runner/src/storage/v2.ts";
 import {
   type Cell,
+  CHIP_UI,
   getPatternSetupIdentityRef,
+  isCell,
+  isStream,
   Runtime,
+  TILE_UI,
+  UI,
 } from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
-// Fabric-aware detach + compare. A JSON round-trip is lossy on exactly the
-// values a durable doc may hold (FabricBytes and epoch wrappers collapse to
-// `{}`, a bigint throws) and its string comparison is key-order sensitive.
-import { snapshotQueryResult } from "../../runner/src/query-result-proxy.ts";
+// The comparison's two leaf cases. A materialized root is not plain data: at an
+// `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
+// a fabric special object (bytes, an epoch). Neither survives a structural
+// comparison unaided — see `comparableState`.
+import { FabricSpecialObject } from "@commonfabric/data-model/interface";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
@@ -396,6 +403,83 @@ export async function vintageArgumentLink(
   return link;
 }
 
+/** What a cycle in a materialized root becomes. Structural, so two of them
+ * compare equal, and JSON-safe, so a report can print it. */
+const CYCLE = Object.freeze({ "[cycle]": true });
+
+/**
+ * A materialized root, detached and reduced to something two of can be
+ * COMPARED.
+ *
+ * A materialized root is not plain data, and three of the things in it defeat a
+ * structural comparison outright:
+ *
+ * - **A live cell.** At every `asCell`/`asStream` position — the six handler
+ *   streams on `home.tsx`'s root, among others — the read yields a `Cell`,
+ *   whose own enumerable properties include `runtime`. A generic deep copy
+ *   therefore copies the whole runtime object graph into the snapshot, cycles
+ *   and all. Measured on the committed `home.tsx` fixture: the copy is cyclic
+ *   (`scheduler` → `runtime` → back), `JSON.stringify` on it throws, and the
+ *   copy compares UNEQUAL to the live cell it came from because one side is a
+ *   plain object and the other a class instance — so every stream key reports
+ *   as stranded and printing the finding takes the run down with it. Reduced
+ *   here to the DOCUMENT the cell points at, which is the durable thing about
+ *   it: a stream that moved to a different doc still shows up, and the schema
+ *   is deliberately dropped, being a view rather than data.
+ * - **A fabric special object** (`FabricBytes`, an epoch). These hold their
+ *   state in private fields, so a structural comparison sees two objects with
+ *   no properties and calls them equal REGARDLESS of contents —
+ *   `deepEqual`'s own documentation says so, and it is the quietest way a
+ *   comparison can pass. Reduced to a tagged content hash, which is the
+ *   data-model's own notion of equality for them (`valueEqual` ends in the same
+ *   hash) without needing a comparator that also has to survive link sigils.
+ * - **A cycle.** Even with cells reduced, the data itself may point back at
+ *   itself; `deepEqual` recurses until the stack ends. Cut with a marker rather
+ *   than by sharing the copy, so what comes out of here is acyclic — which is
+ *   what lets a failure report stringify it.
+ *
+ * Everything else is copied plainly, and `bigint` and `undefined` pass through
+ * as themselves — the two values a JSON round-trip could not carry.
+ *
+ * Idempotent: run over its own output it returns an equal structure, so a
+ * caller that normalizes early and a caller that normalizes late agree.
+ */
+export function comparableState(value: unknown): unknown {
+  // Cycle detection is per-PATH, not per-value: a shared subtree is expanded at
+  // each place it appears, which keeps the copy an honest picture of what was
+  // read. Only a genuine loop is cut.
+  const onPath = new Set<object>();
+  const walk = (current: unknown): unknown => {
+    if (current === null || typeof current !== "object") return current;
+    if (current instanceof FabricSpecialObject) {
+      return { "[fabric]": taggedHashStringOf(current) };
+    }
+    if (isCell(current) || isStream(current)) {
+      const link = current.getAsNormalizedFullLink();
+      return {
+        "[cell]": {
+          space: link.space,
+          id: link.id,
+          path: [...link.path],
+        },
+      };
+    }
+    if (onPath.has(current)) return CYCLE;
+    onPath.add(current);
+    try {
+      if (Array.isArray(current)) return current.map(walk);
+      const copy: Record<string, unknown> = {};
+      for (const key of Object.keys(current)) {
+        copy[key] = walk((current as Record<string, unknown>)[key]);
+      }
+      return copy;
+    } finally {
+      onPath.delete(current);
+    }
+  };
+  return walk(value);
+}
+
 /**
  * A captured root's state, read the way the version that WROTE it saw it.
  *
@@ -405,9 +489,9 @@ export async function vintageArgumentLink(
  * carries its own result schema in meta, so the old version's own view of its
  * data is available without needing its source.
  *
- * Returns a detached deep copy: the live value is a query-result proxy that
- * re-reads through the transaction, so holding it across a materialize would
- * compare the new state against itself.
+ * Returns a detached copy: the live value is a query-result proxy that re-reads
+ * through the transaction, so holding it across a materialize would compare the
+ * new state against itself.
  */
 export async function readVintageState(
   vintage: VintageRuntime,
@@ -431,13 +515,13 @@ export async function readVintageState(
     );
     await typed.sync();
     const value = typed.get();
-    // `snapshotQueryResult`, not a JSON round-trip. The live value is a
-    // query-result proxy that re-reads through the transaction, so it has to be
-    // detached — but detaching via JSON is lossy on exactly the values a durable
-    // doc may hold: `FabricBytes` and epoch wrappers collapse to `{}` (so a
-    // change to one reads as no change), and a `bigint` throws and takes the
-    // whole gate down.
-    const detached = snapshotQueryResult(value);
+    // `comparableState`, not a JSON round-trip and not a generic deep copy. The
+    // live value is a query-result proxy that re-reads through the transaction,
+    // so it has to be detached — but a JSON round-trip is lossy on exactly the
+    // values a durable doc may hold (`FabricBytes` and epoch wrappers collapse
+    // to `{}`, a `bigint` throws), and a generic copy drags the runtime object
+    // graph in behind every live cell.
+    const detached = comparableState(value);
     // Narrow rather than cast. A root is an object in practice, but asserting
     // it would hand `strandedKeys` a non-object to enumerate — and "no keys"
     // reads exactly like "nothing stranded".
@@ -461,35 +545,74 @@ export async function readVintageState(
  * existing key whose value changed is — that is data the old version wrote and
  * the new one no longer reads back.
  *
- * No exclusion list, which is worth stating because the obvious worry is
- * derived projections. Measured on both committed fixtures: applying today's
- * source leaves every key byte-identical, INCLUDING `$UI`, and a UI-only source
- * change still produces no differing keys. So a difference here is signal, and
- * carving out `$UI`/`$NAME` up front would only hide some of it.
+ * The RENDERINGS are excluded, and nothing else. A root's `$UI`/`$TILE_UI`/
+ * `$CHIP_UI` is a projection the setup recomputes, and the stored rendering and
+ * a fresh one are not the same artifact even when nothing about the data
+ * changed: measured on the committed `default-app.tsx` fixture, a COMMENT-only
+ * edit to `piece-grid.tsx` reports `$UI` as stranded — `children: [null]` where
+ * the vintage held it against `children: [[]]` freshly rendered — and the same
+ * edit to `note.tsx` reports `$UI` and `$TILE_UI`, one side carrying a
+ * `type: "vnode"` tag the other does not. Comparing those keys says nothing
+ * about data and reds every pattern edit, so the gate would be turned off
+ * within a week of landing.
+ *
+ * That is the whole list, and it is deliberately not "derived values" in
+ * general: `$NAME` is derived too and stayed equal across both of those edits,
+ * so it is compared — it is a cheap tell that the data behind it went missing.
+ * The cost is real and worth naming: a root whose only key is a rendering
+ * (`profile-picker.tsx`) has nothing left for this check to compare, and rests
+ * on the refusal, completion and reads-as-something checks instead.
+ *
+ * Everything else is compared by SHAPE rather than by name. A value the
+ * comparison cannot see through — a live cell, a fabric special object, a cycle
+ * — is reduced by `comparableState` on both sides rather than skipped.
+ *
+ * Both sides go through it here rather than only at the call site: the before
+ * state arrives already reduced, but the after state is whatever the
+ * materialize returned — a LIVE root value — and comparing a detached copy
+ * against a live one reports every cell-valued key as stranded. It is
+ * idempotent, so normalizing the already-normalized side costs a walk and
+ * removes a way to hold this wrong.
  *
  * Compared with `deepEqual`, not stringified. Serialization is the wrong
  * instrument twice over: it is key-order sensitive, so two equivalent objects
  * whose properties were emitted in a different order would report as stranded,
- * and it cannot represent the Fabric values a durable doc may hold — bytes and
- * epoch wrappers collapse to `{}`, a bigint throws.
+ * and it cannot represent everything a durable doc may hold — a `bigint` throws.
  *
  * `deepEqual` rather than the data-model's `valueEqual`, which is the more
  * obvious choice and does not work here: a schema-driven read leaves LINK
  * SIGILS in place wherever the schema does not descend, and `valueEqual`
  * refuses them outright ("Cannot compare value {\"/\":{\"link@1\":…}}"),
  * taking the whole gate down. Both sides carry sigils in the same shape, so a
- * structural comparison is both sufficient and the only one that survives them.
+ * structural comparison survives them — and the one class `deepEqual` cannot
+ * judge, a fabric special object with its state in private fields, is reduced
+ * to a content hash before it gets here rather than being compared by it.
  */
 export function strandedKeys(
   before: Record<string, unknown>,
-  after: Record<string, unknown> | undefined,
+  after: unknown,
 ): string[] {
+  const beforeState = comparableState(before) as Record<string, unknown>;
+  const afterState = comparableState(after);
+  const afterView = typeof afterState === "object" && afterState !== null
+    ? afterState as Record<string, unknown>
+    : undefined;
   const stranded: string[] = [];
-  for (const key of Object.keys(before)) {
-    if (!deepEqual(before[key], after?.[key])) stranded.push(key);
+  for (const key of Object.keys(beforeState)) {
+    if (RENDERINGS.has(key)) continue;
+    if (!deepEqual(beforeState[key], afterView?.[key])) stranded.push(key);
   }
   return stranded;
 }
+
+/**
+ * The result keys that hold a RENDERING rather than state.
+ *
+ * Taken from the runner's own constants rather than spelled as strings here:
+ * the set of UI variants is the runtime's to define, and a copy would silently
+ * stop matching the day a variant is added.
+ */
+const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
 
 /**
  * Whether a restored fixture's root already holds state.

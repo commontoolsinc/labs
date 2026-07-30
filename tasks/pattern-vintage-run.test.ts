@@ -12,6 +12,7 @@ import {
   type GateRoots,
   isUpgradeTarget,
   replayAll,
+  snippet,
 } from "./pattern-vintage-run.ts";
 
 /**
@@ -33,13 +34,21 @@ const KEY = "vintage-gate-subject.tsx";
  * look green on exactly the change it exists to stop.
  */
 const PRELUDE = [
-  "import { Confidential, Default, Writable, pattern } from 'commonfabric';",
+  "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
   "const ATOM = {",
   "  type: 'https://commonfabric.org/cfc/atom/Resource',",
   "  class: 'VintageGateSubject',",
   "  subject: 'did:example:vintage-gate',",
   "} as const;",
   "type Label = readonly [typeof ATOM];",
+  // A STREAM in the output, because every real pattern has several and a root
+  // holding one is not plain data: the read yields a live cell whose own
+  // properties reach the whole runtime. A subject made only of data cells
+  // cannot exercise that, and a comparison that mishandles it would look
+  // perfectly green here while reporting six false findings on `home.tsx`.
+  "const touch = handler<Record<string, never>, { items: Writable<string[]> }>(",
+  "  (_event, { items }) => { items.push('touched'); },",
+  ");",
 ];
 
 const HEALTHY = [
@@ -47,11 +56,12 @@ const HEALTHY = [
   "export interface Output {",
   "  owner: Confidential<Writable<string>, Label>;",
   "  items: Writable<string[]>;",
+  "  touch: Stream<Record<string, never>>;",
   "}",
   "export default pattern<Record<string, never>, Output>(() => {",
   "  const owner = new Writable<string>('v').for('owner');",
   "  const items = new Writable<string[]>([]).for('items');",
-  "  return { owner, items };",
+  "  return { owner, items, touch: touch({ items }) };",
   "});",
   "",
 ].join("\n");
@@ -62,13 +72,14 @@ const BREAKING = [
   "export interface Output {",
   "  owner: Confidential<Writable<string>, Label>;",
   "  items: Writable<string[]>;",
+  "  touch: Stream<Record<string, never>>;",
   "  addedLater: Writable<string[]>;",
   "}",
   "export default pattern<Record<string, never>, Output>(() => {",
   "  const owner = new Writable<string>('v').for('owner');",
   "  const items = new Writable<string[]>([]).for('items');",
   "  const addedLater = new Writable<string[]>([]).for('addedLater');",
-  "  return { owner, items, addedLater };",
+  "  return { owner, items, touch: touch({ items }), addedLater };",
   "});",
   "",
 ].join("\n");
@@ -626,5 +637,23 @@ describe("the vintage gate, end to end", () => {
         failures.some((f) => f.detail.includes('defines no "Row"')),
       ).toBe(true);
     });
+  });
+});
+
+describe("the stranded-value snippet", () => {
+  it("never throws, whatever the value is", () => {
+    // A report that can take the run down is a report that fails exactly when
+    // it is needed. `JSON.stringify` throws on a `bigint` — a value a durable
+    // doc may hold — and on anything cyclic, and both reach this on the one
+    // path where a finding is being printed.
+    expect(snippet(1n)).toBe('"1n"');
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    expect(typeof snippet(loop)).toBe("string");
+    expect(snippet(undefined)).toBe("undefined");
+  });
+
+  it("keeps a finding short enough to read", () => {
+    expect(snippet("x".repeat(500)).length).toBe(80);
   });
 });

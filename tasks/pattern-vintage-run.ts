@@ -25,6 +25,7 @@ import {
   type VintageRef,
 } from "./pattern-vintage-lib.ts";
 import {
+  comparableState,
   isPresentRootValue,
   materializeOnCell,
   openFileBackedRuntime,
@@ -96,6 +97,27 @@ export function isUpgradeTarget(entry: VintageManifestEntry): boolean {
   if (!entry.main.startsWith("/")) return false;
   if (/\.test\.tsx?$/.test(entry.main)) return false;
   return !entry.identity.startsWith("keyless:");
+}
+
+/**
+ * A stranded value, short enough to sit in a failure line.
+ *
+ * `JSON.stringify` on its own is not safe to call here even though both sides
+ * have been through `comparableState`: `bigint` is a value a durable doc may
+ * hold and stringifying one THROWS. A report that can take the run down is a
+ * report that fails exactly when it is needed, so this can only ever return a
+ * string.
+ */
+export function snippet(value: unknown): string {
+  try {
+    const text = JSON.stringify(
+      value,
+      (_key, item) => typeof item === "bigint" ? `${item}n` : item,
+    );
+    return (text ?? String(value)).slice(0, 80);
+  } catch {
+    return String(value).slice(0, 80);
+  }
 }
 
 /** What replaying one fixture found. */
@@ -331,7 +353,13 @@ export async function replayVintage(
         continue;
       }
       {
-        const stranded = strandedKeys(before, outcome.value);
+        // Reduced ONCE, and the same reduction the comparison makes, so the
+        // report describes the values that were actually compared rather than
+        // the live root they were read from.
+        const after = comparableState(outcome.value) as
+          | Record<string, unknown>
+          | undefined;
+        const stranded = strandedKeys(before, after);
         if (stranded.length > 0) {
           report.stranded += stranded.length;
           report.failures.push({
@@ -340,9 +368,9 @@ export async function replayVintage(
               `updating ${entry.main} (${entry.symbol}) APPLIED CLEANLY ` +
               `but stranded state the vintage held: ${
                 stranded.map((key) =>
-                  `${key} (was ${
-                    JSON.stringify(before[key])?.slice(0, 80)
-                  }, now ${JSON.stringify(outcome.value?.[key])?.slice(0, 80)})`
+                  `${key} (was ${snippet(before[key])}, now ${
+                    snippet(after?.[key])
+                  })`
                 ).join("; ")
               }`,
           });
