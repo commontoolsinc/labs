@@ -525,7 +525,17 @@ the claim was that `llmDialog` performs no direct egress. Its *kind* is now
 known to be effect; whether it performs *double* egress is a separate
 question that nobody has re-measured.
 
-### 2.8 The `llm` hole, already diagnosed (wave A1)
+### 2.8 The `llm` hole — CLOSED by wave A1; this section is history
+
+**Superseded 2026-07-29.** At HEAD `llm.ts:812` passes
+`serverBuiltinId: "llm"`, `"llm"` is in `LLMServerBuiltinId`
+(`builtins/llm-client-options.ts:8-12`) and in
+`SERVER_EXECUTABLE_BUILTIN_IDS`. Wave A1 (`cfa827f82`) closed it. The text
+below described the hole as OPEN for a day after it was fixed — the eleventh
+stale self-assertion this arc has caught, and the second inside its own
+planning docs. Kept for the mechanism it explains, not as a live gap.
+
+### 2.8 (historical) The `llm` hole as originally diagnosed
 
 - `packages/runner/src/builtins/llm.ts:68` `llmClientOptions(runtime, space,
   serverBuiltinId?: "generateText" | "generateObject")`.
