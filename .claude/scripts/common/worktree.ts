@@ -349,18 +349,50 @@ export function dirArgsAt(prefix: string): string[] | null {
 }
 
 /**
- * Flags that make `git add` write to the index *even with* `--dry-run`.
+ * `git add` flags known not to write anything under `--dry-run`.
  *
- * `--edit` is the one that matters and the reason this list exists. git rejects
- * `-i`/`-p` outright under `--dry-run`, but it honours `--edit`: it applies the
- * patch to the index regardless, and because Claude Code sets `GIT_EDITOR=true`
- * the editor step is a silent no-op that accepts everything. So a hook whose
+ * A whitelist, deliberately, and this is the second attempt. `--edit` writes to
+ * the index *even with* `--dry-run` — git rejects `-i`/`-p` outright but honours
+ * `--edit`, applying the patch regardless, and Claude Code sets
+ * `GIT_EDITOR=true` so the editor step silently accepts everything. A hook whose
  * entire purpose is to stop touching the trees it inspects staged the user's
- * working tree for them, before their command had even run — verified against a
- * scratch repo. An add carrying any of these is not dry-runnable, so we do not
- * try.
+ * working tree for them, before their command had run.
+ *
+ * The first attempt blacklisted `--edit`, `--interactive`, `--patch` as exact
+ * words. git accepts any unambiguous abbreviation, so `--e`, `--ed` and `--edi`
+ * all still mutated — verified against a scratch repo, `git write-tree` before
+ * and after. No blacklist can be complete against prefix matching, so the
+ * polarity is wrong for a mutation guard: an unrecognised flag has to mean "do
+ * not run this", not "assume it is fine".
+ *
+ * Rejecting an abbreviation of a *safe* flag costs a skipped file list and says
+ * so. Accepting an abbreviation of an unsafe one costs the read-only contract.
  */
-const MUTATING_ADD_FLAGS = /^--(?:edit|interactive|patch)$|^-[A-Za-z]*[eip]/;
+const SAFE_ADD_LONG = new Set([
+  "--all",
+  "--no-all",
+  "--update",
+  "--force",
+  "--dry-run",
+  "--verbose",
+  "--ignore-errors",
+  "--ignore-removal",
+  "--no-ignore-removal",
+  "--refresh",
+  "--renormalize",
+  "--sparse",
+  "--no-warn-embedded-repo",
+]);
+
+/** Short clusters of safe flags only: all, update, force, dry-run, verbose. */
+const SAFE_ADD_SHORT = /^-[Aufnv]+$/;
+
+function isSafeAddFlag(flag: string): boolean {
+  if (SAFE_ADD_SHORT.test(flag)) return true;
+  const name = flag.split("=")[0];
+  if (name === "--chmod") return true;
+  return SAFE_ADD_LONG.has(name);
+}
 
 export interface GitAddInvocation {
   dirArgs: string[];
@@ -368,8 +400,8 @@ export interface GitAddInvocation {
   flags: string[];
   /** Pathspecs, to be passed after `--`. */
   paths: string[];
-  /** True when this add cannot be dry-run without writing to the index. */
-  mutating: boolean;
+  /** True when every flag is known safe to pass to `git add --dry-run`. */
+  dryRunnable: boolean;
 }
 
 /**
@@ -413,7 +445,7 @@ export function gitAddInvocations(cmd: string): GitAddInvocation[] | null {
       dirArgs,
       flags,
       paths: [...head.filter((w) => !w.startsWith("-")), ...tail],
-      mutating: flags.some((f) => MUTATING_ADD_FLAGS.test(f)),
+      dryRunnable: flags.every(isSafeAddFlag),
     });
 
     const advance = add.before.length +

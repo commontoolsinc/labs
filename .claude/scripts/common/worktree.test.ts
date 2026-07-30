@@ -257,13 +257,13 @@ Deno.test("gitAddInvocations resolves each add on its own terms", () => {
     dirArgs: [],
     flags: [],
     paths: ["bad.ts"],
-    mutating: false,
+    dryRunnable: true,
   });
   assertEquals(one("git add -A -- bad.ts && git commit -m x"), {
     dirArgs: [],
     flags: ["-A"],
     paths: ["bad.ts"],
-    mutating: false,
+    dryRunnable: true,
   });
 
   // A redirect is not a pathspec. `>/dev/null` reached git as one, git failed,
@@ -285,12 +285,20 @@ Deno.test("gitAddInvocations resolves each add on its own terms", () => {
     ["ok.ts", "bad.ts"],
   );
 
-  // An editing flag writes to the index even under --dry-run, so it must be
-  // recognised and left alone rather than run.
-  assertEquals(one("git add -e && git commit -m x")?.mutating, true);
-  assertEquals(one("git add --edit && git commit -m x")?.mutating, true);
-  assertEquals(one("git add -Ae && git commit -m x")?.mutating, true);
-  assertEquals(one("git add -A && git commit -m x")?.mutating, false);
+  // An editing flag writes to the index even under --dry-run, so it must never
+  // be run. git accepts unambiguous abbreviations, so every prefix of --edit
+  // mutates too — `--e`, `--ed`, `--edi` were all verified to stage. A blacklist
+  // of exact words caught none of them, which is why this is a whitelist.
+  const dry = (c: string) => one(c)?.dryRunnable;
+  for (const f of ["-e", "--edit", "--edi", "--ed", "--e", "-Ae", "-p", "-i"]) {
+    assertEquals(dry(`git add ${f} && git commit -m x`), false, f);
+  }
+  // ...while the flags actually used stay resolvable.
+  for (
+    const f of ["-A", "-u", "-f", "-Au", "--all", "--update", "--chmod=+x"]
+  ) {
+    assertEquals(dry(`git add ${f} && git commit -m x`), true, f);
+  }
 
   // The add's directory is where the *add* runs, not where the commit does.
   assertEquals(one("git add foo.ts && cd sub && git commit -m x")?.dirArgs, []);

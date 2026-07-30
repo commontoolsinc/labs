@@ -130,12 +130,13 @@ async function getFilesToCommit(): Promise<string[]> {
   // `add '<repo-relative path>'` per file.
   for (const add of adds) {
     if (add.flags.length === 0 && add.paths.length === 0) continue;
-    if (add.mutating) {
-      // Not dry-runnable without writing to the index. Say so; do not stage on
-      // the user's behalf to satisfy our own curiosity.
+    if (!add.dryRunnable) {
+      // An unrecognised flag might be `--edit`, which writes to the index even
+      // under --dry-run. Say so; do not stage on the user's behalf to satisfy
+      // our own curiosity.
       console.error(
-        "pre-commit: `git add` here carries an editing flag, which writes to " +
-          "the index even under --dry-run. Not resolving its file list.",
+        "pre-commit: `git add` here carries a flag not known to be safe under " +
+          `--dry-run (${add.flags.join(" ")}). Not resolving its file list.`,
       );
       continue;
     }
