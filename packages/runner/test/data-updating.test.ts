@@ -1318,14 +1318,16 @@ describe("data-updating", () => {
       expect(second?.id).toBe(first?.id);
     });
 
-    it("aliases an array occurrence to an earlier inline occurrence", () => {
+    it("promotes an inline-then-array shared object into one document", () => {
       // When the same object appears first as an inline property and then in
-      // an array, the array slot links back to the inline location rather
-      // than anchoring a separate document -- the written graph's aliasing
-      // wins over per-occurrence splitting, and no id is drawn.
+      // an array, the array occurrence must not become a link into the
+      // document's mutable interior (removing the inline property would
+      // leave it dangling). Instead the object is promoted into an entity
+      // document of its own -- one id drawn -- and BOTH occurrences link to
+      // it, so the written graph's aliasing is preserved on a stable target.
       const testCell = runtime.getCell<unknown>(
         space,
-        "inline alias wins",
+        "inline alias promotes",
         undefined,
         tx,
       );
@@ -1336,15 +1338,83 @@ describe("data-updating", () => {
         tx,
         testCell.getAsNormalizedFullLink(),
         { first: shared, list: [shared] },
-        "inline alias wins",
+        "inline alias promotes",
         undefined,
         () => `seed-${draws++}`,
       );
-      expect(draws).toBe(0);
+      expect(draws).toBe(1);
       const raw = testCell.getRaw() as { first: unknown; list: unknown[] };
-      expect(parseLink(raw.first)).toBe(undefined);
+      const firstLink = parseLink(raw.first, testCell);
       const elementLink = parseLink(raw.list[0], testCell);
-      expect(elementLink?.path).toEqual(["first"]);
+      expect(elementLink?.id).not.toBe(undefined);
+      expect(elementLink?.path).toEqual([]);
+      expect(firstLink?.id).toBe(elementLink?.id);
+      const view = testCell.get() as {
+        first: { name: string };
+        list: { name: string }[];
+      };
+      expect(view.first).toEqual({ name: "Ada" });
+      expect(view.list[0]).toEqual({ name: "Ada" });
+    });
+
+    it("keeps an array occurrence alive after its inline alias is removed", () => {
+      // The lifetime consequence of promotion: rewriting the container
+      // without the inline property must leave the array element intact,
+      // since it points at the shared document rather than at the removed
+      // inline location.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "inline alias lifetime",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<{
+          first?: { name: string };
+          list: { name: string }[];
+          // deno-lint-ignore no-explicit-any
+        }>(space, "inline alias lifetime", undefined, tx) as any;
+        const shared = { name: "Ada" };
+
+        cell.set({ first: shared, list: [shared] });
+        expect(cell.get().list[0]).toEqual({ name: "Ada" });
+
+        const raw = cell.getRaw() as { list: unknown[] };
+        cell.set({ list: raw.list });
+        expect(cell.get().first).toBe(undefined);
+        expect(cell.get().list[0]).toEqual({ name: "Ada" });
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("normalizes addUnique candidates before stored-value comparison", () => {
+      // The dedup comparison must see the candidate in its fabric form: a
+      // repeated native `Date` matches the stored `FabricEpochNsec` and
+      // no-ops rather than throwing (or duplicating). The normalization is
+      // comparison-only -- an ACCEPTED candidate writes the original value.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique normalization",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<unknown[]>(
+          space,
+          "addUnique normalization",
+          undefined,
+          tx,
+        );
+        cell.set([new Date(1234)]);
+        cell.addUnique(new Date(1234));
+        expect((cell.getRaw() as unknown[]).length).toBe(1);
+
+        // A toJSON-backed candidate likewise matches its normalized form.
+        cell.set(["hello"]);
+        cell.addUnique({ toJSON: () => "hello" });
+        expect((cell.getRaw() as unknown[]).length).toBe(1);
+      } finally {
+        popFrame(frame);
+      }
     });
 
     it("persists an array element's self-reference as a self-link", () => {

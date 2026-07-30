@@ -565,12 +565,72 @@ export function normalizeAndDiff(
   // When detecting a circular reference on JS objects, turn it into a cell,
   // which below will be turned into a relative link.
   if (state.seen.has(newValue)) {
+    const seenLink = state.seen.get(newValue)!;
+    // An anchor-eligible array occurrence must not become a link into a
+    // document's mutable INTERIOR (a non-root `seen` location, i.e. an
+    // earlier inline occurrence): removing that inline property later would
+    // leave the array element dangling. Instead, PROMOTE the shared object
+    // into an entity document of its own and repoint the earlier inline
+    // location at it too -- all occurrences stay aliased to one stable
+    // document. A root `seen` location (an already-anchored occurrence)
+    // needs no promotion; the plain link below is stable.
+    if (
+      state.nextAnchorId !== undefined &&
+      isArrayElement &&
+      isObject(newValue) &&
+      !(newValue instanceof FabricSpecialObject) &&
+      !isCellLink(newValue) &&
+      seenLink.path.length > 0
+    ) {
+      // An element carried through untouched from the stored array must stay
+      // untouched (see the anchoring branch below for why this is
+      // load-bearing): emit nothing rather than promote it.
+      if (
+        precomputedCurrent !== NO_PRECOMPUTED &&
+        Object.is(precomputedCurrent, newValue)
+      ) {
+        return [];
+      }
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[SEEN_PROMOTE] Promoting inline-aliased array element at path=${pathStr}`,
+      );
+      // Anchoring re-registers the object in `state.seen` under the new
+      // document's root, so later occurrences (and the content recursion's
+      // own cycle hits) link there.
+      const anchorChanges = anchorValueAsEntity(
+        runtime,
+        tx,
+        link,
+        { ...(newValue as FabricPlainObject) },
+        newValue,
+        state.nextAnchorId(),
+        context,
+        options,
+        state,
+      );
+      const promotedLink = state.seen.get(newValue)!;
+      return [
+        ...anchorChanges,
+        // Repoint the earlier inline occurrence at the promoted document.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          seenLink,
+          createSigilLinkFromParsedLink(promotedLink, { base: seenLink }),
+          context,
+          options,
+          state,
+        ),
+      ];
+    }
     diffLogger.debug(
       "diff",
       () =>
         `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
-    newValue = new CellImpl(runtime, tx, state.seen.get(newValue)!);
+    newValue = new CellImpl(runtime, tx, seenLink);
   }
 
   // Scope narrowing: if this slot's schema declares a scope narrower than the

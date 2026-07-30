@@ -6,6 +6,7 @@ import {
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
+  fabricFromNativeValue,
   type FabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -1643,11 +1644,20 @@ export class CellImpl<T extends FabricValue>
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by content, mirroring the server's keyless dedup.
-    const alreadyPresent = (candidate: FabricValue) =>
-      existing.some((element) =>
-        isCell(candidate)
-          ? areLinksSame(
+    // by content, mirroring the server's keyless dedup. Under a frame, the
+    // content comparison runs against a fabric-normalized COPY of the candidate
+    // (a native `Date` must match its stored `FabricEpochNsec` form); the
+    // original candidate -- not the copy -- is what an accepted add writes, so
+    // no identity the write path relies on is disturbed. A frameless
+    // `addUnique` compares the raw candidate: the write boundary that would
+    // normalize it runs only under a frame, and a raw comparison also tolerates
+    // annotation-carrying values (e.g. `get()` results) that the strict
+    // conversion rejects.
+    const normalizeForComparison = this._frame !== undefined;
+    const alreadyPresent = (candidate: FabricValue) => {
+      if (isCell(candidate)) {
+        return existing.some((element) =>
+          areLinksSame(
             element,
             candidate,
             this as unknown as Cell<any>,
@@ -1655,8 +1665,17 @@ export class CellImpl<T extends FabricValue>
             this.tx!,
             this.runtime,
           )
-          : valueEqual(element, candidate)
-      );
+        );
+      }
+      // Link-carrying candidates (query-result proxies, raw sigil links)
+      // compare as themselves -- the write boundary passes them through
+      // unconverted, and the strict conversion would reject their
+      // non-string-keyed internals.
+      const comparable = normalizeForComparison && !isCellLink(candidate)
+        ? fabricFromNativeValue(candidate) as FabricValue
+        : candidate;
+      return existing.some((element) => valueEqual(element, comparable));
+    };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
     if (toAdd.length === 0) {
       return;
