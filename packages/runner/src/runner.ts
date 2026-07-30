@@ -4746,14 +4746,22 @@ export class Runner {
       undefined,
       tx,
     );
+    const receiptsEnabled =
+      this.runtime.experimental.commitPreconditions === true;
     // Expose the handling's receipt address on the transaction, where the
     // sender's commit callback can read it (verb contract WS-D). Stashed
     // before the branches so BOTH outcomes carry it: a committed handling
     // hands back its own receipt, and a create-only collision loser hands
     // back the same address — which is the winner's original outcome.
-    tx.handlingReceiptLink = receiptCell.getAsNormalizedFullLink();
-    const receiptsEnabled =
-      this.runtime.experimental.commitPreconditions === true;
+    //
+    // Only while receipts are actually being written. With commitPreconditions
+    // off nothing below creates or create-only marks this cell, so publishing
+    // its address would hand the caller a witness that does not exist and
+    // invite a readback against an unwritten cell. Absent beats fabricated —
+    // the same fail-closed stance cfc/grants.ts takes when its gate is off.
+    if (receiptsEnabled) {
+      tx.handlingReceiptLink = receiptCell.getAsNormalizedFullLink();
+    }
     if (!resultHasReactives && frame.reactives.size === 0) {
       if (receiptsEnabled) {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was

@@ -389,7 +389,9 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   it never made. Scoping restores what minted ids had, since every minted id
   ends in the stream link. The binding is a content hash over the caller's key
   plus the whole link, not a delimited join: the caller's half is opaque, so
-  concatenation would let a chosen id shift the separator.
+  concatenation would let a chosen id shift the separator. The address is
+  published only while `commitPreconditions` is on, since nothing creates or
+  create-only marks the receipt while it is off.
 
   The alternative — a client-side helper that derives the receipt cell rather
   than receiving its address — was raised again in review (Berni, 2026-07-29)
@@ -412,12 +414,28 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   with the original outcome (`deduplicated: true`), exit 0; stdout is the
   settled `Invocation` JSON (`invocation`, `status`, `result` when the
   receipt carries a value).
-- **cli, pre-dispatch validation:** `piece call` validates the payload against
+- ~~**cli, pre-dispatch validation:** `piece call` validates the payload against
   the *deployed* verb schema before sending — an undeclared or malformed
   field is an immediate local rejection. This is the half that catches
   skill-versus-deployment skew (the live board accepted and discarded
   `agentName`); the closed-world schema (C5) is the server-side backstop for
-  other callers.
+  other callers.~~ — **done**: `verbInputSchemaError` measures a supplied
+  payload against the stream's own schema and every callable entry point
+  (`piece call`, mounted `exec`) refuses before dispatch, so the invocation id
+  is never spent and the corrected retry can reuse it. `VerbInputValidationError`
+  reports as a data error — message plus a pointer at `piece verbs` — not as a
+  usage failure, since the flags parsed fine.
+
+  Pre-dispatch is the only place this is catchable. `generateHandlerSchema`
+  puts the event under `$event` and requires only `$ctx`, so a payload that
+  misses the event schema does not make the argument invalid: `$event` reads
+  back as `undefined`, the body runs with no event, and its receipt spends the
+  id while the call reports settled. Two shapes stay legal, because the runtime
+  accepts them: a call with no payload at all (`$event` is genuinely optional —
+  value-less verbs are a supported shape), and a payload omitting a property
+  that carries a `default`, which the runtime injects on read. (D5 narrows the
+  first: once it lands, an absent payload against an object-schema verb is
+  normalized to `{}` and judged like any other — see its bullet below.)
 - **cli, phase reporting:** every output — success, failure, timeout — carries
   the furthest observed `phase`
   (`initial_sync | dispatched | committed | readback`) beside the invocation

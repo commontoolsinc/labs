@@ -1,5 +1,6 @@
 import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
+import { VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
   type EntryConfig,
@@ -212,6 +213,26 @@ export function pieceLinkDataErrorReport(
 }
 
 /**
+ * Build the stderr report for a `piece call` payload rejection. Returns null
+ * when the error is not a VerbInputValidationError (the caller should
+ * rethrow). The flags parsed fine and the piece resolved — the values simply
+ * do not fit the verb — so it reports like the other data errors rather than
+ * as a usage failure, and points at the listing that shows the shape it wanted.
+ */
+export function verbInputErrorReport(
+  error: unknown,
+  opts: { piece: string },
+): { message: string; hint: string } | null {
+  if (!(error instanceof VerbInputValidationError)) return null;
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: Run 'cf piece verbs --piece ${opts.piece} --json' to see each verb's expected input.`,
+    ),
+  };
+}
+
+/**
  * Print a data-error report — message plus optional hint — to stderr and exit
  * 1. The single exit path for the `piece get` / `piece link` data errors
  * above. The `deps` seam lets unit tests observe the wiring without a real
@@ -231,6 +252,24 @@ export function exitWithDataError(
   printError(report.message);
   if (report.hint) printHint(report.hint);
   return exit(1);
+}
+
+/**
+ * Turn a failed `piece call` into its stderr report, or re-throw.
+ *
+ * A named function rather than an inline `.catch` in the command action: the
+ * action body only ever runs under Cliffy, so anything written there is
+ * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
+ * threaded so a test can observe the report without a real process exit.
+ */
+export function reportVerbInputErrorOrRethrow(
+  error: unknown,
+  piece: string | undefined,
+  deps?: Parameters<typeof exitWithDataError>[1],
+): never {
+  const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
+  if (report) exitWithDataError(report, deps);
+  throw error;
 }
 
 export function pieceCallRawArgs(
@@ -1207,6 +1246,8 @@ after --. Handlers interpret piped input when no input argument is present.`,
             (next) => phase = next,
           ),
         },
+      ).catch((error) =>
+        reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
       );
       if (result.helpText) {
         render(result.helpText);
