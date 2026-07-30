@@ -800,13 +800,22 @@ interface VirtualModuleRecord {
 }
 ```
 
-The verified runtime path registers every reachable record in the pattern's
+Both verifications run on the **compile** path, before any module executes: each
+body is classified as it is wrapped, then the assembled graph is validated as a
+whole. Loading afterwards registers every reachable record in the pattern's
 Compartment and drives the entry synchronously:
 
 ```typescript
 // Shown for illustration only.
+// Compile: classify each body, then validate the assembled graph.
+verifyCompiledModuleBody(compiledBody, filename);
 verifyModuleGraph(records, entrySpecifier);
-const { namespace } = loadModuleGraph(entrySpecifier, { records, globals });
+// Load: the graph is already verified, so the loader does not re-check it.
+const { namespace } = loadModuleGraph(entrySpecifier, {
+  records,
+  globals,
+  verify: false,
+});
 ```
 
 Important details:
@@ -814,8 +823,12 @@ Important details:
 - each module body is classified before it can execute, and the record graph is
   validated structurally before anything in it runs
 - the compile path is the authoritative verification boundary: a body reaches a
-  record only after `verifyCompiledModuleBody` has accepted it, and a graph is
-  loaded only after `verifyModuleGraph` has accepted its wiring
+  record only after `verifyCompiledModuleBody` has accepted it, and no graph
+  reaches a Compartment before `verifyModuleGraph` has accepted its wiring. The
+  loader's own `verify` option defaults to **on** for any other caller, so a
+  graph assembled outside the Engine cannot load unverified; the Engine passes
+  `verify: false` precisely because it has already run the check, and the warm
+  cached-module path runs it again on the graph it rebuilds
 - a warm cache hit may skip the body verifier only when the compiled bodies came
   from an integrity-gated read; a miss or partial hit always re-verifies (see
   the compilation-cache threat model in

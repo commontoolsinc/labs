@@ -135,12 +135,18 @@ closure, and produces a graph of per-module records. It:
    ([`verifyCompiledModuleBody`][c8], called from the Engine) before it can be
    loaded or cached.
 
+5. Validates the assembled graph's shape and wiring
+   ([`verifyModuleGraph`][c8]). Both verifications belong to the compile path:
+   nothing in the graph has executed yet when they run.
+
 ### Loading
 
 `lockdown()` runs once ([`ensureSESInitialized`][c10]). [`loadModuleGraph`][c6]
-creates one `Compartment` per load, freezes its global bindings, validates the
-graph's shape and wiring ([`verifyModuleGraph`][c8]), and drives the entry with
-`compartment.importNow(entrySpecifier)`. Because every reachable record is
+creates one `Compartment` per load, freezes its global bindings, and drives the
+entry with `compartment.importNow(entrySpecifier)`. Its `verify` option runs
+[`verifyModuleGraph`][c8] and defaults to **on**, so a graph assembled outside
+the Engine cannot load unchecked; the Engine passes `verify: false` because it
+already ran the check while compiling. Because every reachable record is
 registered in the compartment's `importNowHook` up front, no asynchronous import
 occurs at run time, preserving the scheduler's synchronous-execution contract.
 Runtime modules (`commonfabric`, `commonfabric/schema`, aliases) are ordinary
@@ -615,11 +621,15 @@ registrar.
 
 [`verifyModuleGraph`][c8] validates the graph *structurally* before any module
 executes: the entry specifier is present, every specifier is content-addressed
-(`cf:module/…` or `cf:runtime/…`), every record is well-formed, and every
-resolved import points at a present record — with a runtime import required to
-resolve to exactly `cf:runtime/<specifier>` so a record cannot be handed a
+(`cf:module/…` or `cf:runtime/…`), every record is well-formed, every entry in a
+record's `resolutions` map remaps an import that record actually declares, and
+every resolved import points at a present record — with a runtime import required
+to resolve to exactly `cf:runtime/<specifier>` so a record cannot be handed a
 sibling module's namespace under a runtime name. This is a pre-flight check, not
 the security boundary; the boundary is the per-module classification above.
+
+It runs on the compile path (and again on the warm path that rebuilds a graph
+from cached bodies), so the graph a Compartment receives has always been checked.
 
 ## Threat Model — the persistent compilation cache
 
