@@ -296,16 +296,31 @@ describe("pattern update validates the stored argument", () => {
     //
     // The two versions differ in WHICH cell backs `tag`, so a staged-but-not-
     // instantiated projection is visible as a value change.
-    const stored = (marker: string, key: string): RuntimeProgram =>
+    // The versions differ in WHICH cell backs `tag` AND in their declared
+    // result shape, so both halves of a partial swap are observable: a staged
+    // projection shows as a value change, and a staged result SCHEMA shows in
+    // the root's `schema` meta, which is what later reads resolve through.
+    const stored = (
+      marker: string,
+      key: string,
+      extra = false,
+    ): RuntimeProgram =>
       programOf([
         "import { Writable, pattern } from 'commonfabric';",
         "interface Args { count?: number; [key: string]: any }",
-        "interface Out { tag: Writable<string>; }",
+        extra
+          ? "interface Out { tag: Writable<string>; extra: Writable<number>; }"
+          : "interface Out { tag: Writable<string>; }",
         "export default pattern<Args, Out>(() => {",
         `  const tag = new Writable<string>(${JSON.stringify(marker)}).for(${
           JSON.stringify(key)
         });`,
-        "  return { tag };",
+        ...(extra
+          ? [
+            "  const extra = new Writable<number>(0).for('extra');",
+            "  return { tag, extra };",
+          ]
+          : ["  return { tag };"]),
         "});",
         "",
       ].join("\n"));
@@ -313,7 +328,10 @@ describe("pattern update validates the stored argument", () => {
     const tx = rt.edit();
     const pm = rt.patternManager;
     const v1 = await pm.compilePattern(stored("v1", "tagA"), { space, tx });
-    const v2 = await pm.compilePattern(stored("v2", "tagB"), { space, tx });
+    const v2 = await pm.compilePattern(stored("v2", "tagB", true), {
+      space,
+      tx,
+    });
     const v1Ref = pm.getArtifactEntryRef(v1)!;
     const v2Ref = pm.getArtifactEntryRef(v2)!;
     const cell = rt.getCell<Record<string, unknown>>(
@@ -376,6 +394,16 @@ describe("pattern update validates the stored argument", () => {
       "the completion marker advanced past the graph that is actually " +
         "running, which erases the mismatch a later repair uses to notice",
     ).toBe(v1Ref.identity);
+    // The result SCHEMA is the other half of a partial swap, and the one most
+    // easily missed: later reads resolve the root through this meta, so staging
+    // the candidate's schema over a graph still running the old version makes
+    // those reads describe a shape nothing is producing.
+    expect(
+      (cell as unknown as { getMetaRaw: (k: string) => unknown })
+        .getMetaRaw("schema"),
+      "the candidate's result schema was staged over a piece still running " +
+        "the previous version's nodes",
+    ).toEqual(v1.resultSchema);
   });
 
   it("does not classify a failure that merely mentions the refusal", () => {

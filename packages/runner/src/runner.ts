@@ -1791,8 +1791,6 @@ export class Runner {
       );
     }
 
-    this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
-
     if (validationOptions.patternRepository !== undefined) {
       setPatternRepository(
         resultCell,
@@ -1829,6 +1827,15 @@ export class Runner {
     if (runningSetup) {
       return runningSetup;
     }
+
+    // AFTER the running-piece gate, deliberately. Later reads resolve the root
+    // through this meta, so writing the candidate's result schema over a piece
+    // whose nodes still produce the previous version's shape is the same
+    // partial swap the gate above exists to prevent — reads would describe a
+    // version that is not running. A piece that is NOT reused reaches
+    // `applySetupState` below, which stages the matching projection in the same
+    // transaction, so the schema and the projection cannot disagree.
+    this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
 
     this.applySetupState(
       tx,
