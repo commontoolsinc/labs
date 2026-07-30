@@ -1403,14 +1403,17 @@ describe("data-updating", () => {
         expect(frame.generatedIdCounter).toBe(0);
         expect((c.getRaw() as unknown[]).length).toBe(1);
 
-        // An accepted candidate draws. The rewrite carries the existing
-        // inline element through the anchoring write as well, so it anchors
-        // too -- one draw for each object in the written array.
+        // An accepted candidate draws exactly one id, and the existing
+        // inline element passes through UNTOUCHED -- not anchored, not
+        // rewritten. That restraint is load-bearing: addUnique's array read
+        // is excluded from the commit's conflict set (mergeable op), which
+        // is only safe while the op emits no writes below the tail.
         c.addUnique({ v: 2 });
         const raw = c.getRaw() as unknown[];
         expect(raw.length).toBe(2);
-        expect(frame.generatedIdCounter).toBe(2);
-        expect(parseLink(raw[0], c)?.id).not.toBe(undefined);
+        expect(frame.generatedIdCounter).toBe(1);
+        expect(parseLink(raw[0])).toBe(undefined);
+        expect(raw[0]).toEqual({ v: 1 });
         expect(parseLink(raw[1], c)?.id).not.toBe(undefined);
       } finally {
         popFrame(frame);

@@ -8,6 +8,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -1063,12 +1064,23 @@ export function normalizeAndDiff(
   // state. Cells, links, and query results were consumed by earlier branches,
   // and atomic fabric objects are excluded here; arrays never anchor, only
   // the objects inside them.
+  //
+  // An element whose written value content-equals the stored slot is NOT
+  // anchored: anchoring is for new content, and an untouched element must
+  // diff to nothing. This is load-bearing for the mergeable collection ops
+  // (`push`/`addUnique`): their array read is excluded from the commit's
+  // conflict set (see docs/development/mergeable-collection-writes.md), which
+  // is only safe while the op emits no writes below the tail -- rewriting an
+  // unchanged inline prefix here would let a stale session clobber a
+  // concurrent element edit without conflict.
   if (
     state.nextAnchorId !== undefined &&
     isArrayElement &&
     isObject(newValue) &&
     !(newValue instanceof FabricSpecialObject) &&
-    !isCellLink(newValue)
+    !isCellLink(newValue) &&
+    !(currentValue !== undefined &&
+      valueEqual(currentValue as FabricValue, newValue as FabricValue))
   ) {
     diffLogger.debug(
       "diff",
