@@ -618,6 +618,18 @@ function prepareAnyOf(
 }
 
 /**
+ * Wall time (ms) above which a traversal reports its stats. The threshold and
+ * the report body live in `maybeReportSlowTraverse()` rather than inline at
+ * the call site: a threshold on real elapsed time decided whether ~40 lines
+ * ran, so leaving it inline made their coverage a function of how fast the
+ * machine happened to be. That swung the `packages/runner` coverage-debt
+ * metric by 39 lines between otherwise identical CI runs, and the ratchet in
+ * `docs/development/COVERAGE.md` then failed whichever pull requests landed on
+ * the fast side of a baseline recorded on the slow side.
+ */
+const SLOW_TRAVERSE_MS = 100;
+
+/**
  * Per-call doc-visit/unique-path diagnostics in `traverseWithSchema` build a
  * string and touch a Map+Set on EVERY schema visit — measurable in tail
  * traversals (thousands of visits each). They only feed the slow-traverse
@@ -2998,38 +3010,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const rv = this.traverseWithSelector(doc, this.selector, link);
     const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
-    if (elapsed > 100) {
-      // Find top visited docs
-      const topDocs = [...this.docVisits.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([id, count]) => `${id.slice(0, 20)}..=${count}`)
-        .join(" ");
-      logger.warn("slow-traverse", () => [
-        `${elapsed.toFixed(0)}ms`,
-        `doc=${doc.address.id}/${doc.address.type}`,
-        `trackerKeys=${this.schemaTracker.size}`,
-        `trackerVals=${this.schemaTracker.totalValues}`,
-        `traverseSchema=${this.traverseWithSchemaCalls}`,
-        `traversePtr=${this.traversePointerCalls}`,
-        `traverseArr=${this.traverseArrayCalls}`,
-        `traverseObj=${this.traverseObjectCalls}`,
-        `traverseDAG=${this.traverseDAGCalls}`,
-        `anyOfBranches=${this.anyOfBranches}`,
-        `anyOfFastRejects=${this.anyOfFastRejects}`,
-        `anyOfPropertyMerges=${this.anyOfPropertyMerges}`,
-        `getDocAtPath=${this.getDocAtPathCalls}`,
-        `dagMemo=${this.dagMemo.size}`,
-        `uniqueDocs=${this.docVisits.size}`,
-        `uniquePaths=${this.uniquePaths.size}`,
-        `maxDepth=${this.maxDepth}`,
-        `schemaMemo=${this.activeMemo.size}`,
-        `schemaMemoHits=${this.schemaMemoHits}`,
-        TRAVERSE_DIAGNOSTICS
-          ? `topDocs=${topDocs}`
-          : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
-      ]);
-    }
+    this.maybeReportSlowTraverse(elapsed, doc);
     if (error !== undefined) {
       // This helps track down mismatched schemas, but may be fine
       logger.debug("traverse", () => [
@@ -3040,6 +3021,54 @@ export class SchemaObjectTraverser<V extends FabricValue>
       ]);
     }
     return rv;
+  }
+
+  /**
+   * Logs the stats of a traversal that ran longer than `SLOW_TRAVERSE_MS`.
+   *
+   * The threshold is tested here rather than at the call site, and the call
+   * site invokes this unconditionally, so that every line in the traversal
+   * path runs on every traversal regardless of how long it took. A test then
+   * reaches the report body by passing an `elapsed` over the threshold — see
+   * `SLOW_TRAVERSE_MS` for why that matters. `topDocs` reports real counts
+   * only under `CF_TRAVERSE_DIAGNOSTICS=1`, which is what populates
+   * `docVisits`.
+   */
+  maybeReportSlowTraverse(
+    elapsed: number,
+    doc: IMemorySpaceValueAttestation,
+  ): void {
+    if (elapsed <= SLOW_TRAVERSE_MS) return;
+    // Find top visited docs
+    const topDocs = [...this.docVisits.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([id, count]) => `${id.slice(0, 20)}..=${count}`)
+      .join(" ");
+    logger.warn("slow-traverse", () => [
+      `${elapsed.toFixed(0)}ms`,
+      `doc=${doc.address.id}/${doc.address.type}`,
+      `trackerKeys=${this.schemaTracker.size}`,
+      `trackerVals=${this.schemaTracker.totalValues}`,
+      `traverseSchema=${this.traverseWithSchemaCalls}`,
+      `traversePtr=${this.traversePointerCalls}`,
+      `traverseArr=${this.traverseArrayCalls}`,
+      `traverseObj=${this.traverseObjectCalls}`,
+      `traverseDAG=${this.traverseDAGCalls}`,
+      `anyOfBranches=${this.anyOfBranches}`,
+      `anyOfFastRejects=${this.anyOfFastRejects}`,
+      `anyOfPropertyMerges=${this.anyOfPropertyMerges}`,
+      `getDocAtPath=${this.getDocAtPathCalls}`,
+      `dagMemo=${this.dagMemo.size}`,
+      `uniqueDocs=${this.docVisits.size}`,
+      `uniquePaths=${this.uniquePaths.size}`,
+      `maxDepth=${this.maxDepth}`,
+      `schemaMemo=${this.activeMemo.size}`,
+      `schemaMemoHits=${this.schemaMemoHits}`,
+      TRAVERSE_DIAGNOSTICS
+        ? `topDocs=${topDocs}`
+        : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
+    ]);
   }
 
   /**

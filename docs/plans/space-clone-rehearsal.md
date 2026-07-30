@@ -274,6 +274,27 @@ The write-storm history and the mis-pointed-client hazard drive four rails.
    on live spaces independent of cloning — it is the query that would have
    caught the July storm in minutes.
 
+## Corrected by the first real rehearsal (2026-07-29)
+
+This document claimed that excluding compiler-generated cells would leave the
+content fingerprint **unchanged** across a clean pattern update. That is wrong,
+and the first real rehearsal proved it: a schema migration rewrites every
+piece's *result* value, and results are part of the fingerprint, so
+`fingerprint.match` is false after any successful migration.
+
+Excluding generated cells was necessary but not sufficient. The single hash
+therefore cannot distinguish "the update worked" from "content was destroyed",
+which was the one job it was designed for.
+
+What does distinguish them is the **shape** of the change. On the Topics
+rehearsal: 149 changed (74 pieces, 73 owned cells, 2 modules), 3,189 added,
+and **0 removed** — while every authored title, body, comment and link stayed
+byte-identical (73 topics / 59 comments / 56 links, matching #4997). `removed`
+is the alarm; changes confined to pieces and their derived cells are the
+migration working. `cf space verify` now reports that breakdown, and authored
+content still has to be checked separately — no fingerprint over the whole
+store can answer "did the content survive?" on its own.
+
 ## Fidelity caveats the practice must state
 
 A clone is not the production system, and two gaps are worth naming so a
