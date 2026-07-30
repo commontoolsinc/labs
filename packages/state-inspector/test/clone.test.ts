@@ -276,6 +276,85 @@ Deno.test("reset discards the attempt, including WAL companions", async () => {
   });
 });
 
+Deno.test("reset refuses while a server still holds the working copy", async () => {
+  // The defect this pins: unlinking a file does not reach a process that
+  // already has it open. A toolshed keeps reading and writing the unlinked
+  // inode while every NEW reader — including the verify that `cf space reset`
+  // runs immediately afterwards — sees the restored one, so the reset reports
+  // success while pass two runs against pass one's state. Every other reset
+  // test in this file closes its connection first, which is exactly the case
+  // that cannot catch this.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+
+    // Stand in for the served store: WAL, and still open.
+    const server = new Database(paths.workingPath);
+    server.exec("PRAGMA journal_mode = WAL");
+    server.prepare(`SELECT count(*) FROM "commit"`).get();
+    try {
+      const error = await assertRejects(
+        () => resetClone(clone),
+        Error,
+        "still has it open",
+      );
+      assert(
+        /stop the server/i.test(error.message),
+        `the message must say what to do, got: ${error.message}`,
+      );
+    } finally {
+      server.close();
+    }
+
+    // And the refusal is not a permanent lockout: once the holder is gone the
+    // same reset succeeds. A guard that could not be cleared would push
+    // operators straight back to `rm -rf`.
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "reset works once the server stops");
+  });
+});
+
+Deno.test("reset restores a working copy that was deleted outright", async () => {
+  // Nothing to hold open, and nothing to unlink. The probe must not treat an
+  // absent file as a reason to fail — and must not create one just to ask.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.remove(clonePaths(clone, SPACE).workingPath);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
+Deno.test("reset works when the working path cannot be opened at all", async () => {
+  // The probe fails at open rather than at lock — a different branch from a
+  // file that opens and turns out not to be a database, and the same verdict:
+  // whatever is in the way, restoring from pristine is the remedy.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    await Deno.remove(paths.workingPath);
+    await Deno.mkdir(paths.workingPath);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
+Deno.test("reset still works on a working copy that is not a database", async () => {
+  // The mirror image of the guard above: a probe that refuses whenever it
+  // cannot take the lock would refuse hardest on a corrupt working copy, which
+  // is precisely when a reset is the remedy rather than the risk.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    await Deno.writeTextFile(paths.workingPath, "not a database at all");
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok, "restored from pristine");
+  });
+});
+
 Deno.test("verify reports a corrupted baseline rather than trusting it", async () => {
   await withDirs(async ({ source, clone }) => {
     await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
@@ -414,11 +493,27 @@ Deno.test("the per-kind tally respects scope, not just id", async () => {
     ).run(seq, JSON.stringify({ value: "per-user override" }), seq);
     db.close();
 
+    // Also CHANGE the space-scope row of the same id, so the tally has to
+    // classify a real entry rather than an empty map. Without this the
+    // assertions below pass no matter how the kind lookup behaves.
+    mutate(clonePaths(clone, SPACE).workingPath, [[
+      "of:named",
+      { value: "named-v2", result: link("of:piece") },
+    ]]);
+
     const v = await verifyClone(clone);
     assertEquals(v.diff.removed, 0);
     assertEquals(v.diff.added, 1, "the per-user entity is new, not a rewrite");
-    // Classified as its own kind rather than inheriting the space-scope row's.
-    assertEquals(Object.values(v.diff.removedByKind).length, 0);
+    assertEquals(v.diff.changed, 1, "the space-scope row of the same id moved");
+    // The point of the test: `of:named` exists at two scopes, and the changed
+    // one must be classified from ITS OWN row. A by-id lookup would let
+    // whichever scope enumerated last supply the kind for both.
+    assertEquals(
+      v.diff.changedByKind,
+      { "owned-cell": 1 },
+      "classified from the changed entity's own (id, scope), not by id alone",
+    );
+    assertEquals(v.diff.removedByKind, {});
   });
 });
 

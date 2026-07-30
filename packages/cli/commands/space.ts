@@ -25,6 +25,7 @@ import {
   resetClone,
   resolveSpace,
   verifyClone,
+  type VerifyResult,
 } from "@commonfabric/state-inspector";
 import { contentFingerprint } from "@commonfabric/state-inspector";
 import { hasJsonArgument } from "../lib/json-output.ts";
@@ -64,28 +65,166 @@ function fromFileUrl(url: string): string {
 }
 
 /**
+ * Reject a snapshot URL that would put a whole space on the wire in the clear.
+ *
+ * A snapshot is the entire contents of a space — the same confidentiality
+ * judgement that keeps the dump endpoint hard-off in production — so plaintext
+ * transport is refused rather than merely discouraged in the help text.
+ * Loopback is the exception: it never leaves the machine, and the tests serve
+ * fixtures over it.
+ */
+function assertConfidentialTransport(url: string): void {
+  const parsed = new URL(url);
+  if (parsed.protocol === "https:") return;
+  const loopback = parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "::1" || parsed.hostname === "localhost";
+  if (parsed.protocol === "http:" && loopback) return;
+  throw new ValidationError(
+    `refusing to download a snapshot over ${parsed.protocol}//: a whole-space ` +
+      `snapshot is the entire contents of the space. Use https, or copy the ` +
+      `file down yourself and pass a path.`,
+  );
+}
+
+/**
+ * How many redirects to follow. A cycle guard, not a retry budget: each hop is
+ * a different URL, and a server that keeps redirecting is misconfigured rather
+ * than slow.
+ */
+const MAX_REDIRECTS = 5;
+
+/**
+ * `fetch`, checking the transport of EVERY hop.
+ *
+ * `fetch` follows redirects itself and reports only the final response, so
+ * validating the URL an operator typed proves nothing about where the bytes
+ * came from: an https URL that 302s to plaintext http would put the whole space
+ * on the wire in the clear, having passed the check. Following by hand is the
+ * only way the refusal can cover the request that actually carries the body.
+ */
+async function fetchFollowingRedirects(url: string): Promise<Response> {
+  let current = url;
+  for (let hop = 0;; hop++) {
+    assertConfidentialTransport(current);
+    const response = await fetch(current, { redirect: "manual" });
+    const location = response.headers.get("location");
+    const redirected = response.status >= 300 && response.status < 400 &&
+      location !== null;
+    if (!redirected) return response;
+    await response.body?.cancel();
+    if (hop === MAX_REDIRECTS) {
+      throw new Error(
+        `could not download ${url}: more than ${MAX_REDIRECTS} redirects.`,
+      );
+    }
+    // Resolve against the current URL: a `Location` may be relative.
+    current = new URL(location, current).toString();
+  }
+}
+
+/**
  * Download a remote snapshot to a temp file so `--from` can take a URL.
  *
  * Returns the staging directory alongside the path so the caller can remove it:
  * a real snapshot is gigabytes, and leaving one per invocation in the system
  * temp directory would be a quiet disk leak.
+ *
+ * Cleanup on the failure paths belongs HERE, not with the caller: once this
+ * function throws it has never returned the directory, so no caller can be
+ * holding a handle to remove. A stream that dies mid-download — the likeliest
+ * failure at gigabyte scale, and the one a non-2xx check cannot catch — would
+ * otherwise strand a partial file the size of however much arrived.
  */
 async function fetchSnapshot(
   url: string,
 ): Promise<{ path: string; stagingDir: string }> {
-  const response = await fetch(url);
+  const response = await fetchFollowingRedirects(url);
   if (!response.ok || response.body === null) {
+    await response.body?.cancel();
     throw new Error(`could not download ${url}: HTTP ${response.status}`);
   }
   const stagingDir = await Deno.makeTempDir({ prefix: "cf-space-clone-" });
   const path = `${stagingDir}/snapshot.sqlite`;
-  using file = await Deno.open(path, { write: true, create: true });
-  await response.body.pipeTo(file.writable);
+  try {
+    const file = await Deno.open(path, { write: true, create: true });
+    // `pipeTo` closes the destination on success and aborts it on failure, so
+    // the handle needs no separate disposal — and must not be given one, since
+    // closing an already-closed file is itself an error.
+    await response.body.pipeTo(file.writable);
+  } catch (error) {
+    await Deno.remove(stagingDir, { recursive: true }).catch(() => {});
+    throw error;
+  }
   return { path, stagingDir };
 }
 
 const bytes = (n: number): string =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : `${(n / 1e6).toFixed(1)} MB`;
+
+/**
+ * The line that says how much of the store the fingerprint could not speak for.
+ *
+ * Printed only when there is something to say, but never suppressed when there
+ * is: a verdict computed over an unknown fraction of a space reads exactly like
+ * one computed over all of it, and this is the only place that difference
+ * becomes visible to an operator.
+ */
+function uncertaintyNote(
+  unhashable: number | null | undefined,
+  ambiguous: number | null | undefined,
+  indent: string,
+): string {
+  const notes: string[] = [];
+  if (unhashable) {
+    notes.push(
+      `${unhashable} entit${
+        unhashable === 1 ? "y" : "ies"
+      } could not be hashed and ` +
+        `${unhashable === 1 ? "is" : "are"} absent from this verdict`,
+    );
+  }
+  if (ambiguous) {
+    notes.push(
+      `${ambiguous} id(s) generated in one manifest and named in another, ` +
+        `counted as generated — a change to ${
+          ambiguous === 1 ? "it" : "them"
+        } would not show`,
+    );
+  }
+  return notes.map((n) => `${indent}⚠ ${n}\n`).join("");
+}
+
+/**
+ * The uncertainty lines for a verify, covering BOTH sides of the comparison.
+ *
+ * Reporting only the working copy's counts would hide the case the diff is
+ * least able to see. An entity excluded from the BASELINE is absent from the
+ * "before" side, so if it is still excluded now the diff cannot compare it at
+ * all and a change to it is silent — that blind spot belongs to the baseline
+ * and does not show up in a working-copy count. An older clone that never
+ * recorded the numbers is the same situation with the size unknown, which is a
+ * weaker claim than zero and must not render as zero.
+ */
+function verifyUncertaintyNote(u: VerifyResult["uncertainty"]): string {
+  const working = uncertaintyNote(
+    u.unhashable.working,
+    u.ambiguous.working,
+    "",
+  );
+  const { unhashable, ambiguous } = u;
+  if (unhashable.manifest === null || ambiguous.manifest === null) {
+    return working +
+      `⚠ this clone predates uncertainty recording, so how much its BASELINE ` +
+      `excluded is unknown; re-clone for a verdict that can say\n`;
+  }
+  const baseline = uncertaintyNote(unhashable.manifest, ambiguous.manifest, "");
+  if (baseline === "") return working;
+  return working +
+    baseline.replace(
+      /^⚠ /gm,
+      "⚠ in the BASELINE: ",
+    );
+}
 
 export const space = new Command()
   .name("space")
@@ -164,10 +303,22 @@ export const space = new Command()
           `  content    ${manifest.fingerprint.hash}\n` +
           `             ${manifest.fingerprint.entities} entities fingerprinted, ` +
           `${manifest.fingerprint.excludedGenerated} generated cells excluded\n` +
+          uncertaintyNote(
+            manifest.fingerprint.unhashable,
+            manifest.fingerprint.ambiguous,
+            "             ",
+          ) +
           `  working    ${paths.workingPath}\n\n` +
-          `serve it (NOT the live store — note the port offset):\n` +
-          `  MEMORY_DIR="file://${targetDir}/" ./scripts/start-local-dev.sh --port-offset 10\n\n` +
-          `then, per attempt:\n` +
+          // HOST is pinned to loopback: the toolshed defaults to 0.0.0.0, and a
+          // clone keeps the source space's DID, so a clone bound to every
+          // interface is a second store answering to production's identity on
+          // the network. The port offset separates it from a local production
+          // server; only the host binding keeps it off the network entirely.
+          `serve it (NOT the live store — note the host and port):\n` +
+          `  HOST=127.0.0.1 MEMORY_DIR="file://${targetDir}/" ` +
+          `./scripts/start-local-dev.sh --port-offset 10\n\n` +
+          `then, per attempt (stop the server before resetting — a reset ` +
+          `cannot reach a process that already holds the store open):\n` +
           `  cf space verify ${targetDir}\n` +
           `  cf space reset  ${targetDir}`,
       );
@@ -203,7 +354,9 @@ export const space = new Command()
           `added      ${diff.added}\n` +
           `content    ${fingerprint.match ? "unchanged" : "CHANGED"}\n` +
           `commits    ${counts.manifest.commits} → ${counts.working.commits}\n` +
-          `revisions  ${counts.manifest.revisions} → ${counts.working.revisions}\n\n` +
+          `revisions  ${counts.manifest.revisions} → ${counts.working.revisions}\n` +
+          verifyUncertaintyNote(result.uncertainty) +
+          `\n` +
           (!result.baselineIntact
             ? "BASELINE CORRUPTED — the pristine snapshot no longer matches the " +
               "manifest; do not reset to it."
