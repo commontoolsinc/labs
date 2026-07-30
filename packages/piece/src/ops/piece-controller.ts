@@ -35,7 +35,7 @@ import {
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
-import type { CellKind, LinkScope } from "@commonfabric/api";
+import type { CellKind, JSONSchemaObj, LinkScope } from "@commonfabric/api";
 import { SchemaObjectTraverser } from "@commonfabric/runner/traverse";
 import {
   cfcSchemaChildRoot,
@@ -802,15 +802,20 @@ export function consumeOuterCellContract(
 }
 
 /** Consume one uniform asCell layer, including across anyOf/oneOf branches. */
-function consumeAsCellProjectionSchema(schema: JSONSchema): JSONSchema {
-  if (typeof schema !== "object" || schema === null) return schema;
+function schemaHasAsCell(
+  schema: JSONSchema | undefined,
+): schema is JSONSchemaObj {
+  return SchemaObjectTraverser.hasAsCell(schema);
+}
+
+function consumeAsCellProjectionSchema(schema: JSONSchemaObj): JSONSchema {
   if (ContextualFlowControl.getAsCellValues(schema).length > 0) {
     return consumeOuterCellContract(schema).payloadSchema;
   }
-  const anyOf = schema.anyOf?.every(SchemaObjectTraverser.hasAsCell)
+  const anyOf = schema.anyOf?.every(schemaHasAsCell)
     ? schema.anyOf.map(consumeAsCellProjectionSchema)
     : schema.anyOf;
-  const oneOf = schema.oneOf?.every(SchemaObjectTraverser.hasAsCell)
+  const oneOf = schema.oneOf?.every(schemaHasAsCell)
     ? schema.oneOf.map(consumeAsCellProjectionSchema)
     : schema.oneOf;
   return {
@@ -2274,52 +2279,58 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
-    if (path?.length) {
-      // Pull the requested cell, not the whole input/result root. The sync
-      // started by pull() sends its path plus narrowed schema to Memory v2, so
-      // this avoids traversing unrelated linked fields (an input can contain a
-      // broad authoring graph even when the caller asks for one small durable
-      // field). Traverse one segment at a time so an intermediate asCell value
-      // can re-root the remaining path, matching resolveCellPath.
-      let selectedCell = targetCell;
-      for (const [index, segment] of path.entries()) {
-        selectedCell = cellAtPath(selectedCell, [segment]);
-        const isLast = index === path.length - 1;
-        const isAsCellProjection = SchemaObjectTraverser.hasAsCell(
-          selectedCell.schema,
-        );
-        // Ordinary inline ancestors need no read: extending their schema/path
-        // keeps the final query as narrow as possible. An asCell ancestor must
-        // be materialized so the rest of the path can move to its handle.
-        if (!isLast && !isAsCellProjection) continue;
-
-        await selectedCell.pull();
-        if (isAsCellProjection) {
-          // An asCell projection materializes even an explicit `undefined` as
-          // a Cell, so inspect the stored slot before resolving the handle.
-          // Falling back preserves the root read's absent-vs-undefined rules.
-          if (selectedCell.getRaw() === undefined) {
-            return await this.#getFromRoot(targetCell, path);
-          }
-          const handle = selectedCell.resolveAsCell().asSchema(
-            consumeAsCellProjectionSchema(selectedCell.schema!),
-          );
-          if (isLast) {
-            const readableHandle = cellWithScopedLinkRequiredsRelaxed(handle);
-            await readableHandle.pull();
-            return readableHandle.get();
-          }
-          selectedCell = handle;
-          continue;
-        }
-        const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
-        if (selected === undefined) {
-          return await this.#getFromRoot(targetCell, path);
-        }
-        return isCell(selected) ? await selected.pull() : selected;
-      }
+    if (!path?.length) {
+      return await this.#getFromRoot(targetCell, []);
     }
-    return await this.#getFromRoot(targetCell, path ?? []);
+    // Pull the requested cell, not the whole input/result root. The sync
+    // started by pull() sends its path plus narrowed schema to Memory v2, so
+    // this avoids traversing unrelated linked fields (an input can contain a
+    // broad authoring graph even when the caller asks for one small durable
+    // field). Traverse one segment at a time so an intermediate asCell value
+    // can re-root the remaining path, matching resolveCellPath.
+    return await this.#getAtPath(targetCell, targetCell, path, 0);
+  }
+
+  async #getAtPath(
+    targetCell: Cell<unknown>,
+    parentCell: Cell<unknown>,
+    path: CellPath,
+    index: number,
+  ): Promise<unknown> {
+    const selectedCell = cellAtPath(parentCell, [path[index]]);
+    const isLast = index === path.length - 1;
+    const selectedSchema = selectedCell.schema;
+    const isAsCellProjection = schemaHasAsCell(selectedSchema);
+    // Ordinary inline ancestors need no read: extending their schema/path
+    // keeps the final query as narrow as possible. An asCell ancestor must
+    // be materialized so the rest of the path can move to its handle.
+    if (!isLast && !isAsCellProjection) {
+      return await this.#getAtPath(targetCell, selectedCell, path, index + 1);
+    }
+
+    await selectedCell.pull();
+    if (isAsCellProjection) {
+      // An asCell projection materializes even an explicit `undefined` as
+      // a Cell, so inspect the stored slot before resolving the handle.
+      // Falling back preserves the root read's absent-vs-undefined rules.
+      if (selectedCell.getRaw() === undefined) {
+        return await this.#getFromRoot(targetCell, path);
+      }
+      const handle = selectedCell.resolveAsCell().asSchema(
+        consumeAsCellProjectionSchema(selectedSchema),
+      );
+      if (isLast) {
+        const readableHandle = cellWithScopedLinkRequiredsRelaxed(handle);
+        await readableHandle.pull();
+        return readableHandle.get();
+      }
+      return await this.#getAtPath(targetCell, handle, path, index + 1);
+    }
+    const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
+    if (selected === undefined) {
+      return await this.#getFromRoot(targetCell, path);
+    }
+    return isCell(selected) ? await selected.pull() : selected;
   }
 
   async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
