@@ -247,7 +247,6 @@ Things this stage settled that the plan had wrong or open:
   materialize could snapshot a space missing the very state the tier replays.
   Downstream cases would go red, but several layers from the cause. It is now
   `editWithRetry` with the result asserted.
-
 On `setPattern` versus `PatternUpdater`: the replay drives the updater's path,
 because that is what the field actually runs. The difference is the whole
 reason this regime is CI-only — `cf piece setsrc` calls
@@ -559,6 +558,45 @@ recapture again.
 Gate: a vintage contains data a change can strand, so stage 5's value
 comparison has something to compare, and every change is checked against every
 world ever captured.
+
+Things this stage settled that the plan had wrong or open:
+
+- The runtime that WRITES a fixture is torn down before the snapshot, which
+  takes a `dispose({ closeStorage: false })` to express — the store is the
+  capture's, and a callee must not tear down what its caller is still using.
+  What the teardown buys over the per-step `idle()`/`synced()` is the work that
+  lives OUTSIDE the scheduler: `patternUpdater`'s source checks, the runner's
+  pointer-commit roll-forwards, and in-flight async builtin work, none of which
+  a settle covers. Measured on both required fixtures: quiescing the writer at
+  the snapshot point runs no further scheduler action and adds no commit, so
+  this is the contract made structural, not a bug fixed. It matters because the
+  alternative is a snapshot whose completeness depends on which of two runtimes
+  won a race, and the tier's whole claim is that a fixture holds a state the
+  pattern reached.
+- A kept store keeps RECORDING, so that path also drains in-flight async
+  builtin work first — `settled()` is the only barrier that waits for a fetch /
+  llm call or a sqlite RPC and its writeback, and it runs before anything is
+  cancelled so a writeback's cascade is not cut midway. Without it a capture
+  whose pattern uses an async builtin could snapshot a partial result. The
+  drain is UNCAPPED: `settled()`'s default gives up after 50 rounds and returns
+  with work outstanding, no throw and no signal, which is the same hole one
+  layer down. Measured over 60 generations of chained tracked work — a capped
+  drain returns at generation 50 while the chain keeps writing.
+- Closing the caller's store would NOT have broken this capture, and that is not
+  a reason to do it. Measured: forcing `closeStorage: true` still produced a
+  logically identical fixture — same commit / revision / doc counts and the same
+  op multiset once entity ids are masked. But the reason it survived is narrower
+  than it looks. `close()` destroys the manager's providers and rotates its
+  session id rather than latching it shut, so what a later write does depends on
+  circumstance: a write to a doc the replica never saw lands, a retrying writer
+  recovers, and a bare `commit()` to a doc the replica already knew fails its
+  stale-read precondition and loses the write. The capture came through because
+  `writeVintageManifest` uses `editWithRetry` on a doc nothing had touched —
+  both favourable conditions at once — not because closing is benign. Under
+  `StorageManager.emulate`, which owns its own server, the same close strands
+  everything. Which case a caller lands in turns on ownership the callee cannot
+  see, which is the argument for handing the decision back rather than for
+  relying on the recovery.
 
 **The cycle — DECIDED.** Per change:
 
