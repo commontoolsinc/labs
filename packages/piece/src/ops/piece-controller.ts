@@ -801,6 +801,25 @@ export function consumeOuterCellContract(
   };
 }
 
+/** Consume one uniform asCell layer, including across anyOf/oneOf branches. */
+function consumeAsCellProjectionSchema(schema: JSONSchema): JSONSchema {
+  if (typeof schema !== "object" || schema === null) return schema;
+  if (ContextualFlowControl.getAsCellValues(schema).length > 0) {
+    return consumeOuterCellContract(schema).payloadSchema;
+  }
+  const anyOf = schema.anyOf?.every(SchemaObjectTraverser.hasAsCell)
+    ? schema.anyOf.map(consumeAsCellProjectionSchema)
+    : schema.anyOf;
+  const oneOf = schema.oneOf?.every(SchemaObjectTraverser.hasAsCell)
+    ? schema.oneOf.map(consumeAsCellProjectionSchema)
+    : schema.oneOf;
+  return {
+    ...schema,
+    ...(anyOf !== undefined && { anyOf }),
+    ...(oneOf !== undefined && { oneOf }),
+  };
+}
+
 function outerCellShapesMatch(
   left: OuterCellShape,
   right: OuterCellShape,
@@ -2276,8 +2295,13 @@ class PiecePropIo implements PieceCellIo {
 
         await selectedCell.pull();
         if (isAsCellProjection) {
-          const handle = selectedCell.resolveAsCell();
-          if (isLast) return await handle.pull();
+          const handle = selectedCell.resolveAsCell().asSchema(
+            consumeAsCellProjectionSchema(selectedCell.schema!),
+          );
+          await handle.pull();
+          if (isLast) {
+            return cellWithScopedLinkRequiredsRelaxed(handle).get();
+          }
           selectedCell = handle;
           continue;
         }
