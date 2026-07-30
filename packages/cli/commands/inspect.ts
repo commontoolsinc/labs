@@ -684,8 +684,18 @@ export const inspect = new Command()
   .option("--bucket <seconds:number>", "Bucket width in seconds.", {
     default: 60,
   })
-  .option("--since <time:string>", "Lower bound on commit time (inclusive).")
-  .option("--until <time:string>", "Upper bound on commit time (exclusive).")
+  .option(
+    "--since <time:string>",
+    "Lower bound on commit time (inclusive). Also widens the curve to cover " +
+      "the whole window asked for.",
+  )
+  .option(
+    "--until <time:string>",
+    "Upper bound on commit time (exclusive). This is the observation " +
+      "boundary: pass the moment you stopped watching and the trailing quiet " +
+      "buckets are reported, which is what shows a storm SETTLED rather than " +
+      "merely ended at the last write.",
+  )
   .option("--top <n:number>", "Entities to attribute the peak bucket to.", {
     default: 10,
   })
@@ -721,7 +731,13 @@ export const inspect = new Command()
               `revisions over ${report.buckets.length} × ${report.bucketSeconds}s` +
               `\npeak ${report.peak.start}: ${
                 commitsPerMinute(report.peak, report.bucketSeconds).toFixed(1)
-              } commits/min`,
+              } commits/min` +
+              // Where writing stopped, against where watching stopped. A curve
+              // that merely ran out of data ends on its last write; one that
+              // was observed through a quiet period ends after it. Only the
+              // second is evidence of a settle, and they render identically
+              // without both numbers.
+              `\nlast commit ${report.lastCommit}, observed through ${report.to}`,
           );
           for (const e of report.peakEntities) {
             console.log(
