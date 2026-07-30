@@ -101,7 +101,7 @@ address in a second, non-canonical encoding). See
 the only pattern pointer; cold recovery recompiles from the `pattern:<identity>`
 source docs.
 
-The design assumes the shipped state after the AMD-loader removal: the ESM
+The design assumes the shipped loader state: the ESM
 module-record loader is the only loader, every module has a content-addressed
 identity (`cf:module/<hash>`), and every module-scope builder artifact
 (pattern / lift / handler) is addressable as `{ identity, symbol }` — authored
@@ -410,7 +410,7 @@ runtime.unsafe_registerHostArtifact(value: object, options: {
   `registerTestArtifact(value, name)`), replacing every test that today relies
   on builder-time `implementationRef` registration outside a compiled program.
   Tests that want **verified** (CFC-passing) artifacts compile a small
-  in-memory program — already the dominant idiom post-AMD.
+  in-memory program — already the dominant idiom.
 
 ### 6. `patternId` scoping: deleted
 

@@ -5,10 +5,9 @@ import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.
 
 // These tests guard the format-agnostic SES module-item classification rules
 // (the `classifyModuleItems` core) through the live enforcement entry point,
-// `verifyCompiledModuleBody` — the ESM module-body verifier. They were
-// originally written against the retired AMD whole-bundle verifier; each case
-// is the same compiled module body, now in compiled-CommonJS form with a
-// `require()` import preamble instead of an AMD `define` factory.
+// `verifyCompiledModuleBody` — the module-body verifier. Each case is one
+// compiled module body in compiled-CommonJS form, with a `require()` import
+// preamble ahead of the top-level items under test.
 //
 // Broad accept/reject parity cases (mutable bindings, classes, generators,
 // IIFEs, raw mutable exports, import policy) live in

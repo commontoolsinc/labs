@@ -659,12 +659,11 @@ describe("SES security regressions", () => {
     expect(probeResult.main?.default()).toBe(expectedApiUrl);
   });
 
-  // The AMD loader (and with it the hand-injected-bundle attack surface that
-  // the old wrapper-guard tests exercised: callable `define`, loader-backed
-  // hidden state, indirect authored `require`) is gone — programs now compile
-  // from TS sources and every module body is verified. The loader-agnostic
-  // invariant that remains is that no loader machinery leaks into the module
-  // compartment's global surface.
+  // Programs compile from TS sources and every module body is verified, so a
+  // hand-injected bundle is not a reachable input. The loader-agnostic invariant
+  // this pins is that no loader machinery leaks into the module compartment's
+  // global surface — no callable `define`, no ambient `require`, nothing that
+  // would let authored code reach loader-backed hidden state.
   it("does not expose loader machinery on the module compartment globals", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",

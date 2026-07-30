@@ -29,8 +29,9 @@ const logger = getLogger("cell-cache");
 /**
  * Content-addressed compilation cache — document model and key scheme.
  *
- * Phase 4 of docs/specs/module-loading.md. The persistent cache is a pair of
- * per-module document sets stored as regular cells in the target space:
+ * See docs/specs/module-loading.md §"Storage model: two content-addressed
+ * document sets, per space". The persistent cache is a pair of per-module
+ * document sets stored as regular cells in the target space:
  *
  *  - **Source set** `pattern:<identity>` — authored TypeScript, keyed by the
  *    per-module Merkle identity (`computeModuleHashes`). Runtime-version
