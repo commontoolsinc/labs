@@ -342,33 +342,37 @@ class ScriptedServerModel {
     const touched = commit.operations.flatMap((operation) =>
       touchedWritesForOperation(operation)
     );
-    const revisions = commit.operations
-      .filter((operation) => operation.op !== "sqlite")
-      .map((operation, index) => ({
-        id: operation.id,
-        branch: "",
-        seq: this.serverSeq + 1,
-        opIndex: index,
-        commitSeq: this.serverSeq + 1,
-        op: operation.op,
-      }));
-    const applied = {
-      seq: ++this.serverSeq,
-      branch: "",
-      revisions,
-    } as AppliedCommit;
-
+    const seq = ++this.serverSeq;
     for (const operation of commit.operations) {
       if (operation.op === "sqlite") continue;
       const next = applyOperation(
         operation,
         this.confirmed.get(operation.id as URI)?.value,
       );
-      this.confirmed.set(operation.id as URI, {
-        seq: applied.seq,
-        value: next,
-      });
+      this.confirmed.set(operation.id as URI, { seq, value: next });
     }
+    // Post-commit state per revision, as a CT-1926 server attaches it:
+    // envelope-wrapped document for set/patch, identity-only for delete.
+    const revisions = commit.operations
+      .filter((operation) => operation.op !== "sqlite")
+      .map((operation, index) => ({
+        id: operation.id,
+        branch: "",
+        seq,
+        opIndex: index,
+        commitSeq: seq,
+        op: operation.op,
+        ...(operation.op === "delete" ? {} : {
+          document: {
+            value: clone(this.confirmed.get(operation.id as URI)?.value),
+          },
+        }),
+      }));
+    const applied = {
+      seq,
+      branch: "",
+      revisions,
+    } as AppliedCommit;
 
     this.applied.set(commit.localSeq, {
       localSeq: commit.localSeq,
@@ -2054,6 +2058,50 @@ Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-
       ],
     );
     await assertResultOk(c2.promise);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: confirmation promotes the server's post-apply value over a stale local mirror (CT-1926)", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+
+    // A foreign whole-doc replacement interleaves server-side just before
+    // the patch's accept; its fan-out frame is never delivered (the
+    // scripted transport sends no sync). The patch is blind, so the server
+    // accepts it ON TOP of the foreign value.
+    // beginPatch bypasses the harness dispatch counter: on the wire it is
+    // localSeq 2 (seed = 1).
+    const patchLocalSeq = 2;
+    harness.model.setOutcome(patchLocalSeq, {
+      kind: "accept",
+      remoteInterleave: {
+        label: "foreign-replace",
+        operations: [{
+          op: "set",
+          id: DOCS.A,
+          value: valueFor("foreign", { extra: true }),
+        }],
+      },
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/note", value: "local-edit" }],
+      valueFor("base", { note: "local-edit" }),
+    );
+    await assertResultOk(patch);
+
+    // The accept's post-apply document is what the server actually computed:
+    // the foreign replacement plus the local leaf. Pre-CT-1926 the client
+    // extrapolated its patch onto the stale "base" mirror instead, minting a
+    // confirmed state the server never had (no foreign fields) until the
+    // fan-out eventually corrected it — the CT-1872 convergence wrinkle.
+    expectVisible(harness, {
+      A: valueFor("foreign", { extra: true, note: "local-edit" }),
+    });
   } finally {
     await harness.close();
   }

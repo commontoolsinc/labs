@@ -485,6 +485,20 @@ type TransactResult =
   | { error: AuthorizationError };
 ```
 
+Revision payloads in the accept response: a `set` revision carries its
+document payload, a `delete` revision is identity-only, and a `patch`
+revision carries `document` — the document's POST-COMMIT state (the same
+state on every patch revision of a doc in the commit, revision-order
+independent; replayed accepts recover it as of the replayed commit's seq,
+not the current head). This lets the client promote its confirmed mirror
+from the value the server actually computed instead of extrapolating its
+own patch onto a possibly-stale local base — the inline verdict can outrun
+the batched novelty fan-out carrying the foreign writes the patch was
+applied on top of (CT-1926). The field is additive: clients fall back to
+local extrapolation when a server omits it, and promote the response value
+only when it differs from that extrapolation (preserving materialized-value
+identity across confirmation in the steady state).
+
 Path conventions on the wire:
 
 - `ClientCommit` reads and writes use full document paths.

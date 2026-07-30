@@ -566,6 +566,17 @@ When a commit is rejected:
 
 The client library SHOULD support automatic retry with a bounded retry count.
 
+When a commit is ACCEPTED, the response's patch revisions carry the
+document's post-commit state (04-protocol.md §4.3.1, CT-1926). The client
+promotes its confirmed mirror from that value when it differs from its own
+locally-extrapolated result — the accept can outrun the batched fan-out
+carrying the foreign writes the patch was applied on top of, and promoting
+a local extrapolation in that window mints a confirmed (seq, value) pair
+the server never had, whose stamp then feeds dishonest staleness bases into
+later reads. When the response value matches the local extrapolation (the
+steady state), the client keeps its local promotion so the materialized
+value's identity survives confirmation.
+
 ## 3.13 Mapping from Current Implementation
 
 | v1 Concept                            | v2 Concept                                        | Notes                                                         |

@@ -2,6 +2,7 @@ import {
   cloneIfNecessary,
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
@@ -3964,6 +3965,24 @@ class SpaceReplica implements ISpaceReplica {
         { id: operation.id, scope: operation.scope },
       ]),
     );
+    // Server truth per doc (CT-1926): accept revisions carry the doc's
+    // post-commit state — `document` on set/patch revisions, absence of a
+    // value on a final delete. Revisions arrive in op order, so last wins;
+    // a patch revision WITHOUT `document` is a pre-CT-1926 server, and it
+    // also invalidates any earlier op's value for the doc (a partial view
+    // must not be promoted as the post-commit state) — those docs fall back
+    // to the local extrapolation below.
+    const serverTruth = new Map<string, EntityDocument | undefined>();
+    for (const revision of applied.revisions) {
+      const key = docKey(revision.id as URI, revision.scope);
+      if (revision.op === "delete") {
+        serverTruth.set(key, undefined);
+      } else if (revision.document !== undefined) {
+        serverTruth.set(key, revision.document);
+      } else {
+        serverTruth.delete(key);
+      }
+    }
     for (const { id, scope } of keys.values()) {
       const record = this.record(id, scope);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
@@ -3982,6 +4001,7 @@ class SpaceReplica implements ISpaceReplica {
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
+      const key = docKey(id, scope);
       if (record.confirmed.seq < applied.seq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
@@ -4007,6 +4027,22 @@ class SpaceReplica implements ISpaceReplica {
               scope,
             }),
           );
+        }
+        // CT-1926: when the accept carried the doc's post-commit state and
+        // it DIFFERS from the local extrapolation, the mirror was stale (a
+        // foreign write raced the fan-out) — promote the server truth and
+        // drop the cached materializations; the identity change is real.
+        // When they MATCH — the steady state — keep the local promotion, so
+        // the materialized value's identity survives confirmation (pinned
+        // by "confirming the head pending write promotes the cached
+        // materialization": identity churn on every accept would ripple
+        // into shallow change detection).
+        if (promoted !== undefined && serverTruth.has(key)) {
+          const truth = serverTruth.get(key);
+          if (!valueEqual(promoted.value, truth)) {
+            promoted = confirmedVersion(applied.seq, truth);
+            reusedSuffix = undefined;
+          }
         }
       }
 
