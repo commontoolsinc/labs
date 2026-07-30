@@ -14,11 +14,7 @@ import {
   WorkerIPCMessageType,
 } from "../src/worker-ipc.ts";
 import { loadEnv } from "../src/env.ts";
-import {
-  getIdentity,
-  isValidDID,
-  isValidPieceId,
-} from "../src/utils.ts";
+import { getIdentity, isValidDID, isValidPieceId } from "../src/utils.ts";
 import {
   BackgroundPieceService,
   type BackgroundPieceServiceOptions,
