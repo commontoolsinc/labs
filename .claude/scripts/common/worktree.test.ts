@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import {
   argumentRegion,
   commitsAllTracked,
+  commitSkipsVerify,
   gitAddInvocations,
   isGitCommit,
   shellWords,
@@ -336,6 +337,37 @@ Deno.test("commitsAllTracked reads flags, not attached values", () => {
   for (const f of ["-mdata", "-ma", "-m x", "--amend", "-Fafile", "-m", "-v"]) {
     assertEquals(commitsAllTracked(` ${f} `), false, f);
   }
+});
+
+Deno.test("commitSkipsVerify honours both spellings", () => {
+  for (const f of ["--no-verify", "-n", "-nm x", "-vn"]) {
+    assertEquals(commitSkipsVerify(` ${f} `), true, f);
+  }
+  // An attached value is a value: `-mn` is a message of "n".
+  for (const f of ["-m x", "-mn", "-man", "-a", "--amend", "--no-edit"]) {
+    assertEquals(commitSkipsVerify(` ${f} `), false, f);
+  }
+});
+
+Deno.test("a line continuation is neither a separator nor an argument", () => {
+  // `git add \<newline> bad.ts` cut the region at the newline and handed git a
+  // lone backslash, so bad.ts was staged, committed and never checked.
+  const cmd = "git add \\\n  bad.ts && git commit -m x";
+  assertEquals(gitAddInvocations(cmd)?.[0]?.paths, ["bad.ts"]);
+});
+
+Deno.test("an unexpanded glob is not resolvable", () => {
+  // The shell expands `*.ts` to this directory; git's pathspec matches
+  // recursively. Resolving it here blocked commits on files in subdirectories
+  // that the command never staged.
+  assertEquals(
+    gitAddInvocations("git add *.ts && git commit -m x")?.[0]?.dryRunnable,
+    false,
+  );
+  assertEquals(
+    gitAddInvocations("git add ok.ts && git commit -m x")?.[0]?.dryRunnable,
+    true,
+  );
 });
 
 Deno.test("over the option bound, a commit is still recognised", () => {

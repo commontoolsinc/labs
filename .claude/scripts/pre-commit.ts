@@ -18,11 +18,14 @@
  */
 
 import {
+  argumentRegion,
   commitsAllTracked,
+  commitSkipsVerify,
   commitTargetWorktree,
   env,
   gitAddInvocations,
   isGitCommit,
+  MAX_COMMAND_LENGTH,
   sameRepository,
   splitAtGitCommit,
   withoutQuotedSpans,
@@ -44,12 +47,39 @@ try {
   Deno.exit(0);
 }
 
-// The commit's own flags, with quoted spans blanked so the message cannot be
-// read as one. `git commit -m "docs: --no-verify escape"` used to disable this
-// hook completely and silently, just by describing it.
-const commitFlags = withoutQuotedSpans(splitAtGitCommit(cmd).after);
+// This commit's own flags: cut at the next command separator, with quoted spans
+// blanked so a message cannot be read as one.
+//
+// Both halves of that are load-bearing. Reading the raw text let
+// `git commit -m "docs: --no-verify escape"` disable the hook by describing it.
+// Reading to end-of-command let a *later* command do it for real:
+// `git commit -m one && git commit -m two --no-verify` turned verification off
+// for the first commit too, silently, and the same leak made a later `-am` sweep
+// the whole tree on behalf of an earlier plain commit.
+const commitAfter = splitAtGitCommit(cmd).after;
+const commitFlags = withoutQuotedSpans(argumentRegion(commitAfter));
 
-if (!isGitCommit(cmd) || /(?:^|\s)--no-verify(?:\s|$)/.test(commitFlags)) {
+if (!isGitCommit(cmd) || commitSkipsVerify(commitFlags)) {
+  Deno.exit(0);
+}
+
+if (cmd.length > MAX_COMMAND_LENGTH) {
+  console.error(
+    `pre-commit: command is ${cmd.length} characters, over the ` +
+      `${MAX_COMMAND_LENGTH} this hook will parse. Skipping — not blocked.`,
+  );
+  Deno.exit(0);
+}
+
+// Only the first commit in a command is modelled, so anything staged for a
+// second one is invisible. Reporting a clean pass over the first commit's files
+// would be a false verdict on a change that does get committed — worse than a
+// skip, by the standard this hook is held to.
+if (splitAtGitCommit(commitAfter).matched) {
+  console.error(
+    "pre-commit: more than one `git commit` in this command; only the first " +
+      "is modelled. Skipping — commit not blocked.",
+  );
   Deno.exit(0);
 }
 
@@ -84,7 +114,13 @@ if (projectDir && !(await sameRepository(worktree, projectDir))) {
 
 async function gitFrom(cwd: string, args: string[]): Promise<string[]> {
   const { stdout } = await new Deno.Command("git", {
-    args,
+    // `--no-optional-locks` because several read-shaped commands are not reads:
+    // `git status --porcelain` refreshes and rewrites the index, verified in a
+    // scratch repo. That breaks the read-only contract, and it takes
+    // `.git/index.lock` in a tree a sibling agent may be committing in.
+    // `core.quotePath=false` because otherwise a non-ASCII path comes back
+    // octal-escaped and double-quoted, and we would stat that literal string.
+    args: ["--no-optional-locks", "-c", "core.quotePath=false", ...args],
     cwd,
     stdout: "piped",
     stderr: "piped",
@@ -133,9 +169,16 @@ async function getFilesToCommit(): Promise<string[]> {
       // An unrecognised flag might be `--edit`, which writes to the index even
       // under --dry-run. Say so; do not stage on the user's behalf to satisfy
       // our own curiosity.
+      const glob = add.paths.find((p) => /[*?[]/.test(p));
       console.error(
-        "pre-commit: `git add` here carries a flag not known to be safe under " +
-          `--dry-run (${add.flags.join(" ")}). Not resolving its file list.`,
+        glob
+          ? `pre-commit: \`git add ${glob}\` is an unexpanded glob, which git ` +
+            "would match recursively rather than as the shell expanded it. " +
+            "Not resolving its file list."
+          : "pre-commit: `git add` here carries a flag not known to be safe " +
+            `under --dry-run (${
+              add.flags.join(" ")
+            }). Not resolving its file list.`,
       );
       continue;
     }
@@ -147,7 +190,10 @@ async function getFilesToCommit(): Promise<string[]> {
       "rev-parse",
       "--show-toplevel",
     ]))[0];
-    if (addWorktree !== worktree) continue;
+    // Same tree only. Not merely "same repository": a `git add` steered
+    // elsewhere stages files this commit will not contain, and running anything
+    // against an unrelated checkout is outside this hook's remit entirely.
+    if (!addWorktree || addWorktree !== worktree) continue;
 
     for (
       const line of await gitFrom(fallbackCwd, [

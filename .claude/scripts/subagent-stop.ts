@@ -202,7 +202,12 @@ if (errors.length > 0) {
 
 async function git(...args: string[]): Promise<string> {
   const { stdout } = await new Deno.Command("git", {
-    args,
+    // `--no-optional-locks`: `git status --porcelain` refreshes and rewrites the
+    // index, verified in a scratch repo. This hook fires once per subagent, so
+    // without it every agent wrote the index of the tree it worked in — and took
+    // `.git/index.lock` there, in exactly the many-agents-one-tree situation
+    // this file's header describes.
+    args: ["--no-optional-locks", ...args],
     cwd: worktree,
     stdout: "piped",
     stderr: "piped",

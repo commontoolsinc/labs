@@ -172,7 +172,7 @@ const MAX_GLOBAL_OPTIONS = 12;
 function gitSubcommand(subcommand: string): RegExp {
   return new RegExp(
     String
-      .raw`\bgit\s+((?:${GLOBAL_OPTION}){0,${MAX_GLOBAL_OPTIONS}})${subcommand}\b`,
+      .raw`\bgit\s+((?:${GLOBAL_OPTION}){0,${MAX_GLOBAL_OPTIONS}})${subcommand}(?![-\w])`,
   );
 }
 
@@ -196,6 +196,41 @@ const GIT_COMMIT = gitSubcommand("commit");
  * delimiter here, so a masked span cannot match anything we look for.
  */
 function maskQuotedSpans(text: string): string {
+  return maskLineContinuations(maskComments(maskQuotesOnly(text)));
+}
+
+/**
+ * Blank a `#` comment to end of line. Applied after quoting, so a `#` inside a
+ * string is already NUL and cannot start one.
+ *
+ * `git status # remember to git commit -m x` was read as a commit: the hook then
+ * checked whatever happened to be staged and, finding a fault, exited 2 on a
+ * `git status`. A hard block on a read-only command, with `--no-verify`
+ * meaningless as an escape because there is no commit to pass it to.
+ */
+function maskComments(text: string): string {
+  return text.replace(
+    /(^|\s)#[^\n]*/g,
+    (span, lead: string) => lead + "\0".repeat(span.length - lead.length),
+  );
+}
+
+/**
+ * Turn `\<newline>` into spaces. It is a line continuation: the shell removes it
+ * and joins the lines, so it is neither an argument nor a separator.
+ *
+ *   git add \
+ *     bad.ts && git commit -m x
+ *
+ * cut the argument region at the newline and handed git a lone `\` as the
+ * pathspec, so bad.ts was staged, committed, and never checked. Two spaces, not
+ * one, because the mask must not change any offset.
+ */
+function maskLineContinuations(text: string): string {
+  return text.replace(/\\\n/g, "  ");
+}
+
+function maskQuotesOnly(text: string): string {
   // `\\[\s\S]` in the double-quoted branch is load-bearing, and the character
   // class rather than `.` doubly so: `.` does not match a newline, so a shell
   // line continuation inside a quoted string ended the span early and reopened
@@ -239,6 +274,13 @@ function looksLikeGitCommit(masked: string): boolean {
   }
   return false;
 }
+
+/**
+ * Beyond this, refuse to parse. The mask is quadratic on a long contiguous run
+ * of escaped quotes — 64 KB of them cost 5.8 seconds, paid several times over as
+ * each entry point re-masks — and no real commit command is anywhere near it.
+ */
+export const MAX_COMMAND_LENGTH = 16384;
 
 /** True when `cmd` contains a `git commit`, however git is steered to it. */
 export function isGitCommit(cmd: string): boolean {
@@ -479,12 +521,18 @@ export function gitAddInvocations(cmd: string): GitAddInvocation[] | null {
     const head = sentinel === -1 ? words : words.slice(0, sentinel);
     const tail = sentinel === -1 ? [] : words.slice(sentinel + 1);
     const flags = head.filter((w) => w.startsWith("-"));
+    const paths = [...head.filter((w) => !w.startsWith("-")), ...tail];
 
     invocations.push({
       dirArgs,
       flags,
-      paths: [...head.filter((w) => !w.startsWith("-")), ...tail],
-      dryRunnable: flags.every(isSafeAddFlag),
+      paths,
+      // An unexpanded glob is not the same pathspec the shell will produce:
+      // `git add *.ts` expands to this directory, while git's pathspec matches
+      // recursively. Resolving it here blocked commits on files in
+      // subdirectories that the command never staged.
+      dryRunnable: flags.every(isSafeAddFlag) &&
+        !paths.some((p) => /[*?[]/.test(p)),
     });
 
     const advance = add.before.length +
@@ -589,6 +637,25 @@ function expand(raw: string): string {
  *
  * `commitFlags` must already have had its quoted spans removed.
  */
+/**
+ * True when the commit's flags disable verification.
+ *
+ * `-n` is git-commit's short spelling of `--no-verify`, and only the long form
+ * was honoured — so the escape hatch the tests call "the only way past" did not
+ * work when spelled the way git documents it first.
+ */
+export function commitSkipsVerify(commitFlags: string): boolean {
+  if (/(?:^|\s)--no-verify(?:\s|$)/.test(commitFlags)) return true;
+  const VALUE_TAKING = "mFcCtSu";
+  for (const m of commitFlags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
+    for (const ch of m[1]) {
+      if (ch === "n") return true;
+      if (VALUE_TAKING.includes(ch)) break;
+    }
+  }
+  return false;
+}
+
 export function commitsAllTracked(commitFlags: string): boolean {
   if (/(?:^|\s)--all(?:\s|$)/.test(commitFlags)) return true;
   const VALUE_TAKING = "mFcCtSu";
