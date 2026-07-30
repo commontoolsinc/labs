@@ -14,6 +14,7 @@ import {
   type GateRoots,
   isUpgradeTarget,
   replayAll,
+  snippet,
 } from "./pattern-vintage-run.ts";
 
 /**
@@ -35,13 +36,21 @@ const KEY = "vintage-gate-subject.tsx";
  * look green on exactly the change it exists to stop.
  */
 const PRELUDE = [
-  "import { Confidential, Default, Writable, pattern } from 'commonfabric';",
+  "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
   "const ATOM = {",
   "  type: 'https://commonfabric.org/cfc/atom/Resource',",
   "  class: 'VintageGateSubject',",
   "  subject: 'did:example:vintage-gate',",
   "} as const;",
   "type Label = readonly [typeof ATOM];",
+  // A STREAM in the output, because every real pattern has several and a root
+  // holding one is not plain data: the read yields a live cell whose own
+  // properties reach the whole runtime. A subject made only of data cells
+  // cannot exercise that, and a comparison that mishandles it would look
+  // perfectly green here while reporting six false findings on `home.tsx`.
+  "const touch = handler<Record<string, never>, { items: Writable<string[]> }>(",
+  "  (_event, { items }) => { items.push('touched'); },",
+  ");",
 ];
 
 const HEALTHY = [
@@ -49,11 +58,12 @@ const HEALTHY = [
   "export interface Output {",
   "  owner: Confidential<Writable<string>, Label>;",
   "  items: Writable<string[]>;",
+  "  touch: Stream<Record<string, never>>;",
   "}",
   "export default pattern<Record<string, never>, Output>(() => {",
   "  const owner = new Writable<string>('v').for('owner');",
   "  const items = new Writable<string[]>([]).for('items');",
-  "  return { owner, items };",
+  "  return { owner, items, touch: touch({ items }) };",
   "});",
   "",
 ].join("\n");
@@ -64,13 +74,14 @@ const BREAKING = [
   "export interface Output {",
   "  owner: Confidential<Writable<string>, Label>;",
   "  items: Writable<string[]>;",
+  "  touch: Stream<Record<string, never>>;",
   "  addedLater: Writable<string[]>;",
   "}",
   "export default pattern<Record<string, never>, Output>(() => {",
   "  const owner = new Writable<string>('v').for('owner');",
   "  const items = new Writable<string[]>([]).for('items');",
   "  const addedLater = new Writable<string[]>([]).for('addedLater');",
-  "  return { owner, items, addedLater };",
+  "  return { owner, items, touch: touch({ items }), addedLater };",
   "});",
   "",
 ].join("\n");
@@ -166,6 +177,80 @@ const NESTED_ALIASED = aliased(false);
 const NESTED_ALIASED_FLIPPED = aliased(true);
 
 /**
+ * A subject that returns a key its declared output type never NAMES, riding an
+ * index signature instead — the shape `system/default-app.tsx` declares
+ * (`[key: string]: unknown`), and the reason its root's `recentPieces`,
+ * `summaryIndex` and `trackRecent` are stored under
+ * `additionalProperties: {"type": "unknown"}`.
+ *
+ * A schema-driven read resolves nothing at an `unknown` position, so such a key
+ * came back `undefined` however much state it held — indistinguishable from a
+ * key the document does not hold, which the comparison treats as nothing to
+ * lose. Measured on the committed `default-app.tsx` fixture: DROPPING
+ * `trackRecent` from the returned result replayed "3 updated cleanly with no
+ * state stranded".
+ *
+ * `notes` is written through a HANDLER rather than seeded, for the reason the
+ * cross-space child is: today's source seeds the fresh cell under the new name
+ * with the same literal, so a subject holding only what its source seeds cannot
+ * witness a moved storage key.
+ */
+const UNDECLARED_KEY = "vintage-gate-undeclared.tsx";
+
+const undeclaredSource = (storageKey: string, trailer = "") =>
+  [
+    "import { Confidential, Stream, Writable, handler, pattern } from 'commonfabric';",
+    "const ATOM = {",
+    "  type: 'https://commonfabric.org/cfc/atom/Resource',",
+    "  class: 'VintageGateUndeclared',",
+    "  subject: 'did:example:vintage-gate-undeclared',",
+    "} as const;",
+    "type Label = readonly [typeof ATOM];",
+    "const scribble = handler<{ text: string }, { notes: Writable<string[]> }>(",
+    "  ({ text }, { notes }) => { notes.push(text); },",
+    ");",
+    "export interface Output {",
+    "  [key: string]: unknown;",
+    "  owner: Confidential<Writable<string>, Label>;",
+    "  items: Writable<string[]>;",
+    "  scribble: Stream<{ text: string }>;",
+    "}",
+    "export default pattern<Record<string, never>, Output>(() => {",
+    "  const owner = new Writable<string>('v').for('owner');",
+    "  const items = new Writable<string[]>([]).for('items');",
+    `  const notes = new Writable<string[]>([]).for('${storageKey}');`,
+    "  return { owner, items, scribble: scribble({ notes }), notes };",
+    "});",
+    trailer,
+    "",
+  ].join("\n");
+
+/**
+ * The subject's own test. `items` carries the assertion because a capture
+ * refuses a run with none; `scribble` is what puts a value in the UNDECLARED
+ * key, which is the one the cases below are about.
+ */
+const undeclaredTest = [
+  "import { action, assert, pattern } from 'commonfabric';",
+  `import Subject from './${UNDECLARED_KEY}';`,
+  "export default pattern(() => {",
+  "  const subject = Subject({});",
+  "  const add = action(() => {",
+  "    subject.items.set([...subject.items.get(), 'captured']);",
+  "  });",
+  "  const added = assert(() => subject.items.get().length === 1);",
+  "  const write = action(() => {",
+  "    subject.scribble.send({ text: 'noted' });",
+  "  });",
+  "  return {",
+  "    tests: [{ action: add }, { assertion: added }, { action: write }],",
+  "    subject,",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
+/**
  * A subject whose child is instantiated in ANOTHER space — the shape
  * `system/profile-create.tsx` uses, where each profile lives in its own
  * `ProfileHome.inSpace()` space.
@@ -192,16 +277,25 @@ const CHILD_SPACE = (await Identity.fromPassphrase("vintage gate child space"))
 
 const crossSource = (added?: string) =>
   [
-    "import { Confidential, Default, Writable, pattern } from 'commonfabric';",
+    "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
     "const ATOM = {",
     "  type: 'https://commonfabric.org/cfc/atom/Resource',",
     "  class: 'VintageGateCross',",
     "  subject: 'did:example:vintage-gate-cross',",
     "} as const;",
     "type Label = readonly [typeof ATOM];",
+    // The child's own handler, so the capture can write INTO the other space
+    // the way production does. A `.set()` from the parent's space does not
+    // land — measured, the child still reads its seeded value afterwards — and
+    // a child holding only what its source seeds cannot witness a moved
+    // storage key: the fresh cell under the new name seeds the same string.
+    "const scribble = handler<{ text: string }, { note: Writable<string> }>(",
+    "  ({ text }, { note }) => { note.set(text); },",
+    ");",
     "export interface ChildOut {",
     "  owner: Confidential<Writable<string>, Label>;",
     "  note: Writable<string>;",
+    "  scribble: Stream<{ text: string }>;",
     ...(added ? [`  addedLater: Writable<${added}>;`] : []),
     "}",
     "export const Child = pattern<Record<string, never>, ChildOut>(() => {",
@@ -210,7 +304,9 @@ const crossSource = (added?: string) =>
     ...(added
       ? ["  const addedLater = new Writable<string[]>([]).for('addedLater');"]
       : []),
-    `  return { owner, note${added ? ", addedLater" : ""} };`,
+    `  return { owner, note, scribble: scribble({ note })${
+      added ? ", addedLater" : ""
+    } };`,
     "});",
     "export interface Output {",
     "  items: Writable<string[]>;",
@@ -229,6 +325,10 @@ const crossSource = (added?: string) =>
  * cross-space child really materialized during the capture — without it a
  * fixture recording the child would be indistinguishable from one that recorded
  * a root nothing ever wrote.
+ *
+ * It then drives the child's OWN handler, so the fixture holds a value in the
+ * other space that today's source cannot reproduce from its defaults — which is
+ * what lets a case there tell a moved storage key from an intact one.
  */
 const crossTest = [
   "import { action, assert, pattern } from 'commonfabric';",
@@ -240,8 +340,18 @@ const crossTest = [
   "  });",
   "  const added = assert(() => subject.items.get().length === 1);",
   "  const noted = assert(() => subject.child.note.get() === 'captured');",
+  "  const scribble = action(() => {",
+  "    subject.child.scribble.send({ text: 'written' });",
+  "  });",
+  "  const wrote = assert(() => subject.child.note.get() === 'written');",
   "  return {",
-  "    tests: [{ action: add }, { assertion: added }, { assertion: noted }],",
+  "    tests: [",
+  "      { action: add },",
+  "      { assertion: added },",
+  "      { assertion: noted },",
+  "      { action: scribble },",
+  "      { assertion: wrote },",
+  "    ],",
   "    subject,",
   "  };",
   "});",
@@ -464,29 +574,35 @@ describe("the vintage gate, end to end", () => {
     expect(failures[0].detail).toContain("did not restore");
   });
 
-  it("does NOT catch a moved storage key — the gap, pinned", async () => {
-    // Asserting a LIMIT, deliberately. `.for('items')` → `.for('itemList')`
-    // leaves the declared contract byte-identical and strands every document
-    // written under the old name — the class Tier 2 was built for, and the one
-    // this gate's own header and CI comment must not be read as claiming.
+  it("CATCHES a moved storage key — the class this tier exists for", async () => {
+    // The inversion this test was written to receive. `.for('items')` →
+    // `.for('itemList')` leaves the declared contract byte-identical and
+    // strands every document written under the old name. No contract check can
+    // see it, and the materialize succeeds — so until the gate compared VALUES
+    // it replayed clean, and this case asserted that limit on purpose.
     //
-    // ONE reason it replays clean, and it is the whole remaining gap:
-    // `replayVintage` asks only whether the materialize was refused, never
-    // whether the values survived it. The fixture genuinely holds stranded data
-    // — capture drives the pattern through its own tests, so `items` was
-    // written through a real handler before the key moved — which is what makes
-    // this a pinned limit of the CHECK rather than of the fixture.
-    //
-    // `packages/piece/test/state-continuity.test.ts` covers the class itself,
-    // over a POPULATED vintage. When the gate grows a value comparison this
-    // test should be INVERTED, not deleted.
+    // The fixture holds real stranded data because capture drives the pattern
+    // through its own tests: `items` was written through a handler before the
+    // key moved. That is what makes this a test of the CHECK rather than of the
+    // fixture.
     await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
     await setSource(MOVED_KEY);
 
-    const { replayed, failures } = await replayAll(roots);
+    const { replayed, stranded, failures } = await replayAll(roots);
 
     expect(replayed).toBe(1);
-    expect(failures).toEqual([]);
+    expect(failures).toHaveLength(1);
+    // The specific finding, not merely "something failed": the update APPLIED
+    // and the loss is what the gate caught. A generic assertion here would also
+    // pass on a refusal, a compile error, or a fixture that never restored —
+    // none of which is this class.
+    expect(failures[0].detail).toContain("APPLIED CLEANLY but stranded");
+    expect(failures[0].detail).toContain("items");
+    // EXACTLY one key, which the failure count cannot say: every stranded key
+    // on one root lands in a single failure, so a comparison that also reported
+    // the subject's stream — the false finding this suite now carries a stream
+    // to catch — would still leave `failures` at one.
+    expect(stranded).toBe(1);
   });
 
   it("reports a vintage whose pattern no longer exists", async () => {
@@ -763,6 +879,59 @@ describe("the vintage gate, end to end", () => {
     });
   });
 
+  describe("a key the declared output type never names", () => {
+    const STAMP = new Date("2026-07-29T12:00:00.000Z");
+
+    const writeUndeclared = (source: string) =>
+      Deno.writeTextFile(`${dir}/patterns/${UNDECLARED_KEY}`, source);
+
+    beforeEach(async () => {
+      await writeUndeclared(undeclaredSource("notes"));
+      await Deno.writeTextFile(
+        `${dir}/patterns/${UNDECLARED_KEY.replace(/\.tsx$/, ".test.tsx")}`,
+        undeclaredTest,
+      );
+    });
+
+    it("CATCHES a moved storage key at an `unknown` position", async () => {
+      // The blind spot, closed. `notes` rides the index signature, so the root
+      // stores it under `additionalProperties: {"type": "unknown"}` and a
+      // schema-driven read resolves NOTHING there — the before value came back
+      // `undefined`, `isPreserved` read that as "held nothing", and the moved
+      // key replayed clean. Red/green on the real tree, not just here: dropping
+      // `trackRecent` from `system/default-app.tsx`'s result reported "3
+      // updated cleanly with no state stranded" against the committed fixture,
+      // and names the key once the read is relaxed.
+      await captureMissing(roots, [UNDECLARED_KEY], STAMP);
+      await writeUndeclared(undeclaredSource("notesMoved"));
+
+      const { failures } = await replayAll(roots);
+
+      expect(failures).toHaveLength(1);
+      // The SPECIFIC finding, with both values. A generic assertion would also
+      // pass on a refusal or an unreadable root, and the before value is what
+      // proves the handler's write was actually captured — a subject that only
+      // ever seeded `notes` would show `[]` on both sides and report nothing.
+      expect(failures[0].detail).toContain("APPLIED CLEANLY but stranded");
+      expect(failures[0].detail).toContain('notes (was ["noted"], now [])');
+    });
+
+    it("reports nothing when the key did not move", async () => {
+      // The green half, and the false-positive guard the relaxation needs: it
+      // makes the comparison SEE keys it could not before, so it also gets to
+      // manufacture findings about them. The two sources differ by a trailing
+      // comment — same storage, different identity, so the replay actually
+      // materializes instead of short-circuiting on an unchanged identity.
+      await captureMissing(roots, [UNDECLARED_KEY], STAMP);
+      await writeUndeclared(undeclaredSource("notes", "// touched"));
+
+      const { changed, failures } = await replayAll(roots);
+
+      expect(changed).toBeGreaterThan(0);
+      expect(failures).toEqual([]);
+    });
+  });
+
   describe("a child instantiated in ANOTHER space", () => {
     // One stamp for the whole block, so a case that captures twice lands on the
     // SAME fixture path — which is how the overwrite and partial-write cases
@@ -841,6 +1010,44 @@ describe("the vintage gate, end to end", () => {
       expect(childFailure?.detail).toContain(
         `the root carries ${pinned.identity}#Child`,
       );
+    });
+
+    it("CATCHES a moved storage key in the CHILD's own space", async () => {
+      // The stranding check over a NESTED root, which the entry-pattern case
+      // above cannot reach. Two things only this shape exercises:
+      //
+      // - the before-state is read in the CHILD's space. Read under the
+      //   fixture's own DID it comes back absent, and an absent before-state is
+      //   reported as unreadable rather than as loss — a different failure, for
+      //   a different reason, which would pass for this one.
+      // - the child's prior state is snapshotted before the PARENT is
+      //   materialized. The parent's setup re-instantiates the child, so a
+      //   before-read taken when the child's own turn came would be reading a
+      //   root today's source had already rewritten, and the comparison would
+      //   be against itself.
+      await captureCross();
+      await writeCross(crossSource().replace(".for('note')", ".for('moved')"));
+
+      const { stranded, failures } = await replayAll(roots);
+
+      const childFailure = failures.find((f) => f.detail.includes("(Child)"));
+      expect(childFailure?.detail).toContain("APPLIED CLEANLY but stranded");
+      // The KEY and both values, so this cannot pass on a failure that merely
+      // mentions the child: what the vintage held in the other space, and what
+      // today's source seeds the fresh cell under the new name with.
+      expect(childFailure?.detail).toContain(
+        'note (was "written", now "captured")',
+      );
+      // TWO keys for one loss, and pinned rather than loosened to "at least
+      // one": the child's own root reports `note`, and the parent — whose
+      // result projects the child's — reports `child`. A change that stopped
+      // reading either of the two roots would still leave a failure behind, so
+      // the count is what says both were examined.
+      const parent = failures.find((f) => f.detail.includes("(default)"));
+      expect(parent?.detail).toContain(
+        "stranded state the vintage held: child",
+      );
+      expect(stranded).toBe(2);
     });
 
     it("passes once the child's added field carries a default", async () => {
@@ -952,5 +1159,23 @@ describe("the vintage gate, end to end", () => {
       );
       expect(failures[0].detail).toContain("recorded but NOT validated");
     });
+  });
+});
+
+describe("the stranded-value snippet", () => {
+  it("never throws, whatever the value is", () => {
+    // A report that can take the run down is a report that fails exactly when
+    // it is needed. `JSON.stringify` throws on a `bigint` — a value a durable
+    // doc may hold — and on anything cyclic, and both reach this on the one
+    // path where a finding is being printed.
+    expect(snippet(1n)).toBe('"1n"');
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    expect(typeof snippet(loop)).toBe("string");
+    expect(snippet(undefined)).toBe("undefined");
+  });
+
+  it("keeps a finding short enough to read", () => {
+    expect(snippet("x".repeat(500)).length).toBe(80);
   });
 });
