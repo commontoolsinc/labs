@@ -35,7 +35,6 @@ import {
   ANCHOR_INDEX,
   ANCHOR_TEXT,
   claimKey,
-  type Comment,
   countCss,
   type Discussion,
   type DiscussionView,
