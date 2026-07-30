@@ -5,7 +5,9 @@ import { parseFunctionText } from "../src/sandbox/compiled-js-parser.ts";
 import {
   type BindingInfo,
   classifyModuleItems,
+  RESERVED_FACTORY_BINDING_SET,
 } from "../src/sandbox/compiled-bundle-verifier.ts";
+import { createFactoryShadowGuardSource } from "@commonfabric/utils/sandbox-contract";
 
 // The security classifier is format-agnostic: it classifies a module's top-level
 // items (compiled-CJS form) against a pre-seeded binding env, independent of how
@@ -13,6 +15,11 @@ import {
 // passes empty guard/reserved sets, since no loader binding is in scope around a
 // module body. These tests exercise both the empty and non-empty configurations,
 // so the shadow-guard and reserved-binding paths stay covered.
+//
+// The empty set is load-bearing, not a stub: the canonical reserved set IS the
+// set of names the transformer emits as shadow guards, so reserving them would
+// reject transformer output. The last case below pins that relationship, which is
+// why no parameter may default to the canonical set.
 
 function bodyStatements(body: string) {
   const fn = parseFunctionText(body, 0, body.length);
@@ -125,5 +132,41 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/SES mode/);
+  });
+
+  it("the canonical reserved set would reject the transformer's own shadow guards", () => {
+    // Why the production path MUST pass an empty reservedBindings set, and why no
+    // parameter may default to RESERVED_FACTORY_BINDING_SET: that set is exactly
+    // the names `createFactoryShadowGuardSource()` emits, so turning the check on
+    // rejects every transformed module on its own guards.
+    const guards = createFactoryShadowGuardSource();
+    expect(guards.length).toBeGreaterThan(0);
+    const body = `function () {\n${guards.join("\n")}\n}`;
+    const { source, statements } = bodyStatements(body);
+
+    // Empty (production): the guards verify as ordinary primitive consts.
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        EMPTY_GUARD_OPTIONS,
+      )
+    ).not.toThrow();
+
+    // Canonical reserved set: the very same body is rejected.
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        {
+          ...EMPTY_GUARD_OPTIONS,
+          reservedBindings: RESERVED_FACTORY_BINDING_SET,
+        },
+      )
+    ).toThrow(/Reserved wrapper binding/);
   });
 });

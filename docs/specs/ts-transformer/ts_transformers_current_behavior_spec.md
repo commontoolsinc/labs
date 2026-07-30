@@ -1755,15 +1755,23 @@ contract, analogous to §11.4's `__cfReg` pairing:
   statements that MUST all be present) and `reservedBindings` (names authored
   code may not declare, else "Reserved wrapper binding '<name>' is not allowed
   in SES mode", `assertFactoryBindingIsNotReserved`).
-- **The live path passes empty sets** — `verifyCompiledModuleBody`
+- **The live path passes empty sets, and must** — `verifyCompiledModuleBody`
   (`packages/runner/src/sandbox/module-record-verifier.ts`) calls the
   classifier with `requiredGuards`/`reservedBindings` both empty, since no
   wrapper binding reaches a module body to shadow. The emitted guards are
   therefore neither required nor reserved; each verifies as an ordinary
   primitive `const` (`undefined` classifies as `{ kind: "data" }` in
-  `classifyExpressionText`). No production caller passes a non-empty set, so
-  both branches are exercised only by
-  `packages/runner/test/module-item-classifier.test.ts`.
+  `classifyExpressionText`).
+  The empty set is load-bearing rather than a stub: `RESERVED_FACTORY_BINDINGS`
+  is exactly `SHADOWED_FACTORY_BINDINGS`, so reserving those names would reject
+  every transformed module **on its own guards**. That is why
+  `RESERVED_FACTORY_BINDING_SET` is exported for a caller to pass explicitly but
+  is deliberately not a parameter default anywhere — a default would silently
+  enable the check that rejects transformer output. Pinned by
+  `packages/runner/test/module-item-classifier.test.ts`, "the canonical reserved
+  set would reject the transformer's own shadow guards", which runs
+  `createFactoryShadowGuardSource()` output through the classifier under both
+  configurations.
 - **Runtime invariant** — the loader-agnostic guarantee is that no loader
   machinery reaches the module compartment's global surface
   (`packages/runner/test/security.test.ts`, "does not expose loader machinery on

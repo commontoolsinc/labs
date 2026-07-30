@@ -52,14 +52,27 @@ export interface BindingInfo {
 }
 
 /**
+/**
  * Packaging-specific configuration for the format-agnostic security classifier
  * ({@link classifyModuleItems}), which is otherwise independent of how a module
- * body is wrapped. A wrapper that puts loader bindings in scope around the body
- * would pass the canonical shadow guards and reserved bindings here; the module
- * records this runtime loads put none in scope, so {@link
- * verifyCompiledModuleBody} passes empty sets and both checks are inert. No
- * production caller passes a non-empty set — `module-item-classifier.test.ts` is
- * what exercises these branches.
+ * body is wrapped.
+ *
+ * {@link verifyCompiledModuleBody} — the only production caller — passes EMPTY
+ * sets, and that is not a stub: it is mutually exclusive with what the
+ * transformer emits. `RESERVED_FACTORY_BINDINGS` is exactly
+ * `SHADOWED_FACTORY_BINDINGS`, and the transformer emits one
+ * `const <name> = undefined;` guard per shadowed name
+ * (`createFactoryShadowGuardSource`). Reserving those names would therefore
+ * reject every transformed module on its own guards, and requiring them would
+ * reject any module that stopped emitting them. Empty sets are what make the
+ * guards verify as ordinary primitive `const`s.
+ *
+ * Non-empty sets belong to a hypothetical wrapper that puts loader bindings in
+ * scope around a module body. Nothing does that here, so the branches exist for
+ * that contingency and are exercised only by
+ * `runner/test/module-item-classifier.test.ts`. `reserved` is a REQUIRED
+ * argument everywhere it is threaded: a default of the canonical reserved set
+ * would silently enable the check that rejects transformer output.
  */
 export interface ModuleItemClassificationOptions {
   /** Canonical shadow-guard statements that MUST be present, or none. */
@@ -79,7 +92,18 @@ const CANONICAL_BINDING_IDENTITY_HELPER = stripJsTrivia(
   createBindingIdentityHelperSource(),
 );
 
-const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
+/**
+ * The canonical reserved-binding set from the shared sandbox contract — the
+ * value a wrapper-bearing caller would pass as
+ * {@link ModuleItemClassificationOptions.reservedBindings}. Deliberately NOT a
+ * default on any parameter: see that interface for why the production path
+ * passes an empty set instead.
+ */
+export const RESERVED_FACTORY_BINDING_SET: ReadonlySet<string> = new Set<
+  string
+>(
+  RESERVED_FACTORY_BINDINGS,
+);
 const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
   "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
 
@@ -347,7 +371,7 @@ function verifyVariableStatement(
     trimRange(source, statement.start, statement.end).start,
     trimRange(source, statement.start, statement.end).end,
   ),
-  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
+  reserved: ReadonlySet<string>,
 ): void {
   const start = performance.now();
   try {
@@ -1755,7 +1779,7 @@ function assertFactoryBindingIsNotReserved(
   filename: string,
   offset: number,
   name: string,
-  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
+  reserved: ReadonlySet<string>,
 ): void {
   if (!reserved.has(name)) {
     return;
