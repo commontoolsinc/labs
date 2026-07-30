@@ -23,7 +23,7 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import type { SpaceDb } from "./db.ts";
 import { type EntityModel, listEntityModels } from "./model.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { type EntityAddress, reconstructDocument } from "./reconstruct.ts";
 import { listScopes } from "./scopes.ts";
 
 /**
@@ -256,11 +256,27 @@ export function contentFingerprint(
   };
 }
 
+/**
+ * An {@link EntityAddress} whose scope is known — which, for a diff, it always
+ * is.
+ *
+ * An id is NOT unique on its own: one id can hold a shared space value plus
+ * per-user/per-session overrides that are genuinely different entities. So the
+ * diff reports the pair it compared by. Returning a bare id forced every caller
+ * to re-associate it with a scope by guessing — a lookup that silently lets the
+ * last scope win, misclassifying exactly the per-kind precision ("74 pieces vs
+ * 73 cells") the diff exists to provide.
+ *
+ * Being an `EntityAddress` is the useful part: what a diff entry is FOR is
+ * looking the entity up, and this hands straight to `reconstructDocument`.
+ */
+export type ScopedEntity = EntityAddress & { scope: string };
+
 export interface FingerprintDiff {
   equal: boolean;
-  added: string[];
-  removed: string[];
-  changed: string[];
+  added: ScopedEntity[];
+  removed: ScopedEntity[];
+  changed: ScopedEntity[];
 }
 
 /**
@@ -275,20 +291,26 @@ export function diffFingerprints(
   const a = new Map(before.perEntity.map((e) => [key(e), e]));
   const b = new Map(after.perEntity.map((e) => [key(e), e]));
 
-  const added: string[] = [];
-  const removed: string[] = [];
-  const changed: string[] = [];
+  const added: ScopedEntity[] = [];
+  const removed: ScopedEntity[] = [];
+  const changed: ScopedEntity[] = [];
+  const at = (e: EntityFingerprint): ScopedEntity => ({
+    id: e.id,
+    scope: e.scope,
+  });
 
-  for (const [k, e] of b) if (!a.has(k)) added.push(e.id);
+  for (const [k, e] of b) if (!a.has(k)) added.push(at(e));
   for (const [k, e] of a) {
     const other = b.get(k);
-    if (other === undefined) removed.push(e.id);
-    else if (other.hash !== e.hash) changed.push(e.id);
+    if (other === undefined) removed.push(at(e));
+    else if (other.hash !== e.hash) changed.push(at(e));
   }
 
-  added.sort(utf8Compare);
-  removed.sort(utf8Compare);
-  changed.sort(utf8Compare);
+  const byAddress = (x: ScopedEntity, y: ScopedEntity) =>
+    x.id === y.id ? utf8Compare(x.scope, y.scope) : utf8Compare(x.id, y.id);
+  added.sort(byAddress);
+  removed.sort(byAddress);
+  changed.sort(byAddress);
   return {
     equal: added.length === 0 && removed.length === 0 && changed.length === 0,
     added,

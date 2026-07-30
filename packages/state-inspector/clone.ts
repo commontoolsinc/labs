@@ -24,6 +24,11 @@
 // serves the clone as a live space under the SAME DID.
 
 import * as Path from "@std/path";
+// The only read-WRITE database handle in this package, and it opens nothing:
+// `assertNotInUse` takes a lock to ask whether a server is still holding the
+// working copy. `db.ts` stays read-only by contract, so the probe lives here
+// with the rest of the code that legitimately writes to a clone.
+import { Database } from "@db/sqlite";
 import {
   resolveMemoryEngineStoreRootUrl,
   resolveSpaceStoreUrl,
@@ -35,6 +40,7 @@ import {
   contentFingerprint,
   diffFingerprints,
   type FingerprintReport,
+  type ScopedEntity,
 } from "./fingerprint.ts";
 
 /** Filenames the layout depends on. */
@@ -82,8 +88,23 @@ export interface CloneManifest {
     entities: number;
     maxSeq: number;
   };
-  /** Content fingerprint at clone time, generated cells excluded. */
-  fingerprint: { hash: string; entities: number; excludedGenerated: number };
+  /**
+   * Content fingerprint at clone time, generated cells excluded.
+   *
+   * `unhashable` and `ambiguous` record what the baseline fingerprint could NOT
+   * speak for. Both are absent from the roll-up by construction, so a verdict
+   * computed from the hash alone rests on however much evidence happened to
+   * exist — and without recording the number here, nobody could tell whether
+   * that was all of it. Optional: clones taken before these were recorded
+   * report them as unknown rather than as zero.
+   */
+  fingerprint: {
+    hash: string;
+    entities: number;
+    excludedGenerated: number;
+    unhashable?: number;
+    ambiguous?: number;
+  };
 }
 
 export interface CreateCloneOptions {
@@ -200,6 +221,8 @@ export async function createClone(
       hash: fingerprint.hash,
       entities: fingerprint.entities,
       excludedGenerated: fingerprint.excludedGenerated,
+      unhashable: fingerprint.unhashable.length,
+      ambiguous: fingerprint.ambiguous.length,
     },
   };
 
@@ -232,10 +255,29 @@ export async function createClone(
  * Deletes the `-wal`/`-shm` companions the engine creates on open. Leaving them
  * behind would let a checkpoint replay part of the discarded attempt over the
  * fresh copy — a reset that silently isn't one.
+ *
+ * REFUSES while a server still has the working copy open, because unlinking a
+ * file does not disturb a process that already holds it: the server keeps
+ * reading and writing the unlinked inode while every new reader — including the
+ * `verify` this function's caller runs next — sees the restored one. Pass two of
+ * a rehearsal would then run against pass one's state while `cf space verify`
+ * reported the clone pristine, which is the failure mode the whole two-pass
+ * procedure exists to rule out.
+ *
+ * That check is a TRIPWIRE, not mutual exclusion. It catches the case that
+ * actually happens — an operator who forgot to stop a toolshed that is already
+ * serving the clone — and cannot prevent one that opens the store in the
+ * instant between the probe and the unlink. No external check can: a process
+ * that opens a SQLite file takes no lock in doing so, so there is no state to
+ * hold against it, and holding our own lock across the unlink would be worse
+ * (the probe connection would then rewrite `-wal`/`-shm` beside the freshly
+ * restored copy on close). Stopping the server is what makes a reset correct;
+ * this makes forgetting to loud rather than silent.
  */
 export async function resetClone(dir: string): Promise<CloneManifest> {
   const manifest = await readManifest(dir);
   const paths = clonePaths(await canonicalPath(dir), manifest.space);
+  await assertNotInUse(paths.workingPath);
   // The companions are absent on a clone no engine has opened yet — the normal
   // case at the start of a rehearsal — so their absence is not an error, while
   // any OTHER failure must surface rather than leave a half-reset clone.
@@ -245,6 +287,57 @@ export async function resetClone(dir: string): Promise<CloneManifest> {
   }
   await Deno.copyFile(paths.pristinePath, paths.workingPath);
   return manifest;
+}
+
+/**
+ * Refuse if any process still holds the working copy open, as of now.
+ *
+ * "As of now" is the honest scope — see the tripwire note on {@link resetClone}
+ * for why nothing stronger is available from outside the server.
+ *
+ * The probe is the hazard itself rather than a proxy for it: take SQLite's
+ * exclusive lock, which in WAL mode cannot be granted while another connection
+ * has the shared-memory index mapped. A PID or lease file would have to be
+ * written by the server, kept in step with it, and disbelieved when stale; this
+ * asks the operating system the actual question and needs no bookkeeping. It
+ * also gives the right answer in the case a marker would get wrong: a toolshed
+ * that is running but has never opened THIS space's engine holds nothing, and
+ * resetting under it is safe because it will open the restored file when it
+ * first reads.
+ *
+ * Locking is the only signal the binding exposes — its errors carry a message
+ * and nothing else — so the two outcomes are separated by message. Anything
+ * that is not a lock conflict means the working copy could not be opened as a
+ * database at all, and that is precisely when a reset is the remedy rather than
+ * the risk, so it proceeds.
+ */
+async function assertNotInUse(workingPath: string): Promise<void> {
+  // Nothing to hold open, and `Database` would otherwise create an empty file
+  // just to probe it. The copy below restores it either way.
+  if (!(await pathExists(workingPath))) return;
+  let db: Database;
+  try {
+    db = new Database(workingPath, { create: false });
+  } catch {
+    return; // unopenable — reset is the fix, not the hazard
+  }
+  try {
+    db.exec("PRAGMA locking_mode=EXCLUSIVE");
+    db.exec("BEGIN IMMEDIATE");
+    db.exec("ROLLBACK");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/database (is|table is) locked/i.test(message)) return;
+    throw new Error(
+      `refusing to reset ${workingPath}: another process still has it open ` +
+        `(${message}). Unlinking it would not reach that process — it would ` +
+        `keep serving the discarded attempt while verify reported the clone ` +
+        `pristine. Stop the server first (scripts/stop-local-dev.sh ` +
+        `--port-offset 10), reset, then start it again.`,
+    );
+  } finally {
+    db.close();
+  }
 }
 
 export interface VerifyResult {
@@ -303,6 +396,32 @@ export interface VerifyResult {
     /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
     changedByKind: Record<string, number>;
     removedByKind: Record<string, number>;
+  };
+  /**
+   * How much of the store the fingerprint could not speak for, on each side.
+   *
+   * Neither verdict above is computed from these, and that is deliberate rather
+   * than an omission — but a verdict that silently rests on partial evidence is
+   * indistinguishable from one that rests on all of it, so the number is
+   * reported wherever the verdict is.
+   *
+   * The two behave differently, and only one is already covered:
+   *
+   *   * `unhashable` — an entity that BECOMES unhashable drops out of the
+   *     working fingerprint entirely, so the diff already counts it as
+   *     `removed` and both verdicts already fail. The gap the count closes is
+   *     the entity unhashable on BOTH sides: invisible to the diff, so a change
+   *     to it is silent, and the only way to know is that the number is nonzero.
+   *   * `ambiguous` — an id one manifest calls generated and another calls
+   *     named is counted as generated and excluded, which can hide a real
+   *     change to authored content. Nothing gates on it, so the count is the
+   *     whole signal.
+   *
+   * `manifest` is null on clones taken before these were recorded.
+   */
+  uncertainty: {
+    unhashable: { manifest: number | null; working: number };
+    ambiguous: { manifest: number | null; working: number };
   };
 }
 
@@ -380,27 +499,26 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   }
 
   const d = diffFingerprints(before, fingerprint);
-  // `diffFingerprints` keys by id AND scope, because one id can hold a shared
-  // space value plus per-user/per-session overrides that are genuinely
-  // different entities. Keying these lookups by id alone would let the last
-  // scope win and misclassify the tally — exactly the precision ("74 pieces vs
-  // 73 cells") the diff exists to provide. `diff` reports bare ids, so a
-  // by-id-only fallback keeps a lookup working when scopes disagree.
+  // Keyed by id AND scope throughout: one id can hold a shared space value plus
+  // per-user/per-session overrides that are genuinely different entities, and a
+  // by-id lookup would let the last scope win and misclassify the tally —
+  // exactly the precision ("74 pieces vs 73 cells") the diff exists to provide.
+  // `diffFingerprints` reports the address it compared by, so there is nothing
+  // left to guess at here.
   const kindIndex = (rows: FingerprintReport["perEntity"]) => {
-    const byIdAndScope = new Map<string, string>();
-    const byId = new Map<string, string>();
-    for (const e of rows) {
-      byIdAndScope.set(`${e.id} ${e.scope}`, e.kind);
-      byId.set(e.id, e.kind);
-    }
-    return (id: string) => byIdAndScope.get(id) ?? byId.get(id) ?? "unknown";
+    const byAddress = new Map(rows.map((e) => [`${e.id} ${e.scope}`, e.kind]));
+    return (at: ScopedEntity) =>
+      byAddress.get(`${at.id} ${at.scope}`) ?? "unknown";
   };
   const kindOf = kindIndex(fingerprint.perEntity);
   const kindWas = kindIndex(before.perEntity);
-  const tally = (ids: string[], lookup: (id: string) => string) => {
+  const tally = (
+    entities: ScopedEntity[],
+    lookup: (at: ScopedEntity) => string,
+  ) => {
     const out: Record<string, number> = {};
-    for (const id of ids) {
-      const k = lookup(id);
+    for (const at of entities) {
+      const k = lookup(at);
       out[k] = (out[k] ?? 0) + 1;
     }
     return out;
@@ -426,6 +544,16 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
       excludedGenerated: fingerprint.excludedGenerated,
     },
     diff: delta,
+    uncertainty: {
+      unhashable: {
+        manifest: manifest.fingerprint.unhashable ?? null,
+        working: fingerprint.unhashable.length,
+      },
+      ambiguous: {
+        manifest: manifest.fingerprint.ambiguous ?? null,
+        working: fingerprint.ambiguous.length,
+      },
+    },
   };
 }
 
