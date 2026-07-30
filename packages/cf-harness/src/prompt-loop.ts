@@ -2423,7 +2423,6 @@ export class CfHarnessPromptLoop {
         ReturnType<CfHarnessEngine["invokeBuiltinTool"]>
       >["output"];
       resultRef: ToolResultRef;
-      descendantUsage?: HarnessModelUsage;
     };
     try {
       result = toolCall.function.name === "delegate_task"
@@ -2434,6 +2433,7 @@ export class CfHarnessPromptLoop {
           promptSlotBinding,
           signal,
           sequence,
+          recordDescendantUsage,
         })
         : await this.#invokeBuiltinTool(
           toolCall.function.name,
@@ -2457,9 +2457,6 @@ export class CfHarnessPromptLoop {
       // narrowing at the tool boundary is what lets this catch stay run-fatal
       // without matching error-message strings.
       throw error;
-    }
-    if (result.descendantUsage !== undefined) {
-      recordDescendantUsage(result.descendantUsage);
     }
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolCall.function.name,
@@ -2723,10 +2720,10 @@ export class CfHarnessPromptLoop {
     promptSlotBinding?: PromptSlotBinding;
     signal?: AbortSignal;
     sequence: number;
+    recordDescendantUsage: (usage: HarnessModelUsage) => void;
   }): Promise<{
     output: DelegateTaskToolOutput;
     resultRef: ToolResultRef;
-    descendantUsage?: HarnessModelUsage;
   }> {
     const delegateInput = options.input;
     const profileConfig = getHarnessSubagentProfileConfig(
@@ -2853,7 +2850,6 @@ export class CfHarnessPromptLoop {
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";
     let childModelTurns = 0;
-    let descendantUsage: HarnessModelUsage | undefined;
     let structuredReturn: HarnessSubagentStructuredReturn | undefined;
     try {
       if (
@@ -2903,7 +2899,10 @@ export class CfHarnessPromptLoop {
       childModelTurns = childResult.modelTurns;
       const childUsage = childResult.totalUsage ?? childResult.usage;
       if (childUsage !== undefined) {
-        descendantUsage = childUsage;
+        // The child has already incurred this usage. Record it before
+        // structured-return processing or parent artifact persistence can
+        // fail, so the parent failure report remains cost-complete.
+        options.recordDescendantUsage(childUsage);
       }
       if (childResult.runState.status !== "completed") {
         subagentStatus = "failed";
@@ -2971,7 +2970,6 @@ export class CfHarnessPromptLoop {
     return {
       output: result.output,
       resultRef: result.resultRef,
-      ...(descendantUsage !== undefined ? { descendantUsage } : {}),
     };
   }
 }

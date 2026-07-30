@@ -777,7 +777,9 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(`${this.runRoot}/policy-trace.json`);
   }
 
-  persistRunReport(): Promise<string> {
+  persistRunReport(
+    _report: Parameters<HarnessArtifactStore["persistRunReport"]>[0],
+  ): Promise<string> {
     return Promise.resolve(`${this.runRoot}/run-report.json`);
   }
 
@@ -791,6 +793,97 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(path);
   }
 }
+
+class FailingDelegateOutputArtifactStore extends RecordingArtifactStore {
+  readonly runReports: Array<
+    Parameters<HarnessArtifactStore["persistRunReport"]>[0]
+  > = [];
+
+  override persistRunReport(
+    report: Parameters<HarnessArtifactStore["persistRunReport"]>[0],
+  ): Promise<string> {
+    this.runReports.push(report);
+    return Promise.resolve(`${this.runRoot}/run-report.json`);
+  }
+
+  override persistToolOutput(): Promise<string> {
+    return Promise.reject(new Error("delegate output persist boom"));
+  }
+}
+
+Deno.test("CfHarnessPromptLoop retains child usage when delegate output persistence fails", async () => {
+  const artifactRoot = await Deno.makeTempDir({
+    dir: "/tmp",
+    prefix: "cf-harness-delegate-usage-failure-",
+  });
+  try {
+    const artifactStore = new FailingDelegateOutputArtifactStore(
+      artifactRoot,
+      "run-delegate-usage-failure",
+    );
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) =>
+        Promise.resolve(
+          request.runId === "run-delegate-usage-failure"
+            ? {
+              usage: {
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+              },
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-delegate-usage-failure",
+                  type: "function" as const,
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Return a short summary.",
+                    }),
+                  },
+                }],
+              },
+            }
+            : {
+              usage: {
+                inputTokens: 20,
+                outputTokens: 3,
+                totalTokens: 23,
+              },
+              assistant: {
+                role: "assistant" as const,
+                content: "Child summary.",
+              },
+            },
+        ),
+    };
+    const loop = new CfHarnessPromptLoop({
+      modelClient,
+      engine: new CfHarnessEngine({
+        artifactStore,
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-delegate-usage-failure",
+        model: "test-model",
+        cfcEnforcementMode: "disabled",
+      }),
+    });
+
+    await assertRejects(
+      () => loop.runPrompt({ prompt: "Delegate this." }),
+      Error,
+      "delegate output persist boom",
+    );
+
+    const failureReport = artifactStore.runReports.at(-1);
+    assertEquals(failureReport?.usage?.totalTokens, 12);
+    assertEquals(failureReport?.totalUsage?.totalTokens, 35);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
 
 const observedCfcResult = (
   stdout: string,
