@@ -3462,8 +3462,8 @@ async function startRequest(
       builtinId: "llmDialog",
     });
     // Record the stamping schema for each pushed message's own entity doc
-    // (every model push carries an [ID] sigil, so each message splits into
-    // its own doc). The messages link carries its own schema, which wins over
+    // (every message is appended as a link to a document of its own, so each
+    // one is separately addressable). The messages link carries its own schema, which wins over
     // an `asSchema` handle inside `push()` (`resolvedLink.schema ?? ...`), so
     // the stamp cannot ride the array handle — instead this mirrors the
     // split-entity idiom in data-updating.ts (`recordRelevantSchemaWrite-
