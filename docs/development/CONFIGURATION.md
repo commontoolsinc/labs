@@ -166,7 +166,7 @@ The toolshed-embedded memory service has two modes:
 | Var | Default | Notes |
 |---|---|---|
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
-| `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database. Used for clusterduck clustering. Validated as an absolute path. |
+| `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
@@ -389,7 +389,6 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 |---|---|
 | `dev` | Build against the cloud toolshed at `toolshed.saga-castor.ts.net`. Use this for shell-only work. |
 | `dev-local` | Build against `http://localhost:$TOOLSHED_PORT`. **Use this for local dev** — `dev` points at the cloud backend. |
-| `dev-clusterduck` | Build against the clusterduck instance (`localhost:7001`). |
 | `build` / `production` | Optimized build (`production` sets `PRODUCTION=1`). |
 | `serve` | Serve pre-built `dist/` on `0.0.0.0:9099`. |
 | `test`, `integration` | Test suites. |
