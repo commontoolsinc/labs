@@ -130,6 +130,30 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 `packages/api`, `packages/ts-transformers`, `packages/schema-generator`,
 `packages/runner`.
 
+- **Results: every published name is permanent, at every depth.** Schema
+  compatibility checks results as candidate ⊆ previous, and "results may
+  narrow freely" governs *values*, never *named fields*. Measured against
+  `assertPatternSchemasBackwardCompatible`:
+
+  | change | verdict |
+  | --- | --- |
+  | remove a named field, any depth | rejected |
+  | add a **required** field, any depth | rejected unless it has a default |
+  | add an **optional** field, any depth | allowed |
+  | narrow a value type, any depth | allowed |
+
+  Nesting a result under one key confers nothing — the removed-field check
+  recurses, so a nested removal is rejected on a nested path exactly as a flat
+  one is. So the rule to author against is: publish as few names as the verb
+  can live with, and make every later addition optional. The design doc's
+  matching paragraph is corrected the same way.
+- **`action` is the sole result-authoring surface.** `handler()` produces
+  `HandlerFactory<T, E, void>`, so a returning verb written with `handler`
+  does not compile against a `Stream<E, R>` annotation. Deliberate: `action`
+  is the CTS-native surface a pattern author writes, `handler` the lower-level
+  escape hatch, and threading `R` through both would double a hand-maintained
+  mirror that already drifts. C2's returning-body error must point authors at
+  `action` rather than merely rejecting the body.
 - **api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void` — the `action()` overloads in
   `packages/runner/src/builder/module.ts`); `Stream<T, R = void>`
@@ -200,6 +224,26 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
+
+  **A value-less verb wants `{ type: "object", properties: {} }`, not the
+  generic `void` sentinel**, which lowers to `{ asCell: ["opaque"] }` — a
+  *wrapper* claim ("the result is an opaque cell") rather than a statement
+  that there is no result, and it would hand readback a cell to resolve. The
+  empty object describes the value the runtime actually writes, since a
+  value-less handling's receipt is `{}`; it satisfies rule 3's "a verb that
+  produces nothing says so"; and leaving `additionalProperties` **undefined**
+  keeps it open, because the compat checker reads `additionalProperties ??
+  true`. Emitting `false` there would freeze a verb as value-less forever.
+  Deliberately the opposite of verb *inputs*, which close so an undeclared
+  field is a rejection.
+
+  **`AsStream` stays single-slot**, so `Stream.for<Event, Result>()` cannot
+  construct a result-carrying stream. Acceptable because verbs come from
+  `action`/`handler` and streams are leaves. If it ever bites, the cost is
+  bounded: `AsStream` has three non-test uses, and widening is four defaulted
+  edits — `_B` on `HKT` (implementors inherit it), `Apply<F, A, B = void>`,
+  `<T, R = void>` on `CellTypeConstructor`'s `new`/`of`/`for`, and `AsStream`'s
+  two-slot projection. Every step carries a default, so no call site moves.
 - **Which signal marks a verb — checked, and C3 is not exposed to it.** An
   earlier revision of this bullet warned that "stream/handler properties" is
   not one predicate, because `Cell.isStream` accepts three independent signals
@@ -247,6 +291,13 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
+- **The reactive half of that exit needs no new machinery** (Berni,
+  2026-07-29): `await cell.pull()` on the receipt already ensures the pattern
+  on that cell, if there is one, has run. The readback the CLI performs is
+  therefore the same call for a plain return and a launched one, and the
+  difference stays inside `pull()`. Recorded rather than assumed — the claim
+  is the architect's about his own machinery, and this plan has not yet
+  exercised a reactive return end to end.
 
 ### WS-D — invocation plumbing
 
@@ -268,6 +319,15 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   ends in the stream link. The binding is a content hash over the caller's key
   plus the whole link, not a delimited join: the caller's half is opaque, so
   concatenation would let a chosen id shift the separator.
+
+  The alternative — a client-side helper that derives the receipt cell rather
+  than receiving its address — was raised again in review (Berni, 2026-07-29)
+  as an equal option. It is not equal, for a reason worth keeping written
+  down: **the receipt is not derivable from the event id alone.** Its cause is
+  the handler's bound closure *plus* the event id, as this document already
+  states. A helper would have to reconstruct `$ctx` from the callable cell at
+  every call site — the client-side reconstruction the callback route exists
+  to avoid, and the same fact that makes caller-key scoping necessary.
 - ~~**cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
@@ -379,11 +439,29 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   everything per the decided semantics; handler result schemas appear once
   WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
   deployed pattern's source identity (skew detection).
-- Generic identity annotation for data reads and callable results. Start with
-  an exploration form such as `--include-ids` that annotates points where the
-  backing identity changes; evaluate a narrower path-selected form if broad
-  output is too noisy. Patterns return child references and never manufacture
-  their own fid fields for this purpose.
+- Generic identity annotation for data reads and callable results
+  (`--show-links` / `--include-ids`). Patterns return child references and
+  never manufacture their own fid fields for this purpose. Two shapes were
+  weighed (Berni, 2026-07-29): an inline `"@ID": { doc?, path?, space?,
+  scope? }` wherever the doc id or scope changes, versus provenance beside the
+  value as a `{ "/path": <link> }` dictionary.
+
+  **Take the second.** Berni's own objection settles it: inline cannot
+  annotate a **scalar**, and a scalar can be its own doc, so the format needs
+  a special case exactly where results are simplest — and an irregular format
+  costs an agent more than a verbose one. A second reason follows from the
+  result rule above: an inline `@ID` inside a schema-described result is
+  either undeclared (the tolerated-but-undeclared shape rule 1 exists to kill)
+  or declared, and then permanent at every path it appears, for provenance
+  metadata.
+
+  Not a new format either — the llm-dialog tool path already returns the link
+  as a sibling of the value, never inside it. Placement is a `links` field on
+  the Invocation JSON rather than a second stdout block: `resultRef` is
+  already recorded as advisory until the invocation protocol carries it there,
+  and Invocation is required to be authored open-world precisely so protocol
+  fields can be added later. Cost is bounded by emitting links only for paths
+  that have them, and only when asked.
 - **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
   the stream's serialization rather than redirecting. The llm-dialog `read`
   tool already rejects this case with the right message — "Path resolves to a
