@@ -34,12 +34,16 @@ gain the second reason they are load-bearing.
 
 **Amendment (2026-07-30)**, from repointing this document's source citations at
 symbols rather than line numbers. Verifying each one against the tree showed
-three claims had been overtaken by landed code, and they are corrected in place
-below: `Cell.send` now accepts a caller-supplied event id and scopes it per
-stream; `executeResolvedCallable` forwards one from the CLI; and the
-plain-JSON-return-into-the-receipt change exists behind the default-off
-`plainResultReceipts` option. What remains open is readback, the flag default,
-and all of Part 1.
+that WS-D has landed whole, and the claims below are corrected in place:
+`Cell.send` accepts a caller-supplied event id and scopes it per stream;
+`resolveInvocationId` mints one for every `cf piece call`, so the id is always
+supplied rather than only when a caller passes `--invocation`;
+`executeResolvedCallable` forwards it, then reads the handling's outcome back
+off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
+on a receipt-exists collision, where the original handling's outcome settles
+the retry. The plain-JSON-return-into-the-receipt change exists behind the
+default-off `plainResultReceipts` option. What remains open is that flag's
+default and all of Part 1.
 
 ## Goal
 
@@ -99,7 +103,9 @@ The CLI has two callable contracts (`callableCommandSpec`,
 **`handler`** — default verb `invoke`, input schema only. Execution sends into
 the stream, awaits `runtime.idle()` and `manager.synced()`, then inspects the
 transaction and throws on runtime failure (`executeResolvedCallable`'s handler
-branch, same file). It returns nothing.
+branch, same file). It returned nothing when this was written; it now returns
+an `invocation` carrying the id, status, and the result read back off the
+receipt.
 
 **`tool`** — default verb `run`, input schema plus `outputSchemaSummary`. A tool
 is a *bound sub-pattern*: execution calls
@@ -149,15 +155,18 @@ callable layer predates:
 Measured against the problem above, what is absent is not machinery but
 plumbing through the callable layer:
 
-1. **No caller-supplied id from the CLI.** Written when `cf piece call` sent
-   without an `eventId`, so a client retry minted a fresh event and re-executed
-   rather than colliding on the receipt. `executeResolvedCallable`'s handler
-   branch (`packages/cli/lib/callable.ts`) now forwards
-   `{ eventId: invocationId }` when the caller supplies one, so this gap is
-   closed on the dispatch side.
-2. **No readback.** The same handler branch awaits commit and returns `{}`; the
-   per-invocation result cell exists at a computable address, and nobody reads
-   it.
+1. **No caller-supplied id from the CLI.** *Closed.* Written when `cf piece
+   call` sent without an `eventId`, so a client retry minted a fresh event and
+   re-executed rather than colliding on the receipt. `resolveInvocationId`
+   (`packages/cli/commands/piece.ts`) now mints an id whenever `--invocation`
+   is absent, and `executeResolvedCallable`'s handler branch
+   (`packages/cli/lib/callable.ts`) forwards it as `{ eventId: invocationId }`.
+2. **No readback.** *Closed.* The same handler branch reads the receipt at
+   `tx.handlingReceiptLink` through `runtime.getCellFromLink`, pulls it, and
+   returns the value as `invocation.result`, treating a value-less verb's
+   empty record as existence-only. A receipt-exists collision reads back the
+   ORIGINAL handling's outcome, so a retry settles as a success without
+   re-executing.
 3. **Patterns return nothing.** All of `topics` is handlers that return no
    value — `addTopic: Stream<AddTopicEvent>` on the board, and the
    `AgentAuthoredEvent` family (`addComment`, `addLink`, `setBody`) on the

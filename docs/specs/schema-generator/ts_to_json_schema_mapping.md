@@ -37,7 +37,7 @@ consumer package is `@commonfabric/ts-transformers`, along two axes:
 
 1. **Schema generation proper** — `SchemaGeneratorTransformer`
    (`packages/ts-transformers/src/transformers/schema-generator.ts`) calls
-   `createSchemaTransformerV2` and feeds it the pipeline's bare cross-stage
+   `createSchemaTransformerV2()` and feeds it the pipeline's bare cross-stage
    maps `typeRegistry` / `schemaHints`
    (`ts-transformers/src/core/cross-stage-state.ts`; its header notes
    this package reads only the bare `WeakMap`s, not `CrossStageState`).
@@ -59,10 +59,10 @@ Two public methods (`src/interface.ts`, implemented in
 {widenLiterals?}?, schemaHints?, sourceFile?)` — the normal,
 type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
 typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
-passes `checker.getAnyType` as the type, forcing the auto-detection
+passes `checker.getAnyType()` as the type, forcing the auto-detection
 below onto the node-based path.
 
-`createSchemaTransformerV2` (`src/plugin.ts`) wraps one shared
+`createSchemaTransformerV2()` (`src/plugin.ts`) wraps one shared
 `SchemaGenerator` instance and exposes both methods. Type-level drift: the
 plugin's signatures narrow `schemaHints` to `WeakMap<ts.Node, { items?:
 unknown }>` (`plugin.ts`) while the class and `GenerationContext` accept
@@ -581,7 +581,7 @@ Mechanics:
   value schema remains the root while the same identity marker is attached.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
-  If it cannot match a compiler-verified exported `exchangeRules` binding,
+  If it cannot match a compiler-verified exported `exchangeRules()` binding,
   it reports a `cfc-policy-of` diagnostic and leaves the marker unresolved.
 - `uiContract` also arrives via the hints channel (§13), produced by
   `ts-transformers/src/transformers/ui-helper-lowering.ts`.
