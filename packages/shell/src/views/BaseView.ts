@@ -10,7 +10,7 @@ const DEBUG_RENDERER = false;
 export const SHELL_COMMAND = "shell-command";
 
 export class BaseView extends LitElement {
-  #_debugController = new DebugController(this, DEBUG_RENDERER);
+  #_debugController = DEBUG_RENDERER ? new DebugController(this) : null;
   command(command: Command) {
     this.dispatchEvent(
       new CustomEvent(SHELL_COMMAND, {
