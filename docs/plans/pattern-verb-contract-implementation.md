@@ -4,6 +4,13 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-30**, follow-up scope from the pre-dispatch gate review
+(#5147): WS-D gains D5 (refuse an absent payload the verb provably cannot run
+without) and D6 (the default-relaxation helper moves next to the runner's
+validator so C5 shares it instead of re-implementing it), and WS-E records
+that pre-dispatch refusals must join the `VerbError` code taxonomy when codes
+reach the invocation surface, so agents branch on one signal.
+
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
 write-storm gate, WS-F gains a read-path guard so `cf piece get` on a verb
@@ -385,6 +392,65 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   a *result* back off the receipt, because a void verb leaves none to read.
   That assertion joins when WS-C gives verbs return values — or sooner
   against `plainResultReceipts`.
+- **cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
+  deferred.** The pre-dispatch validator passes `input === undefined`
+  unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
+  so a call that sends *nothing* against a verb whose event schema requires
+  fields still dispatches, runs the handler with `$event === undefined`, and
+  silently spends the invocation id — the failure class the gate closes for
+  typo'd payloads, reached by the second-most-likely agent mistake:
+  forgetting the payload rather than misspelling a field. The gate's
+  "value-less verbs are a supported shape" rationale conflates a VERB that
+  declares no event with a CALLER that sent nothing; they are
+  distinguishable. The rule — refuse only on proof, stay fail-open on
+  uncertainty: refuse an absent payload iff the schema, after
+  `relaxDefaultedRequired` and after resolving a top-level local `$ref`
+  (reuse `localRefTarget`; a stream's schema is often
+  `{ $ref: "#/$defs/X", asCell: ["stream"], $defs: {...} }`), is an object
+  schema with non-empty `required` — no absent payload can ever satisfy it.
+  Everything else keeps today's behavior: schema `undefined` / `true`,
+  boolean `false` (absent must pass; supplied is already refused), object
+  schemas with no post-relaxation `required`, and combinator roots — an
+  `anyOf`/`oneOf` whose every branch has non-empty relaxed `required` may
+  refuse only with a test proving it, otherwise the helper's doc comment
+  names it out of scope. Conservative and documented beats clever and
+  silent. Characterize first: a CLI unit test pins that an absent payload
+  currently dispatches against a required-fields schema, then flips to
+  assert refusal — the same order the gate's runner characterization took.
+  One question settles by experiment, not assumption: when `required` names
+  only defaulted properties and nothing is sent, what does `$event` read
+  back as — the answer belongs in a code comment. Plumbing reuses
+  `VerbInputValidationError` with a detail that says no payload was supplied
+  and names the missing requirement ("send a payload" must read differently
+  from "fix your payload"); both entry points (piece call and mounted exec)
+  flow through the shared `assertVerbInputSatisfiesSchema` call site.
+  Integration: `run_piece_call_retry` gains the mirror of the gate's
+  scenario 5 — absent payload refused locally, zero messages recorded,
+  corrected call under the SAME invocation id records exactly one. The
+  gate's plan wording ("a call with no payload at all stays legal") narrows
+  in the same change: legal only when the relaxed schema requires nothing;
+  a provably-unsatisfiable absence is refused pre-dispatch like any other
+  unfit payload. Migration note for the PR: calls that previously "settled"
+  with no payload against a required-fields verb now fail locally and are
+  retryable under the same invocation id.
+- **runner/cfc, relocate the relaxation helper (D6).**
+  `relaxDefaultedRequired` and `localRefTarget` re-implement the runtime's
+  default-satisfaction rule inside `packages/cli/lib/callable.ts`, and C5
+  (closed-world inputs enforced at dispatch) needs the identical relaxation
+  server-side — two copies of "what does a default satisfy" is how the CLI
+  and the runtime drift apart, the residual-risk class the gate's own
+  design named. Move both next to `validateSchemaValue` under
+  `packages/runner/src/cfc/` (following that module's conventions), export
+  from the defining module, and import directly in the CLI — no re-export
+  shims. The relaxation unit tests move to the runner with the code; the
+  CLI keeps the tests that exercise the *gate* (refusal at both entry
+  points, id not spent) — those test CLI behavior, not the helper. The
+  helper's doc comment grows the list of what it does not check
+  (`additionalProperties`, `patternProperties`, and the other validations
+  `validateSchemaValue` applies but the relaxer doesn't — each a potential
+  refused-but-valid call if a generated schema leans on a required property
+  there); naming the boundary is the point. Pure move plus doc comment, no
+  behavior change, its own commit beside D5 so the diff reviews as such.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
@@ -406,6 +472,15 @@ The retention half is gated on three resolutions, in order:
 Then: timestamps / typed error shape in the record (schema authored
 open-world); the collection linked from the piece with pattern-declared range +
 default and read-and-expire.
+
+- **One rejection taxonomy.** Two "fix your input" signals exist ahead of
+  this workstream: `VerbInputValidationError` (CLI pre-dispatch refusal,
+  carries no code) and `VerbError { code }` (in-verb rule-4 rejection, C1).
+  When this workstream puts codes on the invocation surface, the
+  pre-dispatch refusal must speak the same taxonomy — e.g. a reserved
+  `INVALID_INPUT` code — so an agent branches one way, not two. Recorded so
+  the convergence is a plan, not a rediscovery; no code field ships before
+  this workstream.
 
 The provenance half is a separate CFC-gated track:
 
@@ -576,6 +651,8 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | D2 | cli: --invocation, readback, receipt-exists reclassification, pre-dispatch validation, phase reporting, transaction-local ack | M | D1 |
 | D3 | integration: four timeout/retry scenarios | S | D2 |
 | D4 | integration + live: three-topic end-to-end fixture | S | C1–C3, D2 |
+| D5 | cli: refuse a provably-unsatisfiable absent payload | S | D2 pre-dispatch gate (#5147) |
+| D6 | runner/cfc: relocate `relaxDefaultedRequired` + `localRefTarget` (C5 consumes) | S | D5 (same PR, own commit) |
 | E1 | timestamps, error shape + linked retention collection | L | C1–C5, D1–D4, OQ1, CFC review |
 | E2 | CFC: specify `AgentActor` mint, propagation, metadata protection + extraction | L | CFC review |
 | E3 | cli: trusted ingress provenance for `cf` calls | M | E2 |
