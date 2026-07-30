@@ -32,7 +32,9 @@ import {
   parseLink,
   PatternCoverageCollector,
   patternCoverageOutputPath,
+  type PatternInstantiationObserver,
   Runtime,
+  type RuntimeOptions,
   runtimePresets,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
@@ -348,6 +350,35 @@ export interface TestRunnerOptions {
   patternCoverageDir?: string;
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+  /**
+   * Run against a caller-supplied identity and storage manager, and observe
+   * what the run instantiates.
+   *
+   * Why: `StorageManager.emulate` runs its memory server against `:memory:`,
+   * so an ordinary test run leaves no file behind. The pattern-update
+   * state-continuity capture (`tasks/pattern-vintage-run.ts`) runs a pattern's
+   * OWN tests against a file-backed store and snapshots the result, which is
+   * what puts real pattern state — written through real handlers — into a
+   * fixture instead of a bare materialized root.
+   *
+   * The caller OWNS the lifecycle: the runner will not close this storage
+   * manager, because the snapshot happens after the run and needs the store
+   * open to flush through `synced()`.
+   */
+  storageHost?: {
+    identity: Identity;
+    storageManager: RuntimeOptions["storageManager"];
+    /**
+     * Cause for the test pattern's result cell, pinning its entity id.
+     *
+     * The default is `test-pattern-result-${Date.now()}` — fine for a store
+     * that is thrown away, fatal for one that is kept, since an id that
+     * differs every run can never be addressed again.
+     */
+    resultCause?: unknown;
+    /** Records every pattern the run materializes; see the vintage capture. */
+    onPatternInstantiated?: PatternInstantiationObserver;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -978,20 +1009,23 @@ export async function runTestPattern(
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
     ["runTestPattern", "identity"],
-    () => Identity.fromPassphrase("test-runner"),
+    () =>
+      options.storageHost?.identity ?? Identity.fromPassphrase("test-runner"),
   );
   const space = identity.did();
-  const { StorageManager } = await withPhase([
-    "runTestPattern",
-    "storageImport",
-  ], () => import("@commonfabric/runner/storage/cache.deno"));
-  const storageManager = await withPhase(
-    ["runTestPattern", "storageManager"],
-    () =>
-      StorageManager.emulate({
-        as: identity,
-      }),
-  );
+  // A caller-supplied store is FILE-BACKED, which the default emulation is not:
+  // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
+  // snapshot. See `TestRunnerOptions.storageHost`.
+  const storageManager = options.storageHost?.storageManager ??
+    await withPhase(
+      ["runTestPattern", "storageManager"],
+      async () => {
+        const { StorageManager } = await import(
+          "@commonfabric/runner/storage/cache.deno"
+        );
+        return StorageManager.emulate({ as: identity });
+      },
+    );
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
@@ -1027,6 +1061,9 @@ export async function runTestPattern(
         // Tests that need a laxer mode than the shared pin opt out per test.
         ...(options.cfcEnforcementMode !== undefined
           ? { cfcEnforcementMode: options.cfcEnforcementMode }
+          : {}),
+        ...(options.storageHost?.onPatternInstantiated !== undefined
+          ? { onPatternInstantiated: options.storageHost.onPatternInstantiated }
           : {}),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
         navigateCallback: (target) => {
@@ -1194,7 +1231,8 @@ export async function runTestPattern(
         // Create a result cell for the pattern
         const resultCell = runtime.getCell<Record<string, unknown>>(
           space,
-          `test-pattern-result-${Date.now()}`,
+          options.storageHost?.resultCause ??
+            `test-pattern-result-${Date.now()}`,
           undefined,
           tx,
         );
@@ -1861,10 +1899,14 @@ export async function runTestPattern(
     await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
       engine.dispose();
     });
-    await withPhase(
-      ["runTestPattern", "cleanup", "storageClose"],
-      () => storageManager.close(),
-    );
+    // A caller-supplied store is the CALLER's to close: the vintage capture
+    // snapshots after this returns and needs the store open to flush.
+    if (options.storageHost === undefined) {
+      await withPhase(
+        ["runTestPattern", "cleanup", "storageClose"],
+        () => storageManager.close(),
+      );
+    }
   }
 }
 

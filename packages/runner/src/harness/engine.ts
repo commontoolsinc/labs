@@ -1146,16 +1146,20 @@ export class Engine extends EventTarget implements Harness {
       // Per-module namespaces keyed by content identity (stripped from the
       // `cf:module/<identity>` specifier) for the in-memory identity cache.
       const exportsByIdentity = new Map<string, Exports>();
+      // Where each module came from, keyed the same way. A pattern loaded BY
+      // IDENTITY carries no program (see `patternFromMain`), so without this
+      // its source location is unrecoverable at the point of use — the
+      // information exists right here and was simply not written down.
+      const sourcePathByIdentity = new Map<string, string>();
       const MODULE_SPECIFIER_PREFIX = "cf:module/";
       for (const [path, specifier] of graph.specifierByPath) {
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
         if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
-          exportsByIdentity.set(
-            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
-            namespace,
-          );
+          const identity = specifier.slice(MODULE_SPECIFIER_PREFIX.length);
+          exportsByIdentity.set(identity, namespace);
+          sourcePathByIdentity.set(identity, fileName);
         }
         for (const [exportName, value] of Object.entries(namespace)) {
           // Only object/function exports are sub-pattern candidates. Skip the
@@ -1198,6 +1202,7 @@ export class Engine extends EventTarget implements Harness {
         main,
         exportMap,
         exportsByIdentity,
+        sourcePathByIdentity,
         registrationsByIdentity: graph.registrationSink,
       };
     } finally {

@@ -148,8 +148,10 @@ jobs:
       #
       # What it does NOT yet catch (measured, and tracked as stage 5 in
       # docs/plans/pattern-update-state-continuity.md): a MOVED storage key.
-      # The committed vintages hold a freshly set-up root and the replay
-      # compares no values, so `.for('x')` → `.for('y')` replays clean here.
+      # The committed vintages DO hold real data — capture drives a pattern
+      # through its own tests — but the replay asks only whether the migration
+      # applied, never whether the values survived it, so `.for('x')` →
+      # `.for('y')` replays clean here.
       # `packages/piece/test/state-continuity.test.ts` covers that class.
       - name: 🔁 Replay pinned vintages under today's source
         run: deno task pattern-vintage

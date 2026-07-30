@@ -8,13 +8,17 @@
  * that a real document written by an older version is still materializable by
  * the version about to be merged.
  *
- * Precisely what a green run asserts, per fixture: today's source RESOLVES,
- * the setup commit that carries it onto the vintage's root is NOT REFUSED, and
- * the root then reads as something rather than nothing. It does not compare
- * VALUES, and a captured vintage holds a freshly set-up root rather than a
- * populated one — so the class where a moved `.for()` key strands real data
- * replays clean here. Measured on the real `home.tsx`: renaming
- * `.for("favorites")` exits 0. That class is covered by
+ * Precisely what a green run asserts, per fixture: today's source RESOLVES for
+ * every recorded instantiation, the setup that carries the artifact each root
+ * NAMES onto that root is not refused and completes, and the root then reads as
+ * something rather than nothing.
+ *
+ * What it still does not assert is VALUES. A captured vintage does hold real
+ * data — capture drives a pattern through its own tests, so the state arrived
+ * through real handlers — but the replay asks only whether the migration
+ * applied, never whether what was there survived it. So the class where a moved
+ * `.for()` key strands real data replays clean here. Measured on the real
+ * `home.tsx`: renaming `.for("favorites")` exits 0. That class is covered by
  * `packages/piece/test/state-continuity.test.ts` and closing it in the gate is
  * stage 5 of `docs/plans/pattern-update-state-continuity.md`.
  *
@@ -28,6 +32,13 @@
  * break. Deleting one is a deliberate act that shows up in review as a deleted
  * file. Naming keys explicitly does not weaken that — a key that already has a
  * pinned vintage is skipped whichever way it was asked for.
+ *
+ * That discipline is enforced HERE, in what the command will do, and otherwise
+ * rests on review — deliberately, and unlike Tier 1, whose baselines have a
+ * mechanical checker (`tasks/check-baselines-append-only.ts`). There is no
+ * equivalent gate over `packages/piece/test/vintages/`, so a deleted fixture is
+ * caught by a human reading the diff and nothing else. Recapturing one is
+ * therefore a decision to make out loud, not a routine step.
  *
  * This file is the shell — roots, argument parsing, printing, exit code. The
  * work is in `pattern-vintage-run.ts`, which takes its roots as arguments so
@@ -127,16 +138,33 @@ async function main() {
     return;
   }
 
-  const { vintages, replayed, failures } = await replayAll(roots);
+  const { vintages, replayed, candidates, changed, updated, failures } =
+    await replayAll(roots);
+  // Coverage is judged against the SAME list that was replayed. A second walk
+  // would be a second answer to one question, and "replayed nothing" paired with
+  // "everything is covered" is the disagreement that reads as a pass.
   const uncovered = uncoveredRequiredPatterns(required, vintages);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
   if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);
   if (failures.length > 0) console.error(`\n${reportFailures(failures)}`);
 
-  if (!isClean(failures, uncovered, replayed)) Deno.exit(1);
+  // CANDIDATES is the soundness floor, not `updated`. A run where nothing
+  // changed legitimately updates nothing — that is the common case, and the
+  // auto-updater fires on the same condition. But a run with no candidates
+  // examined no update targets at all, which is the shape that has read as
+  // success three separate times in this tier's history.
+  if (!isClean(failures, uncovered, replayed, candidates)) Deno.exit(1);
+  // "all mappable" is safe to state unconditionally here: `replayVintage`
+  // reports every unaddressable root as a FAILURE, and `isClean` above requires
+  // no failures — so this line is unreachable with `unmappable > 0`. Saying it
+  // positively rather than printing a caveat beside a pass is the point; a green
+  // verdict with a footnote about skipped roots is how narrowed coverage reads
+  // as success.
   console.log(
-    `Replayed ${replayed} vintage(s) under today's source; all readable.`,
+    `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
+      `all mappable to a file; ${changed} changed since capture, ` +
+      `${updated} updated cleanly.`,
   );
 }
 

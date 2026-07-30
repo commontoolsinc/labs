@@ -77,6 +77,12 @@
  * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
  * |                            | — test/CI statement-coverage collection, unset   |
  * |                            | elsewhere                                        |
+ * | onPatternInstantiated      | delta (patternTest only) — the vintage capture   |
+ * |                            | passes it to learn which patterns a run          |
+ * |                            | materialized and where. Observation only, and    |
+ * |                            | deliberately NOT available to the deployed       |
+ * |                            | presets: nothing in production should depend on  |
+ * |                            | being told about instantiation                   |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
  * | spaceHostMap               | delta (browserWorker only — federation routing   |
  * |                            | is decided by the shell host)                    |
@@ -101,6 +107,7 @@ import type {
   ExperimentalOptions,
   ModuleByteCache,
   NavigateCallback,
+  PatternInstantiationObserver,
   PieceCreatedCallback,
   RuntimeFetch,
   RuntimeOptions,
@@ -146,6 +153,7 @@ export const RUNTIME_OPTION_KEYS = [
   "commitBackpressure",
   "moduleByteCache",
   "patternCoverage",
+  "onPatternInstantiated",
   "fetch",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
@@ -303,6 +311,8 @@ export interface PatternTestPresetParams extends CoreParams {
   cfcEnforcementMode?: CfcEnforcementMode;
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
+  /** Records what a run materializes; see the vintage capture. */
+  onPatternInstantiated?: PatternInstantiationObserver;
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
@@ -406,6 +416,9 @@ export const runtimePresets = {
         : {}),
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }
+        : {}),
+      ...(params.onPatternInstantiated !== undefined
+        ? { onPatternInstantiated: params.onPatternInstantiated }
         : {}),
     };
   },
