@@ -19,6 +19,7 @@ is migration coverage. Tier 1 — the schema gate — merged as [#5144].
 This plan takes the pattern-update regime from "the contract still type-checks"
 to "the new pattern can still read what the old one wrote".
 
+[#3830]: https://github.com/commontoolsinc/labs/pull/3830
 [#5144]: https://github.com/commontoolsinc/labs/pull/5144
 [#5148]: https://github.com/commontoolsinc/labs/pull/5148
 [#5196]: https://github.com/commontoolsinc/labs/pull/5196
@@ -91,8 +92,9 @@ Measured on branch `tier2`, not assumed:
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
 | The gate CATCHES a moved storage key | measured by mutation on the ACTUAL `home.tsx`: renaming `.for("journal")` exits 1 with "APPLIED CLEANLY but stranded state the vintage held: journal (was [{\"eventType\":\"piece:created\",…}], now [])", restoring exits 0. The pinned limit in `tasks/pattern-vintage-run.test.ts` is now INVERTED, which is what it was written to receive |
-| A UI-only change produces NO false positive | measured on the real `home.tsx`: changing rendered markup leaves every compared key identical, `$UI` included. This is why the comparison needs no exclusion list — the obvious worry about derived projections does not reproduce |
-| A schema-less read of a captured root returns NOTHING | measured: reading the root without a schema yields an empty object for a doc full of state, so the comparison reads under the root's own stored `schema` meta — the old version's view of its own data |
+| A materialized root is NOT plain data | measured on the committed `home.tsx` fixture: at each of its six stream positions the read yields a live cell whose own properties reach the runtime, so a generic deep copy of it is CYCLIC. Before that was reduced, a UI-only edit to `home.tsx` did not merely misreport — `JSON.stringify` in the failure text threw and the gate ended with no verdict. Both sides are now reduced by shape first: a cell to the document it points at, a fabric special object to a tagged content hash (`deepEqual` compares those by own properties, of which they have none), a cycle to a marker |
+| The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded and nothing else is. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
+| A schema-less read is not empty, it is NON-DETERMINISTIC | measured on the committed `home.tsx` fixture: a schema-less read returns every key, and materializes `$UI`, which the stored schema (`unknown` at that key) leaves `undefined`. The reason to read under the root's own stored `schema` meta is that a schema-driven read pulls exactly what the schema descends into, where a schema-less one resolves what happens to be resident — the shape of [#3830] |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed` and requires it positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
@@ -580,6 +582,9 @@ worth naming before they bite:
       notice if it did.
 - [x] Read the vintage under the root's OWN stored schema, so the comparison
       sees the data as the version that wrote it did
+- [x] Reduce both sides to something comparable before comparing — a live cell
+      to the document it points at, a fabric special object to a content hash, a
+      cycle to a marker
 - [x] Invert the pinned `moved storage key goes uncaught` case — the acceptance
       test this stage was written to receive
 - [ ] Trigger on memory-engine schema change; promote the affected captures to
@@ -593,28 +598,49 @@ Gate: **met for the stranding half.** Measured on the real `home.tsx`, renaming
 vintage held: journal (was [{"eventType":"piece:created",…}], now [])`, and
 restoring returns exit 0. Migration coverage remains open.
 
-Three measurements decided the design, two of them against expectation:
+Four measurements decided the design, three of them against expectation:
 
-- **The "before" read needs the root's stored schema.** A schema-less read does
-  not materialize — it returns an empty object for a doc full of state, which
-  would make every comparison pass trivially. The root carries its own result
-  schema in meta, so the old version's view is recoverable without its source.
-- **No exclusion list is needed.** The obvious worry is derived projections, so
-  `$UI`/`$NAME` were expected to be noise. Measured on both committed fixtures:
-  applying today's source leaves every key byte-identical INCLUDING `$UI`, and a
-  UI-only source change still produces no differing keys. Carving keys out up
-  front would only have hidden signal.
+- **A materialized root is not plain data.** At every `asCell`/`asStream`
+  position it holds a live cell whose own properties reach the runtime, so a
+  generic deep copy of `home.tsx`'s root is cyclic and every stream key compares
+  unequal to itself. Both sides are reduced by SHAPE before comparison: a cell
+  to the document it points at, a fabric special object to a tagged content
+  hash, a cycle to a marker.
+- **The renderings ARE the noise, and only they.** `$UI` and its variants are
+  recomputed by the setup and the stored rendering never matches a fresh one — a
+  comment-only edit to `piece-grid.tsx` reported `$UI` stranded. They are
+  excluded; `$NAME` is derived too, stayed equal across the same edits, and is
+  compared.
+- **The "before" read wants the root's stored schema for determinism**, not
+  because a schema-less read comes back empty. Measured, it comes back fuller —
+  and depends on what is resident, which is the wrong property for a fixture
+  replay.
 - **The comparison is one-directional.** Only keys present BEFORE are checked.
   An update may legitimately ADD a field — that is what `Default<>` is for — so
   a new key is not a finding; an existing key whose value changed is.
 
-**Open, and it will bite eventually:** the comparison fails on ANY change to an
-existing key, including a deliberate data migration that reformats a field.
+What a green run does NOT cover, stated so it is not read as more than it is:
+
+- A root whose every key is a rendering (`profile-picker.tsx` returns only
+  `$UI`) has nothing left for the value comparison to look at. It still has to
+  survive the refusal, completion and reads-as-something checks.
+- A cell- or stream-valued key is compared as the DOCUMENT it points at, not by
+  that document's contents. A field that moved to a different doc is caught; a
+  field whose own doc was emptied in place, under the same id, is not.
+- The value comparison runs only for a target whose identity CHANGED, which is
+  the same condition the auto-updater fires on. On an unchanged tree it runs
+  zero times — measured, `0 changed` on both committed fixtures — so the
+  mutations above are the only thing keeping it honest.
+
+**Open, and it will bite eventually:** the comparison fails on any change to a
+non-rendering key, including a deliberate data migration that reformats a field.
 There are none today, and failing loudly is the right default for a gate whose
 subject is data loss — but the first real migration will need a way to declare
 "this key is expected to change, here is the shape it becomes". Deliberately
 not built speculatively; the shape of the escape hatch should be decided by the
-migration that needs it.
+migration that needs it. Measured against the changes that are routine today, it
+is quiet: an additive defaulted field on a nested pattern (`note.tsx`), a
+comment-only edit, and a UI edit all exit 0.
 
 ## Open questions
 

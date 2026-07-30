@@ -483,15 +483,22 @@ export function comparableState(value: unknown): unknown {
 /**
  * A captured root's state, read the way the version that WROTE it saw it.
  *
- * The schema matters and cannot be skipped: a schema-less read does not
- * materialize, and returns an empty object for a doc full of state — which
- * would make every stranding comparison trivially pass. The vintage root
- * carries its own result schema in meta, so the old version's own view of its
- * data is available without needing its source.
+ * Read under the root's OWN stored result schema, which it carries in meta — so
+ * the writing version's view of its data is recoverable without its source, and
+ * without this replay having to decide what that view should be.
  *
- * Returns a detached copy: the live value is a query-result proxy that re-reads
- * through the transaction, so holding it across a materialize would compare the
- * new state against itself.
+ * The schema is what makes the read DETERMINISTIC rather than a report on what
+ * happens to be resident. A schema-driven read pulls exactly what the schema
+ * descends into; a schema-less `.get()` resolves whatever is already loaded,
+ * which is the shape of bug that made a cross-space profile read as absent
+ * (#3830). It is not that a schema-less read comes back empty — measured on the
+ * committed `home.tsx` fixture it returns every key, and MORE of some of them:
+ * `$UI` materializes, where under the stored schema (`unknown` at that key) it
+ * reads as `undefined`. It is that what it returns depends on load order.
+ *
+ * Returns a copy detached and reduced by `comparableState`: the live value is a
+ * query-result proxy that re-reads through the transaction, so holding it across
+ * a materialize would compare the new state against itself.
  */
 export async function readVintageState(
   vintage: VintageRuntime,
