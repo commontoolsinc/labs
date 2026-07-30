@@ -98,7 +98,8 @@ export class XLoginView extends BaseView {
       gap: 0.5rem;
     }
 
-    input, textarea {
+    input,
+    textarea {
       width: 100%;
       padding: 0.75rem 1rem;
       margin-bottom: 0.5rem;

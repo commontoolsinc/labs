@@ -15,6 +15,12 @@ alias. Both options keep the pipe read-only and suppress unified-diff
 auto-detection. An explicit language takes priority when both options are
 present. Use `--diff` instead when the pipe is a unified diff.
 
+Automatic container detection is limited to structurally identified raw unified
+diffs and standard Git commit output. A raw diff starts at the first nonblank
+line. Recognized shebangs and transformed compiler headers remain explicit
+selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
+not guessed from its syntax.
+
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
 markers, tables, rules, and code. The same view is available for Markdown files

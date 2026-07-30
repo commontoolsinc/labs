@@ -128,6 +128,25 @@ Deno.test("sparkline: scale normalizes to the recent runs, clipping old spikes",
   assertEquals(clean.slice(1), recent);
 });
 
+Deno.test("sparkline: a trimmed scale ignores ranked extremes without reordering points", () => {
+  const values = [101, 10, 0, 25, 100, 11, 1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
+  const scale = { trim: 2, minValues: 20 };
+  const svg = sparkline(values, "#111", undefined, undefined, undefined, scale);
+  const ys = svg.match(/<polyline points="([^"]*)"/)![1].trim().split(" ")
+    .map((point) => parseFloat(point.split(",")[1]));
+
+  assertEquals(values, [101, 10, 0, 25, 100, 11, 1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]); // sorting the scale does not mutate the line
+  assert(ys[0] < 0 && ys[4] < 0, "the two highest values should clip above the chart");
+  assert(ys[2] > 26 && ys[6] > 26, "the two lowest values should clip below the chart");
+  assert(ys[1] >= 0 && ys[1] <= 26 && ys[3] >= 0 && ys[3] <= 26, "20 points should enable trimming");
+
+  const short = Array.from({ length: 19 }, (_, value) => value);
+  assertEquals(
+    sparkline(short, "#111", undefined, undefined, undefined, scale),
+    sparkline(short, "#111"),
+  );
+});
+
 Deno.test("sparkline: highlight scaleAll keeps the whole series in view, still drawing the tail", () => {
   const y = (pt: string) => parseFloat(pt.split(",")[1]);
   const polys = (svg: string) => [...svg.matchAll(/<polyline points="([^"]*)"/g)].map((m) => m[1].trim().split(" ").map(y));
@@ -191,6 +210,38 @@ Deno.test("multiSparkline: overlaid lines on one shared scale; < 2 points is emp
   ]);
   assert(/right:0[^"]*color:#0a0[^"]*">3<\/span>/.test(labeled), "team label at right, in the line color");
   assert(/right:0[^"]*color:#00a[^"]*">6<\/span>/.test(labeled), "visitor label at right, in the line color");
+});
+
+Deno.test("multiSparkline: a trimmed shared scale pools series and centers a flat interior", () => {
+  const scale = { trim: 2, minValues: 20 };
+  const lines = [
+    { vals: [101, 10, 0, 25, 100, 11, 1, 12, 13, 14], color: "#0a0" },
+    { vals: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24], color: "#00a" },
+  ];
+  const svg = multiSparkline(lines, { scale });
+  const ys = [...svg.matchAll(/<polyline points="([^"]*)"/g)]
+    .flatMap((match) => match[1].trim().split(" "))
+    .map((point) => parseFloat(point.split(",")[1]));
+
+  assertEquals(ys.length, 20);
+  assertEquals(ys.filter((y) => y > 34).length, 2);
+  assertEquals(ys.filter((y) => y < 0).length, 2);
+  assertEquals(ys.filter((y) => y >= 0 && y <= 34).length, 16);
+
+  const short = [
+    { vals: Array.from({ length: 9 }, (_, value) => value), color: "#0a0" },
+    { vals: Array.from({ length: 10 }, (_, value) => value + 9), color: "#00a" },
+  ];
+  assertEquals(multiSparkline(short, { scale }), multiSparkline(short));
+
+  const flat = multiSparkline([
+    { vals: [0, 10, 10, 10, 10, 10, 10, 10, 10, 100], color: "#0a0" },
+    { vals: [1, 10, 10, 10, 10, 10, 10, 10, 10, 101], color: "#00a" },
+  ], { scale });
+  const flatYs = [...flat.matchAll(/<polyline points="([^"]*)"/g)]
+    .flatMap((match) => match[1].trim().split(" "))
+    .map((point) => parseFloat(point.split(",")[1]));
+  assertEquals(flatYs.filter((y) => y === 17).length, 16);
 });
 
 Deno.test("multiSparkline: fadeFrom gradients each line", () => {

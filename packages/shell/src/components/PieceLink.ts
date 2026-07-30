@@ -11,7 +11,8 @@ import {
 
 export class PieceLinkElement extends LitElement {
   static override styles = css`
-    a, a:visited {
+    a,
+    a:visited {
       color: var(--primary-font, "#000");
     }
   `;

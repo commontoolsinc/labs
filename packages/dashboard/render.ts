@@ -2,7 +2,6 @@
 // the shell wraps the grid + wide tiles in the dark page with the SSE client.
 import type { TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
-import { REPO } from "./config.ts";
 import { faviconHref, faviconLink, type FaviconStatus } from "./favicon.ts";
 import { paintStatusFavicon } from "./favicon-client.ts";
 
@@ -130,9 +129,7 @@ ${faviconLink(status)}
   code{background:#1b1e24;padding:1px 5px;border-radius:4px}
 </style></head><body>
   <div class="top">
-    <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>${
-    escapeHtml(REPO)
-  }</span></div>
+    <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>go/fabricwall</span></div>
     <div class="live"><span class="dot green" id="freshdot"></span> <span id="agotext">updated ${ago}s ago</span></div>
   </div>
   <div class="grid" id="dashboard-grid">${gridHtml}</div>

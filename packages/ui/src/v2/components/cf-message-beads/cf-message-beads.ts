@@ -355,8 +355,7 @@ export class CFMessageBeads extends BaseElement {
           aria-label="${beadLabel(msg)}"
           @mouseenter="${(e: Event) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
-        >
-        </li>
+        ></li>
       `;
     });
 

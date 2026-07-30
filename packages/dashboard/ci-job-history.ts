@@ -6,6 +6,7 @@ import {
   type CachedCiGanttJob,
   type CachedCiRun,
   type CachedCiRunReference,
+  CI_JOB_HISTORY_SAMPLING_VERSION,
   CiJobHistoryStore,
 } from "./ci-job-cache.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
@@ -28,14 +29,15 @@ import {
 } from "./trend.ts";
 import {
   PERFORMANCE_CHECK_MS,
+  PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
+  PERFORMANCE_HISTORY_SCALE_TRIM,
+  PERFORMANCE_VIEW_STYLES,
   performanceViewNav,
 } from "./performance-views.ts";
 
 export const CI_HISTORY_DAYS = 45;
 export const CI_HISTORY_MIN_DAYS = 1;
-export const CI_HISTORY_POINT_TARGET = 90;
-export const CI_HISTORY_BUCKET_HOURS = CI_HISTORY_DAYS * 24 /
-  CI_HISTORY_POINT_TARGET;
+export const CI_HISTORY_POINT_TARGET = 200;
 
 const DAY_MS = 86_400_000;
 const JOBS_PER_PAGE = 100;
@@ -385,27 +387,26 @@ export function ciHistoryBucketMs(days: number): number {
   return days * DAY_MS / CI_HISTORY_POINT_TARGET;
 }
 
-function sampleNewestPerBucket<T>(
+function sampleEvenlyAcrossRuns<T>(
   values: T[],
   at: (value: T) => number,
   cutoff: number,
-  bucketMs: number,
 ): T[] {
-  const eligible = values.filter((value) => {
-    const time = at(value);
-    return Number.isFinite(time) && time >= cutoff;
-  });
+  const eligible = values
+    .filter((value) => {
+      const time = at(value);
+      return Number.isFinite(time) && time >= cutoff;
+    })
+    .sort((a, b) => at(a) - at(b));
   if (eligible.length <= CI_HISTORY_POINT_TARGET) {
-    return eligible.sort((a, b) => at(a) - at(b));
+    return eligible;
   }
-  const buckets = new Map<number, T>();
-  for (const value of eligible) {
-    const time = at(value);
-    const bucket = Math.floor((time - cutoff) / bucketMs);
-    const current = buckets.get(bucket);
-    if (!current || time > at(current)) buckets.set(bucket, value);
-  }
-  return [...buckets.values()].sort((a, b) => at(a) - at(b));
+  const last = eligible.length - 1;
+  return Array.from(
+    { length: CI_HISTORY_POINT_TARGET },
+    (_, index) =>
+      eligible[Math.round(index * last / (CI_HISTORY_POINT_TARGET - 1))],
+  );
 }
 
 export function sampleWorkflowRuns(
@@ -415,11 +416,10 @@ export function sampleWorkflowRuns(
 ): WorkflowRun[] {
   const eligible = successfulMainWorkflowRuns(runs, now, days);
   const cutoff = now - days * DAY_MS;
-  return sampleNewestPerBucket(
+  return sampleEvenlyAcrossRuns(
     eligible,
     runTime,
     cutoff,
-    ciHistoryBucketMs(days),
   );
 }
 
@@ -589,8 +589,9 @@ function isDrawableGanttJob(job: ApiJob | CachedCiGanttJob): boolean {
   return job.conclusion !== "skipped" && hasJobTiming(job);
 }
 
-function ganttJob(job: ApiJob): CachedCiGanttJob {
+function ganttJob(job: ApiJob, attempt: number): CachedCiGanttJob {
   return {
+    attempt,
     name: job.name,
     status: job.status ?? "completed",
     conclusion: job.conclusion,
@@ -633,41 +634,36 @@ async function fetchRunJobs(
   source: CiHistorySource,
   request: GitHubRequest,
 ): Promise<CiRunTiming> {
-  let jobs: ApiJob[];
-  let ganttJobs: ApiJob[];
-  if (run.run_attempt > 1) {
-    const complete = new Map<string, ApiJob>();
-    let firstAttempt: ApiJob[] = [];
-    for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
-      const attempted = await fetchJobPage(
-        `actions/runs/${run.id}/attempts/${attempt}/jobs`,
-        token,
-        source,
-        request,
-      );
-      if (attempt === 1) firstAttempt = attempted;
-      for (const job of attempted) complete.set(job.name, job);
-    }
-    jobs = [...complete.values()];
-    ganttJobs = firstAttempt.map((job) => {
-      const latest = complete.get(job.name)!;
-      if (!hasJobTiming(job) && hasJobTiming(latest)) return latest;
-      return {
-        ...job,
-        status: latest.status,
-        conclusion: latest.conclusion,
-      };
-    });
-  } else {
-    jobs = await fetchJobPage(
-      `actions/runs/${run.id}/attempts/1/jobs`,
+  const complete = new Map<string, ApiJob>();
+  const ganttExecutions = new Map<
+    string,
+    { attempt: number; job: ApiJob }
+  >();
+  for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
+    const attempted = await fetchJobPage(
+      `actions/runs/${run.id}/attempts/${attempt}/jobs`,
       token,
       source,
       request,
     );
-    ganttJobs = jobs;
+    for (const job of attempted) {
+      complete.set(job.name, job);
+      // GitHub repeats an earlier successful job in later failed-job rerun
+      // responses with a new job ID. Its name and timestamps stay the same. A
+      // job that ran again has new timestamps and gets a separate Gantt bar.
+      const execution = [
+        job.name,
+        job.started_at ?? "",
+        job.completed_at ?? "",
+      ].join("\u0000");
+      if (!ganttExecutions.has(execution)) {
+        ganttExecutions.set(execution, { attempt, job });
+      }
+    }
   }
-  if (!ganttJobs.some(isDrawableGanttJob)) {
+  const jobs = [...complete.values()];
+  const ganttJobs = [...ganttExecutions.values()];
+  if (!ganttJobs.some(({ job }) => isDrawableGanttJob(job))) {
     throw new Error(
       `No completed CI job timings were returned for run ${run.id} attempt ${run.run_attempt}.`,
     );
@@ -681,7 +677,7 @@ async function fetchRunJobs(
   return {
     jobs: timed.map((job) => job.timing),
     overallSeconds: start && end > start ? (end - start) / 1_000 : 0,
-    ganttJobs: ganttJobs.map(ganttJob),
+    ganttJobs: ganttJobs.map(({ attempt, job }) => ganttJob(job, attempt)),
   };
 }
 
@@ -922,6 +918,15 @@ function hasDrawableGanttTiming(run: CachedCiRun): boolean {
   return run.gantt.jobs.some(isDrawableGanttJob);
 }
 
+function hasAttemptMetadata(run: CachedCiRun): boolean {
+  return run.runAttempt === 1 ||
+    run.gantt.jobs.every((job) => job.attempt !== undefined);
+}
+
+function hasAttemptAwareGanttTiming(run: CachedCiRun): boolean {
+  return hasDrawableGanttTiming(run) && hasAttemptMetadata(run);
+}
+
 function workflowRunFromCache(
   run: CachedCiRun,
   source: CiHistorySource,
@@ -964,12 +969,14 @@ export class CiJobHistoryCollector {
   #jobRequests = new Map<string, Promise<CachedCiRun>>();
   #latest = new Map<string, CiJobHistorySnapshot>();
   #sampledRuns = new Map<string, CachedCiRunReference[]>();
+  #samplingVersions = new Map<string, number | null>();
   #snapshotRevisions = new Map<string, number>();
   #progressById = new Map<string, CiJobProgressRecord>();
   #progressByKey = new Map<string, CiJobProgressRecord>();
   #progressSequence = 0;
   #refreshedAt = new Map<string, { at: number; revision: number }>();
   #refreshFailureAt = new Map<CiHistorySourceKey, number>();
+  #refreshFailureError = new Map<string, string>();
   #refreshRequests = new Map<string, Promise<CiJobHistorySnapshot>>();
   #recentWorkflowRuns = new Map<string, { at: number; runs: WorkflowRun[] }>();
   #selectedWorkflowRuns = new Map<
@@ -1198,13 +1205,12 @@ export class CiJobHistoryCollector {
     const refreshedRuns =
       resolvedRefreshRuns?.filter((run) => run.at >= cutoff && run.at <= now) ??
         resolvedRefreshRuns;
-    const runs = refreshedRuns ?? sampleNewestPerBucket(
+    const runs = refreshedRuns ?? sampleEvenlyAcrossRuns(
       this.#store.list(source.repo, source.workflow, cutoff).filter(
         isSuccessfulMainCachedRun,
       ),
       (run) => run.at,
       cutoff,
-      ciHistoryBucketMs(days),
     );
     if (!runs.length && !refresh) {
       return current ? inRequestedWindow(current, now, days) : null;
@@ -1230,6 +1236,12 @@ export class CiJobHistoryCollector {
         runId: run.runId,
         runAttempt: run.runAttempt,
       })),
+    );
+    this.#samplingVersions.set(
+      key,
+      refresh
+        ? refresh.samplingVersion ?? null
+        : null,
     );
     this.#latest.set(key, value);
     this.#snapshotRevisions.set(
@@ -1277,15 +1289,18 @@ export class CiJobHistoryCollector {
         run.head_sha,
       );
     }
-    const repairCachedEntry = exactAttempt && cached !== undefined &&
-      !hasDrawableGanttTiming(cached);
+    const repairCachedEntry = cached !== undefined &&
+      (exactAttempt
+        ? !hasAttemptAwareGanttTiming(cached)
+        : !hasAttemptMetadata(cached));
     if (
       cached &&
       (exactAttempt
         ? cached.runAttempt === run.run_attempt &&
           cached.headSha === expectedHeadSha &&
-          hasDrawableGanttTiming(cached)
-        : cached.runAttempt >= run.run_attempt)
+          hasAttemptAwareGanttTiming(cached)
+        : cached.runAttempt >= run.run_attempt &&
+          hasAttemptMetadata(cached))
     ) {
       return { kind: "cached", result: Promise.resolve(cached) };
     }
@@ -1409,11 +1424,10 @@ export class CiJobHistoryCollector {
     const successfulRunTimes = successfulRuns.map(runTime).sort((a, b) =>
       a - b
     );
-    const runs = sampleNewestPerBucket(
+    const runs = sampleEvenlyAcrossRuns(
       successfulRuns,
       runTime,
       now - days * DAY_MS,
-      ciHistoryBucketMs(days),
     );
     const priorRefresh = this.#store.refresh(
       source.repo,
@@ -1561,7 +1575,14 @@ export class CiJobHistoryCollector {
         "CI job history could not preserve the exact previous run set.",
       );
     }
+    const previousSamplingVersion = this.#samplingVersions.has(key)
+      ? this.#samplingVersions.get(key)!
+      : priorRefresh?.samplingVersion ?? null;
+    const samplingVersion = preservePrevious
+      ? previousSamplingVersion
+      : CI_JOB_HISTORY_SAMPLING_VERSION;
     this.#sampledRuns.set(key, sampledRuns);
+    this.#samplingVersions.set(key, samplingVersion);
     this.#latest.set(key, value);
     this.#snapshotRevisions.set(
       key,
@@ -1693,7 +1714,7 @@ export class CiJobHistoryCollector {
       );
       if (
         persisted?.headSha === options.headSha &&
-        hasDrawableGanttTiming(persisted)
+        hasAttemptAwareGanttTiming(persisted)
       ) {
         resolved.set(selected.runId, workflowRunFromCache(persisted, source));
         continue;
@@ -1842,11 +1863,13 @@ export class CiJobHistoryCollector {
         );
         if (
           !run || run.headSha !== options.headSha ||
-          !hasDrawableGanttTiming(run)
+          !hasAttemptAwareGanttTiming(run)
         ) return [];
         return [run];
       })
-      : this.#store.list(source.repo, source.workflow);
+      : this.#store.list(source.repo, source.workflow).filter(
+        hasAttemptMetadata,
+      );
     const runs = candidates
       .filter((run) =>
         !options.mainOnly ||
@@ -1975,8 +1998,9 @@ export class CiJobHistoryCollector {
       return !entry ||
         (exactSelection
           ? entry.headSha !== normalized.headSha ||
-            !hasDrawableGanttTiming(entry)
-          : entry.runAttempt < run.run_attempt) ||
+            !hasAttemptAwareGanttTiming(entry)
+          : entry.runAttempt < run.run_attempt ||
+            !hasAttemptMetadata(entry)) ||
         Boolean(this.#pendingJobsForRun(run, source, exactSelection));
     });
     if (progress) {
@@ -2058,8 +2082,9 @@ export class CiJobHistoryCollector {
         !entry ||
         (exactSelection
           ? entry.headSha !== normalized.headSha ||
-            !hasDrawableGanttTiming(entry)
-          : entry.runAttempt < run.run_attempt)
+            !hasAttemptAwareGanttTiming(entry)
+          : entry.runAttempt < run.run_attempt ||
+            !hasAttemptMetadata(entry))
       ) return [];
       return [ganttInputRun(entry)];
     });
@@ -2236,18 +2261,21 @@ export class CiJobHistoryCollector {
       .then((runs) => this.collect(token, now, source, days, runs, progress))
       .then(async (collectedValue) => {
         let value = collectedValue;
-        this.#refreshFailureAt.delete(source.key);
         const refreshedAt = Date.now();
         const previousRefresh = this.#store.refresh(
           source.repo,
           source.workflow,
           days,
         );
+        const samplingVersion = this.#samplingVersions.has(key)
+          ? this.#samplingVersions.get(key)!
+          : CI_JOB_HISTORY_SAMPLING_VERSION;
         const expectedRefresh = {
           repo: source.repo,
           workflow: source.workflow,
           days,
           refreshedAt,
+          ...(samplingVersion === null ? {} : { samplingVersion }),
           successfulRunTimes: [...(value.successfulRunTimes ?? [])].filter(
             Number.isFinite,
           ).sort((a, b) => a - b),
@@ -2269,6 +2297,7 @@ export class CiJobHistoryCollector {
           value.failedRunCount,
           value.failedRunTimes,
           value.stale,
+          samplingVersion,
         );
         try {
           await this.#saveCache(now);
@@ -2307,6 +2336,8 @@ export class CiJobHistoryCollector {
           });
         } else this.#refreshedAt.delete(key);
         const fingerprint = snapshotFingerprint(value);
+        this.#refreshFailureAt.delete(source.key);
+        this.#refreshFailureError.delete(key);
         this.#updateProgress(progress, {
           phase: "complete",
           needsReload: [...progress.baselines].some((value) =>
@@ -2334,13 +2365,15 @@ export class CiJobHistoryCollector {
         const message = reportedError instanceof Error
           ? reportedError.message
           : String(reportedError);
+        const safeMessage = friendlyError(message);
+        this.#refreshFailureError.set(key, safeMessage);
         console.error(
           `CI job history refresh failed for ${source.repo}:`,
           message,
         );
         this.#updateProgress(progress, {
           phase: "error",
-          error: friendlyError(message),
+          error: safeMessage,
         });
         throw reportedError;
       })
@@ -2355,9 +2388,22 @@ export class CiJobHistoryCollector {
     days = CI_HISTORY_DAYS,
     baseline?: CiJobHistorySnapshot | null,
   ): CiJobRefresh | null {
+    if (this.#refreshRequests.has(snapshotKey(source, days))) {
+      return this.startRefresh(token, source, days, baseline);
+    }
     const failedAt = this.#refreshFailureAt.get(source.key);
-    if (failedAt && Date.now() - failedAt < REFRESH_MS) return null;
+    const age = failedAt === undefined ? -1 : Date.now() - failedAt;
+    if (
+      failedAt !== undefined && age >= 0 && age < REFRESH_MS
+    ) return null;
     return this.startRefresh(token, source, days, baseline);
+  }
+
+  lastRefreshError(
+    source = CI_HISTORY_SOURCES.labs,
+    days = CI_HISTORY_DAYS,
+  ): string | null {
+    return this.#refreshFailureError.get(snapshotKey(source, days)) ?? null;
   }
 
   async refresh(
@@ -2442,6 +2488,10 @@ function renderSeries(
     undefined,
     SPARK_FADE[status],
     xs,
+    {
+      trim: PERFORMANCE_HISTORY_SCALE_TRIM,
+      minValues: PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
+    },
   );
   const pointSpan = times.length > 1 ? times[times.length - 1] - times[0] : 0;
   return {
@@ -2495,16 +2545,9 @@ interface CiHistoryPageOptions {
   days?: number;
   runtimeStat?: string;
   progress?: CiJobFetchProgress;
+  lastRequestError?: string;
   fragment?: boolean;
 }
-
-export const CI_FETCH_PROGRESS_STYLES = `
-  .fetch-progress{background:#16181d;border:1px solid #2f333c;border-radius:10px;padding:10px 12px;margin:0 0 12px}
-  .fetch-progress.error,.fetch-progress.warning{border-color:rgba(224,168,82,.42)}
-  .fetch-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:12px;color:#c7ccd4}
-  .fetch-head strong{font-weight:600}.fetch-head span,#fetch-detail{font-variant-numeric:tabular-nums;color:#878d97}
-  .fetch-progress progress{display:block;width:100%;height:7px;margin:7px 0 6px;accent-color:#6ea8fe}
-  #fetch-detail{font-size:11px;margin:0}`;
 
 interface CiFetchProgressPanelOptions {
   ariaLabel?: string;
@@ -2512,6 +2555,7 @@ interface CiFetchProgressPanelOptions {
   snapshotVersion?: string;
   refreshOnComplete?: boolean;
   progressUrl?: string;
+  lastRequestError?: string;
 }
 
 export function ciFetchProgressPanel(
@@ -2520,6 +2564,11 @@ export function ciFetchProgressPanel(
 ): string {
   const progressIdle = !progress || progress.phase === "complete" ||
     progress.phase === "error";
+  const lastRequestError = progress?.phase === "error"
+    ? progress.error ?? "unknown error"
+    : !progress
+    ? options.lastRequestError
+    : undefined;
   const progressTitle = progressIdle
     ? "Idle"
     : progress.phase === "discovering"
@@ -2530,10 +2579,8 @@ export function ciFetchProgressPanel(
     : progress.phase === "discovering"
     ? `${progress.discoveryOutstandingRequests} outstanding`
     : `${progress.completedRuns} / ${progress.totalRuns || "?"}`;
-  const progressDetail = progress?.phase === "error"
-    ? `Last collection stopped: ${
-      escapeHtml(progress.error ?? "unknown error")
-    }`
+  const progressDetail = lastRequestError
+    ? `Last collection stopped: ${escapeHtml(lastRequestError)}`
     : progressIdle && progress?.warning
     ? escapeHtml(progress.warning)
     : !progressIdle && progress?.phase === "discovering"
@@ -2554,9 +2601,16 @@ export function ciFetchProgressPanel(
     options.progressUrl
       ? `data-progress-url="${escapeHtml(options.progressUrl)}"`
       : "",
+    lastRequestError
+      ? `data-last-request-error="${escapeHtml(lastRequestError)}"`
+      : "",
   ].filter(Boolean).join(" ");
   return `<section class="fetch-progress${
-    progressIdle && progress?.warning ? " warning" : ""
+    lastRequestError
+      ? " error"
+      : progressIdle && progress?.warning
+      ? " warning"
+      : ""
   }" id="fetch-progress" aria-live="polite"${
     attributes ? ` ${attributes}` : ""
   }><div class="fetch-head"><strong id="fetch-title">${progressTitle}</strong><span id="fetch-total">${progressTotal}</span></div><progress id="fetch-bar" max="${
@@ -2728,10 +2782,6 @@ export function ciJobHistoryPage(
   const refreshNotice = notices.map((notice) =>
     `<p class="refresh-error">${escapeHtml(notice)}</p>`
   ).join("");
-  const bucketHours = ciHistoryBucketMs(days) / 3_600_000;
-  const bucketLabel = bucketHours >= 10
-    ? String(Math.round(bucketHours))
-    : bucketHours.toFixed(1).replace(/\.0$/, "");
   const viewNav = performanceViewNav("ci", {
     repo: source.key,
     days,
@@ -2757,6 +2807,7 @@ export function ciJobHistoryPage(
       progressActive && (!snapshot || snapshot.runCount === 0 || !hasSeries),
     ),
     progressUrl,
+    lastRequestError: options.lastRequestError,
   });
   const coverageHtml = snapshot
     ? `<p class="coverage">Coverage: ${snapshot.runCount} sampled build${
@@ -2773,52 +2824,25 @@ export function ciJobHistoryPage(
     ${progressHtml}${coverageHtml}
     <p class="legend">Job start-to-finish duration. Overall CI runs from the first job start to the last job completion. A shard group's line is the longest-running shard in each run. Lower is faster; colour follows the selected ${days}-day trend. Duration sort uses the latest sample.</p>
     ${refreshNotice}${body}
-    <p class="note">Every successful main run is sampled when the selected window contains at most ${CI_HISTORY_POINT_TARGET}. Larger sets keep the newest run per ${bucketLabel}-hour bucket from <a href="${
+    <p class="note">Every successful main run is sampled when the selected window contains at most ${CI_HISTORY_POINT_TARGET}. Larger sets keep exactly ${CI_HISTORY_POINT_TARGET} builds spread evenly through the chronological run sequence from <a href="${
     escapeHtml(workflowUrl)
   }" target="_blank" rel="noopener">${
     escapeHtml(source.workflow)
-  } runs ↗</a>. The window adjusts its sampling interval to keep about ${CI_HISTORY_POINT_TARGET} points. Values come from GitHub's job start and completion times. The detailed Gantt uses the same cached runs.</p>
+  } runs ↗</a>. Values come from GitHub's job start and completion times. The detailed Gantt uses the same cached runs.</p>
   </div>`;
   if (options.fragment) return rangeContent;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CI job history</title>
 <style>
-  body{box-sizing:border-box;width:100%;margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
-  .top{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-  .top b{font-size:16px;font-weight:600}.top span{font-size:12px;color:#6f757f}
-  a.back,.note a{color:#6ea8fe;text-decoration:none;font-size:13px}
-  .views{display:flex;gap:6px;margin:0 0 14px}
-  .views a,.controls a{font-size:13px;color:#c7ccd4;text-decoration:none;border:1px solid #2f333c;border-radius:6px;padding:4px 10px}
-  .views a.on,.controls a.on{background:#6ea8fe;border-color:#6ea8fe;color:#0d0e11}
-  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:#16181d;border:1px solid #23262d;border-radius:12px;padding:12px 14px;margin-bottom:8px}
-  .controls .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#878d97;margin-right:6px}
-  .controls .field{display:flex;align-items:center;gap:7px;font-size:12px;color:#9aa0ab;margin-right:8px}
-  .controls .choice-group{display:flex;align-items:center;gap:6px}
-  .controls select{background:#0d0e11;color:#c7ccd4;border:1px solid #2f333c;border-radius:6px;padding:4px 7px}
-  .controls input[type=range]{width:150px}.controls output{color:#c7ccd4;min-width:46px;font-variant-numeric:tabular-nums}
-  .legend{font-size:11px;color:#777d87;margin:0 0 12px}.coverage{font-size:11px;color:#c7ccd4;font-variant-numeric:tabular-nums;margin:0 0 12px}
-  ${CI_FETCH_PROGRESS_STYLES}
-  .axisrow{display:flex;gap:18px;margin:0 14px 4px}.timeaxis{flex:0 0 42%;display:flex;justify-content:space-between;color:#666c76;font-size:10px}
-  h2{font-size:12px;letter-spacing:.04em;color:#878d97;font-weight:600;margin:20px 0 8px;font-family:ui-monospace,Menlo,monospace}
+  ${PERFORMANCE_VIEW_STYLES}
+  .coverage{font-size:11px;color:#c7ccd4;font-variant-numeric:tabular-nums;margin:0 0 12px}
   h2 span{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-weight:400;color:#666c76;margin-left:6px}
-  .clist{display:flex;flex-direction:column;gap:7px}
-  .crow{display:flex;align-items:center;gap:18px;background:#16181d;border:1px solid #23262d;border-radius:10px;padding:8px 14px}
-  .crow.good{border-color:rgba(67,197,116,.34);background:rgba(67,197,116,.06)}
-  .crow.warn{border-color:rgba(224,168,82,.42);background:rgba(224,168,82,.07)}
-  .crow.bad{border-color:rgba(226,80,74,.5);background:rgba(226,80,74,.09)}
   .crow.aggregate{border-left-width:4px}
   .crow.overall{border-left:4px solid #6ea8fe}.overall-section{margin-bottom:20px}
-  .cspark{flex:0 0 42%;min-width:0;position:relative}.cspark>div,.cspark>svg{margin-top:0!important}
-  .cmeta{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
-  .cname{font-size:13px;color:#c7ccd4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cdetail{font-size:11px;color:#777d87}
-  .cval{flex:none;display:flex;flex-direction:column;align-items:flex-end;color:#e7e9ee;text-decoration:none;font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
-  .ctrend{font-size:11px;font-weight:400;color:#9aa0ab}
-  .empty,.refresh-error{color:#9aa0ab;font-size:14px}.refresh-error{color:#e0a852}
-  .note{font-size:11px;color:#666c76;margin-top:22px}.note a{font-size:11px}
-  label.chk{font-size:13px;color:#c7ccd4;display:inline-flex;align-items:center;gap:6px;margin-left:auto;cursor:pointer;user-select:none}
+  .cval{flex:none;display:flex;flex-direction:column;align-items:flex-end;text-decoration:none}
   body.hide-green .crow.good{display:none}body.hide-green section:has(.clist):not(:has(.crow:not(.good))){display:none}
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-  @media(max-width:640px){.timeaxis{flex:1}.crow{align-items:stretch;gap:7px;flex-wrap:wrap}.cspark{flex:1 0 100%}.cmeta{flex:1 1 55%}.cval{font-size:16px}.controls label.chk{margin-left:0}.controls .field{flex:1 1 100%}.controls input[type=range]{flex:1;width:auto}}
+  @media(max-width:640px){.cmeta{flex:1 1 55%}.cval{font-size:16px}}
 </style></head><body>
   <div class="top"><a class="back" href="/">← dashboard</a><b>Performance history</b><span>${
     escapeHtml(source.repo)
@@ -2846,7 +2870,7 @@ export function ciJobHistoryPage(
     ciPageHref(source, days, "trend", runtimeStat)
   }"${
     sort === "trend" ? ' aria-current="true"' : ""
-  }>trend</a></nav><label class="chk"><input type="checkbox" id="hg"> hide green</label></form>
+  }>trend</a></nav><label class="check trailing"><input type="checkbox" id="hg"> hide green</label></form>
   ${rangeContent}
 <script>
   const hg = document.getElementById("hg"), days = document.getElementById("days"), daysv = document.getElementById("daysv"), repo = document.getElementById("repo"), controls = days.form, KEY = "ciJobsHideGreen", DEFAULT_DAYS = days.value;
@@ -2902,15 +2926,20 @@ export function ciJobHistoryPage(
   });
   repo.addEventListener("change", () => repo.form.requestSubmit());
 
-  const renderIdle = () => {
-    collectionFailed = false;
+  const renderIdle = (lastRequestError = fetchProgress.dataset.lastRequestError || "") => {
+    collectionFailed = Boolean(lastRequestError);
     transportFailed = false;
-    fetchProgress.classList.remove("error");
+    if (lastRequestError) {
+      fetchProgress.dataset.lastRequestError = lastRequestError;
+    } else delete fetchProgress.dataset.lastRequestError;
+    fetchProgress.classList.toggle("error", collectionFailed);
     title.textContent = "Idle";
     total.textContent = "0 outstanding";
     bar.max = 1;
     bar.value = 0;
-    detail.textContent = "No requests in progress.";
+    detail.textContent = lastRequestError
+      ? "Last collection stopped: " + lastRequestError
+      : "No requests in progress.";
   };
   const refreshRangeWhenIdle = () => {
     if (navigating) return;
@@ -2938,6 +2967,9 @@ export function ciJobHistoryPage(
     collectionFailed = state.phase === "error";
     transportFailed = false;
     fetchProgress.classList.remove("error");
+    if (collectionFailed) {
+      fetchProgress.dataset.lastRequestError = state.error || "unknown error";
+    } else delete fetchProgress.dataset.lastRequestError;
     if (state.phase === "discovering") {
       title.textContent = "Finding workflow runs…";
       total.textContent = state.discoveryOutstandingRequests + " outstanding";
@@ -2966,7 +2998,8 @@ export function ciJobHistoryPage(
       total.textContent = "0 outstanding";
       bar.max = 1;
       bar.value = 0;
-      detail.textContent = "Last collection stopped: " + (state.error || "unknown error");
+      detail.textContent = "Last collection stopped: " +
+        fetchProgress.dataset.lastRequestError;
       eventStream?.close();
       eventStream = null;
       connectedProgressUrl = "";
@@ -3021,6 +3054,7 @@ export function ciJobHistoryPage(
         connectProgress("/bench/ci-progress?id=" + encodeURIComponent(state.progress.id));
         renderProgress(state.progress);
       } else if (serverVersionChanged) refreshRangeWhenIdle();
+      else if ("lastRequestError" in state) renderIdle(state.lastRequestError || "");
       else if (!collectionFailed) renderIdle();
     } catch {
       if (!eventStream && !collectionFailed && !transportFailed) renderIdle();
@@ -3219,7 +3253,12 @@ type CiJobHistoryProvider =
     CiJobHistoryCollector,
     "cached" | "startRefresh"
   >
-  & Partial<Pick<CiJobHistoryCollector, "startRefreshForCheck">>;
+  & Partial<
+    Pick<
+      CiJobHistoryCollector,
+      "lastRefreshError" | "startRefreshForCheck"
+    >
+  >;
 
 export async function ciJobHistoryCheckResponse(
   url: URL,
@@ -3240,8 +3279,15 @@ export async function ciJobHistoryCheckResponse(
       else snapshot = await refresh.result;
     }
   }
+  const lastRequestError = progress
+    ? null
+    : collector.lastRefreshError?.(source, days) ?? null;
   return Response.json(
-    { version: ciJobHistorySnapshotVersion(snapshot), progress },
+    {
+      version: ciJobHistorySnapshotVersion(snapshot),
+      progress,
+      lastRequestError,
+    },
     { headers: { "cache-control": "no-store" } },
   );
 }
@@ -3256,6 +3302,7 @@ export async function ciJobHistoryResponse(
   let snapshot = await collector.cached(source, days);
   let refreshError: string | undefined;
   let progress: CiJobFetchProgress | undefined;
+  let lastRequestError: string | undefined;
   if (!token) {
     refreshError = snapshot?.runCount
       ? "Set GH_TOKEN to refresh CI job history."
@@ -3265,6 +3312,9 @@ export async function ciJobHistoryResponse(
     progress = refresh.progress ?? undefined;
     if (progress) void refresh.result.catch(() => {});
     else snapshot = await refresh.result;
+  }
+  if (!progress) {
+    lastRequestError = collector.lastRefreshError?.(source, days) ?? undefined;
   }
   return new Response(
     ciJobHistoryPage(
@@ -3276,6 +3326,7 @@ export async function ciJobHistoryResponse(
         days,
         runtimeStat: url.searchParams.get("stat") ?? undefined,
         progress,
+        lastRequestError,
         fragment: url.searchParams.get("fragment") === "range",
       },
     ),

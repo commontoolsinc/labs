@@ -27,12 +27,15 @@ outside the layer stack.
 
 ## Documentation Lifecycle
 
-Documentation is split into two categories with different obligations. The full
-rules are in `docs/README.md`; the short version:
+Whenever editing documentation, read [docs/README.md](docs/README.md) and follow
+the rules therein. These include:
 
 - **Live** documentation (everything outside `docs/history/`) describes the
   current system or pending plans. If your change alters behavior that a live
   document describes, update that document in the same change.
+- Live documentation must be forward-looking, and should not refer to previous
+  states of the repository or justify decisions based on past choices.
+  Everything should stand on its own merits in a forward-looking fashion.
 - **Historical** documentation (`docs/history/`) holds point-in-time records:
   audits, reports, investigation findings, executed plans, superseded designs.
   Never edit their content, and never treat them as descriptions of the current
@@ -144,6 +147,11 @@ If you are developing runtime code, read the following documentation:
   and integration test structure; hub that links the other testing docs
 - `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
   polling: the primitives to use.
+- `docs/development/fetch-request-deadlines.md` - Why the fetch builtins keep a
+  wall-clock bound: it leases a claim held in durable state rather than bounding
+  a request, and it decides when the replica holding that claim is presumed
+  gone. Read it before changing how `fetch.ts` or `fetch-program.ts` decide to
+  start a request
 - `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
   splitting/rebalancing work
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime

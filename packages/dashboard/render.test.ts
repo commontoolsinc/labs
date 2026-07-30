@@ -9,7 +9,6 @@ import {
   shell,
 } from "./render.ts";
 import { humanSpan } from "./lib.ts";
-import { REPO } from "./config.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
 
 const TEST_VERSION = "1".repeat(40);
@@ -355,9 +354,9 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
   assert(!html.includes("faviconSvg"));
 });
 
-Deno.test("shell: the repo name in the header is escaped", () => {
+Deno.test("shell: the header names the Fabric Wall shortcut", () => {
   assertStringIncludes(
     shell("", "", 0, 1000, TEST_VERSION, "good"),
-    `<span>${REPO.replace(/&/g, "&amp;")}</span>`,
+    "<span>go/fabricwall</span>",
   );
 });

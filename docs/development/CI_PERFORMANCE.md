@@ -101,8 +101,9 @@ duration. Matrix jobs are grouped using the trailing-parenthesis base names from
 persistent imbalance.
 
 For a requested history window, the collector retains every successful main
-push build when there are at most 90. Larger sets are reduced to about 90 time
-buckets, keeping the newest build in each bucket.
+push build when there are at most 200. Larger sets are sorted chronologically
+and reduced to exactly 200 builds spread evenly through that run sequence,
+including its oldest and newest builds.
 
 ## Step Phase Markers
 
@@ -111,6 +112,13 @@ segments — setup, work, and shutdown — so the shared scaffolding around a jo
 visually separated from the job's own work. For a matrix job this shows, per
 shard, how much wall time is setup that every shard repeats versus the unique
 work that one shard does.
+
+When the chart contains one workflow run, it draws every execution of a rerun
+job on the same row at its actual time. Each bar carries its own duration
+beside it, and its tooltip names the attempt and how that attempt ended. Failed
+attempts end in a red cross, and the delay before a retry stays blank. Charts
+covering several workflow runs use the latest execution of each job from each
+run when calculating their aggregate bars.
 
 The chart decides a step's phase from the emoji its name starts with. The emoji
 is the marker: the script never reads step wording, only the leading emoji. Every
@@ -148,6 +156,7 @@ authenticate, and bring test servers and devices up before the real work:
 | 🚧 | guard that fails the build on a banned pattern |
 | 🧪 | run tests |
 | 🧩 | run integration tests |
+| 🔁 | replay captured fixtures under today's source |
 | 🧹 | lint |
 | 🧭 | check skill facts |
 | 📄 | type-check docs |
@@ -179,12 +188,13 @@ before you "correct" a step name back to a more obvious emoji:
 - Downloading logs after a failure is shutdown, so those steps use 📋 rather than
   the 📥 or 📦 download markers.
 
-The steps GitHub injects into every job — `Set up job`, `Post …`, and
-`Complete job` — carry no marker, so the script classifies them by name (setup
-for `Set up job`, shutdown for the other two). Any other step that reaches the
-chart without a recognized marker is counted as "other", drawn in gray, and
-listed on standard error when the script runs, so a missing marker is easy to
-find and fix.
+The steps the runner injects into every job carry no marker, so the script
+classifies them by name. GitHub adds `Set up job`, `Post …`, and `Complete
+job`; the Blacksmith runners add `Set up runner` and `Complete runner`
+alongside them. The two set-up steps count as setup and the rest as shutdown.
+Any other step that reaches the chart without a recognized marker is counted as
+"other", drawn in gray, and listed on standard error when the script runs, so a
+missing marker is easy to find and fix.
 
 ## Root Test Job Shape
 
