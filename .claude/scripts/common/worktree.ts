@@ -349,10 +349,10 @@ export function splitAtGitCommit(
  * explicitly to skip.
  */
 export function commitFlagRegion(after: string): string {
-  const masked = maskQuotedSpans(after);
+  const masked = maskRedirections(maskQuotedSpans(after));
   const sep = masked.search(/[;\n&|]/);
   const region = sep === -1 ? after : after.slice(0, sep);
-  return withoutQuotedSpans(region).replace(/\d*[<>]+\s*\S+/g, " ");
+  return maskRedirections(withoutQuotedSpans(region));
 }
 
 export function argumentRegion(text: string): string {
@@ -689,8 +689,61 @@ export function commitSkipsVerify(commitFlags: string): boolean {
  * `--no-verify` and turned the hook off, leaving that file unchecked.
  */
 function beforePathspecSentinel(commitFlags: string): string {
-  const m = commitFlags.match(/(?:^|\s)--(?=\s|$)/);
-  return m?.index === undefined ? commitFlags : commitFlags.slice(0, m.index);
+  // Option values have to be stepped over, not scanned. In `git commit -m -- -a`
+  // the `--` is the message: treating it as the sentinel truncated here and hid
+  // the `-a` behind it, so the commit staged tracked changes nothing checked.
+  const tokens = [...commitFlags.matchAll(/\S+/g)];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i][0];
+    if (token === "--") return commitFlags.slice(0, tokens[i].index);
+    if (consumesNextToken(token)) i++;
+  }
+  return commitFlags;
+}
+
+/** True when `token` takes the following word as its value. */
+function consumesNextToken(token: string): boolean {
+  if (VALUE_TAKING_LONG.has(token)) return true;
+  if (!/^-[A-Za-z]+$/.test(token)) return false;
+  for (const ch of token.slice(1)) {
+    // A value-taking short flag consumes the next word only when its own value
+    // is not already attached: `-m msg` does, `-mmsg` does not.
+    if (VALUE_TAKING_SHORT.includes(ch)) return token.endsWith(ch);
+  }
+  return false;
+}
+
+const VALUE_TAKING_SHORT = "mFcCtSu";
+const VALUE_TAKING_LONG = new Set([
+  "--message",
+  "--file",
+  "--reuse-message",
+  "--reedit-message",
+  "--template",
+  "--gpg-sign",
+  "--untracked-files",
+  "--author",
+  "--date",
+  "--cleanup",
+  "--fixup",
+  "--squash",
+  "--trailer",
+  "--pathspec-from-file",
+]);
+
+/**
+ * Blank redirections, descriptor and all, preserving length.
+ *
+ * The `&` of `2>&1` is not a command separator, but a search for `[;&|]` cannot
+ * tell — and reading it as one cut the commit's flag region in half, so a
+ * `--no-verify` after a redirect went unseen and the hook blocked a commit git
+ * had been told to skip.
+ */
+function maskRedirections(text: string): string {
+  return text.replace(
+    /&?\d*[<>]{1,2}&?\s*(?:\d+|[^\s;&|]*)/g,
+    (span) => " ".repeat(span.length),
+  );
 }
 
 export function commitsAllTracked(commitFlags: string): boolean {

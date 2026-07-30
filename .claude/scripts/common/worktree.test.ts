@@ -359,6 +359,12 @@ Deno.test("git's -- sentinel ends flag parsing", () => {
   // ...while a real flag before the sentinel still counts.
   assertEquals(commitSkipsVerify(" -n -m x"), true);
   assertEquals(commitsAllTracked(" -am x"), true);
+  // ...and a `--` that is an option's *value* is not the sentinel at all.
+  assertEquals(commitsAllTracked(" -m -- -a "), true);
+  assertEquals(commitSkipsVerify(" -m -- -n "), true);
+  assertEquals(commitSkipsVerify(" --message -- -n "), true);
+  // An attached value consumes nothing, so the sentinel after it still counts.
+  assertEquals(commitSkipsVerify(" -mmsg -- -n"), false);
 });
 
 Deno.test("commitFlagRegion keeps the command, drops redirections", () => {
