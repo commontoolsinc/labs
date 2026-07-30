@@ -84,7 +84,37 @@ for (const laneKey of laneKeys) {
 }
 ```
 
-**So the next step is a DELETION, not a build: drop the rank filter.**
+> **CORRECTION 3 IS WRONG — REFUTED BY MEASUREMENT, slice 2, 2026-07-29.**
+> The rank filter is **not arbitration**. It is the assignment of a candidate
+> to the lane that can OWN its writes, and by the survival test it therefore
+> **survives**: write bounding survives, and this is write bounding wearing a
+> candidate-pipeline costume.
+>
+> Deleting it regressed the flagship session arm from **5/0/0 with 28
+> committed** to **75/14/14 with 15 committed**. The decisive evidence is two
+> codes that do not exist in the baseline at ANY rank —
+> `non-lane-scope` ×14 and `commit-rejected:ExecutionActionFirewallError` ×14
+> — which is the ENGINE's exact-lane write fence refusing commits the router
+> newly admitted. Removing the router-side filter does not remove a decision;
+> it **relocates the rejection downstream**, from a cheap pre-commit decline
+> to work done and thrown away. `laneAdmitsWriteScope` is exact-lane
+> (`declared === laneRank`, verified), so a session-declared write can only
+> ever be owned by a session lane. Enumerating every demanding lane proposes
+> writes to lanes that cannot own them.
+>
+> **Nothing behavioural was landed.** The source diff is comment-only; the
+> tests carry retitles and one new pin. Two follow-ups were measured with the
+> filter restored and both correctly declined: one never fires, and the
+> other's apparent gain sits inside run-to-run variance while a unit pin
+> showed a real cost (a space-classified rerun adopting a user-lane identity
+> trips `broad-lane-value-write`).
+>
+> **The lesson for the SURVIVAL TEST itself:** membership in the
+> claim/candidate pipeline is not evidence of being arbitration. Ask what the
+> thing *decides*. This one decides which lane may own a write — so it stays,
+> and it stays whatever happens to claims.
+
+**~~So the next step is a DELETION, not a build: drop the rank filter.~~**
 Every lane that wants the piece gets a run — which is verbatim "we run all
 scopes on the server". That disposes of `laneKeyRank` (this is its only
 substantive use), the `rank: "user" | "session"` parameter, and CA9's rank

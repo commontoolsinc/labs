@@ -108,12 +108,14 @@ export interface ExecutorActionTransactionRouterOptions {
   /**
    * C1.9c per-lane candidates: canonical context keys of the OPEN lanes
    * whose aggregated demand (C1.8/C2.7) covers `pieceId`. An action of
-   * classified rank R produces one candidate per returned lane OF RANK R
-   * (review CA9's rank filter — a user-rank action is never paired with a
-   * session lane, and vice versa); non-canonical keys are dropped. An
-   * absent callback or an `undefined` result (the pre-lane wire) falls back
-   * to the lease sponsor's lane for USER rank only — the C1.5a single-lane
-   * behavior; session rank has no representable pre-lane identity.
+   * classified rank R produces one candidate per returned lane OF RANK R —
+   * the lanes that can OWN its writes, since scoped writes are exact-lane
+   * (see the measurement in {@link candidateLaneKeys}, which refutes the
+   * reading of this rule as CA9 claim-thrash arbitration); non-canonical
+   * keys are dropped. An absent callback or an `undefined` result (the
+   * pre-lane wire) falls back to the lease sponsor's lane for USER rank
+   * only — the C1.5a single-lane behavior; session rank has no
+   * representable pre-lane identity.
    */
   readonly openUserLaneKeys?: (
     pieceId: string,
@@ -435,6 +437,21 @@ export function createExecutorActionTransactionRouter(
     // fabricate). A rank-mismatched or non-canonical commit lane falls
     // through to the same representative, so the claim-key match below
     // rejects the pairing loudly instead of adopting a fabricated identity.
+    //
+    // SLICE 2 TRIED DELETING THE `=== contextRank` COMPARISON HERE — the
+    // owner's "if you find yourself making two rank computations agree so a
+    // claim key matches, stop" applies to it literally. Measured on the
+    // group-chat probe and NOT landed, twice over:
+    //   - alone (candidate lanes still rank-filtered) it never fires: the
+    //     session arm was byte-identical to baseline (5 unserved / 0 firewall
+    //     / 28 committed) because a mixed-rank pairing cannot arise.
+    //   - together with dropping the `contextRank === "space"` head, a
+    //     SPACE-classified rerun of a user-lane claim adopts the lane and
+    //     then trips `broad-lane-value-write` — correctly: a shared value
+    //     written from a per-user run is the §4 hazard. `claim-key-mismatch`
+    //     is the honest answer there, not a fixable disagreement.
+    // The residual `cf:builtin/map:v1` mismatches are NOT a contextKey
+    // disagreement at all — see the pin in executor-action-router.test.ts.
     const commitContextKey: ActionClaimKey["contextKey"] =
       contextRank === "space"
         ? "space"
@@ -579,7 +596,9 @@ export function createExecutorActionTransactionRouter(
     }
     // One candidate per serving lane (C1.9c/C2.5): space rank keys the
     // single space candidate; a scoped rank keys one candidate per open
-    // lane OF THAT RANK whose demand covers the piece (CA9's rank filter).
+    // lane OF THAT RANK whose demand covers the piece — the lanes that can
+    // own its writes (see `candidateLaneKeys`, and the measurement recorded
+    // there against deleting that constraint).
     // Servability is an action-level property (the certificate names
     // declared scopes, never a principal or session id), so one proven run
     // vouches for every lane's candidate.
@@ -692,14 +711,29 @@ function laneKeyRank(key: string): "user" | "session" | undefined {
 
 /** The lanes a scoped-rank action's candidates key by (C1.9c, session rank
  * with C2.5): every open lane OF THE ACTION'S RANK whose demand slice
- * covers the piece — review CA9's "candidate lanes ⊆ action rank" contract,
- * which keeps a user-rank action from ever pairing with a session lane (and
- * vice versa; mixed-rank pairing would ping-pong against chain-compatible
- * issuance). On the pre-lane wire, USER rank falls back to the lease
+ * covers the piece. On the pre-lane wire, USER rank falls back to the lease
  * sponsor's lane (C1.5a); SESSION rank has no representable fallback — a
  * session identity exists only in the host's lane-grant machinery, so the
  * action waits for an open session lane instead of fabricating a key from a
- * DID (CA9). Canonical keys only (amendment 18). */
+ * DID (CA9). Canonical keys only (amendment 18).
+ *
+ * THE RANK FILTER IS NOT ARBITRATION — MEASURED 2026-07-30, slice 2. The
+ * deletion scope's Correction 3 reads this line as "a filter throwing away a
+ * demand-driven enumeration" and asks for it to go, so that every lane
+ * wanting the piece gets a run. It was deleted and measured on the flagship
+ * group-chat probe, and the session arm went from 5 unserved / 0 firewall
+ * rejects / 28 committed to 75 / 14 / 15 — because scoped WRITES are
+ * exact-lane at both the runner firewall ({@link laneAdmitsWriteScope}) and
+ * the engine's own fence (`non-lane-scope` ×14 plus
+ * `commit-rejected:ExecutionActionFirewallError` ×14 are new codes the
+ * baseline never produced). A user lane cannot resolve a session-scoped
+ * write and a session lane may not write its principal's user instance, so
+ * every cross-rank candidate this filter drops is a candidate whose commit
+ * the write fence must refuse. What the filter does is assign the candidate
+ * to the lane that OWNS its writes — servability.ts:896-902 says exactly
+ * that — which is the SURVIVAL TEST's right-hand column, not its left.
+ * Broadening it needs the engine's exact-lane write rule relaxed first, and
+ * that is an owner question about scope chains, not a deletion. */
 function candidateLaneKeys(
   options: ExecutorActionTransactionRouterOptions,
   pieceId: string,

@@ -46,6 +46,19 @@
 > | examples | claim keys, claim-key-mismatch, claim-authority-lost, claim-context-mismatch, lease fences, the durable context floor as a claim GATE, candidate/claim-ready/settle | the §4 widening pair, lane scope admission, write envelopes, cross-principal leak prevention, `broad-lane-value-write` |
 > | why | there is nothing to arbitrate once the server owns the space's closure | a cross-principal leak is wrong no matter WHO runs the action — C1 established the §4 pair is a base-runtime rule that predates lanes entirely |
 >
+> **HOW THE TEST GETS MISAPPLIED — one measured example.** Being *in* the
+> claim/candidate pipeline is not evidence of being arbitration. The
+> orchestrator read `candidateLaneKeys`' rank filter as arbitration polish
+> and specified its deletion as slice 2; measurement refuted it (scope doc,
+> Correction 3). The filter decides **which lane may own a write**, so it is
+> write bounding and it survives — deleting it merely moved the rejection
+> from a cheap pre-commit decline to the engine's exact-lane fence, turning
+> 5 unserved / 28 committed into 75 unserved + 14 firewall rejects / 15
+> committed.
+>
+> **Ask what the thing DECIDES, not where it lives.** Deciding *whether to
+> claim* goes; deciding *what a run may write* stays.
+>
 > Scored against this test, 2026-07-29 was mixed: the sqlite acting-context
 > seam, the provenance envelope rule, the ×12 §4 acceptance, the
 > `pieceCreatedCallback` deletion, the `compileAndRun` outbox move and the

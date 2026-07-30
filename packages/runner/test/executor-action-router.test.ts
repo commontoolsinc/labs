@@ -1577,15 +1577,27 @@ Deno.test("executor router still rejects a broad value write in the auxiliary sh
   ]);
 });
 
-// --- C2.5: session-rank candidate identity + the CA9 rank filter -----------
+// --- C2.5: session-rank candidate identity + the candidate-lane rank rule --
 //
 // The session identity source is the host's lane-grant machinery: candidate
-// keys come ONLY from open session lanes (delivered on the wire by the host,
-// canonical `session:<did>:<sid>`), and a claimed commit's identity comes
+// keys come ONLY from open lanes the host delivered on the wire (canonical
+// `user:<did>` / `session:<did>:<sid>`), and a claimed commit's identity comes
 // from its claim's contextKey. The router must never fabricate a session key
 // from a DID (review CA9) — the pre-lane fallback for session rank is
 // no-candidate (stay-space), and an action of classified rank R candidates
 // only at open lanes of rank R.
+//
+// THE RANK RULE'S REASON CHANGED, ITS BEHAVIOUR DID NOT (slice 2, measured
+// 2026-07-30). These pins were written against CA9's claim-thrash prediction —
+// arbitration, i.e. the column the passivity arc is deleting. Deleting the
+// filter to test that reading regressed the flagship group-chat probe's
+// session arm from 5 unserved / 0 firewall rejects / 28 committed to
+// 75 / 14 / 15, with two codes the baseline never produced (`non-lane-scope`
+// ×14 and `commit-rejected:ExecutionActionFirewallError` ×14). Scoped WRITES
+// are exact-lane at the engine fence, so a cross-rank candidate is a claim
+// whose commit MUST be refused. The rank rule is write ownership — the
+// SURVIVAL TEST's right-hand column — and it stays until the engine's
+// exact-lane write rule is revisited.
 
 const SESSION_LANE = sessionExecutionContextKey(
   LANE_PRINCIPAL,
@@ -1703,10 +1715,16 @@ Deno.test("executor router keys a PerSession candidate at session rank for each 
 Deno.test("CA9: a session-rank action off the lane wire produces zero candidates (no DID fabrication)", async () => {
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
-  // No openUserLaneKeys callback at all: the pre-lane wire. A user-rank
-  // action falls back to the sponsor's lane here; a session-rank action has
-  // no representable identity (a bare DID cannot name a session) and must
-  // stay space — no candidate, no fabricated key.
+  // No openUserLaneKeys callback at all: the pre-lane wire (C1.5a). A
+  // user-rank action falls back to the sponsor's lane here; a session-rank
+  // action has no representable identity (a bare DID cannot name a session)
+  // and must stay space — no candidate, no fabricated key.
+  //
+  // Slice 2 tried the sponsor's USER lane as a rank-free fallback (it
+  // fabricates no session key, so CA9's identity rule permits it). Rejected
+  // on the same measurement as the filter itself: the sponsor's user lane
+  // cannot own a session-scoped write, so the fallback would mint a claim
+  // whose commit the engine's exact-lane fence must refuse.
   const router = sessionLaneRouter(candidates, diagnostics, {});
 
   const route = await router({
@@ -1721,11 +1739,15 @@ Deno.test("CA9: a session-rank action off the lane wire produces zero candidates
   assertEquals(diagnostics, []);
 });
 
-Deno.test("CA9: a session-rank action candidates only at session lanes (rank filter)", async () => {
+Deno.test("a session-rank action candidates only at session lanes — the lanes that can own its writes", async () => {
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   // The demand slice names a USER lane and a session lane. The session-rank
-  // action pairs only with the session lane.
+  // action pairs only with the session lane. Retitled by slice 2: the reason
+  // is not CA9's claim thrash, it is that `laneAdmitsWriteScope` and the
+  // engine fence are EXACT-lane — a user lane has no session id to resolve a
+  // session-scoped write against, so a user-lane candidate here is a claim
+  // that must be refused at commit.
   const router = sessionLaneRouter(candidates, diagnostics, {
     openLaneKeys: [userExecutionContextKey(LANE_PRINCIPAL), SESSION_LANE],
   });
@@ -1744,13 +1766,17 @@ Deno.test("CA9: a session-rank action candidates only at session lanes (rank fil
   ]);
 });
 
-Deno.test("CA9: a user-rank action never candidates at a session lane (rank filter)", async () => {
+Deno.test("a user-rank action never candidates at a session lane — exact-lane writes, not claim thrash", async () => {
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   // Mixed-rank demand (the C2.7 world): a piece demanded by both a user lane
-  // and a session lane. The user-rank action pairs only with the user lane —
-  // a session-lane claim for it would ping-pong against chain-compatible
-  // issuance (CA9's thrash finding).
+  // and a session lane. The user-rank action pairs only with the user lane.
+  // This pin's original reason was CA9's never-measured prediction that a
+  // session-lane claim would ping-pong against chain-compatible issuance.
+  // Slice 2 measured the deletion instead and found a harder reason:
+  // `laneAdmitsWriteScope` is exact (`declared === laneRank`), so a session
+  // lane may not write the principal's USER instance either — the pairing is
+  // refused by the write fence whatever arbitration does.
   const router = sessionLaneRouter(candidates, diagnostics, {
     openLaneKeys: [SESSION_LANE, userExecutionContextKey(LANE_PRINCIPAL)],
   });
@@ -1767,6 +1793,69 @@ Deno.test("CA9: a user-rank action never candidates at a session lane (rank filt
   assertEquals(candidates.map((entry) => entry.claimKey.contextKey), [
     userExecutionContextKey(LANE_PRINCIPAL),
   ]);
+});
+
+Deno.test("a claimed rerun that reclassifies to SPACE invalidates its scoped claim — and that is the honest answer (slice 2 measurement)", async () => {
+  // The residual class this arc keeps meeting: a live USER-lane claim, and a
+  // rerun whose observation is all-space. `commitContextKey` takes the
+  // `contextRank === "space"` head, keys "space", and the live user claim no
+  // longer matches — `claim-key-mismatch`.
+  //
+  // The passivity-arc top box says "a rank changing is not a reason to
+  // decline... if you find yourself making two rank computations agree so a
+  // claim key matches, stop", which reads like an instruction to delete the
+  // rank comparison here. Slice 2 did delete it and measured the result: the
+  // commit adopts the user lane, `laneActingCommit` turns on, and the
+  // all-space write immediately trips `broad-lane-value-write` — a shared
+  // value written out of a per-user run, which is the §4 hazard the lane
+  // backstop exists for. So the decline is not a rank disagreement to be
+  // reconciled; the action genuinely stopped being a lane's work.
+  //
+  // NOTE for whoever chases `cf:builtin/map:v1`'s ×4 on the live probe: those
+  // are NOT this shape. With the commit adopting its lane's key unconditionally
+  // the probe still reported claim-key-mismatch ×2 per scoped arm, so the
+  // disagreeing field is one of the SEVEN non-contextKey components of
+  // `actionClaimKeysEqual` (pieceId / actionId / actionKind / the two
+  // fingerprints / branch / space) — an action IDENTITY change between
+  // issuance and rerun, not a context one.
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const invalidated: { claim: ExecutionClaim; diagnosticCode: string }[] = [];
+  const userLane = userExecutionContextKey(LANE_PRINCIPAL);
+  const liveClaim: ExecutionClaim = {
+    ...key,
+    contextKey: userLane as ActionClaimKey["contextKey"],
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: true,
+    sessionRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    openUserLaneKeys: () => [userLane],
+    claimForAction: (_action, lane) =>
+      lane === userLane ? liveClaim : undefined,
+    onCandidate: (candidate, sourceAction) =>
+      candidates.push({ claimKey: candidate.claimKey, sourceAction }),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    onInvalidated: (invalidClaim, _sourceAction, diagnosticCode) =>
+      invalidated.push({ claim: invalidClaim, diagnosticCode }),
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: commit(),
+    sourceAction: {},
+    lane: userLane,
+  });
+  assertEquals(invalidated.map((entry) => entry.diagnosticCode), [
+    "claim-key-mismatch",
+  ]);
+  assertEquals(route.disposition, "local");
+  assertEquals(candidates, []);
 });
 
 Deno.test("CA9: non-canonical session lane keys never key a candidate", async () => {
@@ -2066,9 +2155,10 @@ Deno.test("C2.8: a session-scoped supported builtin candidates broker-backed at 
   if (route.disposition !== "local") throw new Error("expected local");
   if (route.kind === "executor-shadow") route.afterLocalApply?.();
   assertEquals(diagnostics, []);
-  // One candidate per open SESSION lane (never the user lane — CA9's rank
-  // filter applies to effects exactly as to computations), each carrying the
-  // builtin id so the host's passivity routing recognizes it.
+  // One candidate per open SESSION lane (never the user lane — the
+  // candidate-lane rank rule applies to effects exactly as to computations;
+  // slice 2 measured its deletion and put it back), each carrying the builtin
+  // id so the host's passivity routing recognizes it.
   assertEquals(
     candidates.map((candidate) => candidate.claimKey.contextKey),
     [SESSION_LANE, OTHER_SESSION_LANE],
@@ -2087,7 +2177,11 @@ Deno.test("C2.8 (e): a session-rank builtin with no open session lane produces z
   // Emergent from C2.3/C2.7, pinned here: with zero connected sessions there
   // is no open session lane, a bare DID cannot name one (CA9), and the
   // scoped-lane builtin therefore never candidates — the OQ1 offline-egress
-  // scope stays unbuilt.
+  // scope stays unbuilt. Slice 2 tried candidating it on the open USER lane
+  // instead ("we run all scopes on the server") and measured the cost: a user
+  // lane cannot own the session-scoped write, so the egress claim would be
+  // issued and then refused. The gap here is real and is not closed by
+  // widening the candidate lanes.
   const candidates: Array<{ claimKey: ActionClaimKey }> = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   const router = createExecutorActionTransactionRouter({
