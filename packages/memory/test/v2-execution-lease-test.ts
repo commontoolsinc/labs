@@ -986,7 +986,12 @@ Deno.test("lease-bound execution reads and mirrors sponsor PerSession scope", as
           }],
         }),
       Error,
-      "exact execution claim incarnation",
+      // §2b row 8 re-expect: the executor's unobserved semantic commit is
+      // still refused and still lands nothing — but the refusal now comes from
+      // the LEASE's own admission (a semantic transaction must be a bounded
+      // reactive action run) rather than from `claim-arity`, which only
+      // implied it. Every assertion below is unchanged.
+      "bounded reactive action run",
     );
     assertEquals(
       await sessionValue(sponsor, "of:sponsor-session-output"),

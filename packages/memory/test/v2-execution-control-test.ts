@@ -2772,7 +2772,14 @@ Deno.test("bound executor never downgrades a revoked attempt to an ordinary writ
   }
 });
 
-Deno.test("bound executor semantic writes require an exact claimed action assertion", async () => {
+// §2b row 8 retitle: this pinned the refusal by its CLAIM (`claim-arity`).
+// The property it was really guarding is the LEASE's — a lease-bound session
+// may commit operations only as a bounded reactive action run — and now that
+// the lease says so itself, this commit (no scheduler observation at all)
+// never reaches the claim residual. Same population, same refusal, same
+// non-landing; the cause is now sourced from the authority rather than from
+// the arbitration token that happens to imply it.
+Deno.test("bound executor semantic writes must be a bounded action run, and the LEASE refuses an unobserved one", async () => {
   const server = createControlServer(
     "memory-v2-execution-bound-semantic-guard",
   );
@@ -2799,7 +2806,7 @@ Deno.test("bound executor semantic writes require an exact claimed action assert
           }],
         }),
       Error,
-      "exact execution claim incarnation",
+      "bounded reactive action run",
     );
     assertEquals(error.name, "ExecutionLeaseFenceError");
     assertEquals(

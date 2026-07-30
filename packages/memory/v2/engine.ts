@@ -4136,7 +4136,15 @@ const assertExecutionLeaseFenceTransaction = (
     /** Slice 2b: the lane this commit ACTS AS — the claim-free carrier of the
      * two lane authority checks below. `undefined` names no lane. */
     actingLane?: SchedulerExecutionContextKey;
-    requireExactClaim?: boolean;
+    /** True for a commit carrying semantic operations, i.e. one that will
+     * WRITE. Triggers both the lease-level admission below and the
+     * transitional `claim-arity` residual. */
+    semanticTransaction?: boolean;
+    /** §2b row 8: whether this commit is a SERVED REACTIVE ACTION RUN
+     * that named the lane it acted as — `firewalledActionRun`, the write
+     * firewall's own precondition. This is what the lease admits; see the
+     * `lease-unbounded-commit` docblock below. */
+    boundedActionRun?: boolean;
   },
 ): void => {
   const fence = options.fence;
@@ -4173,7 +4181,48 @@ const assertExecutionLeaseFenceTransaction = (
       "execution lease is stale, expired, or revoked",
     );
   }
-  if (options.requireExactClaim === true && options.claims.length !== 1) {
+  // §2b row 8 — THE LEASE, PROMOTED. Above this line the lease has authorised
+  // the WRITER: the right space/branch/sponsor (`lane-principal-mismatch`),
+  // current WRITE and execution policy (`sponsor-authority`), and a durable
+  // row that is active, unexpired and still owned at this exact generation
+  // (`lease-stale` via `leaseOwnerMatches`). None of that bounds WHAT may be
+  // written. Under blanket ownership the lease is the authority space-wide,
+  // so it must also say what a semantic transaction under it may BE — and
+  // there is exactly one answer the write firewall can enforce: a served
+  // reactive action run that named the lane it acted as.
+  //
+  // Today `claim-arity` supplies that property as a side effect of demanding a
+  // claim, and it is the ONLY thing supplying it: a lease-bound session's
+  // operations reach the firewall only through `firewalledActionRun`, which is
+  // false for a commit carrying no action-run observation. Deleting
+  // `claim-arity` with nothing here would let a lease-bound executor commit
+  // arbitrary unobserved operations with no firewall at all — the same
+  // fail-open shape §2a found, one fence further on.
+  //
+  // Sourced from the lease and the acting context only. It runs BEFORE the
+  // claim residual, so where both apply this is the cause — a RELABELLING,
+  // never a widening. On the host path `claims.length === 1` implies a bounded
+  // run (the host mints a claim only for an action-run, non-event-handler
+  // observation with a lane assertion, and `applyCommitTransaction` rejects a
+  // with-operations commit that also carries a batch), so every commit this
+  // refuses is one `claim-arity` refuses today.
+  //
+  // At the ENGINE seam it also refuses one thing `claim-arity` does not, and
+  // that is a hole being closed rather than a delta: `claims.length` counts
+  // the MAP, so a claim keyed at a localSeq the commit does not carry
+  // satisfies arity while naming no observation — writes with neither a claim
+  // nor a firewall. The lease does not need to trust the map's keys.
+  if (
+    options.semanticTransaction === true && options.boundedActionRun !== true
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "lease-unbounded-commit",
+      "execution lease admits a semantic transaction only as a bounded reactive action run",
+    );
+  }
+  // TRANSITIONAL, and deleted by the claim slice: while claims are minted, a
+  // bounded run must also carry its exact claim incarnation.
+  if (options.semanticTransaction === true && options.claims.length !== 1) {
     throw new ExecutionLeaseFenceError(
       "claim-arity",
       "bound executor semantic transaction requires one exact execution claim incarnation",
@@ -8989,7 +9038,15 @@ const applyCommitTransaction = (
       "failed claimed actions must not include semantic operations",
     );
   }
-  if (firewalledActionRun(schedulerObservation, actingLane, space)) {
+  // Row 8: the SAME predicate feeds the firewall and the lease's admission of
+  // a semantic transaction — the lease admits exactly what the firewall
+  // bounds, computed once so the two can never drift apart.
+  const boundedActionRun = firewalledActionRun(
+    schedulerObservation,
+    actingLane,
+    space,
+  );
+  if (boundedActionRun) {
     if (schedulerObservation!.executionUnservedAttempt !== undefined) {
       rejectExecutionAction(
         "unserved-marker-with-operations",
@@ -9016,7 +9073,8 @@ const applyCommitTransaction = (
     principal,
     claims: executionClaims === undefined ? [] : [...executionClaims.values()],
     actingLane,
-    requireExactClaim: commit.operations.length > 0,
+    semanticTransaction: commit.operations.length > 0,
+    boundedActionRun,
   });
 
   // C3.8: the home-apply epoch fence — after the lease/lane authority fences
@@ -10213,7 +10271,12 @@ const applySchedulerObservationOnlyCommit = (
       }
       : {}),
   });
-  if (firewalledActionRun(schedulerObservation, actingLane, space)) {
+  const boundedActionRun = firewalledActionRun(
+    schedulerObservation,
+    actingLane,
+    space,
+  );
+  if (boundedActionRun) {
     if (schedulerObservation.executionUnservedAttempt === undefined) {
       assertExecutionActionTransaction({
         servedSpace: space!,
@@ -10233,6 +10296,14 @@ const applySchedulerObservationOnlyCommit = (
       );
     }
   }
+  // Row 8: BOTH lease-level inputs are supplied here too, and derived rather
+  // than assumed. This path serves the observation-only commit AND every item
+  // of `applySchedulerObservationBatchCommit`, so `semanticTransaction` reads
+  // the transaction it was actually handed — it is `false` for both today, and
+  // a future path that routes operations through here is fenced instead of
+  // silently skipping the lease's admission. (`1ac795d52`: a superset argument
+  // over call sites is not enough when a new precondition has its own
+  // population path.)
   assertExecutionLeaseFenceTransaction(engine, {
     fence: executionLeaseFence,
     space,
@@ -10240,6 +10311,8 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     claims: executionClaim === undefined ? [] : [executionClaim],
     actingLane,
+    semanticTransaction: transaction.operations.length > 0,
+    boundedActionRun,
   });
   // C3.8: the home-apply epoch fence for a served observation-only attempt
   // (no-op / failed with foreign reads). An unserved-attempt marker authors
