@@ -100,11 +100,26 @@ export function typeCheckable(files: string[]): string[] {
 
 const FORMATTING_LABEL = "Formatting issues found";
 
-/** What one `deno` invocation did: failed with output, passed, or ran on nothing. */
+/**
+ * What one `deno` invocation did: failed with output, passed over a known number
+ * of files, or ran on nothing.
+ *
+ * The count matters. deno silently narrows a file list to what its config
+ * includes, so a mixed list — one excluded path, one real one — exits 0 having
+ * looked at half of it. Reporting that as a clean pass over the whole list is
+ * the exact laundering this type was introduced to stop, and it went on
+ * happening because only the *all*-excluded case was detected.
+ */
 type Ran =
   | { failure: string; soft?: boolean }
-  | "passed"
+  | { passed: true; sawFiles: number | null }
   | "no-targets";
+
+/** deno's own tally of what it looked at, when it prints one. */
+function filesSeen(output: string): number | null {
+  const m = output.match(/Checked (\d+) file/);
+  return m ? Number(m[1]) : null;
+}
 
 async function runDeno(
   worktree: string,
@@ -130,12 +145,14 @@ async function runDeno(
       soft: true,
     };
   }
-  if (result.success) return "passed";
+  const stdout = new TextDecoder().decode(result.stdout);
   const stderr = new TextDecoder().decode(result.stderr);
-  // Every path was excluded by deno.jsonc — nothing was actually checked. Not a
+  if (result.success) {
+    return { passed: true, sawFiles: filesSeen(stdout) ?? filesSeen(stderr) };
+  }
+  // Every path was excluded by config — nothing was actually checked. Not a
   // failure, but not a pass either, and the caller has to be able to say so.
   if (stderr.includes("No target files found")) return "no-targets";
-  const stdout = new TextDecoder().decode(result.stdout);
   return { failure: `${label}:\n${stdout || stderr}` };
 }
 
@@ -145,8 +162,10 @@ export interface CheckOutcome {
   checked: string[];
   /** Candidates that are not on disk, so could not be checked. */
   missing: string[];
-  /** Checks that ran on nothing because deno.jsonc excludes these paths. */
+  /** Checks that ran on nothing at all — no file here is theirs to look at. */
   inapplicable: string[];
+  /** Checks that saw only some of the files, as "fmt (2 of 5)". */
+  partial: string[];
   /** Checks that could not be launched at all. Report, never block. */
   unavailable: string[];
   /** One entry per failing check, plus a remedy line for formatting. */
@@ -163,11 +182,12 @@ function quoteForShell(path: string): string {
  * `deno fmt --check`, never `deno fmt`: the caller is told what to reformat and
  * decides whether to do it.
  *
- * The outcome distinguishes checked from skipped from inapplicable, because the
- * alternative is a gate that says "all checks passed" when it checked nothing —
- * which is how an unchecked change gets laundered into an approved one. That is
- * not hypothetical for this repo: `deno.jsonc` excludes `.claude/` from fmt and
- * lint, so for the hook scripts themselves only the type check ever runs.
+ * The outcome distinguishes checked from skipped from partial from inapplicable,
+ * because the alternative is a gate that says "all checks passed" when it checked
+ * nothing — which is how an unchecked change gets laundered into an approved one.
+ * That is not hypothetical for this repo: `deno.jsonc` excludes `docs/` and
+ * `packages/static/assets/` from fmt, so any commit mixing those with code gets a
+ * partial pass that used to report as a whole one.
  */
 export async function checkFiles(
   worktree: string,
@@ -196,14 +216,15 @@ export async function checkFiles(
       checked,
       missing,
       inapplicable: [],
+      partial: [],
       unavailable: [],
       errors: [],
     };
   }
   const tsFiles = typeCheckable(checked);
 
-  const labels = ["fmt", "lint", "check"];
-  const results = await Promise.all([
+  const runs: Array<[label: string, expected: number, result: Ran]> = [];
+  const [fmt, lint, check] = await Promise.all([
     runDeno(worktree, FORMATTING_LABEL, ["fmt", "--check", ...checked]),
     runDeno(worktree, "Lint errors", ["lint", ...checked]),
     tsFiles.length > 0
@@ -214,18 +235,31 @@ export async function checkFiles(
       ])
       : "no-targets" as Ran,
   ]);
+  runs.push(["fmt", checked.length, fmt]);
+  runs.push(["lint", checked.length, lint]);
+  runs.push(["check", tsFiles.length, check]);
 
   const errors: string[] = [];
   const inapplicable: string[] = [];
+  const partial: string[] = [];
   const unavailable: string[] = [];
-  results.forEach((result, i) => {
-    if (result === "no-targets") inapplicable.push(labels[i]);
-    else if (result === "passed") return;
-    // A check that could not be launched is not a verdict on the code. Surface
-    // it, but never block on it.
-    else if (result.soft) unavailable.push(result.failure);
-    else errors.push(result.failure);
-  });
+  for (const [label, expected, result] of runs) {
+    if (result === "no-targets") {
+      inapplicable.push(label);
+    } else if ("passed" in result) {
+      // A pass over fewer files than we asked about is a pass over fewer files
+      // than we asked about, and has to read that way.
+      if (result.sawFiles !== null && result.sawFiles < expected) {
+        partial.push(`${label} (${result.sawFiles} of ${expected})`);
+      }
+    } else if (result.soft) {
+      // A check that could not be launched is not a verdict on the code. Surface
+      // it, but never block on it.
+      unavailable.push(result.failure);
+    } else {
+      errors.push(result.failure);
+    }
+  }
 
   // Formatting is the one failure with a one-command remedy, and `--check`
   // names the files but not the fix. Spell it out, scoped to these files, so
@@ -236,5 +270,5 @@ export async function checkFiles(
     );
   }
 
-  return { checked, missing, inapplicable, unavailable, errors };
+  return { checked, missing, inapplicable, partial, unavailable, errors };
 }

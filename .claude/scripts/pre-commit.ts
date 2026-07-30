@@ -20,7 +20,7 @@
 import {
   commitTargetWorktree,
   env,
-  gitAddInvocation,
+  gitAddInvocations,
   isGitCommit,
   sameRepository,
   splitAtGitCommit,
@@ -96,11 +96,11 @@ function git(...args: string[]): Promise<string[]> {
   return gitFrom(worktree, args);
 }
 
-// The `git add` in this command, if any: where it runs and what it stages.
-// Resolved at the add's own position, with its own directory redirects — the
-// add and the commit need not run in the same place, and reusing the commit's
-// looked for the file somewhere it never was.
-const add = gitAddInvocation(cmd);
+// Every `git add` in this command: where each runs and what it stages. Resolved
+// at each add's own position, with its own directory redirects — an add and the
+// commit need not run in the same place, and reusing the commit's looked for the
+// file somewhere it never was.
+const adds = gitAddInvocations(cmd) ?? [];
 
 async function getFilesToCommit(): Promise<string[]> {
   // Already staged by an earlier tool call.
@@ -128,17 +128,27 @@ async function getFilesToCommit(): Promise<string[]> {
   // and lost any path followed by a `;`. `--dry-run` writes nothing — verified
   // against a scratch repo, the index is untouched — and prints one
   // `add '<repo-relative path>'` per file.
-  if (add && add.words.length > 0) {
+  for (const add of adds) {
+    if (add.flags.length === 0 && add.paths.length === 0) continue;
+    if (add.mutating) {
+      // Not dry-runnable without writing to the index. Say so; do not stage on
+      // the user's behalf to satisfy our own curiosity.
+      console.error(
+        "pre-commit: `git add` here carries an editing flag, which writes to " +
+          "the index even under --dry-run. Not resolving its file list.",
+      );
+      continue;
+    }
     for (
       const line of await gitFrom(fallbackCwd, [
         ...add.dirArgs,
         "add",
         "--dry-run",
+        ...add.flags,
         // Everything after this is a pathspec, never an option — so a file
         // named `--cached` cannot become a flag we did not intend to pass.
-        ...add.words.filter((w) => w.startsWith("-")),
         "--",
-        ...add.words.filter((w) => !w.startsWith("-")),
+        ...add.paths,
       ])
     ) {
       const m = line.match(/^add '(.*)'$/);
@@ -157,7 +167,16 @@ async function getFilesToCommit(): Promise<string[]> {
 const MAX_FILES = 400;
 
 const files = await getFilesToCommit();
-if (files.length === 0) Deno.exit(0);
+if (files.length === 0) {
+  // Never silently. Every silent bypass this hook has had looked exactly like
+  // this line: a parse went wrong upstream, the list came back empty, and the
+  // commit sailed through indistinguishably from "nothing to check". One line
+  // of output here would have surfaced all of them.
+  console.error(
+    "pre-commit: no files resolved for this commit; nothing checked.",
+  );
+  Deno.exit(0);
+}
 
 if (files.length > MAX_FILES) {
   console.error(
@@ -171,11 +190,8 @@ if (files.length > MAX_FILES) {
 
 console.error(`Running pre-commit checks in ${worktree} ...`);
 
-const { checked, missing, inapplicable, unavailable, errors } =
-  await checkFiles(
-    worktree,
-    files,
-  );
+const { checked, missing, inapplicable, partial, unavailable, errors } =
+  await checkFiles(worktree, files);
 
 if (unavailable.length > 0) console.error(unavailable.join("\n\n"));
 
@@ -185,9 +201,8 @@ if (errors.length > 0) {
 }
 
 // Say what actually ran. "All checks passed" over an empty file list, or over
-// paths deno.jsonc excludes from fmt and lint, is a pass nobody earned — and
-// this hook exists because a verdict that does not match reality is worse than
-// no verdict at all.
+// paths a check silently narrowed away, is a pass nobody earned — and this hook
+// exists because a verdict that does not match reality is worse than none.
 if (checked.length === 0) {
   console.error(
     `pre-commit: none of the ${files.length} file(s) are on disk; nothing checked.`,
@@ -198,9 +213,10 @@ const ran = ["fmt", "lint", "check"].filter((c) => !inapplicable.includes(c));
 let summary = `Pre-commit checks passed on ${checked.length} file(s)`;
 summary += ran.length > 0 ? ` (${ran.join(", ")}).` : ".";
 if (inapplicable.length > 0) {
-  summary += ` Not run — deno.jsonc excludes these paths: ${
-    inapplicable.join(", ")
-  }.`;
+  summary += ` No files here for: ${inapplicable.join(", ")}.`;
+}
+if (partial.length > 0) {
+  summary += ` Saw only part of the list: ${partial.join(", ")}.`;
 }
 if (missing.length > 0) {
   summary += ` Skipped ${missing.length} missing path(s).`;

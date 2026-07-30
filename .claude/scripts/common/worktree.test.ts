@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
   argumentRegion,
-  gitAddInvocation,
+  gitAddInvocations,
   isGitCommit,
   shellWords,
   splitAtGitSubcommand,
@@ -187,10 +187,11 @@ Deno.test("isGitCommit does not backtrack exponentially", () => {
   // An optional value on every option gave N options 2^N readings, and a failed
   // match explored them all: 24 tokens took 1.6s on a hook that runs on every
   // Bash call. This shape is the one that triggered it.
-  const flags = Array.from({ length: 30 }, (_, i) => `--exclude dir${i}`).join(
-    " ",
-  );
-  const cmd = `rsync -av ${flags} src/ dst/`;
+  // Consecutive *bare* flags with no values — the shape that actually
+  // backtracks. Built as `--exclude dirN`, this measured nothing: a non-flag
+  // value after each option breaks the chain after one iteration.
+  const flags = Array.from({ length: 30 }, (_, i) => `--flag${i}`).join(" ");
+  const cmd = `ls ~/src/git ${flags} src/ dst/`;
   const start = performance.now();
   assertEquals(isGitCommit(cmd), false);
   const elapsed = performance.now() - start;
@@ -238,37 +239,73 @@ Deno.test("withoutQuotedSpans hides message text from flag scans", () => {
   );
 });
 
-Deno.test("gitAddInvocation resolves the add on its own terms", () => {
+Deno.test("gitAddInvocations resolves each add on its own terms", () => {
+  const one = (cmd: string) => gitAddInvocations(cmd)?.[0];
+
   // A quoted pathspec must survive. Blanking quotes here produced no arguments
   // at all, so the file was never checked and the commit went through.
-  assertEquals(
-    gitAddInvocation('git add "packages/foo.ts" && git commit -m x')?.words,
-    ["packages/foo.ts"],
-  );
+  assertEquals(one('git add "packages/foo.ts" && git commit -m x')?.paths, [
+    "packages/foo.ts",
+  ]);
   // A pathspec containing a separator is one word, not two commands.
+  assertEquals(one(`git add 'a&b.ts' && git commit -m x`)?.paths, ["a&b.ts"]);
+
+  // The caller's own `--` is a sentinel, not a flag. Classifying by a leading
+  // dash re-emitted it ahead of ours and git died on the duplicate, so the file
+  // list came back empty and the commit passed in silence.
+  assertEquals(one("git add -- bad.ts && git commit -m x"), {
+    dirArgs: [],
+    flags: [],
+    paths: ["bad.ts"],
+    mutating: false,
+  });
+  assertEquals(one("git add -A -- bad.ts && git commit -m x"), {
+    dirArgs: [],
+    flags: ["-A"],
+    paths: ["bad.ts"],
+    mutating: false,
+  });
+
+  // A redirect is not a pathspec. `>/dev/null` reached git as one, git failed,
+  // and the commit passed unchecked.
+  assertEquals(one("git add -A >/dev/null && git commit -m x")?.paths, []);
+  // The file descriptor is part of the operator: leaving the `2` behind made it
+  // a pathspec, git failed on it, and the whole list came back empty.
+  assertEquals(one("git add foo.ts 2>/dev/null && git commit -m x")?.paths, [
+    "foo.ts",
+  ]);
+  assertEquals(one("git add foo.ts >>log 2>&1 && git commit -m x")?.paths, [
+    "foo.ts",
+  ]);
+
+  // Every add, not just the first: bad.ts was staged and never checked.
   assertEquals(
-    gitAddInvocation(`git add 'a&b.ts' && git commit -m x`)?.words,
-    ["a&b.ts"],
+    gitAddInvocations("git add ok.ts && git add bad.ts && git commit -m x")
+      ?.flatMap((a) => a.paths),
+    ["ok.ts", "bad.ts"],
   );
+
+  // An editing flag writes to the index even under --dry-run, so it must be
+  // recognised and left alone rather than run.
+  assertEquals(one("git add -e && git commit -m x")?.mutating, true);
+  assertEquals(one("git add --edit && git commit -m x")?.mutating, true);
+  assertEquals(one("git add -Ae && git commit -m x")?.mutating, true);
+  assertEquals(one("git add -A && git commit -m x")?.mutating, false);
+
   // The add's directory is where the *add* runs, not where the commit does.
+  assertEquals(one("git add foo.ts && cd sub && git commit -m x")?.dirArgs, []);
   assertEquals(
-    gitAddInvocation("git add foo.ts && cd sub && git commit -m x")?.dirArgs,
-    [],
-  );
-  assertEquals(
-    gitAddInvocation("cd sub && git add foo.ts && cd .. && git commit -m x")
-      ?.dirArgs,
+    one("cd sub && git add foo.ts && cd .. && git commit -m x")?.dirArgs,
     ["-C", "sub"],
   );
-  // And its own `-C` still counts.
-  assertEquals(
-    gitAddInvocation("git -C /a add -A && git -C /a commit -m x")?.dirArgs,
-    ["-C", "/a"],
-  );
-  // No add in the command at all.
-  assertEquals(gitAddInvocation("git commit -m x"), null);
-  // A `git add` named only inside the message is not an add.
-  assertEquals(gitAddInvocation("git commit -m 'run git add -A'"), null);
+  assertEquals(one("git -C /a add -A && git -C /a commit -m x")?.dirArgs, [
+    "-C",
+    "/a",
+  ]);
+
+  // No add in the command, and an add named only inside the message.
+  assertEquals(gitAddInvocations("git commit -m x"), []);
+  assertEquals(gitAddInvocations("git commit -m 'run git add -A'"), []);
 });
 
 Deno.test("shellWords splits on the mask and unquotes", () => {
@@ -279,6 +316,8 @@ Deno.test("shellWords splits on the mask and unquotes", () => {
     "plain.ts",
   ]);
   assertEquals(argumentRegion(" foo.ts && git commit"), " foo.ts ");
+  assertEquals(argumentRegion(" foo.ts 2>/dev/null && x"), " foo.ts ");
+  assertEquals(argumentRegion(" foo.ts >out"), " foo.ts ");
   assertEquals(argumentRegion(` 'a&b.ts' && git commit`), ` 'a&b.ts' `);
 });
 

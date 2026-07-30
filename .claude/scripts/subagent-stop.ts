@@ -180,11 +180,8 @@ if (changed.length === 0) {
   Deno.exit(0);
 }
 
-const { checked, missing, inapplicable, unavailable, errors } =
-  await checkFiles(
-    worktree,
-    changed,
-  );
+const { checked, missing, inapplicable, partial, unavailable, errors } =
+  await checkFiles(worktree, changed);
 
 if (unavailable.length > 0) console.error(unavailable.join("\n\n"));
 
@@ -211,9 +208,9 @@ const [branchName, status] = await Promise.all([
   git("status", "--porcelain"),
 ]);
 
-// Report what ran, not what was attempted. Claiming fmt and lint passed on
-// paths deno.jsonc excludes from both — `.claude/**` among them — is how a gate
-// launders an unchecked change into an approved one.
+// Report what ran, not what was attempted. Claiming a check passed on paths it
+// silently narrowed away is how a gate launders an unchecked change into an
+// approved one.
 const LABELS: Array<[flag: string, name: string]> = [
   ["fmt", "fmt"],
   ["lint", "lint"],
@@ -226,9 +223,10 @@ const ran = LABELS.filter(([flag]) => !inapplicable.includes(flag)).map((
 let context = `Checks passed on ${checked.length} file(s) changed by this ` +
   `subagent` + (ran.length > 0 ? ` (${ran.join(", ")}).` : ".");
 if (inapplicable.length > 0) {
-  context += `\nNot run — deno.jsonc excludes these paths: ${
-    inapplicable.join(", ")
-  }.`;
+  context += `\nNo files here for: ${inapplicable.join(", ")}.`;
+}
+if (partial.length > 0) {
+  context += `\nSaw only part of the list: ${partial.join(", ")}.`;
 }
 if (missing.length > 0) {
   context += `\nSkipped ${missing.length} path(s) no longer on disk.`;

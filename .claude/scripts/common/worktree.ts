@@ -103,15 +103,6 @@ export async function sameRepository(a: string, b: string): Promise<boolean> {
 }
 
 /**
- * One global option in a `git <globals> <subcommand>` invocation.
- *
- * A value may be quoted, and may mix quoted and bare spans the way a shell word
- * does (`-c user.name="A B"`), so it is matched as a sequence of those rather
- * than a run of non-space characters. That is not a cosmetic distinction:
- * `git -C "/a b" commit` went unrecognised while the value pattern was
- * `[^\s]+`, and an unrecognised commit is an unchecked one.
- */
-/**
  * git's global options that take a value. Every other token before the
  * subcommand is a boolean flag.
  *
@@ -132,11 +123,43 @@ const VALUE_OPTIONS = [
   "--config-env",
 ];
 
+/**
+ * A value may be quoted, and may mix quoted and bare spans the way a shell word
+ * does (`-c user.name="A B"`), so it is matched as a sequence of those rather
+ * than a run of non-space characters. Not cosmetic: `git -C "/a b" commit` went
+ * unrecognised while this was `[^\s]+`, and an unrecognised commit is an
+ * unchecked one.
+ */
 const SHELL_WORD = String.raw`(?:[^\s"']|"[^"]*"|'[^']*')+`;
 
+/**
+ * A boolean global option.
+ *
+ * `\w` after the dashes, not `[\w-]`, is the whole point: with `-{1,2}[\w-]+`,
+ * `--foo` matched two ways — `--` + `foo` and `-` + `-foo` — over the same span,
+ * so N consecutive dash-flags had 2^N parses and a failing match walked all of
+ * them. 24 of them cost 2.4 seconds of hook time; 26 cost 9.6. Requiring a word
+ * character immediately after the dashes leaves exactly one reading.
+ *
+ * The first version of this fix listed the value-taking options (below) to stop
+ * every option consuming one-or-two tokens. That was necessary and insufficient:
+ * the flag branch was still ambiguous with itself, and the regression test built
+ * its input as `--exclude dirN`, which breaks the chain after one iteration and
+ * so measured nothing.
+ */
+const BOOLEAN_OPTION = String.raw`-{1,2}\w[\w-]*`;
+
+/**
+ * Repetition is bounded rather than open. A real `git` invocation carries a
+ * handful of global options; a bound turns any residual ambiguity from
+ * unbounded-exponential into a fixed ceiling, which is the property worth having
+ * on a hook that runs on every Bash call in the session.
+ */
 const GLOBAL_OPTION = String.raw`(?:(?:${
   VALUE_OPTIONS.join("|")
-})(?:=|\s+)${SHELL_WORD}|-{1,2}[\w-]+)\s+`;
+})(?:=|\s+)${SHELL_WORD}|${BOOLEAN_OPTION})\s+`;
+
+const MAX_GLOBAL_OPTIONS = 12;
 
 /**
  * Matches `git <globals> <subcommand>`, capturing the globals.
@@ -147,7 +170,10 @@ const GLOBAL_OPTION = String.raw`(?:(?:${
  * to inspect. Matching them is also what lets us find a `-C` at all.
  */
 function gitSubcommand(subcommand: string): RegExp {
-  return new RegExp(String.raw`\bgit\s+((?:${GLOBAL_OPTION})*)${subcommand}\b`);
+  return new RegExp(
+    String
+      .raw`\bgit\s+((?:${GLOBAL_OPTION}){0,${MAX_GLOBAL_OPTIONS}})${subcommand}\b`,
+  );
 }
 
 const GIT_COMMIT = gitSubcommand("commit");
@@ -170,17 +196,22 @@ const GIT_COMMIT = gitSubcommand("commit");
  * delimiter here, so a masked span cannot match anything we look for.
  */
 function maskQuotedSpans(text: string): string {
-  // `\\.` in the double-quoted branch is load-bearing. Ending that branch at
-  // the first `"` meant an escaped quote closed the span early, leaving the rest
-  // of the message unmasked — and unmasked text carrying its own separator got
-  // read as commands again:
+  // `\\[\s\S]` in the double-quoted branch is load-bearing, and the character
+  // class rather than `.` doubly so: `.` does not match a newline, so a shell
+  // line continuation inside a quoted string ended the span early and reopened
+  // this whole family — a `--no-verify` written across two lines disabled the
+  // hook again, exactly the bypass a test claimed to have closed.
+  //
+  // Ending the branch at the first `"` was the first version of the same
+  // mistake: an escaped quote closed the span, leaving the rest of the message
+  // unmasked, and unmasked text carrying its own separator got read as commands:
   //
   //   echo "a \" && cd /evil && echo \"" && git commit -m x
   //
   // resolved to /evil. A single-quoted span has no escapes in the shell, so
   // that branch is a plain run to the next quote.
   return text.replace(
-    /"(?:[^"\\]|\\.)*"|'[^']*'/g,
+    /"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g,
     (span) => "\0".repeat(span.length),
   );
 }
@@ -236,7 +267,12 @@ export function splitAtGitCommit(
  * commands.
  */
 export function argumentRegion(text: string): string {
-  const sep = maskQuotedSpans(text).search(/[;\n&|]/);
+  // Redirections end the argument list too, and the whole operator has to go,
+  // file descriptor included. Cutting at the bare `>` left the `2` of
+  // `2>/dev/null` behind as a pathspec, git failed on it, the file list came
+  // back empty, and the commit went through unchecked — the same silent pass as
+  // not handling redirection at all.
+  const sep = maskQuotedSpans(text).search(/[;\n&|]|\d*[<>]/);
   return sep === -1 ? text : text.slice(0, sep);
 }
 
@@ -313,23 +349,80 @@ export function dirArgsAt(prefix: string): string[] | null {
 }
 
 /**
- * Where a `git add` in `cmd` runs and what it will be given, or null when the
- * command has no `git add` (or steers it somewhere unmodellable).
+ * Flags that make `git add` write to the index *even with* `--dry-run`.
+ *
+ * `--edit` is the one that matters and the reason this list exists. git rejects
+ * `-i`/`-p` outright under `--dry-run`, but it honours `--edit`: it applies the
+ * patch to the index regardless, and because Claude Code sets `GIT_EDITOR=true`
+ * the editor step is a silent no-op that accepts everything. So a hook whose
+ * entire purpose is to stop touching the trees it inspects staged the user's
+ * working tree for them, before their command had even run — verified against a
+ * scratch repo. An add carrying any of these is not dry-runnable, so we do not
+ * try.
  */
-export function gitAddInvocation(
-  cmd: string,
-): { dirArgs: string[]; words: string[] } | null {
-  const beforeCommit = splitAtGitCommit(cmd).before;
-  const add = splitAtGitSubcommand(beforeCommit, "add");
-  if (!add.matched) return null;
+const MUTATING_ADD_FLAGS = /^--(?:edit|interactive|patch)$|^-[A-Za-z]*[eip]/;
 
-  const dirArgs = dirArgsAt(add.before);
-  if (dirArgs === null) return null;
-  for (const m of add.options.matchAll(/-C\s+("[^"]*"|'[^']*'|[^\s]+)/g)) {
-    dirArgs.push("-C", expand(m[1]));
+export interface GitAddInvocation {
+  dirArgs: string[];
+  /** Options to pass through, `--dry-run` excluded. */
+  flags: string[];
+  /** Pathspecs, to be passed after `--`. */
+  paths: string[];
+  /** True when this add cannot be dry-run without writing to the index. */
+  mutating: boolean;
+}
+
+/**
+ * Every `git add` in `cmd` before its commit: where each runs and what it
+ * stages.
+ *
+ * All of them, not just the first. `git add ok.ts && git add bad.ts && git
+ * commit` reported only ok.ts, so bad.ts was staged, committed, and never
+ * checked — a silent pass.
+ *
+ * `null` when the command steers git somewhere this parser does not model.
+ */
+export function gitAddInvocations(cmd: string): GitAddInvocation[] | null {
+  const invocations: GitAddInvocation[] = [];
+  let region = splitAtGitCommit(cmd).before;
+  let consumed = 0;
+
+  while (true) {
+    const add = splitAtGitSubcommand(region, "add");
+    if (!add.matched) break;
+
+    // The prefix for this add is everything in the original command up to it.
+    const dirArgs = dirArgsAt(cmd.slice(0, consumed + add.before.length));
+    if (dirArgs === null) return null;
+    for (const m of add.options.matchAll(/-C\s+("[^"]*"|'[^']*'|[^\s]+)/g)) {
+      dirArgs.push("-C", expand(m[1]));
+    }
+
+    const words = shellWords(argumentRegion(add.after));
+
+    // Split at the caller's own `--`: after it everything is a pathspec, however
+    // it is spelled. Classifying by a leading `-` alone put that `--` in with
+    // the flags, where it was re-emitted ahead of ours and git died on the
+    // duplicate — `git add -- foo.ts` checked nothing and passed in silence.
+    const sentinel = words.indexOf("--");
+    const head = sentinel === -1 ? words : words.slice(0, sentinel);
+    const tail = sentinel === -1 ? [] : words.slice(sentinel + 1);
+    const flags = head.filter((w) => w.startsWith("-"));
+
+    invocations.push({
+      dirArgs,
+      flags,
+      paths: [...head.filter((w) => !w.startsWith("-")), ...tail],
+      mutating: flags.some((f) => MUTATING_ADD_FLAGS.test(f)),
+    });
+
+    const advance = add.before.length +
+      (region.length - add.before.length - add.after.length);
+    consumed += advance;
+    region = region.slice(advance);
   }
 
-  return { dirArgs, words: shellWords(argumentRegion(add.after)) };
+  return invocations;
 }
 
 /**

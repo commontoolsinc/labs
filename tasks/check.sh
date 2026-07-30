@@ -79,8 +79,9 @@ FILES_TO_CHECK=()
 # Directory paths (no glob expansion needed)
 DIRS=(
   # The Claude Code hook scripts. A hook that fails to compile blocks every
-  # commit in the repo, and nothing else here type-checks them: `.claude/` is
-  # excluded from fmt and lint, so this list is their only coverage.
+  # commit in the repo, and nothing else type-checks them: the root `.claude/`
+  # exclusions cover fmt and lint, and its workspace-member config re-enables
+  # those two, but neither reaches `deno check`. This list does.
   ".claude/scripts"
   "packages/api"
   "packages/background-piece-service"
