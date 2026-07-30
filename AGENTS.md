@@ -206,3 +206,13 @@ entire suite recursively — causing exponential process spawning and CI timeout
 See `packages/utils/deno.jsonc` for an example of a correctly configured
 package. When the package needs a dependency, follow
 `docs/development/DEPENDENCIES.md`.
+
+## Instructions for committing to this repository
+
+Before committing, squashing, or otherwise getting a branch ready to be reviewed
+or landed: Execute repo-wide `deno fmt --check` and `deno lint` checks, and run
+all relevant tests.
+
+When babysitting a PR through CI, look for codex review comments in addition to
+failed CI jobs. When facing difficulties getting coverage checks to pass,
+consider the information in `docs/development/COVERAGE.md`.
