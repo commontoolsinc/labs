@@ -67,14 +67,25 @@ export async function worktreeRoot(dir: string): Promise<string | null> {
  * branch of our repo" (check it) from "an unrelated project" (leave it alone).
  */
 export async function repositoryId(dir: string): Promise<string | null> {
+  // Ask git for an absolute answer rather than normalising one ourselves. Left
+  // to its own devices git replies relative to the directory it ran in inside a
+  // main worktree (`../../.git` from a subdirectory) and absolutely inside a
+  // linked one — and resolving that relative form against the wrong base
+  // yielded a path outside the repo, so this returned null and both hooks
+  // silently skipped every check. The bug was invisible from a linked worktree,
+  // which is exactly where it was measured.
+  const absolute = await git(dir, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]);
+  if (absolute) return await realPath(absolute);
+
+  // Older git without --path-format: resolve against `dir`, git's own base.
   const common = await git(dir, ["rev-parse", "--git-common-dir"]);
   if (!common) return null;
-  // git answers relatively (".git") inside the main worktree and absolutely
-  // inside a linked one. Normalise through the filesystem so the two forms of
-  // the same repository compare equal.
   if (common.startsWith("/")) return await realPath(common);
-  const root = await worktreeRoot(dir);
-  return root ? await realPath(`${root}/${common}`) : null;
+  return await realPath(`${dir}/${common}`);
 }
 
 async function realPath(p: string): Promise<string | null> {
@@ -92,42 +103,119 @@ export async function sameRepository(a: string, b: string): Promise<boolean> {
 }
 
 /**
- * A `git … commit` invocation, capturing whatever global options sit between
- * `git` and `commit`.
+ * One global option in a `git <globals> <subcommand>` invocation.
  *
- * Those options are the reason this is not simply /git\s+commit/: written that
+ * A value may be quoted, and may mix quoted and bare spans the way a shell word
+ * does (`-c user.name="A B"`), so it is matched as a sequence of those rather
+ * than a run of non-space characters. That is not a cosmetic distinction:
+ * `git -C "/a b" commit` went unrecognised while the value pattern was
+ * `[^\s]+`, and an unrecognised commit is an unchecked one.
+ */
+/**
+ * git's global options that take a value. Every other token before the
+ * subcommand is a boolean flag.
+ *
+ * Listing them is what keeps the invocation pattern from backtracking
+ * exponentially. When any option *might* have taken a value, N of them had 2^N
+ * readings and a failed match explored them all: 24 flag-like tokens after a
+ * word ending in "git" took 1.6 seconds, on a hook that runs on every Bash
+ * call. Here each branch consumes a determined number of tokens.
+ */
+const VALUE_OPTIONS = [
+  "-C",
+  "-c",
+  "--exec-path",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+];
+
+const SHELL_WORD = String.raw`(?:[^\s"']|"[^"]*"|'[^']*')+`;
+
+const GLOBAL_OPTION = String.raw`(?:(?:${
+  VALUE_OPTIONS.join("|")
+})(?:=|\s+)${SHELL_WORD}|-{1,2}[\w-]+)\s+`;
+
+/**
+ * Matches `git <globals> <subcommand>`, capturing the globals.
+ *
+ * Those globals are the reason this is not simply /git\s+commit/: written that
  * way, `git -C <dir> commit` does not match, and the hook that used it waved
  * through every commit aimed at another worktree — the one case it most needed
- * to inspect. Matching the options is also what lets us find a `-C` at all.
+ * to inspect. Matching them is also what lets us find a `-C` at all.
  */
-const GIT_COMMIT = /\bgit\s+((?:-{1,2}[^\s]+(?:[=\s]+[^\s]+)?\s+)*)commit\b/;
+function gitSubcommand(subcommand: string): RegExp {
+  return new RegExp(String.raw`\bgit\s+((?:${GLOBAL_OPTION})*)${subcommand}\b`);
+}
+
+const GIT_COMMIT = gitSubcommand("commit");
+
+/**
+ * `text` with the *contents* of quoted spans replaced by a filler character,
+ * preserving length so offsets into the result still address the original.
+ *
+ * Quoted text is data. Until it was masked, it was parsed as command syntax and
+ * got to choose what the hook did:
+ *
+ *   echo "git -C /other/worktree commit" && git commit -m x
+ *
+ * matched the quoted mention first, took `-C /other/worktree` from a string
+ * literal, and blocked the commit on an unrelated tree's errors. A quoted
+ * mention could equally move the split past a real `cd` and hide it, or make
+ * `rg 'git commit' docs/` — not a commit at all — run checks and fail.
+ *
+ * NUL is the filler: it is not whitespace, not a word character, and not any
+ * delimiter here, so a masked span cannot match anything we look for.
+ */
+function maskQuotedSpans(text: string): string {
+  return text.replace(
+    /"[^"]*"|'[^']*'/g,
+    (span) => "\0".repeat(span.length),
+  );
+}
 
 /** True when `cmd` contains a `git commit`, however git is steered to it. */
 export function isGitCommit(cmd: string): boolean {
-  return GIT_COMMIT.test(cmd);
+  return GIT_COMMIT.test(maskQuotedSpans(cmd));
 }
 
 /**
- * `cmd` split around the `git … commit` invocation.
+ * `cmd` split around a `git … <subcommand>` invocation.
  *
  * Each part answers a different question and only one part can answer it:
  * earlier commands (a `git add`, a `cd`) live in `before`, git's own global
- * options in `options`, the commit's flags in `after`. Splitting once, here,
- * is also what keeps every pattern search out of the commit message — which is
- * free to contain text reading exactly like a `git add` or a `cd`.
+ * options in `options`, the subcommand's arguments in `after`. Splitting once,
+ * here, is what keeps every pattern search out of the commit message — free to
+ * contain text reading exactly like a `git add`, a `cd`, or a `--work-tree`.
  */
-export function splitAtGitCommit(
+export function splitAtGitSubcommand(
   cmd: string,
+  subcommand: string,
 ): { before: string; options: string; after: string } {
-  const m = cmd.match(GIT_COMMIT);
+  // Located on the masked copy so quoted text cannot be the match, but sliced
+  // out of the original so callers get real values back. The mask preserves
+  // length, which is what makes those two the same offsets.
+  const masked = maskQuotedSpans(cmd);
+  const m = masked.match(gitSubcommand(subcommand));
   if (!m || m.index === undefined) {
     return { before: cmd, options: "", after: "" };
   }
+  const optionsStart = m.index + m[0].length - (m[1] ?? "").length -
+    subcommand.length;
   return {
     before: cmd.slice(0, m.index),
-    options: m[1] ?? "",
+    options: cmd.slice(optionsStart, optionsStart + (m[1] ?? "").length),
     after: cmd.slice(m.index + m[0].length),
   };
+}
+
+/** `cmd` split around its `git … commit`. */
+export function splitAtGitCommit(
+  cmd: string,
+): { before: string; options: string; after: string } {
+  return splitAtGitSubcommand(cmd, "commit");
 }
 
 /**
@@ -141,29 +229,67 @@ export function splitAtGitCommit(
  * callers should report that and pass rather than guess.
  */
 export function targetDirArgs(cmd: string): string[] | null {
-  // An explicit tree override changes the answer completely and has forms we
-  // deliberately do not try to model. Refuse rather than answer wrongly.
-  if (/--git-dir[=\s]|--work-tree[=\s]/.test(cmd)) return null;
-
   // The options between `git` and `commit` are the only place a `-C` can affect
   // the commit; `before` is the only place a `cd` can.
   const { before: prefix, options } = splitAtGitCommit(cmd);
 
+  // An explicit tree override changes the answer completely and has forms we
+  // deliberately do not try to model. Refuse rather than answer wrongly — but
+  // only when it is really one of git's options. Searching the whole command
+  // meant `git commit -m 'handle --work-tree correctly'` refused to resolve,
+  // and refusing to resolve turns every check off: a commit message could
+  // silently disable the hook by describing it.
+  if (/--git-dir|--work-tree/.test(options)) return null;
+
+  // Two shapes a regex cannot read, where guessing produced a *confidently
+  // wrong* tree rather than no answer:
+  //
+  // Parentheses. A `cd` inside `( … )` or `$( … )` does not outlive the
+  // subshell, so `(cd /a && git add -A) && git commit` must not resolve to
+  // /a — but `(cd /a && git commit)` must. Telling those apart means knowing
+  // whether the commit shares the subshell, which is parsing, not matching.
+  //
+  // Heredocs. Their body is data, and a line of data reading `cd /elsewhere`
+  // is not a command. Only `before` matters: `git commit -F - <<'EOF'` keeps
+  // its heredoc after the commit, where we never look.
+  //
+  // So refuse. Skipping a check is a cost; asserting the wrong branch's errors
+  // against someone's commit is the bug this module exists to remove.
+  const maskedPrefix = maskQuotedSpans(prefix);
+  if (/[()]/.test(maskedPrefix)) return null;
+  if (maskedPrefix.includes("<<")) return null;
+  // `popd` returns to a directory we never saw pushed. Nothing to compose.
+  if (/(?:^|[;&|{\n])\s*popd\b/.test(maskedPrefix)) return null;
+
   const args: string[] = [];
 
-  // The last `cd` before the commit wins, as it would in the shell. Require a
-  // command boundary so `--author "cd fred"` cannot masquerade as one — but
-  // count `(` and `{` as boundaries too, because `(cd dir && git commit)` is a
-  // real form and missing its `cd` puts us back to judging the wrong tree.
-  const cds = [
-    ...prefix.matchAll(
-      /(?:^|[;&|({])\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|)}]+)/g,
-    ),
-  ];
-  const lastCd = cds.at(-1)?.[1];
-  if (lastCd) args.push("-C", expand(lastCd));
+  // Every `cd` before the commit, in order — not just the last. They compose:
+  // `cd /a && cd sub` ends in /a/sub, and taking only `cd sub` resolved it
+  // against whatever directory the hook happened to start in. Passing them all
+  // to git reproduces the composition exactly, absolute paths overriding
+  // earlier ones just as they do in a shell.
+  //
+  // A command boundary is required so `--author "cd fred"` cannot masquerade as
+  // one. A newline is such a boundary: agents write commit sequences as
+  // multi-line scripts, and while `\n` was missing every `cd` after the first
+  // line was invisible — the original bug, surviving in its most common form.
+  // `{` counts too; unlike `(` a brace group runs in the current shell, so its
+  // `cd` holds. `pushd` moves the shell the same way `cd` does.
+  //
+  // Matched against the mask and read out of the original by index, so a quoted
+  // path arrives intact while quoted prose cannot pose as a command.
+  for (
+    const m of maskedPrefix.matchAll(
+      /(?:^|[;&|{\n])\s*(?:cd|pushd)\s+([^\s;&|}]+)/dg,
+    )
+  ) {
+    const span = m.indices?.[1];
+    if (!span) continue;
+    args.push("-C", expand(prefix.slice(span[0], span[1])));
+  }
 
-  // Then each `-C` the commit itself carries, in order.
+  // Then each `-C` the commit itself carries, in order. git rejects a glued
+  // `-C<path>` ("unknown option"), so a space is required here too.
   for (
     const m of options.matchAll(
       /-C\s+("[^"]*"|'[^']*'|[^\s]+)/g,
@@ -175,18 +301,47 @@ export function targetDirArgs(cmd: string): string[] | null {
   return args;
 }
 
-/** Strip one layer of quoting and expand a leading `~`. */
+/**
+ * Strip one layer of quoting and expand `~` and `$VAR`.
+ *
+ * The shell expands these before git ever sees them; we are reading the command
+ * before it runs, so we have to. `cd "$CLAUDE_PROJECT_DIR" && git commit` is a
+ * shape agents actually write, and without expansion it resolved to nothing.
+ * Single-quoted values are left alone, as the shell leaves them.
+ */
 function expand(raw: string): string {
   let p = raw;
+  const singleQuoted = p.startsWith("'") && p.endsWith("'") && p.length >= 2;
   if (
-    (p.startsWith('"') && p.endsWith('"')) ||
-    (p.startsWith("'") && p.endsWith("'"))
+    singleQuoted || (p.startsWith('"') && p.endsWith('"') && p.length >= 2)
   ) {
     p = p.slice(1, -1);
+  }
+  if (!singleQuoted) {
+    p = p.replace(/\$\{(\w+)\}|\$(\w+)/g, (whole, braced, bare) => {
+      const value = env(braced ?? bare);
+      // An unset variable expands to nothing in the shell. Keeping the literal
+      // would send git looking for a directory named `$FOO`.
+      return value || (value === "" ? "" : whole);
+    });
   }
   if (p === "~") return HOME || p;
   if (p.startsWith("~/") && HOME) return HOME + p.slice(1);
   return p;
+}
+
+/**
+ * `text` with quoted spans blanked out.
+ *
+ * For scanning a region that contains both flags and free text: a commit
+ * message is quoted, so removing quoted spans leaves the flags and drops the
+ * prose. Without this, `git commit -m "fix: honour the -a flag"` read as a
+ * `-a` commit and swept the entire dirty tree — blocking on files the commit
+ * would never have touched, which is the failure this whole change is about.
+ * Flags after the message (`git commit -m "x" -a`) still register.
+ */
+export function withoutQuotedSpans(text: string): string {
+  return text.replace(/"[^"]*"|'[^']*'/g, " ");
 }
 
 /**

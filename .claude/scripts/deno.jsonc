@@ -1,0 +1,16 @@
+{
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
+  //
+  // A workspace member so that `deno task test` reaches these hook scripts.
+  // They are not a package and export nothing; without a member config the root
+  // runner has no way to run a test here, and the parsing in common/worktree.ts
+  // — which decides whether a commit is blocked — went untested long enough to
+  // ship several wrong answers.
+  //
+  // The root deno.jsonc keeps `.claude/` out of `deno fmt` and `deno lint`, and
+  // that is unchanged: this only adds a test task. Type checking comes from
+  // `tasks/check.sh`, which lists this directory.
+  "tasks": {
+    "test": "deno test --allow-env --allow-read --permit-no-files"
+  }
+}

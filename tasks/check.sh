@@ -78,6 +78,10 @@ FILES_TO_CHECK=()
 
 # Directory paths (no glob expansion needed)
 DIRS=(
+  # The Claude Code hook scripts. A hook that fails to compile blocks every
+  # commit in the repo, and nothing else here type-checks them: `.claude/` is
+  # excluded from fmt and lint, so this list is their only coverage.
+  ".claude/scripts"
   "packages/api"
   "packages/background-piece-service"
   "packages/piece"

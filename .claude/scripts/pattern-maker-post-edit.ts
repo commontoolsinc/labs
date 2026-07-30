@@ -26,8 +26,7 @@ if (
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
-      additionalContext:
-        `Run it: deno task cf check ${filePath}`,
+      additionalContext: `Run it: deno task cf check ${filePath}`,
     },
   }));
 }

@@ -98,6 +98,11 @@ const activity = transcriptPath
   ? readAgentActivity(transcriptPath)
   : { cwd: null, files: [] };
 
+// The transcript is the authority. Falling back to the payload's `cwd` is
+// falling back to the very signal this file's header calls wrong for this event
+// — right for a subagent sharing the parent's tree, wrong for one given its
+// own. It is used only when the transcript records no cwd at all, and the
+// containment check below is what keeps a wrong guess from doing damage.
 const payloadCwd = typeof payload.cwd === "string" ? payload.cwd : "";
 const agentDir = activity.cwd ?? payloadCwd;
 
@@ -129,10 +134,31 @@ if (projectDir && !(await sameRepository(worktree, projectDir))) {
   Deno.exit(0);
 }
 
-// Repo-relative, and only files inside the worktree we resolved: a path
-// somewhere else is not something this tree's config can be asked about.
-const prefix = worktree.endsWith("/") ? worktree : `${worktree}/`;
-const changed = activity.files
+function canonical(path: string): string | null {
+  try {
+    return Deno.realPathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+// Repo-relative, and only files genuinely inside the worktree we resolved: a
+// path somewhere else is not something this tree's config can be asked about.
+//
+// Canonicalised first, on both sides. A plain string prefix accepts
+// `<worktree>/../sibling/x.ts` — it starts with the prefix, and slicing it
+// leaves `../sibling/x.ts`, which points deno straight back into another
+// agent's tree. That is the cross-worktree pollution this hook is here to end,
+// arriving through the check meant to prevent it. Symlinked paths need the same
+// treatment to be recognised as inside at all.
+const canonicalWorktree = canonical(worktree) ?? worktree;
+const prefix = canonicalWorktree.endsWith("/")
+  ? canonicalWorktree
+  : `${canonicalWorktree}/`;
+const resolved = activity.files.map(canonical).filter((f): f is string =>
+  f !== null
+);
+const changed = resolved
   .filter((f) => f.startsWith(prefix))
   .map((f) => f.slice(prefix.length))
   .sort();
@@ -140,10 +166,27 @@ const changed = activity.files
 if (changed.length === 0) {
   // A subagent that wrote nothing has nothing to answer for. Checking the repo
   // anyway is what produced the false verdicts this hook used to hand out.
+  //
+  // But say so when it wrote something we then discarded: this is the branch a
+  // containment or worktree-resolution mistake hides in, so it must be the one
+  // branch that is never silent.
+  if (activity.files.length > 0) {
+    console.log(JSON.stringify({
+      systemMessage:
+        `Subagent checks skipped: none of its ${activity.files.length} ` +
+        `written file(s) resolved inside ${canonicalWorktree}. Not blocking.`,
+    }));
+  }
   Deno.exit(0);
 }
 
-const errors = await checkFiles(worktree, changed);
+const { checked, missing, inapplicable, unavailable, errors } =
+  await checkFiles(
+    worktree,
+    changed,
+  );
+
+if (unavailable.length > 0) console.error(unavailable.join("\n\n"));
 
 if (errors.length > 0) {
   console.error(
@@ -168,9 +211,28 @@ const [branchName, status] = await Promise.all([
   git("status", "--porcelain"),
 ]);
 
-let context =
-  `Checks passed on the ${changed.length} file(s) changed by this ` +
-  `subagent (fmt, lint, type check).`;
+// Report what ran, not what was attempted. Claiming fmt and lint passed on
+// paths deno.jsonc excludes from both — `.claude/**` among them — is how a gate
+// launders an unchecked change into an approved one.
+const LABELS: Array<[flag: string, name: string]> = [
+  ["fmt", "fmt"],
+  ["lint", "lint"],
+  ["check", "type check"],
+];
+const ran = LABELS.filter(([flag]) => !inapplicable.includes(flag)).map((
+  [, name],
+) => name);
+
+let context = `Checks passed on ${checked.length} file(s) changed by this ` +
+  `subagent` + (ran.length > 0 ? ` (${ran.join(", ")}).` : ".");
+if (inapplicable.length > 0) {
+  context += `\nNot run — deno.jsonc excludes these paths: ${
+    inapplicable.join(", ")
+  }.`;
+}
+if (missing.length > 0) {
+  context += `\nSkipped ${missing.length} path(s) no longer on disk.`;
+}
 context += `\nWorktree: ${worktree}`;
 context += `\nBranch: ${branchName}`;
 
