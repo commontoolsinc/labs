@@ -149,6 +149,38 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   removed: deleting `CELL_RESULT_TYPE` raises `TS2538`, deleting `action`'s
   overload 2 raises `TS2344`.
 
+  **Type-level stream detection is brand-based** — `AnyStream`
+  (`AnyBrandedCell<any, "stream">`), with `StreamEventOf` / `StreamResultOf`
+  recovering the halves. A guard spelled `[T] extends [Stream<any>]` pins the
+  arity: it means `Stream<any, void>`, which a verb declaring a result does
+  not satisfy, so every such guard stopped matching the moment a result
+  existed. It failed silently and it failed *late* — a value-less stream still
+  matches, and value-less is every stream in the tree today, so the whole
+  workspace type-checked clean while the break waited for the first
+  `action<E, R>` user.
+  This converges the type layer on what the other two already do, which is why
+  neither of them broke: the runtime reads the cell kind (`Cell.isStream`) and
+  the schema generator reads `CELL_BRAND`. Rewriting the guards to
+  `Stream<any, any>` was rejected — it re-arms the same trap for a third
+  parameter.
+
+  **Rebuild sites remain the fragile surface.** Pass-through guards preserve
+  `T` whole and are now arity-independent, but anything that reconstructs a
+  stream (`StripDefaultFieldInner`) still names both parameters explicitly, so
+  a future fourth axis would be dropped there even though detection survives.
+  `packages/api/test/stream-through-utilities.test.ts` is the tripwire: it
+  applies the api's own utilities to a returning stream and asserts identity,
+  not mere assignability. Verified to fail when a guard is reverted (`TS2322`).
+
+  **`action` is the sole result-authoring surface.** `handler()` produces
+  `HandlerFactory<T, E, void>`, so a returning verb written with `handler`
+  does not compile against a `Stream<E, R>` annotation. This is deliberate:
+  `action` is the CTS-native surface a pattern author writes, `handler` the
+  lower-level escape hatch, and threading `R` through both would double a
+  hand-maintained mirror that already drifts (the reason the two overload
+  tests cross-reference each other). C2's returning-body error must therefore
+  point authors at `action` rather than merely rejecting the body.
+
   **Correction — the envelope does not do what this plan and the design doc
   claimed.** Both said a result nested under one key leaves only that key
   permanent, "everything beneath it free to narrow". Measured against

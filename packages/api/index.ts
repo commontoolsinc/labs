@@ -921,7 +921,7 @@ export interface IKeyable<out T, Wrap extends HKT> {
  * Uses non-distributive conditionals to handle union types correctly.
  */
 export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
-  : [T] extends [Stream<any>] ? T
+  : [T] extends [AnyStream] ? T
   : [T] extends [ComparableCell<any>] ? T
   : [T] extends [ReadonlyCell<any>] ? T
   : [T] extends [WriteonlyCell<any>] ? T
@@ -1435,6 +1435,35 @@ export interface Stream<E, R = void>
   readonly [CELL_RESULT_TYPE]: R;
 }
 
+/**
+ * Any stream, whatever its arity — the canonical way for a type-level guard to
+ * ask "is this a stream?".
+ *
+ * Detection must not depend on how many type parameters `Stream` happens to
+ * have. Spelling a guard `[T] extends [Stream<any>]` pins it to
+ * `Stream<any, void>`, which a verb declaring a result does not satisfy, so
+ * every such guard stops matching the moment a result exists — silently, since
+ * a value-less stream still matches and value-less is the common case.
+ *
+ * This is the mechanism the other two layers already use, which is why neither
+ * broke when the result parameter arrived: the runtime reads the cell kind
+ * (`Cell.isStream`) and the schema generator reads `CELL_BRAND`. Only the type
+ * layer matched the full generic instantiation.
+ */
+export type AnyStream = AnyBrandedCell<any, "stream">;
+
+/** The event a stream accepts, recovered without naming the stream's arity. */
+export type StreamEventOf<T> = T extends AnyBrandedCell<infer E, "stream"> ? E
+  : never;
+
+/**
+ * The result a stream declares, `void` when it declares none. Reads the
+ * `CELL_RESULT_TYPE` pin directly — the complementary half of what that
+ * property is for, not a workaround for it.
+ */
+export type StreamResultOf<T> = T extends
+  { readonly [CELL_RESULT_TYPE]: infer R } ? R : void;
+
 export declare const Stream: CellTypeConstructor<AsStream>;
 
 /**
@@ -1554,7 +1583,7 @@ export type StripCell<T> =
     // Non-distributive for everything else (preserves unions like RenderNode)
     : StripCellInner<T>;
 
-type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+type StripCellInner<T> = [T] extends [AnyStream] ? T // Preserve the stream whole - it's a callable interface
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
@@ -2082,7 +2111,7 @@ export type BuiltInLLMTool =
       extraParams?: Record<string, any>;
       useResultSchemaForObservation?: boolean;
     }
-    | { handler: Stream<any> | Reactive<any>; pattern?: never }
+    | { handler: AnyStream | Reactive<any>; pattern?: never }
   );
 
 /**
@@ -2435,7 +2464,7 @@ export interface LiftFunction {
 // methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
 // to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
-  : T extends Stream<any> ? T
+  : T extends AnyStream ? T
   : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
@@ -3134,7 +3163,11 @@ type StripDefaultField<T> = IsAny<T> extends true ? T
 type StripDefaultFieldInner<T> = T extends Cell<infer U>
   ? Cell<StripDefaultUnion<U>>
   : T extends OpaqueCell<infer U> ? OpaqueCell<StripDefaultUnion<U>>
-  : T extends Stream<infer U> ? Stream<StripDefaultUnion<U>>
+  // Rebuilt, so both halves are named explicitly: detection is
+  // brand-based, but the reconstruction still has to carry R across or
+  // a returning verb silently comes back value-less.
+  : T extends AnyStream
+    ? Stream<StripDefaultUnion<StreamEventOf<T>>, StreamResultOf<T>>
   : T extends ComparableCell<infer U> ? ComparableCell<StripDefaultUnion<U>>
   : T extends ReadonlyCell<infer U> ? ReadonlyCell<StripDefaultUnion<U>>
   : T extends WriteonlyCell<infer U> ? WriteonlyCell<StripDefaultUnion<U>>
@@ -3384,7 +3417,7 @@ export type Props = {
     | null
     | undefined
     | Cell<any>
-    | Stream<any>;
+    | AnyStream;
 };
 
 /** A child in a view can be one of a few things */
