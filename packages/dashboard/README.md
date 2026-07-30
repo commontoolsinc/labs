@@ -197,6 +197,11 @@ workflow attempt. While GitHub reruns a workflow, the prior attempt's conclusion
 remains visible and the tile marks the activity as **build rerunning**. A new
 workflow run still appears as **next build running**.
 
+The **labs ci duration** and **loom ci duration** tiles use successful main push
+runs. Each duration starts when GitHub creates the workflow run for the landed
+commit and ends when that run finishes, so it includes runner queueing and
+reruns.
+
 ## Credentials
 
 Every tile that reads a private source is gated on its own env var(s) and grays
@@ -502,7 +507,7 @@ Notes:
     Cache entries written before CPU identity was stored are fetched again.
     Each completed artifact check is persisted before it is counted as
     finished. Only new runs and attempts are fetched after the first fill or a
-    server restart. The shortest-view buckets are about 16 minutes wide. The
+    server restart. The shortest-view buckets are about 8 minutes wide. The
     first cache fill can therefore download more artifacts.
   - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
     line per CPU for **every** benchmark. The lines share a calendar-time axis.
@@ -514,8 +519,12 @@ Notes:
     max) and whether to group by source **file** or sort by latest **duration**
     or **trend**. A "hide green" checkbox drops the steady ones. A slider from 1
     through 45 days changes the visible calendar range. The displayed samples
-    are spread across at most 90 time buckets, so a shorter window uses more of
-    the collected samples per day. Keyboard arrows adjust the window without
+    are spread across at most 200 time buckets, so a shorter window uses more of
+    the collected samples per day. Each graph chooses its vertical scale after
+    ignoring the two lowest and two highest displayed values; those points stay
+    in the line but no longer determine the scale, so they may clip instead of
+    flattening the rest of the history. A graph with fewer than 20 values uses
+    its complete range. Keyboard arrows adjust the window without
     moving focus. Enter applies the range immediately. Another selector carries
     the range into its own navigation, and leaving the controls applies it
     directly. Each row shows one latest value and trend from the CPU with the
@@ -540,19 +549,24 @@ Notes:
     base name used by `scripts/ci-gantt.ts` are shown together. Each group starts
     with a slowest-shard line, followed by the individual shard lines. The
     slider covers 1 through 45 days. It keeps every successful main build when
-    there are at most 90, then uses about 90 time buckets and keeps the newest
-    build in each bucket for larger sets. A coverage label compares the sampled
-    builds shown with every successful main build in the selected range. The
-    view can group by job or sort every line by latest duration or robust trend.
+    there are at most 200. Larger sets keep exactly 200 builds spread evenly
+    through the chronological run sequence. A coverage label compares the
+    sampled builds shown with every successful main build in the selected
+    range. The view can group by job or sort every line by latest duration or
+    robust trend. Its graphs use the same vertical-scale trimming as runtime
+    benchmark history.
     It renders cached history immediately. The progress panel remains visible
     as Idle between collections, then shows live collection progress with
     cached, queued, requested, responded, outstanding, and failed run counts.
+    On both history pages, a failed collection remains in the Idle panel until
+    a later collection for that history view succeeds.
     Open runtime benchmark and CI history pages check for newer server data once
     a minute. An open Gantt regenerates every 30 minutes and whenever its tab
     becomes visible. CI refreshes share a 30-minute GitHub freshness window, so
-    multiple pages do not repeat the same API reads. Moving the window slider
-    starts or joins the matching collection without cancelling wider-window
-    work already in progress.
+    multiple pages do not repeat the same API reads. Runtime and CI history
+    checks wait through the same window after GitHub rejects a collection.
+    Moving the window slider starts or joins the matching collection without
+    cancelling wider-window work already in progress.
   - Every GitHub API request made by the three performance views reserves rate
     capacity before it starts. Each guarded request batch reads GitHub's current
     rate-limit status before reserving. Collection stops before projected
@@ -572,6 +586,8 @@ Notes:
     CI history and the detailed `/bench?view=gantt` view use the same entries.
     The three performance views share one selector and preserve the applicable
     repository, range, sort, and runtime statistic while moving between them.
+    They also share the styles for their page header, selector, controls,
+    progress panel, time axis, and history rows.
     The next collection loads those timings before reading GitHub, so it only
     fetches jobs for new sampled runs, uncached Gantt runs, and new attempts.
     Cached history remains visible when no GitHub token is configured or a
