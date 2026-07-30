@@ -422,9 +422,13 @@ export type ChangeSet = {
  * Turns `content` into an entity document of its own: the slot at `link` gets
  * a link to a (possibly new) document whose id derives from `idSeed`, the
  * slot's location, and the passed context, and `content` is diffed into that
- * document. When the slot is an array element, the id derives from the
- * nearest non-array ancestor location, so an element's identity does not
- * depend on its position in the array.
+ * document. When the slot is an element of a STORED array, the id derives
+ * from the nearest non-array ancestor location, so the element's identity
+ * does not depend on its position. Array ancestry is read from transaction
+ * pre-state, so on a fresh array's first write the indices remain in the
+ * derivation and identity IS position-bearing there -- a long-standing
+ * limitation this helper inherits from the `[ID]` branch it was extracted
+ * from.
  *
  * `registerKey` is the caller's original value (which may differ from
  * `content` when a directive was stripped off it); it is registered in
@@ -745,7 +749,11 @@ export function normalizeAndDiff(
   }
 
   // Check for links that are data: URIs and inline them, by calling
-  // normalizeAndDiff on the contents of the link.
+  // normalizeAndDiff on the contents of the link. This re-entry REPLACES the
+  // value (the link's contents, not the link), so anchoring eligibility
+  // deliberately does not carry over: inlined content in an array slot stores
+  // inline, exactly as the annotation scheme (which never looked behind
+  // links) stored it.
   if (
     isCellLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")
   ) {
@@ -901,6 +909,9 @@ export function normalizeAndDiff(
         parsedLink,
         options,
       ) as unknown;
+      // This re-entry REPLACES the value (the snapshot, not the link), so
+      // anchoring eligibility deliberately does not carry over -- matching
+      // the annotation scheme, which never looked behind links.
       return normalizeAndDiff(
         runtime,
         tx,

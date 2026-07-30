@@ -10,6 +10,8 @@ import {
   schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { createRef } from "../src/create-ref.ts";
+import { toURI } from "../src/uri-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
@@ -1233,6 +1235,149 @@ describe("data-updating", () => {
       const raw = testCell.getRaw() as unknown[];
       expect(parseLink(raw[0])).toBe(undefined);
       expect(raw[0]).toEqual({ name: "Ada" });
+    });
+
+    it("draws anchor ids pre-order: containing element before nested children", () => {
+      // The id source is consumed for an anchored element BEFORE the
+      // recursion into its content, so an element containing its own
+      // objects-in-arrays draws a lower seed than they do. This pins the
+      // sequence deliberately: the annotation scheme this replaced drew
+      // post-order (children first), and nothing else pins either order --
+      // a change here silently re-derives every nested anchored id.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "pre-order anchor ids",
+        undefined,
+        tx,
+      );
+      const seeds: string[] = [];
+      let n = 0;
+      const context = "pre-order anchor ids";
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ kids: [{ x: 1 }], tag: "outer" }],
+        context,
+        undefined,
+        () => {
+          const seed = `seed-${n++}`;
+          seeds.push(seed);
+          return seed;
+        },
+      );
+      expect(seeds.length).toBe(2);
+
+      const rootLink = testCell.getAsNormalizedFullLink();
+      const outerId = toURI(createRef({ id: "seed-0" }, {
+        parent: { id: rootLink.id, space: rootLink.space },
+        path: ["0"],
+        context,
+      }));
+      const raw = testCell.getRaw() as unknown[];
+      const outerLink = parseLink(raw[0], testCell);
+      expect(outerLink?.id).toBe(outerId);
+
+      const innerId = toURI(createRef({ id: "seed-1" }, {
+        parent: { id: outerId, space: rootLink.space },
+        path: ["kids", "0"],
+        context,
+      }));
+      const outerDoc = runtime.getCellFromLink(outerLink!, undefined, tx);
+      const outerRaw = outerDoc.getRaw() as { kids: unknown[] };
+      expect(parseLink(outerRaw.kids[0], outerDoc)?.id).toBe(innerId);
+    });
+
+    it("converges repeated references on one document", () => {
+      // The same object in two array slots is one entity: both slots link to
+      // a single document and the id source is consumed once. (The
+      // annotation scheme stamped a fresh copy per occurrence and stored two
+      // documents; preserving the written graph's aliasing is deliberate.)
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "shared reference converges",
+        undefined,
+        tx,
+      );
+      const shared = { name: "Ada" };
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [shared, shared],
+        "shared reference converges",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      expect(draws).toBe(1);
+      const raw = testCell.getRaw() as unknown[];
+      const first = parseLink(raw[0], testCell);
+      const second = parseLink(raw[1], testCell);
+      expect(first?.id).not.toBe(undefined);
+      expect(second?.id).toBe(first?.id);
+    });
+
+    it("aliases an array occurrence to an earlier inline occurrence", () => {
+      // When the same object appears first as an inline property and then in
+      // an array, the array slot links back to the inline location rather
+      // than anchoring a separate document -- the written graph's aliasing
+      // wins over per-occurrence splitting, and no id is drawn.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "inline alias wins",
+        undefined,
+        tx,
+      );
+      const shared = { name: "Ada" };
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        { first: shared, list: [shared] },
+        "inline alias wins",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      expect(draws).toBe(0);
+      const raw = testCell.getRaw() as { first: unknown; list: unknown[] };
+      expect(parseLink(raw.first)).toBe(undefined);
+      const elementLink = parseLink(raw.list[0], testCell);
+      expect(elementLink?.path).toEqual(["first"]);
+    });
+
+    it("persists an array element's self-reference as a self-link", () => {
+      // An anchored element that references itself stores the cycle as a
+      // link back to its own document root.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "self reference self-link",
+        undefined,
+        tx,
+      );
+      const loop: { tag: string; self?: unknown } = { tag: "loop" };
+      loop.self = loop;
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [loop],
+        "self reference self-link",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      expect(draws).toBe(1);
+      const raw = testCell.getRaw() as unknown[];
+      const elementLink = parseLink(raw[0], testCell);
+      expect(elementLink?.id).not.toBe(undefined);
+      const doc = runtime.getCellFromLink(elementLink!, undefined, tx);
+      const docRaw = doc.getRaw() as { tag: string; self: unknown };
+      expect(docRaw.tag).toBe("loop");
+      const selfLink = parseLink(docRaw.self, doc);
+      expect(selfLink?.id).toBe(elementLink?.id);
+      expect(selfLink?.path).toEqual([]);
     });
 
     it("anchors an object written over an array element's write redirect", () => {

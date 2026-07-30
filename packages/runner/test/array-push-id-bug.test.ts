@@ -1,9 +1,10 @@
 /**
- * Minimal repro for CT-1173: Array push() via query result proxy doesn't add [ID] to items
+ * Minimal repro for CT-1173: Array push() via query result proxy didn't
+ * assign identity to items.
  *
- * This test verifies that when using .push() on arrays accessed via query result proxies,
- * new items get [ID] symbols added automatically, ensuring they're stored as separate
- * entity documents rather than inline data.
+ * This test verifies that when using .push() on arrays accessed via query
+ * result proxies, new items are anchored automatically, ensuring they're
+ * stored as separate entity documents rather than inline data.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

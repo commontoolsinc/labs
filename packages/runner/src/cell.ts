@@ -1257,7 +1257,7 @@ export class CellImpl<T extends FabricValue>
     //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
     //    revision (optimistic-concurrency mutex) and one retries.
     // A LEAF write, not a whole-value set of `{...handle, rev}`: exec runs
-    // inside a handler frame, where a whole-value `.set()` [ID]-anchors every
+    // inside a handler frame, where a whole-value `.set()` anchors every
     // object-in-array and would split the handle's inline rule term lists
     // back into per-element linked docs — the split sqliteDatabase stores the
     // handle raw specifically to avoid (a second runtime can't load those).

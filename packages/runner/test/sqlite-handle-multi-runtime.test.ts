@@ -1,7 +1,7 @@
 // Multi-runtime stability of the SqliteDb handle (CFC Phase 3 rule-bearing
 // dbs). A rowLabel rule's term LIST (`all(a, b, …)` — an array of objects)
 // used to split into per-element entity docs when the handle value was stored
-// (Cell.set assigns [ID] to every object-in-array). Those term docs are not
+// (Cell.set anchors every object-in-array). Those term docs are not
 // reachable through any schema-driven sync, so a SECOND runtime deep-resolved
 // the links to `null` and `sqliteQuery` hashed `allOf: [null]` while the
 // creator runtime hashed the resolved AST — two request hashes fighting over
