@@ -16,6 +16,7 @@ import { parseLink } from "../src/link-utils.ts";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-llm-derived-stamp");
 
@@ -281,25 +282,7 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       const addMessage = await result.key("addMessage").pull();
       addMessage.send({ role: "user", content: "Hello" });
 
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timeout waiting for assistant reply")),
-          5000,
-        );
-        const cancel = result.sink(
-          ({ pending, messages }: {
-            pending?: boolean;
-            messages?: readonly unknown[];
-          } = {}) => {
-            if (pending === false && messages?.length === 2) {
-              clearTimeout(timeout);
-              cancel();
-              resolve();
-            }
-          },
-        );
-      });
-      await runtime.idle();
+      await waitForLlmMessages(runtime, result, 2);
 
       // The contract is the PERSISTED metadata on each message's own entity
       // doc (messages carry [ID] and split); read it there directly — the
@@ -397,25 +380,7 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       const addMessage = await result.key("addMessage").pull();
       addMessage.send({ role: "user", content: "Hello" });
 
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timeout waiting for assistant reply")),
-          5000,
-        );
-        const cancel = result.sink(
-          ({ pending, messages }: {
-            pending?: boolean;
-            messages?: readonly unknown[];
-          } = {}) => {
-            if (pending === false && messages?.length === 2) {
-              clearTimeout(timeout);
-              cancel();
-              resolve();
-            }
-          },
-        );
-      });
-      await runtime.idle();
+      await waitForLlmMessages(runtime, result, 2);
 
       const messagesCell = result.key("messages");
       const rtx = runtime.edit();

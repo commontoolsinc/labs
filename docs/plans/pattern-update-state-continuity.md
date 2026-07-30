@@ -1,20 +1,28 @@
 # Pattern update state continuity (Tier 2)
 
-Status: In progress. Stages 1–3 are complete and the tier is now a REAL GATE:
+Status: In progress. Stages 1–4 are complete and the tier is now a REAL GATE:
 `deno task pattern-vintage` runs on every PR, replaying committed vintages of
 `system/home.tsx` and `system/default-app.tsx` under the source being merged.
-Stage 2 landed as [#5148]. Stages 4–5 remain, and were RESHAPED after review:
-stage 3's fixtures are captured straight off setup and hold no data, so the
-gate currently asserts "the update still applies" rather than "the data
-survives". Stage 4 now covers test-populated vintages (committed to git, not
-CI artifacts — both decisions made) and stage 5 the value comparison they
-enable. Tier 1 — the schema gate — merged as [#5144].
+Stage 2 landed as [#5148]; stage 4 as [#5196].
+
+Vintages are now TEST-POPULATED: capture runs a pattern's own tests against a
+file-backed store, so the state in a fixture arrived through real handlers, and
+a runtime hook records every instantiation the run materialized. Each recorded
+root names the artifact it holds and the file that artifact was authored in, so
+nested sub-patterns are validated too — coverage they can never get from their
+own vintage, having none.
+
+Stage 5 remains: the gate still asserts "the update still APPLIES", not "the
+data survives". The fixtures now hold data a change can strand; what is missing
+is the VALUE comparison that would notice. Tier 1 — the schema gate — merged as
+[#5144].
 
 This plan takes the pattern-update regime from "the contract still type-checks"
 to "the new pattern can still read what the old one wrote".
 
 [#5144]: https://github.com/commontoolsinc/labs/pull/5144
 [#5148]: https://github.com/commontoolsinc/labs/pull/5148
+[#5196]: https://github.com/commontoolsinc/labs/pull/5196
 
 ## Status convention
 
@@ -83,11 +91,11 @@ Measured on branch `tier2`, not assumed:
 | A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
-| The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0, "Replayed 2 vintage(s) … all readable". A captured vintage holds a freshly set-up root, so there is no prior data to strand, and the replay compares no values. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
+| The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0. The replay compares no values — which, now that a captured vintage holds real handler-written data, is the whole of the remaining gap. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed` and requires it positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
-| A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by a control — the vintage's root must already carry the identity its filename records, checked BEFORE the candidate is applied. Red/green: with the control disabled that case is the only one of the eight in `pattern-vintage-run.test.ts` that fails |
-| The committed fixtures really do restore, and their names are provenance | the same control, run against them: both replay clean, so each root carries exactly the identity in its filename |
+| A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
+| The committed fixtures really do restore, and their names are provenance | the same controls, run against them: both replay clean, so each fixture contains the identity its filename records |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
 | `setupPersistent` mints `{ space, random: randomUUID }` when given no cause | `packages/piece/src/manager.ts` |
@@ -146,7 +154,10 @@ upload, fetch, retention-by-count, a pruner that cannot reach `pinned/` —
 existed to avoid a cost that is not there.
 
 So: captures are committed, under the same append-only discipline as pinned
-vintages and Tier 1's baselines. That deletes a whole apparatus from stage 4.
+vintages and Tier 1's baselines — though only Tier 1's is mechanically checked;
+for vintages the discipline is the command's refusal to overwrite plus review of
+the diff, which is a deliberate choice to operate on trust rather than a gap to
+close. That deletes a whole apparatus from stage 4.
 
 What survives the reversal is a DIFFERENT constraint with a different
 threshold, and it should be argued on its own terms rather than inherited:
@@ -267,8 +278,9 @@ setup commit carrying it onto that root is not refused, and that the root then
 reads as something rather than nothing. The restore control is not ceremony: an
 empty or truncated store presents as a fresh space, today's source materializes
 onto a fresh space, and without it every remaining check passes while nothing
-has been replayed. It compares no VALUES, though, and a captured vintage holds
-a freshly set-up root rather than a populated one. So the storage-move class — the one this tier
+has been replayed. It compares no VALUES, though — and that is now the only
+reason, since a captured vintage holds real data written through real handlers.
+So the storage-move class — the one this tier
 was built for — replays clean here: measured on the real `home.tsx`, renaming
 `.for("favorites")` to `.for("favouriteList")` exits 0. That is pinned as a
 limit in `tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
@@ -425,25 +437,31 @@ shaped by every migration that touched it, so the one thing the gate wants to
 test — reading state written by a version that knew nothing about today's — is
 exactly what a migrated-forward database no longer holds.
 
-- [ ] Give `runTestPattern` an injection point for its storage manager. It
+- [x] Give `runTestPattern` an injection point for its storage manager. It
       hard-codes `StorageManager.emulate` (`test-runner.ts` ~:988), which runs
       against `:memory:` — there is no file to snapshot.
-- [ ] Let the caller pin the test's result cause. The runner causes it
+- [x] Let the caller pin the test's result cause. The runner causes it
       `test-pattern-result-${Date.now()}`, which is fine for a store that is
       thrown away and fatal for one that is kept: an id that differs every run
       cannot be addressed again.
-- [ ] **Record every pattern instantiation and its result cell**, via a runtime
+- [x] **Record every pattern instantiation and its result cell**, via a runtime
       hook, and persist the log INSIDE the store under a reserved cause. See
       "finding the update targets" below — this is the part that was tried the
       obvious way first and failed.
-- [ ] Capture by running a pattern's OWN tests against a file-backed store,
+- [x] Capture by running a pattern's OWN tests against a file-backed store,
       then snapshotting. Pattern tests are themselves patterns
       (`home.test.tsx` instantiates `Home({})` and drives it with
       `action()`/`assert()`), so the state they produce is real pattern state
       written through real handlers.
-- [ ] Replay by applying today's PATTERN to EVERY recorded instantiation, and
-      report the count — "updated 0 patterns" must never read as success.
-- [ ] Make the replay path REFUSE a `*.test.tsx` entry, with its own case in
+- [x] Replay by applying today's PATTERN to EVERY recorded instantiation, and
+      report the count. Resolved on implementation: the soundness floor is
+      CANDIDATES, not `updated`. "Updated 0" IS a legitimate success — no
+      pattern changed, which is the common case and the same condition the
+      auto-updater fires on — whereas zero candidates means no update target
+      was examined at all. `isClean` requires `candidates > 0`, and the run
+      prints candidates / changed / updated separately so the three can never
+      be read as one number.
+- [x] Make the replay path REFUSE a `*.test.tsx` entry, with its own case in
       `pattern-vintage-run.test.ts`. See the invariant below: a test pattern
       creates stores and is never an upgrade target, and this is the guard that
       keeps that from being merely written down.
@@ -511,10 +529,12 @@ which is coverage it would otherwise never have, since nested patterns have no
 vintages of their own. An instantiation that legitimately cannot be updated
 fails CLOSED and is reported as a finding rather than skipped.
 
-Option 2 stays the documented fallback for a fixture captured before the hook
-existed. Theoretical today — the two committed vintages are recapturable — but a
-deep vintage from before the hook would not be, which is worth writing down now
-rather than discovering later.
+A fixture captured before the hook existed records no instantiations, and the
+replay REFUSES it by name rather than reading it clean — the two committed
+vintages were recaptured on that basis. Option 2 remains the documented route
+for a deep vintage that could not be recaptured; nothing implements it, and a
+manifest carries no version field, so a change to its shape forces the same
+recapture again.
 
 Gate: a vintage contains data a change can strand, so stage 5's value
 comparison has something to compare, and every change is checked against every

@@ -294,6 +294,27 @@ export type RuntimeFetch = (
   init?: RequestInit & { client?: Deno.HttpClient },
 ) => Promise<Response>;
 
+/**
+ * One pattern materialization: the content-addressed pointer, where it landed,
+ * and the entry file it came from.
+ *
+ * `main` is the program's entry filename (repo-root-relative, e.g.
+ * `/packages/patterns/system/home.tsx`). It is what lets a later run map a
+ * RECORDED identity back to a source file and compile today's version of it —
+ * without it the record says a pattern was here but not which pattern.
+ */
+export interface PatternInstantiation {
+  identity: string;
+  symbol: string;
+  main?: string;
+  /** The result cell the pattern was materialized onto. */
+  cell: NormalizedFullLink;
+}
+
+export type PatternInstantiationObserver = (
+  instantiation: PatternInstantiation,
+) => void;
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -316,6 +337,23 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /**
+   * Called once for every pattern this runtime materializes onto a result
+   * cell, with the content-addressed pointer and where it landed.
+   *
+   * Exists for the pattern-update state-continuity capture
+   * (`tasks/pattern-vintage-run.ts`), which needs the list of update targets a
+   * run produced. The store durably labels every root with its
+   * `patternIdentity`, but there is no way to ENUMERATE those labels: the `_`
+   * wildcard selector is unimplemented, and `sqliteQuery` reaches a
+   * cell-derived db rather than the space store. Observing instantiation is
+   * how the list is obtained at all — not a second copy of something already
+   * readable.
+   *
+   * Capture-time only. Leave unset in production; a throwing callback is the
+   * caller's bug and is not caught here.
+   */
+  onPatternInstantiated?: PatternInstantiationObserver;
   /**
    * Flow-label propagation dial (S16 default transition). Defaults to `off`.
    * Propagation requires enforcement mode ≥ `observe` to run at the commit
@@ -592,6 +630,8 @@ export class Runtime {
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+  /** See `RuntimeOptions.onPatternInstantiated`. */
+  readonly onPatternInstantiated?: PatternInstantiationObserver;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
@@ -1028,6 +1068,7 @@ export class Runtime {
     this.patternUpdater = new PatternUpdater(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
+    this.onPatternInstantiated = options.onPatternInstantiated;
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";

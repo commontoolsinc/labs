@@ -20,6 +20,7 @@
     "./cli": "./src/cli.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
     "./model/client": "./src/model/client.ts",
+    "./model/usage": "./src/model/usage.ts",
     "./model/openai-compatible-gateway": "./src/model/openai-compatible-gateway.ts",
     "./model/openai-codex-responses": "./src/model/openai-codex-responses.ts",
     "./auth/types": "./src/auth/types.ts",

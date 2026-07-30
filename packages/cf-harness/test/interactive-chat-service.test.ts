@@ -57,6 +57,13 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     return {
       runTranscript: async (runOptions) => {
         const result = makeResult(runOptions, "Done.");
+        result.usage = {
+          inputTokens: 2_000,
+          cachedInputTokens: 1_500,
+          cacheWriteTokens: 0,
+          outputTokens: 100,
+          totalTokens: 2_100,
+        };
         await runOptions.onTranscriptEvent?.({
           message: result.transcript[result.transcript.length - 1],
           transcript: result.transcript,
@@ -125,10 +132,23 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     service.listEvents({ sessionId: "session-1" }).latestSequence,
     5,
   );
+  assertEquals(service.events("session-1").at(-1)?.event, {
+    kind: "turn_completed",
+    turnId: "turn-1",
+    finalText: "Done.",
+    usage: {
+      inputTokens: 2_000,
+      cachedInputTokens: 1_500,
+      cacheWriteTokens: 0,
+      outputTokens: 100,
+      totalTokens: 2_100,
+    },
+  });
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
     model: "gpt-test",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: [
       "bash",
       "read_file",
@@ -198,10 +218,20 @@ Deno.test("interactive service preserves an owner-bound Codex client across turn
     },
   });
   await service.waitForTurn("session-owner", "turn-owner");
+  await service.startTurn("req-owner-turn-2", {
+    sessionId: "session-owner",
+    turnId: "turn-owner-2",
+    input: { text: "Continue" },
+  });
+  await service.waitForTurn("session-owner", "turn-owner-2");
 
   assertEquals(loopOptions[0].modelProvider, "openai-codex");
   assertEquals(loopOptions[0].credentialOwnerKey, "loom:user-1");
   assertEquals(loopOptions[0].modelClient, modelClient);
+  assertEquals(
+    loopOptions.map((options) => options.cacheAffinityKey),
+    ["interactive:session-owner", "interactive:session-owner"],
+  );
 });
 
 Deno.test("interactive Codex services require one matching process owner", () => {
@@ -307,6 +337,7 @@ Deno.test("interactive service forces comment-thread turns to read-only prompt-l
 
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
     allowedSubagentProfiles: [],
   });
@@ -353,6 +384,7 @@ Deno.test("interactive service passes Browser Access leases to browser-profile t
 
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["delegate_task"],
     allowedSubagentProfiles: ["browser"],
     browserAccess,

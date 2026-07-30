@@ -223,8 +223,10 @@ Deno.test("diff names what moved, not merely that something did", () => {
 
   const d = diffFingerprints(before!, after!);
   assert(!d.equal);
-  assertEquals(d.changed, ["of:named"]);
-  assertEquals(d.added, ["of:newcomer"]);
+  // Addresses, not bare ids: an id is not unique across scopes, so the diff
+  // reports the (id, scope) pair it actually compared by.
+  assertEquals(d.changed, [{ id: "of:named", scope: "space" }]);
+  assertEquals(d.added, [{ id: "of:newcomer", scope: "space" }]);
   assertEquals(d.removed, []);
 
   assert(
@@ -236,8 +238,8 @@ Deno.test("diff names what moved, not merely that something did", () => {
   // entity is the failure this must catch, and it reads as `removed`, never as
   // a bare "the fingerprints differ".
   const reverse = diffFingerprints(after!, before!);
-  assertEquals(reverse.removed, ["of:newcomer"]);
-  assertEquals(reverse.changed, ["of:named"]);
+  assertEquals(reverse.removed, [{ id: "of:newcomer", scope: "space" }]);
+  assertEquals(reverse.changed, [{ id: "of:named", scope: "space" }]);
   assertEquals(reverse.added, []);
 });
 
