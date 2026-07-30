@@ -95,9 +95,13 @@ Measured on branch `tier2`, not assumed:
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
 | The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0. The replay compares no values — which, now that a captured vintage holds real handler-written data, is the whole of the remaining gap. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
-| A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed` and requires it positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
+| A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed`, `candidates` and `targets`, and requires all three positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
 | The committed fixtures really do restore, and their names are provenance | the same controls, run against them: both replay clean, so each fixture contains the identity its filename records |
+| A root in ANOTHER space would have read green too | measured over a subject that instantiates a child via `Factory.inSpace(…)` — the shape `profile-create.tsx` uses. An entity id is content-derived and carries no space, so reading the child's recorded id under the FIXTURE's DID succeeds at finding nothing: the cell is absent, the broken candidate materializes onto it, and the run reports `changed: 2, updated: 2, failures: []` over a break. Two things were wrong and each alone still produced that green — the replay read `vintage.space` instead of the recorded `entry.space`, and `snapshot` copied only the primary space's SQLite file while the run had written two. Fixed by reading the recorded space and carrying every space the run wrote in a `.sqlite.spaces/` companion directory. Red/green: reverting the read reds exactly the cross-space case; disabling the companion copy reds all four |
+| A fixture covering NOTHING hides behind one that covers something | measured: two fixtures, the second's manifest rewritten so every recorded instantiation is a test pattern, reports `targets: 1, failures: []` and `isClean` true — the second applied today's source to nothing and said so nowhere. The `targets` floor is a SUM, so it only catches the case where every fixture covers nothing. Fixed with a per-fixture failure, which is what `candidates` already had. Reachable rather than theoretical: `isUpgradeTarget` has grown four exclusions, two added after fixtures already existed, and fixtures are append-only — a new exclusion silently zeroes an old fixture's coverage |
+| The cross-space mechanism is exercised only by a SYNTHETIC fixture | both committed fixtures are single-space. `profile-create.tsx` is recorded, but `home.test.tsx` never fires the create, so its `inSpace` child never materializes. `tasks/pattern-vintage-run.test.ts` is therefore the whole of the coverage for companion stores, and it is meant to be: it can break a child on purpose, which a pinned fixture cannot. A real cross-space fixture would follow a required pattern's tests actually creating a profile — worth having, not a substitute |
+| ABSENT, not just cross-space, is the real class — and a space-level control does not cover it | measured two further ways, both green over the same break without a PER-ROOT control: a companion store truncated to zero bytes (a valid empty SQLite database, so it restores and `restoredSpaces` lists it), and a recorded cell id that names nothing in the primary space. "Carries the space" is not "holds the root": `engine.ts` opens with `{ create: true }`, so merely reaching a space leaves a store file behind. Fixed with `vintageHoldsRoot`, run per target before anything is applied — the evidence being the `patternSetupIdentity` marker, which the runner stamps under the SAME condition that reports an instantiation to the capture observer, so every manifest entry's cell carries one by construction. A value check would instead depend on the pattern's result shape and would misread a root whose result is legitimately `{}`. Red/green: forcing the control true reds both absence cases |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
 | `setupPersistent` mints `{ space, random: randomUUID }` when given no cause | `packages/piece/src/manager.ts` |
@@ -270,6 +274,12 @@ automatic updater performs no structural check at all.
       so fixtures would ship inside the toolshed binary and grow it with every
       stage-4 capture — and `PatternsServer` serves the same directory by path,
       so they would be fetchable from any deployment
+- [x] `…/<iso>-<identity>.sqlite.spaces/<did>.sqlite` for every OTHER space the
+      capture wrote. A space is one SQLite file and a capture can instantiate a
+      pattern in another space (`Factory.inSpace(…)`, how a profile is created),
+      so a fixture holding only the primary file would record roots whose state
+      it does not have. The companion directory is part of the fixture, not a
+      fixture itself, so `parseVintagePath` declines everything inside one
 - [x] Seed the auto-updating patterns from today's source
 - [x] Assert every REQUIRED pattern has a vintage, and replay every vintage
       that exists under today's source
@@ -280,18 +290,25 @@ field to the real `home.tsx` makes the task exit 1 with the estuary rejection
 naming the field; restoring it returns exit 0.
 
 **What a green run does and does not assert.** Per fixture it asserts that the
-vintage RESTORED — its root already carries the identity the filename records,
+vintage RESTORED — its MANIFEST contains the identity the filename records,
 checked before anything is applied — that today's source resolves, that the
 setup commit carrying it onto that root is not refused, and that the root then
-reads as something rather than nothing. The restore control is not ceremony: an
-empty or truncated store presents as a fresh space, today's source materializes
-onto a fresh space, and without it every remaining check passes while nothing
-has been replayed. It compares no VALUES, though — and that is now the only
+reads as something rather than nothing. Each recorded root is read out of the
+SPACE it was materialized in, and the fixture must actually HOLD that root —
+checked per target, before anything is applied to it. The restore control is
+not ceremony: an empty or truncated store presents as a fresh space, today's
+source materializes onto a fresh space, and without it every remaining check
+passes while nothing has been replayed. The per-root control is the same
+argument one level in, and the level that matters, because a root can be absent
+while the fixture is otherwise perfectly good — recorded in a space that did
+not travel, in a companion store that restored empty, or at a cell id nothing
+ever wrote. Each of those was measured to replay a real break with no failures
+at all. It compares no VALUES, though — and that is now the only remaining
 reason, since a captured vintage holds real data written through real handlers.
-So the storage-move class — the one this tier
-was built for — replays clean here: measured on the real `home.tsx`, renaming
-`.for("favorites")` to `.for("favouriteList")` exits 0. That is pinned as a
-limit in `tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
+So the storage-move class — the one this tier was built for — replays clean
+here: measured on the real `home.tsx`, renaming `.for("favorites")` to
+`.for("favouriteList")` exits 0. That is pinned as a limit in
+`tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
 `state-continuity.test.ts` over a populated vintage, and listed in stage 5 as
 the thing to close. Until it is closed, this gate's honest claim is "the update
 still APPLIES", not "the data survives".
@@ -301,7 +318,8 @@ could exit 0 having replayed nothing and printed nothing: a pattern that fails
 to compile, and a corrupt fixture, both reject a promise nobody awaits while
 `harness.resolve()`'s own promise never settles, so the event loop drained with
 `main` still mid-flight. A `beforeunload` guard now reports the last rejection
-and exits 1, and `isClean` takes `replayed` so zero replays cannot be a pass.
+and exits 1, and `isClean` takes `replayed`, `candidates` and `targets`, so
+neither zero replays nor a run that examined no upgrade target can be a pass.
 `unmappedPatternUrls` covers the third shape of the same failure: a
 `HOME_PATTERN_URL` that stopped containing `/patterns/` would derive an empty
 required set and quietly stop insisting on anything.

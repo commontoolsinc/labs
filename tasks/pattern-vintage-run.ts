@@ -10,6 +10,7 @@
  * happening.
  */
 
+import { exists } from "@std/fs";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
@@ -29,11 +30,13 @@ import {
   materializeOnCell,
   openFileBackedRuntime,
   readVintageManifest,
+  vintageHoldsRoot,
   type VintageManifestEntry,
   vintageRootCause,
   vintageRootHasState,
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
+import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 
 export interface GateRoots {
   /** Repo root, used only to shorten paths in reports. */
@@ -144,6 +147,20 @@ export async function replayVintage(
     updated: 0,
     failures: [{ ...where, detail }],
   });
+  // Stated once, because every "this fixture is not usable" message needs it and
+  // the obvious remedy is WRONG: `--update` skips a key that already has a
+  // pinned vintage and the capture refuses to overwrite one, so "recapture it"
+  // on its own prints "already pinned" and changes nothing. The path is
+  // ABSOLUTE, not the repo-relative one the report prints for identification —
+  // an instruction to delete a file has to name it the same way from whatever
+  // directory the reader is standing in — and it names the companion directory
+  // too, which is part of the fixture and would otherwise be left behind to
+  // collide with the recapture.
+  const remedy =
+    `Delete ${vintage.path} and ${
+      vintageCompanionDir(vintage.path)
+    }/ deliberately, then \`deno task pattern-vintage --update ` +
+    `${vintage.patternKey}\``;
 
   return await withRuntime(roots, vintage.path, async (runtimeVintage) => {
     // The control, before anything is applied. A fixture that did not restore
@@ -160,8 +177,7 @@ export async function replayVintage(
     if (manifest === undefined || manifest.entries.length === 0) {
       return fail(
         "this fixture records no pattern instantiations, so there is nothing " +
-          "to update and a green run would assert nothing. Recapture it with " +
-          "`deno task pattern-vintage --update`",
+          `to update and a green run would assert nothing. ${remedy}`,
       );
     }
     // The filename's identity is PROVENANCE — which version wrote this state —
@@ -185,9 +201,55 @@ export async function replayVintage(
     // records injected helper modules (`cfc.ts`) whose names carry no leading
     // slash, and `${repoRoot}cfc.ts` is not a file. Counting only the first would
     // let the second be skipped in silence while the verdict says "all mappable".
+    //
+    // Computed BEFORE the zero-target check below, which would otherwise return
+    // while claiming a reason it had not looked at: an unmappable entry is not a
+    // test pattern, and its per-entry diagnosis is the actionable half.
     const unmappable = manifest.entries.filter(
       (e) => e.main === undefined || !e.main.startsWith("/"),
     );
+    // Zero targets is a FIXTURE-level failure, not a quiet contribution of
+    // nothing to the run's total. `isClean` floors the SUM of targets, which one
+    // fixture covering nothing slips under the moment another covers five — and
+    // this fixture would then have applied today's source to nothing at all
+    // while the run read green.
+    //
+    // Reachable, and by design: `isUpgradeTarget` has grown four exclusions,
+    // two of them added after fixtures already existed. Fixtures are
+    // append-only and never recaptured, so a new exclusion silently zeroes an
+    // old fixture's coverage — exactly the kind of drift this tier keeps
+    // mistaking for a pass.
+    if (targets.length === 0) {
+      return fail(
+        `this fixture records ${manifest.entries.length} instantiation(s), ` +
+          `but not one is something today's source can be applied to — ` +
+          `${unmappable.length} cannot be mapped to a file at all, and the ` +
+          `rest are test patterns or keyless session pointers. Replaying it ` +
+          `asserts nothing. ${remedy}`,
+      );
+    }
+    // The per-entry control, and the one the whole gate leans on: does this
+    // fixture actually HOLD the root it is about to validate? A root that is not
+    // there reads CLEAN — the cell is absent, today's source materializes onto
+    // it, the root then holds today's defaults, and the entry counts as updated
+    // cleanly over state that was never captured. `vintageRootHasState` above
+    // cannot answer this: it is one check on the well-known capture root and
+    // says nothing about the nested cell each entry names.
+    //
+    // Measured, three ways to be absent and all of them read green without this:
+    // a root recorded in a space the fixture does not carry (a cross-space child
+    // — `Factory.inSpace(...)` is how a profile is created), a companion store
+    // that restored but is empty, and a recorded cell id that names nothing.
+    const carried = new Set(runtimeVintage.restoredSpaces);
+    const missing = new Set<VintageManifestEntry>();
+    for (const entry of targets) {
+      const held = await vintageHoldsRoot(
+        runtimeVintage,
+        entry.space,
+        entry.cellId,
+      );
+      if (!held) missing.add(entry);
+    }
     const report: ReplayReport = {
       candidates: manifest.entries.length,
       targets: targets.length,
@@ -213,8 +275,31 @@ export async function replayVintage(
           }) — it was recorded but NOT validated`,
       });
     }
+    // Same rule for a root the fixture does not hold, and for the same reason:
+    // the replay cannot reach it, so a green verdict would be a claim about
+    // fewer roots than the fixture records. A missing SPACE is called out by
+    // name because it is both the likeliest cause and the one with an obvious
+    // remedy; otherwise the message names the EVIDENCE the control looked for,
+    // so a doc that is present but unstamped — the one shape a false red could
+    // take — is distinguishable from a doc that is not there at all.
+    //
+    for (const entry of missing) {
+      report.failures.push({
+        ...where,
+        detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
+          (carried.has(entry.space)
+            ? `has no pattern setup marker at ${entry.cellId} in ` +
+              `${entry.space}, so this fixture does not hold that root`
+            : `was materialized in ${entry.space}, which this fixture does ` +
+              `not carry (it holds ${[...carried].sort().join(", ")})`) +
+          ` — it was recorded but NOT validated. ${remedy}`,
+      });
+    }
 
     for (const entry of targets) {
+      // Already reported above. Materializing it anyway would apply today's
+      // source to an empty cell and count the result as a clean update.
+      if (missing.has(entry)) continue;
       const source = `${roots.repoRoot}${entry.main}`;
       let program;
       try {
@@ -236,8 +321,21 @@ export async function replayVintage(
       let pattern;
       try {
         pattern = await runtimeVintage.runtime.patternManager
+          // Compiled in the space the ROOT lives in, because that is what
+          // production does: `pattern-updater.ts` compiles with the piece's own
+          // space, and the space selects what a `cf:` fabric import resolves
+          // against and where `compileViaCellCache` persists the closure.
+          //
+          // Stated as fidelity, not as a bug this catches — no test separates
+          // the two, and none can with fixtures as captured: the pattern-test
+          // runner cannot replicate a source closure into a child space
+          // (`closure-replication-failed` on every cross-space capture), so a
+          // companion store carries the child's DATA and no closure for this to
+          // resolve differently against. Separating them needs a fixture whose
+          // cross-space child has a `cf:` import, which is a capture-side gap
+          // rather than a reason to compile in the wrong space meanwhile.
           .compilePattern(program as never, {
-            space: runtimeVintage.space as never,
+            space: entry.space as never,
           });
       } catch (error) {
         report.failures.push({
@@ -256,19 +354,30 @@ export async function replayVintage(
       const outcome = await materializeOnCell(
         runtimeVintage,
         program as never,
+        // The RECORDED space, not the fixture's primary one. An entity id is
+        // content-derived and so carries no space, which makes reading it under
+        // the wrong DID a lookup that SUCCEEDS at finding nothing: the cell comes
+        // back absent, today's source materializes onto it, and the entry counts
+        // as updated cleanly. Every root a cross-space child owns would replay
+        // that way.
         (v, resultSchema) =>
           v.runtime.getCellFromEntityId(
-            v.space as never,
+            entry.space as never,
             entry.cellId as never,
             [],
             resultSchema as never,
           ),
-        // The RECORDED symbol, not the module's entry export. A module
-        // contributes several instantiable patterns (its default plus each
-        // transformer hoist), and the manifest already says which one this cell
-        // holds — applying the entry pattern instead would validate a different
-        // artifact than the one stored here.
-        entry.symbol,
+        {
+          // The RECORDED symbol, not the module's entry export. A module
+          // contributes several instantiable patterns (its default plus each
+          // transformer hoist), and the manifest already says which one this
+          // cell holds — applying the entry pattern instead would validate a
+          // different artifact than the one stored here.
+          symbol: entry.symbol,
+          // ...and the recorded space, for the compile inside, for the same
+          // reason as the `compilePattern` above.
+          space: entry.space,
+        },
       );
       if (outcome.error !== undefined) {
         report.failures.push({
@@ -314,6 +423,7 @@ export async function replayAll(
     vintages: VintageRef[];
     replayed: number;
     candidates: number;
+    targets: number;
     unmappable: number;
     changed: number;
     updated: number;
@@ -321,11 +431,12 @@ export async function replayAll(
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
-  let candidates = 0, changed = 0, updated = 0, unmappable = 0;
+  let candidates = 0, targets = 0, changed = 0, updated = 0, unmappable = 0;
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
     candidates += report.candidates;
+    targets += report.targets;
     unmappable += report.unmappable;
     changed += report.changed;
     updated += report.updated;
@@ -335,6 +446,7 @@ export async function replayAll(
     vintages,
     replayed: vintages.length,
     candidates,
+    targets,
     unmappable,
     changed,
     updated,
@@ -462,7 +574,36 @@ export async function captureVintage(
     const outDir = `${roots.vintagesRoot}/${patternKey}/${PINNED}`;
     await Deno.mkdir(outDir, { recursive: true });
     const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
-    await vintage.snapshot(path);
+    // Never write over an existing fixture. `captureMissing` already skips a
+    // covered key, so reaching this with the file present means something else
+    // did — and the cleanup below deletes files on the way out, which must
+    // never be somebody else's pinned state. A fixture is deleted deliberately
+    // and visibly in a diff, never by an error path.
+    //
+    // The companion directory is deliberately NOT part of this guard, so the
+    // cleanup can remove a LEFTOVER one. A companion directory whose primary
+    // file does not exist is not a fixture — nothing enumerates it — and
+    // restoring an extra space harms nothing: `restoredSpaces` only feeds a
+    // diagnosis, and what gets validated comes from the manifest.
+    if (await exists(path)) {
+      throw new Error(
+        `cannot capture ${patternKey}: ${path} already exists, and a capture ` +
+          `never overwrites a pinned vintage — delete it deliberately first`,
+      );
+    }
+    try {
+      await vintage.snapshot(path);
+    } catch (error) {
+      // A fixture is written in pieces — the primary file, then one companion
+      // store per other space — so a failure part way through leaves a fixture
+      // that is missing spaces. That is worse than none at all: `--update` only
+      // ever ADDS, so it would skip the key as already covered and the partial
+      // would sit there being replayed. Publishing is therefore all-or-nothing.
+      await Deno.remove(path).catch(() => {});
+      await Deno.remove(vintageCompanionDir(path), { recursive: true })
+        .catch(() => {});
+      throw error;
+    }
     return path;
   } finally {
     await vintage.dispose().catch(() => {});
