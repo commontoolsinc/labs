@@ -154,6 +154,10 @@ If you are developing runtime code, read the following documentation:
   start a request
 - `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
   splitting/rebalancing work
+- `docs/development/deploying.md` - How a commit reaches a host: which CI jobs
+  deploy where, and the contract the bastion's deploy wrapper enforces on what
+  they pass it. That wrapper belongs to the infra repository, and the staging
+  deploy jobs run only on `main`, so read this before editing a deploy step
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime
   coverage and transformer-based pattern coverage), which CI job collects which,
   and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
