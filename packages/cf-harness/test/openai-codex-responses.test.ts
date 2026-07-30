@@ -125,6 +125,50 @@ Deno.test("Codex Responses client sends the pinned owner-authenticated request",
   assertEquals(body.prompt_cache_key, "run-123");
 });
 
+Deno.test("Codex Responses supports stable cache and reasoning controls", async () => {
+  let body: Record<string, unknown> | undefined;
+  let headers: Headers | undefined;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      headers = new Headers(init?.headers);
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: "done" }],
+          }],
+        },
+      }));
+    },
+  });
+
+  await client.complete({
+    model: "gpt-5.6-sol",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "ephemeral-run",
+    cacheAffinityKey: "stable-session",
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
+  });
+
+  assertEquals(headers?.get("session-id"), "stable-session");
+  assertEquals(body?.prompt_cache_key, "stable-session");
+  assertEquals(body?.prompt_cache_options, {
+    mode: "explicit",
+    ttl: "30m",
+  });
+  assertEquals(body?.reasoning, { effort: "low" });
+  const input = body?.input as Array<Record<string, unknown>>;
+  const content = input[0].content as Array<Record<string, unknown>>;
+  assertEquals(content[0].prompt_cache_breakpoint, { mode: "explicit" });
+});
+
 Deno.test("Codex Responses client bounds stable run affinity identifiers", async () => {
   const longRunId = `${"parent-run-".repeat(8)}subagent.123`;
   const requests: Array<{ headers: Headers; body: Record<string, unknown> }> =

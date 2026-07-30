@@ -42,6 +42,17 @@ export const providerRunAffinityKey = (runId: string): string => {
   return `${runId.slice(0, prefixLength)}-${digest}`;
 };
 
+export const assertPromptCacheModeSupported = (
+  model: string,
+  mode: "implicit" | "explicit" | undefined,
+): void => {
+  if (mode !== undefined && !model.startsWith("gpt-5.6")) {
+    throw new Error(
+      `prompt cache mode ${mode} requires a GPT-5.6 model; received ${model}`,
+    );
+  }
+};
+
 /**
  * What to do when a stored continuation was produced by a different model.
  *
@@ -219,6 +230,38 @@ export const toResponsesTools = (
       : { ...tool.inputSchema },
     strict: null,
   }));
+
+/**
+ * Marks the first user-message prefix as the stable explicit cache boundary.
+ *
+ * The initial user message is immutable as the harness appends assistant and
+ * tool messages, so later model turns can reuse this prefix without creating a
+ * new cache write for every growing transcript.
+ */
+export const addFirstUserPromptCacheBreakpoint = (
+  input: readonly ResponsesInputItem[],
+): ResponsesInputItem[] => {
+  const copied = input.map((item) => structuredClone(item));
+  for (const item of copied) {
+    if (item.role !== "user" || !Array.isArray(item.content)) continue;
+    const content = item.content as ResponsesInputItem[];
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+      const block = content[index];
+      if (
+        block.type !== "input_text" && block.type !== "input_image" &&
+        block.type !== "input_file"
+      ) continue;
+      content[index] = {
+        ...block,
+        prompt_cache_breakpoint: { mode: "explicit" },
+      };
+      return copied;
+    }
+  }
+  throw new Error(
+    "explicit prompt caching requires a cacheable user content block",
+  );
+};
 
 export const normalizeTerminalResponse = (
   response: Record<string, unknown>,

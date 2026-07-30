@@ -357,6 +357,24 @@ Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () 
   assertEquals(parsed.gatewayAuthMode, "none");
 });
 
+Deno.test("parseCfHarnessCliArgs accepts cache and reasoning experiment controls", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--reasoning-effort",
+      "low",
+      "--prompt-cache-mode",
+      "explicit",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.reasoningEffort, "low");
+  assertEquals(parsed.promptCacheMode, "explicit");
+});
+
 Deno.test("parseCfHarnessCliArgs resolves sandbox docker runtime from flag and environment", async () => {
   const fromFlag = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--sandbox-docker-runtime", "runc"],
@@ -3265,6 +3283,26 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "",
     ].join("\n"),
   );
+});
+
+Deno.test("formatCfHarnessCliResult summarizes cache usage and cost", () => {
+  const result = completedCliResult("run-usage");
+  result.usage = {
+    inputTokens: 2_000,
+    cachedInputTokens: 1_500,
+    cacheWriteTokens: 200,
+    outputTokens: 100,
+    reasoningTokens: 40,
+    totalTokens: 2_100,
+    estimatedCostUsd: 0.002345,
+  };
+
+  assertStringIncludes(
+    formatCfHarnessCliResult(result),
+    "usage: input=2000 cachedInput=1500 cacheWrite=200 output=100 " +
+      "reasoning=40 total=2100 cacheRead=75.0% estimatedCostUsd=0.002345",
+  );
+  assertEquals(createCfHarnessBatchResult(result, 50).usage, result.usage);
 });
 
 Deno.test("formatCfHarnessCliResult returns plain final text in batch mode", () => {

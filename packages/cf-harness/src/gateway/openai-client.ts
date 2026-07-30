@@ -101,6 +101,13 @@ export interface OpenAIResponsesRequest {
   stream?: boolean;
   include?: readonly string[];
   prompt_cache_key?: string;
+  prompt_cache_options?: {
+    mode: "implicit" | "explicit";
+    ttl?: "30m";
+  };
+  reasoning?: {
+    effort: string;
+  };
 }
 
 export interface OpenAIResponsesResponse {
@@ -162,6 +169,7 @@ export interface OpenAIChatCompletionChoice {
 export interface OpenAIChatCompletionResponse {
   id?: string;
   choices: readonly OpenAIChatCompletionChoice[];
+  usage?: Record<string, unknown>;
   native_model_tool_results?:
     readonly OpenAIChatCompletionNativeModelToolResult[];
   provider_metadata?: Record<string, unknown>;

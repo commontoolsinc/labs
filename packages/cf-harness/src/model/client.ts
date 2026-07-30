@@ -43,19 +43,36 @@ export interface HarnessModelTurnRequest {
   tools: readonly HarnessToolDescriptor[];
   nativeModelToolIds: readonly LLMNativeModelToolId[];
   runId: string;
+  cacheAffinityKey?: string;
+  promptCacheMode?: "implicit" | "explicit";
+  reasoningEffort?: string;
   signal?: AbortSignal;
   onAttempt?: (
     attempt: HarnessModelAttemptDiagnostic,
   ) => void | Promise<void>;
 }
 
+export interface HarnessModelUsage {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  /**
+   * Provider-reported cost only. The harness does not infer prices when this
+   * field is absent.
+   */
+  costUsd?: number;
+  /**
+   * Estimate based on the harness pricing table, not a provider invoice.
+   */
+  estimatedCostUsd?: number;
+}
+
 export interface HarnessModelTurnResult {
   assistant: HarnessAssistantTranscriptMessage;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    totalTokens?: number;
-  };
+  usage?: HarnessModelUsage;
 }
 
 export interface HarnessModelCatalogEntry {

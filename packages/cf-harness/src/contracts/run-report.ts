@@ -14,7 +14,10 @@ import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
 import type { OpenAIChatCompletionAttemptDiagnostic } from "../gateway/openai-client.ts";
-import type { HarnessModelAttemptDiagnostic } from "../model/client.ts";
+import type {
+  HarnessModelAttemptDiagnostic,
+  HarnessModelUsage,
+} from "../model/client.ts";
 import type {
   HarnessModelAuthSource,
   HarnessModelProviderId,
@@ -63,6 +66,11 @@ export interface HarnessModelAttempt extends HarnessModelAttemptDiagnostic {
   modelTurn: number;
 }
 
+export interface HarnessModelTurnUsage {
+  modelTurn: number;
+  usage: HarnessModelUsage;
+}
+
 export interface HarnessRunTimelineEntry {
   type: "cf-harness.timeline-entry";
   sequence: number;
@@ -100,9 +108,17 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
+  reasoningEffort?: string;
+  promptCacheMode?: "implicit" | "explicit";
+  cacheAffinity?: "run" | "custom";
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
   modelTurns: number;
+  /** Usage from model turns executed directly by this run. */
+  usage?: HarnessModelUsage;
+  /** Direct usage plus usage reported by completed descendant runs. */
+  totalUsage?: HarnessModelUsage;
+  modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
   createdAt?: string;
   updatedAt?: string;
@@ -158,12 +174,18 @@ export interface CreateHarnessRunReportOptions {
     subagentRuns?: HarnessSubagentRunRef[];
   };
   model: string;
+  reasoningEffort?: string;
+  promptCacheMode?: "implicit" | "explicit";
+  cacheAffinity?: "run" | "custom";
   modelTurns: number;
   finalAssistantText?: string;
   timeline?: readonly HarnessRunTimelineEntryInput[];
   toolActivity: readonly HarnessToolActivity[];
   gatewayAttempts?: readonly HarnessGatewayAttempt[];
   modelAttempts?: readonly HarnessModelAttempt[];
+  usage?: HarnessModelUsage;
+  totalUsage?: HarnessModelUsage;
+  modelUsage?: readonly HarnessModelTurnUsage[];
 }
 
 export const createHarnessRunTimeline = (
@@ -282,6 +304,13 @@ export const createHarnessRunReport = (
     generatedAt: options.runState.updatedAt,
     status: options.runState.status,
     model: options.model,
+    ...(options.reasoningEffort !== undefined
+      ? { reasoningEffort: options.reasoningEffort }
+      : {}),
+    ...(options.promptCacheMode !== undefined
+      ? { promptCacheMode: options.promptCacheMode }
+      : {}),
+    cacheAffinity: options.cacheAffinity ?? "run",
     ...(options.runState.modelProvider !== undefined
       ? { modelProvider: options.runState.modelProvider }
       : {}),
@@ -291,6 +320,13 @@ export const createHarnessRunReport = (
       ? { modelAuthSource: "owner-bound-oauth" as const }
       : {}),
     modelTurns: options.modelTurns,
+    ...(options.usage !== undefined ? { usage: options.usage } : {}),
+    ...(options.totalUsage !== undefined
+      ? { totalUsage: options.totalUsage }
+      : {}),
+    ...((options.modelUsage?.length ?? 0) > 0
+      ? { modelUsage: [...(options.modelUsage ?? [])] }
+      : {}),
     cfcEnforcementMode: options.runState.cfcEnforcementMode,
     ...(options.runState.createdAt !== undefined
       ? { createdAt: options.runState.createdAt }

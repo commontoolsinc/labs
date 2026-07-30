@@ -351,9 +351,19 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
     complete(request) {
       turns += 1;
       assertEquals(request.model, "test-model");
+      assertEquals(request.cacheAffinityKey, "stable-cache");
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
       return Promise.resolve(
         turns === 1
           ? {
+            usage: {
+              inputTokens: 100,
+              cachedInputTokens: 0,
+              cacheWriteTokens: 80,
+              outputTokens: 20,
+              totalTokens: 120,
+            },
             assistant: {
               role: "assistant",
               content: "",
@@ -368,6 +378,13 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
             },
           }
           : {
+            usage: {
+              inputTokens: 200,
+              cachedInputTokens: 100,
+              cacheWriteTokens: 0,
+              outputTokens: 30,
+              totalTokens: 230,
+            },
             assistant: { role: "assistant", content: "done" },
           },
       );
@@ -375,6 +392,9 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
   };
   const loop = new CfHarnessPromptLoop({
     modelClient,
+    cacheAffinityKey: "stable-cache",
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
     engine: new CfHarnessEngine({
       sandboxRuntime: sandbox,
       runId: "run-model-client",
@@ -387,6 +407,15 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
 
   assertEquals(result.finalAssistantText, "done");
   assertEquals(turns, 2);
+  assertEquals(result.usage, {
+    inputTokens: 300,
+    cachedInputTokens: 100,
+    cacheWriteTokens: 80,
+    outputTokens: 50,
+    totalTokens: 350,
+  });
+  assertEquals(result.totalUsage, result.usage);
+  assertEquals(result.modelUsage?.map((entry) => entry.modelTurn), [1, 2]);
   assertEquals(
     sandbox.shellRequests.filter((request) =>
       !request.command.includes(CAPABILITY_PROBE_SENTINEL)
@@ -433,7 +462,19 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       `data: ${
         JSON.stringify({
           type: "response.completed",
-          response: { status: "completed", output },
+          response: {
+            status: "completed",
+            output,
+            usage: {
+              input_tokens: 10,
+              input_tokens_details: {
+                cached_tokens: 5,
+                cache_write_tokens: 0,
+              },
+              output_tokens: 2,
+              total_tokens: 12,
+            },
+          },
         })
       }\n\n`,
       { status: 200 },
@@ -509,6 +550,8 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(result.finalAssistantText, "Parent done.");
   assertEquals(refreshes, 1);
   assertEquals(modelTurns, 3);
+  assertEquals(result.usage?.totalTokens, 24);
+  assertEquals(result.totalUsage?.totalTokens, 36);
   assertEquals(
     result.runState.subagentRuns?.[0]?.manifest.modelProvider,
     "openai-codex",

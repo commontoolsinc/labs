@@ -146,6 +146,35 @@ Deno.test("chat responses with array content are flattened to text", async () =>
   assertEquals(result.assistant.content, "Part one. Part two.");
 });
 
+Deno.test("chat responses preserve cache and reasoning usage", async () => {
+  const client = clientWith([], () => ({
+    body: {
+      ...assistantText("Done."),
+      usage: {
+        prompt_tokens: 1_500,
+        prompt_tokens_details: {
+          cached_tokens: 1_024,
+          cache_write_tokens: 0,
+        },
+        completion_tokens: 100,
+        completion_tokens_details: { reasoning_tokens: 40 },
+        total_tokens: 1_600,
+      },
+    },
+  }));
+
+  const result = await client.complete(turn());
+
+  assertEquals(result.usage, {
+    inputTokens: 1_500,
+    cachedInputTokens: 1_024,
+    cacheWriteTokens: 0,
+    outputTokens: 100,
+    reasoningTokens: 40,
+    totalTokens: 1_600,
+  });
+});
+
 Deno.test("chat responses surface native model tool results", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, () => ({

@@ -20,6 +20,8 @@ import {
   type OpenAIResponsesRequest,
 } from "../gateway/openai-client.ts";
 import {
+  addFirstUserPromptCacheBreakpoint,
+  assertPromptCacheModeSupported,
   normalizeTerminalResponse,
   providerRunAffinityKey,
   toResponsesInput,
@@ -33,6 +35,10 @@ import type {
   HarnessModelTurnRequest,
   HarnessModelTurnResult,
 } from "./client.ts";
+import {
+  normalizeOpenAIUsage,
+  withEstimatedOpenAIModelUsageCost,
+} from "./usage.ts";
 
 const normalizeTextContent = (
   content: OpenAIChatMessageContent | undefined,
@@ -194,24 +200,6 @@ const toModelAttempt = (
   providerId: OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID,
 });
 
-const toUsage = (
-  usage: Record<string, unknown> | undefined,
-): HarnessModelTurnResult["usage"] | undefined => {
-  if (usage === undefined) return undefined;
-  const mapped = {
-    ...(typeof usage.input_tokens === "number"
-      ? { inputTokens: usage.input_tokens }
-      : {}),
-    ...(typeof usage.output_tokens === "number"
-      ? { outputTokens: usage.output_tokens }
-      : {}),
-    ...(typeof usage.total_tokens === "number"
-      ? { totalTokens: usage.total_tokens }
-      : {}),
-  };
-  return Object.keys(mapped).length > 0 ? mapped : undefined;
-};
-
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
 
@@ -221,6 +209,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     request: HarnessModelTurnRequest,
   ): Promise<HarnessModelTurnResult> {
     assertSupportedToolCombination(request.model, request.nativeModelToolIds);
+    assertPromptCacheModeSupported(request.model, request.promptCacheMode);
     return usesResponsesApi(request.model, request.nativeModelToolIds)
       ? await this.#completeViaResponses(request)
       : await this.#completeViaChatCompletions(request);
@@ -254,7 +243,14 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
         },
       },
     );
-    return { assistant: createAssistantMessage(response) };
+    const usage = withEstimatedOpenAIModelUsageCost(
+      request.model,
+      normalizeOpenAIUsage(response.usage),
+    );
+    return {
+      assistant: createAssistantMessage(response),
+      ...(usage !== undefined ? { usage } : {}),
+    };
   }
 
   async #completeViaResponses(
@@ -279,14 +275,29 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       ...(converted.instructions !== undefined
         ? { instructions: converted.instructions }
         : {}),
-      input: converted.input,
+      input: request.promptCacheMode === "explicit"
+        ? addFirstUserPromptCacheBreakpoint(converted.input)
+        : converted.input,
       ...(tools.length > 0 ? { tools } : {}),
       tool_choice: "auto",
       parallel_tool_calls: true,
       // Reasoning items are only replayable across turns when the provider
       // returns them encrypted, which `store: false` requires.
       include: ["reasoning.encrypted_content"],
-      prompt_cache_key: providerRunAffinityKey(request.runId),
+      prompt_cache_key: providerRunAffinityKey(
+        request.cacheAffinityKey ?? request.runId,
+      ),
+      ...(request.promptCacheMode !== undefined
+        ? {
+          prompt_cache_options: {
+            mode: request.promptCacheMode,
+            ttl: "30m",
+          } as const,
+        }
+        : {}),
+      ...(request.reasoningEffort !== undefined
+        ? { reasoning: { effort: request.reasoningEffort } }
+        : {}),
     };
     const response = await this.gatewayClient.createResponseJson(
       payload,
@@ -297,7 +308,10 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
         },
       },
     );
-    const usage = toUsage(response.usage);
+    const usage = withEstimatedOpenAIModelUsageCost(
+      request.model,
+      normalizeOpenAIUsage(response.usage),
+    );
     return {
       assistant: normalizeTerminalResponse(
         response as unknown as Record<string, unknown>,
