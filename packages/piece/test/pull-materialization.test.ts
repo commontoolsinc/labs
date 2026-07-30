@@ -1722,6 +1722,89 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get(["output"])).toBe(14);
   });
 
+  it("does not pull the input root for a selected path", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const inputRoot = manager.getArgument(piece);
+    const originalGetArgument = manager.getArgument.bind(manager);
+    const originalPull = inputRoot.pull.bind(inputRoot);
+    let rootPulls = 0;
+    manager.getArgument = (() => inputRoot) as typeof manager.getArgument;
+    inputRoot.pull = () => {
+      rootPulls++;
+      return originalPull();
+    };
+
+    try {
+      expect(await controller.input.get(["input"])).toBe(5);
+      expect(rootPulls).toBe(0);
+
+      expect(await controller.input.get()).toEqual({ input: 5 });
+      expect(rootPulls).toBe(1);
+    } finally {
+      manager.getArgument = originalGetArgument;
+      inputRoot.pull = originalPull;
+    }
+  });
+
+  it("pulls a selected asCell value without pulling the input root", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell"] },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: sourcePiece.key("value") },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+    const inputRoot = manager.getArgument(targetPiece);
+    const originalGetArgument = manager.getArgument.bind(manager);
+    const originalPull = inputRoot.pull.bind(inputRoot);
+    let rootPulls = 0;
+    manager.getArgument = (() => inputRoot) as typeof manager.getArgument;
+    inputRoot.pull = () => {
+      rootPulls++;
+      return originalPull();
+    };
+
+    try {
+      expect(await controller.input.get(["handle"])).toBe(7);
+      expect(rootPulls).toBe(0);
+    } finally {
+      manager.getArgument = originalGetArgument;
+      inputRoot.pull = originalPull;
+    }
+  });
+
   it("materializes piece results before setInput returns", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),

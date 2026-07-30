@@ -2253,6 +2253,31 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    if (path?.length) {
+      // Pull the requested cell, not the whole input/result root. The sync
+      // started by pull() sends its path plus narrowed schema to Memory v2, so
+      // this avoids traversing unrelated linked fields (an input can contain a
+      // broad authoring graph even when the caller asks for one small durable
+      // field). A terminal asCell value is the selected field's handle; pull
+      // that handle to materialize its value without widening back to root.
+      let selectedCell = targetCell;
+      for (const segment of path) {
+        selectedCell = selectedCell.key(
+          segment as keyof unknown,
+        ) as Cell<unknown>;
+      }
+      await selectedCell.pull();
+      const selected = selectedCell.get();
+      if (isCell(selected)) {
+        return await selected.pull();
+      }
+      if (selected !== undefined) {
+        return selected;
+      }
+      // Preserve the existing missing-path diagnostics and the distinction
+      // between an absent field and a schema-valid undefined value. This slow
+      // fallback is reached only when the narrow projection produced no value.
+    }
     await targetCell.pull();
     // Terminal read boundary: relax `required` for properties whose stored
     // value links into a scope this session may not be able to materialize
