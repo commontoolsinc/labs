@@ -100,7 +100,6 @@ export {
   type PatternCoverageSpan,
   writePatternCoverageLcov,
 } from "./pattern-coverage.ts";
-export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
   isRendererInputTx,
@@ -136,6 +135,7 @@ export {
   getPatternSource,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
+  isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
   type PieceSourceRevision,
@@ -148,6 +148,7 @@ export {
   schemaHasDefaultValue,
   setPatternRepository,
   setPatternSource,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)
@@ -182,7 +183,6 @@ export {
   type FsProjection,
   type HandlerFactory,
   ID,
-  ID_FIELD,
   isModule,
   isPattern,
   isReactive,

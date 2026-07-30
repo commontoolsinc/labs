@@ -1,4 +1,4 @@
-import { isObject, isRecord, type Mutable } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -12,13 +12,8 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  type CellScope,
-  ID,
-  ID_FIELD,
-  type JSONSchema,
-} from "./builder/types.ts";
-import type { IDFields, JSONSchemaObj } from "@commonfabric/api";
+import { type CellScope, ID, type JSONSchema } from "./builder/types.ts";
+import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
@@ -505,71 +500,6 @@ export function normalizeAndDiff(
         seen,
       ),
     ];
-  }
-
-  // ID_FIELD redirects to an existing field and we do something like DOM
-  // diffing with it: We look at sibling entries and their value for that field,
-  // and if we find a match, we reuse that document. Otherwise we create a new
-  // one, but with a random id. It's random as opposed to causal like ID below,
-  // because we don't want to recycle a document that was removed and added
-  // back, we want to assume removing and adding with the same id is
-  // semantically a new item (in fact we otherwise run into compare-and-swap
-  // transaction errors).
-  const idFieldValue = newValue as FabricPlainObject & { [ID_FIELD]?: string };
-  if (isRecord(newValue) && idFieldValue[ID_FIELD] !== undefined) {
-    diffLogger.debug(
-      "diff",
-      () => `[BRANCH_ID_FIELD] Processing ID_FIELD redirect at path=${pathStr}`,
-    );
-    const { [ID_FIELD]: fieldName, ...rest } = idFieldValue as
-      & { [ID_FIELD]: string }
-      & FabricPlainObject;
-    const id = idFieldValue[fieldName];
-    if (link.path.length > 1) {
-      const parent = tx.readValueOrThrow({
-        ...link,
-        path: link.path.slice(0, -1),
-      }, options);
-      if (Array.isArray(parent)) {
-        const base = runtime.getCellFromLink(link, undefined, tx);
-        for (const v of parent) {
-          if (isCellLink(v)) {
-            const sibling = parseLink(v, base);
-            const siblingId = tx.readValueOrThrow({
-              ...sibling,
-              path: [...sibling.path, fieldName as string],
-            }, options);
-            if (siblingId === id) {
-              // We found a sibling with the same id, so ...
-              return [
-                // ... reuse the existing document
-                ...normalizeAndDiff(
-                  runtime,
-                  tx,
-                  link,
-                  v,
-                  context,
-                  options,
-                  seen,
-                ),
-                // ... and update it to the new value
-                ...normalizeAndDiff(
-                  runtime,
-                  tx,
-                  sibling,
-                  rest,
-                  context,
-                  options,
-                  seen,
-                ),
-              ];
-            }
-          }
-        }
-      }
-    }
-    // Fallback: A random id. Below this will create a new entity.
-    newValue = { [ID]: crypto.randomUUID(), ...rest };
   }
 
   // Unwrap proxies and handle special types
@@ -1580,40 +1510,6 @@ export function applyChangeSet(
       change.delete ? { delete: true } : undefined,
     );
   }
-}
-
-/**
- * Translates `id` that React likes to create to our `ID` property, making sure
- * in any given object it is never used twice.
- *
- * This mostly makes sense in a context where we ship entire JSON documents back
- * and forth and can't express graphs, i.e. two places referring to the same
- * underlying entity.
- *
- * We'll want to revisit once iframes become more sophisticated in what they can
- * express, e.g. we could have the inner shim do some of this work instead.
- */
-export function addCommonIDfromObjectID(
-  obj: unknown,
-  fieldName: string = "id",
-): void {
-  function traverse(obj: unknown): void {
-    if (isRecord(obj) && fieldName in obj) {
-      (obj as Mutable<IDFields>)[ID_FIELD] = fieldName;
-    }
-
-    // TODO(danfuzz): Latent — this is a public entry point (re-exported,
-    // "entire JSON documents" from iframes) walking `obj: unknown` with no
-    // `FabricSpecialObject` guard (only `isCell`/`isPrimitiveCellLink`). A
-    // caller can't be proven to pass only plain JSON, so if a `FabricPrimitive`/
-    // `FabricInstance` ever reaches here it is mishandled (primitive decomposed,
-    // instance walked by internal slots). Mark against that.
-    if (isRecord(obj) && !isCell(obj) && !isPrimitiveCellLink(obj)) {
-      Object.values(obj).forEach((v) => traverse(v));
-    }
-  }
-
-  traverse(obj);
 }
 
 /**
