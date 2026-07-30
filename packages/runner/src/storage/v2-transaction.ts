@@ -2671,7 +2671,9 @@ export class V2StorageTransaction implements IStorageTransaction {
           : undefined,
         hadInitialArray: Array.isArray(initial),
         hadInitialValue,
-        initialArrayLength: Array.isArray(initial) ? initial.length : undefined,
+        initialArray: Array.isArray(initial)
+          ? initial as readonly FabricValue[]
+          : undefined,
       });
       if (built.abandon) {
         abandoned.push(encodePointer(intent.path));

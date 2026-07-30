@@ -788,14 +788,14 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A whole-array set that REPLACES every element without changing the length,
-  // then a push. This one is deliberately NOT abandoned, and pins that: the
-  // replacement diffs into per-index candidates that all sit below the tail
-  // start, so they survive the op's suppression and commit alongside the append.
-  // Only a length change ahead of the tail leaves the diff unable to carry what
-  // the op cannot. (Characterization, not a regression guard — it holds on the
-  // unfixed code too. It is here so a future tightening of the guard to full
-  // prefix comparison has to justify losing this.)
+  // A whole-array set that REPLACES every element without changing the length or
+  // the hole layout, then a push. This one is deliberately NOT abandoned, and
+  // pins that: a dense same-length replacement diffs into per-index candidates
+  // that all sit below the tail start, so they survive the op's suppression and
+  // commit alongside the append. (Characterization, not a regression guard — it
+  // holds on the unfixed code too. It is here so a future tightening of the
+  // guard to full prefix VALUE comparison has to justify losing this. Changing
+  // the hole layout is a different matter and is abandoned — see below.)
   it("a same-length whole-array set then a push commits the replaced list", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -820,6 +820,79 @@ describe("mergeable array appends", () => {
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["x", "y", "z", "d"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A same-length set that changes the array's HOLE LAYOUT, then a push. Length
+  // equality is satisfied, but the diff cannot express a presence change per
+  // index — it falls back to a whole-array replacement, which is the one
+  // candidate the op's suppression drops outright. Sparse arrays are preserved
+  // elsewhere in the runner, so the hole must survive the round trip.
+  it("a set that punches a hole then a push commits the hole", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const punched: string[] = [];
+      punched[1] = "b";
+      punched[2] = "c";
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(punched);
+      cell.push("d");
+      expect(0 in (cell.get() as string[])).toBe(false);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      const durable = await readDurable(server);
+      expect(durable.length).toBe(4);
+      // The hole survived rather than the base's "a" being retained under it.
+      expect(0 in durable).toBe(false);
+      expect(durable[1]).toBe("b");
+      expect(durable[3]).toBe("d");
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The reverse: the base is sparse and the set FILLS the hole, same length.
+  // Without the layout check the fill is dropped and, because the whole-array
+  // candidate carried every element, so is the rest of the replacement.
+  it("a set that fills a hole then a push commits the filled value", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const seed: string[] = [];
+      seed[1] = "b";
+      seed[2] = "c";
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(seed);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["A", "b", "c"]);
+      cell.push("d");
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["A", "b", "c", "d"]);
     } finally {
       await rt1.dispose();
     }

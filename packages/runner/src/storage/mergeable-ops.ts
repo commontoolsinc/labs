@@ -69,14 +69,16 @@ export type OpSuppression = {
  * ANY value at the path: when false the op materializes a previously-absent
  * path, so it stamps the wire op's `createsKey` flag (the parent's key set
  * changed — see the field in `@commonfabric/memory/v2`).
- * `initialArrayLength` is that base array's length (undefined when there was no
- * base array), which a tail op checks its recorded tail against.
+ * `initialArray` is that base array itself (undefined when there was no base
+ * array), which a tail op checks its recorded tail against — length and hole
+ * layout both, since the diff it suppresses can only express a prefix that
+ * matches the base in both.
  */
 export interface MergeableBuildContext {
   readonly workingArray?: readonly FabricValue[];
   readonly hadInitialArray: boolean;
   readonly hadInitialValue: boolean;
-  readonly initialArrayLength?: number;
+  readonly initialArray?: readonly FabricValue[];
 }
 
 /**
@@ -164,16 +166,39 @@ const buildTailOp = (
     ? Math.max(0, array.length - intent.count)
     : 0;
   // The op says "add these elements to whatever the durable array is", and its
-  // suppression drops every diff candidate at or past `start`. That is the
-  // transaction's local truth only while the elements before the tail still line
-  // up with the base one for one. If the transaction also changed the array's
-  // length ahead of the tail — a whole-value `set` at this path or at a parent
-  // that shrank or grew it — the base elements the set removed have no surviving
-  // removal candidate, so the store would keep them and append the tail on top:
-  // a silently doubled list. The op cannot express that reshape, so abandon it
-  // and let the whole-array diff commit the local value.
-  if (ctx.hadInitialArray && ctx.initialArrayLength !== start) {
-    return { ops: [], suppress: [], abandon: true };
+  // suppression drops the whole-array candidate at this path outright plus every
+  // element candidate at or past `start`. What survives to carry the prefix is
+  // therefore only the diff's PER-INDEX candidates — so the op is honest only
+  // while the diff actually decomposes the prefix that way. `buildArrayPatchCandidates`
+  // gives up and emits a whole-array replacement instead in exactly three
+  // situations, and each one must abandon the op rather than let that
+  // replacement be suppressed:
+  //
+  //   1. the prefix changed length (a `set` here or at a parent that shrank or
+  //      grew it) — the base elements it removed have no surviving removal
+  //      candidate, so the store keeps them and appends on top: a doubled list;
+  //   2. the prefix's HOLE LAYOUT changed — punching or filling a hole without
+  //      changing the length, which the diff cannot express per index;
+  //   3. the appended tail is itself sparse.
+  //
+  // In each case the local value is the whole-array diff's to commit, not the
+  // op's. (Case 1 is checked as `initial.length !== start` because `start` is
+  // where the recorded tail begins.)
+  if (ctx.hadInitialArray) {
+    const initial = ctx.initialArray;
+    if (!initial || initial.length !== start) {
+      return { ops: [], suppress: [], abandon: true };
+    }
+    for (let index = 0; index < start; index += 1) {
+      if ((index in initial) !== (index in array)) {
+        return { ops: [], suppress: [], abandon: true };
+      }
+    }
+    for (let index = start; index < array.length; index += 1) {
+      if (!(index in array)) {
+        return { ops: [], suppress: [], abandon: true };
+      }
+    }
   }
   const values = array.slice(start) as FabricValue[];
   if (values.length === 0) {
