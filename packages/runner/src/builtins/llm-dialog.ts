@@ -3172,11 +3172,17 @@ export function llmDialog(
             { ...event } as Schema<typeof LLMMessageSchema>,
           );
           // `push()` is typed for message values and cells of them, not for
-          // links, so appending the bare link needs the cast. Pushing the cell
-          // itself would type cleanly but store the link with space, scope and
-          // the whole message schema inlined -- a copy per message.
+          // links (`data-updating.ts` resolves a link where a value is
+          // expected), so appending a bare link needs the cast to the type the
+          // site resolves it to. Pushing the cell itself would type cleanly but
+          // store the link with space, scope and the whole message schema
+          // inlined -- a copy per message.
           messagesForPush.withTx(tx).push(
-            messageCell.getAsLink({ base: messagesForPush }) as never,
+            messageCell.getAsLink({
+              base: messagesForPush,
+            }) as unknown as Schema<
+              typeof LLMMessageSchema
+            >,
           );
 
           // Set up new request (abort existing ones just in case) by allocating
@@ -3462,7 +3468,11 @@ async function startRequest(
         );
         messageCell.withTx(tx).set(message);
         // See the note at the user-message push: bare link, hence the cast.
-        return messageCell.getAsLink({ base: messagesCell }) as never;
+        return messageCell.getAsLink({
+          base: messagesCell,
+        }) as unknown as Schema<
+          typeof LLMMessageSchema
+        >;
       }),
     );
     if (runtime.cfcEnforcementMode === "disabled") {
@@ -3721,7 +3731,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             );
             // See the note at the user-message push: bare link, hence the cast.
             messagesCell.withTx(tx).push(
-              errorCell.getAsLink({ base: messagesCell }) as never,
+              errorCell.getAsLink({ base: messagesCell }) as unknown as Schema<
+                typeof LLMMessageSchema
+              >,
             );
             pending.withTx(tx).set(false);
           },
