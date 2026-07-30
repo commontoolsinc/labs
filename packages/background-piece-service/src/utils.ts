@@ -1,10 +1,10 @@
 import {
   type Cell,
+  type JSONSchema,
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
-import { ID, type JSONSchema } from "@commonfabric/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -80,18 +80,28 @@ export async function setBGPiece({
     JSON.stringify(piecesCell.getAsLink(), null, 2),
   );
 
-  const pieces = piecesCell.get() || [];
+  // The registration is an upsert on (`space`, `pieceId`): an OAuth callback
+  // fires on every (re)connection, so the same pair arrives repeatedly and must
+  // land on one entry. Both the lookup and the write therefore happen inside the
+  // transaction. `editWithRetry()` re-invokes this callback with a fresh
+  // transaction on conflict, so a concurrent registration of the same pair loses
+  // the commit and then re-reads, finding the entry the winner just added.
+  // Reading outside the transaction instead would let two callbacks both see no
+  // match and both add one.
+  let added = false;
 
-  const existingPieceIndex = pieces.findIndex(
-    (piece: Cell<BGPieceEntry>) =>
-      piece.get().space === space && piece.get().pieceId === pieceId,
-  );
+  const { error } = await runtime.editWithRetry((tx) => {
+    const pieces = piecesCell.withTx(tx).get() || [];
 
-  if (existingPieceIndex === -1) {
-    console.log("[setBGPiece] Adding piece to BGUpdater pieces cell");
-    runtime.editWithRetry((tx) => {
+    const existingPiece = pieces.find(
+      (piece: Cell<BGPieceEntry>) =>
+        piece.get().space === space && piece.get().pieceId === pieceId,
+    );
+
+    if (existingPiece === undefined) {
+      console.log("[setBGPiece] Adding piece to BGUpdater pieces cell");
+      added = true;
       piecesCell.withTx(tx).push({
-        [ID]: `${space}/${pieceId}`,
         space,
         pieceId,
         integration,
@@ -101,23 +111,25 @@ export async function setBGPiece({
         lastRun: 0,
         status: "Initializing",
       } as unknown as Cell<BGPieceEntry>);
-    });
-
-    await runtime.storageManager.synced();
-    return true;
-  } else {
-    console.log("[setBGPiece] Piece already exists, re-enabling");
-    const existingPiece = pieces[existingPieceIndex];
-    runtime.editWithRetry((tx) => {
+    } else {
+      console.log("[setBGPiece] Piece already exists, re-enabling");
+      added = false;
       existingPiece.withTx(tx).update({
         disabledAt: 0,
         updatedAt: Date.now(),
         status: "Re-initializing",
       });
-    });
-    await runtime.storageManager.synced();
-    return false;
+    }
+  });
+
+  if (error) {
+    throw new Error(
+      `Could not register background piece ${space}/${pieceId}: ${error.message}`,
+    );
   }
+
+  await runtime.storageManager.synced();
+  return added;
 }
 
 export async function getBGPieces(
