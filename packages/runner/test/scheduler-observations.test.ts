@@ -2310,7 +2310,7 @@ describe("persistent scheduler observations", () => {
           path: ["value"],
         },
       });
-      runtimeA.scheduler.dispose();
+      await runtimeA.dispose({ closeStorage: false });
 
       const server = (storageManager as unknown as {
         server(): WatchSetCounterServer;
@@ -2348,6 +2348,9 @@ describe("persistent scheduler observations", () => {
       expect(cellDataReads).toBe(0);
     } finally {
       restoreEvaluateWatchSet?.();
+      // Scheduler only, and deliberately: on the success path runtime A is
+      // already fully disposed above, so this exists for the throw path —
+      // where disposeSchedulerTestRuntime below still has to commit A's tx.
       runtimeAEnv.runtime.scheduler.dispose();
       if (runtimeBEnv) {
         await disposeSchedulerTestRuntime(runtimeBEnv);

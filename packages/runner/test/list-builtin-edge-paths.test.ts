@@ -443,7 +443,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("value").get()).toBe(40);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     const rt2 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -469,8 +469,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
       }
       expect(rc2.key("value").get()).toBe(40);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
