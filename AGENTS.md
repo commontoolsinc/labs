@@ -27,12 +27,15 @@ outside the layer stack.
 
 ## Documentation Lifecycle
 
-Documentation is split into two categories with different obligations. The full
-rules are in `docs/README.md`; the short version:
+Whenever editing documentation, read [docs/README.md](docs/README.md) and follow
+the rules therein. These include:
 
 - **Live** documentation (everything outside `docs/history/`) describes the
   current system or pending plans. If your change alters behavior that a live
   document describes, update that document in the same change.
+- Live documentation must be forward-looking, and should not refer to previous
+  states of the repository or justify decisions based on past choices.
+  Everything should stand on its own merits in a forward-looking fashion.
 - **Historical** documentation (`docs/history/`) holds point-in-time records:
   audits, reports, investigation findings, executed plans, superseded designs.
   Never edit their content, and never treat them as descriptions of the current
