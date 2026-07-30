@@ -206,7 +206,8 @@ async function seedSpaceStore(
 export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
 
 /**
- * A stable root cell for a captured space.
+ * The cause of a captured space's root cell — shared by the harness helper
+ * below and by the capture, which pins the test pattern's result cell to it.
  *
  * The cause is fixed rather than minted, because `PieceManager.setupPersistent`
  * otherwise defaults to `{ space, random: crypto.randomUUID() }` and the root's
@@ -230,6 +231,7 @@ export function vintageRootCause(
   return { stateContinuity: key };
 }
 
+/** A stable root cell for a captured space, addressable across captures. */
 export function vintageRoot<T>(
   vintage: VintageRuntime,
   schema: unknown,
