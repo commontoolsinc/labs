@@ -718,6 +718,10 @@ Deno.test("realGit: accepts an amend that reproduces the same commit object", as
     await git(root, ["init", "-q"]);
     await git(root, ["config", "user.email", "t@t.test"]);
     await git(root, ["config", "user.name", "Test"]);
+    // A signature records its own creation time, so a signed commit hashes
+    // differently every second. Pin the switch an inherited configuration may
+    // have turned on, leaving the object id a function of the content alone.
+    await git(root, ["config", "commit.gpgsign", "false"]);
     await Deno.writeTextFile(`${root}/f.txt`, "same\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "same"]);
