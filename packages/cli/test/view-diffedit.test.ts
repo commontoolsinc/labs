@@ -199,6 +199,19 @@ function runGit(root: string, args: string[]): string {
   return new TextDecoder().decode(output.stdout);
 }
 
+/**
+ * Creates a throwaway repository, pinning the configuration its commits are
+ * built from so the configuration a contributor happens to have cannot reach
+ * in. Signing matters beyond the identity: producing a signature waits on the
+ * agent holding the key, and it records its own creation time.
+ */
+function initRepo(root: string): void {
+  runGit(root, ["init", "-q"]);
+  runGit(root, ["config", "user.email", "t@t.test"]);
+  runGit(root, ["config", "user.name", "Test"]);
+  runGit(root, ["config", "commit.gpgsign", "false"]);
+}
+
 Deno.test("diffedit: edits an added line in place and saves it to the file", () => {
   const { root, ws, done } = tempWorkspace();
   try {
@@ -3482,9 +3495,7 @@ Deno.test("diffedit: editing only a hunk prompts and amends the file into the co
 Deno.test("diffedit: saving edited git show output amends the real HEAD tree", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     Deno.writeTextFileSync(
       path,
@@ -3557,9 +3568,7 @@ Deno.test("diffedit: saving edited git show output amends the real HEAD tree", (
 Deno.test("diffedit: a hunk-only amend preserves the raw commit message", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "f.txt");
     Deno.writeTextFileSync(path, "before\n");
     runGit(root, ["add", "f.txt"]);
@@ -3606,9 +3615,7 @@ Deno.test("diffedit: a hunk-only amend preserves the raw commit message", () => 
 Deno.test("diffedit: abbreviated, compact, and email formats amend hunk edits", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "f.txt");
     Deno.writeTextFileSync(path, "before\n");
     runGit(root, ["add", "f.txt"]);
@@ -3710,9 +3717,7 @@ Deno.test("diffedit: standard and compact views skip email ownership checks", ()
 Deno.test("diffedit: consecutive compact commits keep historical hunk ownership", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "f.txt");
     Deno.writeTextFileSync(path, "before\n");
     runGit(root, ["add", "f.txt"]);
@@ -3748,9 +3753,7 @@ Deno.test("diffedit: consecutive compact commits keep historical hunk ownership"
 Deno.test("diffedit: consecutive email commits keep historical hunk ownership", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "f.txt");
     Deno.writeTextFileSync(path, "before\n");
     runGit(root, ["add", "f.txt"]);
@@ -3786,9 +3789,7 @@ Deno.test("diffedit: consecutive email commits keep historical hunk ownership", 
 Deno.test("diffedit: a CRLF commit preamble keeps an LF-normalized message", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "f.txt");
     Deno.writeTextFileSync(path, "before\n");
     runGit(root, ["add", "f.txt"]);
@@ -3833,9 +3834,7 @@ Deno.test({
   fn() {
     const root = Deno.makeTempDirSync();
     try {
-      runGit(root, ["init", "-q"]);
-      runGit(root, ["config", "user.email", "t@t.test"]);
-      runGit(root, ["config", "user.name", "Test"]);
+      initRepo(root);
       runGit(root, [
         "config",
         "filter.caps.clean",
@@ -3903,9 +3902,7 @@ Deno.test({
 Deno.test("diffedit: an empty-message commit amends when its hunk changes", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     Deno.writeTextFileSync(path, "before\n");
     runGit(root, ["add", "m.ts"]);
@@ -3946,9 +3943,7 @@ Deno.test("diffedit: an empty-message commit amends when its hunk changes", () =
 Deno.test("diffedit: later hunk saves retain earlier amendments in the same file", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     const parent = Array.from(
       { length: 16 },
@@ -4013,9 +4008,7 @@ Deno.test("diffedit: later hunk saves retain earlier amendments in the same file
 Deno.test("diffedit: editing a HEAD hunk does not amend a matching historical hunk", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     const parent = Array.from(
       { length: 12 },
@@ -4125,9 +4118,7 @@ Deno.test("diffedit: editing a HEAD hunk does not amend a matching historical hu
 Deno.test("diffedit: a historical insertion does not shift a later HEAD amend", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     const base = Array.from({ length: 14 }, (_, index) => `line ${index + 1}`);
     Deno.writeTextFileSync(path, `${base.join("\n")}\n`);
@@ -4203,9 +4194,7 @@ Deno.test("diffedit: a historical insertion does not shift a later HEAD amend", 
 Deno.test("diffedit: expanded workspace context stays outside the amended commit", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     const base = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`);
     Deno.writeTextFileSync(path, `${base.join("\n")}\n`);
@@ -4281,9 +4270,7 @@ Deno.test("diffedit: expanded workspace context stays outside the amended commit
 Deno.test("diffedit: an amend excludes unrelated same-file edits and preserves their staged state", () => {
   const root = Deno.makeTempDirSync();
   try {
-    runGit(root, ["init", "-q"]);
-    runGit(root, ["config", "user.email", "t@t.test"]);
-    runGit(root, ["config", "user.name", "Test"]);
+    initRepo(root);
     const path = join(root, "m.ts");
     const parentLines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
     const commitLines = [...parentLines];

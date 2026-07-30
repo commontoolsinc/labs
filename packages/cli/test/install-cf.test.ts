@@ -49,6 +49,9 @@ async function makeCheckout(
   await git("init", "-q");
   await git("config", "user.email", "test@example.com");
   await git("config", "user.name", "Test");
+  // Signing would wait on the agent holding a contributor's key, and this
+  // stand-in checkout commits.
+  await git("config", "commit.gpgsign", "false");
 }
 
 async function runInstaller(
