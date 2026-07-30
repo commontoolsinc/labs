@@ -1318,11 +1318,47 @@ export class Runtime {
    * actually reached. `idle()` and `synced()` cannot substitute, because they
    * say nothing about the background work that only teardown stops —
    * `patternUpdater`'s source checks and the runner's pointer-commit
-   * roll-forwards both live outside the scheduler and can still commit.
+   * roll-forwards both live outside the scheduler and can still commit. That
+   * path also drains in-flight async builtin work first; see below.
+   *
+   * It is about OWNERSHIP, not survivability. `close()` destroys the manager's
+   * providers and rotates its session id rather than latching it shut, so how
+   * badly closing hurts depends on who owns the server behind it: a manager
+   * over a caller-held server re-provisions and later writes still land, while
+   * `StorageManager.emulate` owns its own server and closing strands them (both
+   * measured). Recovering in one configuration is not a contract, so a callee
+   * hands the decision back rather than relying on it.
+   *
+   * Passing `false` makes closing the CALLER's job — nothing else will. Note
+   * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
+   *
+   * Either way this resets the PROCESS-GLOBAL experimental config to defaults
+   * (`resetModernCellRepConfig` and friends). Under a non-default flag that is
+   * visible to a second runtime still running against the same store, which is
+   * exactly the caller this option serves — so set the flags per process, not
+   * per runtime, if two of them must agree.
    */
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
   ): Promise<void> {
+    // A kept store keeps RECORDING, so this path drains what could still write
+    // into it. In-flight async builtin work is that shape: a fetch / llm call or
+    // a sqlite RPC runs from a post-commit outbox flush and writes its result
+    // back when it lands, and `trackAsyncWork` exists because neither `idle()`
+    // nor `synced()` waits for it. `settled()` is the barrier that does. The
+    // closing path skips it because a caller who let the store close has no
+    // reader left to mislead, and waiting on the network in every teardown is a
+    // real cost; here the caller is about to read what this runtime wrote.
+    //
+    // BEFORE the cancellation below, not after: `stopAll()` and
+    // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
+    // leaving the store holding part of a result — which is worse than either
+    // extreme for a reader trying to learn what state this runtime reached.
+    //
+    // This is an unbounded wait, deliberately: a bound would report the runtime
+    // quiesced while it was still working, which is the one answer a caller
+    // reading the store afterwards cannot recover from.
+    if (!closeStorage) await this.settled();
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {

@@ -364,9 +364,9 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     }
   }
 
-  // 6. Cleanup
-  engine.dispose();
-  await storageManager.close();
+  // 6. Cleanup. `dispose()` also closes the storage manager; a caller that
+  // supplied its own passes `{ closeStorage: false }` and closes it itself.
+  await runtime.dispose();
 
   return { results, path: testPath };
 }
