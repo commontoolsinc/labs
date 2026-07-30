@@ -4,7 +4,10 @@ import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { type FactoryInput } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-pointwise");
@@ -128,8 +131,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       mappedRef = (values as any).mapWithPattern(
-        pattern(({ element }: FactoryInput<any>) => double(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => double(element)),
+        ),
       );
       return { mapped: mappedRef };
     });
@@ -244,8 +249,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+        ),
       );
       return { kept: filteredRef };
     });
@@ -332,8 +339,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+        ),
       );
       return { kept: filteredRef };
     });
@@ -416,8 +425,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+        ),
       );
       return { kept: filteredRef };
     });
@@ -506,8 +517,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
         // reads only `index`, never element content
-        pattern(({ index }: FactoryInput<any>) => keepFirst(index)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ index }: FactoryInput<any>) => keepFirst(index)),
+        ),
       );
       return { kept: filteredRef };
     });
@@ -578,8 +591,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+        ),
       );
       return { kept: filteredRef };
     });
@@ -670,8 +685,10 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       flattenedRef = (values as any).flatMapWithPattern(
-        pattern(({ element }: FactoryInput<any>) => toSegment(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => toSegment(element)),
+        ),
       );
       return { flattened: flattenedRef };
     });
@@ -741,10 +758,12 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       const kept = (values as unknown as {
-        filterWithPattern: (op: unknown, params: unknown) => unknown;
+        filterWithPattern: (op: unknown) => unknown;
       }).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => dropAll(element)),
-        {},
+        installTestPatternArtifact(
+          runtime!,
+          pattern(({ element }: FactoryInput<any>) => dropAll(element)),
+        ),
       );
       return { kept };
     });

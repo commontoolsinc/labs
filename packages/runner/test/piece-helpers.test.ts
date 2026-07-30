@@ -46,6 +46,20 @@ describe("parseCellPath", () => {
 });
 
 describe("resolveCellPath", () => {
+  it("does not read unrelated siblings when the selected child is available", () => {
+    const child = makeCell("selected");
+    const cell: FakeCell = {
+      get() {
+        throw new Error("root contains a cold factory sibling");
+      },
+      key(segment) {
+        return segment === "lastMessage" ? child : makeCell(undefined);
+      },
+    };
+
+    assertEquals(resolveCellPath(cell as never, ["lastMessage"]), "selected");
+  });
+
   it("resolves schema-backed child cells when the parent object is sparse", () => {
     const cell = makeCell(undefined, {
       messageCount: makeCell(1),

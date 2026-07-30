@@ -128,7 +128,8 @@ const canFollowLinkHop = (
  *   `onScopeBlocked` is invoked when a narrower-scope follow is blocked by a
  *   schema scope cap (the chain then terminates at an undefined-data link);
  *   it is the only way to distinguish that cut from a chain that genuinely
- *   ends at a stored undefined-data link.
+ *   ends at a stored undefined-data link. `onDereferenceSource` observes
+ *   actual pointer-hop sources without exposing terminal link-probe reads.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -136,7 +137,11 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    onDereferenceSource?: (source: NormalizedFullLink) => void;
+    onScopeBlocked?: () => void;
+  } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -295,6 +300,7 @@ export function resolveLink(
         throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
       recordDereferenceHop(tx, nextHop);
+      options.onDereferenceSource?.(nextHop.source);
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {

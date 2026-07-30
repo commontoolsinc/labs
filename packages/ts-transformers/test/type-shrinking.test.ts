@@ -14,6 +14,7 @@ import {
   wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
 import { collect, parseModule } from "./transformed-ast.ts";
+import { registerTrustedCommonFabricTestSources } from "./trusted-commonfabric-sources.ts";
 
 // ---------------------------------------------------------------------------
 // Structural inspection of printed type nodes.
@@ -170,6 +171,9 @@ function createProgramWithFiles(
   };
 
   const program = ts.createProgram([entryFileName], compilerOptions, host);
+  if (files["/commonfabric.d.ts"] !== undefined) {
+    registerTrustedCommonFabricTestSources(program, ["/commonfabric.d.ts"]);
+  }
   const sourceFile = program.getSourceFile(entryFileName);
   if (!sourceFile) {
     throw new Error("Expected source file in program.");

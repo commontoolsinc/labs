@@ -21,7 +21,6 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  type PatternFactory,
   TILE_UI,
   UI,
   wish,
@@ -128,13 +127,6 @@ type ExtractorAnalysisItem = {
 };
 type ScheduleChangeAnalysisItem = ExtractorAnalysisItem & {
   result?: ScheduleChangeAnalysisResult;
-};
-
-type ReactiveArray<T> = T[] & {
-  mapWithPattern<I, S>(
-    op: PatternFactory<I, S>,
-    params: Record<string, unknown>,
-  ): S[];
 };
 
 const addScheduleChangeResult = pattern<
@@ -291,11 +283,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const { pendingCount, completedCount, rawAnalyses } = extractor;
 
   // Create emailAnalyses with result alias for backward compatibility
-  const emailAnalyses = (
-    rawAnalyses as ReactiveArray<ExtractorAnalysisItem>
-  ).mapWithPattern(
-    addScheduleChangeResult,
-    {},
+  const emailAnalyses = rawAnalyses.map((analysis) =>
+    addScheduleChangeResult(analysis as ExtractorAnalysisItem)
   );
 
   // Reactive current time, ticking once a minute so the relative 7-day window

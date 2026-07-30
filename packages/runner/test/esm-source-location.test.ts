@@ -7,7 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import { getComposeBundleSourceMapCallsForTesting } from "@commonfabric/js-compiler/source-map";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import type { Module, Pattern } from "../src/builder/types.ts";
+import { isModule, type Module, type Pattern } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 
 // Regression: under the ESM module-record loader, a verified handler's
@@ -50,11 +50,10 @@ interface HandlerIdentityProbe {
 function probeHandlerIdentity(
   compiled: Pattern,
 ): HandlerIdentityProbe {
-  const nodes = (compiled as Pattern & { nodes: { module: Module }[] }).nodes;
-  const handlerModule = nodes
+  const handlerModule = compiled.nodes
     .map((n) => n.module)
-    .find((m) =>
-      m && m.type === "javascript" && m.wrapper === "handler" &&
+    .find((m): m is Module =>
+      isModule(m) && m.type === "javascript" && m.wrapper === "handler" &&
       typeof m.implementation === "function"
     );
   if (!handlerModule) {

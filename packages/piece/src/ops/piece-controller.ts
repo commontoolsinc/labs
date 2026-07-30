@@ -6,6 +6,7 @@ import {
   ContextualFlowControl,
   deepEqual,
   extractDefaultValues,
+  FactoryArtifactUnavailableError,
   formatFabricRef,
   getMetaLink,
   getPatternIdentityRef,
@@ -2252,18 +2253,40 @@ class PiecePropIo implements PieceCellIo {
   }
 
   async get(path?: CellPath) {
-    const targetCell = await this.#getTargetCell();
-    await targetCell.pull();
+    const manager = this.#cc.manager();
     // Terminal read boundary: relax `required` for properties whose stored
     // value links into a scope this session may not be able to materialize
     // (perSession/perUser-derived outputs), so a whole-object read degrades
     // those members instead of voiding to `undefined` while every child-path
-    // read succeeds. See schemaWithScopedLinkRequiredsRelaxed for the
-    // #4746-compatible rationale.
-    return resolveCellPath(
-      cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path ?? [],
+    // read succeeds.
+    const targetCell = cellWithScopedLinkRequiredsRelaxed(
+      await this.#getTargetCell(),
     );
+    const targetPath = path ?? [];
+    let pullCell = targetCell;
+    for (const segment of targetPath) {
+      pullCell = pullCell.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    await pullCell.pull();
+    const attemptedArtifacts = new Set<string>();
+    for (;;) {
+      try {
+        return resolveCellPath(targetCell, targetPath);
+      } catch (error) {
+        if (!(error instanceof FactoryArtifactUnavailableError)) throw error;
+        const key =
+          `${error.artifactSpace}\0${error.ref.identity}\0${error.ref.symbol}`;
+        if (attemptedArtifacts.has(key)) throw error;
+        attemptedArtifacts.add(key);
+        const loaded = await manager.runtime.patternManager
+          .loadArtifactByIdentity(
+            error.ref.identity,
+            error.ref.symbol,
+            error.artifactSpace,
+          );
+        if (loaded === undefined) throw error;
+      }
+    }
   }
 
   getCell(): Promise<Cell<unknown>> {

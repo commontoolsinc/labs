@@ -11,6 +11,108 @@ import {
 } from "./mod.ts";
 import { cellRefToKey } from "./shared/utils.ts";
 import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
+import {
+  createFactoryShell,
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
+import {
+  decodeFactoryAwareIPCValue,
+  encodeFactoryAwareIPCValue,
+} from "./fabric-value-ipc.ts";
+
+describe("CellHandle Factory@1 IPC", () => {
+  const ref: CellRef = {
+    id: "of:factory-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+  const factory = createFactoryShell({
+    kind: "handler",
+    ref: { identity: `${"C".repeat(42)}A`, symbol: "handler" },
+    contextSchema: { type: "object" },
+    eventSchema: { type: "string" },
+  });
+
+  it("encodes factory-bearing writes before posting them to the worker", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: Record<string, unknown>) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<{ factory: unknown }>(runtime, ref);
+
+    await cell.set({ factory });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      type: RequestType.CellSet,
+      valueEncoding: "fabric-json",
+    });
+    expect(() => structuredClone(requests[0])).not.toThrow();
+  });
+
+  it("context-free decodes factory-bearing reads to inert shells", async () => {
+    const encoded = encodeFactoryAwareIPCValue({ factory });
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve(encoded),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<{ factory: unknown }>(runtime, ref);
+
+    const value = await cell.sync();
+
+    expect(isAdmittedFabricFactory(value?.factory)).toBe(true);
+    expect(factoryStateOf(value?.factory)).toEqual(factoryStateOf(factory));
+    expect(() => (value?.factory as () => void)()).toThrow(
+      "factory requires runner materialization",
+    );
+  });
+
+  it("preserves codec-backed instance state around nested factories", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: Record<string, unknown>) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<UnknownValue>(runtime, ref);
+    const wrapped = new UnknownValue("FutureValue@1", { factory });
+
+    await cell.set(wrapped);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].valueEncoding).toBe("fabric-json");
+    const decoded = decodeFactoryAwareIPCValue(
+      requests[0].value as never,
+      requests[0].valueEncoding as never,
+    );
+    expect(decoded).toBeInstanceOf(UnknownValue);
+    const decodedFactory = (decoded as UnknownValue).state as {
+      factory: unknown;
+    };
+    expect(isAdmittedFabricFactory(decodedFactory.factory)).toBe(true);
+    expect(factoryStateOf(decodedFactory.factory)).toEqual(
+      factoryStateOf(factory),
+    );
+  });
+});
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {

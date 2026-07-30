@@ -93,10 +93,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     type: "object",
     properties: {
         tree: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Entry"
-            },
+            $ref: "#/$defs/AnonymousType_1",
             asCell: ["readonly"]
         },
         p: {
@@ -108,6 +105,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["tree", "p"],
     $defs: {
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
+        },
         Entry: {
             type: "object",
             properties: {
@@ -121,10 +124,7 @@ const __cfLift_2 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    }
+                    $ref: "#/$defs/AnonymousType_1"
                 }
             },
             required: ["id", "name", "type"]
@@ -149,13 +149,16 @@ const __cfLift_2 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    }
+                    $ref: "#/$defs/AnonymousType_1"
                 }
             },
             required: ["id", "name", "type"]
+        },
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
@@ -186,13 +189,16 @@ const __cfLift_3 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    }
+                    $ref: "#/$defs/AnonymousType_1"
                 }
             },
             required: ["id", "name", "type"]
+        },
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -249,9 +255,8 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["item", "pushPath"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, item }) => pushPath.send({ name: item.name }));
-const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((__cf_pattern_input, { pushPath }) => {
     const item = __cf_pattern_input.key("element");
-    const pushPath = __cf_pattern_input.key("params", "pushPath");
     return (<button type="button" onClick={__cfHandler_2({
         pushPath: pushPath,
         item: {
@@ -263,27 +268,26 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 }, {
     type: "object",
     properties: {
-        element: {
-            $ref: "#/$defs/Entry"
-        },
-        params: {
+        pushPath: {
             type: "object",
             properties: {
-                pushPath: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"],
-                    asCell: ["stream"]
+                name: {
+                    type: "string"
                 }
             },
-            required: ["pushPath"]
+            required: ["name"],
+            asCell: ["stream"]
         }
     },
-    required: ["element", "params"],
+    required: ["pushPath"]
+} as const satisfies __cfHelpers.JSONSchema), {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        }
+    },
+    required: ["element"],
     $defs: {
         Entry: {
             type: "object",
@@ -365,9 +369,9 @@ export default pattern((__cf_pattern_input) => {
                     p: p
                 }).for("unsorted", true);
                 const items = __cfLift_3({ unsorted: unsorted }).for("items", true);
-                return items.mapWithPattern(__cfPattern_1, {
+                return items.mapWithPattern(__cfPattern_1.curry({
                     pushPath: pushPath
-                });
+                }));
             })()}
       </div>)
     };

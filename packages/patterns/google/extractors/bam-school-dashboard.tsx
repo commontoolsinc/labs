@@ -24,7 +24,6 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  type PatternFactory,
   TILE_UI,
   UI,
   wish,
@@ -142,13 +141,6 @@ interface SchoolEmailAnalysis {
   error?: unknown;
   result?: SchoolEventResult;
 }
-
-type ReactiveArray<T> = T[] & {
-  mapWithPattern<I, S>(
-    op: PatternFactory<I, S>,
-    params: Record<string, unknown>,
-  ): S[];
-};
 
 const analyzeSchoolEmail = pattern<Email, SchoolEmailAnalysis>((email) => {
   const sourceType = computed(() => classifySource(email.from || ""));
@@ -407,10 +399,7 @@ export default pattern<PatternInput, PatternOutput>(
     // Analyze each email to extract school event information
     // ==========================================================================
 
-    const emailAnalyses = (allEmails as ReactiveArray<Email>).mapWithPattern(
-      analyzeSchoolEmail,
-      {},
-    );
+    const emailAnalyses = allEmails.map((email) => analyzeSchoolEmail(email));
 
     // Count pending/completed analyses
     const pendingCount = computed(

@@ -82,6 +82,12 @@ deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/search.tool --query "dem
 deno task cf exec /tmp/cf/<space>/entities/<piece-id>/result/search.tool --query "demo"
 ```
 
+Mounted tools are direct or metadata-wrapped `PatternFactory` values. Their
+flags come from the factory's public argument schema; captured closure params
+remain private. FUSE projects stored factories through the tagged Fabric codec
+and the CLI asks the runner to materialize the selected artifact before
+invocation.
+
 ## Workflow
 
 1. Deploy pattern: `cf piece new`

@@ -161,7 +161,8 @@ export function isAliasBinding(value: any): value is AliasBinding {
   return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
     Array.isArray(value.$alias.path) &&
     (value.$alias.partialCause !== undefined ||
-      value.$alias.cell === "result" || value.$alias.cell === "argument");
+      value.$alias.cell === "result" || value.$alias.cell === "argument" ||
+      value.$alias.cell === "params");
 }
 
 /**

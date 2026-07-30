@@ -4,6 +4,7 @@ import {
   type CallableResultRef,
   executeResolvedCallable,
   type InvocationOutcome,
+  prepareResolvedCallableTool,
 } from "./callable.ts";
 import {
   type ExecCommandSpec,
@@ -89,14 +90,28 @@ export async function executeCallableCommand<
     validateRawArgs,
   } = options;
 
-  validateRawArgs?.(rawArgs, commandSpec, resolved);
+  const preparedTool = execution.callableKind === "tool"
+    ? await prepareResolvedCallableTool(execution, deps)
+    : undefined;
+  const effectiveExecution = preparedTool === undefined
+    ? execution
+    : { ...execution, preparedTool };
+  const effectiveCommandSpec = preparedTool === undefined
+    ? commandSpec
+    : preparedTool.commandSpec;
 
-  const invocation = await resolveExecInvocation(commandSpec, rawArgs, deps);
+  validateRawArgs?.(rawArgs, effectiveCommandSpec, resolved);
+
+  const invocation = await resolveExecInvocation(
+    effectiveCommandSpec,
+    rawArgs,
+    deps,
+  );
   const parsed = invocation.parsed;
 
   if (parsed.showHelp) {
     return {
-      helpText: renderHelp(commandSpec, parsed),
+      helpText: renderHelp(effectiveCommandSpec, parsed),
       parsed,
       resolved,
     };
@@ -105,10 +120,10 @@ export async function executeCallableCommand<
   const input = invocation.input;
 
   const executed = await executeResolvedCallable(
-    execution,
+    effectiveExecution,
     parsed.usedJsonInput
       ? input
-      : normalizeCallableInputForExecution(commandSpec, input),
+      : normalizeCallableInputForExecution(effectiveCommandSpec, input),
     deps,
   );
 

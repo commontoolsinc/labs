@@ -5,7 +5,6 @@ import {
   handler,
   NAME,
   pattern,
-  patternTool,
   str,
   UI,
   type VNode,
@@ -534,6 +533,71 @@ const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
   },
 );
 
+const searchEventsPattern = pattern<
+  { query: string; events: CalendarEvent[] },
+  CalendarEvent[]
+>(({ query, events }) =>
+  computed(() => {
+    if (!query || !events) return [];
+    const lowerQuery = query.toLowerCase();
+    return events.filter((event) =>
+      event.summary?.toLowerCase().includes(lowerQuery) ||
+      event.description?.toLowerCase().includes(lowerQuery) ||
+      event.location?.toLowerCase().includes(lowerQuery)
+    );
+  })
+);
+
+const getEventCountPattern = pattern<{ events: CalendarEvent[] }, number>(
+  ({ events }) => computed(() => events?.length || 0),
+);
+
+const getUpcomingEventsPattern = pattern<
+  { count: number; events: CalendarEvent[] },
+  string
+>(({ count, events }) =>
+  computed(() => {
+    if (!events || events.length === 0) return "No events";
+    const now = new Date();
+    const upcoming = events
+      .filter((e) => new Date(e.startDateTime || e.start) >= now)
+      .slice(0, count || 5);
+    return upcoming.map((event) =>
+      `${
+        formatEventDate(
+          event.startDateTime,
+          event.endDateTime,
+          event.isAllDay,
+        )
+      }: ${event.summary}${event.location ? ` @ ${event.location}` : ""}`
+    ).join("\n");
+  })
+);
+
+const getTodaysEventsPattern = pattern<
+  { events: CalendarEvent[] },
+  string
+>(({ events }) =>
+  computed(() => {
+    if (!events || events.length === 0) return "No events";
+    const today = new Date().toISOString().split("T")[0];
+    const todayEvents = events.filter((e) =>
+      e.start === today ||
+      Boolean(e.startDateTime && e.startDateTime.startsWith(today))
+    );
+    if (todayEvents.length === 0) return "No events today";
+    return todayEvents.map((event) =>
+      `${
+        formatEventDate(
+          event.startDateTime,
+          event.endDateTime,
+          event.isAllDay,
+        )
+      }: ${event.summary}`
+    ).join("\n");
+  })
+);
+
 // Settings is not optional - we provide it with a default
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
   ({ settings, overrideAuth }) => {
@@ -987,79 +1051,17 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
         selectedCalendarIds,
       }),
       // Pattern tools for omnibot
-      searchEvents: patternTool(
-        pattern(
-          ({ query, events }: { query: string; events: CalendarEvent[] }) => {
-            return computed(() => {
-              if (!query || !events) return [];
-              const lowerQuery = query.toLowerCase();
-              return events.filter((event) =>
-                event.summary?.toLowerCase().includes(lowerQuery) ||
-                event.description?.toLowerCase().includes(lowerQuery) ||
-                event.location?.toLowerCase().includes(lowerQuery)
-              );
-            });
-          },
-        ),
-        { events },
+      searchEvents: pattern<{ query: string }, CalendarEvent[]>(({ query }) =>
+        searchEventsPattern({ query, events })
       ),
-      getEventCount: patternTool(
-        pattern(({ events }: { events: CalendarEvent[] }) => {
-          return computed(() => events?.length || 0);
-        }),
-        { events },
+      getEventCount: pattern<Record<string, never>, number>(() =>
+        getEventCountPattern({ events })
       ),
-      getUpcomingEvents: patternTool(
-        pattern(
-          ({ count, events }: { count: number; events: CalendarEvent[] }) => {
-            const nowCell = wish<number>({ query: "#now/60" });
-            return computed(() => {
-              if (!events || events.length === 0) return "No events";
-              if (nowCell.result == null) return "No events";
-              const now = new Date(nowCell.result);
-              const upcoming = events
-                .filter((e) => new Date(e.startDateTime || e.start) >= now)
-                .slice(0, count || 5);
-              return upcoming.map((event) =>
-                `${
-                  formatEventDate(
-                    event.startDateTime,
-                    event.endDateTime,
-                    event.isAllDay,
-                  )
-                }: ${event.summary}${
-                  event.location ? ` @ ${event.location}` : ""
-                }`
-              ).join("\n");
-            });
-          },
-        ),
-        { events },
+      getUpcomingEvents: pattern<{ count: number }, string>(({ count }) =>
+        getUpcomingEventsPattern({ count, events })
       ),
-      getTodaysEvents: patternTool(
-        pattern(({ events }: { events: CalendarEvent[] }) => {
-          const nowCell = wish<number>({ query: "#now/60" });
-          return computed(() => {
-            if (!events || events.length === 0) return "No events";
-            if (nowCell.result == null) return "No events";
-            const today = new Date(nowCell.result).toISOString().split("T")[0];
-            const todayEvents = events.filter((e) =>
-              e.start === today ||
-              (e.startDateTime && e.startDateTime.startsWith(today))
-            );
-            if (todayEvents.length === 0) return "No events today";
-            return todayEvents.map((event) =>
-              `${
-                formatEventDate(
-                  event.startDateTime,
-                  event.endDateTime,
-                  event.isAllDay,
-                )
-              }: ${event.summary}`
-            ).join("\n");
-          });
-        }),
-        { events },
+      getTodaysEvents: pattern<Record<string, never>, string>(() =>
+        getTodaysEventsPattern({ events })
       ),
     };
   },

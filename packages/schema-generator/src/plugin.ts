@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { SchemaGenerator } from "./schema-generator.ts";
-import type { SchemaGenerationOptions } from "./interface.ts";
+import type { SchemaGenerationOptions, SchemaHint } from "./interface.ts";
 
 /**
  * Plugin function that creates a schema transformer with access to both
@@ -15,8 +15,9 @@ export function createSchemaTransformerV2() {
       checker: ts.TypeChecker,
       typeArg?: ts.TypeNode,
       options?: SchemaGenerationOptions,
-      schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+      schemaHints?: WeakMap<ts.Node, SchemaHint>,
       sourceFile?: ts.SourceFile,
+      typeRegistry?: WeakMap<ts.Node, ts.Type>,
     ) {
       return generator.generateSchema(
         type,
@@ -25,6 +26,7 @@ export function createSchemaTransformerV2() {
         options,
         schemaHints,
         sourceFile,
+        typeRegistry,
       );
     },
 
@@ -32,7 +34,7 @@ export function createSchemaTransformerV2() {
       typeNode: ts.TypeNode,
       checker: ts.TypeChecker,
       typeRegistry?: WeakMap<ts.Node, ts.Type>,
-      schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+      schemaHints?: WeakMap<ts.Node, SchemaHint>,
       sourceFile?: ts.SourceFile,
       options?: SchemaGenerationOptions,
     ) {

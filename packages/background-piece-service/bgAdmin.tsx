@@ -217,9 +217,9 @@ const css = `
 }
 `;
 
-export const pieceRowPattern = pattern((input: any) => {
-  const piece = input.key("element");
-  const pieces = input.key("params", "pieces");
+export const pieceRowPattern = pattern<
+  { piece: BGPieceEntry; pieces: BGPieceEntry[] }
+>(({ piece, pieces }) => {
   const {
     details,
     name,
@@ -262,7 +262,7 @@ export default pattern<InputSchema, ResultSchema>(
         <div>
           <style>{css}</style>
           <div className="bg-piece-container">
-            {(pieces as any).mapWithPattern(pieceRowPattern, { pieces })}
+            {pieces.map((piece) => pieceRowPattern({ piece, pieces }))}
           </div>
         </div>
       ),

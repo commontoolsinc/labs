@@ -141,7 +141,10 @@ export function isTelemetryNotification(
   return (
     isRecord(value) &&
     value.type === NotificationType.Telemetry &&
-    typeof value.marker === "object"
+    typeof value.marker === "object" &&
+    (value.markerEncoding === undefined ||
+      value.markerEncoding === "fabric-json" &&
+        typeof value.encodedMarker === "string")
   );
 }
 
@@ -162,6 +165,9 @@ export function isVDomBatchNotification(
     isRecord(value) &&
     value.type === NotificationType.VDomBatch &&
     typeof value.batchId === "number" &&
-    Array.isArray(value.ops)
+    Array.isArray(value.ops) &&
+    (value.opsEncoding === undefined ||
+      value.opsEncoding === "fabric-json" &&
+        typeof value.encodedOps === "string")
   );
 }

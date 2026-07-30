@@ -9,12 +9,14 @@ import {
   contractHash,
   decodeBaseline,
   encodeBaseline,
+  filterRetiredBaselines,
   type Finding,
   findRetired,
   parseArgs,
   parseShard,
   type PatternContract,
   readBaselines,
+  retirementConfigurationIssues,
   shouldRecord,
   writeBaseline,
 } from "./pattern-compat-lib.ts";
@@ -124,6 +126,57 @@ describe("checkPattern", () => {
       pattern: "system/gone.tsx",
       baselines: ["v1"],
     }]);
+  });
+});
+
+describe("filterRetiredBaselines", () => {
+  it("retires only an exact pattern and baseline label pair", () => {
+    const homeV1 = baseline("v1", EMPTY_ARGUMENT, RESULT_WITH_TITLE);
+    const homeV2 = baseline("v2", EMPTY_ARGUMENT, RESULT_WITHOUT_TITLE);
+    const result = filterRetiredBaselines(
+      "system/home.tsx",
+      [homeV1, homeV2],
+      [{
+        pattern: "system/home.tsx",
+        baseline: "v1",
+        reason: "Pre-launch data was wiped.",
+      }, {
+        pattern: "system/other.tsx",
+        baseline: "v2",
+        reason: "Different pattern.",
+      }],
+    );
+
+    expect(result).toEqual([homeV2]);
+  });
+
+  it("rejects duplicate, unexplained, and nonexistent retirements", () => {
+    const retirements = [{
+      pattern: "system/home.tsx",
+      baseline: "v1",
+      reason: "",
+    }, {
+      pattern: "system/home.tsx",
+      baseline: "v1",
+      reason: "Duplicate.",
+    }, {
+      pattern: "system/home.tsx",
+      baseline: "missing",
+      reason: "No matching evidence.",
+    }];
+    const issues = retirementConfigurationIssues(
+      retirements,
+      new Map([[
+        "system/home.tsx",
+        [baseline("v1", EMPTY_ARGUMENT, RESULT_WITH_TITLE)],
+      ]]),
+    );
+
+    expect(issues).toEqual([
+      "retirement system/home.tsx/v1 has no reason",
+      "duplicate retirement system/home.tsx/v1",
+      "retirement system/home.tsx/missing does not name a recorded baseline",
+    ]);
   });
 });
 

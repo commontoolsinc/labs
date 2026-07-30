@@ -220,7 +220,7 @@ export default pattern((state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: state }), <span>No events yet</span>, <div>
-              {state.key("recentEvents").mapWithPattern(__cfPattern_1, {})}
+              {state.key("recentEvents").mapWithPattern(__cfPattern_1)}
             </div>)}
         {__cfHelpers.ifElse({
             type: "boolean",

@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { detectCallKind } from "./call-kind.ts";
+import {
+  detectCallKind,
+  findEnclosingPatternBuilderCallbackDescriptor,
+} from "./call-kind.ts";
 import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 
 export type ReactiveContextKind = "pattern" | "compute" | "neutral";
@@ -113,10 +116,17 @@ function getMarkedSyntheticCallbackContext(
 
 export function findEnclosingCallbackContext(
   node: ts.Node,
+  checker?: ts.TypeChecker,
 ): CallbackContext | undefined {
   let current: ts.Node | undefined = resolveContextAnchor(node).parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const patternDescriptor = checker
+        ? findEnclosingPatternBuilderCallbackDescriptor(current, checker)
+        : undefined;
+      if (patternDescriptor) {
+        return { callback: current, call: patternDescriptor.call };
+      }
       const parent: ts.Node | undefined = current.parent;
       if (parent && ts.isCallExpression(parent)) {
         if (parent.arguments.includes(current as ts.Expression)) {

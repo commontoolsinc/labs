@@ -17,7 +17,7 @@ import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-import { isDeepFrozen } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -25,6 +25,8 @@ import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { isAdmittedFabricFactory, sealFactoryState } from "./fabric-factory.ts";
+import { CODEC_TYPE_TAGS } from "./codec-common/codec-type-tags.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -233,11 +235,34 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       }
       break;
 
+    case "function": {
+      if (!isAdmittedFabricFactory(value)) {
+        throw new Error("Cannot hash an arbitrary function value");
+      }
+      feedCodecValue(
+        hasher,
+        CODEC_TYPE_TAGS.Factory,
+        sealFactoryState(value, deepFreeze),
+      );
+      break;
+    }
+
     default:
       throw new Error(
         `hashOf: unsupported type: ${typeof value}`,
       );
   }
+}
+
+/** Feed the shared TAG_INSTANCE + codec-tag + codec-state representation. */
+function feedCodecValue(
+  hasher: IncrementalHasher,
+  typeTag: string,
+  state: unknown,
+): void {
+  hasher.update(TAG_INSTANCE_BYTES);
+  hasher.update(getStringRep(typeTag));
+  feedValue(hasher, state);
 }
 
 /**
@@ -303,11 +328,12 @@ function feedObjectValue(
 
     case NATIVE_TAGS.FabricInstance: {
       const fabInst = value as BaseFabricInstance;
-      hasher.update(TAG_INSTANCE_BYTES);
       const codec = codecOf(fabInst);
-      hasher.update(getStringRep(codec.tagForValue(fabInst)));
-      const state = codec.encode(fabInst);
-      feedValue(hasher, state);
+      feedCodecValue(
+        hasher,
+        codec.tagForValue(fabInst),
+        codec.encode(fabInst),
+      );
       return;
     }
 
@@ -461,6 +487,25 @@ function cachedPrimitiveHash(
   return result;
 }
 
+/** Hash an object-or-callable reference, using the deep-frozen identity cache. */
+function hashReferenceValue(
+  value: object,
+  stringOkay: boolean,
+): FabricHash | string {
+  // Even if we don't know that the reference is deep-frozen, a cache lookup
+  // is safe: mutable values are never inserted.
+  const cached = frozenObjectHashCache.get(value);
+  if (cached !== undefined) return cached;
+
+  if (isDeepFrozen(value)) {
+    const result = computeHash(value);
+    frozenObjectHashCache.set(value, result);
+    return result;
+  }
+
+  return stringOkay ? computeHashAsString(value) : computeHash(value);
+}
+
 //
 // Public API
 //
@@ -511,25 +556,14 @@ function hashOfInternal(
       if (value === null) {
         return NULL_HASH;
       }
+      return hashReferenceValue(value, stringOkay);
+    }
 
-      const obj = value as object;
-
-      // Even if we don't know that `obj` is deep-frozen, it's okay to look it
-      // up in the cache for same (we just won't find it if it's not
-      // deep-frozen). And doing this lookup first minimizes the number of
-      // checks needed on the fast path.
-      const cached = frozenObjectHashCache.get(obj);
-      if (cached !== undefined) {
-        return cached;
+    case "function": {
+      if (!isAdmittedFabricFactory(value)) {
+        throw new Error("Cannot hash an arbitrary function value");
       }
-
-      if (isDeepFrozen(value)) {
-        const result = computeHash(value);
-        frozenObjectHashCache.set(obj, result);
-        return result;
-      }
-
-      return stringOkay ? computeHashAsString(value) : computeHash(value);
+      return hashReferenceValue(value as unknown as object, stringOkay);
     }
 
     default: {

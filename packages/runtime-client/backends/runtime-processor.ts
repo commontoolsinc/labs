@@ -11,6 +11,10 @@ import {
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
 import {
+  decodeFactoryAwareIPCValue,
+  encodeFactoryAwareIPCValue,
+} from "../fabric-value-ipc.ts";
+import {
   getLogger,
   getLoggerCountsBreakdown,
   getLoggerFlagsBreakdown,
@@ -41,7 +45,10 @@ import {
   type SigilLink,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { linkRefPayload } from "@commonfabric/runner/shared";
+import {
+  linkRefPayload,
+  type RuntimeTelemetryMarkerResult,
+} from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -132,6 +139,7 @@ import {
   type SetWriteStackTraceMatchersRequest,
   type SlugResponse,
   type SpaceResponse,
+  type TelemetryNotification,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -205,6 +213,19 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   return new URL(url, spaceBaseUrl).href;
 }
 
+export function telemetryNotification(
+  marker: RuntimeTelemetryMarkerResult,
+): TelemetryNotification {
+  const encoded = encodeFactoryAwareIPCValue(marker);
+  return encoded.valueEncoding === undefined
+    ? { type: NotificationType.Telemetry, marker }
+    : {
+      type: NotificationType.Telemetry,
+      marker: {} as RuntimeTelemetryMarkerResult,
+      encodedMarker: encoded.value as string,
+      markerEncoding: encoded.valueEncoding,
+    };
+}
 /** Whether the home root must take the reconcile-before-start path. */
 export function shouldReconcileHomeRoot(
   runtime: Pick<Runtime, "experimental">,
@@ -860,10 +881,11 @@ export class RuntimeProcessor {
           path: [...link.path, ...request.cell.path],
         });
       } else {
-        // For meta cells that aren't link cells, return the raw data
-        return {
-          value: rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
-        };
+        // For meta cells that aren't link cells, encode the value through the
+        // factory-aware IPC codec so Factory@1 shells survive the worker hop.
+        return encodeFactoryAwareIPCValue(
+          rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
+        );
       }
     }
     const value = cell.get();
@@ -880,18 +902,19 @@ export class RuntimeProcessor {
         includeCfcLabelView: true,
       }),
     ) as JSONValue | undefined;
+    const encoded = encodeFactoryAwareIPCValue(converted);
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
     const refField = request.includeRef ? { cell: createCellRef(cell) } : {};
     if (!request.includeCfcLabel) {
-      return { value: converted, ...refField };
+      return { ...encoded, ...refField };
     }
     // Same display-label read as handleCellGetCfcLabel: pure store read, then
     // redact Caveat.source for display (audit 28b). One round-trip for both.
     const cfcLabel = cfcLabelViewForCell(cell);
     return {
-      value: converted,
+      ...encoded,
       ...refField,
       cfcLabel: cfcLabel === undefined
         ? undefined
@@ -931,7 +954,9 @@ export class RuntimeProcessor {
   ): void {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
-    const value = mapCellRefsToSigilLinks(request.value);
+    const value = mapCellRefsToSigilLinks(
+      decodeFactoryAwareIPCValue(request.value, request.valueEncoding),
+    );
     if (blind) {
       markUiInputBlindWriteTx(tx);
       // Renderer-input provenance that survives to commit, so the scheduler can
@@ -959,7 +984,9 @@ export class RuntimeProcessor {
   handleCellSend(request: CellSendRequest): void {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
-    cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
+    cell.withTx(tx).send(mapCellRefsToSigilLinks(
+      decodeFactoryAwareIPCValue(request.event, request.eventEncoding),
+    ));
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
     // confirmation/rollback and must not block cell IPC.
@@ -999,6 +1026,7 @@ export class RuntimeProcessor {
           includeCfcLabelView: true,
         }),
       );
+      const encoded = encodeFactoryAwareIPCValue(converted);
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel
@@ -1014,7 +1042,7 @@ export class RuntimeProcessor {
         self.postMessage({
           type: NotificationType.CellUpdate,
           cell: request.cell,
-          value: converted,
+          ...encoded,
           ...(request.includeCfcLabel ? { cfcLabel: redactedLabel } : {}),
         })
       );
@@ -1501,10 +1529,7 @@ export class RuntimeProcessor {
   #onTelemetry = (event: Event) => {
     if (!this.#telemetryEnabled) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
-    self.postMessage({
-      type: NotificationType.Telemetry,
-      marker,
-    });
+    self.postMessage(telemetryNotification(marker));
   };
 
   getPatternSources(
@@ -1852,10 +1877,16 @@ export class RuntimeProcessor {
       membershipProvider: this.renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
+        const encoded = encodeFactoryAwareIPCValue(ops);
+        const wireOps = encoded.valueEncoding === undefined ? { ops } : {
+          ops: [],
+          encodedOps: encoded.value as string,
+          opsEncoding: encoded.valueEncoding,
+        };
         self.postMessage({
           type: NotificationType.VDomBatch,
           batchId,
-          ops,
+          ...wireOps,
           mountId,
           rootId: reconciler.getRootNodeId(),
         });

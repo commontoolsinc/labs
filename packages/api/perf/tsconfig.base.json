@@ -3,6 +3,14 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "Node16",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable",
+      "DOM.AsyncIterable",
+      "ScriptHost",
+      "ESNext.TypedArrays"
+    ],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,

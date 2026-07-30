@@ -121,6 +121,9 @@ One line per archived document; each document's header carries the fuller
 
 ### Executed plans and work orders
 
+- [first-class-serializable-factories.md](plans/first-class-serializable-factories.md)
+  — first-class Factory@1 pattern, module, and handler values, closure
+  conversion, dynamic materialization, and pre-launch compatibility cleanup.
 - [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
   — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)

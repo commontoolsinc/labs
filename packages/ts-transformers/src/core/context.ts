@@ -193,6 +193,15 @@ export class TransformationContext {
     return this.options.state?.isSyntheticComputeOwnedNode(node) ?? false;
   }
 
+  /** Preserve trusted callable derivations through late module-data lowering. */
+  markLiveFactoryDerivation(node: ts.Node): void {
+    this.options.state?.markLiveFactoryDerivation(node);
+  }
+
+  isLiveFactoryDerivation(node: ts.Node): boolean {
+    return this.options.state?.isLiveFactoryDerivation(node) ?? false;
+  }
+
   /**
    * Mark a builder call/new node that SchemaInjection has finalized, so a
    * later re-traversal of the transformer's own output skips re-injection.
@@ -229,6 +238,19 @@ export class TransformationContext {
    */
   lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
     return this.options.state?.lookupSchemaHint(node);
+  }
+
+  recordFactoryContractForSymbol(
+    symbol: ts.Symbol,
+    contract: NonNullable<SchemaHint["factoryContracts"]>[number],
+  ): void {
+    this.options.state?.recordFactoryContractForSymbol(symbol, contract);
+  }
+
+  lookupFactoryContractsForSymbol(
+    symbol: ts.Symbol,
+  ): NonNullable<SchemaHint["factoryContracts"]> | undefined {
+    return this.options.state?.lookupFactoryContractsForSymbol(symbol);
   }
 
   /**
@@ -354,7 +376,7 @@ export class TransformationContext {
       return this.#callbackContextCache.get(node) ?? undefined;
     }
 
-    const info = findEnclosingCallbackContext(node);
+    const info = findEnclosingCallbackContext(node, this.checker);
     this.#callbackContextCache.set(node, info ?? null);
     return info;
   }

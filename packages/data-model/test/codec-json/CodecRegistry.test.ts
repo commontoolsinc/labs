@@ -10,6 +10,12 @@ import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { type FabricValue } from "@/interface.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfLift_1",
+} as const;
 
 /**
  * Test codec that matches a single pre-set value (by `===`) and records
@@ -166,6 +172,37 @@ describe("CodecRegistry", () => {
       registry.registerSelfRep("number");
       expect(registry.codecFromValue(42)).toBe(codec); // codec match
       expect(registry.codecFromValue(99)).toBe(SELF_REP); // self-rep fallback
+    });
+  });
+
+  describe("registerCallable()", () => {
+    it("dispatches only admitted callable factories and registers their tag", () => {
+      const factory = registerFabricFactory(() => undefined, "module", {
+        kind: "module",
+        ref: FACTORY_REF,
+      });
+      const codec = new TestCodec("Factory@1", undefined, factory);
+      const registry = new CodecRegistry();
+      registry.registerCallable(codec);
+
+      expect(registry.codecFromValue(factory)).toBe(codec);
+      expect(registry.codecFromTag("Factory@1")).toBe(codec);
+      expect(registry.codecFromValue((() => undefined) as never))
+        .toBeUndefined();
+    });
+
+    it("does not dispatch a function through constructor registration", () => {
+      const fn = () => undefined;
+      const codec = new TestCodec(
+        "Function@1",
+        Function as unknown as Constructor,
+        fn as never,
+      );
+      const registry = new CodecRegistry();
+      registry.register(codec);
+
+      expect(registry.codecFromValue(fn as never)).toBeUndefined();
+      expect(codec.canEncodeCalled).toBe(false);
     });
   });
 

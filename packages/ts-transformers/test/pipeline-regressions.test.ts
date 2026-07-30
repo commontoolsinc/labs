@@ -237,6 +237,7 @@ Deno.test(
     assertEquals(CFC_TRANSFORMER_STAGE_NAMES, [
       "CastValidationTransformer",
       "EmptyArrayOfValidationTransformer",
+      "FactoryAuthoringValidationTransformer",
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
       "MergeablePushValidationTransformer",
@@ -244,6 +245,8 @@ Deno.test(
       "CfcPolicyOfValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
       "AssertDiagnosticsTransformer",
+      "FrameworkProvidedForwardingTransformer",
+      "SymbolicFactoryCallTransformer",
       "LiftLoweringTransformer",
       "ClosureTransformer",
       "PatternOwnedExpressionSiteLoweringTransformer",
@@ -251,6 +254,7 @@ Deno.test(
       "WriteAuthorizedByValidationTransformer",
       "PatternCallbackLoweringTransformer",
       "SchemaInjectionTransformer",
+      "FrameworkProvidedTransformer",
       "BuilderCallHoistingTransformer",
       "SchemaGeneratorTransformer",
       "ReactiveVariableForTransformer",
@@ -436,30 +440,50 @@ Deno.test(
       return acc;
     };
 
-    const mapSchemas = emittedSchemas(root)
-      .filter((schema) => {
-        const required = schema.required;
-        return Array.isArray(required) && required.includes("element") &&
-          required.includes("params");
-      })
-      .map((schema) => ({ schema, keys: keysDeep(schema) }));
+    const mapSchemas = callsNamed(root, "pattern").flatMap((call) => {
+      const carrier = call.arguments[0];
+      const publicSchema = call.arguments[1];
+      if (
+        !carrier || !publicSchema || !ts.isCallExpression(carrier) ||
+        !ts.isPropertyAccessExpression(carrier.expression) ||
+        carrier.expression.name.text !== "withPatternParamsSchema" ||
+        !carrier.arguments[1]
+      ) {
+        return [];
+      }
+      const publicValue = literalToValue(publicSchema);
+      const privateValue = literalToValue(carrier.arguments[1]);
+      const publicKeys = keysDeep(publicValue);
+      if (!publicKeys.has("element") || publicKeys.has("params")) return [];
+      return [{
+        publicKeys,
+        privateKeys: keysDeep(privateValue),
+      }];
+    });
 
-    const outerMap = mapSchemas.find(({ keys }) =>
-      keys.has("globalAccent") && keys.has("selectedTaskId") &&
-      keys.has("hoveredSectionId")
+    const outerMap = mapSchemas.find(({ privateKeys }) =>
+      privateKeys.has("globalAccent") && privateKeys.has("selectedTaskId") &&
+      privateKeys.has("hoveredSectionId")
     );
     assert(outerMap, "expected outer sections map schema");
     for (const field of ["id", "title", "expanded", "accent", "tasks"]) {
-      assert(outerMap.keys.has(field), `outer map schema missing ${field}`);
+      assert(
+        outerMap.publicKeys.has(field),
+        `outer map schema missing ${field}`,
+      );
     }
 
-    const innerMap = mapSchemas.find(({ keys }) =>
-      keys.has("sectionIndex") && keys.has("selectedTaskId") &&
-      keys.has("hoveredSectionId") && !keys.has("globalAccent")
+    const innerMap = mapSchemas.find(({ privateKeys }) =>
+      privateKeys.has("sectionIndex") && privateKeys.has("selectedTaskId") &&
+      privateKeys.has("hoveredSectionId") &&
+      !privateKeys.has("globalAccent")
     );
     assert(innerMap, "expected inner tasks map schema");
     for (const field of ["id", "label", "done", "tags", "note"]) {
-      assert(innerMap.keys.has(field), `inner map schema missing ${field}`);
+      assert(
+        innerMap.publicKeys.has(field),
+        `inner map schema missing ${field}`,
+      );
     }
   },
 );
@@ -759,46 +783,41 @@ Deno.test(
       "expected transformed examples.mapWithPattern call site",
     );
 
-    // CT-1655: the whole `pattern(...)` call for this map is hoisted to a
-    // module-scope `const __cfPattern_N = __cfHelpers.pattern(...)`, so the
-    // callback (and its `__cf_pattern_input.key("params", …)` prologue) now
-    // lives at module scope, ABOVE the `examples.mapWithPattern(__cfPattern_N,
-    // …)` call site rather than inline at it. The property this test guards is
-    // unchanged: the examples capture's params-keyed prologue survives the
-    // pipeline.
-    // `const <name> = __cf_pattern_input.key("params", "<seg>")`.
-    const hasParamsPrologue = (name: string, seg: string): boolean =>
-      collect(root, ts.isVariableDeclaration).some((decl) => {
-        if (!ts.isIdentifier(decl.name) || decl.name.text !== name) {
-          return false;
-        }
-        const init = decl.initializer;
-        if (!init || !ts.isCallExpression(init)) return false;
-        const callee = init.expression;
+    // Captures now live in callback argument 1 and are bound exactly once at
+    // the call site; they never become public `params` key reads.
+    const privateBindings = new Set(
+      callsNamed(root, "withPatternParamsSchema").flatMap((carrier) => {
+        const callback = carrier.arguments[0];
         if (
-          !ts.isPropertyAccessExpression(callee) ||
-          callee.name.text !== "key" ||
-          !ts.isIdentifier(callee.expression) ||
-          callee.expression.text !== "__cf_pattern_input"
-        ) return false;
-        const args = init.arguments.map((a) =>
-          ts.isStringLiteralLike(a) ? a.text : undefined
+          !callback ||
+          (!ts.isArrowFunction(callback) &&
+            !ts.isFunctionExpression(callback))
+        ) return [];
+        const privateParam = callback.parameters[1]?.name;
+        if (!privateParam || !ts.isObjectBindingPattern(privateParam)) {
+          return [];
+        }
+        return privateParam.elements.flatMap((element) =>
+          ts.isIdentifier(element.name) ? [element.name.text] : []
         );
-        return args[0] === "params" && args[1] === seg;
-      });
+      }),
+    );
+    const curriedCaptures = new Set(
+      callsNamed(root, "curry").flatMap((call) => {
+        const captures = call.arguments[0];
+        if (!captures || !ts.isObjectLiteralExpression(captures)) return [];
+        return captures.properties.flatMap((property) =>
+          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+            ? [property.name.text]
+            : []
+        );
+      }),
+    );
 
-    assert(
-      hasParamsPrologue("selectedExampleId", "selectedExampleId"),
-      "expected selectedExampleId params-keyed prologue",
-    );
-    assert(
-      hasParamsPrologue("currentItem", "currentItem"),
-      "expected currentItem params-keyed prologue",
-    );
-    assert(
-      hasParamsPrologue("examples", "examples"),
-      "expected examples params-keyed prologue",
-    );
+    for (const name of ["selectedExampleId", "currentItem", "examples"]) {
+      assert(privateBindings.has(name), `expected private ${name} binding`);
+      assert(curriedCaptures.has(name), `expected curried ${name} capture`);
+    }
   },
 );
 
@@ -837,6 +856,33 @@ Deno.test(
         JSON.stringify(schema.required) === JSON.stringify(wholeBranchRequired)
       ),
       "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: symbolic factory calls survive later passes without a compute wrapper",
+  async () => {
+    const source = `import { pattern, type PatternFactory } from "commonfabric";
+
+type Operation = PatternFactory<{ value: number }, { result: number }>;
+
+export default pattern<{ operation: Operation; value: number }>((input) => ({
+  result: input.operation({ value: input.value }),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    const calls = callsNamed(root, "invokeFactory");
+    assertEquals(calls.length, 1);
+    assert(
+      !calls.some((call) =>
+        isInsideCallNamed(call, "lift") || isInsideCallNamed(call, "derive")
+      ),
+      "invokeFactory must remain a structural builder call through every later pipeline stage",
     );
   },
 );
@@ -1139,6 +1185,42 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
       ),
       "expected module-scope pattern factory to stay in lexical scope instead of being captured as derive data",
     );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: nested pattern public input and closure params stay separate",
+  async () => {
+    const output = await transformSource(
+      `import { pattern } from "commonfabric";
+
+export default pattern<{ prefix: string }>(({ prefix }) => ({
+  child: pattern<{ suffix: string }>(({ suffix }) => ({ prefix, suffix })),
+}));
+`,
+      { types: COMMONFABRIC_TYPES },
+    );
+    const root = parseModule(output);
+    const carrier = callsNamed(root, "withPatternParamsSchema")[0];
+    assert(carrier, "expected compiler params-schema carrier");
+    const callback = carrier.arguments[0];
+    assert(callback && ts.isArrowFunction(callback));
+    assertEquals(callback.parameters.length, 2);
+    assert(ts.isIdentifier(callback.parameters[0]!.name));
+    assert(ts.isObjectBindingPattern(callback.parameters[1]!.name));
+    assertEquals(callback.parameters[1]!.name.getText(root), "{ prefix }");
+
+    const privateSchema = literalToValue(carrier.arguments[1]!) as {
+      properties?: Record<string, unknown>;
+    };
+    assertEquals(Object.keys(privateSchema.properties ?? {}), ["prefix"]);
+    const base = carrier.parent;
+    assert(base && ts.isCallExpression(base));
+    const publicSchema = literalToValue(base.arguments[1]!) as {
+      properties?: Record<string, unknown>;
+    };
+    assertEquals(Object.keys(publicSchema.properties ?? {}), ["suffix"]);
+    assertEquals(callsNamed(root, "curry").length, 1);
   },
 );
 

@@ -8,15 +8,16 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { isAdmittedFabricFactory } from "./fabric-factory.ts";
 import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting
  * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
- * `undefined`, and arrays with `undefined` elements or sparse holes
- * -- in addition to the base fabric types (`null`, `boolean`, `number`,
- * `string`, plain objects, dense arrays).
+ * admitted `FabricFactory` callables, `undefined`, and arrays with `undefined`
+ * elements or sparse holes -- in addition to the base fabric types (`null`,
+ * boolean, number, string, plain objects, dense arrays).
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -57,7 +58,10 @@ export function isFabricValueLayer(
       return Symbol.keyFor(value) !== undefined;
     }
 
-    case "function":
+    case "function": {
+      return isAdmittedFabricFactory(value);
+    }
+
     default: {
       return false;
     }
@@ -71,9 +75,9 @@ export function isFabricValueLayer(
  * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
  * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
  * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
- * `FabricPrimitive`, an array of `FabricValue`s with no named or symbol-keyed
- * properties, `length` aside (sparse holes allowed), or a plain object whose
- * values are all
+ * `FabricPrimitive`, an admitted `FabricFactory`, an array of `FabricValue`s
+ * with no named or symbol-keyed properties, `length` aside (sparse holes
+ * allowed), or a plain object whose values are all
  * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
  * symbol -- whether the value itself or reached anywhere within it -- and for
  * any other class instance (`Date`, `Map`, ...) not representable as a
@@ -95,7 +99,7 @@ export function isFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive answers without
   // allocating the cycle-tracking set or the recursion closure below.
   if (typeof value === "function") {
-    return false;
+    return isAdmittedFabricFactory(value);
   } else if (typeof value === "symbol") {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, matching
@@ -110,7 +114,7 @@ export function isFabricValue(value: unknown): value is FabricValue {
   // the recursion callback once here, reusing the same closure at every layer.
   const seen = new Set<object>();
   const check = (item: unknown): boolean => {
-    if (typeof item === "function") return false;
+    if (typeof item === "function") return isAdmittedFabricFactory(item);
     if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
     if (item === null || typeof item !== "object") {
       // A non-function, non-symbol primitive.

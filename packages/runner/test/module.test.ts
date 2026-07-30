@@ -302,6 +302,7 @@ describe("module", () => {
       expect(clickPattern.derivedInternalCells).toEqual([{
         partialCause: { stream: "click" },
         schema: { default: { $stream: true } },
+        scope: "space",
       }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
@@ -337,6 +338,7 @@ describe("module", () => {
       expect(clickPattern.derivedInternalCells).toEqual([{
         partialCause: generatedStreamCause,
         schema: { default: { $stream: true } },
+        scope: "space",
       }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
@@ -616,11 +618,12 @@ describe("module", () => {
     const hasTrackedImplementation = (
       node: TestNode | undefined,
     ): node is TestNode & {
-      module: TestNode["module"] & {
+      module: Module & {
         implementation: SourceTrackedImplementation;
       };
     } =>
       !!node &&
+      isModule(node.module) &&
       typeof node.module.implementation === "function";
 
     const expectTrackedNode = (

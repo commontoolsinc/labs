@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { listPieceCallables } from "../lib/piece.ts";
 
 const TEST_PATTERN_REF = {
@@ -61,18 +62,22 @@ const SEARCH_RESULT: JSONSchema = {
   properties: { summary: { type: "string" } },
 };
 
+const SEARCH_FACTORY = createFactoryShell({
+  kind: "pattern",
+  ref: {
+    identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    symbol: "search",
+  },
+  argumentSchema: SEARCH_ARGUMENTS,
+  resultSchema: SEARCH_RESULT,
+});
+
 describe("listPieceCallables", () => {
   it("lists handlers and tools with schemas; excludes data; result shadows input", async () => {
     const resultRoot = cell(
       {
         addTopic: { $stream: true },
-        search: {
-          pattern: {
-            argumentSchema: SEARCH_ARGUMENTS,
-            resultSchema: SEARCH_RESULT,
-          },
-          extraParams: { source: "bound-source" },
-        },
+        search: SEARCH_FACTORY,
         topicCount: 3,
       },
       {
@@ -80,16 +85,10 @@ describe("listPieceCallables", () => {
         properties: {
           addTopic: ADD_TOPIC_EVENT,
           search: {
-            type: "object",
-            properties: {
-              pattern: {
-                type: "object",
-                properties: {
-                  argumentSchema: { type: "object" },
-                  resultSchema: { type: "object" },
-                },
-              },
-              extraParams: { type: "object" },
+            asFactory: {
+              kind: "pattern",
+              argumentSchema: SEARCH_ARGUMENTS,
+              resultSchema: SEARCH_RESULT,
             },
           },
           topicCount: { type: "number" },

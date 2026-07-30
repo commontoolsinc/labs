@@ -90,6 +90,10 @@ import {
 } from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership } from "./stat.ts";
 import { ReverseInvalidationQueue } from "./invalidation.ts";
+import {
+  decodeFactoryProjections,
+  decodeHandlerWritePayload,
+} from "./callables.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics
@@ -1699,15 +1703,7 @@ export async function main(argv: string[] = Deno.args) {
 
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
-        const trimmed = text.trim();
-        let value: unknown;
-        try {
-          value = JSON.parse(trimmed);
-        } catch {
-          // Bare string — treat as string value so callers don't need
-          // to double-quote (e.g. `echo book > addItem.handler`).
-          value = trimmed;
-        }
+        const value = decodeHandlerWritePayload(text);
         await bridge.sendToHandlerTarget(writeTarget.target, value);
         // Don't invalidate here — sendToHandlerTarget waits for
         // runtime.idle() + synced(), but the downstream reactive graph
@@ -1882,7 +1878,7 @@ export async function main(argv: string[] = Deno.args) {
       if (writePath.isJsonFile) {
         // .json file: parse as JSON
         try {
-          value = JSON.parse(text);
+          value = decodeFactoryProjections(JSON.parse(text));
         } catch {
           return EINVAL;
         }
@@ -1891,6 +1887,7 @@ export async function main(argv: string[] = Deno.args) {
         const trimmed = text.replace(/\n$/, "");
         try {
           const parsed = JSON.parse(trimmed);
+          const decoded = decodeFactoryProjections(parsed);
           // Only accept JSON primitives (number, boolean, null, string)
           if (
             typeof parsed === "number" ||
@@ -1898,7 +1895,9 @@ export async function main(argv: string[] = Deno.args) {
             parsed === null ||
             typeof parsed === "string"
           ) {
-            value = parsed;
+            value = decoded;
+          } else if (decoded !== parsed) {
+            value = decoded;
           } else {
             // It's an object/array — treat as string for scalar files
             value = trimmed;

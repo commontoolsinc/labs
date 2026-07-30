@@ -9,7 +9,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -166,12 +169,14 @@ describe("Pattern Runner - Core", () => {
     const multipliedArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
         const multiplied = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            ((({ x }: any, index: any, array: any) => {
-              return { multiplied: multiply({ x, index, array }) };
-            }) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              ((({ x }: any, index: any, array: any) => {
+                return { multiplied: multiply({ x, index, array }) };
+              }) as any)(element, index, array)
+            ),
           ),
-          {},
         );
         return { multiplied };
       },
@@ -211,10 +216,12 @@ describe("Pattern Runner - Core", () => {
     const doubleArray = pattern<{ values?: number[] }>(
       ({ values }) => {
         const doubled = (values as any)?.mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((x: any) => double(x)) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              (((x: any) => double(x)) as any)(element, index, array)
+            ),
           ),
-          {},
         ) ?? [];
         return { doubled };
       },
@@ -244,10 +251,12 @@ describe("Pattern Runner - Core", () => {
     const doubleArray = pattern<{ values: number[] }>(
       ({ values }) => {
         const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((x: any) => double(x)) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              (((x: any) => double(x)) as any)(element, index, array)
+            ),
           ),
-          {},
         );
         return { doubled };
       },

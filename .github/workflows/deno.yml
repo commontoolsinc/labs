@@ -116,10 +116,12 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      # Proves every pattern can still be applied over each contract recorded
-      # under packages/patterns/baselines/. The automatic updater performs NO
-      # structural check before swapping a pattern onto a running piece, so an
-      # incompatible schema that merges here reaches every deployed piece.
+      # Proves every pattern can still be applied over each active contract
+      # recorded under packages/patterns/baselines/. Exact retired contracts
+      # remain append-only evidence in the separately reviewed retirement
+      # manifest. The automatic updater performs NO structural check before
+      # swapping a pattern onto a running piece, so an incompatible schema that
+      # merges here reaches every deployed piece.
       - name: 🔎 Check pattern update compatibility
         env:
           PATTERN_COMPAT_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
@@ -243,8 +245,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
-        total: [5]
+        shard: [1, 2, 3, 4, 5, 6]
+        total: [6]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7

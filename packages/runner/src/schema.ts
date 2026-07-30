@@ -63,6 +63,7 @@ import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
+import { materializeFactoryForSchema } from "./factory-materialization.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -970,6 +971,8 @@ export interface ValidateAndTransformOptions {
   traverseCells?: boolean;
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
+  /** False for dependency-only/scheduled reads that must preserve shells. */
+  materializeFactories?: boolean;
 }
 
 export function validateAndTransform(
@@ -1004,6 +1007,7 @@ export function validateAndTransform(
       options?.synced ?? false,
       link,
       cfcLabelView,
+      options?.materializeFactories ?? true,
     ).createObject(
       { ...link, schema: resolvedSchema },
       undefined,
@@ -1048,6 +1052,7 @@ export function validateAndTransform(
     options?.synced ?? false,
     link,
     cfcLabelView,
+    options?.materializeFactories ?? true,
   );
 
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
@@ -1058,7 +1063,15 @@ export function validateAndTransform(
     ) &&
     filteredSchema === undefined
   ) {
-    return createQueryResultProxy(runtime, tx, link, 0, false, cfcLabelView);
+    return createQueryResultProxy(
+      runtime,
+      tx,
+      link,
+      0,
+      false,
+      cfcLabelView,
+      options?.materializeFactories ?? true,
+    );
   }
 
   // Now resolve further links until we get the actual value.
@@ -1179,6 +1192,7 @@ class TransformObjectCreator
     private synced: boolean,
     private baseLink: NormalizedFullLink,
     private cfcLabelView: CfcLabelView | undefined,
+    private materializeFactories: boolean,
   ) {
   }
 
@@ -1317,6 +1331,15 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,
   ): AnyCellWrapping<FabricValue> {
+    if (this.materializeFactories) {
+      const materialized = materializeFactoryForSchema(value, link.schema, {
+        runtime: this.runtime,
+        artifactSpace: link.space,
+      });
+      if (!Object.is(materialized, value)) {
+        return materialized as AnyCellWrapping<FabricValue>;
+      }
+    }
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -1330,6 +1353,7 @@ class TransformObjectCreator
         0,
         false,
         this.labelViewFor(link),
+        this.materializeFactories,
       );
     } else if (isRecord(link.schema)) {
       const schema = asCellCompoundSchemaForValue(link.schema, value) ??
@@ -1370,6 +1394,7 @@ class TransformObjectCreator
           0,
           false,
           this.labelViewFor(link),
+          this.materializeFactories,
         );
       }
       // link.schema is not true, and not asCell/asStream

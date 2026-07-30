@@ -176,6 +176,67 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     expect(ContextualFlowControl.isTrueSchema({ scope: "any" })).toBe(true);
   });
 
+  it("preserves factory metadata and discovers refs in its public schemas", () => {
+    const schema: JSONSchema = {
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: { $ref: "#/$defs/Argument" },
+        resultSchema: { $ref: "#/$defs/Result" },
+      },
+      $defs: {
+        Argument: { type: "string" },
+        Result: { type: "number" },
+      },
+    };
+    const refs = new Set<string>();
+
+    findCfcSchemaRefs(schema, refs);
+
+    expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
+    expect([...refs].sort()).toEqual([
+      "#/$defs/Argument",
+      "#/$defs/Result",
+    ]);
+  });
+
+  it("keeps factory-public refs rooted in their embedded schema", () => {
+    const factorySchema = {
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: {
+          $ref: "#/$defs/Input",
+          $defs: { Input: { type: "string" } },
+        },
+        resultSchema: { type: "number" },
+      },
+    } as const satisfies JSONSchema;
+    const fullSchema = {
+      $defs: { Factory: factorySchema },
+      $ref: "#/$defs/Factory",
+    } as const satisfies JSONSchema;
+
+    expect(
+      ContextualFlowControl.resolveSchemaRef(
+        fullSchema,
+        "#/$defs/Factory",
+      ),
+    ).toEqual(factorySchema);
+  });
+
+  it("accepts schema-light module and handler factory contracts", () => {
+    for (
+      const asFactory of [
+        { kind: "module" },
+        { kind: "handler" },
+      ] as const
+    ) {
+      const refs = new Set<string>();
+      expect(() => findCfcSchemaRefs({ asFactory } as JSONSchema, refs)).not
+        .toThrow();
+      expect(refs.size).toBe(0);
+    }
+  });
+
   it("uses nested property $defs while traversing through array item refs", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {

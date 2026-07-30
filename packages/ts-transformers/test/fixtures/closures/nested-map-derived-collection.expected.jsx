@@ -57,24 +57,18 @@ const __cfLift_1 = __cfHelpers.lift<{
         votes: {
             type: "array",
             items: {
-                $ref: "#/$defs/Vote"
+                type: "object",
+                properties: {
+                    voterName: {
+                        type: "string"
+                    }
+                },
+                required: ["voterName"]
             }
         }
     },
     required: ["options", "votes"],
     $defs: {
-        Vote: {
-            type: "object",
-            properties: {
-                optionId: {
-                    type: "string"
-                },
-                voterName: {
-                    type: "string"
-                }
-            },
-            required: ["optionId", "voterName"]
-        },
         Option: {
             type: "object",
             properties: {
@@ -131,33 +125,30 @@ const __cfLift_2 = __cfHelpers.lift<{
         ranked: {
             type: "array",
             items: {
-                $ref: "#/$defs/OptionTally"
+                type: "object",
+                properties: {
+                    option: {
+                        $ref: "#/$defs/Option"
+                    },
+                    voters: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    }
+                },
+                required: ["option", "voters"]
             }
         }
     },
     required: ["ranked"],
     $defs: {
-        OptionTally: {
-            type: "object",
-            properties: {
-                option: {
-                    $ref: "#/$defs/Option"
-                },
-                voters: {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    }
-                }
-            },
-            required: ["option", "voters"]
-        },
         Option: {
             type: "object",
             properties: {
@@ -246,7 +237,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const tally = __cf_pattern_input.key("element");
-    return (<div>{tally.key("voters").mapWithPattern(__cfPattern_1, {})}</div>);
+    return (<div>{tally.key("voters").mapWithPattern(__cfPattern_1)}</div>);
 }, {
     type: "object",
     properties: {
@@ -348,7 +339,7 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const tally = __cf_pattern_input.key("element");
-    return (<div>{tally.key("voters").mapWithPattern(__cfPattern_3, {})}</div>);
+    return (<div>{tally.key("voters").mapWithPattern(__cfPattern_3)}</div>);
 }, {
     type: "object",
     properties: {
@@ -421,10 +412,10 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
           <div>
-            {ranked.mapWithPattern(__cfPattern_2, {})}
+            {ranked.mapWithPattern(__cfPattern_2)}
           </div>
           <div>
-            {enriched.mapWithPattern(__cfPattern_4, {})}
+            {enriched.mapWithPattern(__cfPattern_4)}
           </div>
         </div>),
     };

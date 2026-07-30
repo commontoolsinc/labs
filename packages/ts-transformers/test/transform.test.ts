@@ -616,7 +616,7 @@ export default pattern(() => {
 
   it("does not re-root pattern factory identifiers in tool descriptors", async () => {
     const source = `
-import { BuiltInLLMTool, pattern, patternTool } from "commonfabric";
+import { BuiltInLLMTool, pattern } from "commonfabric";
 
 export const searchWeb = pattern<{ query: string }, { results: string[] }>(
   ({ query }) => ({ results: [query] }),
@@ -627,7 +627,10 @@ export default pattern(() => {
     searchWeb: {
       pattern: searchWeb,
     },
-    wrappedSearch: patternTool(searchWeb),
+    wrappedSearch: {
+      pattern: searchWeb,
+      description: "Search the web",
+    },
   };
   return { tools };
 });
@@ -652,14 +655,18 @@ export default pattern(() => {
       (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
       p.name.text === "wrappedSearch"
     );
-    assert(wrappedProp && ts.isCallExpression(wrappedProp.initializer));
-    const wrapCall = wrappedProp.initializer;
-    assert(ts.isIdentifier(wrapCall.expression));
-    assertEquals(wrapCall.expression.text, "patternTool");
     assert(
-      wrapCall.arguments.length === 1 &&
-        ts.isIdentifier(wrapCall.arguments[0]!) &&
-        wrapCall.arguments[0].text === "searchWeb",
+      wrappedProp && ts.isObjectLiteralExpression(wrappedProp.initializer),
+    );
+    const wrappedPattern = wrappedProp.initializer.properties.find((property) =>
+      ts.isPropertyAssignment(property) &&
+      ts.isIdentifier(property.name) &&
+      property.name.text === "pattern"
+    );
+    assert(
+      wrappedPattern && ts.isPropertyAssignment(wrappedPattern) &&
+        ts.isIdentifier(wrappedPattern.initializer) &&
+        wrappedPattern.initializer.text === "searchWeb",
     );
     // The pattern factory identifier is never given a stable cause.
     assert(
@@ -703,6 +710,8 @@ export { value };
 
     const enabledByDefault = await transformFiles({
       "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
     });
     const enabledRoot = parseModule(enabledByDefault["/main.ts"]!);
     assert(callsNamed(enabledRoot, "lift").length >= 1);
@@ -710,11 +719,30 @@ export { value };
 
     const disabled = await transformFiles({
       "/main.ts": `/// <cf-disable-transform />\n${source}`,
+    }, {
+      types: COMMONFABRIC_TYPES,
     });
 
     const disabledRoot = parseModule(disabled["/main.ts"]!);
     assertEquals(callsNamed(disabledRoot, "computed").length, 1);
     assertEquals(callsNamed(disabledRoot, "lift").length, 0);
+  });
+
+  it("rejects an authored source that collides with a trusted type source", async () => {
+    await assertRejects(
+      () =>
+        transformFiles({
+          "/main.ts": `
+            import { pattern } from "commonfabric";
+            export default pattern(() => ({ ok: true }));
+          `,
+          "commonfabric.d.ts": `
+            export declare function pattern<T>(callback: () => T): T;
+          `,
+        }, { types: COMMONFABRIC_TYPES }),
+      Error,
+      "collides with trusted Common Fabric test source",
+    );
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {

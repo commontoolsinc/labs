@@ -8,6 +8,10 @@ import {
   validateSource,
 } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import {
+  registerTrustedCommonFabricTestSources,
+  sharedCommonFabricTestSourceNames,
+} from "./trusted-commonfabric-sources.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
 import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
 import type { CfcPolicyCompilerManifestV1 } from "../src/mod.ts";
@@ -182,6 +186,10 @@ function transformWithSchemaInjection(source: string): string {
     });
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTrustedCommonFabricTestSources(
+    program,
+    sharedCommonFabricTestSourceNames(COMMONFABRIC_TYPES),
+  );
   const transformer = new SchemaInjectionTransformer({
     mode: "transform",
     state: new CrossStageState(),

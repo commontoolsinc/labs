@@ -9,6 +9,12 @@ import {
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfFactory_1",
+} as const;
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
 describe("type-check", () => {
@@ -99,6 +105,29 @@ describe("type-check", () => {
       it("returns `true` for a `FabricPrimitive`", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
         expect(isFabricValueLayer(bytes)).toBe(true);
+      });
+
+      it("accepts admitted factories of every kind", () => {
+        const factories = [
+          registerFabricFactory(() => undefined, "pattern", {
+            kind: "pattern",
+            ref: FACTORY_REF,
+            argumentSchema: true,
+            resultSchema: true,
+          }),
+          registerFabricFactory(() => undefined, "module", {
+            kind: "module",
+            ref: FACTORY_REF,
+          }),
+          registerFabricFactory(() => undefined, "handler", {
+            kind: "handler",
+            ref: FACTORY_REF,
+          }),
+        ];
+
+        for (const factory of factories) {
+          expect(isFabricValueLayer(factory)).toBe(true);
+        }
       });
 
       it("returns `true` without recursively validating contents", () => {

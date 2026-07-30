@@ -3,6 +3,7 @@ import { BigIntCodec } from "@/codec-common/BigIntCodec.ts";
 import { SpecialNumberCodec } from "@/codec-common/SpecialNumberCodec.ts";
 import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { UndefinedCodec } from "@/codec-common/UndefinedCodec.ts";
+import { FactoryCodec } from "@/codec-common/FactoryCodec.ts";
 import { codecClasses as primitiveCodecClasses } from "@/fabric-primitives/index.ts";
 import { codecClasses as instanceCodecClasses } from "@/fabric-instances/index.ts";
 
@@ -22,6 +23,9 @@ import { CodecRegistry } from "./CodecRegistry.ts";
  * `string`) are registered via `registerSelfRep()`, so `codecFromValue()`
  * reports them directly; arrays and plain objects are handled structurally by
  * the serializer after no codec matches.
+ *
+ * Directly callable factories use a separate callable slot. They do not join
+ * the primitive or class registries, so ordinary functions remain invalid.
  *
  * `UnknownValue` / `ProblematicValue` are registered (via `instanceCodecClasses`)
  * but their codecs recognize no single wire tag: the encode path resolves each
@@ -45,6 +49,10 @@ export function createDefaultRegistry(): CodecRegistry {
   registry.registerPrimitive("number", new SpecialNumberCodec());
   registry.registerPrimitive("symbol", new SymbolCodec());
   registry.registerPrimitive("undefined", new UndefinedCodec());
+
+  // Callable factories have a dedicated slot. They are neither primitives nor
+  // class-dispatched objects, and arbitrary functions remain unencodable.
+  registry.registerCallable(new FactoryCodec());
 
   // Self-representing primitives: emitted as-is (their own wire form).
   // `number` is registered both ways -- finite numbers self-represent, while

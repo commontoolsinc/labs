@@ -258,9 +258,17 @@ await waitForCondition(page, (probe) =>
 Pattern integration tests can use the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
-the common waiting and interaction sequences. `clickCfButton` proceeds only
-when the same target remains rendered before and after a settle. It marks that
-target inside the successful predicate. See
+"settle the view, act once, wait for the effect" on top of these primitives.
+`clickCfButton` proceeds only when the same target remains rendered before and
+after a settle, and marks that target inside the successful predicate. Among
+stable matches, the click helpers select a **visible, enabled** control rather
+than blindly using the first DOM match. Disabled-state waits likewise search
+rendered matches for the requested state instead of letting the first stale
+duplicate decide the result. A rendered control may legitimately be outside the
+viewport before the test scrolls to it, so state-only waits must not require it
+to be on-screen. Worker replacement can briefly leave a hidden, disabled, or
+otherwise stale node from a retired render alongside the current control; the
+state wait and the single click must both observe a live matching control. See
 `docs/development/waiting-in-tests.md` for why that ordering is the load-bearing
 part, and for which helpers do not yet have it.
 

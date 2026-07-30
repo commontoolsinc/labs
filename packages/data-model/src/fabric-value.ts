@@ -3,6 +3,7 @@
 // base class.
 export {
   type FabricArray,
+  type FabricFactory,
   FabricInstance,
   type FabricNativeObject,
   type FabricOrConvertibleNativeValue,
@@ -16,6 +17,24 @@ export {
   type MutableFabricValueLayer,
   type NonNullableFabricValue,
 } from "./interface.ts";
+
+export {
+  type FactoryArtifactRef,
+  factoryStateOf,
+  type FactoryStateV1,
+  type FactoryStateValueField,
+  type FactoryStateView,
+  type HandlerFactoryStateV1,
+  type LiveFactoryState,
+  type LiveHandlerFactoryState,
+  type LiveModuleFactoryState,
+  type LivePatternFactoryState,
+  mapFactoryStateValues,
+  type ModuleFactoryStateV1,
+  type PatternFactoryStateV1,
+  registerFabricFactory,
+  tryFactoryState,
+} from "./fabric-factory.ts";
 
 export {
   cloneForMutation,

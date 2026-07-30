@@ -28,10 +28,12 @@ import {
   Default,
   generateObject,
   handler,
+  type HandlerFactory,
   type JSONSchema,
   NAME,
   navigateTo,
   pattern,
+  type ReadonlyCell,
   Stream,
   toIndentedDebugString,
   UI,
@@ -101,6 +103,24 @@ export interface ToolDefinition {
   inputSchema?: JSONSchema;
   handler: Stream<any>;
 }
+
+type RateQueryFactory = HandlerFactory<
+  {
+    queryId: string;
+    rating: number;
+    localQueries: ReadonlyCell<LocalQuery[]>;
+  },
+  unknown
+>;
+
+type DeleteLocalQueryFactory = HandlerFactory<
+  {
+    queryId: string;
+    localQueries: Writable<{ id: string }[]>;
+    pendingSubmissions: Writable<{ localQueryId: string }[]>;
+  },
+  unknown
+>;
 
 // ============================================================================
 // LOCAL QUERY TRACKING TYPES
@@ -271,8 +291,8 @@ export interface GmailAgenticSearchOutput {
   pendingSubmissions: PendingSubmission[];
 
   // Actions for local query management (handler factories)
-  rateQuery: ReturnType<typeof handler>; // Rate a query's effectiveness
-  deleteLocalQuery: ReturnType<typeof handler>; // Delete a saved query
+  rateQuery: RateQueryFactory; // Rate a query's effectiveness
+  deleteLocalQuery: DeleteLocalQueryFactory; // Delete a saved query
 
   // Cell that consuming patterns can increment to signal "found an item"
   // When this value increases, the base pattern marks the most recent query as having found items

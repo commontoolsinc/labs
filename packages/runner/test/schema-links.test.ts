@@ -43,6 +43,107 @@ describe("Schema - Link Resolution", () => {
     await storageManager?.close();
   });
 
+  describe("Nested link schema projection", () => {
+    it("projects a nested linked object through the consumer schema", () => {
+      const storedPlayerSchema = {
+        anyOf: [
+          { $ref: "#/$defs/PlayerData" },
+          { type: "null" },
+        ],
+        $defs: {
+          PlayerData: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              playerNumber: { type: "number" },
+              ships: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    row: { type: "number" },
+                    column: { type: "number" },
+                  },
+                  required: ["row", "column"],
+                },
+              },
+            },
+            required: ["name", "playerNumber", "ships"],
+          },
+        },
+      } as const satisfies JSONSchema;
+      const lobbySchema = {
+        type: "object",
+        properties: {
+          player: storedPlayerSchema,
+          status: { type: "string" },
+        },
+        required: ["player", "status"],
+      } as const satisfies JSONSchema;
+      const lobby = runtime.getCell(
+        space,
+        "nested-linked-object-lobby",
+        lobbySchema,
+        tx,
+      );
+      lobby.set({
+        player: { name: "Alice", playerNumber: 1, ships: [] },
+        status: "ready",
+      } as any);
+
+      const setup = runtime.getCell(
+        space,
+        "nested-linked-object-setup",
+        {
+          type: "object",
+          properties: { lobby: lobbySchema },
+          required: ["lobby"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      setup.setRaw({ lobby: lobby.getAsLink({ includeSchema: true }) } as any);
+      const consumerPlayerSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+          },
+          { type: "null" },
+        ],
+      } as const satisfies JSONSchema;
+      const inputs = runtime.getImmutableCell(
+        space,
+        {
+          lobby: {
+            player: setup.key("lobby").key("player")
+              .getAsWriteRedirectLink(),
+          },
+        },
+        undefined,
+        tx,
+      );
+
+      const consumerSchema = {
+        type: "object",
+        properties: {
+          lobby: {
+            type: "object",
+            properties: {
+              player: consumerPlayerSchema,
+            },
+            required: ["player"],
+          },
+        },
+        required: ["lobby"],
+      } as const satisfies JSONSchema;
+
+      expect(inputs.asSchema(consumerSchema).get()).toEqualIgnoringSymbols({
+        lobby: { player: { name: "Alice" } },
+      });
+    });
+  });
+
   describe("Array element link resolution", () => {
     it("should treat blocked narrower-scope links as undefined", () => {
       const sessionCell = createCell<string>(

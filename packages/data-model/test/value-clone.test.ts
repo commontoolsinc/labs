@@ -8,12 +8,33 @@ import {
 } from "@/fabric-value.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfHandler_1",
+} as const;
 
 // deno-lint-ignore no-explicit-any
 const obj = (v: unknown) => v as any;
 
 describe("value-clone", () => {
   describe("cloneWithValueAtPath", () => {
+    it("stores one hardened factory atom without cloning its identity", () => {
+      const factory = registerFabricFactory(() => undefined, "handler", {
+        kind: "handler",
+        rootToken: {},
+        ref: FACTORY_REF,
+      });
+      const result = obj(
+        cloneWithValueAtPath(deepFreeze({}), ["factory"], factory),
+      );
+
+      expect(result.factory).toBe(factory);
+      expect(Object.isFrozen(factory)).toBe(true);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
     it("copies only the mutated spine; off-spine subtrees are shared", () => {
       const root = deepFreeze({
         value: { left: { nested: { stable: true } }, right: { count: 1 } },

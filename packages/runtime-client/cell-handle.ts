@@ -27,6 +27,12 @@ import { DID } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import {
+  decodeFactoryAwareIPCValue,
+  encodeFactoryAwareIPCValue,
+} from "./fabric-value-ipc.ts";
 
 // Logger for schema warnings - disabled by default.
 // Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
@@ -142,17 +148,17 @@ export class CellHandle<T = unknown> {
     }
 
     const cell = this.ref();
-    const serialized = CellHandle.serialize(value);
+    const serialized = encodeFactoryAwareIPCValue(CellHandle.serialize(value));
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
         type: RequestType.CellPush,
         cell,
-        value: serialized,
+        ...serialized,
       })
       : this.#conn.request<RequestType.CellSet>({
         type: RequestType.CellSet,
         cell,
-        value: serialized,
+        ...serialized,
       });
     return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
@@ -162,10 +168,14 @@ export class CellHandle<T = unknown> {
   }
 
   async send(event: T): Promise<void> {
+    const serialized = encodeFactoryAwareIPCValue(CellHandle.serialize(event));
     await this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
-      event: CellHandle.serialize(event),
+      event: serialized.value,
+      ...(serialized.valueEncoding === undefined
+        ? {}
+        : { eventEncoding: serialized.valueEncoding }),
     }).catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Send failed:", error);
@@ -310,7 +320,11 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
     });
 
-    this.#value = CellHandle.deserialize<T>(this, response.value) as T;
+    const decoded = decodeFactoryAwareIPCValue(
+      response.value,
+      response.valueEncoding,
+    );
+    this.#value = CellHandle.deserialize<T>(this, decoded) as T;
     return this.#value;
   }
 
@@ -486,7 +500,11 @@ export class CellHandle<T = unknown> {
   static serialize(
     value: readonly any[] | Record<string, any> | any,
   ): any {
-    if (isCellHandle(value)) {
+    if (isAdmittedFabricFactory(value)) {
+      return value;
+    } else if (value instanceof FabricSpecialObject) {
+      return value;
+    } else if (isCellHandle(value)) {
       value = value.ref();
     } else if (isRecord(value)) {
       if (Array.isArray(value)) {

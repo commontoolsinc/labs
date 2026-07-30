@@ -437,7 +437,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
       { path: [], label: { confidentiality: ["memb-secret"] } },
     ]);
     const listId = await buildList(rt, "tp-list-i", criteriaId, ["tp-el-i"]);
-    const before = JSON.stringify(entriesOf(listId));
+    const before = entriesOf(listId);
 
     const again = rt.edit();
     again.readOrThrow(readAddress(criteriaId, []));
@@ -453,7 +453,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     );
     expect(wroteCfc).toBe(false);
     expect((await again.commit()).ok).toBeDefined();
-    expect(JSON.stringify(entriesOf(listId))).toEqual(before);
+    expect(entriesOf(listId)).toEqual(before);
   });
 
   // The §8.12.8 replace-from-criteria READBACK EXCLUSION, pinned at the

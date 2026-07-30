@@ -40,12 +40,28 @@ import {
   listCfcXattrNames,
 } from "./annotations.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 const decoder = new TextDecoder();
+
+function testPatternFactory(symbol: string) {
+  return createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol,
+    },
+    argumentSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    resultSchema: true,
+  });
+}
 
 class IterationCountingMap<K, V> extends Map<K, V> {
   iteratedEntries = 0;
@@ -65,7 +81,10 @@ interface FakeCell {
   getRaw(): unknown;
   asSchemaFromLinks(): FakeCell;
   key(segment: string): FakeCell;
-  sink?: (fn: (v: unknown) => void) => () => void;
+  sink?: (
+    fn: (v: unknown) => void,
+    options?: { materializeFactories?: boolean },
+  ) => () => void;
   isStream?: () => boolean;
 }
 
@@ -2125,15 +2144,7 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
 
   const makeResultCell = (title: string): FakeCell => {
     const searchToolCell = makeCell(
-      {
-        pattern: {
-          argumentSchema: {
-            type: "object",
-            properties: { query: { type: "string" } },
-          },
-        },
-        extraParams: { title },
-      },
+      testPatternFactory(`search-${title}`),
       undefined,
     );
     return makeCell(
@@ -2321,6 +2332,108 @@ Deno.test("CellBridge finalizes CFC annotations after committed writeback", asyn
     tree.getCfcAnnotation(childIno!)?.ref.projection,
     "value",
   );
+});
+
+Deno.test("CellBridge verifies a decoded factory artifact before a by-value write", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const factory = createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "writeFactory",
+    },
+    argumentSchema: true,
+    resultSchema: true,
+  });
+  const events: string[] = [];
+  const piece = {
+    id: "of:factory-write",
+    manager: () => ({
+      getSpace: () => "did:key:destination",
+      runtime: {
+        patternManager: {
+          ensureArtifactClosureInSpace: (
+            identity: string,
+            fromSpace: string,
+            toSpace: string,
+          ) => {
+            events.push(`ensure:${identity}:${fromSpace}:${toSpace}`);
+            return Promise.resolve();
+          },
+        },
+      },
+    }),
+    input: { set: () => Promise.resolve() },
+    result: {
+      set: (value: unknown) => {
+        assertEquals(value, factory);
+        events.push("set");
+        return Promise.resolve();
+      },
+    },
+  };
+
+  await bridge.writeValue({
+    spaceName: "home",
+    pieceName: "Factory Write",
+    cell: "result",
+    jsonPath: [],
+    isJsonFile: true,
+    piece: piece as unknown as WritePath["piece"],
+  }, factory);
+
+  assertEquals(events, [
+    "ensure:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:did:key:destination:did:key:destination",
+    "set",
+  ]);
+});
+
+Deno.test("CellBridge verifies nested factory artifacts before handler enqueue", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const factory = createFactoryShell({
+    kind: "module",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "handlerInputFactory",
+    },
+  });
+  const events: string[] = [];
+  const handlerCell = {
+    send: (value: unknown) => {
+      assertEquals(value, { factory });
+      events.push("send");
+    },
+  };
+  const rootCell = { key: () => handlerCell };
+  const manager = {
+    getSpace: () => "did:key:destination",
+    runtime: {
+      patternManager: {
+        ensureArtifactClosureInSpace: () => {
+          events.push("ensure");
+          return Promise.resolve();
+        },
+      },
+      idle: () => Promise.resolve(),
+    },
+    synced: () => Promise.resolve(),
+  };
+  const piece = {
+    id: "of:handler-factory-event",
+    manager: () => manager,
+    input: { getCell: () => Promise.resolve(rootCell) },
+    result: { getCell: () => Promise.resolve(rootCell) },
+  };
+
+  await bridge.sendToHandlerTarget({
+    piece: piece as unknown as HandlerTarget["piece"],
+    cellProp: "result",
+    cellKey: "handle",
+  }, { factory });
+
+  assertEquals(events, ["ensure", "send"]);
 });
 
 Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeback", async () => {
@@ -2731,15 +2844,7 @@ Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuil
   const state = buildTestSpace(bridge, "home", []);
 
   const initialToolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "before" },
-    },
+    testPatternFactory("search-before"),
     undefined,
   );
   const initialResultCell = makeCell(
@@ -2790,15 +2895,7 @@ Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuil
   assertEquals(initialToolIno !== undefined, true);
 
   const rebuiltToolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "after" },
-    },
+    testPatternFactory("search-after"),
     undefined,
   );
   const rebuiltResultCell = makeCell(
@@ -4309,6 +4406,52 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
 // ---------------------------------------------------------------------------
 // Group 5: subscribePiece — rename on cell change
 // ---------------------------------------------------------------------------
+
+Deno.test("CellBridge subscribes to projected values without eagerly materializing factories", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const sinkOptions: Array<{ materializeFactories?: boolean } | undefined> = [];
+  const projectionCell = makeCell({}, undefined);
+  projectionCell.sink = (_sink, options) => {
+    sinkOptions.push(options);
+    return () => {};
+  };
+  const piece = {
+    id: "of:factory-projection-subscription",
+    name: () => "Factory Projection Subscription",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(projectionCell),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(projectionCell),
+      get: () => Promise.resolve({}),
+    },
+  };
+  const pieceIno = tree.addDir(
+    state.piecesIno,
+    "Factory-Projection-Subscription",
+  );
+
+  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+    .subscribePiece.call(
+      bridge,
+      piece,
+      pieceIno,
+      "Factory-Projection-Subscription",
+      "home",
+      state,
+    );
+
+  assertEquals(sinkOptions, [
+    { materializeFactories: false },
+    { materializeFactories: false },
+    { materializeFactories: false },
+  ]);
+  for (const cancel of subs) cancel();
+});
 
 Deno.test({
   name: "CellBridge.subscribePiece renames directory when piece name changes",

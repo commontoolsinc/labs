@@ -13,7 +13,8 @@ export const SELF_REP = "self-rep" as const;
  * The primitive `type` keys the registry accepts: the `typeof` results that are
  * encodable `FabricValue` primitives, plus `"null"` for the `null` value.
  * `"object"` and `"function"` are deliberately excluded -- object values are
- * matched by class via {@link CodecRegistry#register}.
+ * matched by class via {@link CodecRegistry#register}, while admitted callable
+ * factories use {@link CodecRegistry#registerCallable}.
  */
 export type PrimitiveTypeName =
   | "null"
@@ -43,8 +44,8 @@ function constructorOf(
 
     return proto.constructor;
   } else if (value !== undefined) {
-    // This gets the pseudo-constructor of a primitive. **Note:** `function` is
-    // not included in the `FabricValue` union.
+    // This gets the pseudo-constructor of a primitive. Callable factories are
+    // returned from the dedicated function branch before reaching this helper.
     return value.constructor as Constructor;
   } else {
     return undefined;
@@ -53,7 +54,7 @@ function constructorOf(
 
 /**
  * Registry of `FabricCodec`s. Provides tag-based lookup for decoding, and
- * primitive-type and class matching for encoding.
+ * callable-factory, primitive-type, and class matching for encoding.
  */
 export class CodecRegistry {
   /** Tag -> codec map for O(1) decode dispatch. */
@@ -61,6 +62,9 @@ export class CodecRegistry {
 
   /** Class -> codec map for O(1) encode dispatch on object values. */
   readonly #classMap = new Map<Constructor, FabricCodec>();
+
+  /** The one codec allowed to inspect callable Fabric values. */
+  #callableCodec: FabricCodec | undefined;
 
   /**
    * Primitive `type` -> codec map for O(1) encode dispatch on primitives.
@@ -97,6 +101,20 @@ export class CodecRegistry {
    */
   registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
     this.#primitiveCodecs.set(type, codec);
+
+    const tag = codec.recognizedTypeTag;
+    if (tag !== undefined) {
+      this.#tagMap.set(tag, codec);
+    }
+  }
+
+  /**
+   * Registers the dedicated callable-factory codec. Functions are not a
+   * primitive type and never participate in constructor dispatch; this slot is
+   * the only encoding path for callable Fabric values.
+   */
+  registerCallable(codec: FabricCodec): void {
+    this.#callableCodec = codec;
 
     const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
@@ -148,7 +166,10 @@ export class CodecRegistry {
       }
 
       case "function": {
-        // Not a `FabricValue`; nothing can encode it.
+        const codec = this.#callableCodec;
+        if (codec && codec.canEncode(value)) {
+          return codec;
+        }
         return undefined;
       }
     }

@@ -9,7 +9,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type FactoryInput, NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Pattern } from "../src/builder/types.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -75,17 +78,19 @@ describe("Pattern Runner - Regressions", () => {
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
         const mapped = (items as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((item: any) =>
-              ifElse(
-                lift((i: { name: string; visible: boolean }) => i.visible)(
-                  item,
-                ),
-                lift((i: { name: string; visible: boolean }) => i.name)(item),
-                null,
-              )) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              (((item: any) =>
+                ifElse(
+                  lift((i: { name: string; visible: boolean }) => i.visible)(
+                    item,
+                  ),
+                  lift((i: { name: string; visible: boolean }) => i.name)(item),
+                  null,
+                )) as any)(element, index, array)
+            ),
           ),
-          {},
         );
         return { items, mapped };
       },
@@ -266,7 +271,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
   });
 
-  it("normalizes nested toJSON values before raw runner writes in v2", async () => {
+  it("rejects arbitrary toJSON function fields before raw runner writes in v2", async () => {
     await commitTx();
     await runtime.dispose();
     await storageManager.close();
@@ -286,11 +291,11 @@ describe("Pattern Runner - Regressions", () => {
         return { name: "initial recipe" };
       },
     });
-    const resultRecipe = Object.assign(() => {}, {
+    const resultRecipe = {
       toJSON() {
         return { name: "result recipe" };
       },
-    });
+    };
 
     const rawValuePattern = {
       argumentSchema: {},
@@ -318,13 +323,8 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    const result = runtime.run(tx, rawValuePattern, {}, resultCell);
-    await commitTx();
-
-    const value = await result.pull();
-    expect(value).toMatchObject({
-      internalRecipe: { name: "initial recipe" },
-      resultRecipe: { name: "result recipe" },
-    });
+    expect(() => runtime.run(tx, rawValuePattern, {}, resultCell)).toThrow(
+      "Arbitrary functions are not valid binding values: toJSON",
+    );
   });
 });

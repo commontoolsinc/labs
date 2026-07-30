@@ -12,6 +12,24 @@ export type TransformMode = "transform" | "error";
 export interface SchemaHint {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
+  /**
+   * Compiler-owned exact contract for a generated first-class factory value.
+   * This never comes from serialized `argumentSchema` / `resultSchema` fields;
+   * it carries the canonical TypeNode/Type pairs inferred for the builder.
+   */
+  readonly factoryContracts?: readonly {
+    readonly kind: "pattern" | "module" | "handler";
+    /** Exact trusted factory type that supplied this semantic contract. */
+    readonly factoryType?: ts.Type;
+    readonly inputTypeNode: ts.TypeNode;
+    readonly inputType?: ts.Type;
+    readonly inputSchema?: unknown;
+    readonly outputTypeNode: ts.TypeNode;
+    readonly outputType?: ts.Type;
+    readonly outputSchema?: unknown;
+    /** Trusted compiler metadata; never emitted inside authored `asFactory`. */
+    readonly frameworkProvidedPaths?: readonly (readonly string[])[];
+  }[];
   readonly cfcUiContract?: {
     readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
     readonly action?: string;

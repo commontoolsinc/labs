@@ -129,7 +129,7 @@ type AliasBindingBase = {
 // Named-cell aliases carry no scope: the referenced argument/result cell's
 // own link determines the scope when the binding is unwrapped.
 type AliasBindingNamedCell = AliasBindingBase & {
-  cell: "result" | "argument";
+  cell: "result" | "argument" | "params";
   partialCause?: never;
   scope?: never;
   defer?: number;

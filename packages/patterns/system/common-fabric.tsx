@@ -276,7 +276,7 @@ export const readWebpage = pattern<
  * Execute a bash command in a persistent cloud sandbox.
  * The sandbox preserves installed packages and files across calls.
  */
-type BashRequest = {
+export type BashRequest = {
   /** The bash command to execute. */
   command: string;
   /** Working directory for the command. */
@@ -289,7 +289,7 @@ type BashRequest = {
   sandboxId: FrameworkProvided<string>;
 };
 
-type BashResult = {
+export type BashResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
@@ -354,7 +354,7 @@ export default pattern<ToolsInput>(({ list }) => {
  * Pass in arguments to initialize the pattern. It's especially useful to pass
  * in links to other cells as `{ "@link": "/of:bafe.../path/to/data" }`.
  */
-type FetchAndRunPatternInput = {
+export type FetchAndRunPatternInput = {
   url: string;
   args: Writable<any>;
 };
@@ -395,7 +395,7 @@ export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
  * Especially useful after instantiating a pattern with fetchAndRunPattern:
  * Pass the "@link" you get at `cell` to navigate to the pattern's view.
  */
-type NavigateToPatternInput = { cell: Writable<any> }; // Hack to steer LLM
+export type NavigateToPatternInput = { cell: Writable<any> }; // Hack to steer LLM
 export const navigateToPattern = pattern<NavigateToPatternInput>(
   ({ cell }) => {
     const success = navigateTo(cell);
@@ -440,7 +440,7 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
  *
  * Allows the LLM to remember things about the user by updating their profile text.
  */
-type UpdateProfileInput = {
+export type UpdateProfileInput = {
   /** New profile summary text to set */
   summary: string;
 };
@@ -469,23 +469,27 @@ export const updateProfile = pattern<
 });
 
 export const listMentionable = pattern<
-  { mentionable: Array<MentionablePiece> },
+  { mentionable?: Array<MentionablePiece> },
   { result: Array<{ label: string; piece: MentionablePiece }> }
 >(({ mentionable }) => {
-  const result = mentionable.map((c) => ({
-    label: c[NAME]!,
-    piece: c,
-  }));
+  const result = computed(() =>
+    (mentionable ?? []).map((c) => ({
+      label: c[NAME]!,
+      piece: c,
+    }))
+  );
   return { result };
 });
 
 export const listRecent = pattern<
-  { recentPieces: Array<MentionablePiece> },
+  { recentPieces?: Array<MentionablePiece> },
   { result: Array<{ label: string; piece: MentionablePiece }> }
 >(({ recentPieces }) => {
-  const namesList = recentPieces.map((c) => ({
-    label: c[NAME]!,
-    piece: c,
-  }));
+  const namesList = computed(() =>
+    (recentPieces ?? []).map((c) => ({
+      label: c[NAME]!,
+      piece: c,
+    }))
+  );
   return { result: namesList };
 });

@@ -355,6 +355,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
+    private beforeCommit?: (tx: IExtendedStorageTransaction) => void,
   ) {}
 
   noteCfcSinkReleaseReject(
@@ -1801,6 +1802,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.tx.clearReadOnly?.();
     }
     if (!readOnly) {
+      try {
+        // Runtime-owned boundary work must not be opt-in for callers. In
+        // particular, tx.commit() after Cell.set(factory) still has to attach
+        // the atomic artifact-publication preparation.
+        this.beforeCommit?.(this);
+      } catch (reason) {
+        return this.rejectCommitBeforeStorage({
+          error: {
+            name: "StorageTransactionAborted",
+            message: `transaction preparation failed: ${reason}`,
+            reason,
+          },
+        });
+      }
       // Flow-label relevance is computed, not caller-marked: a tx that
       // observed or wrote a labeled doc derives labels even when nothing
       // called markCfcRelevant (S16 — value-copy laundering happens in

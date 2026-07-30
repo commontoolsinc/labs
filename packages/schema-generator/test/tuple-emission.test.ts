@@ -1,4 +1,4 @@
-// Pins fixed-length tuple emission (mapping spec §4, quirk §16.1): tuples
+// Pins fixed-length tuple emission (mapping spec §4, quirk §17.1): tuples
 // emit { type: "array", items: <merged element union> } via the
 // numeric-index fallback (type-utils.ts getArrayElementInfo). Positional
 // structure and arity are LOST — no prefixItems, no minItems/maxItems —

@@ -4,8 +4,6 @@ import {
   handler,
   NAME,
   pattern,
-  patternTool,
-  PatternToolResult as _PatternToolResult,
   str,
   Stream,
   UI,
@@ -136,12 +134,6 @@ export interface Output {
   bgUpdater: Stream<void>;
   /** Whether auth is ready (has valid token) */
   isReady: boolean;
-  // /** Search emails by query string (searches subject, from, snippet) */
-  // searchEmails: PatternToolResult<{ query: string }>;
-  // /** Get count of imported emails */
-  // getEmailCount: PatternToolResult<void>;
-  // /** Get recent emails as formatted string */
-  // getRecentEmails: PatternToolResult<{ count: number }>;
 }
 
 // Debug logging helpers - pass debugMode explicitly to avoid module-level state issues
@@ -1092,6 +1084,44 @@ const EmailCard = pattern<
   ),
 }));
 
+const searchEmailsPattern = pattern<
+  { query: string; emails: Email[] },
+  Email[]
+>(({ query, emails }) =>
+  computed(() => {
+    if (!query || !emails) return [];
+    const lowerQuery = query.toLowerCase();
+    return emails.filter(
+      (email) =>
+        email.subject?.toLowerCase().includes(lowerQuery) ||
+        email.from?.toLowerCase().includes(lowerQuery) ||
+        email.snippet?.toLowerCase().includes(lowerQuery),
+    );
+  })
+);
+
+const getEmailCountPattern = pattern<{ emails: Email[] }, number>(
+  ({ emails }) => emails?.length || 0,
+);
+
+const getRecentEmailsPattern = pattern<
+  { count: number; emails: Email[] },
+  string
+>(({ count, emails }) =>
+  computed(() => {
+    if (!emails || emails.length === 0) return "No emails";
+    const recent = emails.slice(0, count || 5);
+    return recent
+      .map(
+        (email) =>
+          `From: ${email.from}\nSubject: ${email.subject}\nDate: ${
+            new Date(email.date).toLocaleDateString()
+          }`,
+      )
+      .join("\n\n");
+  })
+);
+
 export default pattern<
   {
     settings:
@@ -1388,45 +1418,14 @@ export default pattern<
     bgUpdater: googleUpdaterStream,
     isReady,
     // Pattern tools for omnibot
-    searchEmails: patternTool(
-      pattern(({ query, emails }: { query: string; emails: Email[] }) => {
-        return computed(() => {
-          if (!query || !emails) return [];
-          const lowerQuery = query.toLowerCase();
-          return emails.filter(
-            (email) =>
-              email.subject?.toLowerCase().includes(lowerQuery) ||
-              email.from?.toLowerCase().includes(lowerQuery) ||
-              email.snippet?.toLowerCase().includes(lowerQuery),
-          );
-        });
-      }),
-      { emails },
+    searchEmails: pattern<{ query: string }, Email[]>(({ query }) =>
+      searchEmailsPattern({ query, emails })
     ),
-    getEmailCount: patternTool(
-      pattern(({ emails }: { emails: Email[] }) => {
-        return emails?.length || 0;
-      }),
-      { emails },
+    getEmailCount: pattern<Record<string, never>, number>(() =>
+      getEmailCountPattern({ emails })
     ),
-    getRecentEmails: patternTool(
-      pattern(({ count, emails }: { count: number; emails: Email[] }) => {
-        return computed(() => {
-          if (!emails || emails.length === 0) return "No emails";
-          const recent = emails.slice(0, count || 5);
-          return recent
-            .map(
-              (email) =>
-                `From: ${email.from}\nSubject: ${email.subject}\nDate: ${
-                  new Date(
-                    email.date,
-                  ).toLocaleDateString()
-                }`,
-            )
-            .join("\n\n");
-        });
-      }),
-      { emails },
+    getRecentEmails: pattern<{ count: number }, string>(({ count }) =>
+      getRecentEmailsPattern({ count, emails })
     ),
   };
 });

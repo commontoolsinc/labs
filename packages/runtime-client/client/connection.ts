@@ -32,6 +32,7 @@ import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "../cell-handle.ts";
 import { cellRefToKey } from "../shared/utils.ts";
+import { decodeFactoryAwareIPCValue } from "../fabric-value-ipc.ts";
 
 const ipcLogger = getLogger("runtime-client");
 
@@ -487,7 +488,22 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     if (isIPCRemoteNotification(message)) {
       if (dead) return;
       if (isTelemetryNotification(message)) {
-        this.emit("telemetry", message);
+        if (message.markerEncoding === undefined) {
+          this.emit("telemetry", message);
+        } else {
+          const decoded = decodeFactoryAwareIPCValue(
+            message.encodedMarker,
+            message.markerEncoding,
+          );
+          if (decoded === null || typeof decoded !== "object") {
+            throw new TypeError("Invalid Fabric-encoded telemetry marker");
+          }
+          const { encodedMarker: _, markerEncoding: __, ...plain } = message;
+          this.emit("telemetry", {
+            ...plain,
+            marker: decoded as TelemetryNotification["marker"],
+          });
+        }
         // Do not log telemetry events when DEBUG_IPC is enabled
         return;
       }
@@ -503,7 +519,22 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       } else if (isErrorNotification(message)) {
         this.emit("error", message);
       } else if (isVDomBatchNotification(message)) {
-        this.emit("vdombatch", message);
+        if (message.opsEncoding === undefined) {
+          this.emit("vdombatch", message);
+        } else {
+          const decoded = decodeFactoryAwareIPCValue(
+            message.encodedOps,
+            message.opsEncoding,
+          );
+          if (!Array.isArray(decoded)) {
+            throw new TypeError("Invalid Fabric-encoded VDOM ops");
+          }
+          const { encodedOps: _, opsEncoding: __, ...plain } = message;
+          this.emit("vdombatch", {
+            ...plain,
+            ops: decoded as VDomBatchNotification["ops"],
+          });
+        }
       } else if (isPendingWritesNotification(message)) {
         this.emit("pendingwriteschange", message);
       } else {
@@ -590,8 +621,12 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
     const subscribed = this.#subscribed.get(cellRefToKey(cellRef));
     if (subscribed && subscribed.size > 0) {
+      const decoded = decodeFactoryAwareIPCValue(
+        value,
+        message.valueEncoding,
+      );
       for (const instance of subscribed) {
-        instance[$onCellUpdate](value, labelUpdate);
+        instance[$onCellUpdate](decoded, labelUpdate);
       }
     }
   }

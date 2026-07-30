@@ -44,7 +44,10 @@ import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import { defer } from "@commonfabric/utils/defer";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
@@ -202,10 +205,13 @@ describe("async builtin work registration", () => {
       },
     );
 
-    const helper = builder.pattern<Record<string, never>, { ok: boolean }>(
-      () => ({ ok: true }),
-      { type: "object", additionalProperties: false },
-      OK_SCHEMA,
+    const helper = installTestPatternArtifact(
+      runtime,
+      builder.pattern<Record<string, never>, { ok: boolean }>(
+        () => ({ ok: true }),
+        { type: "object", additionalProperties: false },
+        OK_SCHEMA,
+      ),
     );
 
     const testPattern = builder.pattern<Record<string, never>>(() =>
@@ -213,7 +219,7 @@ describe("async builtin work registration", () => {
         prompt: "tools-path-prompt",
         schema: OK_SCHEMA,
         tools: {
-          helperTool: builder.patternTool(helper) as unknown as BuiltInLLMTool,
+          helperTool: helper as unknown as BuiltInLLMTool,
         },
       } as any)
     );

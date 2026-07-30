@@ -3,7 +3,8 @@
 // builder/pattern.ts) route through `closureCaptureErrorMessage`, so this pins
 // the shared wording: it names the offending cell, surfaces a source location
 // when one is available, and recommends the actual escape hatches
-// (mapWithPattern / computed) rather than the old "wrap in a derive" guidance.
+// (inline pattern closures / computed) rather than manual sibling params or
+// the old "wrap in a derive" guidance.
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -41,10 +42,12 @@ describe("closureCaptureErrorMessage (CT-1626)", () => {
     expect(message).not.toContain("\n  at ");
   });
 
-  it("recommends the real escape hatches (mapWithPattern / computed)", () => {
+  it("recommends inline closures instead of manual sibling params", () => {
     const message = closureCaptureErrorMessage();
-    expect(message).toContain("mapWithPattern");
+    expect(message).toContain("write the callback inline");
     expect(message).toContain("computed()");
+    expect(message).not.toContain("mapWithPattern(pattern, params)");
+    expect(message).not.toContain("thread captured cells through `params`");
     // The misleading "wrap the access in a derive" recipe is gone.
     expect(message).not.toContain("derive that passes the variable through");
   });

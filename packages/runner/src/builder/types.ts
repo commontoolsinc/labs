@@ -24,6 +24,7 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
+  FabricValue as ApiFabricValue,
   FactoryInput,
   FetchBinaryFunction,
   FetchJsonFunction,
@@ -49,7 +50,7 @@ import type {
   Module,
   NavigateToFunction,
   Pattern,
-  PatternToolFunction,
+  PatternFactory,
   Reactive,
   schema as schemaFunction,
   SELF as SELFSymbol,
@@ -57,6 +58,7 @@ import type {
   SqliteDatabaseFunction,
   SqliteQueryFunction,
   SqliteTableFunction,
+  Stream,
   StreamDataFunction,
   StrFunction,
   UiActionProps,
@@ -76,6 +78,8 @@ import {
   type MemorySpace,
 } from "../storage/interface.ts";
 import { type Runtime } from "../runtime.ts";
+import type { FactoryContract } from "../factory-contract.ts";
+import type { AliasBinding, SigilWriteRedirectLink } from "../sigil-types.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -191,6 +195,8 @@ export type NodeRef = {
   inputs: FactoryInput<any>;
   outputs: Reactive<any>;
   frame: Frame | undefined;
+  /** Compiler-emitted contract for a symbolic Factory@1 call. */
+  expectedFactory?: FactoryContract;
 };
 
 export type StreamValue = {
@@ -262,10 +268,16 @@ export function isModule(value: unknown): value is Module {
  */
 export type Node = {
   description?: string;
-  module: Module; // TODO(seefeld): Add `Alias` here once supported
-  inputs: JSONValue;
-  outputs: JSONValue;
+  /** Static module metadata or the serialized link for a dynamic factory. */
+  module: Module | AliasBinding | SigilWriteRedirectLink;
+  inputs: GraphValue;
+  outputs: GraphValue;
+  /** Trusted call-site contract; never sourced from the selected factory. */
+  expectedFactory?: FactoryContract;
 };
+
+/** Serialized pattern graph data, including admitted callable factories. */
+export type GraphValue = ApiFabricValue;
 
 export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
@@ -286,7 +298,7 @@ declare module "@commonfabric/api" {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     derivedInternalCells?: DerivedInternalCellDescriptor[];
-    result: JSONValue;
+    result: GraphValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source) and the derivation link to a
     // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
@@ -363,7 +375,6 @@ export type Frame = {
 export interface BuilderFunctionsAndConstants {
   // Pattern creation
   pattern: PatternBuilder;
-  patternTool: PatternToolFunction;
 
   // Module creation
   lift: LiftFunction;
@@ -421,6 +432,23 @@ export interface BuilderFunctionsAndConstants {
 
   // Utility
   byRef: ByRefFunction;
+  invokeFactory: {
+    (
+      factory: unknown,
+      input: unknown,
+      expected: Extract<FactoryContract, { kind: "handler" }>,
+    ): Stream<unknown>;
+    (
+      factory: unknown,
+      input: unknown,
+      expected: Exclude<FactoryContract, { kind: "handler" }>,
+    ): Reactive<unknown>;
+    (
+      factory: unknown,
+      input: unknown,
+      expected: FactoryContract,
+    ): Reactive<unknown> | Stream<unknown>;
+  };
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
@@ -484,6 +512,27 @@ export interface BuilderFunctionsAndConstants {
   // Value comparison
   valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
 }
+
+/**
+ * Runtime-only helpers emitted by the transformer. This surface is available
+ * through the private `__cfHelpers` namespace and is deliberately absent from
+ * the authored Common Fabric API.
+ */
+export type InternalBuilderHelpers = BuilderFunctionsAndConstants & {
+  withPatternParamsSchema<T extends (...args: any[]) => unknown>(
+    callback: T,
+    schema: JSONSchema,
+  ): T;
+  withFrameworkProvidedPaths<T extends (...args: any[]) => unknown>(
+    callback: T,
+    paths: readonly (readonly string[])[],
+  ): T;
+};
+
+/** Transformer-only callable view; `.curry` is intentionally not public API. */
+export type InternalPatternFactory<T, R> = PatternFactory<T, R> & {
+  curry(params: unknown): InternalPatternFactory<T, R>;
+};
 
 // Runtime interface needed by createCell
 export interface BuilderRuntime {

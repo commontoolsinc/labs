@@ -27,6 +27,13 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     Undefined: "Undefined@1",
 
     //
+    // Tag for the directly callable Fabric factory protocol.
+    //
+
+    /** Constant for directly callable Fabric factories. */
+    Factory: "Factory@1",
+
+    //
     // Tags for the built-in "primitive" `FabricPrimitive` classes. These tags
     // are for wire formats for which instances of (one or more of) these
     // classes do not have protocol-specific forms.

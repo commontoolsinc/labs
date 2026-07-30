@@ -91,7 +91,13 @@ const compileHomePattern = async (runtime: Runtime) => {
   const program = await runtime.harness.resolve(
     new FileSystemProgramResolver(sourcePath, repoRoot),
   );
-  return await runtime.patternManager.compilePattern(program);
+  const tx = runtime.edit();
+  const compiled = await runtime.patternManager.compilePattern(program, {
+    space: alice.did(),
+    tx,
+  });
+  await tx.commit();
+  return compiled;
 };
 
 const compileProfileHomePattern = async (runtime: Runtime) => {
@@ -106,7 +112,13 @@ const compileProfileHomePattern = async (runtime: Runtime) => {
   const program = await runtime.harness.resolve(
     new FileSystemProgramResolver(sourcePath, repoRoot),
   );
-  return await runtime.patternManager.compilePattern(program);
+  const tx = runtime.edit();
+  const compiled = await runtime.patternManager.compilePattern(program, {
+    space: alice.did(),
+    tx,
+  });
+  await tx.commit();
+  return compiled;
 };
 
 const resolveLocalSchemaRef = (root: JSONSchema, schema: JSONSchema) => {

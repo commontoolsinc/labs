@@ -9,6 +9,7 @@ import type {
   GenerationContext,
   SchemaGenerationOptions,
   SchemaGenerator as ISchemaGenerator,
+  SchemaHint,
   TypeFormatter,
 } from "./interface.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
@@ -18,6 +19,7 @@ import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
+import { FactoryFormatter } from "./formatters/factory-formatter.ts";
 import {
   detectWrapperViaNode,
   getNamedTypeKey,
@@ -34,6 +36,7 @@ import { attachDocTags, extractDocFromType } from "./doc-utils.ts";
  */
 export class SchemaGenerator implements ISchemaGenerator {
   private formatters: TypeFormatter[] = [
+    new FactoryFormatter(this),
     new CommonFabricFormatter(this),
     new NativeTypeFormatter(),
     new UnionFormatter(this),
@@ -47,6 +50,8 @@ export class SchemaGenerator implements ISchemaGenerator {
   private anonymousNames: WeakMap<ts.Type, string> = new WeakMap();
   /** Counter to generate stable synthetic identifiers */
   private anonymousNameCounter: number = 0;
+  /** Contract-document types on the current synchronous generation path. */
+  private activeFactoryContractTypes = new Set<ts.Type>();
 
   /**
    * Generate JSON Schema for a TypeScript type.
@@ -57,28 +62,15 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
   ): MutableJSONSchema {
     return this.generateSchemaInternal(
       type,
       checker,
       typeNode,
-      undefined,
+      typeRegistry,
       options,
       schemaHints,
       sourceFile,
@@ -96,21 +88,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
     options?: SchemaGenerationOptions,
   ): MutableJSONSchema {
@@ -128,6 +106,77 @@ export class SchemaGenerator implements ISchemaGenerator {
   }
 
   /**
+   * Generate one compiler-hinted factory contract document through the same
+   * semantic/node route as ordinary schema injection, while retaining nested
+   * factory hints and restoring root JSDoc from the paired semantic type.
+   */
+  public generateHintedFactoryContractSchema(
+    typeNode: ts.TypeNode,
+    type: ts.Type | undefined,
+    checker: ts.TypeChecker,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
+    sourceFile?: ts.SourceFile,
+  ): MutableJSONSchema {
+    const schema = type && !containsAnyOrUnknownTypeNode(typeNode)
+      ? this.generateSchema(
+        type,
+        checker,
+        typeNode,
+        undefined,
+        schemaHints,
+        sourceFile,
+        typeRegistry,
+      )
+      : this.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+        typeRegistry,
+        schemaHints,
+        sourceFile,
+      );
+    return type
+      ? this.attachRootDescription(schema, type, { typeChecker: checker })
+      : schema;
+  }
+
+  /**
+   * Generate one independently comparable factory contract schema. Nested
+   * factories reuse this document's cycle state so recursive contracts close
+   * over local $defs instead of starting an unbounded series of documents.
+   */
+  public generateFactoryContractSchema(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): MutableJSONSchema {
+    if (this.activeFactoryContractTypes.has(type)) {
+      const symbol = type.aliasSymbol ?? type.getSymbol();
+      const declaration = symbol?.getDeclarations()?.[0];
+      const location = declaration
+        ? (() => {
+          const source = declaration.getSourceFile();
+          const { line, character } = source.getLineAndCharacterOfPosition(
+            declaration.getStart(source),
+          );
+          return `${source.fileName}:${line + 1}:${character + 1}`;
+        })()
+        : "unknown location";
+      throw new Error(
+        `${location}: Recursive nested factory contract for ` +
+          `'${checker.typeToString(type)}' cannot be emitted as a finite ` +
+          "self-contained schema document",
+      );
+    }
+
+    this.activeFactoryContractTypes.add(type);
+    try {
+      return this.generateSchemaInternal(type, checker);
+    } finally {
+      this.activeFactoryContractTypes.delete(type);
+    }
+  }
+
+  /**
    * Internal unified implementation for schema generation.
    * Handles both normal and synthetic type node cases, with optional typeRegistry.
    */
@@ -137,21 +186,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
   ): MutableJSONSchema {
     // Create unified context with all state
@@ -189,7 +224,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
-    if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
+    if (this.shouldUseNodeBasedAnalysis(type, typeNode, context)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       schema = this.analyzeTypeNodeStructure(
         typeNode!,
@@ -226,9 +261,23 @@ export class SchemaGenerator implements ISchemaGenerator {
   private shouldUseNodeBasedAnalysis(
     type: ts.Type,
     typeNode: ts.TypeNode | undefined,
-    checker: ts.TypeChecker,
+    context: GenerationContext,
   ): boolean {
-    if (!typeNode || !(type.flags & ts.TypeFlags.Any)) {
+    if (!typeNode) {
+      return false;
+    }
+
+    const checker = context.typeChecker;
+    const unreliableAny = (type.flags & ts.TypeFlags.Any) !== 0;
+    const recoveredUnknownReference =
+      (type.flags & ts.TypeFlags.Unknown) !== 0 &&
+        ts.isTypeReferenceNode(typeNode) &&
+        typeNode.pos < 0
+        ? this.resolveTypeReferenceFromScope(typeNode, checker, context)
+        : undefined;
+    const unreliableUnknown = !!recoveredUnknownReference &&
+      (recoveredUnknownReference.flags & ts.TypeFlags.Unknown) === 0;
+    if (!unreliableAny && !unreliableUnknown) {
       return false;
     }
 
@@ -263,7 +312,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     const useNodeBased = this.shouldUseNodeBasedAnalysis(
       type,
       typeNode,
-      context.typeChecker,
+      childContext,
     );
     if (useNodeBased) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
@@ -562,19 +611,26 @@ export class SchemaGenerator implements ISchemaGenerator {
   private attachUiContract(
     schema: MutableJSONSchema,
     uiContract: {
-      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-      action?: string;
-      surface?: string;
-      role?: string;
-      kind?: string;
-      trustedPattern?: string;
-      requiredEventIntegrity?: string[];
+      readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      readonly action?: string;
+      readonly surface?: string;
+      readonly role?: string;
+      readonly kind?: string;
+      readonly trustedPattern?: string;
+      readonly requiredEventIntegrity?: readonly string[];
     },
   ): MutableJSONSchema {
+    const { requiredEventIntegrity, ...uiContractFields } = uiContract;
+    const storedUiContract = {
+      ...uiContractFields,
+      ...(requiredEventIntegrity && {
+        requiredEventIntegrity: [...requiredEventIntegrity],
+      }),
+    };
     if (typeof schema === "boolean") {
       return schema === false
-        ? { not: true, ifc: { uiContract } }
-        : { ifc: { uiContract } };
+        ? { not: true, ifc: { uiContract: storedUiContract } }
+        : { ifc: { uiContract: storedUiContract } };
     }
 
     const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
@@ -582,7 +638,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...schema,
       ifc: {
         ...existingIfc,
-        uiContract,
+        uiContract: storedUiContract,
       },
     };
   }
@@ -669,7 +725,7 @@ export class SchemaGenerator implements ISchemaGenerator {
   private attachRootDescription(
     schema: MutableJSONSchema,
     type: ts.Type,
-    context: GenerationContext,
+    context: Pick<GenerationContext, "typeChecker">,
   ): MutableJSONSchema {
     if (typeof schema !== "object") return schema;
 
@@ -759,6 +815,22 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
   ): MutableJSONSchema {
     const typeRegistry = context.typeRegistry;
+    const factoryContracts = context.schemaHints?.get(typeNode)
+      ?.factoryContracts ??
+      context.schemaHints?.get(ts.getOriginalNode(typeNode))?.factoryContracts;
+    if (factoryContracts?.length) {
+      // A node-scoped factory contract is compiler-owned provenance for a
+      // synthetic type that may be unbound (`any`) in checker APIs. Route it
+      // through FactoryFormatter before structural node fallbacks; ordinary
+      // authored lookalikes have no such hint and receive no factory meaning.
+      const hintedType = typeRegistry?.get(typeNode) ?? checker.getAnyType();
+      const { typeNode: _, ...baseContext } = context;
+      return this.formatType(
+        hintedType,
+        { ...baseContext, typeNode },
+        false,
+      );
+    }
 
     // Handle TypeLiteral nodes (object types)
     if (ts.isTypeLiteralNode(typeNode)) {
@@ -864,9 +936,23 @@ export class SchemaGenerator implements ISchemaGenerator {
     // explicitly. Keyword types (string, number, boolean, undefined, null) are
     // resolved directly by the switch below, so they never cause widening.
     if (ts.isUnionTypeNode(typeNode)) {
-      const memberSchemas = typeNode.types.map((member) =>
-        this.analyzeTypeNodeStructure(member, checker, context)
-      );
+      const memberSchemas = typeNode.types.map((member) => {
+        const factoryContracts = context.schemaHints?.get(member)
+          ?.factoryContracts ??
+          context.schemaHints?.get(ts.getOriginalNode(member))
+            ?.factoryContracts;
+        if (factoryContracts?.length) {
+          const memberType = typeRegistry?.get(member) ??
+            checker.getTypeFromTypeNode(member);
+          // Exact compiler-owned factory arms must pass through the ordinary
+          // formatter so FactoryFormatter can emit their carried contracts.
+          return this.formatChildType(memberType, context, member);
+        }
+        // Preserve the node path for ordinary synthetic union arms. In
+        // particular, literal nodes intentionally emit `const` here rather
+        // than the type path's single-value `enum` spelling.
+        return this.analyzeTypeNodeStructure(member, checker, context);
+      });
       if (memberSchemas.some((schema) => schema === true)) {
         return true;
       }
@@ -916,6 +1002,12 @@ export class SchemaGenerator implements ISchemaGenerator {
         context,
       );
       if (resolved) {
+        if ((resolved.flags & ts.TypeFlags.Unknown) !== 0) {
+          // A source alias explicitly declared as `unknown` is authoritative.
+          // Re-entering formatChildType with the detached reference would
+          // select node analysis again and recurse indefinitely.
+          return { type: "unknown" };
+        }
         return this.formatChildType(resolved, context, typeNode);
       }
 
@@ -971,13 +1063,37 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (!ts.isIdentifier(typeNode.typeName)) {
       return undefined;
     }
+    const resolveNonGenericDeclaredType = (
+      symbol: ts.Symbol,
+    ): ts.Type | undefined => {
+      const resolvedSymbol = (symbol.flags & ts.SymbolFlags.Alias) !== 0
+        ? checker.getAliasedSymbol(symbol)
+        : symbol;
+      if ((resolvedSymbol.flags & ts.SymbolFlags.TypeParameter) !== 0) {
+        return undefined;
+      }
+      const declarations = resolvedSymbol.getDeclarations() ?? [];
+      const isGenericDeclaration = declarations.some((declaration) =>
+        (ts.isTypeAliasDeclaration(declaration) ||
+          ts.isInterfaceDeclaration(declaration) ||
+          ts.isClassDeclaration(declaration)) &&
+        (declaration.typeParameters?.length ?? 0) > 0
+      );
+      if (isGenericDeclaration) return undefined;
+
+      const declared = checker.getDeclaredTypeOfSymbol(resolvedSymbol);
+      return declared &&
+          (declared.flags & (ts.TypeFlags.Any | ts.TypeFlags.TypeParameter)) ===
+            0
+        ? declared
+        : undefined;
+    };
+
     const typeName = typeNode.typeName.text;
     const symbolAtNode = checker.getSymbolAtLocation(typeNode.typeName);
     if (symbolAtNode) {
-      const declared = checker.getDeclaredTypeOfSymbol(symbolAtNode);
-      if (declared && !(declared.flags & ts.TypeFlags.Any)) {
-        return declared;
-      }
+      const declared = resolveNonGenericDeclaredType(symbolAtNode);
+      if (declared) return declared;
     }
 
     const checkerWithProgram = checker as ts.TypeChecker & {
@@ -999,12 +1115,27 @@ export class SchemaGenerator implements ISchemaGenerator {
       ts.SymbolFlags.Type,
     );
     const symbol = candidates.find((candidate) => candidate.name === typeName);
-    if (!symbol) return undefined;
-    const declared = checker.getDeclaredTypeOfSymbol(symbol);
-    if (!declared || (declared.flags & ts.TypeFlags.Any)) {
-      return undefined;
-    }
-    return declared;
+    const moduleSource = scopeNode;
+    const moduleSymbol = checker.getSymbolAtLocation(moduleSource) ??
+      (moduleSource as ts.SourceFile & { symbol?: ts.Symbol }).symbol;
+    const exportedSymbol = moduleSymbol
+      ? checker.getExportsOfModule(moduleSymbol).find((candidate) =>
+        candidate.name === typeName
+      )
+      : undefined;
+    // Detached nodes can make getSymbolsInScope return a transient flags=0
+    // placeholder for an exported declaration. Prefer the canonical module
+    // export when both are present.
+    const candidate = exportedSymbol ?? symbol;
+    if (!candidate) return undefined;
+
+    // A detached synthetic `Box<string>` node cannot be instantiated safely
+    // by asking for the declared `Box<T>` type: doing so silently erases the
+    // concrete argument and emits an open `{}` contract for `T`. Exact generic
+    // instantiations must come from the transformer type registry / paired
+    // semantic wrapper type. Source-scope lookup is only a safe recovery path
+    // for non-generic exports such as `Person` or `CommuteMode`.
+    return resolveNonGenericDeclaredType(candidate);
   }
 
   /**
@@ -1034,4 +1165,21 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
     return out as MutableJSONSchema;
   }
+}
+
+function containsAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node): void => {
+    if (found) return;
+    if (
+      current.kind === ts.SyntaxKind.AnyKeyword ||
+      current.kind === ts.SyntaxKind.UnknownKeyword
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
 }

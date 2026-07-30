@@ -101,7 +101,7 @@ function lowerMapReceiverMemberAccess(
   );
 }
 
-function createPatternCallWithParams(
+function createPatternCall(
   methodCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
   transformedBody: ts.ConciseBody,
@@ -189,7 +189,7 @@ function createPatternCallWithParams(
     context,
   );
 
-  const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
+  const newCallback = builder.buildPatternCallback(callback, rewrittenBody);
   context.markAsArrayMethodCallback(newCallback);
 
   const schemaFactory = new SchemaFactory(context);
@@ -198,7 +198,6 @@ function createPatternCallWithParams(
     elemParam,
     indexParam,
     arrayParam,
-    filteredCaptureTree,
   );
 
   const { checker } = context;
@@ -246,14 +245,36 @@ function createPatternCallWithParams(
     typeArgs.push(resultTypeNode);
   }
 
+  const hasCaptures = filteredCaptureTree.size > 0;
+  const callbackArgument = hasCaptures
+    ? context.cfHelpers.createHelperCall(
+      "withPatternParamsSchema",
+      callback,
+      undefined,
+      [
+        newCallback,
+        context.cfHelpers.createHelperCall(
+          "toSchema",
+          callback,
+          [schemaFactory.createHandlerStateSchema(filteredCaptureTree)],
+          [],
+        ),
+      ],
+    )
+    : newCallback;
   const patternCall = context.cfHelpers.createHelperCall(
     "pattern",
     methodCall,
     typeArgs,
-    [newCallback],
+    [callbackArgument],
   );
-
-  const paramsObject = buildCaptureParamsObject(filteredCaptureTree, factory);
+  const boundPattern = hasCaptures
+    ? factory.createCallExpression(
+      factory.createPropertyAccessExpression(patternCall, "curry"),
+      undefined,
+      [buildCaptureParamsObject(filteredCaptureTree, factory)],
+    )
+    : patternCall;
 
   if (!ts.isPropertyAccessExpression(methodCall.expression)) {
     throw new Error(
@@ -283,7 +304,7 @@ function createPatternCallWithParams(
     factory.createIdentifier(targetMethodName),
   );
 
-  const args: ts.Expression[] = [patternCall, paramsObject];
+  const args: ts.Expression[] = [boundPattern];
   if (methodCall.arguments.length > 1) {
     const thisArg = ts.visitNode(
       methodCall.arguments[1],
@@ -326,6 +347,18 @@ export function transformArrayMethodCallback(
 ): ts.CallExpression {
   const { checker } = context;
 
+  if (methodCall.arguments.length > 1) {
+    context.reportDiagnosticOnce({
+      severity: "error",
+      type: "array-method:this-arg-unsupported",
+      message:
+        "Reactive array callbacks do not support Array.prototype thisArg. " +
+        "Capture the value lexically instead.",
+      node: methodCall.arguments[1]!,
+    });
+    return methodCall;
+  }
+
   context.markAsArrayMethodCallback(callback);
 
   const collector = new CaptureCollector(checker);
@@ -341,7 +374,7 @@ export function transformArrayMethodCallback(
     visitor,
   ) as ts.ConciseBody;
 
-  return createPatternCallWithParams(
+  return createPatternCall(
     methodCall,
     callback,
     transformedBody,
