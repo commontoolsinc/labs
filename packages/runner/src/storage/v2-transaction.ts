@@ -123,9 +123,11 @@ type WritableDocumentEntry = {
   // set. See ./mergeable-ops.ts.
   mergeableOps?: Map<string, MergeableOpIntent>;
   // Paths where a mergeable intent cannot faithfully carry the transaction's
-  // local change — a second mergeable op of a different kind was recorded, or a
-  // foreign write (a reshape such as sort/splice) rewrote the array after an op
-  // was recorded. Such a path abandons the mergeable fast path and commits the
+  // local change — a second mergeable op of a different kind was recorded, a
+  // foreign write (a reshape such as sort/splice, or a whole-value set at or
+  // above the path) rewrote the array after an op was recorded, or the
+  // commit-time builder abandoned the intent because it no longer described the
+  // local value. Such a path abandons the mergeable fast path and commits the
   // whole-array diff, which reflects the correct combined local value. Once
   // poisoned a path stays poisoned for the rest of the transaction, so a later
   // op does not resurrect a partial intent. Keyed like mergeableOps.
@@ -1098,23 +1100,36 @@ export class V2StorageTransaction implements IStorageTransaction {
   // Abandon the mergeable fast path for `address`: a foreign write (a reshape
   // that is not itself a mergeable op) has rewritten the array after an op was
   // recorded, so the recorded tail no longer identifies the appended elements.
-  // Drop any intent and mark the path poisoned so the commit emits the
-  // whole-array diff (the correct local value) instead. A path with no recorded
-  // intent is left untouched — a reshape before any op is fine, and a later op on
-  // that path is still mergeable.
+  // Drop any covered intent and mark its path poisoned so the commit emits the
+  // whole-array diff (the correct local value) instead.
+  //
+  // The reshape reaches every intent AT or BENEATH the written path: a write to
+  // an enclosing object (`doc.set({rows})`) rewrites the array inside it just as
+  // surely as a write to the array itself, and the intent's recorded tail then
+  // spans elements the reshape supplied rather than ones an op appended. Intents
+  // ABOVE the write are untouched, which is what keeps an element edit
+  // (`cell.key(i).set(...)`, a write beneath the array) composing with a push,
+  // and leaves a write to a sibling field alone.
+  //
+  // A path carrying no intent yet is left alone — but that is not a statement
+  // that a reshape before an op is harmless. It is caught later instead, by the
+  // tail builder's own prefix check at commit (see ./mergeable-ops.ts).
   poisonMergeableOp(address: IMemorySpaceAddress): void {
     // Only ever called right after a write on this transaction, so the tx is
     // editable — no editable() re-check. The write also made the address's
     // document writable, but a caller could resolve to a different (read-only)
     // slot, so a non-writable target is a real no-op.
     const doc = this.writableMergeableTarget(address);
-    if (!doc) return;
-    const pathKey = encodePointer(address.path);
-    if (!doc.mergeableOps?.has(pathKey)) {
+    if (!doc?.mergeableOps?.size) {
       return;
     }
-    doc.mergeableOps.delete(pathKey);
-    (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    const covered = [...doc.mergeableOps.values()]
+      .filter((intent) => isPrefixPath(address.path, intent.path))
+      .map((intent) => encodePointer(intent.path));
+    for (const pathKey of covered) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    }
   }
 
   // The caller wrote through this same transaction, so the entry is writable.

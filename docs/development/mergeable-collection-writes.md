@@ -125,7 +125,9 @@ The same machinery carries three mergeable ops. `append` is described below;
 - **Transaction (`packages/runner/src/storage/v2-transaction.ts`)** —
   `recordMergeableOp(address, { op: "append", count })` records, per document and
   path, a mergeable intent (`mergeableOps` on the writable entry). At commit:
-  - The op builder emits an `append` op for each recorded array path. With a
+  - The op builder emits an `append` op for each recorded array path whose
+    recorded tail still describes the local value (see "Mixed ops on one path
+    fall back to the whole-array diff" below for when it does not). With a
     base present, only `count` tail elements are the append; with the array
     absent from the base (a fresh or not-yet-loaded entity) the whole working
     array is the append, so a stale-empty base does not drop locally created
@@ -286,21 +288,30 @@ first, since the op carries only the delta.
   contention) but is never silently corrupted. Three sites poison via
   `poisonMergeableOp`: `recordMergeableOp` on a second, different op kind; the
   query-result proxy on any non-`push` in-place mutator; and `Cell.set` on a
-  whole-value overwrite of a path that already carries an intent. `poisonMergeableOp`
-  only acts when an intent is already present at the exact path, so a same-kind
-  repeat (two `push`es, two `increment`s) still folds into one op and an element
-  edit (`cell.key(i).set(...)`, whose path carries no intent) still composes with a
-  push.
+  whole-value overwrite covering a path that already carries an intent.
+  `poisonMergeableOp` acts on every intent at *or beneath* the path written — a
+  write to an enclosing object (`doc.set({rows})`) reshapes the array inside it
+  just as surely as a write to the array itself — and on nothing above it. So a
+  same-kind repeat (two `push`es, two `increment`s) still folds into one op, an
+  element edit (`cell.key(i).set(...)`, which writes *beneath* the array and
+  carries no intent of its own) still composes with a push, and a write to a
+  sibling field leaves the push mergeable.
+
+  Reaching descendants is what catches the sequence the length check below
+  cannot: a `push`, an ancestor reshape, then a second `push`. The two pushes
+  sum to a `count` that spans the reshape, so the recorded tail lands back on
+  the base length while covering an element the reshape supplied rather than one
+  an op appended.
 
 - **A reshape that changes the array's length ahead of the tail falls back too.**
-  The three poison sites above all fire at the moment of the write, so they see
-  only a reshape that lands *after* an op was recorded, at exactly the op's path.
-  A reshape that lands *before* the op (`rows.set([])` and then `addUnique` — the
-  clear-and-reseed idiom) or at a *parent* path (`doc.set({rows: [...]})` and then
-  `doc.key("rows").push(x)`) is invisible to them. The tail op's builder therefore
+  The poison sites all fire at the moment of the write, so they see only a
+  reshape that lands *after* an op was recorded. A reshape that lands *before*
+  the op — `rows.set([])` and then `addUnique`, the clear-and-reseed idiom — is
+  invisible to them. The tail op's builder therefore
   re-checks the invariant the recorded tail rests on: the working array's prefix
   must still line up with the base one element for one, i.e. the base array's
-  length must equal `working.length - count`. When it does not, the builder
+  length must equal the tail start, `max(0, working.length - count)`. When it
+  does not, the builder
   *abandons* the intent — the same fallback the poison sites produce, decided at
   commit rather than at the write. This is what keeps a clear-and-reseed honest:
   a tail op cannot express "and remove everything that was here", and its
@@ -309,12 +320,25 @@ first, since the op carries only the delta.
   new ones on top — a silently doubled list, with the writing session's own local
   value showing the correct one.
 
-  Abandoning at build time has to drop the intent from the transaction, not
-  merely skip emitting the op: a live intent still narrows the op's reads out of
-  the commit's conflict set (see below), and the whole-value diff that replaces
-  the op needs those reads back. `buildMergeableOps` deletes and poisons the path
-  for exactly that reason, and it runs inside `getNativeCommit`, ahead of the
-  narrowing.
+  A same-length replacement (`rows.set(["x","y","z"])` and then a `push`) does
+  *not* need the fallback and keeps its op: the replacement diffs into per-index
+  candidates below the tail, which survive the suppression and commit alongside
+  the append. Only a length change ahead of the tail leaves the diff unable to
+  carry what the op does not.
+
+  Abandoning at build time drops the intent from the transaction rather than
+  merely skipping the op: a live intent still narrows reads out of the commit's
+  conflict set (see below) on behalf of an op that is no longer being sent, and
+  the whole-value diff replacing it is entitled to those reads.
+  `buildMergeableOps` deletes and poisons the path, and it runs inside
+  `getNativeCommit`, ahead of the narrowing, so both sides see the same intents.
+
+  In every case reachable today the reshaping write also leaves an unmarked read
+  at the path, which keeps it in the conflict set regardless — so the delete is
+  belt and braces rather than a demonstrated behaviour change, and no test
+  asserts a conflict outcome that depends on it. It is kept because the
+  guarantee should not rest on that coincidence: nothing obliges a reshape to
+  read what it overwrites.
 
 ## Conditional pushes stay protected: the read-set narrowing
 

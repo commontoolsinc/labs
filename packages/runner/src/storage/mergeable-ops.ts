@@ -81,9 +81,15 @@ export interface MergeableBuildContext {
 
 /**
  * `abandon` says the intent produced no wire op and must be dropped from the
- * transaction entirely, not merely left un-emitted: the reads a live intent
- * narrows out of the conflict set belong to an op that is no longer being sent,
- * so the whole-value diff that replaces it has to keep them.
+ * transaction entirely, not merely left un-emitted: a live intent still narrows
+ * reads out of the commit's conflict set on behalf of an op that is no longer
+ * being sent, and the whole-value diff replacing it is entitled to those reads.
+ *
+ * In today's reachable cases the reshaping write also leaves an unmarked read at
+ * the path, which keeps it in the conflict set anyway — so this is belt and
+ * braces rather than a demonstrated behaviour change. It is kept because the
+ * guarantee should not rest on that coincidence: nothing makes a reshape
+ * obliged to read what it overwrites.
  */
 export interface MergeableBuildResult {
   ops: PatchOp[];
@@ -99,7 +105,8 @@ export interface MergeableBuildResult {
 // - `isNoopDelta` — a delta that records nothing and is dropped before the write
 //   target is even resolved (an empty tail op). Absent means "always record".
 // - `fold` — how a delta combines into the path's accumulated intent.
-// - `build` — how an accumulated intent becomes wire ops and diff-suppression.
+// - `build` — how an accumulated intent becomes wire ops and diff-suppression,
+//   or is abandoned in favour of the plain diff (see `abandon` above).
 interface MergeableOpDescriptor<
   Intent extends MergeableOpIntent = MergeableOpIntent,
   Delta extends MergeableOpDelta = MergeableOpDelta,
@@ -207,9 +214,14 @@ const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
       by: (existing?.op === "increment" ? existing.by : 0) + delta.by,
     }),
     // Increments that summed to zero (a +1 and a -1) are a no-op: the working
-    // value already reflects no change, so emit nothing (and nothing to suppress).
+    // value already reflects no change, so emit nothing (and nothing to
+    // suppress). Deliberately NOT abandoned: with the value unchanged the diff
+    // has no candidate at this path either, so there is no replacement write
+    // whose reads need restoring — abandoning would only put the op's own read
+    // back into the conflict set and make a net-zero increment false-conflict
+    // with a concurrent one.
     build: (intent, ctx) =>
-      intent.by === 0 ? { ops: [], suppress: [], abandon: true } : {
+      intent.by === 0 ? { ops: [], suppress: [] } : {
         ops: [
           {
             op: "increment",

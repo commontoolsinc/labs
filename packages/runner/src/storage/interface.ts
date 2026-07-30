@@ -841,8 +841,11 @@ export interface IStorageTransaction {
    * by identity, a numeric increment, or a value removed by identity. The commit
    * emits these as the corresponding mergeable op (which the server resolves
    * against durable state) and drops the op's path from the commit's conflict
-   * read set, so concurrent and stale-base writes merge rather than clobber. The
-   * op catalog and folding rules live in ./mergeable-ops.ts.
+   * read set, so concurrent and stale-base writes merge rather than clobber.
+   * Recording is an intent, not a guarantee: a later write that reshapes the
+   * same collection, or a recorded tail that no longer describes the local value
+   * at commit, falls the path back to the whole-value diff. The op catalog,
+   * folding rules, and that fallback live in ./mergeable-ops.ts.
    */
   recordMergeableOp?(
     address: IMemorySpaceAddress,
