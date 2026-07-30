@@ -500,15 +500,37 @@ export function handler<E, T>(
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): HandlerFactory<T, E>;
-export function handler<E, T>(
+// Declared results, reached only by naming all three type arguments — the
+// same explicit-only rule as `action`'s result overload, mirrored here and in
+// api's `HandlerFunction` (both halves are hand-maintained; an overload
+// present in only one of them is unreachable from patterns while the other's
+// tests stay green). The `=> any` overloads above absorb every inferred call
+// first, so an incidental return never declares a result.
+export function handler<E, T, R>(
+  eventSchema: JSONSchema,
+  stateSchema: JSONSchema,
+  handler: (event: E, props: T) => R,
+): HandlerFactory<T, E, R>;
+export function handler<E, T, R>(
+  handler: (event: E, props: T) => R,
+  options: { proxy: true },
+): HandlerFactory<T, E, R>;
+export function handler<E, T, R>(
+  handler: (event: E, props: T) => R,
+): HandlerFactory<T, E, R>;
+export function handler<E, T, R = void>(
   eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E> {
-  return handlerInternal(eventSchema, stateSchema, handler);
+): HandlerFactory<T, E, R> {
+  return handlerInternal(eventSchema, stateSchema, handler) as HandlerFactory<
+    T,
+    E,
+    R
+  >;
 }
 
 // unsafe closures: doesn't need any arguments.

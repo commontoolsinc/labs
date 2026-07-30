@@ -13,9 +13,13 @@ codes reach the invocation surface, so agents branch on one signal. Later the
 same day, D5's open question was measured (see its bullet): absent events
 bypass default materialization entirely, narrowing D5's remaining choice to
 refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`. A third pass
-records the C1 review decision: no bespoke `VerbError` — a separate
+records the C1 review decisions: no bespoke `VerbError` — a separate
 `FabricError` effort is underway, the rule-4 carrier will derive from it, and
-C1 ships without one (see WS-C).
+C1 ships without one; `handler` carries the same explicit-only declared-result
+overloads as `action`, reversing the action-only record (both in WS-C); D5's
+absence rule settles as normalize-absent-to-`{}`; the reactive-readback claim
+is re-confirmed; and the compiled-pattern receipt readback is pinned as a
+runner test beside D4's fixture.
 
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
@@ -160,13 +164,20 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   one is. So the rule to author against is: publish as few names as the verb
   can live with, and make every later addition optional. The design doc's
   matching paragraph is corrected the same way.
-- **`action` is the sole result-authoring surface.** `handler()` produces
-  `HandlerFactory<T, E, void>`, so a returning verb written with `handler`
-  does not compile against a `Stream<E, R>` annotation. Deliberate: `action`
-  is the CTS-native surface a pattern author writes, `handler` the lower-level
-  escape hatch, and threading `R` through both would double a hand-maintained
-  mirror that already drifts. C2's returning-body error must point authors at
-  `action` rather than merely rejecting the body.
+- **Both `action` and `handler` author results; the invariant is
+  explicit-only, not which surface.** Reversed in the C1 review (Berni,
+  2026-07-30) from an earlier action-only record: `handler` gains the same
+  declared-result overloads — `handler<E, T, R>(...)`, reached only by naming
+  all three type arguments — so a returning verb compiles against
+  `Stream<E, R>` from either surface. What survives from the old rationale is
+  the mirror-drift worry, converted into a test obligation: the overloads
+  exist in both hand-maintained halves (api `HandlerFunction`,
+  `builder/module.ts`), each pinned where its consumer touches it
+  (`handler-function-surface.test.ts` on the pattern-facing side,
+  `handler-overload-types.test.ts` on the builder side). The `=> any` forms
+  absorb every inferred callback first, so an incidental return still never
+  declares a result. C2's returning-body error points at declaring the
+  result, on whichever surface the author used.
 - ~~**api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void` — the `action()` overloads in
   `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
@@ -344,14 +355,20 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
-  reactive returns are readable in the receipt cell.
+  reactive returns are readable in the receipt cell. The plain half of that
+  readback is pinned at the runner already — `declared-result-e2e.test.ts`
+  compiles a declared-result pattern through the real pipeline and reads the
+  receipt back through `tx.handlingReceiptLink`, both flag states — landed
+  with C1 per review (2026-07-30) in addition to D4's fixture, which stays
+  the end-to-end criterion.
 - **The reactive half of that exit needs no new machinery** (Berni,
   2026-07-29): `await cell.pull()` on the receipt already ensures the pattern
   on that cell, if there is one, has run. The readback the CLI performs is
   therefore the same call for a plain return and a launched one, and the
   difference stays inside `pull()`. Recorded rather than assumed — the claim
   is the architect's about his own machinery, and this plan has not yet
-  exercised a reactive return end to end.
+  exercised a reactive return end to end. Re-confirmed by Berni in the C1
+  review round (2026-07-30).
 
 ### WS-D — invocation plumbing
 
@@ -473,10 +490,16 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   `undefined` and the receipt still spends the id even when every required
   property carries a default. Relaxation is therefore honest for present
   payloads and the wrong lens for the absence decision: an all-defaulted
-  `required` list does not make absence deliverable. D5 settles, at the
-  top of its PR, whether that corner refuses on **unrelaxed** `required`
-  or normalizes an absent payload to `{}` so defaults engage; the measured
-  behavior belongs in the helper's doc comment either way. Plumbing reuses
+  `required` list does not make absence deliverable. **Settled (Berni,
+  2026-07-30): normalize an absent payload to `{}`** where the verb's schema
+  is an object schema, so defaults engage and absence flows through the same
+  gate as any payload — `{}` fails the relaxed schema exactly when top-level
+  `required` survives relaxation, so the refusal set the rule above
+  describes is unchanged; what changes is the fail-open corner, which now
+  delivers a defaults-populated object instead of `undefined`. Boolean
+  `false` and non-object schemas keep today's absent-passes behavior —
+  normalization applies only where an object schema makes `{}` meaningful.
+  The measured behavior belongs in the helper's doc comment. Plumbing reuses
   `VerbInputValidationError` with a detail that says no payload was supplied
   and names the missing requirement ("send a payload" must read differently
   from "fix your payload"); both entry points (piece call and mounted exec)

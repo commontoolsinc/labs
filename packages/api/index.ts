@@ -2445,6 +2445,25 @@ export interface HandlerFunction {
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<T, E>;
+
+  // Declared results, reached only by naming all three type arguments —
+  // `ActionFunction`'s explicit-only rule, for the same reason: the `=> any`
+  // forms above absorb every callback first, so an incidental return never
+  // declares a result; a result must be asked for by name.
+  <E, T, R>(
+    eventSchema: JSONSchema,
+    stateSchema: JSONSchema,
+    handler: (event: E, props: HandlerState<T>) => R,
+  ): HandlerFactory<T, E, R>;
+
+  <E, T, R>(
+    handler: (event: E, props: T) => R,
+    options: { proxy: true },
+  ): HandlerFactory<T, E, R>;
+
+  <E, T, R>(
+    handler: (event: E, props: HandlerState<T>) => R,
+  ): HandlerFactory<T, E, R>;
 }
 
 /**
