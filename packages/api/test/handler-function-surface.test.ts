@@ -42,7 +42,7 @@ export function _handlerFunctionSurfaceProbe() {
     { proxy: true },
   );
   type _ConciseHasNoResult = MustBeTrue<
-    Same<typeof concise, HandlerFactory<BoundState, string>>
+    Same<typeof concise, HandlerFactory<string, BoundState>>
   >;
 
   // A result is reachable from a pattern, and only by naming all three type
@@ -51,7 +51,7 @@ export function _handlerFunctionSurfaceProbe() {
     (_event, _props) => ({ topic: { fid: "topic-1" } }),
   );
   type _DeclaredCarriesResult = MustBeTrue<
-    Same<typeof declared, HandlerFactory<BoundState, AddTopic, TopicRef>>
+    Same<typeof declared, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
   const declaredProxy = handler<AddTopic, BoundState, TopicRef>(
@@ -59,7 +59,7 @@ export function _handlerFunctionSurfaceProbe() {
     { proxy: true },
   );
   type _ProxyCarriesResult = MustBeTrue<
-    Same<typeof declaredProxy, HandlerFactory<BoundState, AddTopic, TopicRef>>
+    Same<typeof declaredProxy, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
   const declaredWithSchemas = handler<AddTopic, BoundState, TopicRef>(
@@ -70,7 +70,7 @@ export function _handlerFunctionSurfaceProbe() {
   type _SchemaFormCarriesResult = MustBeTrue<
     Same<
       typeof declaredWithSchemas,
-      HandlerFactory<BoundState, AddTopic, TopicRef>
+      HandlerFactory<AddTopic, BoundState, TopicRef>
     >
   >;
 

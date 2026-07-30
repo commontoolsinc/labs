@@ -118,7 +118,7 @@ export default pattern(() => {
 // Verifies: a declared result on Stream's second parameter survives the
 //   transformer and still satisfies the pattern's own Output annotation.
 //   `action` is the sole result-authoring surface — `handler()` produces
-//   HandlerFactory<T, E, void>, so the same shape written with `handler` does
+//   HandlerFactory<E, T, void>, so the same shape written with `handler` does
 //   not compile. C2 lowers the returned value; C3 emits the result schema.
 //   Until both land, a returning verb transforms exactly like a value-less
 //   one, and this golden is the baseline they move.

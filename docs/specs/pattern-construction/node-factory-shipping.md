@@ -165,7 +165,7 @@ The same applies to modules and handlers:
 interface FactoryInputs {
   value: string;
   transform: ModuleFactory<{ value: string }, { length: number }>;
-  select: HandlerFactory<{ source: string }, { id: string }>;
+  select: HandlerFactory<{ id: string }, { source: string }>;
 }
 
 const useFactories = pattern<FactoryInputs>(({

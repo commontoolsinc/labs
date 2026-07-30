@@ -51,7 +51,7 @@ export function _handlerOverloadTypeProbe() {
     (id: string, state: BoundState) => state.selected.set(id),
   );
   type _ConciseHasNoResult = MustBeTrue<
-    Same<typeof concise, HandlerFactory<BoundState, string>>
+    Same<typeof concise, HandlerFactory<string, BoundState>>
   >;
 
   // A result is opt-in, and only by naming all three type arguments — on each
@@ -60,7 +60,7 @@ export function _handlerOverloadTypeProbe() {
     (_event, _state) => ({ id: "topic-1" }),
   );
   type _DeclaredCarriesResult = MustBeTrue<
-    Same<typeof declared, HandlerFactory<BoundState, AddTopic, TopicRef>>
+    Same<typeof declared, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
   const declaredProxy = handler<AddTopic, BoundState, TopicRef>(
@@ -68,7 +68,7 @@ export function _handlerOverloadTypeProbe() {
     { proxy: true },
   );
   type _ProxyCarriesResult = MustBeTrue<
-    Same<typeof declaredProxy, HandlerFactory<BoundState, AddTopic, TopicRef>>
+    Same<typeof declaredProxy, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
   const declaredWithSchemas = handler<AddTopic, BoundState, TopicRef>(
@@ -79,7 +79,7 @@ export function _handlerOverloadTypeProbe() {
   type _SchemaFormCarriesResult = MustBeTrue<
     Same<
       typeof declaredWithSchemas,
-      HandlerFactory<BoundState, AddTopic, TopicRef>
+      HandlerFactory<AddTopic, BoundState, TopicRef>
     >
   >;
 
@@ -87,7 +87,7 @@ export function _handlerOverloadTypeProbe() {
   // dropped declaration is a compile error at the assignment rather than a
   // silent erasure.
   type _DeclaredIsNotResultLess = MustBeTrue<
-    Same<typeof declared, HandlerFactory<BoundState, AddTopic>> extends true
+    Same<typeof declared, HandlerFactory<AddTopic, BoundState>> extends true
       ? false
       : true
   >;
