@@ -38,7 +38,7 @@ const PRELUDE = [
 
 const HEALTHY = [
   ...PRELUDE,
-  "interface Output {",
+  "export interface Output {",
   "  owner: Confidential<Writable<string>, Label>;",
   "  items: Writable<string[]>;",
   "}",
@@ -53,7 +53,7 @@ const HEALTHY = [
 /** The estuary shape: additive, required, no default. */
 const BREAKING = [
   ...PRELUDE,
-  "interface Output {",
+  "export interface Output {",
   "  owner: Confidential<Writable<string>, Label>;",
   "  items: Writable<string[]>;",
   "  addedLater: Writable<string[]>;",
@@ -76,6 +76,34 @@ const COMPATIBLE = BREAKING.replace(
 /** Same contract, different backing cell — the class the gate cannot see. */
 const MOVED_KEY = HEALTHY.replace(".for('items')", ".for('itemList')");
 
+/**
+ * The subject's own test, which is what CAPTURE runs.
+ *
+ * A capture drives the pattern through its tests rather than materializing it
+ * bare, so the fixture holds state written through a real handler. This one
+ * writes to `items` and asserts the write landed — the assertion matters
+ * because a capture refuses a run whose tests did not pass, so a fixture can
+ * never record a state the pattern does not actually reach.
+ */
+const SUBJECT_TEST = [
+  "import { action, assert, pattern } from 'commonfabric';",
+  `import Subject from './${KEY}';`,
+  "export default pattern(() => {",
+  "  const subject = Subject({});",
+  "  const add = action(() => {",
+  "    subject.items.set([...subject.items.get(), 'captured']);",
+  "  });",
+  "  const added = assert(() => subject.items.get().length === 1);",
+  "  return {",
+  "    tests: [{ action: add }, { assertion: added }],",
+  "    subject,",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
+const TEST_KEY = KEY.replace(/\.tsx$/, ".test.tsx");
+
 describe("the vintage gate, end to end", () => {
   let dir = "";
   let roots: GateRoots;
@@ -90,6 +118,7 @@ describe("the vintage gate, end to end", () => {
       signer,
     };
     await Deno.writeTextFile(`${dir}/patterns/${KEY}`, HEALTHY);
+    await Deno.writeTextFile(`${dir}/patterns/${TEST_KEY}`, SUBJECT_TEST);
   });
 
   afterEach(async () => {
@@ -224,6 +253,9 @@ describe("the vintage gate, end to end", () => {
     const { failures } = await replayAll(roots);
 
     expect(failures).toHaveLength(1);
-    expect(failures[0].detail).toContain("does not resolve");
+    // Names WHICH pattern stopped resolving, not just that something did — a
+    // fixture records many instantiations, so an unattributed failure would
+    // leave the reader to guess which of them retired.
+    expect(failures[0].detail).toContain(`/patterns/${KEY} no longer resolves`);
   });
 });

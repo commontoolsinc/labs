@@ -283,17 +283,21 @@ describe("reporting", () => {
     // Stated once and tested, rather than an `if` at the bottom of main that a
     // later edit can quietly invert. A gate that exits 0 on failure is worse
     // than no gate at all.
-    expect(isClean([], [], 2)).toBe(true);
-    expect(isClean([failure], [], 2)).toBe(false);
-    expect(isClean([], ["system/home.tsx"], 2)).toBe(false);
-    expect(isClean([failure], ["system/home.tsx"], 2)).toBe(false);
+    expect(isClean([], [], 2, 5)).toBe(true);
+    expect(isClean([failure], [], 2, 5)).toBe(false);
+    expect(isClean([], ["system/home.tsx"], 2, 5)).toBe(false);
+    expect(isClean([failure], ["system/home.tsx"], 2, 5)).toBe(false);
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {
     // The catastrophic shape: no failures, nothing uncovered, and no evidence
     // whatsoever. A run that replays nothing proves nothing, so it cannot be
     // the same answer as a run that replayed everything and found it readable.
-    expect(isClean([], [], 0)).toBe(false);
+    expect(isClean([], [], 0, 0)).toBe(false);
+    // The same shape one level in: fixtures replayed, but between them they
+    // recorded no instantiation, so no update target was examined. "Replayed 2
+    // vintage(s)" would read as success while proving nothing.
+    expect(isClean([], [], 2, 0)).toBe(false);
     expect(reportNothingReplayed()).toContain("covered NOTHING");
     expect(reportNothingReplayed()).toContain(
       "deno task pattern-vintage --update",
