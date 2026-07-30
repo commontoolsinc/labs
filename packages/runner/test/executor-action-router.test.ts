@@ -1239,7 +1239,7 @@ const wideningPairCommit = (
   schedulerObservation: wideningPairObservation(),
 });
 
-Deno.test("executor router candidates the §4 widening pair at user rank with an unwidened shadow certificate", async () => {
+Deno.test("executor router candidates the §4 widening pair at user rank, and a run naming NO LANE keeps an unwidened certificate", async () => {
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
@@ -1262,8 +1262,11 @@ Deno.test("executor router candidates the §4 widening pair at user rank with an
     },
     sourceAction: pairAction,
   }]);
-  // Unclaimed shadow routes keep the trusted certificate byte-identical:
-  // envelope widening is claimed-commit presentation only.
+  // This route names no lane (`input.lane` absent => the space lane), so the
+  // trusted certificate stays byte-identical. Envelope widening is presented
+  // for a run that ACTS ON a lane — since §2b row 5 that is the carrier, not
+  // the presence of a claim (see the acting-lane pins below). The candidate
+  // this route emits is a claim KEY, not a lane the run acted on.
   const shadowSummary = (shadow.schedulerObservation as ReturnType<
     typeof wideningPairObservation
   >).completeActionScopeSummary;
@@ -1332,6 +1335,85 @@ Deno.test("executor router rejects a broad value write in the pair with the engi
     // Output-scoping failed: the broad leg carries a plain value.
     commit: wideningPairCommit({ value: 42 }),
     sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "broad-lane-value-write",
+  ]);
+});
+
+// --- SLICE 2b (§2b row 5): the §4 pair's carrier is the ACTING LANE --------
+//
+// `claim-deletion-scope.md` §2b row 5. `widenLaneOutputEnvelopes` reached the
+// commit only through `attachClaimAssertion`, so the pair the engine's
+// scope-sensitive coverage requires existed only while a CLAIM did — while C1
+// ruled the pair itself SURVIVES claim deletion (it is a base-runtime rule
+// that predates lanes: the runtime's own emission at `pattern-binding.ts:274`
+// names no lane, claim, executor or server term). A survivor may not ride on
+// the mechanism being deleted, so the emission moves onto the lane the run
+// ACTED AS — which is what slice 1 (`768aab2dc`) already sends on the wire as
+// the commit's `actingContext`: `storage/v2.ts` `commitActingContext` reads
+// the same `#localSeqLanes` entry the router receives as `input.lane`, and
+// `5aa63e6d3` made the engine's firewall resolve its lane from it.
+//
+// LATENT TODAY BY CONSTRUCTION, and that is the expected reading of the gate:
+// the executor resolves a run's acting lane FROM its claims (`laneRunPins` /
+// `undirectedRunLane` in `executor-worker.ts`), so an unclaimed run acts on
+// the space lane and the delta is empty. These pins describe the shape that
+// exists the moment the lane arrives from demand instead of from a claim.
+
+Deno.test("an UNCLAIMED run acting on a user lane presents the §4 lane-widened certificate", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // `claimForAction: () => undefined` — no claim anywhere in this route.
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const pairAction = {};
+  const acting = wideningPairCommit();
+  const route = await router({
+    space: SPACE,
+    commit: acting,
+    sourceAction: pairAction,
+    lane: userExecutionContextKey(LANE_PRINCIPAL),
+  });
+  assertEquals(diagnostics, []);
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  const routed = acting.schedulerObservation as
+    & ReturnType<typeof wideningPairObservation>
+    & { executionClaimAssertion?: Record<string, unknown> };
+  // No claim is asserted — the certificate is presented on the run's own
+  // acting lane, not on a claim's contextKey.
+  assertEquals(routed.executionClaimAssertion, undefined);
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    { ...output, scope: "user" },
+  ]);
+  // The declared direct outputs stay exactly as the transformer authored
+  // them: widening presents INSTANCES of declared documents, never new ones.
+  assertEquals(routed.completeActionScopeSummary.directOutputs, [output]);
+});
+
+Deno.test("an UNCLAIMED run acting on a user lane still rejects a broad VALUE write", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  // THE PAIR MUST STAY A PAIR. Widening a lane-acting run's envelopes admits
+  // the broad INSTANCE leg — a self-scoping redirect, byte-identical across
+  // principals because it carries no principal at all, so every lane emits
+  // the same bytes at the same address. A broad VALUE differs per principal
+  // and is therefore the cross-principal leak; dropping the claim from the
+  // carrier must not drop this rejection with it.
+  const route = await router({
+    space: SPACE,
+    commit: wideningPairCommit({ value: 42 }),
+    sourceAction: {},
+    lane: userExecutionContextKey(LANE_PRINCIPAL),
   });
   assertEquals(route.disposition, "local");
   if (route.disposition !== "local") throw new Error("expected local");
@@ -2025,6 +2107,107 @@ Deno.test("executor router rejects a broad value write at session rank with the 
     // backstop applies to session-acting commits exactly as to user ones.
     commit: sessionWideningPairCommit({ value: 42 }),
     sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "broad-lane-value-write",
+  ]);
+});
+
+Deno.test("an UNCLAIMED run acting on a SESSION lane presents the session-widened certificate", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // No `claimForAction` — the session lane is the sole carrier (§2b row 5).
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE],
+  });
+
+  const acting = sessionWideningPairCommit();
+  const route = await router({
+    space: SPACE,
+    commit: acting,
+    sourceAction: {},
+    lane: SESSION_LANE,
+  });
+  assertEquals(diagnostics, []);
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  const routed = acting.schedulerObservation as
+    & ReturnType<typeof sessionWideningPairObservation>
+    & { executionClaimAssertion?: Record<string, unknown> };
+  assertEquals(routed.executionClaimAssertion, undefined);
+  // The instance twin is the ACTING rank's — the session's, not the
+  // principal's user instance (which this run may not write at all).
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    { ...output, scope: "session" },
+  ]);
+  assertEquals(routed.completeActionScopeSummary.directOutputs, [output]);
+});
+
+Deno.test("THE SUPERSET LEG: a SPACE-lane claim on a session-rank action keeps its session-widened certificate", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // The case that makes `actingRank ?? contextRank` mandatory rather than
+  // decorative (§2b row 5). `commitContextKey`'s session arm has no
+  // representable pre-lane identity, so a session-rank action running on the
+  // SPACE lane keys — and can hold — a SPACE claim. Its acting rank is
+  // therefore "space" while its classified rank is "session", and it is
+  // widened at session rank today. Gating the widening on the acting lane
+  // ALONE would drop this commit out of the widened set: a shrink, not a
+  // superset, and the engine would answer it `runtime-exceeds-static-scope`.
+  const spaceClaim: ExecutionClaim = {
+    ...key,
+    contextKey: "space",
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE],
+    claimForAction: (_action, lane) =>
+      lane === "space" ? spaceClaim : undefined,
+  });
+
+  const claimed = sessionWideningPairCommit();
+  const route = await router({
+    space: SPACE,
+    commit: claimed,
+    sourceAction: {},
+    // No `lane`: this run acts on the space lane.
+  });
+  assertEquals(diagnostics, []);
+  assertEquals(route.disposition, "upstream");
+  const routed = claimed.schedulerObservation as
+    & ReturnType<typeof sessionWideningPairObservation>
+    & { executionClaimAssertion?: Record<string, unknown> };
+  assertEquals(routed.executionClaimAssertion, {
+    contextKey: "space",
+    leaseGeneration: spaceClaim.leaseGeneration,
+    claimGeneration: spaceClaim.claimGeneration,
+  });
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    { ...output, scope: "session" },
+  ]);
+});
+
+Deno.test("an UNCLAIMED run acting on a SESSION lane still rejects a broad VALUE write", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE],
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: sessionWideningPairCommit({ value: 42 }),
+    sourceAction: {},
+    lane: SESSION_LANE,
   });
   assertEquals(route.disposition, "local");
   if (route.disposition !== "local") throw new Error("expected local");

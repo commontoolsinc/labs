@@ -495,23 +495,63 @@ export function createExecutorActionTransactionRouter(
       );
       return local;
     }
+    // The rank of the lane this run ACTED AS (`input.lane`, captured by the
+    // provider at commit entry and sent on the wire as this commit's
+    // `actingContext` — `storage/v2.ts` `commitActingContext` reads the same
+    // `#localSeqLanes` entry). Undefined for the space lane and for any
+    // non-canonical key: CA9 forbids fabricating a lane identity, so an
+    // unreadable key falls back rather than inventing a rank.
+    const actingRank = laneKeyRank(commitLane);
+    // §2b row 5, the §4 pair's new carrier. `actingRank` FIRST, the static
+    // classification only as the fallback: the pair is a base-runtime rule
+    // that survives claim deletion (C1's `pattern-binding.ts:274` ruling), so
+    // it may not keep riding on a claim-keyed rank. Not `actingRank` alone —
+    // that would SHRINK the widened set. A claim can be issued at space rank
+    // for an action the classifier later reads as session rank (the
+    // `commitContextKey` space representative above), and that commit is
+    // widened today; keeping the fallback makes the after-set a superset.
+    // Where both are defined they agree: a claimed commit only reaches here
+    // after `executionClaimMatchesActionKey`, so its claim's contextKey IS
+    // `commitLane`, and `commitContextKey` equals a scoped `commitLane` only
+    // when `laneKeyRank(commitLane) === contextRank`.
+    const laneRank: "space" | "user" | "session" = actingRank ?? contextRank;
     // Engine-emission lockstep for the §4 output-widening pair (A7): a
-    // scoped-rank claimed commit presents its trusted certificate with the
-    // acting lane's instance of each broad direct output added to the write
+    // scoped-rank commit presents its trusted certificate with the acting
+    // lane's instance of each broad direct output added to the write
     // envelopes — exactly the pair shape the engine's scope-sensitive
     // coverage (and its conformance fixtures) accepts. The instance scope
     // is the acting rank: the principal's user instance at user rank, the
     // acting session's instance at session rank (C2.2/C2.5).
-    const observationForClaim = contextRank !== "space"
-      ? widenLaneOutputEnvelopes(routedObservation, contextRank)
+    const observationForCommit = laneRank !== "space"
+      ? widenLaneOutputEnvelopes(routedObservation, laneRank)
       : routedObservation;
+    // EMISSION (§2b row 5): the widened certificate rides on the COMMIT, not
+    // on a claim assertion. It used to reach the commit only through
+    // `attachClaimAssertion`, i.e. only in the claimed path — so a served run
+    // that acts on a lane without a claim would present the UNwidened
+    // certificate and the engine would refuse it `runtime-exceeds-static-
+    // scope`, which is a refusal of work the server already did (D11's
+    // operational target). Writing it here makes the acting lane the sole
+    // requirement; the claimed path below still overwrites with the same
+    // observation plus its assertion, byte-identical.
+    //
+    // LATENT until claims stop being minted: the executor derives a run's
+    // acting lane FROM its claims (`laneRunPins` / `undirectedRunLane` in
+    // `executor-worker.ts`), so today an unclaimed run acts on the space lane
+    // and this branch is empty. The delta is exactly the post-deletion shape.
+    if (
+      liveClaim === undefined && actingRank !== undefined &&
+      observationForCommit !== routedObservation
+    ) {
+      input.commit.schedulerObservation = observationForCommit;
+    }
     const permanentUnservedReason = liveClaim === undefined
       ? undefined
       : options.permanentUnservedReasonForAction?.(sourceAction, liveClaim);
     if (permanentUnservedReason !== undefined) {
       attachClaimAssertion(
         input.commit,
-        observationForClaim,
+        observationForCommit,
         liveClaim!,
         foreignReadStamps,
       );
@@ -534,7 +574,7 @@ export function createExecutorActionTransactionRouter(
       if (liveClaim !== undefined) {
         attachClaimAssertion(
           input.commit,
-          observationForClaim,
+          observationForCommit,
           liveClaim,
           foreignReadStamps,
         );
@@ -560,11 +600,23 @@ export function createExecutorActionTransactionRouter(
       {
         servedSpace: options.servedSpace,
         branch: options.branch,
-        contextRank,
+        // LOCKSTEP with the widening above, and it is load-bearing: this
+        // firewall's `laneInstanceCovers` admits a scoped instance write of a
+        // broad declared output only AT `contextRank`. Widening the envelopes
+        // at the acting rank while checking coverage at the classified rank
+        // would reject the very run whose certificate was just widened
+        // (`dynamic-write-outside-static-surface` — the ×12 that `8e1cb7d99`
+        // fixed, in a new shape). Same `actingRank ?? contextRank`, so the
+        // set of rejections is unchanged wherever a claim still names the
+        // lane.
+        contextRank: laneRank,
         // Executor scoped-rank commits (user and session alike, C2.5) act
         // on the lane, so the engine's §4 broad scope-naming backstop
-        // applies at this seam too.
-        laneActingCommit: contextRank !== "space",
+        // applies at this seam too. A run acting on a lane is lane-acting
+        // whether or not a claim was ever minted for it — this is the
+        // cross-principal leak guard (`broad-lane-value-write`) and it must
+        // engage on strictly more commits than before, never fewer.
+        laneActingCommit: laneRank !== "space",
         // C3.6: mirror the static stage at the per-attempt firewall so a
         // discovered foreign space-scoped read is admitted, not rejected.
         crossSpaceRead: options.crossSpaceReadCandidates === true,
@@ -574,7 +626,7 @@ export function createExecutorActionTransactionRouter(
       if (liveClaim !== undefined) {
         attachClaimAssertion(
           input.commit,
-          observationForClaim,
+          observationForCommit,
           liveClaim,
           foreignReadStamps,
         );
@@ -633,7 +685,7 @@ export function createExecutorActionTransactionRouter(
 
     attachClaimAssertion(
       input.commit,
-      observationForClaim,
+      observationForCommit,
       liveClaim,
       foreignReadStamps,
     );
