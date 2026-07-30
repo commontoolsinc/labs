@@ -828,6 +828,112 @@ function overlayUnresolvedLinkPlaceholders(
   return materialized;
 }
 
+/**
+ * Prefix of the error setup throws when a piece's stored argument does not
+ * satisfy the argument schema of the pattern being installed.
+ *
+ * Exported so a caller can CLASSIFY that failure rather than match on prose. It
+ * is code-controlled and sits at the START of the message — a validation detail
+ * carrying user-influenced text is appended after it — so a value that merely
+ * contains this string cannot forge the classification.
+ */
+export const STORED_ARGUMENT_SCHEMA_REFUSAL =
+  "updated arguments do not match the candidate schema";
+
+/**
+ * Whether `error` is setup refusing a piece's stored argument.
+ *
+ * Distinct from a transient commit or storage failure, and callers must treat
+ * it differently: re-running the same identity refuses identically, so a boot
+ * repair that hits this has to escalate rather than retry (or a root pinned to
+ * a version whose schema cannot read its own document never opens again).
+ */
+export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
+  return error instanceof Error &&
+    error.message.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
+}
+
+/**
+ * How setup should treat the state already stored on a result cell.
+ *
+ * They are distinct on purpose. `sameStoredSetup` answers "is this the same run
+ * of the same pattern", which is what name preservation keys on;
+ * `restageStoredArgument` answers "was this pattern's argument schema ever
+ * staged here", which a pointer comparison cannot see on a repair; and
+ * `storedSetupMatches` answers "is the running graph provably this pattern",
+ * which only a marker that NAMES it can establish.
+ */
+interface SetupStateReuse {
+  /** Same pattern as the last run, so stored setup state is this run's own. */
+  sameStoredSetup: boolean;
+  /** Re-point the stored argument at this schema and validate it. */
+  restageStoredArgument: boolean;
+  /**
+   * Same stored setup AND a completion marker that POSITIVELY names this
+   * pattern. Distinct from `!restageStoredArgument`, which is also true when the
+   * marker is absent — absence is not evidence that the running graph is this
+   * pattern, only the lack of evidence that it is not.
+   */
+  storedSetupMatches: boolean;
+}
+
+/**
+ * What the setup-completion marker on `resultCell` says about `entryRef`:
+ * `"matches"` (staged by this pattern), `"other"` (staged by a different
+ * version), or `"absent"` (nothing recorded).
+ *
+ * Three states rather than a boolean, because the two ways of not being
+ * `"other"` license different things. `"matches"` is positive evidence that the
+ * running graph is this pattern; `"absent"` is no evidence at all, and code
+ * that collapses them writes state describing a version that may not be there.
+ *
+ * `patternIdentity` alone cannot answer this, because an update can move the
+ * pointer before any setup runs. `PiecesController`'s roll-forward materialize
+ * commits the candidate's identity and then calls `runSynced`, and
+ * `PatternUpdater`'s instantiated mode moves the pointer with no setup at all —
+ * leaving a root that boots through `PiecesController`'s cold-start setup
+ * repair. Either way the pointer already names the pattern being set up, so
+ * comparing pointers reports "same pattern" for what is in fact an update. A
+ * caller that hands setup a pattern the pointer does not name yet — `cf piece
+ * setsrc`, which positively asserts the pointer has NOT moved, or the ordinary
+ * default-root apply — is already recognized as a change without this.
+ *
+ * The completion marker is the signal that survives that: `applySetupState`
+ * stamps `patternSetupIdentity` only once it has staged this identity's schema,
+ * arguments, internal cells and result projection, so a marker naming another
+ * version means the stored argument was staged against another version's schema
+ * and must be re-staged — and re-validated — against this one.
+ *
+ * Not every caller wants that conclusion, so this is a signal rather than a
+ * policy: the nested-piece instantiation repair re-verifies the pinned identity
+ * itself and opts out (`restageStoredArgument: false`), because it is the same
+ * pattern rebuilding its own internal cells rather than an update.
+ *
+ * For the RE-STAGE decision specifically, an ABSENT marker reads as "same",
+ * deliberately — `storedSetupMatches` is what callers use when they need the
+ * positive fact instead. It cannot distinguish a
+ * pending update from a root written before the marker existed, and re-staging
+ * every such root would validate — and rewrite defaults over — arguments no
+ * update is touching, turning a legacy doc into a piece that will not start.
+ * That exemption currently covers most stored roots rather than a rare tail:
+ * the marker itself is recent, so a root written before it exists gets one
+ * unvalidated setup, and it is the aged roots — the ones most likely to hold an
+ * argument a new schema cannot read — that are exempt for that one setup.
+ */
+type StoredSetupMarker = "matches" | "other" | "absent";
+
+function storedSetupMarker(
+  resultCell: Cell<unknown>,
+  entryRef: { identity: string; symbol: string } | undefined,
+): StoredSetupMarker {
+  if (entryRef === undefined) return "absent";
+  const stagedRef = getPatternSetupIdentityRef(resultCell);
+  if (stagedRef === undefined) return "absent";
+  return patternIdentityKey(stagedRef) === patternIdentityKey(entryRef)
+    ? "matches"
+    : "other";
+}
+
 function dedupeNormalizedLinks(
   links: readonly NormalizedFullLink[],
 ): NormalizedFullLink[] {
@@ -1181,9 +1287,47 @@ export class Runner {
     );
     if (validationFailure !== undefined) {
       throw new Error(
-        `updated arguments do not match the candidate schema: ${validationFailure}`,
+        `${STORED_ARGUMENT_SCHEMA_REFUSAL}: ${validationFailure}`,
       );
     }
+  }
+
+  /**
+   * Check a piece's STORED argument against `pattern`'s schema without staging
+   * anything. Used where the caller must not move the piece but must not
+   * report success over an argument nobody has checked either.
+   *
+   * Mirrors the re-stage branch's deferrals deliberately, so the two paths
+   * cannot disagree about what counts as valid: an argument doc that reads
+   * nothing right now is skipped (CT-1917 — a nested piece's argument lives in
+   * its host's doc, and "not synced" is not "invalid"), and the staged raw is
+   * passed so a slot holding an unreadable link validates as opaque rather than
+   * as its missing materialization.
+   */
+  private validateStoredArgument<R>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<R>,
+    pattern: Pattern,
+  ): void {
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (argumentLink === undefined) return;
+    const stored = this.runtime.getCellFromLink(argumentLink, undefined, tx)
+      .getRaw({ meta: ignoreReadForScheduling });
+    if (stored === undefined) return;
+    const defaults = extractDefaultValues(pattern.argumentSchema);
+    this.validateArgument(
+      tx,
+      argumentLink,
+      pattern.argumentSchema,
+      defaults,
+      {
+        unresolvedLinkRaw: mergeSchemaDefaults(
+          stored,
+          defaults,
+          pattern.argumentSchema,
+        ),
+      },
+    );
   }
 
   private updateResultSchemaMeta<R>(
@@ -1201,21 +1345,59 @@ export class Runner {
     }
   }
 
+  /**
+   * Skip setup for a piece that is already RUNNING this pattern.
+   *
+   * A running piece is never re-staged here, and that is the whole point of the
+   * branch: `applySetupState` installs the incoming version's argument schema,
+   * internal manifest and result projection, but only the pattern watcher can
+   * cancel the live nodes and instantiate the new ones. Staging without that
+   * leaves the stored setup describing a version the running graph is not —
+   * the piece's projection reads as the new pattern while its handlers still
+   * drive the old one's cells — and stamps the completion marker forward,
+   * erasing the very mismatch a later repair would use to notice.
+   *
+   * What it does NOT do is report success without looking, on the branch that
+   * supplies no argument: a stale setup marker there means nobody has checked
+   * the stored argument against this pattern, so it is validated in place — no
+   * write, no schema retarget, nothing that moves the piece — and a refusal
+   * surfaces to the caller. The supplied-argument branch below writes the
+   * caller's value through without that check, as it always has; callers of
+   * that shape validate what they supply before entering Runner.
+   */
   private maybeReuseRunningSetup<T, R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
     argument: T,
     pattern: Pattern,
-    samePattern: boolean,
+    setupState: SetupStateReuse,
   ): SetupResult<R> | undefined {
     const key = this.getDocKey(resultCell);
     if (!this.cancels.has(key)) return undefined;
 
-    if (argument === undefined && samePattern) {
+    // Record the result schema for BOTH reuse branches below, on the one
+    // condition that makes it safe: the setup marker names THIS pattern, so the
+    // running graph is this pattern and the schema cannot describe a version
+    // that is not there. (`storedSetupMatches` implies `sameStoredSetup`, so
+    // every path reaching this write returns from one of those branches.)
+    // The stale-marker case is deliberately excluded — see the class comment —
+    // but a piece whose `schema` meta is missing or stale-but-same-version
+    // still gets it repaired, which is what keeps its reads typed and its
+    // durable write contract present. Both branches need it: a caller may
+    // re-run a running piece WITH an argument (`PieceManager.runWithPattern`),
+    // and that piece's metadata is no less worth repairing.
+    if (setupState.storedSetupMatches) {
+      this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
+    }
+
+    if (argument === undefined && setupState.sameStoredSetup) {
+      if (setupState.restageStoredArgument) {
+        this.validateStoredArgument(tx, resultCell, pattern);
+      }
       return { resultCell, needsStart: false };
     }
 
-    if (samePattern) {
+    if (setupState.sameStoredSetup) {
       const argumentLink = getMetaLink(resultCell, "argument")!;
       const defaults = extractDefaultValues(pattern.argumentSchema);
       const nextArgument = mergeSchemaDefaults(
@@ -1378,10 +1560,11 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     entryRef: { identity: string; symbol: string } | undefined,
-    sameStoredSetup: boolean,
+    setupState: SetupStateReuse,
     argument: T,
     resultCell: Cell<R>,
   ): void {
+    const { sameStoredSetup, restageStoredArgument } = setupState;
     const defaults = extractDefaultValues(pattern.argumentSchema);
     let argumentLink = getMetaLink(resultCell, "argument");
     const previousInternal = resultCell.getMetaRaw("internal", {
@@ -1426,7 +1609,7 @@ export class Runner {
       if (argumentLink === undefined) {
         throw new Error("Invalid argument link in updateArgument");
       }
-    } else if (!sameStoredSetup) {
+    } else if (restageStoredArgument) {
       const previousArgumentCell = this.runtime.getCellFromLink(
         argumentLink,
         undefined,
@@ -1595,6 +1778,23 @@ export class Runner {
       entryRef.symbol === previousIdentityRef.symbol;
     const sameStoredSetup = samePattern &&
       !validationOptions.reapplyStoredSetup;
+    // Derived once and used by BOTH gates below. The running-piece fast path
+    // short-circuits before `applySetupState`, so a live piece whose stored
+    // setup was staged by another version would otherwise keep skipping the
+    // re-stage no matter what the re-stage branch itself decides — the repair
+    // would report success over an argument nothing validated.
+    // Read through `tx`, like the identity read above: this decides whether the
+    // transaction writes the argument, so it belongs in the same conflict set
+    // rather than reading around it off committed state.
+    const marker = storedSetupMarker(resultCell.withTx(tx), entryRef);
+    const setupState: SetupStateReuse = {
+      sameStoredSetup,
+      restageStoredArgument: !sameStoredSetup || marker === "other",
+      // "matches" only. An ABSENT marker is not evidence that the running graph
+      // is this pattern — it is the absence of evidence either way, and the two
+      // must not collapse into one boolean.
+      storedSetupMatches: sameStoredSetup && marker === "matches",
+    };
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
       `[SETUP] source=${sourceKey}`,
@@ -1634,8 +1834,6 @@ export class Runner {
       );
     }
 
-    this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
-
     if (validationOptions.patternRepository !== undefined) {
       setPatternRepository(
         resultCell,
@@ -1667,17 +1865,26 @@ export class Runner {
       resultCell,
       argument,
       pattern,
-      sameStoredSetup,
+      setupState,
     );
     if (runningSetup) {
       return runningSetup;
     }
 
+    // AFTER the running-piece gate, deliberately. Later reads resolve the root
+    // through this meta, so writing the candidate's result schema over a piece
+    // whose nodes still produce the previous version's shape is the same
+    // partial swap the gate above exists to prevent — reads would describe a
+    // version that is not running. A piece that is NOT reused reaches
+    // `applySetupState` below, which stages the matching projection in the same
+    // transaction, so the schema and the projection cannot disagree.
+    this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
+
     this.applySetupState(
       tx,
       pattern,
       entryRef,
-      sameStoredSetup,
+      setupState,
       argument,
       resultCell,
     );
@@ -1953,7 +2160,11 @@ export class Runner {
             setupTx,
             pattern,
             newRef,
-            false,
+            {
+              sameStoredSetup: false,
+              restageStoredArgument: true,
+              storedSetupMatches: false,
+            },
             undefined,
             resultCell,
           );
@@ -2181,7 +2392,20 @@ export class Runner {
             repairTx,
             pattern,
             ref,
-            true,
+            // No re-stage, even though this doc's setup state may well have
+            // been staged by an older version: the precondition just re-read
+            // the pinned identity, so this is the SAME pattern repairing its
+            // own internal cells, not an update. Re-pointing the argument here
+            // would rewrite user data on a narrow instantiation repair.
+            {
+              sameStoredSetup: true,
+              restageStoredArgument: false,
+              // Inert here — `applySetupState` reads only the two fields
+              // above — but stated rather than defaulted, because this repair
+              // deliberately leaves the piece's ARGUMENT alone even though its
+              // precondition proves the pattern is the same one.
+              storedSetupMatches: false,
+            },
             undefined,
             resultCell,
           );
