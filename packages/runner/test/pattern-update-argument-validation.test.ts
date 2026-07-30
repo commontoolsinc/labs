@@ -576,6 +576,28 @@ describe("pattern update validates the stored argument", () => {
         "repaired — the reuse path suppresses the write for the stale-marker " +
         "case and took the same-version case with it",
     ).toEqual(pattern.resultSchema);
+
+    // The same repair on the OTHER reuse branch. A caller may re-run a running
+    // piece WITH an argument (`PieceManager.runWithPattern` does), and that
+    // branch returns from a different place — so a fix applied to only one of
+    // them leaves half the callers unrepaired.
+    const { error: stripAgain } = await rt.editWithRetry((tx) => {
+      cell.withTx(tx).setMetaRaw("schema", undefined);
+    });
+    expect(stripAgain?.message).toBeUndefined();
+    await rt.idle();
+    await cell.sync();
+    expect(meta(cell)).toBeUndefined();
+
+    await rt.runSynced(cell.withTx(), pattern, { count: 7 }, {});
+    await rt.idle();
+    await rt.storageManager.synced();
+    await cell.sync();
+    expect(
+      meta(cell),
+      "the supplied-argument reuse branch returns without repairing the " +
+        "result schema, so a piece re-run with an argument stays untyped",
+    ).toEqual(pattern.resultSchema);
   });
 
   it("does not classify a failure that merely mentions the refusal", () => {

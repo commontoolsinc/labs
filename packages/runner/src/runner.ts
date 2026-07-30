@@ -1351,17 +1351,24 @@ export class Runner {
     const key = this.getDocKey(resultCell);
     if (!this.cancels.has(key)) return undefined;
 
+    // Record the result schema for BOTH reuse branches below, on the one
+    // condition that makes it safe: the setup marker names THIS pattern, so the
+    // running graph is this pattern and the schema cannot describe a version
+    // that is not there. (`!restageStoredArgument` implies `sameStoredSetup`,
+    // so every path reaching this write returns from one of those branches.)
+    // The stale-marker case is deliberately excluded — see the class comment —
+    // but a piece whose `schema` meta is missing or stale-but-same-version
+    // still gets it repaired, which is what keeps its reads typed and its
+    // durable write contract present. Both branches need it: a caller may
+    // re-run a running piece WITH an argument (`PieceManager.runWithPattern`),
+    // and that piece's metadata is no less worth repairing.
+    if (!setupState.restageStoredArgument) {
+      this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
+    }
+
     if (argument === undefined && setupState.sameStoredSetup) {
       if (setupState.restageStoredArgument) {
         this.validateStoredArgument(tx, resultCell, pattern);
-      } else {
-        // The marker names THIS pattern, so the running graph is this pattern
-        // and recording its result schema cannot describe a version that is not
-        // there. Suppressing the write above is about the stale-marker case
-        // only; a piece whose `schema` meta is missing or stale-but-same-version
-        // still gets it repaired here, which is what keeps its reads typed and
-        // its durable write contract present.
-        this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
       }
       return { resultCell, needsStart: false };
     }
