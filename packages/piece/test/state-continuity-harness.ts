@@ -45,7 +45,11 @@ import {
   type SessionFactory,
   StorageManager,
 } from "../../runner/src/storage/v2.ts";
-import { type Cell, Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  getPatternSetupIdentityRef,
+  Runtime,
+} from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
@@ -537,6 +541,14 @@ export async function materializeOver(
  * fixture's manifest rather than only the well-known vintage root. `locate`
  * receives the compiled result schema, because a root has to be read under the
  * schema of the pattern being applied to it.
+ *
+ * `symbol` names WHICH artifact in the module to apply. A module contributes
+ * more than one instantiable pattern — its default export, plus every
+ * transformer hoist (`__cfPattern_N`, the body of a `map`/`filter`/`flatMap`) —
+ * and a stored root records the one it was materialized from. Defaulting to the
+ * entry export would apply the module's ROOT pattern to a nested pattern's
+ * cell, which can refuse a valid migration or, worse, accept an invalid one
+ * having checked the wrong artifact.
  */
 export async function materializeOnCell(
   vintage: VintageRuntime,
@@ -545,15 +557,44 @@ export async function materializeOnCell(
     vintage: VintageRuntime,
     resultSchema: unknown,
   ) => Cell<Record<string, unknown>>,
+  symbol?: string,
 ): Promise<MaterializeOutcome> {
   const { runtime } = vintage;
-  const pattern = await runtime.patternManager.compilePattern(program, {
+  const entryPattern = await runtime.patternManager.compilePattern(program, {
     space: vintage.space as never,
   });
-  const ref = runtime.patternManager.getArtifactEntryRef(pattern);
-  if (ref === undefined) {
+  const entryRef = runtime.patternManager.getArtifactEntryRef(entryPattern);
+  if (entryRef === undefined) {
     throw new Error("compiled candidate has no artifact entry ref");
   }
+  // `compilePattern` registers the whole evaluated module — exports and
+  // `__cfReg` hoists alike — so the named artifact is resolvable in-index
+  // under the identity just compiled.
+  const selected = symbol === undefined || symbol === entryRef.symbol
+    ? entryPattern
+    : runtime.patternManager.artifactFromIdentitySync(
+      entryRef.identity,
+      symbol,
+    ) as typeof entryPattern | undefined;
+  if (selected === undefined) {
+    // Fails CLOSED rather than falling back to the entry pattern. A hoist
+    // symbol is positional, so an edit that adds an earlier `map` renumbers it
+    // — and a stored root naming a symbol today's module does not define is
+    // exactly the migration hazard worth reporting, not one to paper over.
+    return {
+      error:
+        `today's ${program.main} defines no "${symbol}"; the stored root ` +
+        `names an artifact this version does not have`,
+      resultSchema: entryPattern.resultSchema,
+      argumentSchema: entryPattern.argumentSchema,
+      identity: entryRef.identity,
+    };
+  }
+  const pattern = selected;
+  const ref = {
+    identity: entryRef.identity,
+    symbol: symbol ?? entryRef.symbol,
+  };
   const root = locate(vintage, pattern.resultSchema);
   await root.sync();
 
@@ -581,6 +622,26 @@ export async function materializeOnCell(
     await runtime.idle();
   } catch (error) {
     return { error: describeError(error), ...schemas };
+  }
+  // `expectedPatternIdentity` makes a rejected setup COMMIT throw, but a swap
+  // whose setup itself fails (the candidate refusing the root's stored
+  // arguments, say) is only LOGGED as `pattern-swap-setup-error` — `runSynced`
+  // returns normally and the migration reads as applied. The completion marker
+  // is the honest signal: `setup()` stamps `patternSetupIdentity` only once it
+  // has staged the schema, arguments, internal cells, and result projection, so
+  // a root that does not carry the candidate's ref was not actually migrated.
+  await root.sync();
+  const staged = getPatternSetupIdentityRef(root as Cell<unknown>);
+  if (staged?.identity !== ref.identity || staged?.symbol !== ref.symbol) {
+    return {
+      error: `setup did not complete for ${ref.identity}#${ref.symbol}: the ` +
+        `root carries ${
+          staged === undefined
+            ? "no setup marker"
+            : `${staged.identity}#${staged.symbol}`
+        }`,
+      ...schemas,
+    };
   }
   await root.pull();
   return {

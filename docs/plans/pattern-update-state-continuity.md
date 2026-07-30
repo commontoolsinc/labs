@@ -83,7 +83,7 @@ Measured on branch `tier2`, not assumed:
 | A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
-| The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0, "Replayed 2 vintage(s) … all readable". A captured vintage holds a freshly set-up root, so there is no prior data to strand, and the replay compares no values. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
+| The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0, "Replayed 2 vintage(s) … all readable". The replay compares no values — which, now that a captured vintage holds real handler-written data, is the whole of the remaining gap. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed` and requires it positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by a control — the vintage's root must already carry the identity its filename records, checked BEFORE the candidate is applied. Red/green: with the control disabled that case is the only one of the eight in `pattern-vintage-run.test.ts` that fails |
@@ -267,8 +267,9 @@ setup commit carrying it onto that root is not refused, and that the root then
 reads as something rather than nothing. The restore control is not ceremony: an
 empty or truncated store presents as a fresh space, today's source materializes
 onto a fresh space, and without it every remaining check passes while nothing
-has been replayed. It compares no VALUES, though, and a captured vintage holds
-a freshly set-up root rather than a populated one. So the storage-move class — the one this tier
+has been replayed. It compares no VALUES, though — and that is now the only
+reason, since a captured vintage holds real data written through real handlers.
+So the storage-move class — the one this tier
 was built for — replays clean here: measured on the real `home.tsx`, renaming
 `.for("favorites")` to `.for("favouriteList")` exits 0. That is pinned as a
 limit in `tasks/pattern-vintage-run.test.ts`, covered as a behaviour by

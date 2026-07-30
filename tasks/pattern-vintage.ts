@@ -8,13 +8,17 @@
  * that a real document written by an older version is still materializable by
  * the version about to be merged.
  *
- * Precisely what a green run asserts, per fixture: today's source RESOLVES,
- * the setup commit that carries it onto the vintage's root is NOT REFUSED, and
- * the root then reads as something rather than nothing. It does not compare
- * VALUES, and a captured vintage holds a freshly set-up root rather than a
- * populated one — so the class where a moved `.for()` key strands real data
- * replays clean here. Measured on the real `home.tsx`: renaming
- * `.for("favorites")` exits 0. That class is covered by
+ * Precisely what a green run asserts, per fixture: today's source RESOLVES for
+ * every recorded instantiation, the setup that carries the artifact each root
+ * NAMES onto that root is not refused and completes, and the root then reads as
+ * something rather than nothing.
+ *
+ * What it still does not assert is VALUES. A captured vintage does hold real
+ * data — capture drives a pattern through its own tests, so the state arrived
+ * through real handlers — but the replay asks only whether the migration
+ * applied, never whether what was there survived it. So the class where a moved
+ * `.for()` key strands real data replays clean here. Measured on the real
+ * `home.tsx`: renaming `.for("favorites")` exits 0. That class is covered by
  * `packages/piece/test/state-continuity.test.ts` and closing it in the gate is
  * stage 5 of `docs/plans/pattern-update-state-continuity.md`.
  *

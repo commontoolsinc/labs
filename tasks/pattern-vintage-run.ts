@@ -179,6 +179,12 @@ export async function replayVintage(
             [],
             resultSchema as never,
           ),
+        // The RECORDED symbol, not the module's entry export. A module
+        // contributes several instantiable patterns (its default plus each
+        // transformer hoist), and the manifest already says which one this cell
+        // holds — applying the entry pattern instead would validate a different
+        // artifact than the one stored here.
+        entry.symbol,
       );
       if (outcome.error !== undefined) {
         report.failures.push({
