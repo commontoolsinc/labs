@@ -100,7 +100,6 @@ export {
   type PatternCoverageSpan,
   writePatternCoverageLcov,
 } from "./pattern-coverage.ts";
-export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
   isRendererInputTx,
@@ -182,7 +181,6 @@ export {
   type FsProjection,
   type HandlerFactory,
   ID,
-  ID_FIELD,
   isModule,
   isPattern,
   isReactive,

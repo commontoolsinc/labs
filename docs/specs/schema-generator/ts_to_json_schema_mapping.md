@@ -604,8 +604,8 @@ The emitted key set aligns with the api's `JSONSchemaObj.ifc` member
 `writeAuthorizedBy`, `exactCopyOf`, `projection`, `observes`, and `uiContract`.
 `ownerPrincipal` and `observes` have no direct producing alias in this package
 as of this writing.
-The api type also declares `[ID]`/`[ID_FIELD]` extension keys
-(`api/index.ts`); this package never emits them (grep).
+The api type also declares an `[ID]` extension key
+(`api/index.ts`); this package never emits it (grep).
 
 ## 12. Doc Comments → `description` / `tags` / `$comment`
 

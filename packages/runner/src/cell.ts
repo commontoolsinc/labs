@@ -57,7 +57,6 @@ import {
   type HKT,
   type ICell,
   ID,
-  ID_FIELD,
   type IDFields,
   isStreamValue,
   type IsThisObject,
@@ -3066,22 +3065,22 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // A plain object may still be carrying an `[ID]` or `[ID_FIELD]` directive
-  // here -- either author-supplied or added by the array walk below -- and those
-  // are instructions for `diffAndUpdate()`, not content, so the conversion
+  // A plain object may still be carrying an `[ID]` directive here -- either
+  // author-supplied or added by the array walk below -- and it is an
+  // instruction for `diffAndUpdate()`, not content, so the conversion
   // functions rightly refuse to store an object bearing one. Such an object is
   // walked directly instead; the walk rebuilds it either way, and the directive
   // survives to the consumer that strips it.
   // Known gap, deliberately left: the bypass is unconditional, so an object
-  // carrying a directive AND some other symbol or non-enumerable key keeps its
-  // other key out of the key check too, and the record walk below then drops it
-  // silently (it rebuilds from `Object.entries()` and copies back only `ID` and
-  // `ID_FIELD`). That drop predates the key check rather than being introduced
-  // by this bypass, and it goes away with the directives themselves. Should they
+  // carrying the directive AND some other symbol or non-enumerable key keeps
+  // its other key out of the key check too, and the record walk below then
+  // drops it silently (it rebuilds from `Object.entries()` and copies back
+  // only `ID`). That drop predates the key check rather than being introduced
+  // by this bypass, and it goes away with the directive itself. Should it
   // outlive this comment, close it by requiring everything other than the
-  // directives to satisfy `isPlainObjectWithOnlyEnumerableStringKeys()`.
+  // directive to satisfy `isPlainObjectWithOnlyEnumerableStringKeys()`.
   const carriesIdDirective = isPlainObject(value) &&
-    ((ID in (value as object)) || (ID_FIELD in (value as object)));
+    (ID in (value as object));
 
   // Convert value to fabric form. This handles:
   // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
@@ -3188,17 +3187,11 @@ export function recursivelyAddIDIfNeeded<T>(
       result[key] = next;
     });
 
-    // Copy supported symbols from the original value. Symbols are not
+    // Copy the `ID` directive from the original value. Symbols are not
     // enumerable via `Object.entries()` and are not preserved by the
     // shallow fabric conversion.
-    if (isRecord(value)) {
-      const valueRecord = value as Record<string, unknown>;
-      [ID, ID_FIELD].forEach((symbol) => {
-        const key = symbol as keyof IDFields;
-        if (key in valueRecord) {
-          result[key] = (valueRecord as IDFields)[key];
-        }
-      });
+    if (isRecord(value) && ID in value) {
+      result[ID] = (value as IDFields)[ID];
     }
 
     if (!changed) {

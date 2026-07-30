@@ -12,7 +12,6 @@ import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -1245,7 +1244,6 @@ describe("asCell with schema", () => {
       },
     ];
     const initialDataCopy = JSON.parse(JSON.stringify(initialData));
-    addCommonIDfromObjectID(initialDataCopy);
 
     const frame1 = pushFrame({
       generatedIdCounter: 0,
@@ -1270,7 +1268,6 @@ describe("asCell with schema", () => {
     const linkFromContext1 = parseLink(testCell.getRaw()[0], testCell)!;
 
     const returnedData = JSON.parse(JSON.stringify(testCell.get()));
-    addCommonIDfromObjectID(returnedData);
 
     const frame2 = pushFrame({
       generatedIdCounter: 0,
