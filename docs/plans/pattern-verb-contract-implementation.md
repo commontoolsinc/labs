@@ -270,6 +270,18 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   concatenation would let a chosen id shift the separator. The address is
   published only while `commitPreconditions` is on, since nothing creates or
   create-only marks the receipt while it is off.
+
+  The alternative — a client-side helper that derives the receipt cell rather
+  than receiving its address — was raised again in review (Berni, 2026-07-29)
+  as an equal option. It is not equal, for a reason worth keeping written
+  down: **the receipt is not derivable from the event id alone.** Its cause is
+  the handler's bound closure *plus* the event id, as the design doc states —
+  "addressed deterministically from the event id plus the handler's bound
+  closure... reachable by a caller that can reconstruct that cause from the
+  callable cell, but enumerable by nobody." A helper would have to reconstruct
+  `$ctx` from the callable cell at every call site, which is the client-side
+  reconstruction the callback route exists to avoid, and it is also why the
+  caller's key needs scoping at all.
 - ~~**cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
