@@ -3155,11 +3155,24 @@ export function llmDialog(
           // deliberate cause rather than a frame-relative counter.
           // TODO(seefeld): Once we have event ids, the cause should be that.
           //
-          // Space AND scope come from the messages cell, so the document lands
-          // in the same partition an anchored one would, and its link stores
-          // bare relative to that cell.
+          // Space AND scope come from the RESOLVED messages link -- the array
+          // document itself, not the input slot that points at it, which can
+          // sit at a different scope. `push()` resolves the same way before it
+          // writes; a document minted at the slot's scope instead lands in a
+          // partition the array's readers never look in. The link is then
+          // taken relative to that resolved base, so it stores bare, exactly
+          // as an anchored element does.
           const messagesForPush = inputs.key("messages");
-          const messagesBase = messagesForPush.getAsNormalizedFullLink();
+          const messagesBase = resolveLink(
+            runtime,
+            tx,
+            messagesForPush.getAsNormalizedFullLink(),
+          );
+          const messagesDoc = runtime.getCellFromLink(
+            messagesBase,
+            undefined,
+            tx,
+          );
           const messageCell = runtime.getCell(
             messagesBase.space,
             { llmDialog: { message: cause, id: crypto.randomUUID() } },
@@ -3179,7 +3192,7 @@ export function llmDialog(
           // inlined -- a copy per message.
           messagesForPush.withTx(tx).push(
             messageCell.getAsLink({
-              base: messagesForPush,
+              base: messagesDoc,
             }) as unknown as Schema<
               typeof LLMMessageSchema
             >,
@@ -3454,9 +3467,16 @@ async function startRequest(
     // identity -- a deliberate cause rather than a frame-relative counter.
     // TODO(seefeld): Once we have event ids, the cause should be that.
     //
-    // Space AND scope come from the messages cell, so the documents land in
-    // the same partition anchored ones would, and their links store bare.
-    const base = messagesCell.getAsNormalizedFullLink();
+    // Space AND scope come from the RESOLVED messages link -- the array
+    // document itself, not the input slot that points at it, which can sit at
+    // a different scope (see the user-message push). Links are taken relative
+    // to that resolved base, so they store bare, as anchored elements do.
+    const base = resolveLink(
+      runtime,
+      tx,
+      messagesCell.getAsNormalizedFullLink(),
+    );
+    const baseDoc = runtime.getCellFromLink(base, undefined, tx);
     messagesCell.withTx(tx).push(
       ...messages.map((message) => {
         const messageCell = runtime.getCell(
@@ -3469,7 +3489,7 @@ async function startRequest(
         messageCell.withTx(tx).set(message);
         // See the note at the user-message push: bare link, hence the cast.
         return messageCell.getAsLink({
-          base: messagesCell,
+          base: baseDoc,
         }) as unknown as Schema<
           typeof LLMMessageSchema
         >;
@@ -3716,9 +3736,14 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           internal,
           requestId,
           (tx) => {
-            // As above: made explicitly for identity control, in the messages
-            // cell's space and scope, link stored bare.
-            const errorBase = messagesCell.getAsNormalizedFullLink();
+            // As above: made explicitly for identity control, in the resolved
+            // messages document's space and scope, link stored bare.
+            const errorBase = resolveLink(
+              runtime,
+              tx,
+              messagesCell.getAsNormalizedFullLink(),
+            );
+            const errorDoc = runtime.getCellFromLink(errorBase, undefined, tx);
             const errorCell = runtime.getCell(
               errorBase.space,
               { llmDialog: { message: cause, id: crypto.randomUUID() } },
@@ -3731,7 +3756,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             );
             // See the note at the user-message push: bare link, hence the cast.
             messagesCell.withTx(tx).push(
-              errorCell.getAsLink({ base: messagesCell }) as unknown as Schema<
+              errorCell.getAsLink({ base: errorDoc }) as unknown as Schema<
                 typeof LLMMessageSchema
               >,
             );
