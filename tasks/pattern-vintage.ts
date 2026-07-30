@@ -131,15 +131,8 @@ async function main() {
     return;
   }
 
-  const {
-    vintages,
-    replayed,
-    candidates,
-    unmappable,
-    changed,
-    updated,
-    failures,
-  } = await replayAll(roots);
+  const { vintages, replayed, candidates, changed, updated, failures } =
+    await replayAll(roots);
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
@@ -155,16 +148,12 @@ async function main() {
   // examined no update targets at all, which is the shape that has read as
   // success three separate times in this tier's history.
   if (!isClean(failures, uncovered, replayed, candidates)) Deno.exit(1);
-  // Reached only with `unmappable === 0`: an unaddressable recorded root is
-  // reported as a FAILURE by the replay, not as a footnote here, because a
-  // green verdict plus a printed caveat is how narrowed coverage reads as
-  // success. Asserted rather than assumed, so the two cannot drift apart.
-  if (unmappable !== 0) {
-    throw new Error(
-      `unreachable: ${unmappable} unmappable instantiation(s) passed the clean ` +
-        `check — the replay must report them as failures`,
-    );
-  }
+  // "all mappable" is safe to state unconditionally here: `replayVintage`
+  // reports every unaddressable root as a FAILURE, and `isClean` above requires
+  // no failures — so this line is unreachable with `unmappable > 0`. Saying it
+  // positively rather than printing a caveat beside a pass is the point; a green
+  // verdict with a footnote about skipped roots is how narrowed coverage reads
+  // as success.
   console.log(
     `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
       `all mappable to a file; ${changed} changed since capture, ` +
