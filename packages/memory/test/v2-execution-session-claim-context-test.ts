@@ -266,20 +266,24 @@ Deno.test("a session-rank claim commits at ITS OWN session context, never the sp
   }
 });
 
-Deno.test("a session-rank claim on a run resolving space fences claim-context-mismatch", async () => {
+// RE-EXPECTED by slice 1 of the claim deletion (was: "a session-rank claim on
+// a run resolving space fences claim-context-mismatch"). Pre-C2.1 this shape
+// rejected `claim-observation-mismatch` at the admission guard; C2.1 made it
+// reach the effective-context fence instead; slice 1 deletes that fence. A
+// session lane whose run's surfaces are all space RESOLVES space, and that is
+// an observation, not a refusal — so the run serves and the resolved context
+// is what gets recorded.
+Deno.test("a session lane whose run resolves space commits at the RESOLVED context", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
-    // All-space surfaces: the effective context resolves `space`, so the
-    // session claim mismatches — the C2.1 commit-lane fence is a REAL check
-    // (pre-C2.1 this fenced claim-observation-mismatch at the admission
-    // guard instead; the guard now admits canonical session keys).
     const lease = acquire(engine, nowMs);
     const claim = claimFor(lease, SESSION_CONTEXT_KEY);
-    assertFenceCause(
-      () => applyClaimed(engine, lease, claim, { nowMs: nowMs + 1 }),
-      "claim-context-mismatch",
-    );
+    const applied = applyClaimed(engine, lease, claim, { nowMs: nowMs + 1 });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, "space");
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });

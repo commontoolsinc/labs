@@ -2761,6 +2761,26 @@ class SpaceReplica implements ISpaceReplica {
       : this.#executionLaneForAction?.(sourceAction)) ?? this.#actingLane;
   }
 
+  /**
+   * The per-commit acting context this commit sends on the wire (C1.4b's
+   * write-side twin, slice 1 of the claim deletion): the lane the commit was
+   * ENTERED under, recorded at `commitOperations` entry. The host validates it
+   * against the live lane grant and makes it the commit's sole acting context
+   * — the engine no longer re-derives one from the claims the observation
+   * asserts, and no longer fences the two computations against each other.
+   *
+   * Space-lane commits (the entire ordinary-client population, and the
+   * executor's own space-rank runs) send nothing and stay byte-identical.
+   */
+  private commitActingContext(
+    localSeq: number,
+  ): { actingContext: SchedulerExecutionContextKey } | undefined {
+    const lane = this.#localSeqLanes.get(localSeq);
+    return lane === undefined || lane === "space"
+      ? undefined
+      : { actingContext: lane };
+  }
+
   /** Replica document key of `(id, scope)` as seen by the acting lane. */
   private actingDocKey(id: URI, scope?: CellScope): string {
     return docKey(id, scope, this.#actingLane);
@@ -4442,6 +4462,10 @@ class SpaceReplica implements ISpaceReplica {
       localSeq,
       route.diagnosticCode,
     );
+    // The unserved marker acts as the ORIGINAL attempt's lane (it carries that
+    // attempt's claim assertion): the marker's own localSeq is minted here and
+    // was never registered, so read the lane off the attempt's.
+    const unservedActingContext = this.commitActingContext(commit.localSeq);
     const telemetry = this.#getTelemetry();
     const pushOpId = `push:${this.#space}:${localSeq}`;
     telemetry?.submit({
@@ -4453,7 +4477,10 @@ class SpaceReplica implements ISpaceReplica {
     });
     try {
       const { session } = await this.sessionHandle();
-      const applied = await session.transact(unservedCommit);
+      const applied = await session.transact(
+        unservedCommit,
+        unservedActingContext,
+      );
       session.noteAppliedCommit?.(applied.seq);
       telemetry?.submit({
         type: "storage.push.complete",
@@ -4620,7 +4647,10 @@ class SpaceReplica implements ISpaceReplica {
       // A rejection or claimed-overlay recording during the awaits above may
       // have doomed a localSeq this commit's pending reads still name.
       this.rebaseUnresolvablePendingReads(commit);
-      const applied = await session.transact(commit);
+      const applied = await session.transact(
+        commit,
+        this.commitActingContext(commit.localSeq),
+      );
       this.confirmPending(localSeq, operations, applied);
       this.noteSourceCommitConfirmed(localSeq, applied.seq);
       session.noteAppliedCommit?.(applied.seq);

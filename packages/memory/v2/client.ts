@@ -95,6 +95,16 @@ export type SessionOpenAuthFactory = (
  * validates the acting context against the live lane grant BEFORE resolving
  * any scope key; ordinary client sessions never send one.
  */
+/**
+ * Per-commit options (C1.4b write-side seam, slice 1 of the claim deletion):
+ * a lease-bound executor session names the lane its commit ACTS AS, validated
+ * host-side against the live lane grant exactly like a read's acting context.
+ * Ordinary client sessions and space-lane executor commits never send one.
+ */
+export interface SessionCommitOptions {
+  actingContext?: SchedulerExecutionContextKey;
+}
+
 export interface SessionReadOptions {
   actingContext?: SchedulerExecutionContextKey;
   /** FA5/FB12 trigger attribution for graph.query accounting (wave-triggered
@@ -586,6 +596,9 @@ export class SpaceSession {
   #outstandingCommits = new Map<number, {
     commit: ClientCommit;
     pending: PromiseWithResolvers<AppliedCommit>;
+    /** C1.4b write-side seam: the lane this commit acts as, retained beside
+     * the commit so a reconnect replay re-sends it unchanged. */
+    actingContext?: SchedulerExecutionContextKey;
   }>();
   #watchSpecs: WatchSpec[] = [];
   #watchView: WatchView | null = null;
@@ -702,7 +715,10 @@ export class SpaceSession {
     }
   }
 
-  async transact(commit: ClientCommit): Promise<AppliedCommit> {
+  async transact(
+    commit: ClientCommit,
+    options?: SessionCommitOptions,
+  ): Promise<AppliedCommit> {
     this.#assertOpen();
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
@@ -713,6 +729,9 @@ export class SpaceSession {
     this.#outstandingCommits.set(commit.localSeq, {
       commit,
       pending,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
     });
 
     const outstanding = this.#outstandingCommits.get(commit.localSeq);
@@ -1696,6 +1715,7 @@ export class SpaceSession {
     pendingCommit: {
       commit: ClientCommit;
       pending: PromiseWithResolvers<AppliedCommit>;
+      actingContext?: SchedulerExecutionContextKey;
     },
     options: {
       throwOnConnectionError?: boolean;
@@ -1717,6 +1737,9 @@ export class SpaceSession {
           space: this.space,
           sessionId: this.#sessionId,
           commit: pendingCommit.commit,
+          ...(pendingCommit.actingContext !== undefined
+            ? { actingContext: pendingCommit.actingContext }
+            : {}),
         });
         this.noteResult(applied.seq);
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {

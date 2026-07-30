@@ -265,20 +265,39 @@ const applyClaimedObservationOnly = (
   lease: ExecutionLease,
   claim: ExecutionClaim,
   nowMs: number,
+  localSeq = 1,
 ) =>
   Engine.applyCommit(engine, {
     sessionId: "executor-session",
     space: SPACE,
     principal: PRINCIPAL,
     commit: {
-      localSeq: 1,
+      localSeq,
       reads: { confirmed: [], pending: [] },
       operations: [],
       schedulerObservation: claimedRunObservation(claim, []),
     },
-    executionClaims: new Map([[1, claim]]),
+    executionClaims: new Map([[localSeq, claim]]),
     executionLeaseFence: { lease, nowMs, authorize: () => true },
   });
+
+/** The context an all-space claimed run RESOLVES to under `lane` — the
+ * durable floor's only observable consequence now that the issuance-side
+ * reader is deleted. */
+const resolvedContextUnderLane = (
+  engine: Engine.Engine,
+  lease: ExecutionLease,
+  lane: SchedulerExecutionContextKey,
+  nowMs: number,
+  localSeq: number,
+): SchedulerExecutionContextKey | undefined =>
+  applyClaimedObservationOnly(
+    engine,
+    lease,
+    claimFor(lease, lane),
+    nowMs,
+    localSeq,
+  ).schedulerObservationResults?.[0]?.executionContextKey;
 
 const applyClaimedSemanticCommit = (
   engine: Engine.Engine,
@@ -380,29 +399,44 @@ Deno.test("effective-context resolution follows the claim's lane, not the sponso
   }
 });
 
-Deno.test("user-rank claim on a run resolving space fences claim-context-mismatch", async () => {
+// RE-EXPECTED by slice 1 of the claim deletion (was: "user-rank claim on a
+// run resolving space fences claim-context-mismatch"). The fence compared the
+// context the run RESOLVED to against the context the claim was issued at and
+// refused the commit when they disagreed. A rank the run resolves to
+// differently is an observation, never a refusal (D11 / client-passivity
+// §5h.4), so the commit is KEPT and the resolved context is recorded as-is.
+Deno.test("a user-rank lane whose run resolves space commits at the RESOLVED context", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
     const lease = acquire(engine, nowMs);
     const claim = claimFor(lease, USER_CONTEXT_KEY);
-    const error = assertThrows(
-      () => applyClaimedObservationOnly(engine, lease, claim, nowMs + 1),
-      Engine.ExecutionLeaseFenceError,
+    const applied = applyClaimedObservationOnly(
+      engine,
+      lease,
+      claim,
+      nowMs + 1,
     );
-    assertEquals(error.fenceCause, "claim-context-mismatch");
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    // The run's own surfaces are all-space and no floor narrows it, so the
+    // effective context is `space` even though the lane is user rank.
+    assertEquals(result.executionContextKey, "space");
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
   }
 });
 
-// C2.1 updated this pin: the admission guard now admits canonical
-// session-rank computation claims, so an all-space run under a session claim
-// reaches the effective-context fence (claim-context-mismatch) instead of
-// the pre-C2 claim-observation-mismatch admission rejection. The session
-// lane's own coverage lives in v2-execution-session-claim-context-test.ts.
-Deno.test("session-rank claims on space-resolving runs fence claim-context-mismatch", async () => {
+// C2.1 updated this pin: the admission guard admits canonical session-rank
+// computation claims, so an all-space run under a session lane passes
+// admission rather than rejecting `claim-observation-mismatch`. RE-EXPECTED
+// by slice 1 (was: "…fence claim-context-mismatch"): past admission there is
+// no longer an effective-context fence to reach — the resolved context is the
+// context. The session lane's own coverage lives in
+// v2-execution-session-claim-context-test.ts.
+Deno.test("session-rank lanes on space-resolving runs commit at the RESOLVED context", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
@@ -412,11 +446,16 @@ Deno.test("session-rank claims on space-resolving runs fence claim-context-misma
       sessionId: "executor-session",
     }) as SchedulerExecutionContextKey;
     const claim = claimFor(lease, sessionKey);
-    const error = assertThrows(
-      () => applyClaimedObservationOnly(engine, lease, claim, nowMs + 1),
-      Engine.ExecutionLeaseFenceError,
+    const applied = applyClaimedObservationOnly(
+      engine,
+      lease,
+      claim,
+      nowMs + 1,
     );
-    assertEquals(error.fenceCause, "claim-context-mismatch");
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, "space");
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
@@ -488,12 +527,13 @@ Deno.test("scoped-rank effect claims admit and commit under their lane (C2.8 lif
   }
 });
 
-Deno.test("a session-rank effect claim on a space-resolving run reaches the effective-context fence (C2.8)", async () => {
+// RE-EXPECTED by slice 1 (was: "…reaches the effective-context fence (C2.8)").
+Deno.test("a session-rank effect lane on a space-resolving run commits (C2.8)", async () => {
   // Companion to the session-rank computation case above: post-C2.8 the
-  // rank × effect combination is admissible, so the mismatch this run DOES
-  // have — its surfaces resolve space, the claim names a session lane —
-  // fences `claim-context-mismatch`, never the pre-C2.8 admission
-  // rejection (`claim-observation-mismatch`).
+  // rank × effect combination is admissible, so this run passes admission
+  // rather than rejecting `claim-observation-mismatch`. What it used to hit
+  // next — `claim-context-mismatch`, because its surfaces resolve space while
+  // the lane names a session — is deleted, so it commits.
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
@@ -510,28 +550,27 @@ Deno.test("a session-rank effect claim on a space-resolving run reaches the effe
       ...claimedRunObservation(claim, []),
       actionKind: "effect",
     };
-    const error = assertThrows(
-      () =>
-        Engine.applyCommit(engine, {
-          sessionId: "executor-session",
-          space: SPACE,
-          principal: PRINCIPAL,
-          commit: {
-            localSeq: 1,
-            reads: { confirmed: [], pending: [] },
-            operations: [],
-            schedulerObservation: observation,
-          },
-          executionClaims: new Map([[1, claim]]),
-          executionLeaseFence: {
-            lease,
-            nowMs: nowMs + 1,
-            authorize: () => true,
-          },
-        }),
-      Engine.ExecutionLeaseFenceError,
-    );
-    assertEquals(error.fenceCause, "claim-context-mismatch");
+    const applied = Engine.applyCommit(engine, {
+      sessionId: "executor-session",
+      space: SPACE,
+      principal: PRINCIPAL,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observation,
+      },
+      executionClaims: new Map([[1, claim]]),
+      executionLeaseFence: {
+        lease,
+        nowMs: nowMs + 1,
+        authorize: () => true,
+      },
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, "space");
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
@@ -644,34 +683,42 @@ Deno.test("the claim guard admits a helper-built colon-bearing user key", async 
   }
 });
 
-Deno.test("with-operations context mismatch fences claim-context-mismatch", async () => {
+// RE-EXPECTED by slice 1 (was: "with-operations context mismatch fences
+// claim-context-mismatch"). This is the R7 shape and it is the one the owner
+// ruled on directly: a SPACE-acting run whose action identity carries a
+// durable floor another observer narrowed to user.
+//
+// It writes a broad VALUE and that is not a cross-principal leak. A
+// space-acting commit cannot consume scoped state at all: with no lane scope
+// key `assertLaneScopedAddress` rejects every user/session-scoped read AND
+// write surface `non-space-scope` before this point. So the value is derived
+// from all-space inputs whatever the durable floor of the action IDENTITY
+// says — the floor is monotonic bookkeeping about the identity, not evidence
+// about this run.
+Deno.test("a space-acting run commits its broad value even when the durable floor resolves user", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
-    // A space claim whose run's durable floor evaluates to user rank is the
-    // same semantic condition as the observation-only twin; amendment 14
-    // requires it to fence (counted, R7-tolerated) rather than surface as an
-    // uncounted ProtocolError.
     narrowFloorToUser(engine);
     const lease = acquire(engine, nowMs);
     const claim = claimFor(lease, "space");
-    const before = Engine.serverSeq(engine);
-    const error = assertThrows(
-      () =>
-        applyClaimedSemanticCommit(
-          engine,
-          lease,
-          claim,
-          "of:claim-context-fenced-output",
-          nowMs + 1,
-        ),
-      Engine.ExecutionLeaseFenceError,
+    const applied = applyClaimedSemanticCommit(
+      engine,
+      lease,
+      claim,
+      "of:claim-context-fenced-output",
+      nowMs + 1,
     );
-    assertEquals(error.fenceCause, "claim-context-mismatch");
-    assertEquals(Engine.serverSeq(engine), before);
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    // The resolved context is the narrowed one, and it is RECORDED, not
+    // refused — that is the whole content of "a rank changing is not a reason
+    // to decline".
+    assertEquals(result.executionContextKey, USER_CONTEXT_KEY);
     assertEquals(
       Engine.read(engine, { id: "of:claim-context-fenced-output" }),
-      null,
+      { value: 1 },
     );
   } finally {
     Engine.close(engine);
@@ -698,77 +745,50 @@ Deno.test("with-operations context mismatch fences claim-context-mismatch", asyn
 // "R7 diagnosis").
 // ---------------------------------------------------------------------------
 
-Deno.test("R7 mechanism: a prior UNCLAIMED client run narrows the floor, and a later space-rank claim on an all-space run fences claim-context-mismatch", async () => {
+// RE-EXPECTED by slice 1 (was: "…fences claim-context-mismatch"). The R7
+// MECHANISM is unchanged and still worth pinning — a prior unclaimed client
+// run durably narrows the floor and every later run of that identity resolves
+// at the narrowed rank. What changed is the CONSEQUENCE: the narrowed
+// resolution is recorded, not refused, so the run that used to burn itself
+// against the fence now serves.
+Deno.test("R7 mechanism: a prior UNCLAIMED client run narrows the floor, and a later space-lane run on all-space surfaces still commits at the narrowed context", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
     // The client run that pins the floor. Nothing about it is claimed.
     narrowFloorToUser(engine);
     const lease = acquire(engine, nowMs);
-    // A SPACE claim — exactly what the executor proposes for a run whose own
+    // A SPACE lane — exactly what the executor acts as for a run whose own
     // surfaces are all-space, because that is all it can see.
     const claim = claimFor(
       lease,
       "space" as SchedulerExecutionContextKey,
     );
-    const error = assertThrows(
-      () => applyClaimedObservationOnly(engine, lease, claim, nowMs + 1),
-      Engine.ExecutionLeaseFenceError,
+    const applied = applyClaimedObservationOnly(
+      engine,
+      lease,
+      claim,
+      nowMs + 1,
     );
-    assertEquals(error.fenceCause, "claim-context-mismatch");
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, USER_CONTEXT_KEY);
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
   }
 });
 
-Deno.test("R7: the issuance-side floor consult reports the narrowed floor for the action identity a claim key names", async () => {
-  const { directory, engine } = await openTempEngine();
-  try {
-    const claimKey = {
-      branch: "" as const,
-      pieceId: PIECE_ID,
-      actionId: ACTION_ID,
-      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
-      runtimeFingerprint: RUNTIME_FINGERPRINT,
-    };
-    // Nothing observed yet: no floor, so issuance must not decline anything.
-    assertEquals(
-      Engine.schedulerClaimContextFloor(engine, claimKey, undefined),
-      "space",
-    );
-    narrowFloorToUser(engine);
-    // The GLOBAL row is principal-independent, so a space-rank claim (which
-    // names no principal) sees it — this is the row that makes the measured
-    // group-chat case decidable at issuance.
-    assertEquals(
-      Engine.schedulerClaimContextFloor(engine, claimKey, undefined),
-      "user",
-    );
-    // A different action identity is unaffected: the consult must not leak
-    // one action's floor onto another's claim.
-    assertEquals(
-      Engine.schedulerClaimContextFloor(
-        engine,
-        { ...claimKey, actionId: "action:unrelated" },
-        undefined,
-      ),
-      "space",
-    );
-    // Nor across a fingerprint change — different code, different shape.
-    assertEquals(
-      Engine.schedulerClaimContextFloor(
-        engine,
-        { ...claimKey, implementationFingerprint: "impl:other" },
-        undefined,
-      ),
-      "space",
-    );
-  } finally {
-    Engine.close(engine);
-    await Deno.remove(directory, { recursive: true });
-  }
-});
+// DELETED by slice 1 (was: "R7: the issuance-side floor consult reports the
+// narrowed floor for the action identity a claim key names"). The consult
+// (`Engine.schedulerClaimContextFloor`) and its only caller
+// (`#assertExecutionClaimContextFloorAdmits`) existed for exactly one job —
+// declining a claim at ISSUANCE because the engine would later fence it
+// `claim-context-mismatch`. With no fence there is nothing to decline in
+// advance of. The floor READER the engine's own resolution uses
+// (`schedulerContextFloor`) is untouched and is pinned by the durable-floor
+// tests below.
 
 // ---------------------------------------------------------------------------
 // The durable floor must record what an action's DECLARED SHAPE forces on
@@ -802,36 +822,33 @@ Deno.test("R7: the issuance-side floor consult reports the narrowed floor for th
 // `commit-rejected:ExecutionLeaseFenceError` x2 in the space arm.
 // ---------------------------------------------------------------------------
 
+// Slice 1 re-pointed this test's INSTRUMENT, not its subject: the
+// issuance-side reader it used to call (`Engine.schedulerClaimContextFloor`)
+// is deleted with the claim gate, so the floor is asserted through its only
+// remaining observable — the context a later run resolves to.
 Deno.test("an envelope-escaping client run does not durably narrow the floor to session", async () => {
   const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
   try {
-    const claimKey = {
-      branch: "" as const,
-      pieceId: PIECE_ID,
-      actionId: ACTION_ID,
-      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
-      runtimeFingerprint: RUNTIME_FINGERPRINT,
-    };
     narrowFloorByEnvelopeEscape(engine);
+    const lease = acquire(engine, nowMs);
     // The PerUser read is real evidence and floors the action at user rank.
     // The envelope escape is not evidence of ANY scope, so it must not add a
-    // session row on top.
+    // session row on top — a session floor would resolve a `session:` key.
     assertEquals(
-      Engine.schedulerClaimContextFloor(
-        engine,
-        claimKey,
-        USER_CONTEXT_KEY,
-      ),
-      "user",
+      resolvedContextUnderLane(engine, lease, USER_CONTEXT_KEY, nowMs + 1, 1),
+      USER_CONTEXT_KEY,
     );
     // And no other principal inherits anything narrower either.
     assertEquals(
-      Engine.schedulerClaimContextFloor(
+      resolvedContextUnderLane(
         engine,
-        claimKey,
+        lease,
         OTHER_USER_CONTEXT_KEY,
+        nowMs + 2,
+        2,
       ),
-      "user",
+      OTHER_USER_CONTEXT_KEY,
     );
   } finally {
     Engine.close(engine);
@@ -866,14 +883,8 @@ Deno.test("a later in-envelope run stays servable at user rank after an envelope
 
 Deno.test("a genuine PerSession surface still narrows the durable floor to session", async () => {
   const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
   try {
-    const claimKey = {
-      branch: "" as const,
-      pieceId: PIECE_ID,
-      actionId: ACTION_ID,
-      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
-      runtimeFingerprint: RUNTIME_FINGERPRINT,
-    };
     const sessionRead: SchedulerObservationAddress = {
       space: SPACE,
       scope: "session",
@@ -925,9 +936,15 @@ Deno.test("a genuine PerSession surface still narrows the durable floor to sessi
         },
       },
     });
+    // A later all-space run of the same identity resolves at the narrowed
+    // floor: the sponsor session's own session context, not user rank.
+    const lease = acquire(engine, nowMs);
     assertEquals(
-      Engine.schedulerClaimContextFloor(engine, claimKey, USER_CONTEXT_KEY),
-      "session",
+      resolvedContextUnderLane(engine, lease, USER_CONTEXT_KEY, nowMs + 1, 2),
+      Engine.resolveScopeKey("session", {
+        principal: PRINCIPAL,
+        sessionId: "executor-session",
+      }),
     );
   } finally {
     Engine.close(engine);

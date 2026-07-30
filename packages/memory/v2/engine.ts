@@ -7025,73 +7025,6 @@ function schedulerContextFloor(
   return row?.floor_scope ?? "space";
 }
 
-/**
- * ISSUANCE-side floor consult (R7): the narrowest durable context floor this
- * action IDENTITY carries, for the global row and — when the caller names one
- * — one principal's row.
- *
- * WHY THIS EXISTS. The engine resolves a run's effective context as
- * `narrowest(staticFloor, runtimeFloor, globalFloor, principalFloor)` and
- * fences `claim-context-mismatch` when that disagrees with the claim's
- * contextKey. The floors are DURABLE and MONOTONIC and can be written by any
- * observer — including an ordinary unclaimed CLIENT run that happened to read
- * PerUser/PerSession state. The executor classifies its candidate from the
- * CURRENT observation's surfaces alone, so it can keep proposing a rank the
- * engine will never resolve to, and every claimed attempt then burns a full
- * run before the commit-time fence rejects it — permanently, since the floor
- * never widens. Measured on the group-chat product: the same
- * `cf:builtin/map:v1` action fenced on every space-rank claim, run after run
- * (client-passivity §5g, "R7 diagnosis"). This reader lets the host decline
- * such a claim at ISSUANCE, before any work is done.
- *
- * DELIBERATELY COARSER THAN {@link schedulerContextFloor}: a claim key
- * (`ActionClaimKey`) carries no `processGeneration` and no `ownerSpace`, so
- * this matches on the fingerprinted action identity and takes the narrowest
- * row across both. That can only ever over-report narrowness, and
- * over-reporting is SAFE here — the caller's response is to decline the
- * claim, which falls back to exactly the client-primary behavior that would
- * have happened anyway. Under-reporting would silently reinstate the burned
- * run. The fingerprints are what make it sound rather than merely safe:
- * identical implementation + runtime fingerprints are the same code, so a
- * floor observed for one process generation describes the same scope shape.
- */
-export function schedulerClaimContextFloor(
-  engine: Engine,
-  key: {
-    branch: BranchName;
-    pieceId: string;
-    actionId: string;
-    implementationFingerprint: string;
-    runtimeFingerprint: string;
-  },
-  principalKey?: string,
-): SchedulerContextScope {
-  const rows = engine.database.prepare(`
-    SELECT floor_scope
-    FROM scheduler_context_floor
-    WHERE branch = :branch
-      AND piece_id = :piece_id
-      AND action_id = :action_id
-      AND implementation_fingerprint = :implementation_fingerprint
-      AND runtime_fingerprint = :runtime_fingerprint
-      AND (principal_key = '' OR principal_key = :principal_key)
-  `).all({
-    branch: key.branch,
-    piece_id: key.pieceId,
-    action_id: key.actionId,
-    implementation_fingerprint: key.implementationFingerprint,
-    runtime_fingerprint: key.runtimeFingerprint,
-    // No principal named (a space-rank claim has none): the `principal_key =
-    // ''` disjunct still selects the global row, and this sentinel matches no
-    // per-principal row (principal keys are canonical `user:<did>`).
-    principal_key: principalKey ?? " none",
-  }) as { floor_scope: SchedulerContextScope }[];
-  return rows.reduce<SchedulerContextScope>(
-    (narrowest, row) => narrowerSchedulerContext(narrowest, row.floor_scope),
-    "space",
-  );
-}
-
 function upsertSchedulerContextFloor(
   engine: Engine,
   key: SchedulerContextFloorKey,
@@ -8580,10 +8513,10 @@ const commitLaneAssertions = (
 };
 
 /**
- * C1.4 lane admission (C1 review amendments 5/6): resolve the asserted
+ * C1.4 lane admission (C1 review amendments 5/6): resolve the acting
  * execution lane BEFORE any scoped-state validation (preconditions,
  * confirmed reads, pending reads) runs, so a forged or fenced lane
- * assertion learns nothing about scoped state — every rejection here is a
+ * learns nothing about scoped state — every rejection here is a
  * constant-shape fence cause. One commit — schedulerObservationBatch
  * included — may assert claims of exactly one lane. Space-lane commits
  * pass through byte-identically (their claim checks keep today's later
@@ -8592,12 +8525,17 @@ const commitLaneAssertions = (
  * sponsor `principal` keeps the lease fence, the replay/pending-read
  * sessionKey namespace, and provenance.onBehalfOf. For a session lane
  * (C2.1b, amendment CA1) the identity also carries the LANE's sessionId,
- * parsed from the canonical claim contextKey — never the sponsor's session
- * — so session-scope resolution and the claim-context-mismatch fence
- * compare against the lane's own session context. Exact observation
- * replays are exempt from the liveness checks so a lost-response replay
- * stays idempotent after a lane drain, mirroring the replay-before-fence
- * ordering of the per-observation apply paths.
+ * parsed from the canonical context key — never the sponsor's session —
+ * so session-scope resolution compares against the lane's own session
+ * context. Exact observation replays are exempt from the liveness checks
+ * so a lost-response replay stays idempotent after a lane drain, mirroring
+ * the replay-before-fence ordering of the per-observation apply paths.
+ *
+ * The lane comes from `options.actingContext` — the wire's host-validated
+ * per-commit acting context — not from the claims the observation asserts.
+ * That is slice 1 of the claim deletion: the acting lane is a property of
+ * the RUN, so nothing computes it twice and there is no disagreement left
+ * to fence (`claim-context-mismatch` is deleted).
  */
 const admitExecutionCommitLanes = (
   engine: Engine,
@@ -8618,14 +8556,18 @@ const admitExecutionCommitLanes = (
       "memory v2 commit may assert execution claims of exactly one lane",
     );
   }
-  const lane = assertions.length > 0 ? assertions[0].contextKey : undefined;
-  if (options.actingContext !== undefined && options.actingContext !== lane) {
-    // A host-supplied acting context that disagrees with the asserted lane
-    // is a host bug, never a client-reachable state.
-    throw new ProtocolError(
-      "acting context does not match the commit's asserted execution lane",
-    );
-  }
+  // The host-validated acting context is the SOLE source of the commit's
+  // lane: it is what the run acted as, checked against the live lane grant
+  // before any scope key resolved. The asserted claim lane survives only as
+  // the transitional fallback for a commit that carries no acting context —
+  // without it a scoped assertion would skip the claim fences below entirely.
+  // It is NOT a second opinion to reconcile: a claim naming a different lane
+  // than the run acted as reaches `claim-observation-mismatch` below, which is
+  // the claim's own liveness fence and disappears with the claim.
+  const assertedLane = assertions.length > 0
+    ? assertions[0].contextKey
+    : undefined;
+  const lane = options.actingContext ?? assertedLane;
   if (lane === undefined || lane === "space") return undefined;
   const userPrincipal = principalOfUserContextKey(lane);
   const sessionIdentity = userPrincipal === undefined
@@ -9047,19 +8989,21 @@ const applyCommitTransaction = (
       observation: acceptedObservation.observation,
     })
     : undefined;
-  if (
-    acceptedObservation?.provenance !== undefined &&
-    schedulerObservationResult?.executionContextKey !==
-      acceptedObservation.provenance.claim.contextKey
-  ) {
-    // Same semantic condition as the observation-only twin below: one fence
-    // cause keeps stats counting, the R7 measurement tolerance, and executor
-    // rejection handling identical across both commit shapes.
-    throw new ExecutionLeaseFenceError(
-      "claim-context-mismatch",
-      "execution claim context does not match the effective scheduler context",
-    );
-  }
+  // NO effective-context fence here (and none in the observation-only twin).
+  // `claim-context-mismatch` compared the context the run RESOLVED to against
+  // the context the claim was issued at, and refused the commit when they
+  // disagreed. A rank the run resolves to differently is an observation, never
+  // a refusal (D11, client-passivity §5h.4): the resolved context simply IS
+  // the context, and `upsertSchedulerContextFloor` records it.
+  //
+  // It was not a cross-principal leak guard in disguise. A space-acting run
+  // cannot consume scoped state at all — `assertLaneScopedAddress` rejects
+  // every user/session-scoped read AND write surface `non-space-scope` when
+  // the lane scope key is undefined — so its broad value is derived from
+  // all-space inputs whatever the durable floor says. A scoped-acting run's
+  // broad writes stay bounded by `assertLaneBroadScopeNamingWrite`, so its
+  // value lands on the lane instance and the broad instance takes a
+  // scope-naming link that is byte-identical for every principal.
 
   // C3.2: the epoch bump, in the SAME transaction as the ACL apply — a
   // rollback after this point takes the bumps with it, and a commit
@@ -9563,9 +9507,10 @@ const resolvedPendingReadsForBasis = (
 // canonical user-rank keys (`user:<encodeURIComponent(principal)>`) and —
 // since C2.1 — canonical session-rank keys
 // (`session:<enc(principal)>:<enc(sessionId)>`), so a colon-bearing DID
-// never appears raw. Malformed keys stay rejected. Effective-context
-// EQUALITY is owned by the claim-context-mismatch fence once the
-// observation's context resolves. Amendment 8's computation-only conjunct
+// never appears raw. Malformed keys stay rejected. Nothing here compares a
+// claim's rank against the context the run resolves to: that equality was
+// the `claim-context-mismatch` fence, and it is deleted — a rank changing is
+// an observation, never a refusal. Amendment 8's computation-only conjunct
 // was LIFTED by C2.8 (2026-07-18, context-lattice OQ6/R12): scoped ranks
 // admit effect claims too — a scoped-lane builtin is the lane principal's
 // own standing side effect executing under the lane grant, so user- and
@@ -10179,17 +10124,8 @@ const applySchedulerObservationOnlyCommit = (
       : {}),
     observation: accepted.observation,
   });
-  if (
-    accepted.provenance !== undefined &&
-    accepted.unservedDiagnosticCode === undefined &&
-    observationResult.executionContextKey !==
-      accepted.provenance.claim.contextKey
-  ) {
-    throw new ExecutionLeaseFenceError(
-      "claim-context-mismatch",
-      "execution claim context does not match the effective scheduler context",
-    );
-  }
+  // The observation-only twin of the deleted `claim-context-mismatch` fence —
+  // see the with-operations site for why nothing replaces it.
   return {
     seq: observedAtSeq,
     branch,

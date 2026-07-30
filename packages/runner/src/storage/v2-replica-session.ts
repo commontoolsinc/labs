@@ -44,6 +44,15 @@ export interface ReplicaReadOptions {
 }
 
 /**
+ * Per-commit options — the write-side twin of {@link ReplicaReadOptions}:
+ * the lane this commit ACTS AS, validated host-side against the live lane
+ * grant BEFORE any scope key resolves. Space-lane commits omit it.
+ */
+export interface ReplicaCommitOptions {
+  actingContext?: SchedulerExecutionContextKey;
+}
+
+/**
  * The authenticated storage operations SpaceReplica needs from its backend.
  * Remote memory sessions and the executor MessagePort backend both implement
  * this interface; the synchronous replica/cache remains in the Worker.
@@ -52,7 +61,10 @@ export interface ReplicaSession {
   readonly sessionId: string;
   readonly sessionToken: string | undefined;
   readonly serverSeq: number;
-  transact(commit: ClientCommit): Promise<AppliedCommit>;
+  transact(
+    commit: ClientCommit,
+    options?: ReplicaCommitOptions,
+  ): Promise<AppliedCommit>;
   /** Advance execution settlement gating only after the local replica has
    * applied/confirmed the accepted commit data. */
   noteAppliedCommit?(seq: number): void;

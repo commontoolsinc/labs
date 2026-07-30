@@ -48,6 +48,7 @@ import {
 } from "./v2.ts";
 import type {
   ReplicaClient,
+  ReplicaCommitOptions,
   ReplicaReadOptions,
   ReplicaSession,
 } from "./v2-replica-session.ts";
@@ -1261,9 +1262,12 @@ class HostReplicaSession implements ReplicaSession {
       : undefined;
   }
 
-  async transact(commit: ClientCommit) {
+  async transact(commit: ClientCommit, options?: ReplicaCommitOptions) {
     try {
-      return await this.session.transact({ ...commit, branch: this.branch });
+      return await this.session.transact(
+        { ...commit, branch: this.branch },
+        options,
+      );
     } catch (error) {
       installHostConflictRetryBarrier(error, {
         acceptedCommitsSettled: () => this.acceptedCommitsSettled(),

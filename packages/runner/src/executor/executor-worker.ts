@@ -794,12 +794,20 @@ const refreshForeignMountForWake = async (
  * Why this is load-bearing (the composed-serve defect this closes): without a
  * pre-run mount, the initial claimed run reads the foreign source through the
  * home mirror WITHOUT a served-point-read stamp, so `foreignReadStampsForAction`
- * yields nothing, the accepted observation floors at SESSION (the conservative
- * no-provenance posture — `claimedForeignReadFloorExempt` requires the engine's
- * accept-path provenance, which requires the stamps), and the SPACE-rank
- * cross-space-read claim fences it `claim-context-mismatch`. The fence loses the
- * claim before any foreign wake can refresh the mount, so the composed serve
- * never recovers. The memory C3.4/C3.5/C3.6 fixtures never caught this because
+ * yields nothing, and the accepted observation floors at SESSION (the
+ * conservative no-provenance posture — `claimedForeignReadFloorExempt` requires
+ * the engine's accept-path provenance, which requires the stamps).
+ *
+ * Until slice 1 of the claim deletion that floor then fenced the SPACE-rank
+ * cross-space-read claim `claim-context-mismatch`, losing the claim before any
+ * foreign wake could refresh the mount, so the composed serve never recovered.
+ * The fence is deleted (a rank the run resolves to differently is an
+ * observation, not a refusal), so the failure is no longer loud — the run now
+ * commits with a SESSION effective context it has no evidence for, which is a
+ * quieter defect, not a fixed one. This pre-run mount is what keeps the run
+ * stamped and correctly space-ranked either way.
+ *
+ * The memory C3.4/C3.5/C3.6 fixtures never caught this because
  * they hand-attach `foreignReadStamps` to the claimed observation; the real
  * `executor-worker.ts` run path (first exercised by the C3.11 gate) does not.
  *

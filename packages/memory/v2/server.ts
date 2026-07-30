@@ -415,26 +415,6 @@ type CommitSchedulerObservation = {
   observation: Engine.SchedulerActionObservation;
 };
 
-/**
- * C1.4: the single lane this commit's HOST-RESOLVED claims assert, handed to
- * the engine as `ApplyCommitOptions.actingContext` so host and engine agree
- * on the acting context by construction. Mixed lanes return undefined and
- * are rejected by the engine's lane admission (one commit, one lane); a
- * forged assertion resolves no claim, so the admission fences it before any
- * scoped-state validation.
- */
-const executionClaimsActingContext = (
-  claims: ReadonlyMap<number, ExecutionClaim> | undefined,
-): SchedulerExecutionContextKey | undefined => {
-  if (claims === undefined) return undefined;
-  let lane: SchedulerExecutionContextKey | undefined;
-  for (const claim of claims.values()) {
-    if (lane === undefined) lane = claim.contextKey;
-    else if (lane !== claim.contextKey) return undefined;
-  }
-  return lane;
-};
-
 const schedulerObservationsFromCommit = (
   commit: ClientCommit,
 ): CommitSchedulerObservation[] => {
@@ -2373,71 +2353,6 @@ export class Server {
     if (!this.#executionClaimRankEnabled(claim)) {
       throw new Error(
         "server-primary execution claim rank is not enabled for this context",
-      );
-    }
-  }
-
-  /**
-   * R7 issuance-side floor consult: refuse a claim whose contextKey is
-   * BROADER than the action's durable context floor.
-   *
-   * The engine resolves a run's effective context as
-   * `narrowest(staticFloor, runtimeFloor, globalFloor, principalFloor)` and
-   * fences `claim-context-mismatch` when that disagrees with the claim. The
-   * last two floors are durable and MONOTONIC, and any observer writes them
-   * — including an ordinary unclaimed CLIENT run that read PerUser or
-   * PerSession state. The executor classifies its candidate from the CURRENT
-   * observation's surfaces alone and cannot see them, so without this check
-   * it keeps proposing a rank the engine will never resolve to: every
-   * claimed attempt burns a full run and is then fenced at commit, forever,
-   * because the floor never widens (measured on group-chat: a
-   * `cf:builtin/map:v1` action fencing every space-rank claim; see
-   * client-passivity §5g "R7 diagnosis").
-   *
-   * Declining here turns that wasted run into a free refusal. It is NOT a
-   * correctness fix — the engine fence already prevented anything wrong from
-   * committing, and it stays as the backstop for the race this cannot see (a
-   * floor narrowed between issuance and commit; the measured space arm still
-   * shows a couple). What it fixes is liveness: the action falls back to
-   * client-primary immediately instead of after a discarded server run.
-   *
-   * Rank comparison only. A claim NARROWER than the floor is left alone —
-   * that direction is the engine's existing `claim-context-mismatch`
-   * territory (a user-rank claim on a space-resolving run) and is not this
-   * check's business.
-   */
-  #assertExecutionClaimContextFloorAdmits(
-    engine: Engine.Engine,
-    claim: ExecutionClaimInput,
-  ): void {
-    const principal = Engine.principalOfUserContextKey(claim.contextKey) ??
-      Engine.parseSessionExecutionContextKey(claim.contextKey)?.principal;
-    const floor = Engine.schedulerClaimContextFloor(
-      engine,
-      {
-        branch: claim.branch,
-        pieceId: claim.pieceId,
-        actionId: claim.actionId,
-        implementationFingerprint: claim.implementationFingerprint,
-        runtimeFingerprint: claim.runtimeFingerprint,
-      },
-      principal === undefined
-        ? undefined
-        : Engine.resolveScopeKey("user", { principal }),
-    );
-    const claimScope: Engine.SchedulerContextScope =
-      Engine.parseSessionExecutionContextKey(claim.contextKey) !== undefined
-        ? "session"
-        : principal !== undefined
-        ? "user"
-        : "space";
-    if (
-      Engine.schedulerContextRank(floor) >
-        Engine.schedulerContextRank(claimScope)
-    ) {
-      throw new ExecutionLeaseAuthorityError(
-        `execution claim context ${claimScope} is broader than the action's ` +
-          `durable context floor ${floor}`,
       );
     }
   }
@@ -6223,7 +6138,6 @@ export class Server {
     // lifecycle may begin draining/replacing this slot while the open awaits.
     // Re-sample and re-read every host/durable authority input afterwards.
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
-    this.#assertExecutionClaimContextFloorAdmits(engine, claimInput);
     assertLaneGrantCurrent();
     const claimNow = this.#executionNowMs();
     if (
@@ -8268,6 +8182,25 @@ export class Server {
               deny,
             );
           }
+          // C1.4b's WRITE-side leg (slice 1 of the claim deletion): a
+          // lease-bound executor session names the lane its commit ACTS AS,
+          // and the host validates it against the LIVE lane grant BEFORE any
+          // scope key resolves — the identical seam, and the identical
+          // constant-shape rejections, `sqlite.query` and every other read
+          // verb already use. Requests without an acting context — the whole
+          // ordinary-client population and every space-rank executor run —
+          // keep today's behavior byte-identically.
+          const actingCommitScope = this.#actingReadScopeContext(
+            message.space,
+            session,
+            message.actingContext,
+          );
+          if (actingCommitScope.error) {
+            return respondTypedError<Engine.AppliedCommit>(
+              message.requestId,
+              actingCommitScope.error,
+            );
+          }
           // Scheduler ownership is derived from an authenticated principal.
           // An otherwise-authorized anonymous memory session may still commit
           // cell data, but cannot persist scoped scheduler metadata.
@@ -8387,11 +8320,19 @@ export class Server {
                     // sessionKey, provenance.onBehalfOf (C1.4).
                     principal: session.principal,
                     // Acting context: scope resolution, effective-context
-                    // resolution, CFC label validation (C1.4). Derived from
-                    // the host-resolved claims' single lane.
-                    actingContext: executionClaimsActingContext(
-                      executionClaims,
-                    ),
+                    // resolution, CFC label validation (C1.4). THE WIRE's
+                    // per-commit lane, validated above against the live lane
+                    // grant — never re-derived from the claims. Sourcing it
+                    // from the claims made the acting lane a property of an
+                    // arbitration decision, which is why the engine then had
+                    // to fence the two computations against each other
+                    // (`claim-context-mismatch`, now deleted). One source, no
+                    // second opinion, and a rank the run resolves to
+                    // differently is an observation rather than a refusal
+                    // (D11 / client-passivity §5h.4).
+                    ...(message.actingContext !== undefined
+                      ? { actingContext: message.actingContext }
+                      : {}),
                     commit: commitPayload,
                     executionClaims,
                     executionLeaseFence,
@@ -13814,6 +13755,7 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       commit: parsed.commit as unknown as TransactRequest["commit"],
+      ...parsedActingContext(parsed),
     };
   }
 

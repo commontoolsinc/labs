@@ -952,6 +952,25 @@ export interface TransactRequest {
   space: string;
   sessionId: SessionId;
   commit: ClientCommit;
+  /**
+   * The lane this commit ACTS AS — the same C1.4b per-request seam every read
+   * verb already carries (see {@link GraphQueryRequest.actingContext}), now on
+   * the write side. Validated host-side against the LIVE lane grant of the
+   * binding's (space, branch) BEFORE any scope key resolves, exactly like a
+   * read: an unbound session, a malformed key, or a drained grant rejects in
+   * the same constant shape.
+   *
+   * It is the SOLE source of the commit's acting context. Before this field
+   * the host derived it from the claims the observation asserted, which made
+   * the acting lane a property of an arbitration decision rather than of the
+   * run; the engine then had to fence the two computations against each other
+   * (`claim-context-mismatch`). One source, no second opinion — and a rank
+   * the run resolves to differently is an observation, never a refusal
+   * (D11 / client-passivity §5h.4).
+   *
+   * Space-lane commits omit it and stay byte-identical.
+   */
+  actingContext?: SchedulerExecutionContextKey;
 }
 
 /** F2/FA5 (FB12) trigger attribution for graph.query accounting: `"wave"` =

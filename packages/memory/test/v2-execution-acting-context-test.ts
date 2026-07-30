@@ -170,7 +170,8 @@ type ApplyClaimedOptions = {
 };
 
 /** Sponsor-bound apply: `principal` is ALWAYS the sponsor; the acting
- * context, when any, derives from the asserted claim's lane. */
+ * context, when any, is supplied by the caller (the host validates it against
+ * the live lane grant before calling). */
 const applyClaimed = (
   engine: Engine.Engine,
   lease: ExecutionLease,
@@ -271,7 +272,16 @@ Deno.test("user-lane commits act as the lane principal while onBehalfOf stays th
   }
 });
 
-Deno.test("an explicit actingContext must match the asserted lane", async () => {
+// RE-EXPECTED by slice 1 of the claim deletion (was: "an explicit
+// actingContext must match the asserted lane"). The acting context is now the
+// SOLE source of the commit's lane — it is what the run acted as, validated
+// host-side against the live lane grant — so a claim asserting a different
+// lane is not a host bug to ProtocolError on, it is a claim that does not
+// belong to this run and is fenced by the claim's own liveness check. The
+// distinction matters because the ProtocolError direction was the mechanism
+// that forced the two computations to agree, which is exactly what slice 1
+// removes.
+Deno.test("an explicit actingContext OVERRIDES the asserted lane", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
@@ -286,10 +296,12 @@ Deno.test("an explicit actingContext must match the asserted lane", async () => 
     });
     assert(applied.schedulerObservationResults?.[0].status === "kept");
 
-    // A host-supplied acting context naming a DIFFERENT lane is a host bug
-    // and rejects before anything is validated or written.
+    // A different lane: the acting context wins, so the claim resolved for
+    // this attempt no longer matches the acting lane and the CLAIM fence —
+    // not a host-bug ProtocolError — rejects, still before anything is
+    // written.
     const before = Engine.serverSeq(engine);
-    assertThrows(
+    const error = assertThrows(
       () =>
         applyClaimed(engine, lease, claim, {
           operations: [userInstanceOperation],
@@ -298,10 +310,62 @@ Deno.test("an explicit actingContext must match the asserted lane", async () => 
           localSeq: 2,
           actingContext: OTHER_LANE_CONTEXT_KEY,
         }),
-      Engine.ProtocolError,
-      "acting context",
+      Engine.ExecutionLeaseFenceError,
     );
+    assertEquals(error.fenceCause, "claim-observation-mismatch");
     assertEquals(Engine.serverSeq(engine), before);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+// Slice 1's load-bearing new capability: an acting context resolves the
+// commit's scope WITHOUT any claim in the picture. That is what makes the
+// acting lane a property of the RUN rather than of an arbitration decision,
+// and it is the shape that has to survive when claims are deleted outright.
+Deno.test("an acting context resolves the commit's scope with no claim at all", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    // An observation carrying NO claim assertion, committed by the sponsor
+    // session, acting as alice's lane.
+    const claim = claimFor(lease, LANE_CONTEXT_KEY);
+    const observation = observationFor(claim, { writes: [USER_OUTPUT] });
+    delete (observation as { executionClaimAssertion?: unknown })
+      .executionClaimAssertion;
+    Engine.applyCommit(engine, {
+      sessionId: "executor-session",
+      scopeSessionId: "executor-session",
+      space: SPACE,
+      principal: SPONSOR,
+      actingContext: LANE_CONTEXT_KEY,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [userInstanceOperation],
+        schedulerObservation: observation,
+      },
+    });
+    // The user-scoped write landed on ALICE's instance — the acting lane's —
+    // never the sponsor's, and no claim was consulted to decide that.
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: LANE_PRINCIPAL,
+      }),
+      { value: 7 },
+    );
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: SPONSOR,
+      }),
+      null,
+    );
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
@@ -990,6 +1054,119 @@ Deno.test("through a sponsor-bound provider session, a user lane commits as its 
   }
 });
 
+// Slice 1 puts `actingContext` on `transact` — the write-side twin of the
+// C1.4b read seam. It is the commit's SOLE lane source, so it is also a new
+// forgery surface, and the host must validate it exactly as it validates a
+// read's: lease binding first, then the LIVE lane grant, both in the same
+// constant shape a read rejects with.
+Deno.test("a wire actingContext on transact is validated against the live lane grant", async () => {
+  const server = createActingServer("memory-v2-acting-context-commit-seam");
+  rankDial.resetServerPrimaryExecutionClaimRankConfig();
+  const bobClient = await connectActingClient(server);
+  const bobSession = await mountAs(bobClient, SPONSOR);
+  const aliceClient = await connectActingClient(server);
+  const aliceSession = await mountAs(aliceClient, LANE_PRINCIPAL);
+  let unbind = () => {};
+  try {
+    await bobSession.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:acting-server-seed",
+        value: { value: "seed" },
+      }],
+    });
+    const laneKey = Engine.userExecutionContextKey(
+      LANE_PRINCIPAL,
+    ) as SchedulerExecutionContextKey;
+
+    // An ORDINARY client session may not name an acting context at all: no
+    // lease binding, no lane authority to derive one from.
+    await assertRejects(
+      () =>
+        aliceSession.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:acting-server-forged",
+            scope: "user",
+            value: { value: 1 },
+          }],
+        }, { actingContext: laneKey }),
+      Error,
+      "lease-bound executor session",
+    );
+
+    rankDial.setServerPrimaryExecutionClaimRankConfig("user");
+    await bobSession.setExecutionDemand("", ["space:piece:acting"]);
+    const lease = await server.acquireExecutionLease(SERVER_SPACE, "");
+    assertExists(lease);
+    unbind = server.bindExecutionSession(
+      SERVER_SPACE,
+      bobSession.sessionId,
+      lease,
+    );
+
+    // Bound, but the named lane has NO open grant: the same constant-shape
+    // rejection a READ takes, before any scope key resolves.
+    await assertRejects(
+      () =>
+        bobSession.transact({
+          localSeq: 3,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:acting-server-forged",
+            scope: "user",
+            value: { value: 1 },
+          }],
+        }, { actingContext: laneKey }),
+      Error,
+      "lane-generation-stale",
+    );
+
+    // With the grant open, a commit naming the lane on the wire is admitted
+    // and lands on the LANE principal's instance — never the sponsor's.
+    await server.openUserLaneGrant(SERVER_SPACE, "", LANE_PRINCIPAL);
+    const claim = await server.setExecutionClaim(
+      lease,
+      serverLaneClaimKey(laneKey),
+    );
+    const output = serverAddress("user", "of:acting-server-granted");
+    const applied = await bobSession.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: output.id,
+        scope: "user",
+        value: { value: 5 },
+      }],
+      schedulerObservation: serverObservationFor(claim, { writes: [output] }),
+    }, { actingContext: laneKey }) as Engine.AppliedCommit;
+    assert(applied.schedulerObservationResults?.[0].status === "kept");
+    const aliceView = await aliceSession.queryGraph({
+      roots: [{
+        id: output.id,
+        scope: "user",
+        selector: { path: [], schema: false },
+      }],
+    });
+    assertEquals(
+      aliceView.entities.find((entity) => entity.id === output.id)?.document,
+      { value: 5 },
+    );
+  } finally {
+    rankDial.resetServerPrimaryExecutionClaimRankConfig();
+    unbind();
+    await aliceClient.close();
+    await bobClient.close();
+    await server.close();
+  }
+});
+
 Deno.test("acting-principal WRITE loss drains the lane before a later commit (claim-not-live)", async () => {
   const server = createActingServer("memory-v2-acting-context-write-loss");
   rankDial.resetServerPrimaryExecutionClaimRankConfig();
@@ -1086,20 +1263,22 @@ Deno.test("acting-principal WRITE loss drains the lane before a later commit (cl
 });
 
 // ---------------------------------------------------------------------------
-// R7 issuance-side floor consult. The engine's `claim-context-mismatch` fence
-// is a COMMIT-time backstop: by the time it fires the executor has already run
-// the action and the work is discarded. Because the durable context floor is
-// monotonic and the executor cannot see it, that discard repeats forever for
-// the affected action. The host must therefore refuse such a claim at
-// ISSUANCE, before any run happens.
+// R7, RE-EXPECTED by slice 1 of the claim deletion.
 //
-// Red-first against the diagnosed production shape (client-passivity §5g):
-// an ordinary UNCLAIMED client run reads user-scoped state and narrows the
-// action's global floor; the executor, seeing only its own all-space surfaces,
-// proposes a SPACE claim; issuance must decline it.
+// The issuance-side floor consult existed to pre-empt the engine's
+// `claim-context-mismatch` fence: the fence discarded a completed run, the
+// durable floor is monotonic and the executor cannot see it, so the discard
+// repeated forever and declining at ISSUANCE turned a wasted run into a free
+// refusal. Its own docblock said it was "NOT a correctness fix".
+//
+// With the fence deleted there is no discard to pre-empt. A run whose
+// resolved context is narrower than the lane it acted as is served, and the
+// resolved context is recorded. So the SUBJECT of this pin inverts: the
+// production shape it was written against — an unclaimed client run narrows
+// the floor, the executor still proposes space — must now ISSUE and SERVE.
 // ---------------------------------------------------------------------------
 
-Deno.test("R7: the host declines a claim broader than the action's durable context floor", async () => {
+Deno.test("R7 dissolved: a durable floor narrower than the proposed lane no longer declines the claim", async () => {
   const server = createActingServer("memory-v2-acting-context-r7-floor");
   rankDial.resetServerPrimaryExecutionClaimRankConfig();
   const bobClient = await connectActingClient(server);
@@ -1186,12 +1365,10 @@ Deno.test("R7: the host declines a claim broader than the action's durable conte
     });
 
     // The claim the executor would now propose — its own surfaces are all
-    // space, so it still says "space" — must be refused before any run.
-    await assertRejects(
-      () => server.setExecutionClaim(lease, spaceClaimKey),
-      Error,
-      "broader than the action's durable context floor",
-    );
+    // space, so it still says "space". It ISSUES: a rank the run will resolve
+    // to differently is an observation, never a refusal.
+    const reissued = await server.setExecutionClaim(lease, spaceClaimKey);
+    assertEquals(reissued.contextKey, "space");
   } finally {
     unbind();
     rankDial.resetServerPrimaryExecutionClaimRankConfig();
