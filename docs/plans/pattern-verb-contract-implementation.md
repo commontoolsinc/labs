@@ -8,11 +8,14 @@ as work proceeds: check off exit criteria, record scope changes.
 (#5147): WS-D gains D5 (refuse an absent payload the verb provably cannot run
 without) and D6 (the default-relaxation helper moves next to the runner's
 validator so C5 shares it instead of re-implementing it), and WS-E records
-that pre-dispatch refusals must join the `VerbError` code taxonomy when codes
-reach the invocation surface, so agents branch on one signal. Later the same
-day, D5's open question was measured (see its bullet): absent events bypass
-default materialization entirely, narrowing D5's remaining choice to
-refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`.
+that pre-dispatch refusals must join the typed-rejection code taxonomy when
+codes reach the invocation surface, so agents branch on one signal. Later the
+same day, D5's open question was measured (see its bullet): absent events
+bypass default materialization entirely, narrowing D5's remaining choice to
+refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`. A third pass
+records the C1 review decision: no bespoke `VerbError` — a separate
+`FabricError` effort is underway, the rule-4 carrier will derive from it, and
+C1 ships without one (see WS-C).
 
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
@@ -168,8 +171,15 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   the callback `=> void` — the `action()` overloads in
   `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
-  keeps every existing `Stream<E>` use compiling. A `VerbError { code,
-  message }` type for rule 4's typed rejections.~~ — **done (C1)**.
+  keeps every existing `Stream<E>` use compiling.~~ — **done (C1)**.
+
+  **No bespoke `VerbError` — rule 4's typed carrier is deferred** (review,
+  2026-07-30): a separate `FabricError` effort is underway and the
+  verb-rejection type will derive from it rather than being its own class.
+  C1 briefly carried a `VerbError { code, message }` and dropped it. Until
+  the derived carrier exists, a rejection is a thrown `Error` whose message
+  reaches the caller as prose, and stable codes wait; WS-E's taxonomy bullet
+  binds to the derived type when it lands.
 
   Verb-shaped type parameters read one way throughout: **`E`** the event,
   **`R`** the declared result, **`T`** the handler's bound state where there
@@ -521,9 +531,11 @@ open-world); the collection linked from the piece with pattern-declared range +
 default and read-and-expire.
 
 - **One rejection taxonomy.** Two "fix your input" signals exist ahead of
-  this workstream: `VerbInputValidationError` (CLI pre-dispatch refusal,
-  carries no code) and `VerbError { code }` (in-verb rule-4 rejection, C1).
-  When this workstream puts codes on the invocation surface, the
+  this workstream, and today neither carries a stable code:
+  `VerbInputValidationError` (CLI pre-dispatch refusal) and a thrown `Error`
+  in the verb body (rule 4's rejection, whose typed carrier is deferred to
+  derive from `FabricError` — see WS-C). When this workstream puts codes on
+  the invocation surface, the `FabricError`-derived rejection type and the
   pre-dispatch refusal must speak the same taxonomy — e.g. a reserved
   `INVALID_INPUT` code — so an agent branches one way, not two. Recorded so
   the convergence is a plan, not a rediscovery; no code field ships before
@@ -689,7 +701,7 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | A1 | topics: body at create + thrown rejections | S | — |
 | A2 | topics: reference-plus-summary discovery index | S | — |
 | B1 | cli: sink-based settlement, result cell address | S | — |
-| C1 | api: action return types, `Stream<T, R>`, VerbError | M | — |
+| C1 | api: action return types, `Stream<E, R>` (rejection carrier deferred to `FabricError`) | M | — |
 | C2 | ts-transformers: value-returning action lowering + CTS spec | M | C1 |
 | C3 | schema-generator: result schemas for streams + mapping spec | M | C1 |
 | C4 | runner: plain-return projection behind flag + registry entry | S | — |

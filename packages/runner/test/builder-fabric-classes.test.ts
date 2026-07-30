@@ -19,7 +19,6 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import { createBuilder } from "../src/builder/factory.ts";
 import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
-import { VerbError } from "@commonfabric/api";
 
 // The Fabric value classes reach pattern code as `export declare const`s in
 // `api/index.ts`, but the runtime values behind those declarations are bound
@@ -216,37 +215,5 @@ describe("commonfabric Fabric value classes", () => {
       expect(instance instanceof BoundFabricSpecialObject).toBe(true);
       expect({} instanceof BoundFabricSpecialObject).toBe(false);
     });
-  });
-});
-
-// `VerbError` reaches pattern code the same way these classes do, and is
-// exposed to the same declared-but-not-bound failure. It is not covered by the
-// derivation above, which matches `export declare const Fabric*` — `VerbError`
-// is a real `export class` in `api/index.ts`, so nothing about it is a
-// declaration awaiting a binding. What it shares is the delivery path: a
-// pattern writes `throw new VerbError(code, message)` (verb contract rule 4),
-// so the constructor itself has to survive to the frozen sandbox surface.
-describe("commonfabric VerbError", () => {
-  const sandboxCommonfabric = getRuntimeModuleExports()
-    .runtimeExports["commonfabric"] as unknown as Record<string, unknown>;
-
-  it("is carried through to pattern code, not only type-resolvable", () => {
-    // `deno.jsonc` maps the `commonfabric` specifier to `api/index.ts` for type
-    // resolution, so an unbound class compiles in a pattern and throws
-    // "not a constructor" once that pattern runs.
-    expect(sandboxCommonfabric.VerbError).toBe(VerbError);
-  });
-
-  it("still constructs after sandbox hardening", () => {
-    const BoundVerbError = sandboxCommonfabric.VerbError as typeof VerbError;
-    const rejection = new BoundVerbError(
-      "NOT_YOUR_TURN",
-      "wait for your opponent",
-    );
-
-    expect(rejection).toBeInstanceOf(Error);
-    expect(rejection.code).toBe("NOT_YOUR_TURN");
-    expect(rejection.message).toBe("wait for your opponent");
-    expect(rejection.name).toBe("VerbError");
   });
 });

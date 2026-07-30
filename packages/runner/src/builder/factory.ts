@@ -22,7 +22,6 @@ import {
   TILE_UI,
   TYPE,
   UI,
-  VerbError,
   WebhookConfigSchema,
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
@@ -288,7 +287,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     __cf_data: freezeVerifiedPlainData,
     AuthSchema,
     WebhookConfigSchema,
-    VerbError,
 
     // Render utils
     h,
