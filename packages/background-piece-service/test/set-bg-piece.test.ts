@@ -6,7 +6,7 @@
 // without their semantics.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -100,6 +100,42 @@ describe("setBGPiece() registration is an upsert", () => {
       entries.map((e) => e.pieceId).sort(),
       [PIECE_ID, OTHER_PIECE_ID].sort(),
     );
+  });
+
+  it("surfaces a failed commit instead of reporting success", async () => {
+    // Everything stays real except the one call whose failure is under test:
+    // the commit result used to be dropped, so a registration that never
+    // landed still answered as though it had. Forcing a real conflict is not
+    // available here (see the note in the concurrency test), and this branch
+    // only propagates -- so the narrow substitution is the honest instrument.
+    const failing = new Proxy(runtime, {
+      // The real target is the receiver, so methods reached through this see
+      // their own instance rather than the proxy.
+      get: (target, prop) =>
+        prop === "editWithRetry"
+          ? () =>
+            Promise.resolve({
+              error: { name: "TestCommitFailure", message: "commit refused" },
+            })
+          : Reflect.get(target, prop, target),
+    });
+
+    await assertRejects(
+      () =>
+        setBGPiece({
+          space: TEST_DID,
+          pieceId: PIECE_ID,
+          integration: "gmail",
+          runtime: failing,
+          bgSpace,
+          bgCause,
+        }),
+      Error,
+      "commit refused",
+    );
+
+    // And nothing was recorded, which is the point of surfacing it.
+    assertEquals((await readEntries()).length, 0);
   });
 
   it("lands one entry when the same piece is registered concurrently", async () => {
