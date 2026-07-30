@@ -131,7 +131,8 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 `packages/runner`.
 
 - **api:** `action` overloads accept a return type (today both overloads type
-  the callback `=> void`, `builder/module.ts:606-609`); `Stream<T, R = void>`
+  the callback `=> void` — the `action()` overloads in
+  `packages/runner/src/builder/module.ts`); `Stream<T, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
   keeps every existing `Stream<T>` use compiling. A `VerbError { code,
   message }` type for rule 4's typed rejections.
@@ -161,9 +162,10 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   It does stop matching — but that does not reach the schema layer, which
   detects wrappers from the author's annotation by two annotation-rooted
   paths: the written `ts.TypeNode` name
-  (`schema-generator/src/type-utils.ts:427-437`) and the `[CELL_BRAND]:
+  (the wrapper-name check in `schema-generator/src/type-utils.ts`) and the
+  `[CELL_BRAND]:
   "stream"` literal on the resolved type
-  (`schema-generator/src/typescript/cell-brand.ts:97-114`), whose
+  (`computeCellBrand`, `schema-generator/src/typescript/cell-brand.ts`), whose
   `extractWrapperTypeReference` exposes the full `typeArguments` where `R`
   sits — so detection even survives an alias like
   `type MyVerb = Stream<E, R>`. The
@@ -202,12 +204,12 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   earlier revision of this bullet warned that "stream/handler properties" is
   not one predicate, because `Cell.isStream` accepts three independent signals
   — construction kind, `asCell: ["stream"]` in the schema, and a stored
-  `{$stream: true}` value (`packages/runner/src/cell.ts:936-958`) — and that
+  `{$stream: true}` value (`Cell.isStream`, `packages/runner/src/cell.ts`) — and that
   C3 might therefore skip verbs carried only by the stored one. That warning
   was misdirected. C3 runs in schema-generator, off the **TypeScript checker**:
   `getWrapperSchemaFromCallable` reads a property's call signatures and asks
   `getCellWrapperInfo` whether the return type is a `Stream`
-  (`packages/schema-generator/src/formatters/object-formatter.ts:44-67`). The
+  (`packages/schema-generator/src/formatters/object-formatter.ts`). The
   `asCell` marker is that check's *output*, not its input, and the stored
   `{$stream: true}` value is a runtime artifact schema-generator never sees. A
   result schema would ride the same type check that already emits the marker,
@@ -236,7 +238,7 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   flag states tested in `scheduler-event-receipts.test.ts`, including
   same-id redelivery retaining the original result.
 - ~~**C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
-  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1358`), so
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts`), so
   `Stream<T, R = void>` ripples through the cell-type machinery; the
   alternative is a separate declared-result carrier (e.g.
   `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer

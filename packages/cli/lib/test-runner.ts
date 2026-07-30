@@ -368,8 +368,8 @@ export interface TestRunnerOptions {
    * The RUNTIME is still torn down (`dispose({ closeStorage: false })`), which
    * is what makes reading the store afterwards a statement about the state the
    * run reached: the runtime that wrote it can no longer commit into it. A
-   * teardown that does not complete is RAISED on this path rather than logged,
-   * since the caller would otherwise read a store whose writer never stopped.
+   * teardown that does not complete is RAISED, so a caller never reads a store
+   * whose writer never stopped.
    */
   storageHost?: {
     identity: Identity;
@@ -1925,35 +1925,36 @@ export async function runTestPattern(
     // per-file guard. Firing early is safe here in a way it is not elsewhere:
     // it only skips the rest of a teardown in a process that is moving on.
     //
-    // Except when the caller supplied the store. There an incomplete teardown
-    // means the writer was NOT quiesced, and the caller is about to read what
-    // it wrote — so it is RAISED, not logged. A capture refused is recoverable;
-    // a fixture silently missing state is the failure this whole path exists to
-    // prevent.
+    // A teardown that does not complete is RAISED, on both paths. It says the
+    // runtime never quiesced, which is a fact about the pattern under test —
+    // reporting it only to stderr would let `cf test` exit 0 on a run whose
+    // writer was still going, and a caller that supplied its own store is worse
+    // off still, since it is about to read what that writer wrote. Raising also
+    // keeps the pre-existing contract: `storageManager.close()` used to sit here
+    // unguarded, so a failing teardown already failed the file.
     //
-    // Losing the race ABANDONS the dispose rather than cancelling it: `settled()`
-    // takes no abort signal, so the drain runs on in the background and the
-    // steps after it never happen. Acceptable because the only path that can
-    // reach it has already failed — the capture is refused and its temp store
-    // and server are torn down by `captureVintage`'s own `finally`.
-    const runnerOwnsStorage = options.storageHost === undefined;
+    // Logged BEFORE it is raised because throwing from a `finally` discards the
+    // result this function was about to return, including any step failures.
+    // The exit code is right either way; the log is what keeps the diagnosis.
+    //
+    // Losing the race ABANDONS the dispose rather than cancelling it:
+    // `settled()` takes no abort signal, so the drain runs on in the background
+    // and the steps after it never happen. Acceptable because the only path
+    // that reaches it has already failed, and a capture's temp store and server
+    // are torn down by `captureVintage`'s own `finally`.
     const teardown = withPhase(
       ["runTestPattern", "cleanup", "runtimeDispose"],
       () =>
         Promise.race([
-          runtime.dispose({ closeStorage: runnerOwnsStorage }),
+          runtime.dispose({ closeStorage: options.storageHost === undefined }),
           timeout(TIMEOUT, `Runtime teardown timed out after ${TIMEOUT}ms`),
         ]),
     );
     await teardown.catch((error) => {
-      // Reported either way. Raising from a `finally` DISCARDS the result this
-      // function was about to return — the catch above already turned a failing
-      // run into one — so without this line a test that fails its assertions
-      // AND wedges teardown would report only the wedge.
       console.error(
         `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
       );
-      if (!runnerOwnsStorage) throw error;
+      throw error;
     });
   }
 }
@@ -1979,7 +1980,20 @@ export async function runTests(
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
 
-    const result = await runTestPattern(testPath, options);
+    // `runTestPattern` RAISES a teardown that did not complete, which is the
+    // right contract for a direct caller — the vintage capture is about to read
+    // what the run wrote, so it must refuse rather than snapshot. A multi-file
+    // run is the other case: one wedged file is a failure of that file, not a
+    // reason the remaining ones go unreported. Counted and skipped past, so the
+    // exit code is still non-zero.
+    let result: TestRunResult;
+    try {
+      result = await runTestPattern(testPath, options);
+    } catch (error) {
+      totalFailed++;
+      console.log(`  ✗ ${formatError(error)}`);
+      continue;
+    }
     allResults.push(result);
 
     if (result.error) {

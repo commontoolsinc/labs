@@ -21,7 +21,7 @@ import { resolve } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { runTestPattern } from "../lib/test-runner.ts";
+import { runTestPattern, runTests } from "../lib/test-runner.ts";
 
 const FIXTURES = resolve(import.meta.dirname!, "fixtures/storage-host");
 
@@ -78,6 +78,59 @@ describe(
 
       // The caller owns the close, which is the other half of the contract.
       await reader.dispose();
+    });
+
+    it("RAISES a teardown that does not complete", async () => {
+      // The other half of "the store is the caller's": the caller is about to
+      // read what this run wrote, so a teardown that did not finish must not be
+      // reported as a completed run. `captureVintage` turns the throw into a
+      // refused capture rather than a fixture silently missing state.
+      //
+      // Driven by a store whose `synced()` always rejects, which is what the
+      // teardown drain awaits. The run itself fails too — that is fine and not
+      // what this pins; the claim is that the failure REACHES the caller rather
+      // than being logged and swallowed.
+      const identity = await Identity.fromPassphrase("cli storage host raise");
+      const wedged = StorageManager.emulate({ as: identity });
+      // Patched on the INSTANCE, not through a Proxy: the manager reads private
+      // class fields, and a Proxy receiver makes `#telemetry` throw before the
+      // wedge under test is ever reached.
+      (wedged as { synced: () => Promise<void> }).synced = () =>
+        Promise.reject(new Error("wedged store"));
+
+      await expect(
+        runTestPattern(resolve(FIXTURES, "counter.test.tsx"), {
+          root: FIXTURES,
+          storageHost: {
+            identity,
+            storageManager: wedged,
+            resultCause: RESULT_CAUSE,
+          },
+        }),
+      ).rejects.toThrow("wedged store");
+
+      await wedged.close();
+    });
+
+    it("counts a raised teardown per file and keeps the run going", async () => {
+      // The raise is right for a DIRECT caller and wrong for a multi-file run:
+      // one wedged file must not take the remaining files' results with it.
+      // Two paths, both wedged — a `failed` of 2 is what says the loop got past
+      // the first one rather than aborting on it.
+      const identity = await Identity.fromPassphrase("cli storage host suite");
+      const wedged = StorageManager.emulate({ as: identity });
+      (wedged as { synced: () => Promise<void> }).synced = () =>
+        Promise.reject(new Error("wedged store"));
+      const fixture = resolve(FIXTURES, "counter.test.tsx");
+
+      const { failed } = await runTests([fixture, fixture], {
+        root: FIXTURES,
+        storageHost: { identity, storageManager: wedged },
+      });
+
+      expect(failed).toBe(2);
+
+      await wedged.close();
     });
   },
 );
