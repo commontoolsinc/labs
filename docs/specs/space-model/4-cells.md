@@ -309,12 +309,14 @@ The current system does **not** add timestamps or unique IDs to event payloads:
   include it in the allowlist of properties passed through
 
 However, each handler **invocation** does receive a unique identity. When an
-event handler is invoked, the runner generates a fresh UUID
-(`crypto.randomUUID()` in `runner.ts:1219`) and includes it in the `cause`
-object used to derive cell identities for handler results. This ensures that
-each invocation produces distinct result cells, even for identical event
-payloads. The uniqueness is in the invocation context, not in the event data
-itself.
+event handler is invoked, `Runner.instantiateJavaScriptHandlerNode`
+(`packages/runner/src/runner.ts`) puts an event id in the `cause` object used
+to derive cell identities for handler results — the durable id minted for the
+dispatched event (`tx.dispatchedEventId`), falling back to a fresh
+`crypto.randomUUID()` for non-dispatch invocations such as a test calling the
+handler directly. This ensures that each invocation produces distinct result
+cells, even for identical event payloads. The uniqueness is in the invocation
+context, not in the event data itself.
 
 For unification, timestamps or IDs would need to be part of the **event payload
 or cell value** (not just the invocation context) — either injected at the
