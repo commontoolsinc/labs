@@ -27,8 +27,59 @@
 > applies to write surfaces (output scope is discovered per transaction, not
 > declared statically), carried over to scheduling.
 >
+> ### THE SURVIVAL TEST — apply it before starting ANY item
+>
+> Owner, 2026-07-29: *"we keep falling back playing whack-a-mole with the
+> claim mechanism when we know we'll eventually delete that entire
+> mechanism."* That is an accurate description of most of 2026-07-29's work,
+> and the top box alone did not prevent it. So:
+>
+> **Before taking an item, ask: does this fix survive the deletion of claim
+> arbitration?** If no, do not do it unless it unblocks something that does —
+> and say which.
+>
+> Two kinds of machinery are tangled together here, and only one is going:
+>
+> | | goes with the claim mechanism | survives it |
+> | --- | --- | --- |
+> | what it is | deciding WHETHER to claim, and arbitrating between two executors | bounding what a run may WRITE, and who may read it |
+> | examples | claim keys, claim-key-mismatch, claim-authority-lost, claim-context-mismatch, lease fences, the durable context floor as a claim GATE, candidate/claim-ready/settle | the §4 widening pair, lane scope admission, write envelopes, cross-principal leak prevention, `broad-lane-value-write` |
+> | why | there is nothing to arbitrate once the server owns the space's closure | a cross-principal leak is wrong no matter WHO runs the action — C1 established the §4 pair is a base-runtime rule that predates lanes entirely |
+>
+> Scored against this test, 2026-07-29 was mixed: the sqlite acting-context
+> seam, the provenance envelope rule, the ×12 §4 acceptance, the
+> `pieceCreatedCallback` deletion, the `compileAndRun` outbox move and the
+> `navigateTo` seam all **survive**. The `map` chase — R7's floor consult, the
+> durable-floor sentinel, the CA9 question, the router `commitLane` residual —
+> is **arbitration polish**. Its lasting value is the lessons (do not record
+> per-run state as static; a counter that cannot NAME its offender is a dead
+> end), not the fixes.
+>
+> **Corollary, and it is uncomfortable:** part of what wave G built may be
+> scaffolding too. A descriptor serves two purposes — deciding claimability
+> (goes) and bounding writes (stays). Do not assume a descriptor is durable
+> just because it was hard to get right.
+>
+> ### THE TERMINAL CONDITION — how you know the gap is actually closed
+>
+> `externalSinkDisposition` (`storage/extended-storage-transaction.ts:369-379`)
+> suppresses a CLIENT's egress **only when a server effect claim exists**;
+> absent one it pins `executionEffectAuthority = "client"` and returns
+> `"allow"`. So today, for every action in the never-claimed set, **the client
+> performs the egress** — which makes D9's "control authority and quota on the
+> server" claim-conditional rather than actual.
+>
+> The end state is **categorical**: a client never runs an egress effect, full
+> stop. `allow` becomes the exception a server-side executor earns.
+>
+> That flip is also the **acceptance test for coverage**: it fails open today
+> because an unclaimed effect must still happen. If you can flip the default to
+> `suppress` and nothing breaks, the serving gap is closed by definition. Do
+> not flip it before then — silent missing side effects are worse than
+> duplicated ones.
+>
 > Full rationale: decision **D11** in
-> [`client-passivity.md`](client-passivity.md) §6b.
+> [`client-passivity.md`](client-passivity.md) §6b, §5h.4.
 
 **Live plan.** The orchestration companion to this directory's design docs
 ([`README.md`](README.md) — the original spec), the phase plan
@@ -85,12 +136,27 @@ demand-closure roll-up makes child sub-patterns servable. **Keep this line
 current — it is the resume pointer, and it has rotted three times. Edit it by
 hand; a `sed` on this line broke the file once.**
 
-**Next up:** the single CA9 question below (it is the last thing between `map`
-and being served), then re-measure with the CORRECTED gate in
+**Next up — REORDERED 2026-07-29 by the survival test above.** The `map` chase
+is CLOSED as arbitration polish, not because it is finished: it is one router
+residual away from served, and that residual does not survive the deletion.
+Stop there deliberately.
+
+The work is now the deletion itself: **replace per-action claim arbitration
+with blanket server ownership of a space's demanded closure.** Under that model
+there is nothing to arbitrate, so the whole
+candidate→claim-ready→claim→settle→fence pipeline has no referent, and
+`map`'s four events disappear rather than being fixed.
+
+Sequence: (1) scope what blanket ownership means concretely and what it deletes;
+(2) close whatever coverage it genuinely needs — noting that "coverage" changes
+meaning, since classification exists to decide *whether to claim*; (3) the
+categorical egress flip as the acceptance test.
+
+Measure throughout with the CORRECTED gate in
 [client-passivity §5h.5](client-passivity.md) — `candidateUnservedByCode`
 **plus** `actionFirewallRejects` **plus** `commit-rejected:*`, quoted beside
-`settlementsCommitted`. The old gate counted only unattempted work and would
-score a tightening as a regression.
+`settlementsCommitted`. The old gate counted only unattempted work and scored a
+tightening as a regression.
 
 > **REORDERED 2026-07-29 by owner ruling D11** (client-passivity §6b).
 > The claim mechanism is **transitional scaffolding**, not the end state.
