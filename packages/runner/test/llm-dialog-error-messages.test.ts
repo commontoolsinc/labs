@@ -1,8 +1,8 @@
-// The dialog's invalid-content branch: when a model reply carries nothing
-// usable, an assistant error message is appended instead of the empty content.
-// That branch had no end-to-end coverage, so nothing pinned either the message
-// reaching `messages` or its landing in a document of its own -- the property
-// the LlmDerived stamping downstream depends on.
+// The dialog's error paths substitute an assistant message when a turn cannot
+// produce a real reply. None of them had end-to-end coverage, so nothing pinned
+// either the message reaching `messages` or its landing in a document of its
+// own -- the latter being what the LlmDerived stamping downstream depends on,
+// and what keeps the array from mixing bare values with links.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -12,6 +12,7 @@ import {
   loadConversationFixture,
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
+import { LLMClient } from "@commonfabric/llm/client";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -22,7 +23,7 @@ import { waitForLlmMessages } from "./support/llm-result.ts";
 
 const signer = await Identity.fromPassphrase("llm invalid content");
 
-describe("llmDialog invalid model content", () => {
+describe("llmDialog error-path messages", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -124,5 +125,83 @@ describe("llmDialog invalid model content", () => {
     }
 
     await rtx.commit();
+  });
+
+  it("stores a failed-request error message in its own document", async () => {
+    // The `.catch` path substitutes a message when the request itself rejects.
+    // It is reached by no other test, and it pushes on its own rather than
+    // through the shared model-message path, so it is exactly where an
+    // inconsistently stored element can hide.
+    const original = LLMClient.prototype.sendRequest;
+    LLMClient.prototype.sendRequest = () =>
+      Promise.reject(new Error("upstream exploded"));
+
+    try {
+      const tx = runtime.edit();
+      const { commonfabric } = createTrustedBuilder(runtime);
+      const { pattern, llmDialog, Cell } = commonfabric;
+
+      const resultSchema = {
+        type: "object",
+        properties: {
+          addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+          pending: { type: "boolean" },
+          messages: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+        },
+        required: ["addMessage"],
+      } as const satisfies JSONSchema;
+
+      const testPattern = pattern(
+        () => {
+          const messages = Cell.of<BuiltInLLMMessage[]>([]);
+          const dialog = llmDialog({ messages });
+          return {
+            addMessage: dialog.addMessage,
+            pending: dialog.pending,
+            messages,
+          };
+        },
+        false,
+        resultSchema,
+      );
+
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "llm-request-failure",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      tx.commit();
+
+      const addMessage = await result.key("addMessage").pull();
+      addMessage.send({ role: "user", content: "Hello" });
+
+      await waitForLlmMessages(runtime, result, 2);
+
+      const messagesCell = result.key("messages");
+      const rtx = runtime.edit();
+      const messages = messagesCell.withTx(rtx).get() as
+        | readonly BuiltInLLMMessage[]
+        | undefined;
+
+      expect(messages?.length).toBe(2);
+      expect(String(messages![1]!.content)).toContain("upstream exploded");
+
+      // Every element is a link. `Cell.push` assigns identity to objects in
+      // arrays, so this holds whether or not the caller chose the cause --
+      // which is what keeps the stamping from skipping elements.
+      for (const index of [0, 1]) {
+        const raw = messagesCell.withTx(rtx).key(index).getRaw();
+        expect(parseLink(raw)?.id).not.toBe(undefined);
+      }
+
+      await rtx.commit();
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+    }
   });
 });
