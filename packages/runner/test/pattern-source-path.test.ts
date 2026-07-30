@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { Engine } from "../src/harness/engine.ts";
 import type { PatternInstantiation } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
@@ -141,6 +142,65 @@ describe("pattern source path", () => {
       // specifically is the point: a lookup that resolved only the exact object
       // would still report the parent correctly and drop this one.
       expect(new Set(sources)).toEqual(new Set(["/main.tsx", "/sub.tsx"]));
+    });
+
+    // The by-identity/warm-cache path is the one this table exists for: it
+    // evaluates from cached bodies with NO source, so a pattern loaded through
+    // it has no program at all. Its `fileNameForPath` is identity, so what it
+    // records is whatever the cached graph keys its paths by — pin that this is
+    // the AUTHORED filename and not a `cf:module/<identity>` specifier, which
+    // would be worse than sourceless (a confident, unusable answer).
+    it("the cached-module path records authored filenames, not identities", async () => {
+      const program: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/util.ts",
+            contents: "export const double = (x:number)=>x*2;",
+          },
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { pattern, lift } from 'commonfabric';",
+              "import { double } from './util.ts';",
+              "const dbl = lift((x:number)=>double(x));",
+              "export default pattern<{ value: number }>(({ value }) => {",
+              "  return { result: dbl(value) };",
+              "});",
+            ].join("\n"),
+          },
+        ],
+      };
+      const engine = runtime.harness as Engine;
+      const { modules, entryIdentity } = await engine.compileToRecordGraph(
+        program,
+      );
+      const result = await engine.evaluateCachedModules(
+        modules.map((m) => ({
+          identity: m.identity,
+          filename: m.filename,
+          code: m.js,
+          // deno-lint-ignore no-explicit-any
+          imports: m.imports as any,
+        })),
+        entryIdentity,
+      );
+      const recorded = result.sourcePathByIdentity;
+      expect(recorded).toBeDefined();
+      expect(recorded!.get(entryIdentity)).toBe("/main.tsx");
+      // Both authored modules are named. (The set also holds the injected
+      // runtime modules the graph folds in, e.g. `cfc.ts`, so this is a subset
+      // check rather than an equality one.)
+      const recordedPaths = new Set(recorded!.values());
+      expect(recordedPaths.has("/main.tsx")).toBe(true);
+      expect(recordedPaths.has("/util.ts")).toBe(true);
+      // Nothing recorded a module SPECIFIER or a bare content identity in place
+      // of a filename — a path the gate would resolve against the repo root and
+      // fail on, having been told confidently where to look.
+      for (const path of recordedPaths) {
+        expect(path.startsWith("cf:module/")).toBe(false);
+        expect(recorded!.has(path)).toBe(false);
+      }
     });
   });
 });
