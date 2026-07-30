@@ -198,7 +198,10 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
     },
     lastGetCell: undefined as unknown,
     editWithRetry(fn: (tx: unknown) => void) {
-      fn({});
+      // The real one returns a Result and re-invokes `fn` on commit conflict.
+      // This models only the success shape; anything whose behavior depends on
+      // the conflict path wants a real `Runtime` (see `set-bg-piece.test.ts`).
+      return Promise.resolve({ ok: fn({}) });
     },
   };
 }
@@ -404,38 +407,6 @@ describe("background piece utility functions", () => {
       "No IDENTITY or OPERATOR_PASS environemnt set.",
     );
     await Deno.remove(dir, { recursive: true });
-  });
-
-  it("adds a new background piece and re-enables an existing one", async () => {
-    const piecesCell = new FakePiecesCell();
-    const runtime = fakeRuntime(piecesCell);
-
-    assertEquals(
-      await setBGPiece({
-        space: TEST_DID,
-        pieceId: PIECE_ID,
-        integration: "gmail",
-        runtime: runtime as never,
-      }),
-      true,
-    );
-    assertEquals(piecesCell.pushed.length, 1);
-
-    const existing = new FakeEntryCell(
-      pieceEntry({ disabledAt: Date.now(), status: "Disabled" }),
-    );
-    piecesCell.entries = [existing];
-    assertEquals(
-      await setBGPiece({
-        space: TEST_DID,
-        pieceId: PIECE_ID,
-        integration: "gmail",
-        runtime: runtime as never,
-      }),
-      false,
-    );
-    assertEquals(existing.value.disabledAt, 0);
-    assertEquals(existing.value.status, "Re-initializing");
   });
 });
 
