@@ -183,7 +183,7 @@ surveillance tool.
 | production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard without direct tailnet access can route this check through `PROD_PROXY` or point `PROD_URL` at another truthful health source | `PROD_URL`, `PROD_PROXY` (optional) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
-| cloud spend | BigQuery billing export, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
+| cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
 | benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
@@ -316,13 +316,36 @@ dataset.
 6. For local development instead, grant those two roles to a service account,
    download a key for it, and set `GCP_SA_KEY` to the file's contents.
 
-The tile sums the raw `cost` column, i.e. total spend across every project tied
-to the exported billing account, gross of credits. It shows the estimated
-full-month spend as its headline and the actual month-to-date value in the
-header. The estimate uses every settled day in the current month. During the
-first half of the month, it fills that rate window from the prior month's tail
-until it covers 14 days or reaches the first available billing day. The chart
-shows up to 45 complete UTC days and highlights the part used for the estimate.
+The tile covers every project tied to the exported billing account. Its figures
+are money that account actually pays: the export's `cost` column plus the credits
+the same rows carry, which are negative amounts. Every kind of credit counts —
+promotional credits, committed- and sustained-use discounts, and the free tier —
+because none of them is money the account pays. The credit is not a figure the
+tile reports on its own; it is simply absent from the spend, in the same way that
+the usage GitHub's plan includes is absent from the ci-spend figures.
+
+It shows the estimated full-month spend as its headline and the actual
+month-to-date value in the header. The estimate uses every settled day in the
+current month. During the first half of the month, it fills that rate window from
+the prior month's tail until it covers 14 days or reaches the first available
+billing day. The chart shows up to 45 finished UTC days and highlights the part
+used for the estimate.
+
+A day is finished when the export has stopped adding to it, which the tile reads
+from the export's own progress: a day counts as finished once a later day's usage
+has been written since that day was last written to. This matters because the
+export lands a day's usage in batches and goes on adding to a day well into the
+following one, so a day it has not finished holds only part of that day's cost.
+Such a day belongs in the month-to-date total, where it is a running figure, and
+not in the rate behind the projection or at the end of the chart, where it would
+read as spend falling away. When the export has finished no day for more than
+four days the tile goes gray and says how far behind it is, rather than
+projecting a month from stale history.
+
+A promotional credit is finite, so the spend the tile reports rises when a grant
+runs out even though nothing about the usage changed. How much of a grant is left
+is not in the billing export: Google publishes it only in the console's billing
+credits page.
 
 ### `OPENAI_ADMIN_KEY`
 
