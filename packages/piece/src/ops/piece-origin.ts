@@ -17,6 +17,7 @@ import {
   type MemorySpace,
   NAME,
   parseFabricRef,
+  resolveSystemPatternSource,
   type Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -227,9 +228,9 @@ function fabricHostScheme(host: string): "http:" | "https:" {
 /**
  * Classify a recorded source string as an origin.
  *
- * A toolshed-relative path — the legacy shape system roots are stamped with —
- * resolves against the host accepted for `space`, so the origin that leaves
- * this function is always absolute. An unusable string throws rather than
+ * A `system:` ref, and the toolshed-relative path that is the legacy shape
+ * system roots were stamped with, both resolve against the host accepted for
+ * `space`, so the origin that leaves this function is always absolute. An unusable string throws rather than
  * becoming a silently inert origin.
  */
 export function classifyOrigin(
@@ -263,6 +264,17 @@ export function classifyOrigin(
         ? "fabric-piece"
         : "fabric-pattern",
     };
+  }
+
+  // A `system:` ref names a pattern this deployment's toolshed serves; it
+  // classifies as the web origin it resolves to, keeping the ref itself as the
+  // recorded form so the panel shows what the piece actually stores.
+  const systemRoute = resolveSystemPatternSource(source);
+  if (systemRoute !== undefined) {
+    return webOrigin(
+      new URL(systemRoute, runtime.hostForSpace(space)),
+      source,
+    );
   }
 
   if (source.startsWith("/")) {

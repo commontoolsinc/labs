@@ -14,10 +14,14 @@ import {
   type RuntimeProgram,
   setPatternRepository,
   setPatternSource,
+  systemPatternSource,
 } from "../src/index.ts";
 
 const signer = await Identity.fromPassphrase("lazy system pattern updates");
 const PARENT_PATH = "/api/patterns/system/lazy-update-parent.tsx";
+// The `system:` ref that route path spells — what a checked piece is stamped
+// with, whichever legacy spelling it started from.
+const PARENT_SOURCE = systemPatternSource("system/lazy-update-parent.tsx");
 const SOURCE_PATH = "/api/patterns/system/lazy-update-test.tsx";
 const SYMBOL = "TrackedPattern";
 
@@ -52,6 +56,22 @@ function parentProgram(contents: string): RuntimeProgram {
       name: PARENT_PATH,
       contents: parentSource,
     }, { name: SOURCE_PATH, contents }],
+  };
+}
+
+// A program named the way `cf piece new` names one deployed from a file tree:
+// every module by its path under the compile root, so the entry says nothing
+// about what the host serves.
+const FILE_TREE_PATH = "/main.tsx";
+
+function fileTreeProgram(contents: string): RuntimeProgram {
+  return {
+    main: FILE_TREE_PATH,
+    mainExport: SYMBOL,
+    files: [
+      { name: FILE_TREE_PATH, contents: parentSource },
+      { name: "/lazy-update-test.tsx", contents },
+    ],
   };
 }
 
@@ -200,9 +220,7 @@ describe("lazy system-pattern auto-update", () => {
     identityGate.resolve();
     await runtime.patternUpdater.idle();
     expect(identityFetches).toBe(1);
-    expect(getPatternSource(piece)).toBe(
-      new URL(PARENT_PATH, runtime.apiUrl).href,
-    );
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
   });
 
   it("does not schedule a generic check for an explicitly handled root", async () => {
@@ -528,9 +546,7 @@ describe("lazy system-pattern auto-update", () => {
       identity: v2Identity,
       symbol: SYMBOL,
     });
-    expect(getPatternSource(piece)).toBe(
-      new URL(PARENT_PATH, runtime.apiUrl).href,
-    );
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     expect(requested).toContainEqual({
       href: `http://toolshed.test${PARENT_PATH}?identity=`,
       cache: "no-cache",
@@ -571,10 +587,76 @@ describe("lazy system-pattern auto-update", () => {
     await runtime.patternUpdater.idle();
 
     expect(getPatternIdentityRef(piece)).toEqual(originalRef);
-    expect(getPatternSource(piece)).toBe(
-      new URL(PARENT_PATH, runtime.apiUrl).href,
-    );
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     expect(sourceFetches).toBe(0);
+  });
+
+  it("does not fetch an entry filename that names no route", async () => {
+    let fetches = 0;
+    createRuntime(() => {
+      fetches++;
+      return Promise.resolve(new Response("unexpected"));
+    });
+    const space = signer.did();
+    const pattern = await runtime.patternManager.compilePattern(
+      fileTreeProgram(source("v1")),
+      { space },
+    );
+    const piece = runtime.getCell<{ marker?: string }>(
+      space,
+      `file-tree-${crypto.randomUUID()}`,
+    );
+    await runtime.setup(undefined, pattern, {}, piece);
+    const recovered = await runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        getPatternIdentityRef(piece)!.identity,
+        space,
+      );
+    // The precondition this guards: a program deployed from a file tree names
+    // its entry for the compile root, not for any route. Resolving that name
+    // against the host reached the shell's SPA fallback, which answers 200 with
+    // HTML for an unrouted path, and the HTML was then compiled as TSX.
+    expect(recovered?.main).toBe(FILE_TREE_PATH);
+
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(fetches).toBe(0);
+    expect(getPatternSource(piece)).toBeUndefined();
+  });
+
+  it("re-stamps a legacy absolute origin as a system ref", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname !== PARENT_PATH) {
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }
+      return Promise.resolve(
+        url.searchParams.has("identity")
+          ? new Response(v1Identity)
+          : new Response(parentSource),
+      );
+    });
+    // The spelling a piece carries once a source transition recorded its route
+    // path against the space's host.
+    const legacyOrigin = new URL(PARENT_PATH, runtime.apiUrl).href;
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, legacyOrigin);
+    });
+    expect(stamped.error).toBeUndefined();
+    const originalRef = getPatternIdentityRef(piece);
+
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
   });
 
   it("repairs an active legacy origin whose retained source probe failed", async () => {
@@ -627,9 +709,7 @@ describe("lazy system-pattern auto-update", () => {
     expect(sourceFetches).toBeGreaterThan(0);
     expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
       .toEqual(["baseline", "origin-update"]);
-    expect(getPatternSource(piece)).toBe(
-      new URL(PARENT_PATH, runtime.apiUrl).href,
-    );
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
   });
 
   it("rejects an unattended update that changes the piece contract", async () => {

@@ -14,6 +14,11 @@ import {
   preparePieceSourceTransitionBaseline,
 } from "./runner.ts";
 import type { Pattern } from "./builder/types.ts";
+import {
+  normalizePatternSource,
+  resolveSystemPatternSource,
+  systemPatternSourceForModuleName,
+} from "./pattern-source-scheme.ts";
 import type { Runtime } from "./runtime.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
@@ -169,31 +174,53 @@ export class PatternUpdater {
       const sourceSnapshot = getPieceSourceSnapshot(resultCell)!;
       if (storedRepository !== undefined) return "current";
 
-      let source = storedSource;
+      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+      let source = storedSource === undefined
+        ? undefined
+        : normalizePatternSource(storedSource, host);
       if (source === undefined) {
         // A lifecycle revision with no active origin is an intentional detach.
         // Only a history-free legacy piece may have provenance reconstructed.
         if (sourceSnapshot.revisionId !== null) return "current";
         if (mode.kind === "default-root") {
-          source = mode.officialSource;
+          // Callers may still name the official root by its route path; the
+          // same legacy rewrite applies, so the repair below stamps the ref.
+          source = normalizePatternSource(mode.officialSource, host);
         }
         if (mode.kind === "instantiated") {
           // A sourceless default root remains under the stricter, awaited root
           // policy. In particular, do not turn an author-controlled filename
           // into provenance and bypass its legacy/custom-root admission rules.
+          //
+          // Reconstruction is limited to an entry document whose name is itself
+          // a patterns-route pathname, which is the only case where the name
+          // says where the source came from. A program deployed from a file
+          // tree names its entry for the compile root instead
+          // (`/participant-identity-card.tsx`); resolving that against the host
+          // fetched the shell's SPA fallback — 200, with HTML, for any unrouted
+          // path — and then compiled the HTML as TSX.
           const program = await runtime.patternManager
             .getPatternSourceProgramByIdentity(runningRef.identity, space);
-          source = program?.main;
+          source = program === undefined
+            ? undefined
+            : systemPatternSourceForModuleName(program.main);
         }
         if (source === undefined) return "current";
       }
 
-      // Published `cf:` refs have a different resolver. This pass is exactly
-      // for same-toolshed HTTP sources whose route implements `?identity`.
-      if (source.startsWith("cf:")) return "current";
-      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
-      const target = new URL(source, host);
-      if (target.origin !== new URL(host).origin) return "current";
+      // Only a `system:` ref names something this pass can fetch. A `cf:` ref
+      // has its own resolver, and everything else is provenance this pass has
+      // no route for.
+      const routePath = resolveSystemPatternSource(source);
+      if (routePath === undefined) return "current";
+      // A piece still carrying a pre-scheme spelling is re-stamped in its
+      // canonical form by the repair below, so it migrates on this check.
+      const legacyProvenance = storedSource !== undefined &&
+        storedSource !== source;
+      // Host-relative by construction, so there is no cross-origin case left
+      // to refuse: the ref addresses the patterns route of whichever host
+      // serves this space.
+      const target = new URL(routePath, host);
       const baseline = await preparePieceSourceTransitionBaseline(
         runtime,
         resultCell,
@@ -238,6 +265,8 @@ export class PatternUpdater {
       const repairProvenance = async (
         transitionBaseline: PieceSourceTransitionBaseline = baseline,
       ): Promise<PatternUpdateOutcome> => {
+        // A legacy re-stamp keeps `origin-update`: the origin field does
+        // change, even though it names the same route in a new spelling.
         const transition = sourceTransition(
           storedSource === undefined ? "follow" : "origin-update",
           source,
@@ -336,7 +365,7 @@ export class PatternUpdater {
           mode.kind === "instantiated" &&
           baseline.kind === "retain"
         ) {
-          return storedSource === undefined
+          return storedSource === undefined || legacyProvenance
             ? await repairProvenance()
             : "current";
         }
@@ -357,7 +386,7 @@ export class PatternUpdater {
             !setupNeedsRepair &&
             baseline.kind !== "unavailable"
           ) {
-            return storedSource === undefined
+            return storedSource === undefined || legacyProvenance
               ? await repairProvenance()
               : "current";
           }
@@ -402,7 +431,7 @@ export class PatternUpdater {
         entryRef.identity === runningRef.identity &&
         entryRef.symbol === runningRef.symbol
       ) {
-        return storedSource === undefined ||
+        return storedSource === undefined || legacyProvenance ||
             baseline.kind === "unavailable"
           ? await repairProvenance(transitionBaseline)
           : "current";
