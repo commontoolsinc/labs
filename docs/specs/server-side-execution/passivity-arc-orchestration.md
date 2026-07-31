@@ -190,10 +190,14 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `8de47f7e3` — ALL of §2b; the claim mechanism's survivors now
-have claim-free carriers and the fence deletions are unblocked. (Earlier:
-`2663771ec` — navigateTo's seam + rank-containment invariant;
-demand-closure roll-up makes child sub-patterns servable.) **Keep this line
+**Last landed:** `e32a46e26` — three claim-shaped lease fences DELETED
+(`claim-arity`, `claim-expired`, `claim-lease-generation`); `claim-not-live`
+kept for a measured cross-principal reason.
+
+Earlier, most recent first: `ab948050b` the terminal-condition trial;
+`8de47f7e3` all of §2b, so every survivor has a claim-free carrier;
+`2663771ec` navigateTo's seam + rank-containment invariant; `3a48d6731`
+demand-closure roll-up makes child sub-patterns servable. **Keep this line
 current — it is the resume pointer, and it has rotted three times. Edit it by
 hand; a `sed` on this line broke the file once.**
 
@@ -297,40 +301,72 @@ server; closing them all is what makes the claim mechanism unnecessary.
 | `dynamic-sqlite-operation` | **NOT A BLOCKER** | Handler-only, so inside the goal per D2-as-amended |
 | `event-handler` | **NOT A BLOCKER** | Client-inherent; P5 sends the EVENT instead of the commit |
 
-**Known-open (pruned 2026-07-29 — closed items removed, not archived here;
-the Log in §6 is the history):**
+**Known-open — CURRENT as of `e32a46e26` (2026-07-29). Closed items are
+removed, not archived here; §6's Log is the history. This list has rotted
+three times — prune it, do not append to it.**
 
-- **`sqliteDatabase` still has no descriptor**, but the design question is
-  now ANSWERED and only the build remains. `makeResultCell` writes the
-  document-root `["result"]` path (a parent back-pointer six production
-  readers walk), which a value-root computation envelope cannot bound; pinned
-  in `packages/runner/test/sqlite-database-servability.test.ts`. The rule to
-  build: **a minted-document declaration implicitly covers `["result"]` and
-  `["pattern"]`, and nothing else.** Both caveats are resolved in
-  client-passivity §5h.2 — `covers()` is address-only with a path-PREFIX
-  match, so content variance is irrelevant and the two paths are exactly
-  expressible; and the scope half is already solved by the ×12 fix's
-  lane-instance relaxation. Do NOT take the materializer route: joining
-  `SERVER_MATERIALIZER_BUILTIN_IDS` also installs
-  `materializerWriteEnvelopes`, which re-indexes the node in
-  `SchedulerMaterializers` and changes **when it is scheduled**
-  (`isMaterializer` is read at `scheduler/dependency-graph.ts:41,325`,
-  `event-preflight-dependencies.ts:217`, `facade.ts:2709`).
-- **`navigateTo` / `compileAndRun`** need the server→client channel designed
-  in [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates
-  in its §7 are open.
-- **Cross-space reads must be supported** (owner, 2026-07-29). The live
-  residual `non-space-read-scope` ×1 and `malformed-output-surface` ×1 in the
-  user arm are undiagnosed; the sibling code
-  `foreign-read-access-denied` at `executor/deno-space-executor.ts:781`
-  suggests C3.6 territory that is already partly built.
+**The measured distance to the TERMINAL CONDITION** (from the throwaway flip
+trial; details in the top box). Under a categorical client-egress flip:
+runner 1346 passed / 29 failed (123 steps), memory 840/0, integration probes
+green — with **zero executor, claim, pool, lease, routing or servability
+failures, and zero rendering effects broken.** Every failure is one shape: a
+post-commit effect never ran, so the result cell stayed `pending`. **The
+arbitration machinery is NOT what stands between here and the end.** Four
+things do:
+
+1. **Make "the server earned `allow`" expressible.** `externalSinkDisposition`
+   (`storage/extended-storage-transaction.ts:366-372`) short-circuits only on
+   `configured === "suppress"`, so a configured `"allow"` falls through to the
+   same default the flip changes — flipping it kills the EXECUTOR's egress too
+   (measured: 1 → 0 releases at `executor-shadow-sink.test.ts:95`).
+   Prerequisite for the flip, not a detail.
+2. **Two R5 rows.** `streamData` and `sqliteQuery` are absent from
+   `SERVER_EXECUTABLE_BUILTIN_IDS`. Note `sqliteDatabase` joined the
+   COMPUTATION list, which is a different thing.
+3. **`wish`'s egress bypasses the gate entirely** (`wish.ts:1266`), so the flip
+   cannot make the categorical statement true even once it works. Owner ruled
+   the system-pattern load a special case needing no quota; the eventual fix is
+   to load from disk server-side.
+4. **A gate probe containing a pattern effect.** The corrected gate and the
+   flip are DISJOINT surfaces — today's probes contain no pattern effects, so
+   the gate cannot see egress at all.
+
+**`claim-not-live` is the last claim-shaped fence, and it is LOAD-BEARING.**
+Kept in `e32a46e26` after measurement: deleting it lets an unprivileged client
+forging an `executionClaimAssertion` that names ANOTHER PRINCIPAL'S user lane
+commit into that principal's instance. Its `unservedAttempt` leg has no carrier
+at all. Deleting it needs one built first — authorising a LANE ASSERTION as
+such, independently of any claim. **Its own slice; do not fold it in.**
+
+**Other open items:**
+
+- **Cross-space reads must be supported** (owner). Not yet exercised by any
+  fixture; the user-arm residual that looked like this turned out to be the
+  §4 relabel left half-applied (`cf09a186b`), so this is genuinely untested
+  rather than partly done.
 - **CP6's refutation is re-opened.** `llmDialog`'s KIND is now known to be
-  effect and it runs server-side as of `b3304e771`; whether it performs
-  *double* egress was never re-measured after the kind changed. Needs a
-  measurement, not a decision.
-- The four residual unserved events (`claim-key-mismatch` ×2,
-  `claim-authority-lost` ×2) are expected to **evaporate with the claim
-  mechanism itself** per D11 — do not build anything to fix them.
+  effect and it runs server-side (`b3304e771`); whether it performs *double*
+  egress was never re-measured after the kind changed. Needs a measurement.
+- **Two-hop redirect, space → session via a user scope** (owner follow-up).
+  The intermediate user-scoped doc may stay user-scoped for some principals
+  and narrow for others, so a single redirect is not obviously convergent; the
+  safe form is space → user → session, needed only when the path went through
+  a user scope. See `claim-deletion-scope.md` header, Correction 1b.
+- **`map` is one router residual from served** — deliberately NOT finished,
+  because that residual is arbitration polish that does not survive the
+  deletion. Do not resume it as a target.
+- **Two instrument defects**, both found by downstream surprise rather than by
+  the instruments failing: the C1.9 client-side `session.transact` commit tap
+  read ZERO derived wire writes on a run where the server attributed those
+  exact revisions to those sessions (C1.9 criterion (b) and C2.9 §7(b) both
+  rest on it); and `recordExecutionCandidateUnserved` counts offenders by
+  fingerprint and cannot NAME them, which hid the `map` residual for a full
+  wave. **A counter that can read zero when the thing happened is worse than
+  no counter.**
+- **`data-model`'s `FabricError` codec test fails at MAIN** (`aac9bd3dc`) and
+  is the only battery failure. Not this branch — `data-model` is clean and
+  imports neither `runner` nor `memory` — and it passed here earlier the same
+  day, so it is environmental. Do not attribute it to arc work.
 
 ---
 
