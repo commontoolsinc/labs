@@ -63,10 +63,11 @@ Take `Cell.increment(2)`:
 3. **Commit** — at commit the intent becomes wire ops plus the diff-suppression
    they imply (`buildMergeableIntent`), and the whole-value diff for the paths the
    op covers is dropped. The op travels in `ClientCommit.operations`. A builder
-   that finds its intent no longer describes the local value — a tail op whose
-   base length no longer matches its prefix, because the transaction also
-   reshaped the array before the op or at a parent path — instead *abandons* it,
-   and the commit poisons the path as above.
+   that finds its intent no longer describes the local value instead *abandons*
+   it, and the commit poisons the path as above: a tail op whose prefix no longer
+   matches its base, or a `remove-by-value` whose removals applied to the base do
+   not reproduce the working array — both meaning the transaction also changed
+   that array outside the op, before it or at a parent path.
 4. **Apply** — the durable store applies the op against live state
    (`packages/memory/v2/patch.ts`, `patchOpDescriptors[op].apply`).
 5. **React** — the store computes which paths the op touched so stale reads

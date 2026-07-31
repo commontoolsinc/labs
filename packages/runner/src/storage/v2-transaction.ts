@@ -1112,8 +1112,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   // and leaves a write to a sibling field alone.
   //
   // A path carrying no intent yet is left alone — but that is not a statement
-  // that a reshape before an op is harmless. It is caught later instead, by the
-  // tail builder's own prefix check at commit (see ./mergeable-ops.ts).
+  // that a reshape before an op is harmless. It is caught later instead, by each
+  // builder's own check at commit that its intent still describes the local
+  // value (see ./mergeable-ops.ts). The same goes for an element edit, which is
+  // beneath the array and so passes through here untouched: harmless to a tail
+  // op, fatal to a remove-by-value, and the builders are what tell them apart.
   poisonMergeableOp(address: IMemorySpaceAddress): void {
     // Only ever called right after a write on this transaction, so the tx is
     // editable — no editable() re-check. The write also made the address's
@@ -2634,12 +2637,12 @@ export class V2StorageTransaction implements IStorageTransaction {
   // supply each intent the working/initial array state its builder needs.
   //
   // A builder can also abandon its intent — the recorded op no longer describes
-  // the transaction's local value (see `buildTailOp`). Abandoning must poison the
-  // path here rather than just skip the op, because a surviving intent still
-  // narrows the op's reads out of the commit's conflict set (v2.ts) and would
-  // hand the replacing whole-value diff a read set it has not earned. This runs
-  // inside getNativeCommit, which precedes that narrowing, so both sides see the
-  // same intents.
+  // the transaction's local value (see `buildTailOp` / `buildRemoveByValue`).
+  // Abandoning must poison the path here rather than just skip the op, because a
+  // surviving intent still narrows the op's reads out of the commit's conflict
+  // set (v2.ts) and would hand the replacing whole-value diff a read set it has
+  // not earned. This runs inside getNativeCommit, which precedes that narrowing,
+  // so both sides see the same intents.
   private buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
