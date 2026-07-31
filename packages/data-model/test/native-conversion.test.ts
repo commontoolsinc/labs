@@ -1545,7 +1545,7 @@ describe("native-conversion", () => {
         const obj = { a: 1 } as Record<string | symbol, unknown>;
         obj[Symbol("s")] = 2;
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Cannot store object with non-string-keyed properties",
+          "Cannot store object that is not an inert plain object",
         );
       });
 
@@ -1553,7 +1553,7 @@ describe("native-conversion", () => {
         const obj = { a: 1 };
         Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Cannot store object with non-string-keyed properties",
+          "Cannot store object that is not an inert plain object",
         );
       });
 
@@ -1561,7 +1561,7 @@ describe("native-conversion", () => {
         const inner = { a: 1 } as Record<string | symbol, unknown>;
         inner[Symbol("s")] = 2;
         expect(() => fabricFromNativeValue([inner])).toThrow(
-          "Cannot store object with non-string-keyed properties",
+          "Cannot store object that is not an inert plain object",
         );
       });
 

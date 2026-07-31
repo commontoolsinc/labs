@@ -133,6 +133,21 @@ describe("type-check", () => {
         expect(isFabricValueLayer(obj)).toBe(false);
       });
 
+      it("returns `false` for an accessor-backed property", () => {
+        // An accessor is live code, not inert data: a read executes it and
+        // can answer differently every time. Freezing does not change that.
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
+        expect(isFabricValueLayer(obj)).toBe(false);
+        expect(isFabricValueLayer(Object.freeze(obj))).toBe(false);
+      });
+
+      it("returns `false` for a setter-only property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "s", { set: () => {}, enumerable: true });
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
       it("returns `true` for an object whose keys are all enumerable strings", () => {
         expect(isFabricValueLayer({ a: 1, b: 2 })).toBe(true);
         expect(isFabricValueLayer({})).toBe(true);
@@ -332,6 +347,20 @@ describe("type-check", () => {
       it("returns `false` for a non-fabric class instance nested in the graph", () => {
         expect(isFabricValue({ a: 1, d: new Date() })).toBe(false);
         expect(isFabricValue([1, [2, new Map()]])).toBe(false);
+      });
+
+      it("returns `false` for an accessor-backed property, at any depth", () => {
+        // An accessor is live code, not inert data: a read executes it and
+        // can answer differently every time. Freezing does not change that.
+        const top = { a: 1 };
+        Object.defineProperty(top, "g", { get: () => 2, enumerable: true });
+        expect(isFabricValue(top)).toBe(false);
+        expect(isFabricValue(Object.freeze(top))).toBe(false);
+
+        const inner = { b: 3 };
+        Object.defineProperty(inner, "g", { get: () => 4, enumerable: true });
+        expect(isFabricValue({ outer: inner })).toBe(false);
+        expect(isFabricValue([1, [inner]])).toBe(false);
       });
 
       it("returns `false` for an array with enumerable named (non-index) properties", () => {
