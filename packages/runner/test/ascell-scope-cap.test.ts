@@ -101,6 +101,14 @@ describe("asCell scope cap", () => {
       through: outer.key("handle", "field").get(),
       // 3. explicit dereference
       dereferenced: outer.key("handle").resolveAsCell().key("field").get(),
+      // 4. the handle reached as a PROPERTY of a whole-object read. This goes
+      //    through SchemaObjectTraverser rather than validateAndTransform's
+      //    top-level asCell path, and builds the handle in getNextCellLink.
+      whole: (() => {
+        const parent = (outer.get() ?? {}) as { handle?: unknown };
+        const handle = parent.handle;
+        return isCell(handle) ? (handle as { get(): unknown }).get() : handle;
+      })(),
     };
   };
 
@@ -110,6 +118,7 @@ describe("asCell scope cap", () => {
     expect(r.dereferenced).toBeUndefined();
     expect(r.through).toBeUndefined();
     expect(r.projection).toBeUndefined();
+    expect(r.whole).toBeUndefined();
   });
 
   it("allows every route when the cap admits the link's scope", () => {
@@ -118,6 +127,7 @@ describe("asCell scope cap", () => {
     expect(r.dereferenced).toBe("secret");
     expect(r.through).toBe("secret");
     expect(r.projection).toEqual({ field: "secret" });
+    expect(r.whole).toEqual({ field: "secret" });
   });
 
   it("allows every route when no cap is declared", () => {
@@ -125,6 +135,7 @@ describe("asCell scope cap", () => {
     expect(r.dereferenced).toBe("secret");
     expect(r.through).toBe("secret");
     expect(r.projection).toEqual({ field: "secret" });
+    expect(r.whole).toEqual({ field: "secret" });
   });
 
   it("allows every route when the link is no narrower than the cap", () => {
@@ -132,6 +143,7 @@ describe("asCell scope cap", () => {
     expect(r.dereferenced).toBe("secret");
     expect(r.through).toBe("secret");
     expect(r.projection).toEqual({ field: "secret" });
+    expect(r.whole).toEqual({ field: "secret" });
   });
 
   it("keeps the cap reachable after key() narrows past the handle", () => {
@@ -174,5 +186,65 @@ describe("asCell scope cap", () => {
     expect(
       outer.key("handle", "field").getAsNormalizedFullLink().scopeCaps,
     ).toEqual([{ depth: 1, scope: "space" }]);
+  });
+
+  it("records the cap declared at the address key() starts from", () => {
+    // `outer.key("handle").key("field")` reaches the same leaf as
+    // `outer.key("handle", "field")`, but the cap on `handle` is now declared
+    // by the schema of the cell key() is CALLED ON rather than by a child
+    // schema the loop walks to. Without seeding from the starting link, that
+    // cap is never recorded and the chained form leaks where the varargs form
+    // blocks.
+    const r = build("chained", "space", "session");
+    const handle = r.outer.key("handle");
+    expect(handle.key("field").getAsNormalizedFullLink().scopeCaps)
+      .toEqual([{ depth: 1, scope: "space" }]);
+    expect(handle.key("field").get()).toBeUndefined();
+  });
+
+  it("records a cap declared at the root of a link key() never walked", () => {
+    // A cell whose OWN value is a link, reinterpreted through a capped schema:
+    // nothing recorded the cap, because key() was never called above this
+    // address. The first key() has to seed from the link it starts at, or the
+    // hop resolveLink finds at depth 0 is checked against the leaf schema —
+    // which has no cap — and the session-scoped target leaks.
+    const inner = runtime.getCell(
+      space,
+      "root-cap-inner",
+      innerSchema,
+      tx,
+      "session",
+    );
+    inner.set({ field: "secret" });
+    const holder = runtime.getCell(space, "root-cap-holder", undefined, tx);
+    holder.set(inner as never);
+
+    const capped = holder.asSchema(
+      {
+        ...innerSchema,
+        asCell: [{ kind: "cell", scope: "space" }],
+      } as JSONSchema,
+    );
+    expect(capped.key("field").getAsNormalizedFullLink().scopeCaps)
+      .toEqual([{ depth: 0, scope: "space" }]);
+    expect(capped.key("field").get()).toBeUndefined();
+  });
+
+  it("keeps caps across asSchema, so reinterpreting cannot lift one", () => {
+    // asSchema() makes a sibling at the SAME address with a different schema.
+    // The recorded caps describe how this address was reached, which that
+    // reinterpretation does not change — and dropping them would turn
+    // asSchema() into a way to read past any cap. Read-boundary helpers like
+    // cellWithScopedLinkRequiredsRelaxed are asSchema calls, so they have to
+    // carry the caps through too.
+    const r = build("as-schema", "space", "session");
+    const uncapped = {
+      ...innerSchema,
+      asCell: ["cell"],
+    } as JSONSchema;
+    const reinterpreted = r.outer.key("handle").asSchema(uncapped);
+    expect(reinterpreted.getAsNormalizedFullLink().scopeCaps)
+      .toEqual([{ depth: 1, scope: "space" }]);
+    expect(reinterpreted.key("field").get()).toBeUndefined();
   });
 });

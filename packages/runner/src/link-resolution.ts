@@ -21,7 +21,7 @@ import { linkResolutionProbe } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import { canFollowScopedLink } from "./scope.ts";
+import { canFollowScopedLink, scopeRank } from "./scope.ts";
 import type { SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
@@ -85,16 +85,37 @@ const recordDereferenceHop = (
 // full path. A hop found at an ancestor is governed by whatever that ancestor's
 // schema declared, which `key()` recorded in `scopeCaps` on its way down —
 // narrowing had already replaced the declaring schema by the time we get here
-// (#5230). Fall back to the leaf schema when nothing was recorded, which is
-// both the pre-existing behavior and correct for a full-path hop.
+// (#5230).
+//
+// For an ancestor hop we take the NARROWER of the recorded cap and the leaf's.
+// The leaf cap is not really the right authority there — it describes a
+// different address — but applying it to ancestor hops is what this resolver
+// has always done, and a link that never passed through `key()` carries no
+// recorded caps at all. Keeping it as a floor means this change can only block
+// more than before, never less.
+//
+// NOTE: no test reaches this floor — every shape tried either records a cap or
+// fails to resolve for unrelated reasons. It is here as a conservatism, not as
+// behavior anything depends on, so treat it as unproven rather than pinned.
+const narrowerCap = (
+  a: SchemaScope | undefined,
+  b: SchemaScope | undefined,
+): SchemaScope | undefined => {
+  if (a === undefined || a === "any") return b;
+  if (b === undefined || b === "any") return a;
+  return scopeRank(a) <= scopeRank(b) ? a : b;
+};
+
 const schemaScopeForLinkAtDepth = (
   link: NormalizedFullLink,
   depth: number,
 ): SchemaScope | undefined => {
-  if (depth >= link.path.length) {
-    return ContextualFlowControl.getSchemaScopeCap(link.schema);
-  }
-  return link.scopeCaps?.find((cap) => cap.depth === depth)?.scope;
+  const leafCap = ContextualFlowControl.getSchemaScopeCap(link.schema);
+  if (depth >= link.path.length) return leafCap;
+  return narrowerCap(
+    link.scopeCaps?.find((cap) => cap.depth === depth)?.scope,
+    leafCap,
+  );
 };
 
 /**

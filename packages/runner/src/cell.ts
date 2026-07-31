@@ -1915,6 +1915,23 @@ export class CellImpl<T extends FabricValue>
     let childSchema: JSONSchema | undefined;
     const childPath = keys.map((key) => key.toString());
 
+    // Follow caps this walk narrows past, so resolveLink can still check a hop
+    // it later finds at an ancestor. `schema` only ever describes the leaf, so
+    // a cap on an `asCell` ancestor otherwise vanishes the moment the path
+    // continues past it (#5230). Costs nothing on the uncapped path.
+    let scopeCaps = currentLink.scopeCaps;
+    const recordCap = (depth: number, schema: JSONSchema | undefined) => {
+      const cap = ContextualFlowControl.getSchemaScopeCap(schema);
+      if (cap === undefined) return;
+      // A repeated key() over the same prefix re-derives the same caps.
+      if (scopeCaps?.some((entry) => entry.depth === depth)) return;
+      scopeCaps = [...(scopeCaps ?? []), { depth, scope: cap }];
+    };
+    // Seed with the cap declared at the address we start from: it governs a
+    // link stored AT this address, which the first appended segment already
+    // puts beyond the reach of the leaf schema.
+    if (keys.length > 0) recordCap(currentLink.path.length, currentLink.schema);
+
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
@@ -1932,18 +1949,7 @@ export class CellImpl<T extends FabricValue>
       // re-address the value to the wrong scoped instance of the container doc
       // (see CT-1623).
       const path = [...currentLink.path, key.toString()] as string[];
-      // Remember a follow cap declared at this segment. `schema` below is
-      // replaced by the child's, so a cap on an `asCell` ancestor would
-      // otherwise vanish as soon as the path continues past it, leaving
-      // resolveLink unable to check the hop it later finds there (#5230).
-      // Recording it costs nothing on the overwhelmingly common uncapped path.
-      const cap = ContextualFlowControl.getSchemaScopeCap(childSchema);
-      const scopeCaps = cap === undefined
-        ? currentLink.scopeCaps
-        : [...(currentLink.scopeCaps ?? []), {
-          depth: path.length,
-          scope: cap,
-        }];
+      recordCap(path.length, childSchema);
 
       currentLink = {
         ...currentLink,

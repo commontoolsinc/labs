@@ -4847,9 +4847,13 @@ function getNextCellLink(
         `narrow as the value it points at.`,
         { schemaScope, linkScope: lastLink.scope, target: lastLink },
       ]);
+      // Undefined-data in the SOURCE's place, matching resolveLink and the
+      // asCell path in schema.ts so a blocked handle has ONE identity however
+      // it was reached. `schema` keeps the asCell marker, so the caller still
+      // gets a handle -- one that reads as undefined.
       return {
-        ...undefinedDataLink(lastLink),
-        schema: combineSchema(schema, lastLink.schema ?? true),
+        ...undefinedDataLink(getNormalizedLink(doc.address, schema)),
+        schema,
       };
     }
     // The link may not have the asCell flags, so pull that from itemSchema

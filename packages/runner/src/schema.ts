@@ -1085,7 +1085,7 @@ export function validateAndTransform(
   if (SchemaObjectTraverser.hasAsCell(effectiveSchema)) {
     // We check for a link value, since we will follow links one step in get
     // We've already followed all the writeRedirect links above.
-    let next = readMaybeLink(tx, link);
+    const next = readMaybeLink(tx, link);
     if (next !== undefined) {
       // An asCell schema turns this link into a handle instead of following
       // it, so resolveLink's cap check never sees this hop. Apply it here too,
@@ -1100,7 +1100,17 @@ export function validateAndTransform(
             `read cannot hold a "${next.scope}"-scoped link, so the handle ` +
             `reads as undefined.`,
         );
-        next = undefinedDataLink(next);
+        // Exactly the shape resolveLink produces for a blocked follow:
+        // undefined-data in the SOURCE's place, keeping the reader's own space
+        // and scope, and no dereference recorded for a hop we refused to take.
+        // Keeping `effectiveSchema` preserves the asCell marker, so the caller
+        // still gets a handle -- one that reads as undefined.
+        const blocked = {
+          ...undefinedDataLink(link),
+          schema: effectiveSchema!,
+        };
+        objectCreator.setBase(blocked, cfcLabelView);
+        return objectCreator.createObject(blocked, undefined);
       }
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
