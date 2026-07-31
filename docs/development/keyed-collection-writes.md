@@ -64,7 +64,11 @@ mergeable ops plus plain entity edits:
   same field resolves last-writer-wins; edits to different records never interact.
 - **Delete** — `array.removeByValue(array.elementById(key))`. `removeByValue`
   matches the membership entry by link and is idempotent, so concurrent deletes of
-  distinct keys merge.
+  distinct keys merge. It stays mergeable as long as the removals are the
+  transaction's only change to *that array* — editing a keyed element writes the
+  entity document, so it does not count, but rewriting the list in the same
+  handler falls the path back to a whole-array diff (see
+  `mergeable-collection-writes.md`).
 
 The lunch poll derives a vote's key as `JSON.stringify([voterName, optionId])`
 and an option's key as its generated `id`; castVote, clearMyVote, and the

@@ -239,7 +239,10 @@ applies:
   matches the durable element exactly. Because it identifies what to remove by
   value rather than by position, concurrent removes of distinct entries merge
   instead of clobbering through a whole-array rewrite. Suppression drops the
-  whole subtree at the array path that the local positional removal produced.
+  whole subtree at the array path that the local positional removal produced,
+  which makes the op the commit's only carrier for that array — so it is emitted
+  only when it fully accounts for the local value (see the removal-check bullet
+  below).
 
 `add-unique` and `remove-by-value` compare by stored-value content equality. For
 an element that is a separate entity, that stored value is a link, so the
@@ -287,7 +290,7 @@ first, since the op carries only the delta.
   merge-friendliness (it commits as a value diff, so it can false-conflict under
   contention) rather than being silently corrupted. Read that as a description of
   the poisoned path, not as a closed-class guarantee for every op — see "Known
-  gaps" at the end of this section for two shapes that still commit a value the
+  gaps" at the end of this section for a shape that still commits a value the
   writer never saw. The rule is that every whole-value write poisons the ops it
   covers, so the sites to keep in step are every path that performs one:
   `Cell.set`, `Cell.setRawUntyped`, the query-result proxy's in-place mutators,
@@ -361,24 +364,41 @@ first, since the op carries only the delta.
   guarantee should not rest on that coincidence: nothing obliges a reshape to
   read what it overwrites.
 
+- **A `removeByValue` that does not account for the whole local array falls back
+  too.** Its suppression is `subtree: true` — the array path and everything under
+  it — so unlike a tail op it leaves *nothing* to carry the array, not even the
+  per-index candidates. That is a stronger claim, and it is checked against the
+  whole value rather than a prefix: applying the recorded removals to the base
+  array (every occurrence of each value, exactly as the store applies the wire
+  op) must reproduce the working array. The comparison is `valueEqual`, so hole
+  layout counts too. Anything else the transaction changed on that array breaks
+  the equality and abandons the intent, and the whole-array diff commits the
+  local value instead.
+
+  Two ordinary shapes need it, and neither is caught earlier. An element edit —
+  the "edit one row and delete another in the same handler" shape — writes
+  *beneath* the array and so deliberately does not poison the intent, yet the
+  subtree suppression discards its per-index candidate; a tail op survives that
+  composition, a removal cannot. And a whole-value `set` landing *before* the
+  removal (at this path or at a parent) has no intent to poison yet. In both
+  cases the store would otherwise apply the removals to an untouched base and
+  drop everything else, while the writing session's own value shows the change.
+
+  A transaction that creates the array and removes from it in one go has no base
+  array to check against, and abandons for that reason: the removals say nothing
+  about the elements the transaction created, so with the diff suppressed the
+  entity would never be written at all.
+
+  A removal that is the transaction's only change to the array — including
+  alongside a write to a *sibling* field, which is not that array — reproduces
+  the working array exactly and keeps its op, so concurrent removals of distinct
+  entries still merge.
+
 ### Known gaps
 
-Two shapes still commit a value the writer never saw. Both are measured, both
-predate the tail-op checks above, and neither is caught by them. Treat this list
-as the honest boundary of "falls back rather than corrupts".
-
-- **`removeByValue` alongside any other change to the same array.** Its
-  suppression is `subtree: true` — the whole array path and everything under it —
-  and unlike the tail ops it has no commit-time check that the local value is
-  still what the op describes. So any other local change to that array is
-  swallowed. Measured, from a durable `["a","b","c"]`: `key(0).set("A")` then
-  `removeByValue("c")` gives a local `["A","b"]` and a durable `["a","b"]` — the
-  edit is gone; the reverse order loses it too; and `set(["p","q"])` then
-  `removeByValue("p")` gives a local `["q"]` against a durable `["a","b","c"]` —
-  the whole `set` vanishes. The first of these is the ordinary "edit one row and
-  delete another in the same handler" shape. Note that the deliberate decision
-  *not* to poison beneath a write is what lets it through: an element edit writes
-  beneath the array, so it leaves the `removeByValue` intent alive.
+One shape still commits a value the writer never saw. It is measured, it predates
+the commit-time checks above, and it is not caught by them. Treat this as the
+honest boundary of "falls back rather than corrupts".
 
 - **Nested arrays where one tail op's payload contains another's target.** Push a
   new array onto an outer array, then push into that inner array: the outer
