@@ -2534,6 +2534,57 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
+  // Characterized first (pre-D5, observed passing on unmodified code with
+  // the dispatch assertion): a mounted handler invoked with nothing at all
+  // dispatched `undefined` when its event schema sat behind a top-level
+  // local $ref the arg parser derives no flags from. The gate now normalizes
+  // absence to `{}` against the resolved object schema and refuses when
+  // `required` survives relaxation — nothing dispatches, so an invocation id
+  // would never have been spent.
+  it("refuses an absent payload for a mounted handler that cannot run without one", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        $ref: "#/$defs/AddEvent",
+        asCell: ["stream"],
+        $defs: {
+          AddEvent: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        [],
+        {
+          stateDir,
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => true,
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "add": no payload was supplied.*query.*send a payload/,
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
   it("returns machine-readable schema details for --help --json", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
