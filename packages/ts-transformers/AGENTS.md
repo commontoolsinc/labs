@@ -2,7 +2,7 @@
 
 TypeScript AST transformer pipeline that compiles the CTS dialect (natural
 TS/JSX pattern source) into explicit, schema-annotated reactive form for the
-Common Fabric runtime. 23 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
+Common Fabric runtime. 24 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
 `src/cf-pipeline.ts`): validation → JSX routing → lift/closure lowering → schema
 injection → builder hoisting + `__cfReg` registration → schema generation →
 module-scope hardening.

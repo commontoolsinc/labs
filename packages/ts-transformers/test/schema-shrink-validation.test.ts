@@ -1984,7 +1984,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {",
         '  const foo = state.key("foo").get();',
         "  Object.keys(state.get());",
-        "  return foo + event.id;",
+        "  console.log(foo + event.id);",
         "});",
       ].join("\n");
 
