@@ -101,8 +101,41 @@
 > Concretely, drive to zero across all arms:
 > `candidateUnservedByCode` + `actionFirewallRejects` + `commit-rejected:*`
 > (the corrected gate, [client-passivity §5h.5](client-passivity.md)).
-> Zero refusals is what makes the categorical egress flip safe — the flip is
-> the acceptance test, this is the thing being tested.
+>
+> **MEASURED 2026-07-29 — the two are DISJOINT, and I had claimed otherwise.**
+> I wrote that "zero refusals is what makes the flip safe — the flip is the
+> acceptance test, this is the thing being tested." A throwaway trial of the
+> flip refutes it: **the gate did not move by a single digit** under the flip
+> (flipped = control = baseline in every arm, identical composition), because
+> the probes that produce the gate **contain no pattern effects at all.** The
+> gate measures COMPUTATION ADMISSION; the flip acts on EFFECT DISPATCH. They
+> are different surfaces, and driving one to zero says nothing about the other.
+>
+> So the terminal condition needs **its own instrument**: a gate probe that
+> actually contains a pattern effect. Until that exists, "refusals → 0" is a
+> real target but it is not evidence about egress.
+>
+> **AND THE FLIP IS NOT A ONE-LINER.** `externalSinkDisposition`
+> (`storage/extended-storage-transaction.ts:366-372`) short-circuits only on
+> `configured === "suppress"`; a configured `"allow"` falls through to the same
+> default the flip changes. **The SERVER's permission to egress rides on that
+> default** — so flipping it kills the executor's egress too (measured: 1 → 0
+> releases at `executor-shadow-sink.test.ts:95`). Making "the server earned
+> `allow`" expressible is a prerequisite, not a detail.
+>
+> Trial results, for scale: runner 1346 passed / **29 failed (123 steps)**,
+> memory 840/0, integration probes green in both arms. **Zero executor, claim,
+> pool, lease, routing or servability failures — and zero rendering effects
+> broke.** Every failure is one shape: a post-commit effect never ran, so the
+> result cell stayed `pending`. **The claim/executor machinery is not what
+> stands between here and the terminal condition.**
+>
+> What does: making "the server earned allow" expressible; two R5 rows
+> (`streamData` and `sqliteQuery` are absent from
+> `SERVER_EXECUTABLE_BUILTIN_IDS` — only `sqliteDatabase` joined, and to the
+> COMPUTATION list); `wish`'s egress, which bypasses the gate entirely
+> (`wish.ts:1266`) so the flip cannot make the categorical statement true; and
+> a gate probe containing a pattern effect.
 >
 > Full rationale: decision **D11** in
 > [`client-passivity.md`](client-passivity.md) §6b, §5h.4.
