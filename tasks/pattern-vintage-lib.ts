@@ -414,6 +414,29 @@ export function reportReplaySummary(
     `${counts.updated} updated cleanly with no state stranded.${served}`;
 }
 
+/**
+ * What `--update` prints when every seeded test already has a fixture.
+ *
+ * It must say what was actually CHECKED. The required PATTERNS come from the
+ * runtime's URL constants while the seed list is a hand-kept set of TEST keys,
+ * so "every auto-updating pattern already has a pinned vintage" is a claim this
+ * command cannot make: add a system pattern no seeded test instantiates and the
+ * gate goes red telling you to run `--update`, which then reported everything
+ * fine and exited 0 — a dead end whose message blamed the reader.
+ *
+ * Lives here rather than in the task shell because the shell is only reachable
+ * through `import.meta.main` and so is never exercised by a test; a message
+ * this load-bearing should be.
+ */
+export function reportNothingToSeed(seededTestKeys: readonly string[]): string {
+  return `Every seeded test already has a pinned vintage (${
+    seededTestKeys.join(", ")
+  }). If the gate still reports a pattern uncovered, no seeded test ` +
+    `instantiates it — add the test that does to REQUIRED_TEST_KEYS in ` +
+    `tasks/pattern-vintage.ts, or pin its test explicitly with ` +
+    `\`--update <test path>\`.`;
+}
+
 /** What the gate prints when it found no fixture to replay at all. */
 export function reportNothingReplayed(): string {
   return [

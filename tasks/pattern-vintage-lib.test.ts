@@ -12,6 +12,7 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
+  reportNothingToSeed,
   reportNoVerdict,
   reportReplaySummary,
   reportUncovered,
@@ -375,6 +376,28 @@ describe("reporting", () => {
     })).toContain(
       "2 target(s) were served routes and not identity-compared.",
     );
+  });
+
+  it("says what --update actually checked, not what it cannot know", () => {
+    // The required PATTERNS come from the runtime's URL constants; the seed
+    // list is a hand-kept set of TEST keys. So "every auto-updating pattern
+    // already has a pinned vintage" is a claim this command cannot make — add a
+    // system pattern no seeded test instantiates and the gate goes red telling
+    // you to run --update, which then reported everything fine and exited 0.
+    const message = reportNothingToSeed([
+      "system/home.test.tsx",
+      "topics/topics.test.tsx",
+    ]);
+
+    expect(message).toContain("Every seeded test");
+    // It names the tests it checked, so the reader can see their pattern is
+    // not among them rather than concluding the gate is confused.
+    expect(message).toContain("system/home.test.tsx");
+    expect(message).toContain("topics/topics.test.tsx");
+    // ...and the remedy, which is the whole point: the old text left none.
+    expect(message).toContain("REQUIRED_TEST_KEYS");
+    // It must NOT claim anything about patterns being covered.
+    expect(message).not.toContain("auto-updating pattern");
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {

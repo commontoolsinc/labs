@@ -693,6 +693,21 @@ describe("the vintage gate, end to end", () => {
           cellId: "of:fid1:notrootrelative",
           space: signer.did(),
         },
+        {
+          // Repo-root-relative and a real-looking path, but NOT under
+          // `packages/patterns/` and not a served route — so there is no
+          // pattern key for it. Capture refuses this shape now (it asks
+          // `patternKeyFromMain`, the same question replay asks), which is why
+          // it has to be written directly.
+          //
+          // It reuses a REAL recorded root rather than a synthetic cell id, on
+          // purpose: the presence control runs before key resolution, so an id
+          // nothing wrote is reported as a root the fixture does not hold and
+          // never reaches the branch this case is about.
+          ...(manifest?.entries ?? []).find((e) => e.main !== undefined)!,
+          symbol: "__cfPattern_11",
+          main: "/packages/home-schemas/well-known.tsx",
+        },
       ]);
       // To a fresh path, not over the file this runtime opened FROM — sqlite
       // refuses that — then swapped in once the handles are closed.
@@ -713,7 +728,11 @@ describe("the vintage gate, end to end", () => {
     // repo-root-relative (the evaluate loop records injected helper modules
     // like `cfc.ts`, whose names carry no leading slash).
     expect(unmappable).toBe(2);
-    expect(failures).toHaveLength(2);
+    // Three failures for two `unmappable`: the third entry IS repo-root-
+    // relative, so it passes the capture-side shape check and is only refused
+    // where the key is resolved. Both are reported; only the first two are
+    // that counter's business.
+    expect(failures).toHaveLength(3);
     // Each reason bound to ITS entry. Asserting both strings against the joined
     // text would pass just as well with the two reasons swapped, which is the
     // mistake that reports the wrong diagnosis for the right count.
@@ -722,6 +741,36 @@ describe("the vintage gate, end to end", () => {
     expect(reasonFor("__cfPattern_9")).toContain("no source path");
     expect(reasonFor("__cfPattern_10")).toContain(
       '"cfc.ts" is not repo-root-relative',
+    );
+    expect(reasonFor("__cfPattern_11")).toContain(
+      "neither a repo path nor a served pattern route",
+    );
+  });
+
+  it("FAILS a fixture whose pattern no longer COMPILES", async () => {
+    // Distinct from "no longer resolves": the file is still there and still
+    // readable, and the compiler rejects it. Reported per entry rather than
+    // thrown, so one broken pattern does not take every remaining fixture with
+    // it — the whole reason the replay reports instead of raising.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    // Valid TypeScript the pattern compiler cannot accept: no default export,
+    // so there is no artifact for the recorded root to name.
+    await Deno.writeTextFile(
+      `${roots.patternsRoot}/${KEY}`,
+      "export const notAPattern = 1;\n",
+    );
+
+    const { failures } = await replayAll(roots);
+
+    expect(failures.length).toBeGreaterThan(0);
+    // The SPECIFIC diagnosis. A bare "there was a failure" would pass on a
+    // missing store or a disposed runtime just as well.
+    expect(failures.map((f) => f.detail).join("\n")).toMatch(
+      /no longer (compiles|resolves)/,
     );
   });
 

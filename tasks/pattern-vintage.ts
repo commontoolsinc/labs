@@ -81,6 +81,7 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
+  reportNothingToSeed,
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
@@ -162,23 +163,10 @@ async function main() {
       new Date(),
     );
     if (captured.length === 0 && problems.length === 0) {
-      // Says what was actually checked: every seeded TEST already has a
-      // fixture. It must not say "every auto-updating pattern is covered",
-      // which is a claim about patterns that this command cannot make — the
-      // required PATTERNS come from the runtime's URL constants while the
-      // seed list is `REQUIRED_TEST_KEYS`, and the two are coupled by hand.
-      // Adding a system pattern no existing test instantiates makes the gate
-      // red with "run --update", and --update then reported everything fine
-      // and exited 0: a dead end whose message blamed the reader.
       console.log(
         named.length > 0
           ? `Already pinned: ${named.join(", ")}.`
-          : `Every seeded test already has a pinned vintage (${
-            REQUIRED_TEST_KEYS.join(", ")
-          }). If the gate still reports a pattern uncovered, no seeded test ` +
-            `instantiates it — add the test that does to REQUIRED_TEST_KEYS ` +
-            `in this file, or pin its test explicitly with ` +
-            `\`--update <test path>\`.`,
+          : reportNothingToSeed(REQUIRED_TEST_KEYS),
       );
     }
     for (const path of captured) {
