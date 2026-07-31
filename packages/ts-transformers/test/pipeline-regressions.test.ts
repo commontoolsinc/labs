@@ -240,6 +240,7 @@ Deno.test(
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
       "MergeablePushValidationTransformer",
+      "VerbReturnValidationTransformer",
       "CfcPolicyAuthoringTransformer",
       "CfcPolicyOfValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
