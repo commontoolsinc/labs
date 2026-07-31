@@ -1897,6 +1897,13 @@ class SpaceReplica implements ISpaceReplica {
   #closed = false;
   #getTelemetry: () => TelemetrySink | undefined;
   #caughtUpLocalSeq = 0;
+  // Overlays retired at FRAME time (CT-1927): localSeqs whose optimistic
+  // entries were removed by `applySessionSync` because a frame covering
+  // their docs carried `caughtUpLocalSeq` at or above them. Their verdicts
+  // still arrive and do promise/cascade bookkeeping; membership here is what
+  // makes the "no pending entry" condition expected rather than warn-worthy.
+  // Pruned when the verdict settles (confirmPending / dropPending).
+  #frameRetired = new Set<number>();
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -3668,6 +3675,44 @@ class SpaceReplica implements ISpaceReplica {
       this.#watchedIds.delete(docKey(id, remove.scope));
     }
 
+    // CT-1927 frame-time retirement: a frame carrying `caughtUpLocalSeq = W`
+    // reflects, for every doc it COVERS, the outcome of this session's
+    // commits ≤ W — accepted writes are contained in the covered durable
+    // state, rejected writes are absent from it. Their optimistic overlays
+    // retire here, atomically with the base swap: the view snaps to durable
+    // truth ⊕ undecided layers, closing both the double-apply window (a
+    // non-idempotent patch replayed over a base that already contains it)
+    // and the rejected-phantom window, before the verdicts arrive to do
+    // promise/cascade bookkeeping. Sound against pre-CT-1927 servers too:
+    // even when their marker outruns unrelated content (the Class 5 race),
+    // a covered doc's frame value is current durable state, which reflects
+    // every decided (≤ W) outcome — and an empty frame covers nothing, so
+    // retirement never keys on a bare marker. Docs NOT covered (own
+    // accepted writes are echo-suppressed from frames) retire at verdict
+    // time as always.
+    const retireThrough = sync.caughtUpLocalSeq;
+    if (retireThrough !== undefined) {
+      for (const { id, scope } of touched) {
+        const record = this.record(id, scope);
+        if (record.pending.length === 0) {
+          continue;
+        }
+        const surviving = record.pending.filter((entry) =>
+          entry.localSeq > retireThrough
+        );
+        if (surviving.length === record.pending.length) {
+          continue;
+        }
+        for (const entry of record.pending) {
+          if (entry.localSeq <= retireThrough) {
+            this.#frameRetired.add(entry.localSeq);
+          }
+        }
+        record.pending = surviving;
+        record.materialized = undefined;
+      }
+    }
+
     if (before !== undefined) {
       const changes = before.compare(this);
       if (type === "pull" || [...changes].length > 0) {
@@ -3970,9 +4015,14 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq === localSeq ? [index] : []
       );
       if (pendingIndexes.length === 0) {
-        logger.warn?.(
-          `confirmPending: no pending entry for localSeq=${localSeq} on ${id}`,
-        );
+        if (!this.#frameRetired.has(localSeq)) {
+          // Frame-time retirement (CT-1927) is the expected way for an
+          // overlay to be gone before its verdict; anything else is a
+          // genuine bookkeeping anomaly.
+          logger.warn?.(
+            `confirmPending: no pending entry for localSeq=${localSeq} on ${id}`,
+          );
+        }
         continue;
       }
       const firstPendingIndex = pendingIndexes[0]!;
@@ -4027,6 +4077,7 @@ class SpaceReplica implements ISpaceReplica {
 
       dropMaterializedSuffix(record, firstPendingIndex);
     }
+    this.#frameRetired.delete(localSeq);
   }
 
   private dropPending(localSeq: number): void {
@@ -4042,6 +4093,7 @@ class SpaceReplica implements ISpaceReplica {
       );
       dropMaterializedSuffix(record, firstPendingIndex);
     }
+    this.#frameRetired.delete(localSeq);
   }
 
   private visibleVersion(id: URI, scope?: CellScope): {

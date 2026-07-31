@@ -976,6 +976,17 @@ const expectVisible = (
   }
 };
 
+const hasPendingOverlay = (harness: Harness, id: URI): boolean =>
+  (harness.provider as unknown as {
+    schedulerHasPendingWriteOverlapping?: (
+      addresses: Array<
+        { space: string; id: URI; scope: "space"; path: string[] }
+      >,
+    ) => boolean;
+  }).schedulerHasPendingWriteOverlapping?.([
+    { space, id, scope: "space", path: [] },
+  ]) === true;
+
 const assertResultOk = async (promise: Promise<any>) => {
   assertEquals(await promise, { ok: {} });
 };
@@ -2055,6 +2066,175 @@ Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-
     );
     await assertResultOk(c2.promise);
   } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a frame covering a pending doc retires its overlays at the caught-up marker (CT-1927)", async () => {
+  const harness = await createHarness();
+  const gate = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    // Establish the sync-consumption loop (frames dead-letter without a
+    // pull/watch view to feed them into the replica).
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    // Non-idempotent pending patch (append), verdict held.
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: gate.promise,
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(2),
+      "patch to reach the wire",
+    );
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+
+    // CT-1927 server ordering: the frame carrying the doc's post-commit
+    // durable state — which already CONTAINS the append — and the outcome
+    // marker arrives BEFORE the verdict. Without frame-time retirement the
+    // still-present overlay would re-apply the append over that base:
+    // ["a","X","X"], a view no server state ever had.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 2, value: { items: ["a", "X"] } }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "frame-time retirement to land",
+    );
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+
+    // The verdict is pure bookkeeping over the already-retired overlay.
+    gate.resolve();
+    await assertResultOk(patch);
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+  } finally {
+    gate.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a repair frame retires a rejected overlay before its verdict arrives (CT-1927)", async () => {
+  const harness = await createHarness();
+  const gate = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      responseGate: gate.promise,
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(2),
+      "patch to reach the wire",
+    );
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+
+    // The repair frame reflects the rejection: durable state WITHOUT the
+    // append, marker covering the rejected localSeq (rejected docs are
+    // staged origin-less server-side, so repair frames cover them). The
+    // phantom disappears at frame time — not after the verdict plus a
+    // 30-second read-repair timeout.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 1, value: { items: ["a"] } }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "frame-time retirement to land",
+    );
+    expectVisible(harness, { A: { items: ["a"] } });
+
+    gate.resolve();
+    await assertConflict(patch);
+    expectVisible(harness, { A: { items: ["a"] } });
+  } finally {
+    gate.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: frame-time retirement is scoped to covered docs (CT-1927)", async () => {
+  const harness = await createHarness();
+  const gate = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([
+        [{ id: DOCS.A, type: DOCUMENT_MIME }, undefined],
+        [{ id: DOCS.B, type: DOCUMENT_MIME }, undefined],
+      ]),
+      { ok: {} },
+    );
+
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: gate.promise,
+    });
+    const b = beginSet(harness, DOCS.B, valueFor("optimistic"));
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(2),
+      "set to reach the wire",
+    );
+
+    // The frame covers only doc A (foreign novelty); doc B — the session's
+    // own accepted write, echo-suppressed from frames — is NOT covered, so
+    // its overlay survives the marker and settles at its verdict, exactly
+    // the accepted-path split the §4.11.2 stamping contract describes.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign") }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => {
+        const value = visibleValue(harness.provider, DOCS.A) as {
+          label?: string;
+        };
+        return value?.label === "foreign";
+      },
+      "frame to integrate",
+    );
+    expectVisible(harness, {
+      A: valueFor("foreign"),
+      B: valueFor("optimistic"),
+    });
+    // B's overlay itself is still standing — retirement never fired for it.
+    assertEquals(hasPendingOverlay(harness, DOCS.B), true);
+
+    gate.resolve();
+    await assertResultOk(b.promise);
+    expectVisible(harness, {
+      A: valueFor("foreign"),
+      B: valueFor("optimistic"),
+    });
+  } finally {
+    gate.resolve();
     await harness.close();
   }
 });
