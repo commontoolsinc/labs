@@ -2712,7 +2712,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         hasValueAtPath(doc.initial.value, intent.path, {
           allowArrayLength: true,
         }),
-      initialArrayLength: Array.isArray(initial) ? initial.length : undefined,
+      initialArray: Array.isArray(initial)
+        ? initial as readonly FabricValue[]
+        : undefined,
     };
   }
 }

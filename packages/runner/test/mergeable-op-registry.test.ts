@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { MERGEABLE_OP_METHODS } from "@commonfabric/api";
 import { patchOpDescriptors } from "@commonfabric/memory/v2/patch";
+import type { FabricValue } from "@commonfabric/api";
 import {
   buildMergeableIntent,
   MERGEABLE_WIRE_OPS,
@@ -63,7 +64,7 @@ describe("mergeable op createsKey stamping", () => {
           workingArray: ["a", "b"],
           hadInitialArray: true,
           hadInitialValue: true,
-          initialArrayLength: 1,
+          initialArray: ["a"],
         },
       ).ops,
     ).toEqual([{ op: "append", path: "/value/items", values: ["b"] }]);
@@ -90,7 +91,7 @@ describe("mergeable op createsKey stamping", () => {
   });
 });
 
-// The tail op builder (append / add-unique) bails in three guarded cases,
+// The tail op builder (append / add-unique) bails in several guarded cases,
 // abandoning the intent so the commit carries the plain diff instead. Some are
 // reachable only through sequences the poison fallback short-circuits before
 // build, so they are covered directly here.
@@ -120,7 +121,7 @@ describe("mergeable tail-op build guards", () => {
   // appends the tail on top); the guard also covers the shorter direction, where
   // the diff alone is likewise the honest carrier.
   it("a tail op whose prefix no longer matches the base length abandons the intent", () => {
-    for (const initialArrayLength of [3, 0]) {
+    for (const initialArray of [["p", "q", "r"], []]) {
       expect(
         buildMergeableIntent(
           { op: "add-unique", path: ["value"], count: 2 },
@@ -128,11 +129,70 @@ describe("mergeable tail-op build guards", () => {
             workingArray: ["x", "y", "z"],
             hadInitialArray: true,
             hadInitialValue: true,
-            initialArrayLength,
+            initialArray,
           },
         ),
       ).toEqual({ ops: [], suppress: [], abandon: true });
     }
+  });
+
+  // Same length, but the prefix's HOLE LAYOUT changed. The diff cannot express a
+  // presence change per index, so it falls back to a whole-array replacement —
+  // the one candidate the op's suppression drops outright. Length equality alone
+  // would let that replacement vanish while the tail still committed.
+  it("a tail op whose prefix hole layout changed abandons the intent", () => {
+    const punched: (string | undefined)[] = [];
+    punched[1] = "b";
+    punched[2] = "c";
+    punched[3] = "d";
+    expect(
+      buildMergeableIntent(
+        { op: "append", path: ["value"], count: 1 },
+        {
+          workingArray: punched as FabricValue[],
+          hadInitialArray: true,
+          hadInitialValue: true,
+          initialArray: ["a", "b", "c"],
+        },
+      ),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
+  // The appended tail is itself sparse, which is the diff's other whole-array
+  // fallback.
+  it("a tail op whose appended tail is sparse abandons the intent", () => {
+    const sparseTail: (string | undefined)[] = ["a", "b"];
+    sparseTail[3] = "d";
+    expect(
+      buildMergeableIntent(
+        { op: "append", path: ["value"], count: 2 },
+        {
+          workingArray: sparseTail as FabricValue[],
+          hadInitialArray: true,
+          hadInitialValue: true,
+          initialArray: ["a", "b"],
+        },
+      ),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
+  // With NO base the payload is the whole working array, so the density check
+  // has to cover all of it — the other two conditions need a base to compare
+  // against, this one does not.
+  it("a tail op with no base and a sparse payload abandons the intent", () => {
+    const sparse: (string | undefined)[] = [];
+    sparse[1] = "b";
+    sparse[2] = "c";
+    expect(
+      buildMergeableIntent(
+        { op: "append", path: ["value"], count: 1 },
+        {
+          workingArray: sparse as FabricValue[],
+          hadInitialArray: false,
+          hadInitialValue: false,
+        },
+      ),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
   });
 
   // The recorded tail slice is empty: an empty working array against an empty
@@ -145,7 +205,7 @@ describe("mergeable tail-op build guards", () => {
           workingArray: [],
           hadInitialArray: true,
           hadInitialValue: true,
-          initialArrayLength: 0,
+          initialArray: [],
         },
       ),
     ).toEqual({ ops: [], suppress: [], abandon: true });
@@ -165,7 +225,7 @@ describe("mergeable op payload containment", () => {
       workingArray: [["a"], ["x"]],
       hadInitialArray: true,
       hadInitialValue: true,
-      initialArrayLength: 1,
+      initialArray: [["a"]],
     };
     const intent = { op: "append", path: ["value"], count: 1 } as const;
 
@@ -215,7 +275,7 @@ describe("mergeable op payload containment", () => {
           workingArray: ["b"],
           hadInitialArray: true,
           hadInitialValue: true,
-          initialArrayLength: 2,
+          initialArray: ["a", "b"],
         },
         ["value", "0"],
       ),

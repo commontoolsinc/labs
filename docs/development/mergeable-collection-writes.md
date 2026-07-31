@@ -308,28 +308,44 @@ first, since the op carries only the delta.
   the base length while covering an element the reshape supplied rather than one
   an op appended.
 
-- **A reshape that changes the array's length ahead of the tail falls back too.**
-  The poison sites all fire at the moment of the write, so they see only a
-  reshape that lands *after* an op was recorded. A reshape that lands *before*
-  the op — `rows.set([])` and then `addUnique`, the clear-and-reseed idiom — is
-  invisible to them. The tail op's builder therefore
-  re-checks the invariant the recorded tail rests on: the working array's prefix
-  must still line up with the base one element for one, i.e. the base array's
-  length must equal the tail start, `max(0, working.length - count)`. When it
-  does not, the builder
-  *abandons* the intent — the same fallback the poison sites produce, decided at
-  commit rather than at the write. This is what keeps a clear-and-reseed honest:
-  a tail op cannot express "and remove everything that was here", and its
-  suppression covers the very diff candidates that would have carried the
-  removal, so without the check the store keeps the old elements and appends the
-  new ones on top — a silently doubled list, with the writing session's own local
-  value showing the correct one.
+- **A reshape the surviving diff cannot express falls back too.** The poison
+  sites all fire at the moment of the write, so they see only a reshape that
+  lands *after* an op was recorded. A reshape that lands *before* the op —
+  `rows.set([])` and then `addUnique`, the clear-and-reseed idiom — is invisible
+  to them. The tail op's builder therefore re-checks, at commit, the invariant
+  its suppression rests on.
 
-  A same-length replacement (`rows.set(["x","y","z"])` and then a `push`) does
-  *not* need the fallback and keeps its op: the replacement diffs into per-index
+  The suppression drops the whole-array candidate at the op's path outright,
+  plus every element candidate at or past the tail start. What is left to carry
+  the prefix is only the diff's *per-index* candidates — so the op is honest
+  only while the diff actually decomposes the prefix that way.
+  `buildArrayPatchCandidates` gives up and emits a whole-array replacement in
+  three situations, and each one abandons the op instead:
+
+  1. **the prefix changed length** — the base array's length no longer equals
+     the tail start, `max(0, working.length - count)`. This is what keeps a
+     clear-and-reseed honest: a tail op cannot express "and remove everything
+     that was here", and its suppression covers the very candidates that would
+     have carried the removal, so without the check the store keeps the old
+     elements and appends the new ones on top — a silently doubled list, with
+     the writing session's own local value showing the correct one.
+  2. **the prefix's hole layout changed** — a hole punched or filled without a
+     length change. Presence is not expressible per index, and sparse arrays are
+     preserved elsewhere in the runner, so this must not be flattened away.
+  3. **the payload is sparse.** Unlike the other two this needs no base to
+     compare against, and must be checked whether or not one exists: the payload
+     is `array.slice(start)` either way, and with no base that slice is the whole
+     working array — so a hole anywhere in a freshly created sparse array is a
+     hole in the payload. The wire op rebuilds its payload elementwise and cannot
+     carry one.
+
+  Abandoning is the same fallback the poison sites produce, decided at commit
+  rather than at the write.
+
+  A *dense* same-length replacement (`rows.set(["x","y","z"])` and then a
+  `push`) does *not* need the fallback and keeps its op: it diffs into per-index
   candidates below the tail, which survive the suppression and commit alongside
-  the append. Only a length change ahead of the tail leaves the diff unable to
-  carry what the op does not.
+  the append. Value changes are fine; length and presence changes are not.
 
   Abandoning at build time drops the intent from the transaction rather than
   merely skipping the op: a live intent still narrows reads out of the commit's
@@ -351,8 +367,10 @@ first, since the op carries only the delta.
   new inner list onto an outer list and then push into that inner list, and the
   outer append's payload already holds the inner list *including* the element the
   inner append would add: the store applies the outer op, then the inner op adds
-  its element a second time. Each array's own length arithmetic is individually
-  consistent, so the length check above cannot see it.
+  its element a second time. Each array is individually dense and its own length
+  arithmetic individually consistent, so none of the three checks above sees it —
+  each judges one intent against the base, and this is a relationship *between*
+  two intents.
 
   So an intent whose path lies inside another op's payload is abandoned, and the
   containing op carries the combined value — its suppression already covers the
