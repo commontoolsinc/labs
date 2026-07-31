@@ -1229,6 +1229,12 @@ export interface AppliedSchedulerObservationResult {
   /** Canonical accepted basis/provenance, emitted only for kept rows. */
   inputBasisSeq?: InputBasisSeq;
   executionProvenance?: ActionExecutionProvenance;
+  /** Present when the accepted attempt declared itself UNSERVED. Emitted for
+   * BOTH the claimed and unclaimed arms; only the claimed arm additionally
+   * publishes a settlement through `actionAttempts`, so this is the only
+   * footprint an unclaimed unserved attempt leaves — count it, or the
+   * migration off claims reads as unserved attempts having stopped. */
+  unservedDiagnosticCode?: string;
   reason?:
     | "stale-confirmed-read"
     | "stale-pending-read"
@@ -4328,6 +4334,11 @@ type HostSchedulerObservationOptions = UpsertSchedulerObservationOptions & {
   /** Exact source frontier covered by a claimed attempt. This never crosses
    * the protocol boundary; ordinary observations clear all pending causes. */
   causeCoverageSeq?: number;
+  /** The attempt reported itself UNSERVED: it produced no output, so it
+   * covers NO cause row and settles NO dirt. Wins over `causeCoverageSeq`
+   * and over the provenance-derived default. Host-derived from the accepted
+   * observation; never crosses the protocol boundary. */
+  unservedAttempt?: boolean;
 };
 
 export interface UpsertSchedulerObservationResult {
@@ -4488,11 +4499,21 @@ const upsertSchedulerObservationTransaction = (
     actionId: observation.actionId,
     executionContextKey,
   };
-  const coveredThroughSeq = options.causeCoverageSeq ??
-    (observation.executionProvenance !== undefined
-      ? observation.inputBasisSeq
-      : undefined) ??
-    Number.MAX_SAFE_INTEGER;
+  // An UNSERVED attempt covers nothing: `0` clears nothing by construction
+  // rather than by convention. `consumeSchedulerActionCauses` deletes
+  // `source_seq > 0 AND source_seq <= 0` (empty) and cannot clear the overflow
+  // arm (which needs `pendingFrontier <= 0`); `upsertSchedulerActionState`
+  // keeps every `direct_dirty_seq`/`stale_seq` because every mark is provably
+  // >= 1 — `assertSchedulerActionCauseSeq` throws on `sourceSeq <= 0`, and
+  // marks originate as commit seqs. `0 ?? x` is `0`, so the chain below is
+  // unreachable for it either way; the explicit branch keeps the rule legible.
+  const coveredThroughSeq = options.unservedAttempt === true ? 0 : (
+    options.causeCoverageSeq ??
+      (observation.executionProvenance !== undefined
+        ? observation.inputBasisSeq
+        : undefined) ??
+      Number.MAX_SAFE_INTEGER
+  );
   consumeSchedulerActionCauses(
     engine,
     actionKey,
@@ -4621,6 +4642,7 @@ const upsertSchedulerObservationTransaction = (
     executionContextKey,
     latestObservationId: observationId,
     coveredThroughSeq,
+    unserved: options.unservedAttempt === true,
   });
   // C3A9: the conservative window mark — strictly AFTER the action-state
   // upsert, whose covered-through clearing must not erase it, and inside
@@ -8533,6 +8555,12 @@ function upsertSchedulerActionState(
     executionContextKey: SchedulerExecutionContextKey;
     latestObservationId: number;
     coveredThroughSeq: number;
+    /** The attempt reported itself UNSERVED. `coveredThroughSeq = 0` already
+     * preserves `direct_dirty_seq`/`stale_seq`, but `unknown_reason` clears
+     * UNCONDITIONALLY — an attempt that served nothing must not resolve an
+     * unknown either. (Nothing in production sets `unknown_reason` today, so
+     * this is correctness-for-symmetry, not a live bug.) */
+    unserved?: boolean;
   },
 ): void {
   engine.database.prepare(`
@@ -8578,7 +8606,10 @@ function upsertSchedulerActionState(
         WHEN stale_seq > :covered_through_seq THEN stale_seq
         ELSE NULL
       END,
-      unknown_reason = NULL
+      unknown_reason = CASE
+        WHEN :unserved THEN unknown_reason
+        ELSE NULL
+      END
   `).run({
     branch: options.branch,
     owner_space: normalizeSchedulerOwnerSpace(options.observation.ownerSpace),
@@ -8588,6 +8619,7 @@ function upsertSchedulerActionState(
     execution_context_key: options.executionContextKey,
     latest_observation_id: options.latestObservationId,
     covered_through_seq: options.coveredThroughSeq,
+    unserved: options.unserved === true ? 1 : 0,
   });
 }
 
@@ -9071,13 +9103,26 @@ const applyCommitTransaction = (
     actingLane,
     space,
   );
+  // UN-GATED (was inside `if (boundedActionRun)`, i.e. required an acting
+  // lane). An unserved attempt is carried on the UNCLAIMED path precisely
+  // because it is self-depriving — it writes nothing, marks nothing clean and
+  // widens no scope. A marker riding a commit that WRITES is none of those
+  // things, so it must be rejected unconditionally, not only for a lane
+  // commit. A plain client commit names no acting context — and at the time of
+  // writing neither does the space-rank executor, whose `commitActingContext`
+  // omits the space lane — so `boundedActionRun` is false for exactly the
+  // population this rejects; `claim-not-live` used to catch it and no longer
+  // does. The reject stays unconditional even once every commit names its
+  // lane: the rule is about the marker's shape, not about who sent it.
+  // Reached only with `commit.operations.length > 0` — a zero-operation
+  // observation commit routes to `applySchedulerObservationOnlyCommit` above.
+  if (schedulerObservation?.executionUnservedAttempt !== undefined) {
+    rejectExecutionAction(
+      "unserved-marker-with-operations",
+      "an unserved attempt marker is valid only without semantic operations",
+    );
+  }
   if (boundedActionRun) {
-    if (schedulerObservation!.executionUnservedAttempt !== undefined) {
-      rejectExecutionAction(
-        "unserved-marker-with-operations",
-        "an unserved attempt marker is valid only without semantic operations",
-      );
-    }
     assertExecutionActionTransaction({
       servedSpace: space!,
       branch,
@@ -9875,6 +9920,15 @@ const acceptedSchedulerObservation = (
 ): {
   observation: SchedulerActionObservation;
   provenance?: ActionExecutionProvenance;
+  /** The attempt declared itself UNSERVED. NOTE the four legal combinations —
+   * every consumer written before the unclaimed carrier implicitly assumed
+   * this field and `provenance` travel together, and they no longer do:
+   *
+   *   claimed served     provenance,     no code
+   *   claimed unserved   provenance,     code
+   *   unclaimed unserved NO provenance,  code       <- the carrier's shape
+   *   unclaimed served   neither
+   */
   unservedDiagnosticCode?: string;
 } => {
   const assertedClaim = observation.executionClaimAssertion;
@@ -9894,26 +9948,34 @@ const acceptedSchedulerObservation = (
   } = observation;
   const claim = options.executionClaim;
   if (claim === undefined) {
-    // The SECOND `claim-not-live` site, also NOT deleted by the claim slice.
-    // Its `unservedAttempt` leg has no carrier at all: `untrustedObservation`
-    // strips `executionUnservedAttempt`, and the unclaimed return below
-    // reports no `unservedDiagnosticCode`, so merely dropping this throw would
-    // record a run that declared itself UNSERVED as an ordinary served
-    // observation — losing the attempt and clearing the action's dirtiness.
-    // Under blanket ownership every unserved marker is unclaimed, so a carrier
-    // must exist before this goes. See the sibling site in
-    // `admitExecutionCommitLanes` for the measured forged-assertion hole.
-    if (assertedClaim !== undefined || unservedAttempt !== undefined) {
+    // KEPT — the SECOND `claim-not-live` site, still NOT deleted by the claim
+    // slice. A wire assertion naming a claim that is not live is the measured
+    // cross-principal hole; see the sibling site in
+    // `admitExecutionCommitLanes` for the forged-assertion form of it.
+    if (assertedClaim !== undefined) {
       throw new ExecutionLeaseFenceError(
         "claim-not-live",
         "execution claim incarnation is not live for this action attempt",
       );
     }
+    // CARRIED — an UNCLAIMED attempt may declare itself unserved. That
+    // declaration grants no authority: it authors no provenance and no input
+    // basis, persists nothing (the marker is stripped above and never becomes
+    // durable state), marks nothing clean, widens no scope, and forces
+    // STRICTER read validation upstream. What it needed was never an
+    // authorization check but a DIRTINESS CARRIER — the caller must translate
+    // `unservedDiagnosticCode` into "this attempt covers nothing", otherwise
+    // the stripped observation reads as an ordinary client observation and
+    // clears the action's dirt unboundedly. Under blanket server ownership
+    // this is the ONLY shape an unserved attempt has.
     return {
       observation: {
         ...untrustedObservation,
         inputBasisSeq: options.inputBasisSeq,
       },
+      ...(unservedAttempt !== undefined
+        ? { unservedDiagnosticCode: unservedAttempt.diagnosticCode }
+        : {}),
     };
   }
   if (
@@ -10310,25 +10372,30 @@ const applySchedulerObservationOnlyCommit = (
     actingLane,
     space,
   );
-  if (boundedActionRun) {
-    if (schedulerObservation.executionUnservedAttempt === undefined) {
-      assertExecutionActionTransaction({
-        servedSpace: space!,
-        branch,
-        scopeContext: {
-          principal: scopePrincipal!,
-          sessionId: scopeSessionId,
-        },
-        actingContextKey: actingLane!,
-        transaction,
-        observation: schedulerObservation,
-      });
-    } else if (transaction.merge !== undefined) {
+  if (schedulerObservation.executionUnservedAttempt !== undefined) {
+    // UN-GATED (was inside `if (boundedActionRun)`) — same reason as the
+    // `unserved-marker-with-operations` twin on the with-operations path: a
+    // marker carrying branch-merge metadata is not the self-depriving shape
+    // the unclaimed carrier accepts, and `boundedActionRun` is false for every
+    // plain client commit and for the space-rank executor alike.
+    if (transaction.merge !== undefined) {
       rejectExecutionAction(
         "merge-commit",
         "an unserved attempt marker may not carry branch merge metadata",
       );
     }
+  } else if (boundedActionRun) {
+    assertExecutionActionTransaction({
+      servedSpace: space!,
+      branch,
+      scopeContext: {
+        principal: scopePrincipal!,
+        sessionId: scopeSessionId,
+      },
+      actingContextKey: actingLane!,
+      transaction,
+      observation: schedulerObservation,
+    });
   }
   // Row 8: BOTH lease-level inputs are supplied here too, and derived rather
   // than assumed. This path serves the observation-only commit AND every item
@@ -10399,7 +10466,15 @@ const applySchedulerObservationOnlyCommit = (
     writerSessionId: sessionKey,
     localSeq,
     replayPayload,
-    ...(accepted.provenance !== undefined
+    // The dirtiness carrier. An UNCLAIMED unserved attempt authors no
+    // provenance, so without this it would fall through to the ordinary
+    // client-observation default (`Number.MAX_SAFE_INTEGER`) and clear ALL
+    // dirt at any seq — strictly worse than the claimed unserved path, not
+    // equal to it. `unservedAttempt` pins its coverage to nothing.
+    ...(accepted.unservedDiagnosticCode !== undefined &&
+        accepted.provenance === undefined
+      ? { unservedAttempt: true as const }
+      : accepted.provenance !== undefined
       ? { causeCoverageSeq: inputBasisSeq }
       : {}),
     // C3.11: an UNSERVED claimed cross-space-read attempt reaches the engine
@@ -10429,6 +10504,12 @@ const applySchedulerObservationOnlyCommit = (
       ...(accepted.provenance !== undefined &&
           accepted.unservedDiagnosticCode === undefined
         ? { executionProvenance: accepted.provenance }
+        : {}),
+      // Emitted for BOTH arms. The claimed arm ALSO settles through
+      // `actionAttempts` below; the unclaimed arm does not, so this is its
+      // only footprint — see `unservedObservations` in the server.
+      ...(accepted.unservedDiagnosticCode !== undefined
+        ? { unservedDiagnosticCode: accepted.unservedDiagnosticCode }
         : {}),
     }],
     ...(accepted.provenance !== undefined && executionClaim !== undefined

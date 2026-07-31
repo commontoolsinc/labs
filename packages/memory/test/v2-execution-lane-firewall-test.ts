@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { toDocumentPath } from "../v2.ts";
 import type {
   ClientCommit,
   ExecutionClaim,
@@ -1075,13 +1076,16 @@ const applyActingLane = (
     nowMs?: number;
     fence?: Partial<Engine.ExecutionLeaseFence>;
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+    merge?: ClientCommit["merge"];
+    reads?: ClientCommit["reads"];
   },
 ) => {
   const localSeq = options.localSeq ?? 1;
   const commit: ClientCommit = {
     localSeq,
-    reads: { confirmed: [], pending: [] },
+    reads: options.reads ?? { confirmed: [], pending: [] },
     operations: options.operations,
+    ...(options.merge !== undefined ? { merge: options.merge } : {}),
     schedulerObservation: options.observation ??
       unclaimedObservation(options.surfaces ?? {}),
   };
@@ -2289,38 +2293,381 @@ Deno.test("claim-not-live subsumption: RESIDUAL — the promoted consult fences 
   }
 });
 
-Deno.test("claim-not-live subsumption: BLOCKER — an unserved-attempt marker still requires a live claim", async () => {
+// ---------------------------------------------------------------------------
+// THE UNSERVED-ATTEMPT DIRTINESS CARRIER.
+//
+// `acceptedSchedulerObservation`'s `claim === undefined` branch used to throw
+// `claim-not-live` for BOTH a wire claim assertion and an unserved-attempt
+// marker. Those two legs are different sizes and are now split:
+//
+//   * the ASSERTED-CLAIM leg stays — a wire assertion naming a claim that is
+//     not live is the measured cross-principal hole (sibling site in
+//     `admitExecutionCommitLanes`);
+//   * the UNSERVED-MARKER leg is CARRIED instead of refused. An unserved
+//     attempt grants no authority: it authors no provenance and no input
+//     basis, persists nothing, marks nothing clean, widens no scope, and
+//     forces STRICTER read validation. What it needed was never an
+//     authorization check but a dirtiness carrier — the marker must not let
+//     a run that served nothing settle the action's dirt.
+//
+// Dropping the throw alone would have been strictly WORSE than the claimed
+// path, not equal to it: the stripped observation would look like an ordinary
+// client observation, whose `coveredThroughSeq` falls to MAX_SAFE_INTEGER and
+// clears all dirt at any seq. The carrier pins it to 0 — "covers nothing",
+// which clears nothing by construction because every dirty mark is provably
+// >= 1 (`assertSchedulerActionCauseSeq`).
+
+/** The one unclaimed action `applyActingLane` commits for, keyed so the
+ * durable dirtiness row can be read back. */
+const dirtyActionEntry = (
+  executionContextKey: SchedulerExecutionContextKey,
+  actionId: string = ACTION_ID,
+): Engine.SchedulerReaderIndexEntry => ({
+  branch: "",
+  ownerSpace: SPACE,
+  pieceId: PIECE_ID,
+  processGeneration: 1,
+  actionId,
+  executionContextKey,
+  observationId: 0,
+  readKind: "recursive",
+  read: { ...USER_INPUT, scopeKey: "space" },
+});
+
+const actionStateFor = (
+  engine: Engine.Engine,
+  executionContextKey: SchedulerExecutionContextKey,
+  actionId: string = ACTION_ID,
+) =>
+  Engine.getSchedulerActionState(engine, {
+    branch: "",
+    ownerSpace: SPACE,
+    pieceId: PIECE_ID,
+    processGeneration: 1,
+    actionId,
+    executionContextKey,
+  });
+
+const unservedMarker = (
+  diagnosticCode: string,
+  surfaces: {
+    reads?: readonly SchedulerObservationAddress[];
+    writes?: readonly SchedulerObservationAddress[];
+  } = { writes: [USER_OUTPUT] },
+  overrides: Partial<SchedulerActionObservation> = {},
+): SchedulerActionObservation =>
+  ({
+    ...unclaimedObservation(surfaces),
+    ...overrides,
+    executionUnservedAttempt: { diagnosticCode },
+  }) as SchedulerActionObservation;
+
+Deno.test("carrier: an UNCLAIMED unserved-attempt marker is KEPT, and the attempt it reports covers nothing", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
     const lease = acquire(engine, nowMs);
-    // The SECOND `claim-not-live` site (`acceptedSchedulerObservation`), which
-    // §1d's table does not list: an `executionUnservedAttempt` marker with no
-    // live claim is refused outright. Under blanket ownership EVERY unserved
-    // marker is unclaimed, so this fence has no carrier and no replacement —
-    // it must be resolved before `claim-not-live` is deleted.
-    //
-    // STILL OPEN after the deletion slice, and now with the shape of the fix
-    // named: simply dropping the throw is NOT the fix. `untrustedObservation`
-    // strips `executionUnservedAttempt` and the unclaimed return reports no
-    // `unservedDiagnosticCode`, so the marker would vanish and the attempt
-    // would be recorded as an ordinary SERVED observation — clearing the
-    // action's dirtiness for a run that never served. The carrier has to
-    // PRESERVE the marker on the unclaimed path, not just stop refusing it.
-    const marker: SchedulerActionObservation = {
-      ...unclaimedObservation({ writes: [USER_OUTPUT] }),
-      executionUnservedAttempt: { diagnosticCode: "unknown-effect-surface" },
-    } as SchedulerActionObservation;
+    // The SECOND `claim-not-live` site (`acceptedSchedulerObservation`). Under
+    // blanket ownership EVERY unserved marker is unclaimed, so refusing it
+    // outright leaves the executor unable to report an unserved attempt at
+    // all. The marker is now carried: accepted, and its diagnostic code
+    // surfaces on the observation result.
+    const applied = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [],
+      observation: unservedMarker("unknown-effect-surface"),
+      lease,
+      nowMs: nowMs + 1,
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    // The carrier's observable: the marker survives the accept as a
+    // diagnostic code, on a result that carries NO provenance (an unclaimed
+    // attempt authors none).
+    assertEquals(result.unservedDiagnosticCode, "unknown-effect-surface");
+    assertEquals(result.executionProvenance, undefined);
+    // ...and no settlement, because there is no claim to settle against.
+    assertEquals(applied.actionAttempts, undefined);
+    const contextKey = result.executionContextKey!;
+    assertExists(contextKey);
+
+    // THE CARRIER ITSELF: dirt marked before the attempt SURVIVES it.
+    Engine.markSchedulerActionsDirectDirty(engine, {
+      branch: "",
+      ownerSpace: SPACE,
+      dirtySeq: 7,
+      actions: [dirtyActionEntry(contextKey)],
+    });
+    assertEquals(actionStateFor(engine, contextKey)?.directDirtySeq, 7);
+
+    const second = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [],
+      observation: unservedMarker("unknown-effect-surface"),
+      lease,
+      nowMs: nowMs + 2,
+      localSeq: 2,
+    });
+    assert(second.schedulerObservationResults?.[0].status === "kept");
+    assertEquals(actionStateFor(engine, contextKey)?.directDirtySeq, 7);
+
+    // CONTROL — the same commit WITHOUT the marker is an ordinary unclaimed
+    // observation, and those clear dirt unboundedly. This is the delta the
+    // carrier exists to produce; without it the marker would take this arm.
+    const served = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [],
+      surfaces: { writes: [USER_OUTPUT] },
+      lease,
+      nowMs: nowMs + 3,
+      localSeq: 3,
+    });
+    assert(served.schedulerObservationResults?.[0].status === "kept");
+    assertEquals(
+      served.schedulerObservationResults?.[0]
+        .unservedDiagnosticCode,
+      undefined,
+    );
+    assertEquals(actionStateFor(engine, contextKey)?.directDirtySeq, null);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("carrier: SIBLING — a wire claim assertion naming no live claim still fences claim-not-live", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    // The leg the carrier deliberately does NOT touch: an unprivileged client
+    // forging an `executionClaimAssertion` that names a claim the host never
+    // issued (or has revoked). Refused whether or not it also carries a
+    // marker — the marker does not launder the assertion.
     assertFenceCause(
       () =>
         applyActingLane(engine, {
           actingContext: USER_CONTEXT_KEY,
           operations: [],
-          observation: marker,
+          observation: observationFor(claim, { writes: [USER_OUTPUT] }),
           lease,
           nowMs: nowMs + 1,
         }),
       "claim-not-live",
+    );
+    assertFenceCause(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [],
+          observation: {
+            ...observationFor(claim, { writes: [USER_OUTPUT] }),
+            executionUnservedAttempt: { diagnosticCode: "forged-assertion" },
+          } as SchedulerActionObservation,
+          lease,
+          nowMs: nowMs + 1,
+          localSeq: 2,
+        }),
+      "claim-not-live",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("carrier: an unclaimed marker riding a commit WITH operations rejects unserved-marker-with-operations — with NO acting lane", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    // THE UN-GATING. Both rejects used to sit inside `if (boundedActionRun)`,
+    // which requires `actingLane !== undefined`. A plain client commit names
+    // no acting context — and neither does the space-rank executor, whose
+    // `commitActingContext` deliberately sends nothing for the space lane —
+    // so neither fence fired for either. `claim-not-live` caught all of it;
+    // once the marker is carried, nothing would. A marker that WRITES is not
+    // self-depriving, which is the whole basis for carrying it, so the reject
+    // must be unconditional.
+    //
+    // NOTE the shape deliberately used here: NO lease and NO acting context,
+    // i.e. the ordinary unclaimed client commit. With a lease present the
+    // operations arm is already caught by the lease fence
+    // (`semanticTransaction` without `boundedActionRun`); the population this
+    // un-gating protects is the one with no lease fence to fall back on.
+    assertFirewallReject(
+      () =>
+        applyActingLane(engine, {
+          operations: [userInstanceOperation],
+          observation: unservedMarker("unknown-effect-surface"),
+        }),
+      "unserved-marker-with-operations",
+    );
+    // Nothing applied.
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      null,
+    );
+    // The same un-gating for branch-merge metadata on the observation-only
+    // twin: a marker may not carry it either, acting lane or no acting lane.
+    assertFirewallReject(
+      () =>
+        applyActingLane(engine, {
+          operations: [],
+          observation: unservedMarker("unknown-effect-surface"),
+          localSeq: 2,
+          merge: {
+            sourceBranch: "source",
+            sourceSeq: 1,
+            baseBranch: "",
+            baseSeq: 0,
+          },
+        }),
+      "merge-commit",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("carrier: RESIDUAL — a CLAIMED unserved attempt still settles dirt up to its input basis", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, "space" as SchedulerExecutionContextKey);
+    const SPACE_INPUT = address("space", "of:claimed-unserved-input");
+    // Give the attempt a real input basis to cover: without a confirmed read
+    // `inputBasisSeq` is 0 and the two arms are indistinguishable.
+    const seeded = Engine.applyCommit(engine, {
+      sessionId: "seed-session",
+      scopeSessionId: "seed-session",
+      space: SPACE,
+      principal: PRINCIPAL,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: SPACE_INPUT.id, value: { value: 1 } }],
+      },
+    });
+    Engine.markSchedulerActionsDirectDirty(engine, {
+      branch: "",
+      ownerSpace: SPACE,
+      dirtySeq: seeded.seq,
+      actions: [dirtyActionEntry("space" as SchedulerExecutionContextKey)],
+    });
+    assertEquals(
+      actionStateFor(engine, "space" as SchedulerExecutionContextKey)
+        ?.directDirtySeq,
+      seeded.seq,
+    );
+
+    const applied = applyActingLane(engine, {
+      operations: [],
+      reads: {
+        confirmed: [{
+          id: SPACE_INPUT.id,
+          path: toDocumentPath(["value"]),
+          seq: seeded.seq,
+        }],
+        pending: [],
+      },
+      observation: {
+        ...observationFor(claim, { reads: [SPACE_INPUT] }),
+        actualChangedWrites: [],
+        currentKnownWrites: [],
+        executionUnservedAttempt: { diagnosticCode: "unknown-effect-surface" },
+      } as SchedulerActionObservation,
+      executionClaims: new Map([[1, claim]]),
+      lease,
+      nowMs: nowMs + 1,
+    });
+    const [result] = applied.schedulerObservationResults!;
+    assert(result.status === "kept");
+    assertEquals(result.inputBasisSeq, seeded.seq);
+    assertEquals(result.unservedDiagnosticCode, "unknown-effect-surface");
+    assertEquals(applied.actionAttempts?.[0].outcome, "unserved");
+
+    // THE RESIDUAL, and it is a LATENT BUG this slice deliberately did not
+    // fix. A CLAIMED unserved attempt still passes `causeCoverageSeq:
+    // inputBasisSeq`, so it CLEARS the dirt it did not serve — the same rule
+    // the unclaimed arm was just denied. It is masked today only because the
+    // unserved settlement feeds back to the client, which drops its overlay
+    // with `dirtyProducer: true` and re-runs. Under blanket server ownership
+    // there is no client re-run and no settlement, so this becomes a live
+    // liveness hole: an action that served nothing goes CLEAN.
+    //
+    // The one-line fix is to drop the `provenance === undefined` conjunct on
+    // the `unservedAttempt` option in `applySchedulerObservationOnlyCommit`,
+    // making the rule "an unserved attempt covers nothing" apply to BOTH arms.
+    // Measured: it costs ZERO failures across the memory and runner batteries
+    // — but it is also covered by NOTHING, which is why this pin exists. Flip
+    // the expectation below to `seeded.seq` in the same change.
+    assertEquals(
+      actionStateFor(engine, "space" as SchedulerExecutionContextKey)
+        ?.directDirtySeq,
+      null,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("carrier: an unclaimed marker naming a FOREIGN action does not clean it", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const FOREIGN_ACTION_ID = "action:lane-firewall-foreign";
+    // The observation names `ownerSpace`/`pieceId`/`actionId` freely and the
+    // unclaimed path has no claim to cross-check them against. That is a
+    // PRE-EXISTING capability with a strictly worse existing form — an
+    // ordinary unclaimed observation naming a foreign action clears its dirt
+    // at MAX_SAFE_INTEGER and marks it CLEAN. Along the dimension the marker
+    // adds, it is a de-escalation: it leaves the foreign action dirty.
+    const marker = unservedMarker(
+      "unknown-effect-surface",
+      { writes: [USER_OUTPUT] },
+      { actionId: FOREIGN_ACTION_ID },
+    );
+    const applied = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [],
+      observation: marker,
+      lease,
+      nowMs: nowMs + 1,
+    });
+    const contextKey = applied.schedulerObservationResults?.[0]
+      .executionContextKey!;
+    assertExists(contextKey);
+    Engine.markSchedulerActionsDirectDirty(engine, {
+      branch: "",
+      ownerSpace: SPACE,
+      dirtySeq: 11,
+      actions: [dirtyActionEntry(contextKey, FOREIGN_ACTION_ID)],
+    });
+    assertEquals(
+      actionStateFor(engine, contextKey, FOREIGN_ACTION_ID)?.directDirtySeq,
+      11,
+    );
+    const second = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [],
+      observation: marker,
+      lease,
+      nowMs: nowMs + 2,
+      localSeq: 2,
+    });
+    assert(second.schedulerObservationResults?.[0].status === "kept");
+    assertEquals(
+      actionStateFor(engine, contextKey, FOREIGN_ACTION_ID)?.directDirtySeq,
+      11,
     );
   } finally {
     Engine.close(engine);

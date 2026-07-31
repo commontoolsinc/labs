@@ -2428,6 +2428,17 @@ export class Server {
     settlementsNoOp: 0,
     settlementsFailed: 0,
     settlementsUnserved: 0,
+    // Every accepted attempt that declared itself UNSERVED, claimed or not.
+    // DELIBERATELY SEPARATE from `settlementsUnserved`, which is claim-gated
+    // (it counts settlements, and a settlement needs an `actionAttempts` entry,
+    // and that needs a live claim). Under blanket server ownership every
+    // unserved attempt is unclaimed, so `settlementsUnserved` would read zero
+    // while the thing kept happening — this arc's own named instrument defect.
+    // Keeping the two separate makes the crossing read as ONE NUMBER MIGRATING
+    // INTO ANOTHER rather than as a drop: today every claimed unserved attempt
+    // bumps both, so `unservedObservations >= settlementsUnserved`, and the
+    // gap is exactly the unclaimed population.
+    unservedObservations: 0,
     // navigate-to-server-side.md §2c: server-side `navigateTo` actuations
     // handed to their one issuing session over the execution feed.
     navigatesPublished: 0,
@@ -11077,6 +11088,20 @@ export class Server {
   #publishAcceptedActionAttempts(commit: Engine.AppliedCommit): void {
     this.executionStats.acceptedActionAttempts +=
       commit.actionAttempts?.length ?? 0;
+    // The unserved counter reads the OBSERVATION results, not `actionAttempts`:
+    // an unclaimed unserved attempt produces no attempt entry and therefore no
+    // settlement, so `unservedDiagnosticCode` on the observation result is its
+    // only footprint. Counted here rather than in
+    // `applyPostCommitSchedulerSideEffects` — that site also reads
+    // `schedulerObservationResults` but returns early when persistent
+    // scheduler state is disabled, and a counter that can read zero while the
+    // thing happens is worse than no counter. This method's one call site is
+    // guarded by `!isAppliedCommitReplay`, so a replay never double-counts.
+    for (const result of commit.schedulerObservationResults ?? []) {
+      if (result.unservedDiagnosticCode !== undefined) {
+        this.executionStats.unservedObservations += 1;
+      }
+    }
     for (const attempt of commit.actionAttempts ?? []) {
       // C3.5 (C3A14: this literal is a settlement CARRIER): the vector
       // projects from provenance as {space, seq} — the epoch stamps stay

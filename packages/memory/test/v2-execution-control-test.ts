@@ -2645,6 +2645,16 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
     assertEquals(stored.inputBasisSeq, pending.seq);
     assertEquals(stored.executionProvenance, undefined);
 
+    // THE COUNTER MIGRATION, pinned on the CLAIMED arm — the only arm that
+    // reaches both counters. `settlementsUnserved` is claim-gated (it counts
+    // settlements, which need an `actionAttempts` entry, which needs a live
+    // claim); `unservedObservations` reads the observation result and so
+    // counts the unclaimed arm too. While claims still exist the two agree,
+    // which is what makes the crossing legible as one number migrating into
+    // another rather than as a drop.
+    assertEquals(server.executionStats.settlementsUnserved, 1);
+    assertEquals(server.executionStats.unservedObservations, 1);
+
     assertEquals(server.revokeExecutionClaim(claim), true);
     await assertRejects(
       () =>
@@ -2661,6 +2671,53 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
   } finally {
     unbind();
     unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("an UNCLAIMED unserved attempt is carried over the wire and counted", async () => {
+  const server = createControlServer("memory-v2-execution-unclaimed-unserved");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  try {
+    // The shape blanket server ownership produces: an unserved attempt with
+    // no claim at all. It used to be refused outright (`claim-not-live`); the
+    // carrier accepts it, and because there is no claim there is no
+    // `actionAttempts` entry and therefore no settlement — so
+    // `settlementsUnserved` cannot see it. `unservedObservations` can.
+    const claim = {
+      ...claimKey(CONTROL_SPACE, "", "action:unclaimed-unserved"),
+      leaseGeneration: 1,
+      claimGeneration: 1,
+      expiresAt: 0,
+    } as ExecutionClaim;
+    const {
+      executionClaimAssertion: _assertion,
+      ...unclaimed
+    } = claimedSpaceObservation(claim, "of:unclaimed-unserved-output");
+    const applied = await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: {
+        ...unclaimed,
+        actualChangedWrites: [],
+        executionUnservedAttempt: { diagnosticCode: "unknown-effect-surface" },
+      },
+    });
+    assertEquals(applied.schedulerObservationResults?.[0].status, "kept");
+    assertEquals(
+      applied.schedulerObservationResults?.[0].unservedDiagnosticCode,
+      "unknown-effect-surface",
+    );
+    assertEquals(applied.actionAttempts, undefined);
+    // The migration, stated as a number: the claim-gated counter stays at
+    // zero while the observation counter sees the attempt. This gap IS the
+    // unclaimed population, and it is the whole reason the two are separate.
+    assertEquals(server.executionStats.settlementsUnserved, 0);
+    assertEquals(server.executionStats.unservedObservations, 1);
+  } finally {
     await client.close();
     await server.close();
   }
