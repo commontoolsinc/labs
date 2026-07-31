@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { html } from "lit";
 import { BaseElement } from "./base-element.ts";
 
 /**
