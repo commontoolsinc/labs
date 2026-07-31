@@ -821,6 +821,28 @@ for work in `.agents/worktrees/`; check your own changed files individually
 believe that instead. Without the warning each agent spends tokens
 re-deriving it, and one of them may "fix" a file it does not own.
 
+**UPDATED 2026-07-30, and the warning above was NOT enough.** Five more
+subagents hit it that day — every one of them carrying the §2 pointer, and
+several carrying the warning verbatim — and each still spent a full closing
+round re-deriving the same three complaints, at roughly 100-250k tokens per
+agent. Reading it is not sufficient; the hook fires at STOP time, after the
+agent has reported, so it reads as a fresh failure demanding action. **Use the
+literal §3 prompt clause instead**, which pre-authorises the dismissal rather
+than describing it.
+
+**The three complaints, each fully attributed as of 2026-07-30**, so nobody
+diagnoses them a seventh time:
+
+| complaint | actual cause |
+| --- | --- |
+| "Type check failed" | **NOT a type error any more.** `tasks/check.sh` aborts on a version gate: `ERROR: Deno version is 2.9.4, expected >= 2.8.0 and < 2.9.0`. `mise.toml` pins `deno = "2.8.1"`, no mise-managed deno is installed, and the PATH deno is 2.9.4 — so **no type checking runs at all**, in either worktree. The `actionId`/`watchReactiveActionCommit` errors this section used to name are no longer what fires. An agent that trusts the hook and greps for TS errors finds none and then hunts a non-existent problem. |
+| "Formatting issues found" | 43 unformatted files in the OTHER checkout (`packages/memory`, `shell`, `ui`, `toolshed`, `ts-transformers`, `rfcs/`, `skills/`). Zero in `packages/runner`. Compounded by §2.4e — that checkout's pre-commit hook runs bare `deno fmt`, so its drift keeps growing. |
+| "Lint errors found" | Exactly one: `require-await` at `packages/runner/src/executor/executor-worker.ts:1072` on that branch. Arrived with `d28092a64`, fixed on the arc branch by `a34c15fd2` (the reasoned `// deno-lint-ignore require-await` pin). That branch never received it. |
+
+**None of the three is ever caused by arc work in `.agents/worktrees/`.** If a
+future agent's own changed files are individually clean, the hook is telling it
+about a checkout nobody is working in.
+
 ### 2.6 Comparing action ids across arms
 
 Action ids read `cf:module/<hash>:<lift>:<instance>`; the trailing instance
@@ -1013,6 +1035,19 @@ Every prompt in §4 already contains this; keep it if you write new ones:
 > Do NOT commit, do NOT push, do NOT edit anything under
 > `docs/specs/server-side-execution/`. Report: files changed, the exact test
 > command that proves it, and anything you found that contradicts §2.
+>
+> **STOP-HOOK CLAUSE — include this verbatim; describing the defect is not
+> enough, it has to pre-authorise the dismissal.** When you finish, a stop hook
+> will report fmt / lint / type-check failures. **They are not yours and you
+> must not investigate them.** The hook validates the session's cwd checkout,
+> not this worktree (§2.5c), and all three of its complaints are already fully
+> attributed there: the type-check leg is a Deno VERSION GATE that runs no type
+> checking at all, the fmt leg is 43 files in a checkout nobody is working in,
+> and the lint leg is one `require-await` already fixed on this branch. Verify
+> your OWN changed files (`deno fmt --check <files>`, `deno lint <files>`,
+> `deno check <files>`); if those are clean you are done. **Do not re-derive the
+> attribution, do not write it up, and never edit or format the other
+> checkout.** Six agents have now spent a full closing round each on this.
 
 ---
 
