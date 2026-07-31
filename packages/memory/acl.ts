@@ -6,6 +6,19 @@ export type { ACL, ACLUser, ANYONE, Capability, DID, DIDKey };
 
 export const ANYONE_USER: ANYONE = "*";
 
+/**
+ * Entity id of a space's ACL document. The id was previously hand-built as
+ * `of:${space}` in the server, the storage manager, `ACLManager` and the CFC
+ * space-membership reader independently; this is the one definition they
+ * should share.
+ *
+ * The document has a non-standard write contract — see INV-12 in
+ * `docs/specs/memory-v2/09-invariants.md`: a mutation must be an ACL-only
+ * commit carrying a single whole-document `set`. Value-surface writes are
+ * refused client-side at the runner's write chokepoint.
+ */
+export const aclDocId = (space: string): string => `of:${space}`;
+
 export function isACLUser(value: unknown): value is ACLUser {
   return value === ANYONE_USER || isDID(value);
 }

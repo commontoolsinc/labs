@@ -8,6 +8,7 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { aclDocId } from "@commonfabric/memory/acl";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
@@ -740,6 +741,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         `${address.id}/${address.path.join("/")}`,
       );
       return;
+    }
+    // The space ACL document has a non-standard write contract: the memory
+    // server accepts only an ACL-only commit carrying a single whole-document
+    // `set` (INV-12, docs/specs/memory-v2/09-invariants.md). A write through
+    // the value surface is decomposed per key by `normalizeAndDiff` and
+    // emitted as `op: "patch"`, which the server refuses — so it fails after a
+    // round-trip, with an error about commit shape that the author of the
+    // write has no reason to understand. Refuse it here instead, in-process,
+    // naming the one sanctioned writer. `ACLManager` addresses the whole
+    // document (path `[]`) and so passes; genesis bypasses this transaction
+    // entirely via a raw `session.transact`; hydration delivers path-`[]`
+    // shapes; the CFC space-membership reader only reads.
+    if (address.path.length > 0 && address.id === aclDocId(address.space)) {
+      throw new Error(
+        `${address.id} is the space ACL document: mutate it through ` +
+          `ACLManager, which replaces the whole document. A value-path write ` +
+          `is emitted as a patch and rejected by the memory server.`,
+      );
     }
     // The ["cfc"] document field holds the persisted label map. A value-path
     // write (path[0] is a user key) or a path-[] full-document write is not it.

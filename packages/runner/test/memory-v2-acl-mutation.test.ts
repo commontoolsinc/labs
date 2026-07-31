@@ -402,6 +402,42 @@ Deno.test("ACL mutation notifies subscribers of the ACL cell", async () => {
   }
 });
 
+Deno.test("a value-path write to the ACL document is refused in-process", async () => {
+  // The server's contract (INV-12) is that an ACL mutation is a single
+  // whole-document `set`. Before this guard, a value-surface write was
+  // decomposed into `op: "patch"`, refused after a round-trip, and reported as
+  // an error about commit shape that the write's author had no reason to
+  // understand — which is how the original bug stayed unexplained. The runner's
+  // write chokepoint now refuses it locally and names the sanctioned writer.
+  const ctx = await withGenesisedSpace("runner-acl-mutation-guard");
+  const bob = await Identity.fromPassphrase("runner-acl-mutation-guard bob");
+  try {
+    const marker = ctx.factory.mark();
+    const result = await ctx.runtime.editWithRetry((tx) => {
+      tx.writeOrThrow({
+        space: ctx.space,
+        id: `of:${ctx.space}` as URI,
+        type: "application/json",
+        path: ["value", bob.did()],
+      }, "WRITE");
+    });
+
+    assert(result.error, "a value-path ACL write must not commit");
+    assert(
+      /mutate it through ACLManager/.test(result.error.message),
+      `error should name ACLManager, got: ${result.error.message}`,
+    );
+    // Refused before any commit is built — no round-trip, no server rejection.
+    assertEquals(ctx.factory.since(marker), []);
+    assertEquals(await ctx.readStoredAcl(), {
+      [ctx.user.did()]: "OWNER",
+      "*": "WRITE",
+    });
+  } finally {
+    await ctx.dispose();
+  }
+});
+
 Deno.test("ACL mutation still cannot remove the last concrete owner", async () => {
   // Guard against the fix having relaxed a real server invariant while making
   // mutation work.
