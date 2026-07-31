@@ -582,9 +582,9 @@ Consequently, under a void-declared verb, a block body's explicit
 literal, string/number/boolean/null literal, template string, or
 arithmetic/concatenation over those — is a compile-time error
 (`verb-result:undeclared-return`): plain data returned without a declaration
-is silently discarded exactly where a caller would have read it. The fix the
-diagnostic names is declaring the result, or a bare `return;` for an early
-exit.
+is a value the verb's contract never announces — no caller can rely on it.
+The fix the diagnostic names is declaring the result, or a bare `return;`
+for an early exit.
 
 Everything else stays legal, deliberately: concise bodies (the absorption
 rule above), bare `return;` / `return undefined;` (control flow), and
