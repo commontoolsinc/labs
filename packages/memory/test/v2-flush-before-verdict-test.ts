@@ -225,6 +225,47 @@ Deno.test("memory v2 server: flush-before-verdict delivers read repair ahead of 
   assertEquals(committerMessages.length, 0);
 });
 
+Deno.test("memory v2 server: a pre-verdict flush failure never eats the verdict", async () => {
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://flush-before-verdict-failure",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Break the flush. The verdict must still arrive: the commit's fate is
+  // durable, and the batched refresh remains the recovery path.
+  const realFlush = server.flushSessions.bind(server);
+  (server as unknown as { flushSessions: () => Promise<void> }).flushSessions =
+    () => Promise.reject(new Error("synthetic flush failure"));
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-a",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
+
+  // Restore and drain so the parked refresh timer is cancelled cleanly.
+  (server as unknown as { flushSessions: typeof realFlush }).flushSessions =
+    realFlush;
+  await realFlush([space]);
+});
+
 Deno.test("memory v2 server: flag off keeps verdict-first delivery (the catalogued deviation)", async () => {
   const context = await setup({
     flushBeforeVerdict: false,

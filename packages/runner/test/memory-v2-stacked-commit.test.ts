@@ -2344,6 +2344,94 @@ Deno.test("memory v2 stacked commits: rejection round trip — frame-retire, ver
   }
 });
 
+Deno.test("memory v2 stacked commits: an undecided dependent above the marker survives frame-time retirement (CT-1927)", async () => {
+  const harness = await createHarness();
+  const gate2 = Promise.withResolvers<void>();
+  const gate3 = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    // Two stacked appends, both verdicts held: L2 ("X") and L3 ("Y").
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: gate2.promise,
+    });
+    const l2 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    harness.model.setOutcome(3, {
+      kind: "accept",
+      responseGate: gate3.promise,
+    });
+    const l3 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "Y" }],
+      { items: ["a", "X", "Y"] },
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(3),
+      "both commits to reach the wire",
+    );
+
+    // The frame reflects L2's outcome only (marker 2); the `foreign` field
+    // distinguishes the delivered base from the local one. L2 retires; the
+    // UNDECIDED L3 survives and replays on top: without partial retirement
+    // the view would double-apply X (["a","X","X","Y"]); without survivor
+    // replay it would lose Y.
+    harness.pushSync({
+      upserts: [{
+        id: DOCS.A,
+        seq: 2,
+        value: { items: ["a", "X"], foreign: true },
+      }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => {
+        const value = visibleValue(harness.provider, DOCS.A) as {
+          foreign?: boolean;
+        };
+        return value?.foreign === true;
+      },
+      "frame to integrate",
+    );
+    expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
+
+    // A stale redelivery of the same marker covers the doc while every
+    // remaining overlay sits ABOVE it: nothing retires, nothing changes.
+    harness.pushSync({
+      upserts: [{
+        id: DOCS.A,
+        seq: 2,
+        value: { items: ["a", "X"], foreign: true },
+      }],
+      caughtUpLocalSeq: 2,
+    });
+    expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
+
+    gate2.resolve();
+    await assertResultOk(l2);
+    gate3.resolve();
+    await assertResultOk(l3);
+    expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
+  } finally {
+    gate2.resolve();
+    gate3.resolve();
+    await harness.close();
+  }
+});
+
 // An "older server": advertises every current capability EXCEPT the array
 // dependency sets.
 class PreStackTransport extends ScriptedModelTransport {
