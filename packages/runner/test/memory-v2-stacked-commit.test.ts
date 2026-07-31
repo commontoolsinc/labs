@@ -2239,6 +2239,111 @@ Deno.test("memory v2 stacked commits: frame-time retirement is scoped to covered
   }
 });
 
+Deno.test("memory v2 stacked commits: rejection round trip — frame-retire, verdict, regenerate against the repaired base (CT-1927)", async () => {
+  const harness = await createHarness();
+  const gate = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    // A foreign winner lands server-side; its fan-out is not delivered.
+    harness.model.injectRemote({
+      label: "winner",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    assertEquals(winnerSeq, 2);
+
+    // The doomed optimistic commit: reads A at the stale confirmed basis,
+    // writes A. Verdict held so the repair frame can precede it (CT-1927
+    // server ordering).
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+      responseGate: gate.promise,
+    });
+    const doomed = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v1mine"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(2),
+      "doomed commit to reach the wire",
+    );
+    expectVisible(harness, { A: valueFor("v1mine") });
+
+    // Repair frame first: the winner plus the marker covering the rejected
+    // localSeq. The phantom retires at frame time — the view shows the
+    // winner BEFORE the verdict exists client-side.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("v2winner") }],
+      caughtUpLocalSeq: doomed.localSeq,
+    });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "frame-time retirement to land",
+    );
+    expectVisible(harness, { A: valueFor("v2winner") });
+
+    // Verdict: bookkeeping only, and the retry gate is already satisfied by
+    // the marker — readyToRetry must resolve without any further delivery.
+    gate.resolve();
+    const result = await doomed.promise;
+    assertExists(result.error);
+    const readyToRetry = (result.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    const raced = await Promise.race([
+      readyToRetry().then(() => "ready" as const),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 500)
+      ),
+    ]);
+    assertEquals(raced, "ready");
+
+    // The regeneration: rebuild against the repaired confirmed base. The
+    // fresh commit gets a fresh localSeq (outside the old marker's reach)
+    // and — because the mirror already holds the winner — an honest new
+    // basis, so it is built on the right premise on its first attempt.
+    harness.model.setOutcome(3, { kind: "accept" });
+    const regenerated = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v3merged"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    assertEquals(regenerated.localSeq, 3);
+    await assertResultOk(regenerated.promise);
+    expectVisible(harness, { A: valueFor("v3merged") });
+
+    // The regenerated wire read declared the WINNER's basis, and its
+    // dependency stack does not name the retired layer: the view stopped
+    // depending on it, so the array stopped naming it.
+    const sent = harness.model.applied.get(3);
+    assertExists(sent);
+    assertEquals(
+      sent.commit.reads.confirmed.map((read) => ({
+        id: read.id,
+        seq: read.seq,
+      })),
+      [{ id: DOCS.A, seq: winnerSeq }],
+    );
+    assertEquals(sent.commit.reads.pending, []);
+  } finally {
+    gate.resolve();
+    await harness.close();
+  }
+});
+
 // An "older server": advertises every current capability EXCEPT the array
 // dependency sets.
 class PreStackTransport extends ScriptedModelTransport {
