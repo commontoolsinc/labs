@@ -38,6 +38,14 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   // Unset flags stay unset (tri-state fidelity), not coerced.
   assertEquals(options.experimental?.persistentSchedulerState, undefined);
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
+  // Toolshed declares no egress authority. A webhook delivery starts the
+  // target piece in this process and runs its effect builtins, so without the
+  // declaration those effects ride the client default and egress from the API
+  // server. What the declaration DOES — the piece still starts, the sink is
+  // recorded and never released — is pinned behaviourally in
+  // `routes/webhooks/webhooks.egress-authority.test.ts`; this is the cheap
+  // guard that production is actually wired to it.
+  assertEquals(options.externalSinkDisposition, "suppress");
 });
 
 // The runtime→OTel bridge attach rides Runtime construction (CT plan: the
