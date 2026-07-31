@@ -1650,7 +1650,6 @@ export class XDebuggerView extends LitElement {
 
     if (keys.length === 0) {
       return html`
-
       `;
     }
 
@@ -1660,7 +1659,6 @@ export class XDebuggerView extends LitElement {
           const stats = timingData[key];
           if (!stats.cdf || stats.cdf.length === 0) {
             return html`
-
             `;
           }
 
@@ -1788,7 +1786,6 @@ export class XDebuggerView extends LitElement {
 
     if (cdf.length === 0) {
       return html`
-
       `;
     }
 
