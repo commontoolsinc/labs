@@ -1183,6 +1183,12 @@ Section 4.5.
 ### 1.5 Recursive Containers
 
 **Arrays:**
+- Direct `Array` instances only: the prototype must be `Array.prototype`
+  itself. An `Array` subclass instance, an array whose prototype has been
+  severed or replaced, and an array from another realm all cause rejection,
+  because a prototype is live code rather than an inert value — an overridden
+  `Symbol.iterator`, say, makes iteration answer differently than the indices
+  do — and no prototype has any representation as array content
 - May be dense or sparse
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
@@ -3063,9 +3069,12 @@ export function fabricFromNativeValue(
 > `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
 > `"FabricInstance"`). The conversion function then switches on the tag to
 > route to the appropriate wrapping logic. Fallback paths handle exotic Error
-> subclasses (via `Error.isError()`), cross-realm arrays (via
-> `Array.isArray()`), null-prototype objects, and objects with `toJSON()`
-> methods.
+> subclasses (via `Error.isError()`), arrays whose constructor is unreachable
+> or foreign (via `Array.isArray()`), null-prototype objects, and objects with
+> `toJSON()` methods. Dispatch classifies more broadly than the type admits:
+> tagging a subclass instance or a cross-realm array as `"Array"` is what lets
+> the array rule of Section 1.5 reject it by name, rather than as some
+> unrecognized class.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

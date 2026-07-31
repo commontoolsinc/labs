@@ -187,6 +187,22 @@ describe("type-check", () => {
         expect(isFabricValueLayer(arr)).toBe(false);
       });
 
+      it("returns `false` for an `Array` subclass instance", () => {
+        // A subclass prototype is live code just as an accessor is, and
+        // freezing the instance does not change that.
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(isFabricValueLayer(sub)).toBe(false);
+        expect(isFabricValueLayer(Object.freeze(sub))).toBe(false);
+      });
+
+      it("returns `false` for an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(isFabricValueLayer(severed)).toBe(false);
+      });
+
       it("returns `false` for a sparse array with extra named properties", () => {
         // Length 3, hole at index 1, plus a named property "foo": still
         // `false` because the named property isn't a valid array index.
@@ -428,6 +444,24 @@ describe("type-check", () => {
         const arr = [1, 2];
         (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
         expect(isFabricValue({ data: arr })).toBe(false);
+      });
+
+      it("returns `false` for an indirect `Array` instance, at any depth", () => {
+        // A subclass prototype is live code no matter the container: an
+        // overridden `Symbol.iterator` makes iteration answer content the
+        // indices never show, and freezing does not reach the prototype.
+        class Sub extends Array {}
+        const top = new Sub();
+        top.push(1, 2);
+        expect(isFabricValue(top)).toBe(false);
+        expect(isFabricValue(Object.freeze(top))).toBe(false);
+        expect(isFabricValue({ data: top })).toBe(false);
+        expect(isFabricValue([1, [top]])).toBe(false);
+
+        const severed: unknown[] = [3, 4];
+        Object.setPrototypeOf(severed, null);
+        expect(isFabricValue(severed)).toBe(false);
+        expect(isFabricValue({ data: severed })).toBe(false);
       });
 
       it("returns `false` for a unique (uninterned) symbol", () => {
