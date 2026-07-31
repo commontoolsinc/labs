@@ -560,7 +560,7 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   one (pre-D5, measured live: the absent call recorded "(no event)" and the
   corrected same-id retry deduplicated against it, the correction never
   applied).
-- **runner/cfc, relocate the relaxation helper (D6).**
+- ~~**runner/cfc, relocate the relaxation helper (D6).**
   `relaxDefaultedRequired` and `localRefTarget` re-implement the runtime's
   default-satisfaction rule inside `packages/cli/lib/callable.ts`, and C5
   (closed-world inputs enforced at dispatch) needs the identical relaxation
@@ -577,7 +577,22 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   `validateSchemaValue` applies but the relaxer doesn't — each a potential
   refused-but-valid call if a generated schema leans on a required property
   there); naming the boundary is the point. Pure move plus doc comment, no
-  behavior change, its own commit beside D5 so the diff reviews as such.
+  behavior change, its own commit beside D5 so the diff reviews as such.~~ —
+  **done (D6)**: both helpers moved verbatim into the validator's own module
+  (`packages/runner/src/cfc/schema-sanitization.ts`, beside
+  `validateSchemaValue`), exported from the defining module and imported
+  directly by the CLI through a new `./cfc/schema-sanitization` package
+  export — no re-export shim, nothing added to `cfc/mod.ts`. The relaxation
+  tests moved with the code
+  (`packages/runner/test/cfc-defaulted-required-relaxation.test.ts`, pinned
+  against the same relax-then-validate composition the gate applies); the
+  CLI keeps the gate tests plus one defaulted-required pin proving the gate
+  applies the relaxation. The doc comment now names the boundary: only
+  `required` is rewritten, so `additionalProperties`, `patternProperties`,
+  `minProperties` and the other constraints, `const`/`enum`, `not` /
+  `if`/`then`/`else`, and `oneOf` exclusivity are judged against the
+  original schema text — each a potential refused-but-valid call when a
+  schema leans on a defaulted property through them.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.

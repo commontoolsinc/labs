@@ -1837,147 +1837,17 @@ describe("verbInputSchemaError", () => {
   });
 
   // The runtime injects a property's default when the payload omits it, so
-  // requiring it here would refuse a call the verb would have accepted.
+  // requiring it here would refuse a call the verb would have accepted. This
+  // pins that the gate APPLIES the relaxation; the relaxation's own semantics
+  // ($ref chains, combinators, cycles, the `definitions` refusal) are pinned
+  // where the helpers live (runner `cfc-defaulted-required-relaxation.test.ts`
+  // — verb contract D6).
   it("treats a defaulted property as satisfied when omitted", () => {
     expect(verbInputSchemaError({}, {
       type: "object",
       properties: { mode: { type: "string", default: "fast" } },
       required: ["mode"],
     })).toBeUndefined();
-  });
-
-  it("treats a defaulted property as satisfied when nested", () => {
-    expect(verbInputSchemaError({ opts: {} }, {
-      type: "object",
-      properties: {
-        opts: {
-          type: "object",
-          properties: { mode: { type: "string", default: "fast" } },
-          required: ["mode"],
-        },
-      },
-      required: ["opts"],
-    })).toBeUndefined();
-  });
-
-  it("treats a defaulted property as satisfied behind a $ref", () => {
-    expect(verbInputSchemaError({}, {
-      type: "object",
-      properties: { mode: { $ref: "#/$defs/Mode" } },
-      required: ["mode"],
-      $defs: { Mode: { type: "string", default: "fast" } },
-    })).toBeUndefined();
-  });
-
-  it("follows a $ref chain to find the default", () => {
-    expect(verbInputSchemaError({}, {
-      type: "object",
-      properties: { mode: { $ref: "#/$defs/Mode" } },
-      required: ["mode"],
-      $defs: {
-        Mode: { $ref: "#/$defs/RealMode" },
-        RealMode: { type: "string", default: "fast" },
-      },
-    })).toBeUndefined();
-  });
-
-  it("relaxes a defaulted property inside array items", () => {
-    expect(verbInputSchemaError([{}], {
-      type: "array",
-      items: {
-        type: "object",
-        properties: { mode: { type: "string", default: "fast" } },
-        required: ["mode"],
-      },
-    })).toBeUndefined();
-  });
-
-  it("relaxes a defaulted property inside a combinator branch", () => {
-    expect(verbInputSchemaError({}, {
-      anyOf: [
-        {
-          type: "object",
-          properties: { mode: { type: "string", default: "fast" } },
-          required: ["mode"],
-        },
-      ],
-    } as JSONSchema)).toBeUndefined();
-  });
-
-  // A reference that names nothing local cannot be followed to a default.
-  // Relaxation leaves it exactly as written rather than guessing.
-  it("leaves a non-local $ref untouched", () => {
-    expect(verbInputSchemaError({ mode: "x" }, {
-      type: "object",
-      properties: { mode: { $ref: "https://example.com/Mode" } },
-    } as JSONSchema)).toMatch(/cannot resolve schema reference/);
-  });
-
-  // Hoisting emits `$defs`; a `definitions` ref is one the runtime cannot
-  // resolve either. Relaxing on a default behind one would admit a payload the
-  // verb then receives as an absent event, spending the invocation id.
-  it("does not relax on a default behind a #/definitions ref", () => {
-    expect(verbInputSchemaError({}, {
-      type: "object",
-      properties: { mode: { $ref: "#/definitions/Mode" } },
-      required: ["mode"],
-      definitions: { Mode: { type: "string", default: "fast" } },
-    } as unknown as JSONSchema)).toMatch(/mode/);
-  });
-
-  it("leaves a $ref naming a missing definition untouched", () => {
-    expect(verbInputSchemaError({ mode: "x" }, {
-      type: "object",
-      properties: { mode: { $ref: "#/$defs/Absent" } },
-      $defs: { Present: { type: "string" } },
-    } as JSONSchema)).toMatch(/cannot resolve schema reference/);
-  });
-
-  it("ignores a malformed $defs pool instead of indexing it", () => {
-    expect(verbInputSchemaError({ mode: "x" }, {
-      type: "object",
-      properties: { mode: { $ref: "#/$defs/Mode" } },
-      $defs: null,
-    } as unknown as JSONSchema)).toMatch(/cannot resolve schema reference/);
-  });
-
-  it("handles a $ref whose target is a boolean schema", () => {
-    expect(verbInputSchemaError({ mode: "x" }, {
-      type: "object",
-      properties: { mode: { $ref: "#/$defs/Anything" } },
-      $defs: { Anything: true },
-    } as JSONSchema)).toBeUndefined();
-  });
-
-  it("passes a boolean property schema through unchanged", () => {
-    expect(verbInputSchemaError({ mode: "x" }, {
-      type: "object",
-      properties: { mode: true },
-    } as JSONSchema)).toBeUndefined();
-  });
-
-  // A ref cycle names no schema to check against. Relaxation walks it without
-  // looping and hands it on unchanged; the validator is what reports it.
-  it("terminates on a $ref cycle instead of looping", () => {
-    expect(verbInputSchemaError({ mode: "x" }, {
-      type: "object",
-      properties: { mode: { $ref: "#/$defs/A" } },
-      $defs: {
-        A: { $ref: "#/$defs/B" },
-        B: { $ref: "#/$defs/A" },
-      },
-    })).toMatch(/cannot resolve schema reference/);
-  });
-
-  it("still rejects a non-defaulted sibling of a defaulted property", () => {
-    expect(verbInputSchemaError({}, {
-      type: "object",
-      properties: {
-        mode: { type: "string", default: "fast" },
-        target: { type: "string" },
-      },
-      required: ["mode", "target"],
-    })).toMatch(/target/);
   });
 
   it("accepts asCell fields given either a plain value or a link", () => {
@@ -1999,17 +1869,6 @@ describe("verbInputSchemaError", () => {
         schema,
       ),
     ).toBeUndefined();
-  });
-
-  it("terminates on a self-referential schema", () => {
-    const cyclic: Record<string, unknown> = {
-      type: "object",
-      properties: { name: { type: "string" } },
-      required: ["name"],
-    };
-    (cyclic.properties as Record<string, unknown>).child = cyclic;
-    expect(verbInputSchemaError({ name: "a" }, cyclic as JSONSchema))
-      .toBeUndefined();
   });
 });
 
