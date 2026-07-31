@@ -1651,8 +1651,7 @@ export type UnwrapCell<T> =
  * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
  * and allow any part of T that is currently wrapped in AnyCell<> to be used
  * unwrapped. This is designed for use with cell method parameters, allowing
- * flexibility in how values are passed. The ID metadata symbol allows
- * controlling id generation and can only be passed to write operations.
+ * flexibility in how values are passed.
  */
 export type AnyCellWrapping<T> =
   // Handle existing AnyBrandedCell<> types, allowing unwrapping
