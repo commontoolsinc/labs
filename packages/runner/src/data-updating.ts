@@ -1157,6 +1157,12 @@ export function normalizeAndDiff(
   // shallowly normalized -- its nested contents (Cells, native objects) are
   // converted later in the recursion, so a deep comparison would inspect
   // values whose canonical form does not exist yet.
+  //
+  // Atomic fabric objects are excluded from this guard: an untouched
+  // special-object prefix element re-emits its identical stored instance
+  // from the instance branch below, and the mergeable invariant for those
+  // elements rests on the write layer eliding that identical write from the
+  // journal rather than on this guard.
   if (
     state.nextAnchorId !== undefined &&
     isArrayElement &&
