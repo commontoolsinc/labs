@@ -12,9 +12,9 @@
  * `action((id) => selected.set(id))` the completion value is the cell
  * (`Cell.set` returns it) and nobody wrote a verb result, so a concise body
  * never errors here. But the same absorption means a deliberate
- * `return { ... }` statement under a void declaration is silently discarded
- * exactly where the schema layer would have read it, and the type system
- * cannot object — any value is assignable to a void-returning signature.
+ * `return { ... }` statement under a void declaration produces a value no
+ * caller is ever told about — the verb's contract says nothing — and the
+ * type system cannot object — any value is assignable to a void-returning signature.
  * This validator reads the body and raises what the checker cannot.
  *
  * A bare `return;` and `return undefined;` stay legal: they are control
@@ -91,7 +91,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
         type: "verb-result:undeclared-return",
         message:
           `This ${builderName} body returns a value, but the verb declares ` +
-          `no result, so the return is silently discarded. Declare the ` +
+          `no result — nothing tells a caller this value exists. Declare the ` +
           `result by naming the type arguments — ${
             DECLARE_HINT[builderName]
           } — or use a bare \`return;\` for an early exit.`,

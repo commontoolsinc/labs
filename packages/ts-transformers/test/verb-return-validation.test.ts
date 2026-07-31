@@ -45,7 +45,7 @@ Deno.test("explicit return under a void-declared action errors", async () => {
   `);
   assertEquals(errors.length, 1);
   assertStringIncludes(errors[0].message, "action<Event, Result>");
-  assertStringIncludes(errors[0].message, "silently discarded");
+  assertStringIncludes(errors[0].message, "nothing tells a caller");
 });
 
 Deno.test("a declared result makes the same body legal", async () => {
