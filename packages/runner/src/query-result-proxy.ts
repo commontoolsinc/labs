@@ -443,11 +443,12 @@ export function createQueryResultProxy<T>(
             // A tail append records its intent so the commit emits a
             // tail-relative, mergeable operation rather than a position diffed
             // against a possibly-stale base. Any other in-place mutator (splice,
-            // unshift, sort, reverse, fill, ...) reshapes the array: if a
-            // mergeable push was recorded on it earlier in the transaction, the
-            // recorded tail no longer identifies the appended elements, so
-            // abandon the intent and let the whole-array diff carry the reshaped
-            // result.
+            // unshift, sort, reverse, fill, ...) reshapes the array: for any
+            // mergeable op recorded earlier in the transaction on this array —
+            // or on an array nested inside it, which this reshape rewrites just
+            // as surely — the recorded tail no longer identifies the appended
+            // elements, so abandon those intents and let the whole-array diff
+            // carry the reshaped result.
             if (prop === "push") {
               tx.recordMergeableOp?.(link, {
                 op: "append",
@@ -535,12 +536,20 @@ export function createQueryResultProxy<T>(
         );
       }
 
+      const writeLink = { ...link, path: [...link.path, String(prop)] };
       diffAndUpdate(
         runtime,
         tx,
-        { ...link, path: [...link.path, String(prop)] },
+        writeLink,
         value,
       );
+
+      // Assigning over a property is a whole-value write, the same reshape
+      // `Cell.set` performs — and it reaches this trap instead of that method.
+      // Any mergeable op recorded at or beneath the assigned property refers to
+      // a value this write just replaced, so abandon it and let the whole-value
+      // diff carry the result.
+      tx.poisonMergeableOp?.(writeLink);
 
       return true;
     },

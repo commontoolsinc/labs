@@ -1380,15 +1380,19 @@ export class CellImpl<T extends FabricValue>
         this._frame?.cause,
       );
 
-      // A whole-value set over the path it writes reshapes what a mergeable op
-      // intent recorded there (an earlier push / addUnique / increment /
-      // removeByValue in this transaction) refers to. Poison that intent —
-      // keyed on `writeLink`, the exact path diffAndUpdate wrote — so the commit
-      // emits this set's whole-array diff rather than a stale tail op. Keying on
-      // the written path is what keeps this correct across aliases and child
-      // writes: a set that lands on a different slot than the op's target (a
-      // non-redirect alias) or on a child path (an element edit) finds no intent
-      // there, so poisonMergeableOp is a no-op and the append stays mergeable.
+      // A whole-value set reshapes what a mergeable op intent (an earlier push /
+      // addUnique / increment / removeByValue in this transaction) refers to,
+      // both at the path it writes and anywhere beneath it — writing an
+      // enclosing object rewrites the arrays inside it too. Poison those intents,
+      // keyed on `writeLink`, the path diffAndUpdate wrote, so the commit emits
+      // this set's whole-array diff rather than a stale tail op.
+      //
+      // Keying on the written path is what keeps this correct for the writes
+      // that should NOT disturb an op: a set on a CHILD path (an element edit)
+      // sits beneath the array, so the array's own intent is above the write and
+      // survives, and a set that lands on an unrelated slot (a non-redirect
+      // alias, a sibling field) covers no intent at all. Only a write at or
+      // above an op's array poisons it.
       this.tx.poisonMergeableOp?.(writeLink);
 
       // Register commit callback if provided.
@@ -2266,6 +2270,13 @@ export class CellImpl<T extends FabricValue>
       this.link.schema ?? this.schema,
     );
     this.tx.writeValueOrThrow(this.link, inlined);
+
+    // Every whole-value write poisons the mergeable ops it covers — one rule,
+    // rather than a list of write paths that happen to remember. Today's callers
+    // are internal machinery writing links into result cells, where no op is
+    // ever recorded, so this is inert; it is here so the rule stays true if that
+    // changes.
+    this.tx.poisonMergeableOp?.(this.link);
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {

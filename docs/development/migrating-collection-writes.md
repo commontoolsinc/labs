@@ -33,8 +33,10 @@ read. The read stays in the conflict set, which is what makes the retry correct.
 **The read feeds a different write to the same collection.** The handler
 appends an entry and then separately trims or reorders the list. Keep the
 independent read-modify-write in its own handler so the append stays mergeable.
-A transaction that both appends and reshapes the whole array may drop the
-reshape — see "Mixed whole-array reshape" in
+A transaction that both appends and reshapes the whole array gives up the
+append, not the reshape: the path falls back to the whole-array diff, which
+carries the correct combined local value but can false-conflict under
+contention. See "Mixed ops on one path fall back to the whole-array diff" in
 [mergeable-collection-writes.md](./mergeable-collection-writes.md).
 
 **The read is unrelated to the write.** Leave the `push` alone. The append

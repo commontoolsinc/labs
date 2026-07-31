@@ -69,16 +69,34 @@ export type OpSuppression = {
  * ANY value at the path: when false the op materializes a previously-absent
  * path, so it stamps the wire op's `createsKey` flag (the parent's key set
  * changed — see the field in `@commonfabric/memory/v2`).
+ * `initialArray` is that base array itself (undefined when there was no base
+ * array), which a tail op checks its recorded tail against — length and hole
+ * layout both, since the diff it suppresses can only express a prefix that
+ * matches the base in both.
  */
 export interface MergeableBuildContext {
   readonly workingArray?: readonly FabricValue[];
   readonly hadInitialArray: boolean;
   readonly hadInitialValue: boolean;
+  readonly initialArray?: readonly FabricValue[];
 }
 
+/**
+ * `abandon` says the intent produced no wire op and must be dropped from the
+ * transaction entirely, not merely left un-emitted: a live intent still narrows
+ * reads out of the commit's conflict set on behalf of an op that is no longer
+ * being sent, and the whole-value diff replacing it is entitled to those reads.
+ *
+ * In today's reachable cases the reshaping write also leaves an unmarked read at
+ * the path, which keeps it in the conflict set anyway — so this is belt and
+ * braces rather than a demonstrated behaviour change. It is kept because the
+ * guarantee should not rest on that coincidence: nothing makes a reshape
+ * obliged to read what it overwrites.
+ */
 export interface MergeableBuildResult {
   ops: PatchOp[];
   suppress: OpSuppression[];
+  abandon?: boolean;
 }
 
 // The single definition of one mergeable op's runtime behavior. Every question
@@ -89,7 +107,8 @@ export interface MergeableBuildResult {
 // - `isNoopDelta` — a delta that records nothing and is dropped before the write
 //   target is even resolved (an empty tail op). Absent means "always record".
 // - `fold` — how a delta combines into the path's accumulated intent.
-// - `build` — how an accumulated intent becomes wire ops and diff-suppression.
+// - `build` — how an accumulated intent becomes wire ops and diff-suppression,
+//   or is abandoned in favour of the plain diff (see `abandon` above).
 interface MergeableOpDescriptor<
   Intent extends MergeableOpIntent = MergeableOpIntent,
   Delta extends MergeableOpDelta = MergeableOpDelta,
@@ -141,14 +160,55 @@ const buildTailOp = (
 ): MergeableBuildResult => {
   const array = ctx.workingArray;
   if (!array) {
-    return { ops: [], suppress: [] };
+    return { ops: [], suppress: [], abandon: true };
   }
   const start = ctx.hadInitialArray
     ? Math.max(0, array.length - intent.count)
     : 0;
+  // The op says "add these elements to whatever the durable array is", and its
+  // suppression drops the whole-array candidate at this path outright plus every
+  // element candidate at or past `start`. What survives to carry the prefix is
+  // therefore only the diff's PER-INDEX candidates — so the op is honest only
+  // while the diff actually decomposes the prefix that way. `buildArrayPatchCandidates`
+  // gives up and emits a whole-array replacement instead in exactly three
+  // situations, and each one must abandon the op rather than let that
+  // replacement be suppressed:
+  //
+  //   1. the prefix changed length (a `set` here or at a parent that shrank or
+  //      grew it) — the base elements it removed have no surviving removal
+  //      candidate, so the store keeps them and appends on top: a doubled list;
+  //   2. the prefix's HOLE LAYOUT changed — punching or filling a hole without
+  //      changing the length, which the diff cannot express per index;
+  //   3. the appended tail is itself sparse.
+  //
+  // In each case the local value is the whole-array diff's to commit, not the
+  // op's. (Case 1 is checked as `initial.length !== start` because `start` is
+  // where the recorded tail begins.)
+  // Conditions 1 and 2 compare against a base, so they need one.
+  if (ctx.hadInitialArray) {
+    const initial = ctx.initialArray;
+    if (!initial || initial.length !== start) {
+      return { ops: [], suppress: [], abandon: true };
+    }
+    for (let index = 0; index < start; index += 1) {
+      if ((index in initial) !== (index in array)) {
+        return { ops: [], suppress: [], abandon: true };
+      }
+    }
+  }
+  // Condition 3 does not: the payload is `array.slice(start)` either way, and
+  // with no base that slice is the WHOLE working array, so a hole anywhere in a
+  // freshly created sparse array is a hole in the payload. The wire op cannot
+  // carry one — it rebuilds the payload elementwise — so a sparse payload must
+  // fall back to the diff, which does preserve holes.
+  for (let index = start; index < array.length; index += 1) {
+    if (!(index in array)) {
+      return { ops: [], suppress: [], abandon: true };
+    }
+  }
   const values = array.slice(start) as FabricValue[];
   if (values.length === 0) {
-    return { ops: [], suppress: [] };
+    return { ops: [], suppress: [], abandon: true };
   }
   return {
     ops: [{
@@ -185,7 +245,12 @@ const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
       by: (existing?.op === "increment" ? existing.by : 0) + delta.by,
     }),
     // Increments that summed to zero (a +1 and a -1) are a no-op: the working
-    // value already reflects no change, so emit nothing (and nothing to suppress).
+    // value already reflects no change, so emit nothing (and nothing to
+    // suppress). Deliberately NOT abandoned: with the value unchanged the diff
+    // has no candidate at this path either, so there is no replacement write
+    // whose reads need restoring — abandoning would only put the op's own read
+    // back into the conflict set and make a net-zero increment false-conflict
+    // with a concurrent one.
     build: (intent, ctx) =>
       intent.by === 0 ? { ops: [], suppress: [] } : {
         ops: [
