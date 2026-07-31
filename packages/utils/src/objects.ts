@@ -24,7 +24,7 @@
  * @returns `true` if the value is a plain object all of whose own properties
  *   are enumerable string-keyed data properties, `false` otherwise.
  */
-export function isPlainObjectWithOnlyEnumerableStringKeys(
+export function isInertPlainObject(
   value: unknown,
 ): boolean {
   if ((value === null) || (typeof value !== "object")) {
