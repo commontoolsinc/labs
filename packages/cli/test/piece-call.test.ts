@@ -16,6 +16,7 @@ import {
   invocationPhaseReporter,
   isPieceGetDataError,
   pieceCallInvocation,
+  pieceCallPhaseObserver,
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
@@ -1366,6 +1367,97 @@ describe("piece call stdin payloads", () => {
       "dispatched",
       "readback",
     ]);
+  });
+
+  it("streams one wall-clock span per observed phase to stderr under --verbose", () => {
+    const lines: string[] = [];
+    const seen: string[] = [];
+    let t = 1000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      (phase) => seen.push(phase),
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 1012.5;
+    observer.onPhase("dispatched");
+    t = 1093.5;
+    observer.onPhase("committed");
+    t = 1094.5;
+    observer.onPhase("readback");
+    t = 1100;
+    observer.finish();
+    // A second finish must not double-close the settled span.
+    observer.finish();
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 12.5ms",
+      "timing: dispatched → committed 81.0ms",
+      "timing: committed → readback 1.0ms",
+      "timing: readback → settled 5.5ms",
+    ]);
+    // The furthest-phase tracker still advances for the failure report.
+    expect(seen).toEqual(["dispatched", "committed", "readback"]);
+  });
+
+  it("closes the in-flight span with the failure that ended it", () => {
+    const lines: string[] = [];
+    let t = 2000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 2010;
+    observer.onPhase("dispatched");
+    t = 2500;
+    observer.finish("failed");
+    // Lines stream per transition, so the spans observed before the failure
+    // are already out; the failure only closes the one in flight.
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 10.0ms",
+      "timing: dispatched → failed 490.0ms",
+    ]);
+  });
+
+  it("emits no timing lines without --verbose while phases still advance", () => {
+    const lines: string[] = [];
+    const seen: string[] = [];
+    const observer = pieceCallPhaseObserver(
+      false,
+      (phase) => seen.push(phase),
+      (line) => lines.push(line),
+    );
+    observer.onPhase("dispatched");
+    observer.onPhase("committed");
+    observer.finish();
+    expect(lines).toEqual([]);
+    expect(seen).toEqual(["dispatched", "committed"]);
+  });
+
+  it("defaults to console.error — stdout stays exactly the command output", () => {
+    const stderrLines: string[] = [];
+    const stdoutLines: string[] = [];
+    const originalError = console.error;
+    const originalLog = console.log;
+    console.error = (...args: unknown[]) => {
+      stderrLines.push(args.join(" "));
+    };
+    console.log = (...args: unknown[]) => {
+      stdoutLines.push(args.join(" "));
+    };
+    try {
+      const observer = pieceCallPhaseObserver(true, () => {});
+      observer.onPhase("dispatched");
+      observer.finish();
+    } finally {
+      console.error = originalError;
+      console.log = originalLog;
+    }
+    expect(stderrLines).toHaveLength(2);
+    expect(stderrLines[0]).toMatch(/^timing: initial_sync → dispatched \d/);
+    expect(stderrLines[1]).toMatch(/^timing: dispatched → settled \d/);
+    expect(stdoutLines).toEqual([]);
   });
 
   it("shapes the settled Invocation JSON an agent parses", () => {
