@@ -59,13 +59,11 @@ export function resolveSystemPatternSource(
   const path = source.slice(SYSTEM_PATTERN_SOURCE_SCHEME.length);
   if (path.length === 0 || path.startsWith("/")) return undefined;
   if (path.includes("?") || path.includes("#")) return undefined;
-  let resolved: URL;
-  try {
-    resolved = new URL(PATTERNS_ROUTE_PREFIX + path, RESOLUTION_BASE);
-  } catch {
-    return undefined;
-  }
-  if (resolved.origin !== new URL(RESOLUTION_BASE).origin) return undefined;
+  // Resolving a `/`-rooted path against a fixed base neither throws nor can
+  // reach another origin, whatever the ref holds — the prefix is prepended, so
+  // even `//evil.example/x` is just a path. What it CAN do is climb: `..`
+  // segments are normalized here, and the prefix is re-checked afterwards.
+  const resolved = new URL(PATTERNS_ROUTE_PREFIX + path, RESOLUTION_BASE);
   if (!resolved.pathname.startsWith(PATTERNS_ROUTE_PREFIX)) return undefined;
   return resolved.pathname;
 }

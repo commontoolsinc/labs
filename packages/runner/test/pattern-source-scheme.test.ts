@@ -81,6 +81,9 @@ describe("normalizePatternSource", () => {
     expect(
       normalizePatternSource("http://elsewhere.test/api/patterns/x.tsx", HOST),
     ).toBe("http://elsewhere.test/api/patterns/x.tsx");
+    // This host, but not the patterns route: nothing to rewrite it into.
+    expect(normalizePatternSource(`${HOST}/api/other/thing.tsx`, HOST))
+      .toBe(`${HOST}/api/other/thing.tsx`);
     // With no host there is nothing to compare against.
     expect(normalizePatternSource(`${HOST}/api/patterns/system/home.tsx`))
       .toBe(`${HOST}/api/patterns/system/home.tsx`);

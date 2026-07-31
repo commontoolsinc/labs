@@ -67,7 +67,6 @@
 
 import { fromFileUrl } from "@std/path/from-file-url";
 import { Identity } from "@commonfabric/identity";
-import { resolveSystemPatternSource } from "@commonfabric/runner";
 import {
   DEFAULT_APP_PATTERN_SOURCE,
   HOME_PATTERN_SOURCE,
@@ -122,12 +121,7 @@ async function main() {
   // cannot drift from what actually auto-updates. A constant that stops
   // deriving a key would leave the gate requiring nothing, so that is checked
   // rather than absorbed.
-  // The constants are `system:` refs; the gate maps ROUTES to fixture keys, so
-  // each is expanded here. A ref that stops resolving to a route falls through
-  // unexpanded and trips the unmapped check below — the drift the check exists
-  // for, rather than a key that silently disappears.
-  const systemUrls = [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE]
-    .map((source) => resolveSystemPatternSource(source) ?? source);
+  const systemUrls = [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE];
   const unmapped = unmappedPatternUrls(systemUrls);
   if (unmapped.length > 0) {
     console.error(reportUnmappedUrls(unmapped));
