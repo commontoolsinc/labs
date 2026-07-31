@@ -452,13 +452,64 @@ observations with `executionClaimAssertion: undefined` explicitly. Those
 resolve `lane = undefined` today and `"space"` under the predicate: a
 population that has never named a lane.
 
-**THE CHEAPER ROUTE, and it needs no client change at all: RESTRICT the
-fallback rather than empty its population.**
+**AND THE RESTRICTION FAILS OPEN OVER THE WIRE — measured, route closed.**
 
 ```ts
+// TRIED AND REVERTED. Do not re-propose without reading the paragraph below.
 const lane = options.actingContext ??
   (assertedLane === "space" ? "space" : undefined);
 ```
+
+It does close the leak (red→green on a real loopback: the forged write lands at
+bob before and at alice after) and the runner suite stays 1377/0. But memory
+goes 845/0 → **800/45**, and **two of those 45 are wire-reachable fail-opens**,
+measured on a real Server/Client loopback rather than inferred: the identical
+commit goes from `REFUSED ExecutionActionFirewallError: non-lane-scope` at
+baseline to `APPLIED status=kept` at the sponsor's context under the
+restriction. Five of the 45 are wire-path, not in-process. 44 of 45 would be
+mechanically fixable by passing `actingContext`, but **the two fail-open
+fixtures must NOT be "fixed" that way — they are the only detectors of the
+hole.**
+
+### THE ONE MECHANISM BEHIND ALL FOUR FAILURES — read this before trying a fifth route
+
+Every route tried today fails for the same reason, and it is not about lane
+resolution at all:
+
+> **`actingLane !== undefined` IS THE WRITE FIREWALL'S ON-SWITCH.**
+> `firewalledActionRun` tests nothing else. So `assertedLane` — the unvalidated
+> wire field — is what TURNS THE WRITE FIREWALL ON for scoped commits. It is not
+> merely resolving a lane; it is admitting a population INTO the firewall.
+
+That single fact explains all four measurements:
+
+| route | what it does to the on-switch | measured |
+| --- | --- | --- |
+| delete the fallback outright | firewall OFF for space-rank executor commits, which then fail the lease's bounded-run requirement | 83 memory + 16 runner, all refusals |
+| client names space, broad | firewall ON for the entire ordinary-client population, never subject to it before | livelock, refused-and-retried |
+| client names space, narrow | firewall ON for the executor's space commits | livelock, accepted-and-no-op |
+| restrict the fallback to `"space"` | firewall **OFF** for scoped-asserting commits — so a write the firewall used to reject now applies | **wire-reachable fail-open** |
+
+**So `claim-not-live` is not guarding a lane. It is standing in for the write
+firewall on a population the firewall cannot otherwise reach**, and any change
+that moves the on-switch moves a whole population in or out of enforcement at
+once. That is why every route costs something real, and why four independent
+attempts failed in four different ways.
+
+**The leg is therefore MEASURED-AND-BLOCKED, not abandoned.** Do not try a
+fifth variant of "which lane string reaches the engine". The next move is one
+of these two, and both are bigger than a one-line change:
+
+1. **Decouple the firewall's on-switch from lane presence** — let a commit that
+   ASSERTS a scoped lane be firewalled even when it resolves no lane. That
+   attacks the actual coupling instead of shuffling which population is inside
+   it, and it would make the restriction safe.
+2. **Understand the narrow-variant livelock** (accepted-and-no-op, `seq` pinned,
+   mechanism unpinned) — that is the only route where the executor's own
+   population was correct and something else broke.
+
+Until one of those lands, `claim-not-live` stays. It has now held for a measured
+reason four times over, which is a stronger position than it started the day in.
 
 The leak is exclusively about SCOPED lanes. `"space"` has no acting principal
 and `admitExecutionCommitLanes` returns early for it before the claim loop, so
