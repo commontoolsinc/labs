@@ -108,7 +108,11 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
 } from "./cfc/types.ts";
-import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
+import {
+  localRefTarget,
+  relaxDefaultedRequired,
+  validateSchemaValue,
+} from "./cfc/schema-sanitization.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
@@ -782,6 +786,110 @@ const acceptsOpaqueCellOrUnresolvedLink = (
 ): boolean =>
   value === UNRESOLVED_LINK_PLACEHOLDER ||
   schemaAcceptsOpaqueCellValue(value, schema);
+
+// The relaxed copy of a handler's argument schema, built once per schema
+// rather than once per dispatched event: `generateHandlerSchema` interns its
+// result, so every dispatch of the same handler shares one entry by identity.
+const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
+
+/**
+ * The dispatch-side closed-world gate (verb contract WS-C, C5 — design rule
+ * 1: an undeclared field is a rejection, never ignored).
+ *
+ * Returns the rejection message when a PRESENT event payload cannot satisfy
+ * an event schema that declares `additionalProperties: false` — read off the
+ * handler's `$event` schema itself, or off the definition a top-level local
+ * `$ref` names (`generateHandlerSchema` hoists the event schema's `$defs`
+ * onto the handler schema, so that schema is the root local refs resolve
+ * against). Everything else returns `undefined` and keeps the measured
+ * delivery behavior (recorded on #5147):
+ *
+ * - An OPEN event schema stays exactly as measured: the schema read path
+ *   delivers the declared fields and ignores the rest, and a payload that
+ *   misses the schema reads back as an absent event. Closure is the schema's
+ *   opt-in — generated event schemas do not carry it yet (the emission is
+ *   blocked on a pattern-update-gate migration; see the plan's WS-C bullet).
+ * - An ABSENT payload stays deliverable as `undefined` regardless of
+ *   closure: absence is the CLI gate's question (D5), and the measured table
+ *   holds — defaults never materialize for an absent event.
+ *
+ * Validation is the same composition the CLI's pre-dispatch gate applies
+ * (`verbInputSchemaError`, packages/cli/lib/callable.ts) — which is why D6
+ * moved the helpers beside the validator: `required` lists are relaxed for
+ * defaulted properties first (the runtime fills a present object's missing
+ * defaulted properties before checking `required`, so judging the unrelaxed
+ * schema would refuse payloads the verb accepts), then `validateSchemaValue`
+ * judges the payload. Cell links inside the payload are accepted opaquely: a
+ * link's target cannot be read here, and its schema check belongs to the
+ * handler's own reactive reads — the same deferral the pattern-argument
+ * validator applies to unresolvable links. A link VALUE passes unjudged; an
+ * undeclared KEY still rejects.
+ *
+ * On rejection the handler wrapper throws, which fails the handling exactly
+ * the way a thrown handler error already fails — no new receipt shape, error
+ * class, or wire format (WS-E owns codes later).
+ */
+function closedWorldEventRejection(
+  argumentSchema: JSONSchema | undefined,
+  event: unknown,
+): string | undefined {
+  if (event === undefined) return undefined;
+  if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+    return undefined;
+  }
+  const eventSchema = argumentSchema.properties.$event;
+  if (!isRecord(eventSchema)) return undefined;
+  const refTarget = localRefTarget(eventSchema, argumentSchema);
+  const closed = eventSchema.additionalProperties === false ||
+    (isRecord(refTarget) && refTarget.additionalProperties === false);
+  if (!closed) return undefined;
+
+  // The LLM tool-call path injects a `result` cell into every handler-tool
+  // payload (`builtins/llm-dialog.ts`: `handler.send({ ...input, result })` —
+  // "doesn't HAVE to be used, but can be"), and the advertised schema
+  // deliberately hides the slot (`stripInjectedResult` there; the CLI's
+  // `cloneWithoutBoundToolKeys` does the same), so a closed schema that does
+  // not declare `result` still receives it — invisibly to the handler, since
+  // the schema read path never delivers undeclared fields. Judge the payload
+  // without the injected slot: refusing a field the runtime itself injected
+  // would reject every closed-schema tool call. Only the injected SHAPE is
+  // exempt — an undeclared `result` carrying plain data is still a rejection.
+  let payload: unknown = event;
+  if (
+    isRecord(event) &&
+    isCellLink((event as Record<string, unknown>).result) &&
+    !(isRecord(refTarget) && isRecord(refTarget.properties) &&
+      Object.hasOwn(refTarget.properties, "result"))
+  ) {
+    const { result: _injectedResult, ...rest } = event as Record<
+      string,
+      unknown
+    >;
+    payload = rest;
+  }
+
+  let relaxedRoot = relaxedHandlerSchemaCache.get(argumentSchema);
+  if (relaxedRoot === undefined) {
+    relaxedRoot = relaxDefaultedRequired(
+      argumentSchema,
+      argumentSchema,
+      new Map(),
+    );
+    relaxedHandlerSchemaCache.set(argumentSchema, relaxedRoot);
+  }
+  const relaxedEvent = isRecord(relaxedRoot) && isRecord(relaxedRoot.properties)
+    ? relaxedRoot.properties.$event
+    : undefined;
+  if (relaxedEvent === undefined) return undefined;
+
+  const failure = validateSchemaValue(relaxedEvent, payload, relaxedRoot, {
+    acceptOpaqueValue: (value) => isCellLink(value),
+  });
+  if (failure === undefined) return undefined;
+  return "Event payload rejected by the verb's closed event schema " +
+    "(additionalProperties: false — an undeclared field is a rejection, " +
+    `never ignored): ${failure}`;
+}
 
 /**
  * Rebuild `materialized` so every slot whose counterpart in `raw` is a link
@@ -5139,6 +5247,20 @@ export class Runner {
   ): void {
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
+
+      // The dispatch-side closed-world gate (verb contract WS-C, C5). A
+      // present payload that cannot satisfy a closed event schema fails the
+      // handling exactly the way a thrown handler error already fails: the
+      // body never runs, the transaction aborts (no receipt is created, the
+      // event id is not spent), scheduler onError fires, and the commit
+      // callback settles with the errored transaction.
+      const closedWorldRejection = closedWorldEventRejection(
+        module.argumentSchema,
+        event,
+      );
+      if (closedWorldRejection !== undefined) {
+        throw new Error(closedWorldRejection);
+      }
 
       const eventInputs = {
         ...(inputs as Record<string, any>),
