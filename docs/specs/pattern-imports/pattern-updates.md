@@ -105,9 +105,11 @@ the *destination* cell's annotations, and replication does not copy the
 `updatesAt` written in a publisher's space
 would not appear on a consumer's replicated copy. The **piece** is the reliable
 carrier: explicit source provenance travels with it. For an unstamped non-root
-piece, its verified source-doc closure supplies the authored entry path; the
-runtime persists that path on the piece only after the matching same-toolshed
-`?identity` route succeeds.
+piece, its verified source-doc closure supplies the authored entry path — but
+only a path under the patterns route is admitted, since a module's name equals
+its route only for a program compiled over HTTP. The runtime persists the
+`system:` ref that path spells, and only after the matching `?identity` route
+succeeds.
 
 ## The implemented specialized model
 
@@ -116,9 +118,11 @@ Two decisions carry the whole design:
 1. **Every updatable piece carries a `patternSource` provenance string** — the
    source it tracks for updates. (`patternSource`, *not* `source`: the latter
    is the doc-level producer annotation the server-primary work uses.) Roots
-   stamp it at URL-based creation. An unstamped non-root may recover its verified
-   authored entry filename and stamp it after that same-origin route proves it
-   implements `?identity`.
+   stamp it at creation. An unstamped non-root may recover its verified
+   authored entry filename, but only one that is itself a patterns-route path,
+   and stamps the `system:` ref for it after that route proves it implements
+   `?identity`. A filename that names no route is not a claim about a source,
+   and the piece stays unstamped.
 2. **Update = resolve `patternSource` → current identity; if it differs from
    the persisted `patternIdentity.identity`, write the new `{identity, symbol}`
    to the piece's `patternIdentity` meta.** At space open this happens before
@@ -190,10 +194,17 @@ prefix:
   (`fabric-ref-resolution.ts`: slug → piece → `patternIdentity`). A
   `cf:pattern:<hash>` ref is **frozen** (resolves to a constant → never
   updates); a bare slug **tracks**. Immutability is just a pinned ref.
-- **non-`cf:` toolshed source path** (system, e.g.
-  `/api/patterns/system/default-app.tsx`) → use `?identity` against the space's
-  host, then fetch and compile whenever the persisted artifact needs an update
-  or repair.
+- **`system:` ref** (a pattern this deployment's toolshed serves from its
+  patterns directory, addressed relative to that route, e.g.
+  `system:system/default-app.tsx` → `/api/patterns/system/default-app.tsx`) →
+  use `?identity` against the space's host, then fetch and compile whenever the
+  persisted artifact needs an update or repair. The ref is host-relative, so it
+  survives a space moving hosts; a ref that would climb out of the patterns
+  route is refused.
+- **Anything else** → no fetch. The scheme is a whitelist rather than a
+  filter, because a bare path cannot be distinguished from an authored module
+  name that merely looks like a route, and resolving such a name against the
+  host reaches whatever the site serves for an unrouted path.
 - **General source URL origins** use the discriminated active-origin and
   revision schemas defined by the piece source lifecycle spec. They must not
   overload the raw string with origin-kind-specific behavior. A fabric
@@ -210,11 +221,14 @@ be established under the ordinary consent rule. Otherwise it keeps the legacy
 locator only as inactive historical provenance and migrates the piece as
 detached. Rollout flags are not durable per-piece consent.
 
-Migration resolves a relative system path against the currently accepted
-toolshed route for the space and stores the resulting absolute web URL. If no
-accepted host can be established, migration does not invent an active origin.
-A later host remapping does not rewrite the stored URL; that requires an
-ordinary repoint.
+Migration rewrites a pre-scheme system locator — the rooted patterns-route
+path, and the absolute web URL that path resolves to under the space's own
+accepted host — into the `system:` ref naming the same file. A locator on any
+other host is left alone: re-pointing it at the local toolshed would be a
+change of source, not a change of spelling. If no accepted host can be
+established, migration does not invent an active origin. Because the ref is
+host-relative, a later host remapping needs no rewrite; changing which *file* a
+piece tracks still requires an ordinary repoint.
 
 A source-less legacy root does not gain an origin merely because it is a root.
 The specialized updater can derive an official candidate path, but ordinary
@@ -404,11 +418,12 @@ conditionally revalidate them before every update attempt.
 root with `runIt=false`, run this loop, re-resolve the cell after any metadata
 transaction, and only then start it:
 
-1. `url` = the root piece's stored `patternSource`. If it is absent, derive the
-   official candidate URL for the space, but do not treat that path as
-   provenance. A root with explicit repository provenance remains pinned.
-   `host` = `mappedHostFor(space) ?? apiUrl`. Only same-origin toolshed sources
-   participate in this v1 loop.
+1. `url` = the patterns route the root piece's stored `patternSource` ref
+   expands to. If the source is absent, derive the official candidate ref for
+   the space, but do not treat it as provenance. A root with explicit
+   repository provenance remains pinned, and so is one whose source is not a
+   `system:` ref. `host` = `mappedHostFor(space) ?? apiUrl`; the ref is
+   host-relative, so the request is same-origin by construction.
 2. `currentId` = a revalidating `GET {host}{url}?identity` for this attempt
    (`fetch` cache mode `no-cache`). A matching `ETag` may reuse the cached body
    after a `304`; the browser may not replay it without validation. An HTTP
