@@ -557,7 +557,7 @@ describe("Pattern Runner - Lift", () => {
 
     // Follow the result indirection to the doc that actually holds the
     // array, then assert its RAW stored form: a plain inline array of
-    // records — not element links, and not element `[ID]` markers.
+    // records — not element links, and not anchored element documents.
     const indexCell = result.key("index");
     const link = resolveLink(
       runtime,

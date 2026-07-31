@@ -727,8 +727,8 @@ export class ContextualFlowControl {
     return cfcSchemaIsTrue(schema);
   }
 
-  // We don't need to check ID, since it won't be included in Object.keys
-  // return values.
+  // Symbol keys are not included in Object.keys return values, so no
+  // symbol-keyed entry needs checking here.
   static isInternalSchemaKey(key: string): boolean {
     return cfcSchemaIsInternalKey(key);
   }

@@ -8,7 +8,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createCell, isCell } from "../src/cell.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
@@ -186,12 +186,12 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
 
-      // Create nested documents in the array using [ID] syntax
+      // Anchoring creates a nested document per array element
       listCell.set({
         items: [
-          { [ID]: "item-1", name: "Item 1", value: 10 },
-          { [ID]: "item-2", name: "Item 2", value: 20 },
-          { [ID]: "item-3", name: "Item 3", value: 30 },
+          { name: "Item 1", value: 10 },
+          { name: "Item 2", value: 20 },
+          { name: "Item 3", value: 30 },
         ],
       });
 
@@ -313,9 +313,9 @@ describe("Schema - Link Resolution", () => {
       // Create todos as nested documents
       todoCell.set({
         todos: [
-          { [ID]: "todo-1", title: "Task 1", done: false },
-          { [ID]: "todo-2", title: "Task 2", done: true },
-          { [ID]: "todo-3", title: "Task 3", done: false },
+          { title: "Task 1", done: false },
+          { title: "Task 2", done: true },
+          { title: "Task 3", done: false },
         ],
       });
 
@@ -391,9 +391,9 @@ describe("Schema - Link Resolution", () => {
       // Mix of nested documents and plain objects
       mixedCell.set({
         items: [
-          { [ID]: "nested-1", type: "document", value: "A" },
+          { type: "document", value: "A" },
           { type: "plain", value: "B" }, // Plain object
-          { [ID]: "nested-2", type: "document", value: "C" },
+          { type: "document", value: "C" },
           { type: "plain", value: "D" }, // Plain object
         ],
       });
@@ -450,9 +450,9 @@ describe("Schema - Link Resolution", () => {
       // Create array with nested documents
       listCell.set({
         items: [
-          { [ID]: "doc-a", name: "A", order: 1 },
-          { [ID]: "doc-b", name: "B", order: 2 },
-          { [ID]: "doc-c", name: "C", order: 3 },
+          { name: "A", order: 1 },
+          { name: "B", order: 2 },
+          { name: "C", order: 3 },
         ],
       });
 
@@ -512,8 +512,8 @@ describe("Schema - Link Resolution", () => {
       // Create nested documents in the array
       listCell.set({
         items: [
-          { [ID]: "proxy-1", name: "Proxy 1", value: 100 },
-          { [ID]: "proxy-2", name: "Proxy 2", value: 200 },
+          { name: "Proxy 1", value: 100 },
+          { name: "Proxy 2", value: 200 },
         ],
       });
 

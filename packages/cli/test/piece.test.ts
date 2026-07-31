@@ -4,7 +4,6 @@ import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
   getCellOrThrow,
-  ID as FABRIC_ID,
   isCell,
   isCellResult,
   type JSONSchema,
@@ -940,7 +939,10 @@ describe("cli piece parsing", () => {
           searchablePiece(
             "of:internal-symbol",
             "Internal symbol metadata",
-            { [FABRIC_ID]: "Needle in internal identity metadata" },
+            {
+              [Symbol("internal metadata")]:
+                "Needle in internal identity metadata",
+            },
             {},
           ),
           searchablePiece(
