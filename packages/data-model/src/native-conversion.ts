@@ -3,10 +3,10 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   isArrayIndexPropertyName,
-  isArrayWithOnlyIndexProperties,
+  isInertArray,
 } from "@commonfabric/utils/arrays";
 
 import {
@@ -41,7 +41,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
 /**
  * Returns a shallow clone of the given array carrying nothing but its
  * enumerable index properties and `length`, that is, one which satisfies
- * `isArrayWithOnlyIndexProperties()`. Holes are preserved as holes, and
+ * `isInertArray()`. Holes are preserved as holes, and
  * elements are copied by reference without themselves being converted or
  * validated, this being a shallow operation.
  *
@@ -51,6 +51,11 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * Calling this is how such a caller says explicitly that it means to drop
  * them. Code with no such warrant should let the rejection happen ("death
  * before confusion").
+ *
+ * The given array's index properties must all be enumerable data properties:
+ * the copy reads elements through enumeration, which would execute an
+ * accessor-backed index (silently flattening it to its momentary answer)
+ * and would turn a non-enumerable data index into a hole.
  *
  * @param value The array to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
@@ -101,7 +106,7 @@ export function shallowCleanArray(
 /**
  * Returns a shallow clone of the given object carrying nothing but its
  * enumerable string-keyed properties, that is, one which satisfies
- * `isPlainObjectWithOnlyEnumerableStringKeys()`. Values are copied by reference
+ * `isInertPlainObject()`. Values are copied by reference
  * without themselves being converted or validated, this being a shallow
  * operation.
  *
@@ -244,13 +249,15 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Array: {
-      // Arrays may only carry numeric index properties. A named property or a
-      // symbol-keyed one has no fabric representation, so reject it outright
-      // rather than silently dropping it ("death before confusion").
-      if (!isArrayWithOnlyIndexProperties(value)) {
+      // An array in this system is INERT: it may only carry numeric index
+      // properties, each a data property. A named or symbol-keyed property
+      // has no fabric representation, and an accessor-backed index is live
+      // code rather than inert data; reject any of them outright rather than
+      // silently dropping or flattening ("death before confusion").
+      if (!isInertArray(value)) {
         throw new Error(
-          "Not representable as a `FabricValue`: array with non-index " +
-            "properties",
+          "Not representable as a `FabricValue`: array that is not an " +
+            "inert array",
         );
       }
       // Delegate frozenness handling to `cloneHelper()`.
@@ -271,7 +278,7 @@ export function shallowFabricFromNativeValue(
       // outright rather than dropping or flattening it on the way through
       // ("death before confusion"), matching how an array's non-index
       // properties are treated.
-      if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
+      if (!isInertPlainObject(value)) {
         throw new Error(
           "Not representable as a `FabricValue`: object that is not an " +
             "inert plain object",
@@ -656,8 +663,9 @@ function isFabricCompatibleInternal(
       seen.add(value);
 
       if (Array.isArray(value)) {
-        // Check array structure (no non-index properties).
-        if (!isArrayWithOnlyIndexProperties(value)) {
+        // Check array structure (no non-index properties, no
+        // accessor-backed indices).
+        if (!isInertArray(value)) {
           seen.delete(value);
           return false;
         }
@@ -689,7 +697,7 @@ function isFabricCompatibleInternal(
       // Plain objects -- check the key shape, then all property values
       // recursively. A symbol key or a non-enumerable string key has no fabric
       // representation, just as an array's non-index properties do not.
-      if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
+      if (!isInertPlainObject(value)) {
         seen.delete(value);
         return false;
       }

@@ -168,6 +168,25 @@ describe("type-check", () => {
         expect(isFabricValueLayer(arr)).toBe(false);
       });
 
+      it("returns `false` for an array with an accessor-backed index", () => {
+        // An accessor is live code, not inert data: a read executes it and
+        // can answer differently every time. Freezing does not change that.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: false,
+        });
+        expect(isFabricValueLayer(arr)).toBe(false);
+        expect(isFabricValueLayer(Object.freeze(arr))).toBe(false);
+      });
+
+      it("returns `false` for an array with a setter-only index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, { set: () => {}, enumerable: true });
+        expect(isFabricValueLayer(arr)).toBe(false);
+      });
+
       it("returns `false` for a sparse array with extra named properties", () => {
         // Length 3, hole at index 1, plus a named property "foo": still
         // `false` because the named property isn't a valid array index.
@@ -385,6 +404,24 @@ describe("type-check", () => {
         const arr = [1, 2, 3];
         Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
         expect(isFabricValue(arr)).toBe(false);
+      });
+
+      it("returns `false` for an accessor-backed array index, at any depth", () => {
+        // An accessor is live code, not inert data, no matter the container:
+        // an array index reaches it just as a plain-object key does.
+        const top = [1, 2, 3];
+        Object.defineProperty(top, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: false,
+        });
+        expect(isFabricValue(top)).toBe(false);
+        expect(isFabricValue(Object.freeze(top))).toBe(false);
+
+        const inner = [4, 5];
+        Object.defineProperty(inner, 0, { set: () => {}, enumerable: true });
+        expect(isFabricValue({ data: inner })).toBe(false);
+        expect(isFabricValue([1, [inner]])).toBe(false);
       });
 
       it("returns `false` for a symbol-keyed-property array nested in the graph", () => {

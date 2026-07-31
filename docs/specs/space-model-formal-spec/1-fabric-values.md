@@ -1190,6 +1190,11 @@ Section 4.5.
   (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
 - Non-index keys cause rejection, `length` aside: named (string-keyed) and
   symbol-keyed properties alike, whether or not they are enumerable
+- Every present index must hold a *data* property: an accessor-backed
+  (getter and/or setter) index causes rejection, because an accessor is live
+  code rather than an inert value. Index enumerability is not significant,
+  because array contents are reached by index rather than by
+  enumeration-driven copying
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
 > explicitly-set `undefined` element. Given `const a = [1, , 3]`, index `1` is
@@ -1217,6 +1222,11 @@ Section 4.5.
 - Keys must be strings; symbol-keyed *properties* cause rejection (this
   is distinct from symbol *values*, which are admitted per Section 1.2
   with the runtime restriction in Section 1.3)
+- Every property must be an enumerable *data* property: an accessor-backed
+  (getter and/or setter) property causes rejection, because an accessor is
+  live code rather than an inert value, and a non-enumerable key causes
+  rejection because it has no representation as a property name in
+  name-driven copying or serialization
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - No distinction between regular and null-prototype objects; reconstruction
