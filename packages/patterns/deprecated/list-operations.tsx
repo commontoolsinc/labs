@@ -2,7 +2,6 @@ import {
   computed,
   Default,
   handler,
-  ID,
   lift,
   NAME,
   pattern,
@@ -10,12 +9,12 @@ import {
   Writable,
 } from "commonfabric";
 
-// NOTE: This example uses [ID] to demonstrate advanced array manipulation features
-// and ensure stable references when items are inserted/removed at the front of the array.
-// For most basic list patterns, you DON'T need [ID]. See docs/common/PATTERNS.md for
-// simpler examples without [ID] that use bidirectional binding.
+// NOTE: Array elements are anchored into documents of their own automatically,
+// so references stay stable when items are inserted/removed at the front of the
+// array; the `id` field here is ordinary application data. See
+// docs/common/PATTERNS.md for simpler examples using bidirectional binding.
 interface Item {
-  [ID]: number;
+  id: number;
   title: string;
 }
 
@@ -41,10 +40,10 @@ const typeTest = handler(
 );
 
 const resetList = handler((_, state: { items: Writable<Item[]> }) => {
-  state.items.set([{ [ID]: 1, title: "A" }, { [ID]: 2, title: "B" }, {
-    [ID]: 3,
+  state.items.set([{ id: 1, title: "A" }, { id: 2, title: "B" }, {
+    id: 3,
     title: "C",
-  }, { [ID]: 4, title: "D" }]);
+  }, { id: 4, title: "D" }]);
 });
 
 const deleteFirstItem = handler((_, state: { items: Writable<Item[]> }) => {
@@ -63,14 +62,14 @@ const deleteAllItems = handler((_, state: { items: Writable<Item[]> }) => {
 const insertItemAtStart = handler((_, state: { items: Writable<Item[]> }) => {
   const currentItems = state.items.get();
   state.items.set([
-    { [ID]: Math.random(), title: "New Start" },
+    { id: Math.random(), title: "New Start" },
     ...currentItems,
   ]);
 });
 
 const insertItemAtEnd = handler((_, state: { items: Writable<Item[]> }) => {
   const currentItems = state.items.get();
-  state.items.set([...currentItems, { [ID]: Math.random(), title: "New End" }]);
+  state.items.set([...currentItems, { id: Math.random(), title: "New End" }]);
 });
 
 const shuffleItems = handler((_, state: { items: Writable<Item[]> }) => {
@@ -96,16 +95,17 @@ export default pattern<ListInput, ListOutput>(
 
     // We do not just have top-level support on Writable<T[]> for the major array operations.
     // However, performing them on a ProxyObject (such as within a derive, or calling .get() on a Cell in a handler) will work as expected.
-    // caveat: behaviour is only guaranteed to be correct for all operations IF the items include an [ID] property.
-    // excluding the [ID] in this pattern leads to item alignment bugs when insertig or removing from items at the FRONT of an array
+    // Elements are anchored into their own documents automatically, which is
+    // what keeps item alignment stable when inserting or removing at the
+    // FRONT of an array.
     const itemsLessThanB = computed(
       () => items.get().filter((item) => item.title < "B"),
     );
     const extendedItems = computed(
       () =>
         items.get().concat([
-          { [ID]: 5, title: "E" },
-          { [ID]: 6, title: "F" },
+          { id: 5, title: "E" },
+          { id: 6, title: "F" },
         ]),
     );
     const combinedItems = computed(
