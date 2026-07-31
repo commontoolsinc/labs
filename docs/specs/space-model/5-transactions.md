@@ -106,7 +106,8 @@ This system does not implement SQL-style transaction isolation. Key differences:
 
 ### Retry Semantics
 
-The `editWithRetry()` helper provides automatic retry on commit failure:
+The `editWithRetry()` helper provides automatic retry on a **retryable** commit
+failure:
 
 ```typescript
 // Shown for illustration only.
@@ -117,8 +118,38 @@ const result = await runtime.editWithRetry(async (tx) => {
 });
 ```
 
-- On commit error, re-runs the entire function with a fresh transaction
+- On a retryable commit rejection, re-runs the entire function with a fresh
+  transaction
+- On any other commit rejection, returns the error immediately — the first
+  attempt is the only attempt
 - Returns success or error after exhausting retries
+
+Retryability is an **allow-list**, defined once in the shared rejection
+vocabulary (`isRetryableCommitRejection`, `packages/runner/src/storage/rejection.ts`)
+and shared with the scheduler's own classifier. A rejection is retried only when
+re-running the function against fresh state can produce a different outcome:
+
+| Class | Why a re-run can converge |
+| --- | --- |
+| `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
+| `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
+| `ConnectionError`, `SessionError` | Liveness failure: the commit never reached a verdict, so a re-established connection or session can land the identical write. |
+| `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or CFC enforcement refused to hand the transaction over. A re-run is a genuinely new attempt, and costs no round-trip. |
+| `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
+
+Everything else is **terminal on the first attempt**: a `ProtocolError` (the
+server refused the commit's shape), an unmarked `AuthorizationError` (the server
+evaluated the request and denied it), a `PreconditionFailedError` (permanent by
+definition — the client must not retry), a `RowLabelCommitError` (a commit-time
+rule refused the data), a `StoreError`, or the generic `TransactionError`. Those
+are deterministic with respect to the committed data: a re-run recomputes the
+identical refused write, and each doomed attempt costs a server round-trip plus
+a revert notification to the cell's subscribers.
+
+A rejection class introduced later is non-retryable until someone establishes
+that re-running can converge and adds it to the allow-list. If a callback
+*throws* rather than aborting, the transaction is aborted and the error is
+returned without any retry.
 
 The scheduler also provides automatic retry for handlers on transaction conflict.
 

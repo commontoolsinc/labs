@@ -89,3 +89,104 @@ export function isStorageTransactionInconsistent(
 ): boolean {
   return error?.name === "StorageTransactionInconsistent";
 }
+
+/**
+ * A liveness failure: the commit never reached a verdict because the link to
+ * the memory server was down or the session behind it was replaced. The
+ * committed data was never evaluated, so nothing about it is refused — a fresh
+ * attempt over a re-established connection/session can land the identical
+ * write. `ConnectionError` is the runner's normalization of a transport failure
+ * (storage/v2.ts `toConnectionError`); `SessionError` is the server refusing to
+ * route a commit to a session it no longer knows (memory/v2/server.ts "Unknown
+ * session for space"), which the client's reconnect re-opens.
+ *
+ * This is deliberately narrow. An `AuthorizationError` is NOT a liveness
+ * failure even though it also arrives from the network: the server evaluated
+ * the request and denied it. The one exception the server marks itself —
+ * `retriable: true` on a session-open anti-replay race
+ * (memory/v2/session-open-auth.ts) — is handled by
+ * {@link isRetryableCommitRejection} reading that marker, not by class.
+ */
+export function isTransientCommitRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "ConnectionError" || error?.name === "SessionError";
+}
+
+/**
+ * The attempt was discarded before it ever reached storage, so there is no
+ * server verdict to respect: either the `editWithRetry` callback called
+ * `tx.abort()` to throw this attempt away, or CFC enforcement refused to hand
+ * the transaction to storage (`rejectCommitBeforeStorage` in
+ * extended-storage-transaction.ts). Re-running produces a genuinely new
+ * attempt, and — unlike every other rejection class — a discarded attempt costs
+ * no round-trip, no `finalizeRejection`, and no subscriber revert notification,
+ * so retrying one is local work rather than churn against the server.
+ *
+ * NOTE the asymmetry with a callback that THROWS: `editWithRetry` aborts that
+ * transaction and returns immediately without retrying, because a thrown
+ * callback is a failure rather than a request for a fresh attempt. `abort()` is
+ * the affordance for "discard this attempt and run me again".
+ */
+export function isDiscardedAttemptRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "StorageTransactionAborted";
+}
+
+/**
+ * The commit-retry ALLOW-LIST: the only rejection classes for which re-running
+ * the same function against fresh state can produce a different outcome. Used
+ * by `Runtime.editWithRetry` (runtime.ts), which before this predicate retried
+ * on the mere TRUTHINESS of the commit error — so a deterministic refusal (an
+ * ACL `ProtocolError`, an `AuthorizationError`, a `PreconditionFailedError`
+ * whose own interface doc says the client MUST NOT retry) burned the whole
+ * budget on identical doomed round-trips, each one emitting a subscriber revert
+ * from `finalizeRejection`. Budgets are not small everywhere: pattern-manager
+ * sizes one at `Math.max(16, 2 * importEdges + 8)`.
+ *
+ * It is an allow-list on purpose. A rejection class introduced tomorrow — a new
+ * server-side commit rule, a new policy refusal — is non-retryable until
+ * someone establishes that re-running can converge and adds it here, next to
+ * the reason why. The reverse default silently enrolls every new refusal in the
+ * doomed-retry loop, which is how this defect arose.
+ *
+ * The four admitted cases and their convergence argument:
+ *  - stale basis from upstream ({@link isConflictRejection}) — the retry runs
+ *    after the conflict's `readyToRetry` catch-up gate, against fresh state.
+ *  - stale basis locally ({@link isStorageTransactionInconsistent}) — a value
+ *    read during the transaction changed on this replica; re-reading resolves.
+ *  - liveness ({@link isTransientCommitRejection}) — the commit was never
+ *    evaluated; a re-established connection/session can land it.
+ *  - discarded attempt ({@link isDiscardedAttemptRejection}) — the attempt
+ *    never reached storage and the caller asked for a fresh one.
+ *
+ * Plus one marker-driven case: an `AuthorizationError` the SERVER tagged
+ * `retriable` (the session-open anti-replay race a fresh handshake heals — see
+ * memory/v2/session-open-auth.ts, and `isNonRetriableAuthorizationError` in
+ * memory/v2/client.ts, which reads the same marker). An unmarked
+ * `AuthorizationError` is terminal, including the ACL bootstrap denial
+ * ("Space … requires an ACL genesis commit before ordinary writes",
+ * memory/v2/server.ts): that denial CAN clear if a concurrent genesis lands,
+ * but retrying it here is not how it clears — `editWithRetry` re-runs with no
+ * backoff, so all attempts complete within milliseconds of each other, and the
+ * runner's own genesis runs at session open (storage/v2.ts) rather than
+ * concurrently with a replica's writes. Failing fast surfaces the real problem
+ * instead of hiding it behind six identical denials. If that race ever needs to
+ * heal by retry, the server should mark the denial `retriable` — the marker,
+ * not a blanket class exemption, is the mechanism.
+ */
+export function isRetryableCommitRejection(
+  error: { name?: string; retriable?: boolean } | undefined | null,
+): boolean {
+  if (!error) return false;
+  if (
+    isConflictRejection(error) ||
+    isStorageTransactionInconsistent(error) ||
+    isTransientCommitRejection(error) ||
+    isDiscardedAttemptRejection(error)
+  ) {
+    return true;
+  }
+  return error.name === "AuthorizationError" && error.retriable === true;
+}

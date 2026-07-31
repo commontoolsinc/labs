@@ -4284,16 +4284,39 @@ const toRejectedError = (
     return rejected;
   }
 
-  // A terminal commit rejection (a deterministic server-side refusal of the
-  // committed data — today `RowLabelCommitError`, storage/rejection.ts
-  // `isTerminalRejection`): preserve the wire name so the scheduler classifies
-  // it as non-retryable instead of collapsing it into a generic, bounded-retry
-  // TransactionError. Re-running the identical handler recomputes the identical
-  // refused write, so the doomed re-runs would only starve sibling commits.
-  if (name === "RowLabelCommitError") {
+  // Preserve the wire name the server chose instead of collapsing it into a
+  // generic TransactionError. Every classifier downstream — the scheduler's
+  // `classifyCommitDisposition`, `Runtime.editWithRetry`'s retry allow-list
+  // (storage/rejection.ts) — keys off `error.name`, so flattening here destroys
+  // the only evidence they have. The names:
+  //
+  //  - `RowLabelCommitError`: a deterministic commit-time row-label refusal
+  //    (memory/v2/sqlite/commit-eval.ts), classified terminal by
+  //    `isTerminalRejection`. Re-running recomputes the identical refused
+  //    write, so the doomed re-runs would only starve sibling commits.
+  //  - `ProtocolError`: the server refused the SHAPE of the commit (an ACL
+  //    mutation that is not a whole-document `set`, a multi-operation ACL
+  //    commit — memory/v2/server.ts `#validateAclCommit`). Nothing about the
+  //    commit changes on a re-run, so it can never become well-formed.
+  //  - `AuthorizationError`: the server evaluated the request and denied it.
+  //    The server's own `retriable` marker (a session-open anti-replay race a
+  //    fresh handshake heals) rides along, as it already does on the pull path
+  //    (`toPullError` above) — it is what distinguishes the one denial that can
+  //    clear from the ones that cannot.
+  //  - `SessionError`: the commit was routed to a session the server no longer
+  //    knows; the client's reconnect re-opens one, so a retry can land it.
+  //
+  // The memory server MUST keep emitting these names unchanged (server.ts
+  // `transact` catch, and the ACL validation errors it returns directly).
+  if (
+    name === "RowLabelCommitError" || name === "ProtocolError" ||
+    name === "AuthorizationError" || name === "SessionError"
+  ) {
+    const retriable = (error as { retriable?: unknown })?.retriable === true;
     return {
       name,
       message,
+      ...(retriable ? { retriable: true } : {}),
       cause: { name: "SystemError", message, code: 500 },
       transaction: commit as Transaction,
     } as unknown as TransactionError;

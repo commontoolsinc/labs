@@ -110,6 +110,7 @@ import { ModuleRegistry } from "./module.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
@@ -1624,7 +1625,18 @@ export class Runtime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    *
-   * If the transaction fails, it will be retried up to maxRetries times.
+   * If the transaction fails with a RETRYABLE commit rejection, it will be
+   * retried up to maxRetries times. Retryability is decided by the shared
+   * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
+   * which is an allow-list: a stale basis (server conflict or the local
+   * inconsistency guard), a liveness failure (connection/session), a discarded
+   * attempt (`tx.abort()` or a CFC pre-storage refusal), or an authorization
+   * denial the server itself marked `retriable`. Every other rejection — an
+   * ACL/protocol refusal, an authorization denial, a precondition failure, a
+   * commit-rule violation — is deterministic with respect to the committed data
+   * and is returned on the FIRST attempt, because re-running recomputes the
+   * identical refused write and each doomed attempt costs a round-trip plus a
+   * subscriber revert notification.
    *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.
@@ -1658,7 +1670,7 @@ export class Runtime {
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
       if (error) {
-        if (maxRetries > 0) {
+        if (maxRetries > 0 && isRetryableCommitRejection(error)) {
           // A CONFLICT means this replica is behind the authoritative
           // version: re-running immediately re-reads the same stale local
           // state and fails identically, so without waiting the retries all
