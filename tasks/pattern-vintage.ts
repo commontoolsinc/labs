@@ -85,6 +85,7 @@ import {
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
+  REQUIRED_TEST_KEYS,
   requiredPatternKeys,
   uncoveredRequiredPatterns,
   unmappedPatternUrls,
@@ -95,21 +96,6 @@ import {
   type GateRoots,
   replayAll,
 } from "./pattern-vintage-run.ts";
-
-/**
- * The tests whose fixtures CI seeds by default.
- *
- * Test keys, because a fixture is produced by running a test. The required
- * PATTERNS are still derived from the runtime's own URL constants — this list
- * only says which tests are known to cover them, which is not derivable: a test
- * need not be named after what it drives.
- */
-const REQUIRED_TEST_KEYS = [
-  "system/home.test.tsx",
-  "system/default-app.test.tsx",
-  "topics/topics.test.tsx",
-  "lunch-poll/main.test.tsx",
-];
 
 const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
   /\/$/,

@@ -17,6 +17,7 @@ import {
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
+  REQUIRED_TEST_KEYS,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
@@ -376,6 +377,24 @@ describe("reporting", () => {
     })).toContain(
       "2 target(s) were served routes and not identity-compared.",
     );
+  });
+
+  it("seeds only TEST keys, which is what a capture can run", () => {
+    // A capture runs the key as a test. A pattern path names no test, so it
+    // captures nothing and the entry silently buys no coverage — the exact
+    // confusion the `--update` message now has to explain. Cheap to assert,
+    // and the list is hand-kept against the runtime's URL constants.
+    expect(REQUIRED_TEST_KEYS.length).toBeGreaterThan(0);
+    for (const key of REQUIRED_TEST_KEYS) {
+      expect(key, `${key} is not a test path`).toMatch(/\.test\.tsx$/);
+      // Repo-relative under `packages/patterns/`, never absolute or `../`.
+      expect(key.startsWith("/"), `${key} is absolute`).toBe(false);
+      expect(key.includes(".."), `${key} escapes the patterns root`).toBe(
+        false,
+      );
+    }
+    // No duplicates: a repeated key is a capture attempted twice.
+    expect(new Set(REQUIRED_TEST_KEYS).size).toBe(REQUIRED_TEST_KEYS.length);
   });
 
   it("says what --update actually checked, not what it cannot know", () => {

@@ -437,6 +437,26 @@ export function reportNothingToSeed(seededTestKeys: readonly string[]): string {
     `\`--update <test path>\`.`;
 }
 
+/**
+ * The tests whose fixtures CI seeds by default.
+ *
+ * TEST keys, because a fixture is produced by running a test. The required
+ * PATTERNS are still derived from the runtime's own URL constants — this list
+ * only says which tests are known to cover them, which is not derivable: a test
+ * need not be named after what it drives, and `topics/main.tsx` is tested by
+ * `topics/topics.test.tsx`.
+ *
+ * Lives beside the rest of the coverage vocabulary rather than in the task
+ * shell, which no test loads (it is reachable only through `import.meta.main`),
+ * so the invariant every entry has to satisfy can be asserted.
+ */
+export const REQUIRED_TEST_KEYS = [
+  "system/home.test.tsx",
+  "system/default-app.test.tsx",
+  "topics/topics.test.tsx",
+  "lunch-poll/main.test.tsx",
+];
+
 /** What the gate prints when it found no fixture to replay at all. */
 export function reportNothingReplayed(): string {
   return [

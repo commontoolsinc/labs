@@ -747,6 +747,75 @@ describe("the vintage gate, end to end", () => {
     );
   });
 
+  it("FAILS a fixture that records NO instantiations", async () => {
+    // An empty manifest means there is nothing to apply today's source to, so
+    // a green run would be a statement about zero roots. The gate has mistaken
+    // that shape for a pass before, which is why it is a failure rather than a
+    // note.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-empty-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    try {
+      await writeVintageManifest(vintage, []);
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { failures, candidates } = await replayAll(roots);
+
+    expect(candidates).toBe(0);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("records no pattern instantiations");
+    // The remedy is part of the message: `--update` alone prints "already
+    // pinned" and changes nothing, so a reader told only "this is broken"
+    // cannot act.
+    expect(failures[0].detail).toContain("Delete");
+  });
+
+  it("FAILS a fixture holding state its NAME does not claim", async () => {
+    // The filename records which pattern version wrote the state. A fixture
+    // whose manifest holds only other identities is not the state its name
+    // claims — provenance and content disagreeing, which makes every later
+    // judgement about it meaningless.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-identity-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({ ...entry, identity: "someoneelse" })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { failures } = await replayAll(roots);
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("does not contain");
+    // Both sides named, so the reader can see WHICH disagreed rather than
+    // being told only that something did.
+    expect(failures[0].detail).toContain(pinned.identity);
+    expect(failures[0].detail).toContain("someoneelse");
+  });
+
   it("FAILS a fixture whose pattern no longer COMPILES", async () => {
     // Distinct from "no longer resolves": the file is still there and still
     // readable, and the compiler rejects it. Reported per entry rather than
