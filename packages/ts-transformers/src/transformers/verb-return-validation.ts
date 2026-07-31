@@ -154,6 +154,13 @@ function isDefinitelyPlainShaped(expr: ts.Expression): boolean {
     return isDefinitelyPlainShaped(expr.whenTrue) &&
       isDefinitelyPlainShaped(expr.whenFalse);
   }
+  if (ts.isPrefixUnaryExpression(expr)) {
+    // `return -1` is a numeric literal in spirit; sign (and unary plus) do
+    // not change plainness.
+    return (expr.operator === ts.SyntaxKind.MinusToken ||
+      expr.operator === ts.SyntaxKind.PlusToken) &&
+      isDefinitelyPlainShaped(expr.operand);
+  }
   if (ts.isBinaryExpression(expr)) {
     // Concatenation / arithmetic over plain operands is plain; comparison,
     // logical, and assignment operators produce values this validator does

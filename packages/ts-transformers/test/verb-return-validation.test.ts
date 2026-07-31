@@ -176,6 +176,26 @@ Deno.test("plain-shaped returns error: templates and concatenation", async () =>
   assertEquals(concat.length, 1);
 });
 
+Deno.test("signed numeric literals are plain-shaped", async () => {
+  const negative = await errorsIn(`
+    const verb = action((id: string) => {
+      if (id.length === 0) {
+        return -1;
+      }
+      selected.set(id);
+    });
+  `);
+  assertEquals(negative.length, 1);
+
+  // Unary over a non-plain operand stays unjudged, like the operand itself.
+  const negatedRead = await errorsIn(`
+    const verb = action((id: string) => {
+      return -id.length;
+    });
+  `);
+  assertEquals(negatedRead.length, 0);
+});
+
 Deno.test("an any-assertion opts the return out (fail-open)", async () => {
   const errors = await errorsIn(`
     const verb = action((id: string) => {
