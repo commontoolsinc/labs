@@ -482,9 +482,10 @@ function anchorValueAsEntity(
 
   state.seen.set(registerKey, newEntryLink);
 
-  // When a child value becomes its own entity document, carry the child schema
-  // and its output role over so CFC metadata can be prepared for that separate
-  // document too.
+  // This helper handles both creation and later writes to an anchored entity.
+  // Carry the child schema on every visit so CFC can merge the candidate
+  // envelope — including generated-output provenance — against an existing
+  // long-lived document.
   recordRelevantSchemaWritePolicyInput(
     tx,
     newEntryLink,

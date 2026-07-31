@@ -32,7 +32,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
 } from "../src/cfc/types.ts";
-import { ID, type JSONSchema, type Pattern } from "../src/builder/types.ts";
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
@@ -3431,62 +3431,87 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("propagates generated-output provenance to extracted collection entities", async () => {
+  it("uses generated-output provenance when migrating extracted collection entities", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
-      const tx = runtime.edit();
-      const cell = runtime.getCell(
-        signer.did(),
-        "cfc-generated-output-nested-entity",
-        {
-          type: "object",
-          properties: {
-            messages: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  body: {
-                    type: "string",
-                    ifc: { confidentiality: ["secret"] },
-                  },
+      const entitySchema = (withGeneratedField: boolean): JSONSchema => ({
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                body: {
+                  type: "string",
+                  ifc: { confidentiality: ["secret"] },
                 },
-                required: ["body"],
+                ...(withGeneratedField
+                  ? { generated: { type: "string" } }
+                  : {}),
               },
+              required: [
+                "body",
+                ...(withGeneratedField ? ["generated"] : []),
+              ],
             },
           },
-          required: ["messages"],
         },
-        tx,
-      );
-      const root = cell.getAsNormalizedFullLink();
+        required: ["messages"],
+      });
+      const write = (
+        rootId: string,
+        withGeneratedField: boolean,
+        schemaRole?: "output",
+      ) => {
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-explicit");
+        const cell = runtime.getCell(
+          signer.did(),
+          rootId,
+          entitySchema(withGeneratedField),
+          tx,
+        );
+        diffAndUpdate(
+          runtime,
+          tx,
+          cell.getAsNormalizedFullLink(),
+          {
+            messages: [{
+              // Once the array container exists, reusing this anchor id
+              // targets the same extracted document during migration.
+              body: "hello",
+              ...(withGeneratedField ? { generated: "new" } : {}),
+            }],
+          },
+          undefined,
+          schemaRole === undefined ? undefined : { schemaRole },
+          () => "message-1",
+        );
+        return tx;
+      };
 
-      diffAndUpdate(
-        runtime,
-        tx,
-        root,
-        { messages: [{ [ID]: "message-1", body: "hello" }] },
-        undefined,
-        { schemaRole: "output" },
+      // The first write establishes the array container; the second targets
+      // the stable entity id derived once that container is present. The
+      // migration then revisits that same long-lived entity document.
+      for (let round = 0; round < 2; round++) {
+        for (const rootId of ["generated-output-control", "generated-output"]) {
+          const seed = write(rootId, false);
+          seed.prepareCfc();
+          expect((await seed.commit()).ok).toBeDefined();
+        }
+      }
+
+      const strictUpdate = write("generated-output-control", true);
+      strictUpdate.prepareCfc();
+      const strictResult = await strictUpdate.commit();
+      expect(strictResult.error?.message).toContain(
+        "required field generated needs a default",
       );
 
-      expect(tx.getCfcState().writePolicyInputs).toContainEqual(
-        expect.objectContaining({
-          kind: "schema",
-          schemaRole: "output",
-          target: expect.objectContaining({
-            path: [],
-          }),
-        }),
-      );
-      expect(
-        tx.getCfcState().writePolicyInputs.some((input) =>
-          input.kind === "schema" &&
-          input.schemaRole === "output" &&
-          input.target.id !== root.id
-        ),
-      ).toBe(true);
-      tx.abort();
+      const outputUpdate = write("generated-output", true, "output");
+      outputUpdate.prepareCfc();
+      expect((await outputUpdate.commit()).ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
