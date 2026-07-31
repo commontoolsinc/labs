@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
+import { AUTO, collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
   openFileBackedRuntime,
   readVintageManifest,
@@ -106,6 +106,7 @@ const MOVED_KEY = HEALTHY.replace(".for('items')", ".for('itemList')");
  * only the default export.
  */
 const NESTED_KEY = "vintage-gate-nested.tsx";
+const NESTED_TEST_KEY = NESTED_KEY.replace(/\.tsx$/, ".test.tsx");
 
 const nestedSource = (extra: { field?: string; line?: string } = {}) =>
   [
@@ -196,6 +197,7 @@ const NESTED_ALIASED_FLIPPED = aliased(true);
  * witness a moved storage key.
  */
 const UNDECLARED_KEY = "vintage-gate-undeclared.tsx";
+const UNDECLARED_TEST_KEY = UNDECLARED_KEY.replace(/\.tsx$/, ".test.tsx");
 
 const undeclaredSource = (storageKey: string, trailer = "") =>
   [
@@ -267,6 +269,7 @@ const undeclaredTest = [
  * attributable to the child's root — the one in the other space.
  */
 const CROSS_KEY = "vintage-gate-crossspace.tsx";
+const CROSS_TEST_KEY = CROSS_KEY.replace(/\.tsx$/, ".test.tsx");
 
 /**
  * The child's space. NAMED rather than anonymous (`inSpace()` derives a DID
@@ -458,6 +461,21 @@ describe("isUpgradeTarget", () => {
   });
 });
 
+/** The identity a fixture's manifest recorded for its `Child` instantiation. */
+async function childRecordedIdentity(fixturePath: string): Promise<string> {
+  const dir = await Deno.makeTempDir({ prefix: "child-identity-" });
+  const vintage = await openFileBackedRuntime(signer, dir, fixturePath);
+  try {
+    const manifest = await readVintageManifest(vintage);
+    const child = manifest?.entries.find((e) => e.symbol === "Child");
+    if (child === undefined) throw new Error("no Child instantiation recorded");
+    return child.identity;
+  } finally {
+    await vintage.dispose().catch(() => {});
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+}
+
 describe("the vintage gate, end to end", () => {
   let dir = "";
   let roots: GateRoots;
@@ -485,7 +503,7 @@ describe("the vintage gate, end to end", () => {
   it("captures a vintage for a required pattern that has none", async () => {
     const { captured, problems } = await captureMissing(
       roots,
-      [KEY],
+      [TEST_KEY],
       new Date("2026-07-29T12:00:00.000Z"),
     );
 
@@ -494,7 +512,7 @@ describe("the vintage gate, end to end", () => {
     // Named by the identity that WROTE it, and findable by enumeration.
     const found = await collectVintages(roots.vintagesRoot);
     expect(found).toHaveLength(1);
-    expect(found[0].patternKey).toBe(KEY);
+    expect(found[0].testKey).toBe(TEST_KEY);
     expect(found[0].identity.length).toBeGreaterThan(0);
     expect(Deno.statSync(captured[0]).size).toBeGreaterThan(0);
   });
@@ -502,10 +520,14 @@ describe("the vintage gate, end to end", () => {
   it("captures nothing when the required pattern already has a vintage", async () => {
     // `--update` must only ever ADD. A second run that recaptured would let a
     // broken pattern overwrite the very vintage that would have caught it.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     const { captured } = await captureMissing(
       roots,
-      [KEY],
+      [TEST_KEY],
       new Date("2026-07-29T13:00:00.000Z"),
     );
 
@@ -514,7 +536,11 @@ describe("the vintage gate, end to end", () => {
   });
 
   it("passes when today's source still reads the vintage", async () => {
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
 
     const { replayed, failures } = await replayAll(roots);
 
@@ -524,13 +550,17 @@ describe("the vintage gate, end to end", () => {
 
   it("FAILS when today's source cannot read the vintage", async () => {
     // The whole point. Everything else in this file is scaffolding for it.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     await setSource(BREAKING);
 
     const { failures } = await replayAll(roots);
 
     expect(failures).toHaveLength(1);
-    expect(failures[0].patternKey).toBe(KEY);
+    expect(failures[0].testKey).toBe(TEST_KEY);
     // Assert the SPECIFIC rejection. A generic "something failed" would also
     // pass if the fixture were missing, the source failed to compile, or the
     // runtime died — none of which is the break this gate exists to catch.
@@ -543,7 +573,11 @@ describe("the vintage gate, end to end", () => {
     // The other half of the red/green pair: the two candidates differ by
     // exactly `Default<[]>`, so the failure above is attributable to that and
     // not to anything else about the change.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     await setSource(COMPATIBLE);
 
     const { failures } = await replayAll(roots);
@@ -585,7 +619,11 @@ describe("the vintage gate, end to end", () => {
     // through its own tests: `items` was written through a handler before the
     // key moved. That is what makes this a test of the CHECK rather than of the
     // fixture.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     await setSource(MOVED_KEY);
 
     const { replayed, stranded, failures } = await replayAll(roots);
@@ -608,7 +646,11 @@ describe("the vintage gate, end to end", () => {
   it("reports a vintage whose pattern no longer exists", async () => {
     // Deleting a pattern is legitimate — retiring it — but it must be visible
     // rather than silently reducing coverage to nothing.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     await Deno.remove(`${dir}/patterns/${KEY}`);
 
     const { failures } = await replayAll(roots);
@@ -625,7 +667,11 @@ describe("the vintage gate, end to end", () => {
     // no source path, so a green verdict would be a claim about fewer roots than
     // the fixture holds — the shape this tier has mistaken for a pass three
     // times. Capture refuses to create one of these, so it is written directly.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     const [pinned] = await collectVintages(roots.vintagesRoot);
     const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-doctor-" });
     const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
@@ -647,6 +693,21 @@ describe("the vintage gate, end to end", () => {
           cellId: "of:fid1:notrootrelative",
           space: signer.did(),
         },
+        {
+          // Repo-root-relative and a real-looking path, but NOT under
+          // `packages/patterns/` and not a served route — so there is no
+          // pattern key for it. Capture refuses this shape now (it asks
+          // `patternKeyFromMain`, the same question replay asks), which is why
+          // it has to be written directly.
+          //
+          // It reuses a REAL recorded root rather than a synthetic cell id, on
+          // purpose: the presence control runs before key resolution, so an id
+          // nothing wrote is reported as a root the fixture does not hold and
+          // never reaches the branch this case is about.
+          ...(manifest?.entries ?? []).find((e) => e.main !== undefined)!,
+          symbol: "__cfPattern_11",
+          main: "/packages/home-schemas/well-known.tsx",
+        },
       ]);
       // To a fresh path, not over the file this runtime opened FROM — sqlite
       // refuses that — then swapped in once the handles are closed.
@@ -667,7 +728,11 @@ describe("the vintage gate, end to end", () => {
     // repo-root-relative (the evaluate loop records injected helper modules
     // like `cfc.ts`, whose names carry no leading slash).
     expect(unmappable).toBe(2);
-    expect(failures).toHaveLength(2);
+    // Three failures for two `unmappable`: the third entry IS repo-root-
+    // relative, so it passes the capture-side shape check and is only refused
+    // where the key is resolved. Both are reported; only the first two are
+    // that counter's business.
+    expect(failures).toHaveLength(3);
     // Each reason bound to ITS entry. Asserting both strings against the joined
     // text would pass just as well with the two reasons swapped, which is the
     // mistake that reports the wrong diagnosis for the right count.
@@ -676,6 +741,212 @@ describe("the vintage gate, end to end", () => {
     expect(reasonFor("__cfPattern_9")).toContain("no source path");
     expect(reasonFor("__cfPattern_10")).toContain(
       '"cfc.ts" is not repo-root-relative',
+    );
+    expect(reasonFor("__cfPattern_11")).toContain(
+      "neither a repo path nor a served pattern route",
+    );
+  });
+
+  it("FAILS a fixture that records NO instantiations", async () => {
+    // An empty manifest means there is nothing to apply today's source to, so
+    // a green run would be a statement about zero roots. The gate has mistaken
+    // that shape for a pass before, which is why it is a failure rather than a
+    // note.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-empty-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    try {
+      await writeVintageManifest(vintage, []);
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { failures, candidates } = await replayAll(roots);
+
+    expect(candidates).toBe(0);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("records no pattern instantiations");
+    // The remedy is part of the message: `--update` alone prints "already
+    // pinned" and changes nothing, so a reader told only "this is broken"
+    // cannot act.
+    expect(failures[0].detail).toContain("Delete");
+  });
+
+  it("FAILS a fixture holding state its NAME does not claim", async () => {
+    // The filename records which pattern version wrote the state. A fixture
+    // whose manifest holds only other identities is not the state its name
+    // claims — provenance and content disagreeing, which makes every later
+    // judgement about it meaningless.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-identity-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({ ...entry, identity: "someoneelse" })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { failures } = await replayAll(roots);
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("does not contain");
+    // Both sides named, so the reader can see WHICH disagreed rather than
+    // being told only that something did.
+    expect(failures[0].detail).toContain(pinned.identity);
+    expect(failures[0].detail).toContain("someoneelse");
+  });
+
+  it("FAILS a fixture whose pattern no longer COMPILES", async () => {
+    // Distinct from "no longer resolves": the file is still there and still
+    // readable, and the compiler rejects it. Reported per entry rather than
+    // thrown, so one broken pattern does not take every remaining fixture with
+    // it — the whole reason the replay reports instead of raising.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    // Valid TypeScript the pattern compiler cannot accept: no default export,
+    // so there is no artifact for the recorded root to name.
+    await Deno.writeTextFile(
+      `${roots.patternsRoot}/${KEY}`,
+      "export const notAPattern = 1;\n",
+    );
+
+    const { failures } = await replayAll(roots);
+
+    expect(failures.length).toBeGreaterThan(0);
+    // The SPECIFIC diagnosis. A bare "there was a failure" would pass on a
+    // missing store or a disposed runtime just as well.
+    expect(failures.map((f) => f.detail).join("\n")).toMatch(
+      /no longer (compiles|resolves)/,
+    );
+  });
+
+  it("still MATERIALIZES a served-route target, only skipping its identity", async () => {
+    // A pattern loaded BY URL records the route the toolshed serves it at, and
+    // the same file compiles to a different identity served than from the repo
+    // — so an identity comparison would call it changed on every run forever.
+    // That is the whole of what a served route may skip. Skipping the TARGET
+    // outright meant a recorded root got no materialize and no state
+    // comparison at all, and the committed lunch-poll fixture holds exactly
+    // this shape for `profile-create`: a breaking change to it left the run
+    // green.
+    //
+    // Proved by BREAKING the source the route maps to. Counting served routes
+    // would pass this case just as well if they were still skipped, so the
+    // assertion is on the failure the comparison produces.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-served-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    let subjectCell: string | undefined;
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // The entry that actually holds the subject's state, re-pointed at the
+      // ROUTE the same file would be served under. Same cell, same identity —
+      // only `main` changes, so anything that still fails is the served-route
+      // path and not a different fixture.
+      const subject = entries.find((entry) => entry.main?.endsWith(`/${KEY}`))!;
+      subjectCell = subject.cellId;
+      await writeVintageManifest(vintage, [
+        ...entries.filter((entry) => entry !== subject),
+        { ...subject, main: `/api/patterns/${KEY}` },
+      ]);
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+    expect(subjectCell, "the fixture no longer records the subject")
+      .toBeDefined();
+
+    // Green first: the route resolves to today's unchanged source, and a
+    // served route is materialized every run because it has no "changed"
+    // answer. Without this control the red below could be a route that never
+    // resolved at all.
+    const clean = await replayAll(roots);
+    expect(clean.failures, "an UNBROKEN served route should replay clean")
+      .toEqual([]);
+    expect(clean.servedRoute).toBe(1);
+    // ...and it is kept out of `changed`, which would otherwise report the
+    // same fixed number forever and stop meaning "something moved".
+    expect(clean.changed).toBe(0);
+
+    // Now break where the state is STORED, leaving the contract untouched —
+    // the class this tier exists for, and one only a materialize can see.
+    await Deno.writeTextFile(`${roots.patternsRoot}/${KEY}`, MOVED_KEY);
+    const broken = await replayAll(roots);
+
+    expect(
+      broken.failures.map((f) => f.detail).join("\n"),
+      "a served-route target was not materialized, so a moved storage key in " +
+        "it replayed clean — the hole this case exists to close",
+    ).toContain("stranded state the vintage held");
+  });
+
+  it("credits coverage only for a PINNED fixture", async () => {
+    // An auto capture is regenerable and pruned by COUNT, so letting one
+    // satisfy the coverage gate means retention can delete the gate's only
+    // evidence for a pattern while the run still reads green. That guarantee
+    // used to live in `coveredPatternKeys`; coverage stopped going through it
+    // when it moved to what the replay actually replayed, and the condition
+    // that restored it survived deletion with every suite green — which is why
+    // this exists.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const covers = pinnedRef.testKey;
+
+    // The control: as PINNED, this fixture credits the pattern it replayed.
+    const asPinned = await replayAll(roots);
+    expect([...asPinned.covered], "the pinned fixture covered nothing")
+      .toContain(KEY);
+
+    // The same bytes under `auto/` credit NOTHING, though they still replay.
+    const autoDir = `${roots.vintagesRoot}/${covers}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    await Deno.copyFile(
+      pinnedRef.path,
+      `${autoDir}/${pinnedRef.stamp}-${pinnedRef.identity}.sqlite`,
+    );
+    await Deno.remove(pinnedRef.path);
+
+    const asAuto = await replayAll(roots);
+    // It was REPLAYED — otherwise "covers nothing" would be true for the
+    // uninteresting reason that nothing ran.
+    expect(asAuto.replayed, "the auto fixture was not replayed at all").toBe(1);
+    expect(asAuto.targets).toBe(asPinned.targets);
+    expect([...asAuto.covered], "an AUTO fixture credited coverage").toEqual(
+      [],
     );
   });
 
@@ -690,7 +961,11 @@ describe("the vintage gate, end to end", () => {
     // Reachable rather than theoretical: `isUpgradeTarget` has grown four
     // exclusions, two added after fixtures already existed, and fixtures are
     // append-only. A new exclusion silently zeroes an old fixture's coverage.
-    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
     const [pinned] = await collectVintages(roots.vintagesRoot);
     const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-notarget-" });
     const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
@@ -749,7 +1024,7 @@ describe("the vintage gate, end to end", () => {
 
       const { captured, problems } = await captureMissing(
         roots,
-        [KEY],
+        [TEST_KEY],
         new Date("2026-07-29T12:00:00.000Z"),
       );
 
@@ -779,7 +1054,7 @@ describe("the vintage gate, end to end", () => {
 
       const { captured, problems } = await captureMissing(
         roots,
-        [KEY],
+        [TEST_KEY],
         new Date("2026-07-29T12:00:00.000Z"),
       );
 
@@ -804,7 +1079,7 @@ describe("the vintage gate, end to end", () => {
     it("records the nested roots under their own symbols", async () => {
       const { problems, captured } = await captureMissing(
         roots,
-        [NESTED_KEY],
+        [NESTED_TEST_KEY],
         new Date("2026-07-29T12:00:00.000Z"),
       );
       expect(problems).toEqual([]);
@@ -820,7 +1095,7 @@ describe("the vintage gate, end to end", () => {
       // schema-compatible, so a symbol-correct replay has nothing to report.
       await captureMissing(
         roots,
-        [NESTED_KEY],
+        [NESTED_TEST_KEY],
         new Date("2026-07-29T12:00:00.000Z"),
       );
       await writeNested(NESTED_CHANGED);
@@ -844,7 +1119,7 @@ describe("the vintage gate, end to end", () => {
       await writeNested(NESTED_ALIASED);
       await captureMissing(
         roots,
-        [NESTED_KEY],
+        [NESTED_TEST_KEY],
         new Date("2026-07-29T12:00:00.000Z"),
       );
       await writeNested(NESTED_ALIASED_FLIPPED);
@@ -865,7 +1140,7 @@ describe("the vintage gate, end to end", () => {
       // validate the wrong artifact; the honest answer is a reported finding.
       await captureMissing(
         roots,
-        [NESTED_KEY],
+        [NESTED_TEST_KEY],
         new Date("2026-07-29T12:00:00.000Z"),
       );
       await writeNested(NESTED_ROW_RENAMED);
@@ -902,7 +1177,7 @@ describe("the vintage gate, end to end", () => {
       // `trackRecent` from `system/default-app.tsx`'s result reported "3
       // updated cleanly with no state stranded" against the committed fixture,
       // and names the key once the read is relaxed.
-      await captureMissing(roots, [UNDECLARED_KEY], STAMP);
+      await captureMissing(roots, [UNDECLARED_TEST_KEY], STAMP);
       await writeUndeclared(undeclaredSource("notesMoved"));
 
       const { failures } = await replayAll(roots);
@@ -922,7 +1197,7 @@ describe("the vintage gate, end to end", () => {
       // manufacture findings about them. The two sources differ by a trailing
       // comment — same storage, different identity, so the replay actually
       // materializes instead of short-circuiting on an unchanged identity.
-      await captureMissing(roots, [UNDECLARED_KEY], STAMP);
+      await captureMissing(roots, [UNDECLARED_TEST_KEY], STAMP);
       await writeUndeclared(undeclaredSource("notes", "// touched"));
 
       const { changed, failures } = await replayAll(roots);
@@ -941,7 +1216,7 @@ describe("the vintage gate, end to end", () => {
     const writeCross = (source: string) =>
       Deno.writeTextFile(`${dir}/patterns/${CROSS_KEY}`, source);
 
-    const captureCross = () => captureMissing(roots, [CROSS_KEY], STAMP);
+    const captureCross = () => captureMissing(roots, [CROSS_TEST_KEY], STAMP);
 
     beforeEach(async () => {
       await writeCross(crossSource());
@@ -996,7 +1271,11 @@ describe("the vintage gate, end to end", () => {
       // the replay reading `vintage.space` this exact break replays with zero
       // failures.
       await captureCross();
+      // The CHILD's recorded identity, from the manifest — not the fixture's
+      // name, which is the TEST's identity now that a fixture is keyed by the
+      // test that produced it and covers several patterns.
       const [pinned] = await collectVintages(roots.vintagesRoot);
+      const childIdentity = await childRecordedIdentity(pinned.path);
       await writeCross(crossSource("string[]"));
 
       const { failures } = await replayAll(roots);
@@ -1008,13 +1287,34 @@ describe("the vintage gate, end to end", () => {
       // in a space the fixture never wrote carries no marker at all — and would
       // have taken the migration without complaint.
       expect(childFailure?.detail).toContain(
-        `the root carries ${pinned.identity}#Child`,
+        `the root carries ${childIdentity}#Child`,
       );
     });
 
-    it("CATCHES a moved storage key in the CHILD's own space", async () => {
-      // The stranding check over a NESTED root, which the entry-pattern case
-      // above cannot reach. Two things only this shape exercises:
+    it("only WARNS on a moved storage key whose new slot is SEEDED", async () => {
+      // A PINNED LIMIT, not a passing check. Read it before trusting a green
+      // run over a pattern whose fields carry initial values.
+      //
+      // The gate fails on a stranded key only when the value went from
+      // something to NOTHING — see `StateFinding`, and the measurements that
+      // bought that grading: a replay recomputes as well as reads, so a derived
+      // value the vintage never pulled on resolves to something better this
+      // time and failing on it would red every real edit.
+      //
+      // A moved `.for()` key does not always read back as nothing. Here the
+      // child seeds its cell (`new Writable<string>('captured')`), so the fresh
+      // cell under the NEW name reads `"captured"` — non-empty, and therefore
+      // graded as changed rather than lost. `"written"`, which a handler wrote
+      // and the vintage held, is unreachable and the run is GREEN.
+      //
+      // The companion case is the one that still fails: an undeclared `notes`
+      // moved to `notesMoved` reads back `[]`, and
+      // "reports a key that rides an INDEX SIGNATURE" pins it. So the class is
+      // caught when the new slot stays empty and warned when the pattern fills
+      // it — which is the blind spot to close if this grading is ever revisited
+      // (weighting by `of:` versus `computed:` backing is the candidate).
+      //
+      // What this shape still uniquely exercises, and must keep exercising:
       //
       // - the before-state is read in the CHILD's space. Read under the
       //   fixture's own DID it comes back absent, and an absent before-state is
@@ -1028,26 +1328,39 @@ describe("the vintage gate, end to end", () => {
       await captureCross();
       await writeCross(crossSource().replace(".for('note')", ".for('moved')"));
 
-      const { stranded, failures } = await replayAll(roots);
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (...args: unknown[]) => {
+        warnings.push(args.map(String).join(" "));
+      };
+      let stranded: number;
+      let failures: { detail: string }[];
+      try {
+        ({ stranded, failures } = await replayAll(roots));
+      } finally {
+        console.warn = originalWarn;
+      }
 
-      const childFailure = failures.find((f) => f.detail.includes("(Child)"));
-      expect(childFailure?.detail).toContain("APPLIED CLEANLY but stranded");
-      // The KEY and both values, so this cannot pass on a failure that merely
-      // mentions the child: what the vintage held in the other space, and what
-      // today's source seeds the fresh cell under the new name with.
-      expect(childFailure?.detail).toContain(
-        'note (was "written", now "captured")',
-      );
-      // TWO keys for one loss, and pinned rather than loosened to "at least
-      // one": the child's own root reports `note`, and the parent — whose
-      // result projects the child's — reports `child`. A change that stopped
-      // reading either of the two roots would still leave a failure behind, so
-      // the count is what says both were examined.
-      const parent = failures.find((f) => f.detail.includes("(default)"));
-      expect(parent?.detail).toContain(
-        "stranded state the vintage held: child",
-      );
-      expect(stranded).toBe(2);
+      // Asserted rather than merely absent: the gate must still NOTICE, and a
+      // change that stopped reading either root would produce no warning at
+      // all — indistinguishable here from the limit being pinned.
+      const childWarning = warnings.find((line) => line.includes("(Child)"));
+      expect(
+        childWarning,
+        "the child's moved key produced no warning, so the comparison did not " +
+          "read the child's root at all — the limit below would then be pinning " +
+          "nothing",
+      ).toBeDefined();
+      expect(childWarning).toContain('note (was "written", now "captured")');
+      // TWO roots examined for one move, pinned rather than loosened to "at
+      // least one": the child's own root reports `note`, and the parent — whose
+      // result projects the child's — reports `child`.
+      const parentWarning = warnings.find((line) => line.includes("(default)"));
+      expect(parentWarning).toContain("changed state the vintage held: child");
+
+      // ...and the limit itself: nothing FAILED.
+      expect(failures.filter((f) => f.detail.includes("stranded"))).toEqual([]);
+      expect(stranded).toBe(0);
     });
 
     it("passes once the child's added field carries a default", async () => {
@@ -1080,10 +1393,11 @@ describe("the vintage gate, end to end", () => {
       // store at the destination makes `VACUUM INTO` refuse (its output file
       // must not exist), which is also the real hazard of a half-deleted
       // fixture.
-      const first = await captureVintage(roots, CROSS_KEY, STAMP);
+      const first = await captureVintage(roots, CROSS_TEST_KEY, STAMP);
       await Deno.remove(first);
 
-      await expect(captureVintage(roots, CROSS_KEY, STAMP)).rejects.toThrow();
+      await expect(captureVintage(roots, CROSS_TEST_KEY, STAMP)).rejects
+        .toThrow();
 
       expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
       // The companion directory goes too. Leaving it would strand the next
@@ -1099,12 +1413,13 @@ describe("the vintage gate, end to end", () => {
       // above is why this is enforced HERE and not only in `captureMissing` —
       // a capture that wrote over someone else's state and then failed would
       // delete it on the way out.
-      const first = await captureVintage(roots, CROSS_KEY, STAMP);
+      const first = await captureVintage(roots, CROSS_TEST_KEY, STAMP);
       const before = await Deno.stat(first);
 
-      await expect(captureVintage(roots, CROSS_KEY, STAMP)).rejects.toThrow(
-        "never overwrites a pinned vintage",
-      );
+      await expect(captureVintage(roots, CROSS_TEST_KEY, STAMP)).rejects
+        .toThrow(
+          "never overwrites a pinned vintage",
+        );
 
       expect((await Deno.stat(first)).mtime).toEqual(before.mtime);
       expect(await collectVintages(roots.vintagesRoot)).toHaveLength(1);

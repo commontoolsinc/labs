@@ -32,6 +32,7 @@
 
 import { fromFileUrl } from "@std/path/from-file-url";
 import { Identity } from "@commonfabric/identity";
+import { Database } from "@db/sqlite";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
@@ -165,6 +166,94 @@ export interface VintageRuntime {
   dispose(): Promise<void>;
 }
 
+/**
+ * Shrink a just-written fixture, in place, without changing what it holds for
+ * a replay.
+ *
+ * Two measured wins, on the four committed fixtures (42.2 MiB together):
+ *
+ * - **`commit.original.operations` is a byte-for-byte duplicate of the whole
+ *   `revision` table.** Verified by joining `json_each(original,'$.operations')`
+ *   to `revision` on `commit_seq`+`op_index`: equal counts, ids, ops and
+ *   payloads in all four. The `commit` table is 42-50% of each file and
+ *   outweighs `revision` itself in three of them.
+ * - **`page_size` is 32 KiB**, which costs 1.2-1.4 MiB of near-empty pages per
+ *   file — 38% of the smallest one. Plain `VACUUM` reclaims nothing
+ *   (`freelist_count` is already 0); the waste is inside pages, not between
+ *   them.
+ *
+ * Together: 42.2 MiB → 21.8 MiB checked out. The fixtures stay RAW rather than
+ * compressed, which is a separate measurement: git's own zlib beats
+ * pre-gzipping (3.11 vs 3.25 MiB packed at one generation) and deltas a
+ * recapture ~5x better (+0.21 vs +1.03 MiB on a second topics generation),
+ * because it cannot delta a gzip stream.
+ *
+ * **Only `operations` goes, and the rest of the envelope stays.** Blanking the
+ * whole column is smaller still (16.7 MiB) and was measured to leave the gate
+ * byte-identical — but `commit.original` has THREE readers, not the one the
+ * engine has, and the other two are the shipping `cf inspect`:
+ *
+ * - `state-inspector/conflicts.ts` prefilters candidate reader commits with
+ *   `WHERE original LIKE '%'||id||'%'` and then reads `$.reads.confirmed`.
+ *   With the column blanked, that prefilter matched 0 of topics' 353 commits,
+ *   so the stale-read detector returned "no anomalies" for every fixture —
+ *   a CONFIDENT CLEAN BILL it cannot otherwise produce, and the one output
+ *   whose whole purpose is flagging corruption. Keeping `reads` restores it:
+ *   309 of 353 match again.
+ * - `state-inspector/queries.ts` `listCommits` decodes `original` for its
+ *   `ops`/`reads` counts. Its `ops` column reads 0 on these fixtures, which is
+ *   the one degradation this transform knowingly keeps: the operations are
+ *   still all there in `revision`, which is where `cf inspect history`,
+ *   `timeline` and `diff` read them from.
+ *
+ * The engine's own use is unaffected either way: `sameStoredOriginal`
+ * (`memory/v2/engine.ts`) is a string equality reached only through
+ * `SELECT_EXISTING_COMMIT`, keyed `session_id`+`local_seq`, and a fresh replay
+ * session cannot match a stored session id. Commit ROWS always stay, so
+ * `MAX(seq)` allocation and the `revision.commit_seq` foreign key are intact.
+ *
+ * Proven equivalent rather than assumed: the gate was run against a pruned
+ * copy and an untouched one with every pattern's identity forced to change, so
+ * 50 targets actually materialized, and the two produced byte-identical output
+ * including all 18 failure diagnostics.
+ *
+ * The right long-term fix is in the engine — storing a hash of the operations
+ * rather than the operations — at which point this becomes a no-op and should
+ * be deleted.
+ */
+function compactVintageStore(path: string): void {
+  const db = new Database(path);
+  try {
+    // Guarded on the codec prefix rather than assuming it: `json_remove` over a
+    // string that is not JSON returns NULL, and the column is NOT NULL, so an
+    // unprefixed row would fail the statement rather than corrupt quietly — but
+    // the guard says which rows are meant to change instead of relying on that.
+    db.exec(
+      `UPDATE "commit" SET original = 'fvj1:' || ` +
+        `json_remove(substr(original, 6), '$.operations') ` +
+        `WHERE substr(original, 1, 5) = 'fvj1:'`,
+    );
+  } finally {
+    db.close();
+  }
+  // Repage through a fresh copy: `page_size` only takes effect on a database
+  // being written from scratch, which is what `VACUUM INTO` produces.
+  const repaged = `${path}.repaged`;
+  const source = new Database(path, { readonly: true });
+  try {
+    source.exec("PRAGMA page_size = 4096");
+    const stmt = source.prepare("VACUUM main INTO ?");
+    try {
+      stmt.run(repaged);
+    } finally {
+      stmt.finalize();
+    }
+  } finally {
+    source.close();
+  }
+  Deno.renameSync(repaged, path);
+}
+
 /** Every companion store beside `fixturePath`, as `[space, path]`. */
 async function companionStores(
   fixturePath: string,
@@ -261,6 +350,7 @@ export async function openFileBackedRuntime(
         );
       }
       snapshotSpaceStore(path, destPath);
+      compactVintageStore(destPath);
       // Every OTHER space the run wrote travels too, enumerated from the store
       // itself rather than from what an observer recorded: the two can disagree,
       // and the copy has to be a statement about what is on disk.
@@ -280,10 +370,14 @@ export async function openFileBackedRuntime(
         // `listSpaceStores` just stat'd this file, so re-resolving it cannot
         // legitimately come back null; `!` rather than a branch nothing can
         // reach. `snapshotSpaceStore` throws on a path that is not there.
+        const companionPath = `${companionDir}/${
+          companionFileName(info.space)
+        }`;
         snapshotSpaceStore(
           spaceStorePath(storeUrl, info.space)!,
-          `${companionDir}/${companionFileName(info.space)}`,
+          companionPath,
         );
+        compactVintageStore(companionPath);
       }
     },
     async dispose() {
@@ -614,8 +708,10 @@ export function comparableState(value: unknown): unknown {
 }
 
 /**
- * `schema` with every `unknown` TYPE dropped, so a read descends where the
- * declared type stopped it.
+ * `schema` relaxed for READING rather than for validating: every `unknown` TYPE
+ * dropped so a read descends where the declared type stopped it, and every
+ * `required` dropped so one property that does not resolve cannot hide the
+ * rest of the object.
  *
  * A schema-driven read resolves nothing at a `{"type": "unknown"}` position —
  * `schemaTypeValidity` in `traverse.ts` answers `Unknown` there, and the value
@@ -632,17 +728,36 @@ export function comparableState(value: unknown): unknown {
  * under the stored schema verbatim all three read `undefined`, and a change
  * that stranded any of them would have replayed clean.
  *
- * Only the `type` keyword is dropped, and only where it says `unknown`. That is
- * what keeps this a RELAXATION rather than a different read: `asCell`, `ifc`
- * and every other keyword survive, so a stream still reduces to the document it
- * points at (reading under a bare `{}` instead would resolve it to its value
- * and lose the moved-document class this comparison exists for). The result is
- * still a schema-driven read, so it is still deterministic — unlike a
- * schema-less `.get()`, which resolves whatever is already loaded and is the
- * shape of bug that made a cross-space profile read as absent (#3830).
+ * `required` goes for a different reason, measured on the committed topics
+ * fixture. A schema-driven read answers `undefined` for the WHOLE object when a
+ * required property does not resolve — and a pattern's own result schema marks
+ * its session-local drafts required: `topic.tsx` requires `bodyDraft`,
+ * `commentDraft`, `editingBody`, `linkUrlDraft` and `linkLabelDraft`, each a
+ * link to a per-session cell that holds nothing in a fresh replay runtime. All
+ * 28 keys of real state then read as nothing, and the entry was reported as a
+ * recorded root the fixture does not hold. EVERY recorded `topic.tsx` target
+ * failed that way, so the gate examined no topics state at all while reporting
+ * loudly. `main.tsx` fell to the same collapse through `$NAME` and `newTitle`.
+ *
+ * Dropping it cannot hide a loss, which is what makes this safe rather than
+ * merely convenient: the comparison is per key, so a key that resolved before
+ * and does not after is still a finding. `required` only ever decided whether
+ * the object collapsed ENTIRELY — and a collapse reports one unreadable root
+ * instead of the moved key it was hiding. It is dropped at every depth for the
+ * same reason it is dropped at the top: a nested object collapses identically,
+ * and the key holding it would read as stranded.
+ *
+ * Beyond those two, keywords survive — that is what keeps this a RELAXATION
+ * rather than a different read: `asCell`, `ifc` and the rest still apply, so a
+ * stream still reduces to the document it points at (reading under a bare `{}`
+ * instead would resolve it to its value and lose the moved-document class this
+ * comparison exists for). The result is still a schema-driven read, so it is
+ * still deterministic — unlike a schema-less `.get()`, which resolves whatever
+ * is already loaded and is the shape of bug that made a cross-space profile
+ * read as absent (#3830).
  */
-export function schemaWithUnknownsRelaxed(schema: unknown): unknown {
-  if (Array.isArray(schema)) return schema.map(schemaWithUnknownsRelaxed);
+export function schemaRelaxedForComparison(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(schemaRelaxedForComparison);
   if (typeof schema !== "object" || schema === null) return schema;
   const relaxed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema)) {
@@ -657,7 +772,11 @@ export function schemaWithUnknownsRelaxed(schema: unknown): unknown {
     ) {
       continue;
     }
-    relaxed[key] = schemaWithUnknownsRelaxed(value);
+    // Matched on the KEY and on the VALUE's shape, for the reason above: a
+    // property legitimately NAMED `required` holds a schema object, never the
+    // array of names this drops.
+    if (key === "required" && Array.isArray(value)) continue;
+    relaxed[key] = schemaRelaxedForComparison(value);
   }
   return relaxed;
 }
@@ -691,7 +810,7 @@ export async function readStateUnder(
       space as never,
       cellId as never,
       [],
-      schemaWithUnknownsRelaxed(schema) as never,
+      schemaRelaxedForComparison(schema) as never,
     );
     await cell.sync();
     const detached = comparableState(cell.get());
@@ -716,15 +835,22 @@ export async function readStateUnder(
  * Read under the root's OWN stored result schema, which it carries in meta — so
  * the writing version's view of its data is recoverable without its source, and
  * without this replay having to decide what that view should be. Relaxed at its
- * `unknown` positions first — see `schemaWithUnknownsRelaxed` for what that
+ * `unknown` positions first — see `schemaRelaxedForComparison` for what that
  * buys and why it is still the writer's own schema.
  */
-export async function readVintageState(
+/**
+ * The result schema a root carries in meta, or `undefined` if it carries none.
+ *
+ * Split out so a caller reporting a failed read can say WHICH half failed —
+ * a root with no stored schema and a root whose stored schema reads back
+ * nothing are different findings with different fixes, and one message for
+ * both sent a reader hunting a missing schema that was present all along.
+ */
+export async function readStoredResultSchema(
   vintage: VintageRuntime,
   space: string,
   cellId: string,
-): Promise<Record<string, unknown> | undefined> {
-  let storedSchema: unknown;
+): Promise<unknown> {
   try {
     const raw = vintage.runtime.getCellFromEntityId(
       space as never,
@@ -733,10 +859,18 @@ export async function readVintageState(
       undefined as never,
     );
     await raw.sync();
-    storedSchema = raw.getMetaRaw("schema");
+    return raw.getMetaRaw("schema");
   } catch {
     return undefined;
   }
+}
+
+export async function readVintageState(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const storedSchema = await readStoredResultSchema(vintage, space, cellId);
   // No stored schema is not "read it some other way": the caller reports it,
   // because a recorded root with none is a fixture that does not hold what it
   // claims.
@@ -811,7 +945,7 @@ function isReduction(value: unknown): boolean {
  *
  *   This branch is only honest because the read cannot ALSO return `undefined`
  *   for a key the document does hold. It could, before
- *   `schemaWithUnknownsRelaxed`: an `unknown` position resolves to `undefined`
+ *   `schemaRelaxedForComparison`: an `unknown` position resolves to `undefined`
  *   whatever is stored there, and measured on the committed `default-app.tsx`
  *   fixture that hid `recentPieces`, `summaryIndex` and `trackRecent` — three
  *   keys holding real state, indistinguishable here from three keys holding
@@ -837,6 +971,41 @@ function isPreserved(before: unknown, after: unknown): boolean {
     );
   }
   return deepEqual(before, after);
+}
+
+/**
+ * One key the update did not preserve, and how bad that is.
+ *
+ * The two are graded rather than lumped together because a replay recomputes
+ * as well as reads. A pattern's derived values are a function of state the
+ * vintage may never have pulled on — measured on the committed fixtures,
+ * `createdBy` goes `{name:""}` → `{name:"t"}` (the pattern backfilling from
+ * its OWN `createdByName` compatibility shadow), `$NAME` goes `"Topics (2)"` →
+ * `"Topics (3)"`, `artSyncState` goes `""` → `"generated"`. None of those is
+ * data going missing; all three are the new version resolving something the
+ * old one had left unresolved.
+ *
+ * So a value that merely CHANGED is reported and not failed on, while a
+ * non-empty value that went empty is the shape worth stopping for: that is a
+ * reader that could see something and now cannot.
+ *
+ * A refinement deliberately not taken yet: weighting a key by whether it is
+ * backed by an `of:` document rather than a `computed:` one. A computed cell
+ * is a function of other state by definition, so it recomputing is never loss
+ * and losing its INPUTS would surface at the input. The reduction carries the
+ * id that would answer it, but a plain data key carries no id at all, so it
+ * would grade only some of the findings — worth doing when the warnings have
+ * been read for a while and the noise is understood.
+ */
+export interface StateFinding {
+  key: string;
+  before: unknown;
+  after: unknown;
+  /**
+   * The value went from something to nothing, rather than to something else.
+   * FAILS the gate; a bare change only warns.
+   */
+  lost: boolean;
 }
 
 /**
@@ -903,18 +1072,111 @@ function isPreserved(before: unknown, after: unknown): boolean {
 export function strandedKeys(
   before: Record<string, unknown>,
   after: unknown,
-): string[] {
+): StateFinding[] {
   const beforeState = comparableState(before) as Record<string, unknown>;
   const afterState = comparableState(after);
   const afterView = typeof afterState === "object" && afterState !== null
     ? afterState as Record<string, unknown>
     : undefined;
-  const stranded: string[] = [];
+  const findings: StateFinding[] = [];
   for (const key of Object.keys(beforeState)) {
     if (RENDERINGS.has(key)) continue;
-    if (!isPreserved(beforeState[key], afterView?.[key])) stranded.push(key);
+    const wasThere = beforeState[key];
+    const nowThere = afterView?.[key];
+    if (isPreserved(wasThere, nowThere)) continue;
+    findings.push({
+      key,
+      before: wasThere,
+      after: nowThere,
+      lost: lostAnything(wasThere, nowThere),
+    });
   }
-  return stranded;
+  return findings;
+}
+
+/**
+ * Whether anything that carried a value now carries nothing, AT ANY DEPTH.
+ *
+ * Asked per leaf rather than of the top-level value, and that is the whole
+ * point: a durable root's keys are mostly containers, and `.for()` lists are
+ * the commonest shape in the system. Judging emptiness only at the top means a
+ * key FAILS only when it empties ENTIRELY, so the losses that actually happen
+ * pass as warnings — measured, before this recursed:
+ *
+ *   items ["a","b","c"] → ["a"]                     two rows gone, WARNED
+ *   items ["a","b","c"] → [undefined,undefined,…]   every row unreadable, WARNED
+ *   profile {name:"ada",id:1} → {id:1}              field gone, WARNED
+ *   items [{t,body:"real"}] → [{t,body:""}]         row emptied, WARNED
+ *
+ * Recursing restores all four to failures and costs none of the measurements
+ * that motivated the grading in the first place — `createdBy {name:""} →
+ * {name:"t"}`, `$NAME "Topics (2)" → "Topics (3)"`, `artSyncState "" →
+ * "generated"` and the pinned seeded `note "written" → "captured"` all still
+ * warn, because a leaf that was ALREADY empty had nothing to lose and two
+ * non-empty scalars are a change rather than a loss.
+ *
+ * A REDUCTION compares as an identity, not a container. `{"[cell]": {space,
+ * id, path}}` naming a different document is a change, not an emptying — and
+ * it must stay that way: a pattern update rotates compiler-generated internal
+ * cell identities on purpose, so failing on a moved reduction would red every
+ * edit. A reduction that became NOTHING is still lost, caught by the emptiness
+ * test above before this branch is reached.
+ */
+function lostAnything(before: unknown, after: unknown): boolean {
+  // Nothing to lose.
+  if (isEmptyValue(before)) return false;
+  // Held something, holds nothing now.
+  if (isEmptyValue(after)) return true;
+  if (isReduction(before) || isReduction(after)) return false;
+  // A CONTAINER that stopped being one took everything under it with it,
+  // whichever direction the flip went. Guarding only the array side let
+  // `{a:1}` → `["x"]` and `{a:1}` → `"x"` fall through to "merely changed" —
+  // a whole object's worth of state gone, reported as a warning, and NOT the
+  // pinned seeded-`.for()` limit, which is a moved key rather than a type
+  // change.
+  const beforeIsObject = typeof before === "object" && before !== null;
+  if (Array.isArray(before)) {
+    // A shorter array reaches this through the per-element `undefined`.
+    if (!Array.isArray(after)) return true;
+    return before.some((item, index) => lostAnything(item, after[index]));
+  }
+  if (beforeIsObject) {
+    if (
+      typeof after !== "object" || after === null || Array.isArray(after)
+    ) {
+      return true;
+    }
+    return Object.entries(before as Record<string, unknown>).some(
+      ([key, value]) =>
+        lostAnything(value, (after as Record<string, unknown>)[key]),
+    );
+  }
+  // Two non-empty values that simply differ.
+  return false;
+}
+
+/**
+ * Whether a value carries nothing a reader could act on.
+ *
+ * The falsy primitives are here alongside the empty containers on purpose:
+ * `""`, `0` and `false` are what a declared `Default<>` gives a field nobody
+ * has written, so a value reverting to one is the same event as a value
+ * disappearing — the update stopped being able to read what was there and the
+ * schema filled the hole. Distinguishing the two would mean knowing each
+ * field's declared default, which the stored schema carries but the comparison
+ * does not need: they are the same finding either way.
+ *
+ * A REDUCTION is never empty. `{"[cell]": {space, id, path}}` names a document,
+ * so an empty-looking one is a cell that exists and points somewhere.
+ */
+function isEmptyValue(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (isReduction(value)) return false;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length === 0;
+  }
+  return value === "" || value === 0 || value === false;
 }
 
 /**

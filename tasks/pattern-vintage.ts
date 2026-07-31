@@ -41,9 +41,13 @@
  * compared as the DOCUMENT it points at, so a field that moved to a different
  * doc is still a finding.
  *
- *   deno task pattern-vintage                      # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update             # capture where a REQUIRED one is missing
- *   deno task pattern-vintage --update system/x.tsx  # pin any pattern deliberately
+ *   deno task pattern-vintage                            # replay; fail on a stranded fixture
+ *   deno task pattern-vintage --update                   # capture where a REQUIRED one is missing
+ *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one deliberately
+ *
+ * A named key is a TEST path, not a pattern path — a fixture is produced by
+ * running a test, and covers whatever that test instantiates. `system/x.tsx`
+ * names no test and captures nothing.
  *
  * `--update` can only ADD. It never rewrites or deletes an existing fixture,
  * for the reason Tier 1's baselines are append-only: a command that could
@@ -77,9 +81,11 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
+  reportNothingToSeed,
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
+  REQUIRED_TEST_KEYS,
   requiredPatternKeys,
   uncoveredRequiredPatterns,
   unmappedPatternUrls,
@@ -133,8 +139,10 @@ async function main() {
     // Keys named on the command line pin a pattern nobody auto-updates — the
     // deliberate act the layout allows for. With none named, the required set
     // is what gets seeded.
+    // Keys name TEST files now, not patterns — a fixture is produced by
+    // running a test, and covers whatever that test instantiates.
     const named = Deno.args.filter((arg) => !arg.startsWith("--"));
-    const wanted = named.length > 0 ? named : required;
+    const wanted = named.length > 0 ? named : REQUIRED_TEST_KEYS;
     const { captured, problems } = await captureMissing(
       roots,
       wanted,
@@ -144,7 +152,7 @@ async function main() {
       console.log(
         named.length > 0
           ? `Already pinned: ${named.join(", ")}.`
-          : "Every auto-updating pattern already has a pinned vintage.",
+          : reportNothingToSeed(REQUIRED_TEST_KEYS),
       );
     }
     for (const path of captured) {
@@ -162,7 +170,7 @@ async function main() {
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
-  const uncovered = uncoveredRequiredPatterns(required, replay.vintages);
+  const uncovered = uncoveredRequiredPatterns(required, replay.covered);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
   if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);

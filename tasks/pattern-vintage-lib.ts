@@ -10,11 +10,14 @@
  *
  * Layout:
  *
- *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
- *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.spaces/<did>.sqlite
+ *     packages/piece/test/vintages/<test key>/pinned/<iso>-<identity>.sqlite
+ *     packages/piece/test/vintages/<test key>/pinned/<iso>-<identity>.sqlite.spaces/<did>.sqlite
  *
- * `<pattern key>` is the pattern's repo path under `packages/patterns/`, so a
- * fixture sits next to nothing and is found by path alone.
+ * `<test key>` is the repo path under `packages/patterns/` of the TEST that
+ * produced the fixture, so a fixture sits next to nothing and is found by path
+ * alone. Keyed by test rather than by pattern because a test need not be named
+ * after what it drives — `topics/main.tsx` is tested by `topics/topics.test.tsx`
+ * — and one fixture routinely covers several patterns.
  *
  * The `.sqlite.spaces/` directory carries the run's OTHER spaces — a capture
  * that instantiates a pattern via `Factory.inSpace(...)` writes a second store,
@@ -83,8 +86,12 @@ export const AUTO = "auto";
 export const VINTAGE_SUFFIX = ".sqlite";
 
 export interface VintageRef {
-  /** Pattern path relative to `packages/patterns/`, e.g. `system/home.tsx`. */
-  patternKey: string;
+  /**
+   * TEST path relative to `packages/patterns/`, e.g. `system/home.test.tsx`.
+   * Named for the test, not the pattern: the fixture covers whatever that
+   * test instantiates, which is routinely several patterns.
+   */
+  testKey: string;
   /** `pinned` or `auto`. */
   tier: string;
   /** Capture timestamp, ISO-8601 with `:` replaced (filenames). */
@@ -95,9 +102,9 @@ export interface VintageRef {
   path: string;
 }
 
-/** The directory holding one pattern's fixtures of a given tier. */
-export function vintageDir(patternKey: string, tier: string): string {
-  return `${VINTAGES_DIR}/${patternKey}/${tier}`;
+/** The directory holding one TEST's fixtures of a given tier. */
+export function vintageDir(testKey: string, tier: string): string {
+  return `${VINTAGES_DIR}/${testKey}/${tier}`;
 }
 
 /**
@@ -160,8 +167,8 @@ export function parseVintagePath(
   const tierCut = dir.lastIndexOf("/");
   if (tierCut === -1) return undefined;
   const tier = dir.slice(tierCut + 1);
-  const patternKey = dir.slice(0, tierCut);
-  if (patternKey.length === 0 || tier.length === 0) return undefined;
+  const testKey = dir.slice(0, tierCut);
+  if (testKey.length === 0 || tier.length === 0) return undefined;
 
   const base = fileName.slice(0, -VINTAGE_SUFFIX.length);
   // Anchor on the STAMP, which has a fixed shape, and take everything after it
@@ -179,7 +186,7 @@ export function parseVintagePath(
   if (parsed === null) return undefined;
   const [, stamp, identity] = parsed;
 
-  return { patternKey, tier, stamp, identity, path };
+  return { testKey, tier, stamp, identity, path };
 }
 
 /** Every fixture under `root`, sorted by path so runs are reproducible. */
@@ -214,17 +221,6 @@ export async function collectVintages(
   return found;
 }
 
-/** Pattern keys with at least one PINNED vintage. */
-export function coveredPatternKeys(
-  vintages: readonly VintageRef[],
-): Set<string> {
-  const covered = new Set<string>();
-  for (const vintage of vintages) {
-    if (vintage.tier === PINNED) covered.add(vintage.patternKey);
-  }
-  return covered;
-}
-
 /**
  * Pattern keys that MUST have a pinned vintage.
  *
@@ -238,11 +234,46 @@ export function coveredPatternKeys(
  * personal variants (`*-ben.tsx`) and modules that are not patterns at all
  * (`piece-registry-migration.ts`), and requiring a vintage for those would
  * either wedge the gate on files that cannot be materialized or pad coverage
- * with fixtures nobody replays. Any other pattern can still be pinned
- * deliberately (`--update <pattern key>`) — a vintage that exists is always
+ * with fixtures nobody replays. Any other TEST can still be pinned
+ * deliberately (`--update <test key>`) — a vintage that exists is always
  * replayed; it is only being REQUIRED that this list governs.
  */
 const PATTERN_ROUTE_MARKER = "/patterns/";
+
+/**
+ * A recorded `main` as a path under `packages/patterns/`, or `undefined`.
+ *
+ * Two spellings reach a manifest and only one is a repo path. A pattern
+ * imported locally records `/packages/patterns/x.tsx`; one loaded BY URL — as
+ * `lunch-poll/main.tsx` does for `profile-create` — records the route the
+ * toolshed serves it at, `/api/patterns/system/profile-create.tsx`. Resolving
+ * the second against the repo root looks for `<repo>/api/patterns/...`, which
+ * does not exist, and the replay reports a pattern that is right there as
+ * unresolvable.
+ *
+ * The route prefix is the same `/patterns/` marker `requiredPatternKeys` keys
+ * on, for the same reason: it is where `PatternsServer` mounts the directory.
+ *
+ * `patternsPrefix` is a parameter rather than a constant so the gate stays
+ * exercisable against a temp tree — the suite's fixtures record
+ * `/patterns/x.tsx`, the repo's record `/packages/patterns/x.tsx`, and a
+ * hardcoded prefix would quietly make every synthetic fixture unmappable.
+ */
+export function patternKeyFromMain(
+  main: string | undefined,
+  patternsPrefix: string,
+): string | undefined {
+  if (main === undefined) return undefined;
+  if (main.startsWith(patternsPrefix)) return main.slice(patternsPrefix.length);
+  // The route EXACTLY, not "/api" plus the marker somewhere later. Matching
+  // loosely turned `/api/anything/at/all/patterns/x.tsx` into the repo key
+  // `x.tsx`, so an unrelated served path would resolve to a real source file
+  // and be replayed as though it were that pattern — a wrong answer rather
+  // than a refused one, which is the shape this gate must never produce.
+  const route = "/api/patterns/";
+  if (main.startsWith(route)) return main.slice(route.length);
+  return undefined;
+}
 
 /**
  * The route a system pattern source names.
@@ -286,18 +317,25 @@ export function unmappedPatternUrls(
   );
 }
 
-/** Required patterns with no pinned vintage. */
+/**
+ * Required patterns that no fixture actually replayed.
+ *
+ * Judged from what the replay COVERED, not from the fixture tree's shape. A
+ * fixture is named after the test that produced it and routinely covers several
+ * patterns, so "a directory exists for X" and "X was replayed" are different
+ * questions — and only the second is evidence.
+ */
 export function uncoveredRequiredPatterns(
   requiredKeys: readonly string[],
-  vintages: readonly VintageRef[],
+  covered: ReadonlySet<string>,
 ): string[] {
-  const covered = coveredPatternKeys(vintages);
   return requiredKeys.filter((key) => !covered.has(key)).sort();
 }
 
 /** A vintage that could not be replayed under today's source. */
 export interface ReplayFailure {
-  patternKey: string;
+  /** The TEST whose fixture this failure came from. */
+  testKey: string;
   /** Repo-relative fixture path. */
   path: string;
   detail: string;
@@ -339,8 +377,8 @@ export function reportFailures(failures: readonly ReplayFailure[]): string {
   return [
     `${failures.length} vintage(s) could not be replayed:`,
     "",
-    ...failures.flatMap(({ patternKey, path, detail }) => [
-      `  ${patternKey}`,
+    ...failures.flatMap(({ testKey, path, detail }) => [
+      `  ${testKey}`,
       `    ${path}`,
       `    ${detail}`,
     ]),
@@ -375,13 +413,65 @@ export function reportReplaySummary(
     targets: number;
     changed: number;
     updated: number;
+    servedRoute: number;
   },
 ): string {
+  // Served routes are PRINTED, not merely counted. They are targets the run
+  // deliberately did not identity-compare, so a summary that omitted them
+  // described more coverage than the run bought — and the count existed for
+  // exactly that reason while nothing displayed it.
+  const served = counts.servedRoute > 0
+    ? ` ${counts.servedRoute} target(s) were served routes and not ` +
+      `identity-compared.`
+    : "";
   return `Replayed ${counts.replayed} vintage(s): ${counts.candidates} ` +
     `recorded instantiation(s), all mappable to a file; ${counts.targets} ` +
     `upgrade target(s), ${counts.changed} changed since capture, ` +
-    `${counts.updated} updated cleanly with no state stranded.`;
+    `${counts.updated} updated cleanly with no state stranded.${served}`;
 }
+
+/**
+ * What `--update` prints when every seeded test already has a fixture.
+ *
+ * It must say what was actually CHECKED. The required PATTERNS come from the
+ * runtime's URL constants while the seed list is a hand-kept set of TEST keys,
+ * so "every auto-updating pattern already has a pinned vintage" is a claim this
+ * command cannot make: add a system pattern no seeded test instantiates and the
+ * gate goes red telling you to run `--update`, which then reported everything
+ * fine and exited 0 — a dead end whose message blamed the reader.
+ *
+ * Lives here rather than in the task shell because the shell is only reachable
+ * through `import.meta.main` and so is never exercised by a test; a message
+ * this load-bearing should be.
+ */
+export function reportNothingToSeed(seededTestKeys: readonly string[]): string {
+  return `Every seeded test already has a pinned vintage (${
+    seededTestKeys.join(", ")
+  }). If the gate still reports a pattern uncovered, no seeded test ` +
+    `instantiates it — add the test that does to REQUIRED_TEST_KEYS in ` +
+    `tasks/pattern-vintage.ts, or pin its test explicitly with ` +
+    `\`--update <test path>\`.`;
+}
+
+/**
+ * The tests whose fixtures CI seeds by default.
+ *
+ * TEST keys, because a fixture is produced by running a test. The required
+ * PATTERNS are still derived from the runtime's own URL constants — this list
+ * only says which tests are known to cover them, which is not derivable: a test
+ * need not be named after what it drives, and `topics/main.tsx` is tested by
+ * `topics/topics.test.tsx`.
+ *
+ * Lives beside the rest of the coverage vocabulary rather than in the task
+ * shell, which no test loads (it is reachable only through `import.meta.main`),
+ * so the invariant every entry has to satisfy can be asserted.
+ */
+export const REQUIRED_TEST_KEYS = [
+  "system/home.test.tsx",
+  "system/default-app.test.tsx",
+  "topics/topics.test.tsx",
+  "lunch-poll/main.test.tsx",
+];
 
 /** What the gate prints when it found no fixture to replay at all. */
 export function reportNothingReplayed(): string {
