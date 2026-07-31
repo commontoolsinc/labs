@@ -266,6 +266,38 @@ See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/
   resolved string/number is the actual defect, and `cf check` would reject the
   handler-state type mismatch if the binding were unresolved.
 
+### 17. Cross-Pattern Data Contracts
+
+Review types used to read externally owned data: linked pieces, wish results,
+registry entries, cells passed between independently evolving patterns, and
+similar boundaries. A schema is a runtime projection and capability contract,
+not just a TypeScript annotation. The consumer should name only the fields it
+reads and the writable/stream capabilities it actually uses.
+
+| Violation | Fix |
+|-----------|-----|
+| another pattern's full `FooInput` or `FooOutput` is imported, aliased, or extended to type external data even though only a subset is used | declare a consumer-owned structural type containing exactly the fields and capabilities used |
+| `Pick<FooOutput, ...>` / `Omit<FooOutput, ...>` is used merely to avoid spelling the consumer contract | write the minimal local shape so unrelated producer type changes do not become consumer migrations |
+| a consumer projection names fields it never reads, including `[UI]`, unrelated state, or mutation streams | remove them; undeclared fields are intentionally outside this relationship |
+| a consumer requests `Writable<>`, `Cell<>`, or a stream it does not mutate, bind, or send | use the plain readable field type or omit the capability |
+| a producer's advertised reusable model contains its full pattern state or grows whenever one consumer needs another field | keep/export a shallow role model for the stable shared semantics; let specialized consumers own additional local projections |
+
+This duplication is intentional. Narrow schemas avoid traversing unrelated
+linked data, reduce validation failures across durable-data vintages, avoid
+exporting excess write capabilities, and let patterns migrate independently.
+See
+`docs/common/patterns/composition.md#keep-external-data-contracts-narrow`.
+
+Do not flag a genuinely shared protocol (for example, a stream event or enum),
+a cohesive domain model co-owned by one pattern family, a test intentionally
+checking the complete public result, or a wrapper whose stated purpose is to
+forward the complete contract. If the consumer demonstrably uses every field
+and capability, the full contract may be honest.
+
+Severity is `minor` when the only current effect is unnecessary coupling.
+Raise it to `major` when the oversized contract causes extra traversal,
+validation/migration failure, or excess write capability.
+
 ## Output Format
 
 The review should be emitted as a structured checklist with explicit pass/fail

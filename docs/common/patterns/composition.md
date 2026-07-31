@@ -69,6 +69,49 @@ Both patterns receive the same `items` cell - changes sync automatically.
 - **Pattern Composition**: Multiple views in one UI, reusable components
 - **Linked Pieces**: Independent deployments that communicate
 
+## Keep External Data Contracts Narrow
+
+A pattern schema is a runtime projection and capability contract, not only a
+TypeScript annotation. When a pattern receives externally owned data through a
+link, wish result, registry entry, or other cell, declare only the fields it
+reads and only the write or stream capabilities it uses. Extra fields can make
+the runtime traverse more linked data, make otherwise compatible stored values
+fail validation, and couple the consumer to unrelated producer migrations.
+
+The consumer normally owns this structural type:
+
+```typescript
+// Shown at module scope.
+type NotePreview = {
+  title?: string;
+  summary?: string;
+};
+
+interface PreviewInput {
+  note: NotePreview;
+}
+```
+
+Do not import another pattern's entire `FooInput` or `FooOutput`, or derive a
+`Pick`/`Omit` from it, merely because it contains the needed fields. Spelling
+the minimal local shape is intentional duplication: the producer can evolve
+unrelated state, UI, and mutation streams without changing this consumer's
+contract.
+
+When a producer intentionally supports a stable role used by several
+independent consumers, export a shallow model for that role, such as a
+`MentionablePiece` or `SummarizablePiece`, rather than asking consumers to
+reuse its full input or output schema. Keep that model limited to the role's
+semantic core. A consumer with extra needs should usually extend its own local
+projection instead of widening the shared model for everyone.
+
+Reusing a shared type is still appropriate when it is itself the intended
+protocol: for example, a stream event, an enum, or a cohesive domain model
+co-owned by one pattern family. A wrapper that deliberately forwards a complete
+contract may also use that complete contract. The test is whether every named
+field and capability belongs to the relationship, not whether centralizing the
+type removes duplicate TypeScript.
+
 ## Merging Complex Objects from Pattern Inputs
 
 Pattern inputs are cellified — they become cell proxies, not plain objects. You **cannot** spread a pattern input directly into an object literal, because the spread operates on the proxy's own properties (which are empty) rather than the underlying value.
