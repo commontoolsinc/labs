@@ -609,11 +609,25 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
     addresses: readonly IMemorySpaceAddress[],
   ): boolean;
 
-  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  /**
+   * Run a server-side read-only SQLite query against a cell-derived db.
+   *
+   * `options.actingContext` is the C1.4b lane-scoped read seam (A5/G1): a
+   * cell-db is a FILE, not a document, so the scope context IS the file
+   * selector (`#cellDbPath`'s scopeTag) and there is no downstream per-address
+   * scope check to catch a wrong resolution. A lease-bound executor serving
+   * alice's user lane must name that lane or it opens the EXECUTOR
+   * principal's cell-db. Strictly additive: absence keeps the pre-existing
+   * `#scopeContextForSession` resolution byte-identically, which is every
+   * client call. The caller must capture the lane SYNCHRONOUSLY inside the
+   * action's own extent — this RPC runs in a post-commit flush, by which time
+   * the ambient lane is restored.
+   */
   sqliteQuery?(
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: { actingContext?: SchedulerExecutionContextKey },
   ): Promise<SqliteQueryResult>;
 
   // No `sqliteExecute`: SQLite writes go through the commit fold

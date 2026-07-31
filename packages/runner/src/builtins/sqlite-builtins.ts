@@ -55,6 +55,7 @@ import {
   columnDeclaresIfc,
   parseSessionExecutionContextKey,
   principalOfUserContextKey,
+  type SchedulerExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
@@ -146,11 +147,42 @@ function actingHandleOwner(
   runtime: Runtime,
   space: MemorySpace,
 ): string | undefined {
+  return actingPrincipalOfLane(
+    runtime,
+    actingExecutionLane(runtime, space),
+  );
+}
+
+/**
+ * The execution lane this run is acting as, or undefined for the space lane
+ * (every client run and every space-rank executor run).
+ *
+ * MUST be called synchronously inside the action's own extent:
+ * `runWithExecutionLane` restores the previous ambient lane on synchronous
+ * exit, so a post-await read sees the space lane. That is precisely why
+ * `sqliteQuery` captures it in the action body and carries it into the
+ * post-commit flush rather than letting `Replica.sqliteQuery` read
+ * `#actingLane` the way every other read verb does.
+ */
+function actingExecutionLane(
+  runtime: Runtime,
+  space: MemorySpace,
+): SchedulerExecutionContextKey | undefined {
   const lane = runtime.storageManager.actingExecutionLane?.(
     space,
     getTransactionSourceAction(),
   );
-  if (lane !== undefined && lane !== "space") {
+  return lane === undefined || lane === "space" ? undefined : lane;
+}
+
+/** The principal a lane names, falling back to the ambient trust snapshot for
+ *  the space lane. Naming a lane only NARROWS: absence keeps the pre-existing
+ *  derivation byte-identically. */
+function actingPrincipalOfLane(
+  runtime: Runtime,
+  lane: SchedulerExecutionContextKey | undefined,
+): string | undefined {
+  if (lane !== undefined) {
     const session = parseSessionExecutionContextKey(lane);
     if (session !== undefined) return session.principal;
     const principal = principalOfUserContextKey(lane);
@@ -679,6 +711,21 @@ export function sqliteQuery(
   let result: Cell<QueryState>;
   let resultScope: CellScope | undefined;
   const space = parentCell.space;
+  // R5: the effect descriptor's declaration of the ONE document this builtin
+  // mints. `makeResultCell` allocates it at a scope discovered per transaction
+  // (the narrowest of the output binding, the db handle's scope and the
+  // clearance floor), so it is not a registered output cell and the runner can
+  // only learn about it here — `runner.ts` reads this array off the returned
+  // action and folds it into `ServerBuiltinActionDescriptor.runtimeWrites`.
+  // The router renders each entry at BOTH its value-root address and its
+  // DOCUMENT root, which is what covers the `["result"]` / `["pattern"]`
+  // provenance meta paths `makeResultCell` stamps beside `["value"]` (the same
+  // coverage `sqliteDatabase`'s computation descriptor buys through
+  // `mintedDocuments`). Declared at the scope actually allocated, so a scoped
+  // instance is admitted only at a lane of matching rank
+  // (`servability.ts` `laneAdmitsScope`) — a space-rank claim can never serve
+  // a per-user query result.
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
     const inputs = inputsCell.withTx(tx).get() as {
@@ -734,10 +781,26 @@ export function sqliteQuery(
       initialized = true;
       resultScope = scope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      result.getAsNormalizedFullLink(),
+    );
 
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
     const db = readDbRef(inputs.db);
+    // A5/G1 — captured HERE, in the action's synchronous extent, because that
+    // is the only place it is readable: the RPC and every identity read below
+    // happen in the post-commit flush, after `runWithExecutionLane` has
+    // restored the ambient lane. A cell-db is a FILE and the scope context is
+    // its selector, so a lease-bound executor that fails to name the lane it
+    // is serving opens the executor principal's db and returns its rows;
+    // `resolveCeilingPlaceholders` and the read-clearance reader would resolve
+    // the same wrong principal. Undefined on every client run and every
+    // space-rank executor run, which keeps both byte-identical.
+    const actingContext = actingExecutionLane(runtime, space);
+    const actingPrincipal = actingPrincipalOfLane(runtime, actingContext);
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
     try {
@@ -760,9 +823,7 @@ export function sqliteQuery(
       // reader is part of the query identity (belt-and-suspenders with the
       // per-user result scope above — a cleared result is never keyed only by
       // the boolean). Absent for non-clearance queries so they do not re-hash.
-      clearanceReader: inputs.readClearance
-        ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
-        : null,
+      clearanceReader: inputs.readClearance ? (actingPrincipal ?? null) : null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
@@ -824,7 +885,12 @@ export function sqliteQuery(
                 "(sqliteQuery unavailable)",
             );
           }
-          const res = await provider.sqliteQuery(db, sql, params);
+          const res = await provider.sqliteQuery(
+            db,
+            sql,
+            params,
+            actingContext !== undefined ? { actingContext } : undefined,
+          );
           // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
           // OBJECTS so a typed consumer's asCell schema rehydrates them to live
           // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
@@ -871,8 +937,7 @@ export function sqliteQuery(
           let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
           if (ceiling !== undefined) {
             const resolved = resolveCeilingPlaceholders(ceiling, {
-              actingPrincipal: runtime.trustSnapshotProvider()
-                ?.actingPrincipal,
+              actingPrincipal,
               owner: db.owner,
             });
             if ("error" in resolved) {
@@ -892,7 +957,7 @@ export function sqliteQuery(
             // Phase 3.b read-time clearance: the reader is the acting principal
             // (same identity the ceiling placeholders resolve against).
             readClearance: inputs.readClearance
-              ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+              ? { reader: actingPrincipal }
               : undefined,
           });
           if ("error" in rowLabels) {
@@ -990,5 +1055,9 @@ export function sqliteQuery(
       },
     );
   };
-  return { action };
+  // The effect kind stays declared ONCE, in the registration
+  // (`builtins/index.ts`, `raw(sqliteQuery, { isEffect: true })`) — `runner.ts`
+  // resolves `module.isEffect ?? builtinIsEffect`, so repeating it here would
+  // only add a second source of truth for the same fact.
+  return { action: Object.assign(action, { serverBuiltinRuntimeWrites }) };
 }

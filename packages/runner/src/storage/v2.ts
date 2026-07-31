@@ -178,6 +178,7 @@ import * as V2Transaction from "./v2-transaction.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   ReplicaClient,
+  ReplicaReadOptions,
   ReplicaSessionHandle,
   ReplicaWatchView,
 } from "./v2-replica-session.ts";
@@ -2174,8 +2175,9 @@ class Provider implements IStorageProviderWithReplica {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: ReplicaReadOptions,
   ): Promise<SqliteQueryResult> {
-    return this.replica.sqliteQuery(db, sql, params);
+    return this.replica.sqliteQuery(db, sql, params, options);
   }
 
   sqliteServerCommitRowLabelEval(): boolean {
@@ -2888,9 +2890,15 @@ class SpaceReplica implements ISpaceReplica {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: ReplicaReadOptions,
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
-    return await session.sqliteQuery(db, sql, params);
+    // The lane is NOT read from `#actingLane` here, unlike every other read
+    // verb: this call happens in a post-commit flush, after the action's
+    // synchronous extent, when `runWithExecutionLane` has already restored the
+    // previous ambient lane. The caller captures it inside the run and passes
+    // it in (`sqlite-builtins.ts`, `actingExecutionLane`).
+    return await session.sqliteQuery(db, sql, params, options);
   }
 
   async acquireLegacyBackgroundExclusion(

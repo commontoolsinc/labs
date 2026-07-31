@@ -15,6 +15,53 @@ import type { NormalizedFullLink } from "../link-utils.ts";
  * (`executor/action-transaction-router.ts`) accepts, and therefore the only way
  * an EFFECT node ever acquires an assembled scope summary instead of
  * classifying `unknown-effect-surface`.
+ *
+ * `streamData` is the R5 effect row REFUSED (2026-07-30), and the refusal is
+ * about EGRESS, not about surface: its three minted documents
+ * (`pending`/`result`/`error`) are the same shape `fetch.ts` already declares
+ * through `serverBuiltinRuntimeWrites`, so a descriptor would assemble
+ * perfectly well. Two independent blockers sit in front of that.
+ *
+ *  1. It egresses by calling `globalThis.fetch` directly with the authored url
+ *     (`stream-data.ts`), never `runtime.fetchBuiltin`. The executor Worker's
+ *     `fetch: denyExternalBuiltinFetch` is a RUNTIME option
+ *     (`executor-worker.ts`), so it never sees that call — the same bypass
+ *     `wish` has, but pointed at an AUTHOR-SUPPLIED url instead of `wish`'s
+ *     fixed `patternUrl()` on our own API. The owner ruling that accepted
+ *     `wish`'s bypass turned on that fixed destination; it does not extend
+ *     here. Membership would put unbrokered, unauthorized, DNS-unpinned egress
+ *     to an arbitrary host on the serving box, which is precisely what
+ *     `createDefaultServerBuiltinBroker`'s `fetchExternalPinned` path exists
+ *     to prevent.
+ *  2. It cannot simply be rewired to the broker, because the broker is a
+ *     BOUNDED, BUFFERED request/response and that is a deliberate invariant,
+ *     not an unfinished edge. `server-builtin-egress.ts`'s defaults —
+ *     `timeoutMs: 30_000`, `maxResponseBytes: 8 MiB`, and a docblock that says
+ *     in as many words that external I/O has no guaranteed completion event,
+ *     so it is bounded "so a claimed builtin cannot hold its action/lease
+ *     forever" and a timeout "follows the normal transient-failure path rather
+ *     than accepting a partial response". The channel then materializes the
+ *     whole body twice more (`new Uint8Array(await
+ *     result.response.arrayBuffer())` host-side,
+ *     `new Response(response.body.slice(), …)` Worker-side, in
+ *     `executor/server-builtin-channel.ts`).
+ *
+ *     `streamData`'s contract is the exact negation of all three: an
+ *     unbounded-duration connection, consumed incrementally through
+ *     `response.body.getReader()`, publishing each SSE frame as it arrives.
+ *     "Partial response" is its entire output. On a stream that stays open the
+ *     bounded read never completes and the builtin gets a 30 s transient
+ *     failure instead of data.
+ *
+ * Its lifetime compounds both: the loop is unbounded and, unlike `fetch.ts`,
+ * never `runtime.trackAsyncWork`ed, so neither `settled()` nor the executor's
+ * activation fixpoint can observe it — the very hazard the broker's timeout
+ * exists to prevent, arriving by a route the broker does not police. Serving
+ * `streamData` means designing a STREAMING broker seam and a run-scoped
+ * lifetime for it, and deciding what a claim means when the effect outlives
+ * every run; it is not an allowlist edit. (Its kind is already correct —
+ * CP6's flip to `isEffect: true` landed and is pinned by
+ * `builtin-effect-registry.test.ts`; kind was never what kept it out.)
  */
 export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   "fetchBinary",
@@ -63,6 +110,48 @@ export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   // `test/navigate-to-rank-containment.test.ts`; drop the declaration and that
   // file goes red.
   "navigateTo",
+  // `sqliteQuery` joins as the SECOND non-fetch member, and for a different
+  // reason than `navigateTo`: its server-side work is a server-side read that
+  // the executor was already able to perform. The Worker's storage manager is
+  // a `HostStorageManager`, whose provider forwards `sqliteQuery` over the
+  // memory port to the same `sqlite.query` verb the client uses
+  // (`storage/v2-host-provider.ts`), so no broker route was ever the missing
+  // piece — a second egress broker would have duplicated a working transport.
+  // The registry test used to say "nothing server-side runs it at all yet";
+  // that was the gap, and it is closed.
+  //
+  // Its write surface is a single minted document — the `QueryState`
+  // `{ pending, result, error, requestHash, withheld }` cell `makeResultCell`
+  // allocates — plus the output spot linking to it. The mint is not a
+  // registered output cell (its scope is discovered per transaction: the
+  // narrowest of the output binding, the db handle's scope, and the `user`
+  // floor a read-clearance query forces), so it rides
+  // `serverBuiltinRuntimeWrites`, which also carries the `["result"]` /
+  // `["pattern"]` provenance meta the effect summary renders at document root.
+  // The per-row entity documents a CFC-labeled result splits off carry
+  // content-derived ids and cannot be declared; they ride
+  // `sameTransactionMaterializedDocuments`, exactly like `llmDialog`'s
+  // per-message documents.
+  //
+  // Two preconditions were load-bearing and both landed before this entry.
+  // (1) Double-execution: `sqliteQuery` consults `externalSinkDisposition()`
+  // BEFORE writing its `requestHash` dedup marker (8cb00bbf8) — write the
+  // marker on the suppressed side and the result stays `pending` forever while
+  // the issuing side is wedged. (2) Identity: the query RPC runs in a
+  // post-commit flush, after `runWithExecutionLane` has restored the ambient
+  // lane, so the builtin captures the acting lane synchronously in its action
+  // body and carries it into the flush as `actingContext` (A5/G1, 57dd8da7f).
+  // Without that a lease-bound executor serving alice's lane would open the
+  // EXECUTOR principal's cell-db — a cell-db is a FILE, the scope context is
+  // its selector, and no downstream per-address check catches a wrong
+  // resolution. The same capture feeds `resolveCeilingPlaceholders` and the
+  // read-clearance reader, which have the identical hazard.
+  //
+  // NOT covered, and still fails closed: `db.exec` writes. They fold a
+  // `sqlite` op into an arbitrary CALLER's commit, which the routing layer
+  // rejects unconditionally (`dynamic-sqlite-operation`, CP21/D2) — a
+  // different action's transaction, not this node's.
+  "sqliteQuery",
 ] as const;
 
 export type ServerExecutableBuiltinId =

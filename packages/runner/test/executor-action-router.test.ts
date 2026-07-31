@@ -39,6 +39,7 @@ const EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS = [
   "generateObject",
   "llmDialog",
   "navigateTo",
+  "sqliteQuery",
 ] as const satisfies readonly ServerExecutableBuiltinId[];
 const action = {};
 const output = {
@@ -386,8 +387,7 @@ Deno.test("server executable builtin registry is exact and excludes ambient capa
   // supported. `llm` joined the registry when it was given the same
   // `/api/ai/llm` broker route generateText already had (A1); `llmDialog`
   // joined under owner ruling D11 (run pattern effects entirely server-side)
-  // once it too routed through `runtime.fetchBuiltin`; `sqliteQuery`
-  // is not fetch-shaped and stays outside until its own broker exists.
+  // once it too routed through `runtime.fetchBuiltin`.
   //
   // This pin exists to make registry growth DELIBERATE, and it earned that
   // on 2026-07-29: the `llmDialog` addition landed without updating the
@@ -403,12 +403,24 @@ Deno.test("server executable builtin registry is exact and excludes ambient capa
   // states — membership is what earns the `:server-v1` fingerprint, hence the
   // only path by which an EFFECT node acquires an assembled scope summary. So
   // the question to answer before adding an id is "does the server perform this
-  // builtin's half of the work", not "does it fetch". `sqliteQuery` still
-  // stays outside: nothing server-side runs it at all yet.
+  // builtin's half of the work", not "does it fetch". `sqliteQuery` is the
+  // second id that rule admits and the first one it CHANGED the answer for:
+  // it dials no `/api/...` route either, but the executor's
+  // `HostStorageManager` provider has forwarded `sqlite.query` over the memory
+  // port all along, so the server really does perform its half.
+  //
+  // `streamData` is the R5 effect row that stays outside, and NOT because of
+  // its surface (three minted docs, identical in shape to the fetch family's).
+  // It egresses through the global `fetch`, which the Worker's
+  // `denyExternalBuiltinFetch` runtime option cannot see, and its SSE reader
+  // loop cannot cross the broker channel's buffered
+  // `arrayBuffer()`/`new Response(body)` wire at all. See the registry
+  // docblock.
+  //
   // `fetch`/`generateImage` are ambient capabilities, not builtin ids, and
   // must never resolve here.
   assertEquals(
-    ["fetch", "generateImage", "sqliteQuery"].map(
+    ["fetch", "generateImage", "streamData"].map(
       isServerExecutableBuiltinId,
     ),
     [false, false, false],

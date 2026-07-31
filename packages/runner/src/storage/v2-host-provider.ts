@@ -1334,8 +1334,9 @@ class HostReplicaSession implements ReplicaSession {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: ReplicaReadOptions,
   ): Promise<SqliteQueryResult> {
-    return this.session.sqliteQuery(db, sql, params);
+    return this.session.sqliteQuery(db, sql, params, options);
   }
 
   registerSqliteDiskSource(

@@ -108,6 +108,7 @@ export interface ReplicaSession {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: ReplicaReadOptions,
   ): Promise<SqliteQueryResult>;
   registerSqliteDiskSource(
     id: string,

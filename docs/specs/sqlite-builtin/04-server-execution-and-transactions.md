@@ -168,6 +168,16 @@ interface SqliteQueryRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  // C1.4b lane-scoped read seam: the execution lane this read ACTS AS,
+  // validated host-side against the live lane grant before any scope key
+  // resolves. Absent for every ordinary client read, which keeps the
+  // session's own scope resolution. A lease-bound executor MUST name the
+  // lane it is serving — step 3 below picks a FILE from `db.scope` resolved
+  // against this context, so a missing lane opens the executor principal's
+  // cell-db rather than the user's, and no later per-address check catches
+  // it. `sqliteQuery` captures the lane inside the action's synchronous
+  // extent, because the RPC itself is issued from a post-commit flush.
+  actingContext?: SchedulerExecutionContextKey;
   db: SqliteDbRef;            // resolved source descriptor (Section 03)
   sql: string;               // single read-only statement
   params?: unknown[] | Record<string, unknown>;
