@@ -107,13 +107,18 @@ interface CounterOutput {
 declared interface by name (`pattern<Input, Output>` produces a
 `PatternFactory<…, Output>`), a non-exported `Output` interface fails
 compilation with "Default export of the module has or is using private name
-'Output'". The result type is your public contract — export it:
+'Output'". The result type is the factory's public return contract — export it:
 
 ```tsx
 // Shown for illustration only.
 export interface CounterOutput { /* ... */ }
 export default pattern<CounterInput, CounterOutput>(/* ... */);
 ```
+
+This TypeScript visibility requirement does not make the full output type the
+right input schema for every external consumer. A consumer that needs only a
+subset should normally declare its own narrow structural projection; see
+[Keep External Data Contracts Narrow](../patterns/composition.md#keep-external-data-contracts-narrow).
 
 Consumers see exactly what the author returned — the factory's result type is
 not stripped. A consumer that receives `Writable<GameState>` reads current
