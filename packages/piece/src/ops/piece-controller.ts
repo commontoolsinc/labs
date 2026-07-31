@@ -34,7 +34,8 @@ import {
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
-import type { CellKind, LinkScope } from "@commonfabric/api";
+import type { CellKind, JSONSchemaObj, LinkScope } from "@commonfabric/api";
+import { SchemaObjectTraverser } from "@commonfabric/runner/traverse";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
@@ -796,6 +797,34 @@ export function consumeOuterCellContract(
     payloadSchema: entries.length === 1
       ? payloadSchema
       : { ...payloadSchema, asCell: entries.slice(1) },
+  };
+}
+
+function schemaHasAsCell(
+  schema: JSONSchema | undefined,
+): schema is JSONSchemaObj {
+  return SchemaObjectTraverser.hasAsCell(schema);
+}
+
+/**
+ * Consume one uniform asCell layer, including across anyOf/oneOf branches.
+ * This is the compound-schema counterpart to runner/schema.ts's filterAsCell;
+ * keep their top-level wrapper semantics aligned.
+ */
+function consumeAsCellProjectionSchema(schema: JSONSchemaObj): JSONSchema {
+  if (ContextualFlowControl.getAsCellValues(schema).length > 0) {
+    return consumeOuterCellContract(schema).payloadSchema;
+  }
+  const anyOf = schema.anyOf?.every(schemaHasAsCell)
+    ? schema.anyOf.map(consumeAsCellProjectionSchema)
+    : schema.anyOf;
+  const oneOf = schema.oneOf?.every(schemaHasAsCell)
+    ? schema.oneOf.map(consumeAsCellProjectionSchema)
+    : schema.oneOf;
+  return {
+    ...schema,
+    ...(anyOf !== undefined && { anyOf }),
+    ...(oneOf !== undefined && { oneOf }),
   };
 }
 
@@ -2260,33 +2289,41 @@ class PiecePropIo implements PieceCellIo {
     // started by pull() sends its path plus narrowed schema to Memory v2, so
     // this avoids traversing unrelated linked fields (an input can contain a
     // broad authoring graph even when the caller asks for one small durable
-    // field). No per-segment asCell handling is needed: key() walks the schema
-    // (so an asCell ancestor's `properties` keep narrowing the query) and link
-    // resolution follows the stored link at that segment during the read. Only
-    // a TERMINAL asCell needs unwrapping, because that is the one place the
-    // projection hands back a handle instead of a value.
+    // field). No per-segment asCell handling is needed on the way down: key()
+    // walks the schema (so an asCell ancestor's `properties` keep narrowing the
+    // query) and link resolution follows the stored link at that segment during
+    // the read. A TERMINAL asCell still needs unwrapping, because that is the
+    // one place the projection hands back a handle instead of a value.
     const selectedCell = targetCell.key(...path);
     await selectedCell.pull();
+    const selectedSchema = selectedCell.schema;
+    if (schemaHasAsCell(selectedSchema)) {
+      // An asCell projection materializes even an absent or explicitly
+      // undefined slot as a Cell, so inspect the stored slot before resolving
+      // the handle. Falling back preserves the root read's absent-vs-undefined
+      // rules and its missing-path diagnostics.
+      if (selectedCell.getRaw() === undefined) {
+        return await this.#getFromRoot(targetCell, path);
+      }
+      // resolveAsCell() applies the asCell descriptor's scope cap. The Cell the
+      // projection hands back from get() does NOT, and neither does a key()
+      // chain that continues past the handle — see #5230. Route through
+      // resolveAsCell() so a capped handle stays capped at this boundary.
+      const handle = selectedCell.resolveAsCell().asSchema(
+        consumeAsCellProjectionSchema(selectedSchema),
+      );
+      const readableHandle = cellWithScopedLinkRequiredsRelaxed(handle);
+      await readableHandle.pull();
+      return readableHandle.get();
+    }
     // Relax `required` for scoped links that this session cannot materialize,
     // at the selected subtree rather than the root — same boundary as
     // #getFromRoot, see schemaWithScopedLinkRequiredsRelaxed.
     const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
-    if (isCell(selected)) {
-      // An asCell projection materializes even an absent or explicitly
-      // undefined slot as a Cell, so inspect the stored slot before reading
-      // through the handle. Falling back preserves the root read's
-      // absent-vs-undefined rules and its missing-path diagnostics.
-      if (selectedCell.getRaw() === undefined) {
-        return await this.#getFromRoot(targetCell, path);
-      }
-      const handle = cellWithScopedLinkRequiredsRelaxed(selected);
-      await handle.pull();
-      return handle.get();
-    }
     if (selected === undefined) {
       return await this.#getFromRoot(targetCell, path);
     }
-    return selected;
+    return isCell(selected) ? await selected.pull() : selected;
   }
 
   async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
