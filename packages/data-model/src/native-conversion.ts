@@ -3,7 +3,10 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
+import {
+  hasOnlyOwnDataProperties,
+  isPlainObjectWithOnlyEnumerableStringKeys,
+} from "@commonfabric/utils/objects";
 import {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
@@ -263,13 +266,19 @@ export function shallowFabricFromNativeValue(
 
     case NATIVE_TAGS.Object: {
       // `FabricPlainObject` is keyed by `string`, so a symbol key has no fabric
-      // representation, and neither does a non-enumerable string key. Reject
-      // either outright rather than dropping it on the way through ("death
-      // before confusion"), matching how an array's non-index properties are
-      // treated.
+      // representation, and neither does a non-enumerable string key; an
+      // accessor-backed property is live code rather than inert data. Reject
+      // any of them outright rather than dropping or flattening it on the way
+      // through ("death before confusion"), matching how an array's non-index
+      // properties are treated.
       if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
         throw new Error(
           "Cannot store object with non-string-keyed properties",
+        );
+      }
+      if (!hasOnlyOwnDataProperties(value as object)) {
+        throw new Error(
+          "Cannot store object with accessor-backed properties",
         );
       }
       // Plain objects: delegate frozenness handling to `cloneHelper()`.

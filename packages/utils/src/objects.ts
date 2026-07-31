@@ -38,3 +38,27 @@ export function isPlainObjectWithOnlyEnumerableStringKeys(
   // key and no non-enumerable string key anywhere.
   return Reflect.ownKeys(value).length === Object.keys(value).length;
 }
+
+/**
+ * Indicates whether every own property of the given object is a *data*
+ * property -- as opposed to an accessor (getter and/or setter). An accessor
+ * is live code rather than inert data: a read executes it and can answer
+ * differently every time, and freezing the object does not change that.
+ *
+ * This is purely a descriptor-shape check; it says nothing about the keys'
+ * visibility or type. Pair it with
+ * `isPlainObjectWithOnlyEnumerableStringKeys()` when both dimensions matter.
+ *
+ * @param value The object to check.
+ * @returns `true` if every own property is a data property, `false`
+ *   otherwise.
+ */
+export function hasOnlyOwnDataProperties(value: object): boolean {
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!("value" in descriptor)) {
+      return false;
+    }
+  }
+  return true;
+}

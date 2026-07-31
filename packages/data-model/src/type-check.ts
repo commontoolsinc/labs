@@ -1,5 +1,8 @@
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
+import {
+  hasOnlyOwnDataProperties,
+  isPlainObjectWithOnlyEnumerableStringKeys,
+} from "@commonfabric/utils/objects";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
@@ -48,8 +51,10 @@ export function isFabricValueLayer(
       // Plain objects are accepted; class instances are not (except
       // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
       // `string`, so a symbol key has no representation either, and neither
-      // does a non-enumerable string key.
-      return isPlainObjectWithOnlyEnumerableStringKeys(value);
+      // does a non-enumerable string key; an accessor-backed property is live
+      // code rather than inert data.
+      return isPlainObjectWithOnlyEnumerableStringKeys(value) &&
+        hasOnlyOwnDataProperties(value);
     }
 
     case "symbol": {
@@ -75,9 +80,10 @@ export function isFabricValueLayer(
  * properties, `length` aside (sparse holes allowed), or a plain object whose
  * values are all
  * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
- * symbol -- whether the value itself or reached anywhere within it -- and for
- * any other class instance (`Date`, `Map`, ...) not representable as a
- * `FabricValue`. Handles circular references.
+ * symbol -- whether the value itself or reached anywhere within it -- for an
+ * accessor-backed (getter/setter) property anywhere, which is live code
+ * rather than inert data, and for any other class instance (`Date`, `Map`,
+ * ...) not representable as a `FabricValue`. Handles circular references.
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
@@ -145,8 +151,10 @@ export function isFabricValue(value: unknown): value is FabricValue {
       return true;
     } else if (isPlainObject(item)) {
       // Symbol-keyed and non-enumerable string-keyed properties have no fabric
-      // representation, the same as an array's non-index properties.
+      // representation, the same as an array's non-index properties; an
+      // accessor-backed property is live code rather than inert data.
       if (!isPlainObjectWithOnlyEnumerableStringKeys(item)) return false;
+      if (!hasOnlyOwnDataProperties(item)) return false;
       const record = item as Record<string, unknown>;
       for (const key of Object.keys(record)) {
         if (!check(record[key])) return false;

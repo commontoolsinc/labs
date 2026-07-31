@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
+import {
+  hasOnlyOwnDataProperties,
+  isPlainObjectWithOnlyEnumerableStringKeys,
+} from "@commonfabric/utils/objects";
 
 describe("objects", () => {
   describe("isPlainObjectWithOnlyEnumerableStringKeys()", () => {
@@ -171,6 +174,51 @@ describe("objects", () => {
       expect(
         isPlainObjectWithOnlyEnumerableStringKeys(new Proxy(withSymbol, {})),
       ).toBe(false);
+    });
+  });
+
+  describe("hasOnlyOwnDataProperties()", () => {
+    it("accepts an object with only data properties", () => {
+      expect(hasOnlyOwnDataProperties({})).toBe(true);
+      expect(hasOnlyOwnDataProperties({ a: 1, b: "two" })).toBe(true);
+      expect(hasOnlyOwnDataProperties(Object.freeze({ a: 1 }))).toBe(true);
+    });
+
+    it("accepts non-enumerable and symbol-keyed data properties", () => {
+      // Descriptor shape only; key visibility and type are out of scope.
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+      obj[Symbol("s")] = 3;
+      expect(hasOnlyOwnDataProperties(obj)).toBe(true);
+    });
+
+    it("accepts an array of data elements", () => {
+      expect(hasOnlyOwnDataProperties([1, 2, 3])).toBe(true);
+    });
+
+    it("rejects an enumerable getter", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
+      expect(hasOnlyOwnDataProperties(obj)).toBe(false);
+    });
+
+    it("rejects a non-enumerable getter", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "g", { get: () => 2, enumerable: false });
+      expect(hasOnlyOwnDataProperties(obj)).toBe(false);
+    });
+
+    it("rejects a setter-only property", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "s", { set: () => {}, enumerable: true });
+      expect(hasOnlyOwnDataProperties(obj)).toBe(false);
+    });
+
+    it("rejects a frozen object with a getter", () => {
+      // Freezing does not make an accessor inert: reads still execute it.
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
+      expect(hasOnlyOwnDataProperties(Object.freeze(obj))).toBe(false);
     });
   });
 });
