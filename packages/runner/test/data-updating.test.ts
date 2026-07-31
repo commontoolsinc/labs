@@ -1512,6 +1512,54 @@ describe("data-updating", () => {
       }
     });
 
+    it("derives position-independent ids over a stored array", () => {
+      // Once an array is stored, the ancestor climb strips index segments,
+      // so an anchored element's identity derives from the array's own
+      // location -- the same seed and context yield the same document at any
+      // index. This is load-bearing for re-runs: a handler reuses its frame
+      // cause and counter sequence, and without index-stripping an element
+      // whose stored position had shifted would silently fork a new
+      // document.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "position independent stored ids",
+        undefined,
+        tx,
+      );
+      testCell.setRaw(["x", "y"]);
+      const context = "position independent stored ids";
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        ["x", { name: "Ada" }],
+        context,
+        undefined,
+        () => "probe-seed",
+      );
+      const idAtOne = parseLink(
+        (testCell.getRaw() as unknown[])[1],
+        testCell,
+      )?.id;
+      expect(idAtOne).not.toBe(undefined);
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ name: "Ada" }, "y"],
+        context,
+        undefined,
+        () => "probe-seed",
+      );
+      const idAtZero = parseLink(
+        (testCell.getRaw() as unknown[])[0],
+        testCell,
+      )?.id;
+      expect(idAtZero).toBe(idAtOne);
+    });
+
     it("draws no anchor id for an addUnique candidate rejected as duplicate", () => {
       // A candidate `addUnique` rejects never reaches the write, so it draws
       // no id. (The annotation scheme anchored all candidates before

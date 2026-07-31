@@ -427,9 +427,9 @@ export type ChangeSet = {
  * derivation and identity IS position-bearing there -- a long-standing
  * limitation.
  *
- * `registerKey` is the caller's original value (which may differ from
- * `content`, a distinct shallow copy); it is registered in
- * `state.seen` so shared references to it resolve to the same document.
+ * `registerKey` is the caller's original value, and `content` a distinct
+ * shallow copy of it; `registerKey` is registered in `state.seen` so shared
+ * references to it resolve to the same document.
  */
 function anchorValueAsEntity(
   runtime: Runtime,
@@ -437,7 +437,7 @@ function anchorValueAsEntity(
   link: NormalizedFullLink,
   content: FabricPlainObject,
   registerKey: unknown,
-  idSeed: unknown,
+  idSeed: string | number,
   context: unknown,
   options: IReadOptions | undefined,
   state: DiffWalkState,
