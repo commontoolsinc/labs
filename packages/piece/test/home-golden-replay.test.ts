@@ -3,15 +3,22 @@ import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
   resolveEntryIdentity,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 import {
-  HOME_PATTERN_URL,
+  HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The route that ref expands to — what the toolshed serves, and what the
+// worker names the module by when it compiles the pattern over HTTP.
+const HOME_PATTERN_PATH = resolveSystemPatternSource(
+  HOME_PATTERN_SOURCE,
+)!;
 
 // Golden replay for the HOME root — the higher-stakes sibling of
 // default-app-golden-replay.test.ts.
@@ -82,9 +89,9 @@ const SEEDED_COUNTS =
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(source: string): Promise<string> {
   return resolveEntryIdentity(
-    HOME_PATTERN_URL, // /api/patterns/system/home.tsx
+    HOME_PATTERN_PATH, // /api/patterns/system/home.tsx
     (name) =>
-      name === HOME_PATTERN_URL
+      name === HOME_PATTERN_PATH
         ? Promise.resolve(source)
         : Promise.reject(new Error(`not found: ${name}`)),
   );
@@ -107,7 +114,7 @@ function installFetchStub(): StubControls {
       : input.url;
     const url = new URL(href);
 
-    if (url.pathname === HOME_PATTERN_URL) {
+    if (url.pathname === HOME_PATTERN_PATH) {
       if (url.searchParams.has("identity")) {
         return new Response(await identityForSource(source), {
           headers: { "content-type": "text/plain" },
@@ -146,7 +153,7 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
     });
     // A HOME session: space === the user's identity DID, which is what flips
     // `isHomeSpace` on inside the controller (ensureDefaultPattern + the update
-    // gate) so the home branch — cause "home-pattern", provenance HOME_PATTERN_URL
+    // gate) so the home branch — cause "home-pattern", provenance HOME_PATTERN_PATH
     // — is exercised.
     const session = await createSession({
       identity: signer,

@@ -122,6 +122,14 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
+  normalizePatternSource,
+  PATTERNS_ROUTE_PREFIX,
+  resolveSystemPatternSource,
+  SYSTEM_PATTERN_SOURCE_SCHEME,
+  systemPatternSource,
+  systemPatternSourceForModuleName,
+} from "./pattern-source-scheme.ts";
+export {
   type PatternUpdateOutcome,
   PatternUpdater,
 } from "./pattern-updater.ts";

@@ -69,6 +69,7 @@
  */
 
 import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/vintage-layout.ts";
+import { resolveSystemPatternSource } from "@commonfabric/runner";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
 export const VINTAGES_DIR = "packages/piece/test/vintages";
@@ -243,11 +244,24 @@ export function coveredPatternKeys(
  */
 const PATTERN_ROUTE_MARKER = "/patterns/";
 
+/**
+ * The route a system pattern source names.
+ *
+ * The runtime's constants are `system:` refs, addressed relative to the
+ * patterns route; the gate maps routes to fixture keys. A source that names no
+ * route is handed back unchanged, so it reaches the unmapped check below rather
+ * than disappearing from the required set.
+ */
+function patternRoute(source: string): string {
+  return resolveSystemPatternSource(source) ?? source;
+}
+
 export function requiredPatternKeys(
   systemPatternUrls: readonly string[],
 ): string[] {
   const keys: string[] = [];
-  for (const url of systemPatternUrls) {
+  for (const source of systemPatternUrls) {
+    const url = patternRoute(source);
     const at = url.indexOf(PATTERN_ROUTE_MARKER);
     if (at === -1) continue;
     keys.push(url.slice(at + PATTERN_ROUTE_MARKER.length));
@@ -267,7 +281,9 @@ export function requiredPatternKeys(
 export function unmappedPatternUrls(
   systemPatternUrls: readonly string[],
 ): string[] {
-  return systemPatternUrls.filter((url) => !url.includes(PATTERN_ROUTE_MARKER));
+  return systemPatternUrls.filter((source) =>
+    !patternRoute(source).includes(PATTERN_ROUTE_MARKER)
+  );
 }
 
 /** Required patterns with no pinned vintage. */

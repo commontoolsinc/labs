@@ -875,12 +875,12 @@ The implementation evidence for this table is concentrated in:
 - Fabric reference parsing and resolution support content-addressed pattern
   references, explicit pins, and same-toolshed mutable references by stable
   entity or slug. Static imports pin mutable references into source.
-- System space roots carry a `patternSource` URL path when created through
-  `ensureDefaultPattern`. Roots can check that source and replace
-  `patternIdentity` before starting. Other successfully instantiated
-  same-toolshed system-source patterns are checked in the background. This is a
-  transitional implementation and migration input, not a target lifecycle
-  exception.
+- System space roots carry a `system:` `patternSource` ref when created through
+  `ensureDefaultPattern`, naming a pattern the toolshed serves relative to its
+  patterns route. Roots can check that source and replace `patternIdentity`
+  before starting. Other successfully instantiated patterns are checked in the
+  background, and only a `system:` ref is fetched. This is a transitional
+  implementation and migration input, not a target lifecycle exception.
 - Storage supports late registration of a space-to-host hint before that space
   opens. The runtime processor hydrates durable hints from the home-space site
   table. A seeded route can only be confirmed. An opened space accepts only its
