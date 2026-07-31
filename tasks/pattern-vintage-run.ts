@@ -382,6 +382,12 @@ export async function replayVintage(
       string,
       Record<string, unknown> | undefined
     >();
+    // Whether the root carried a stored result schema AT CAPTURE, taken in the
+    // same pass and for the same reason. The failure below distinguishes "no
+    // schema stored" from "a schema that reads back nothing", and asking after
+    // the materialize reads the schema THE REPLAY JUST WROTE — so the fixture
+    // defect it exists to name would always report as the second one.
+    const hadSchemaByCell = new Map<string, boolean>();
     for (const entry of targets) {
       // Skip what the presence check already reported. Reading it would only
       // re-derive "absent" and risk reporting the same root twice.
@@ -391,6 +397,14 @@ export async function replayVintage(
       beforeByCell.set(
         key,
         await readVintageState(runtimeVintage, entry.space, entry.cellId),
+      );
+      hadSchemaByCell.set(
+        key,
+        await readStoredResultSchema(
+          runtimeVintage,
+          entry.space,
+          entry.cellId,
+        ) !== undefined,
       );
     }
 
@@ -461,10 +475,17 @@ export async function replayVintage(
       // "changed" would stop meaning anything for it. Counted and reported
       // rather than silently skipped: the pattern is still covered wherever a
       // fixture imports it locally.
-      if (entry.main !== undefined && entry.main.startsWith("/api/")) {
-        report.servedRoute++;
-        continue;
-      }
+      // ...but only the IDENTITY comparison is skipped. The target is still
+      // materialized and its state still compared, which is the whole of what
+      // the gate is for. Skipping it outright meant a recorded root got no
+      // check at ALL — no materialize, no state comparison — and the committed
+      // lunch-poll fixture holds exactly this shape for `profile-create`, so a
+      // breaking change to that pattern left the run green. There is no
+      // "changed since capture" answer to give for one, so it is materialized
+      // UNCONDITIONALLY and counted apart from `changed`.
+      const servedRoute = entry.main !== undefined &&
+        entry.main.startsWith("/api/");
+      if (servedRoute) report.servedRoute++;
       // Covered from HERE: today's source for this target resolved, compiled,
       // and was not skipped. An UNCHANGED identity below still counts — the
       // fixture exercised the pattern and found no migration to run, which is
@@ -483,8 +504,16 @@ export async function replayVintage(
         .getArtifactEntryRef(pattern)?.identity;
       // Unchanged identity, no migration to exercise. This is the common case
       // and a legitimate no-op, NOT a skipped check.
-      if (today === entry.identity) continue;
-      report.changed++;
+      //
+      // A served route has no such answer — the same file compiles to a
+      // different identity served than from the repo, so `today` never equals
+      // what was recorded — so it falls through and is materialized every run.
+      // It is NOT counted in `changed`, which would otherwise report the same
+      // fixed number forever and stop meaning "something moved".
+      if (!servedRoute) {
+        if (today === entry.identity) continue;
+        report.changed++;
+      }
 
       const before = beforeByCell.get(`${entry.space}/${entry.cellId}`);
 
@@ -549,16 +578,13 @@ export async function replayVintage(
         // different fixes, and one message for both sent a reader looking for
         // a missing schema when the schema was present, readable, and the read
         // THROUGH it was what came back empty — see `schemaRelaxedForComparison`
-        // for the collapse that produced.
-        const storedSchema = await readStoredResultSchema(
-          runtimeVintage,
-          entry.space,
-          entry.cellId,
-        );
+        // for the collapse that produced. Read from the pre-materialize pass,
+        // never re-derived here: this line runs AFTER the update, so asking the
+        // root now would see the schema the replay just wrote.
         report.failures.push({
           ...where,
           detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
-            (storedSchema === undefined
+            (hadSchemaByCell.get(`${entry.space}/${entry.cellId}`) === false
               ? `carries a setup marker but no readable stored schema, so `
               : `stores a result schema that reads back nothing, so `) +
             `applying ${entry.main} over it could not be checked for stranded ` +
@@ -637,7 +663,10 @@ export async function replayVintage(
         });
         continue;
       }
-      report.updated++;
+      // `updated` counts CHANGED targets that came through cleanly, so a served
+      // route — which has no changed answer — is not one of them. It was still
+      // materialized and compared; any finding above has already been reported.
+      if (!servedRoute) report.updated++;
     }
     return report;
   });

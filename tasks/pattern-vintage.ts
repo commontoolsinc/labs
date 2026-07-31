@@ -41,9 +41,13 @@
  * compared as the DOCUMENT it points at, so a field that moved to a different
  * doc is still a finding.
  *
- *   deno task pattern-vintage                      # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update             # capture where a REQUIRED one is missing
- *   deno task pattern-vintage --update system/x.tsx  # pin any pattern deliberately
+ *   deno task pattern-vintage                            # replay; fail on a stranded fixture
+ *   deno task pattern-vintage --update                   # capture where a REQUIRED one is missing
+ *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one deliberately
+ *
+ * A named key is a TEST path, not a pattern path — a fixture is produced by
+ * running a test, and covers whatever that test instantiates. `system/x.tsx`
+ * names no test and captures nothing.
  *
  * `--update` can only ADD. It never rewrites or deletes an existing fixture,
  * for the reason Tier 1's baselines are append-only: a command that could

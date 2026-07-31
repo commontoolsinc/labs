@@ -925,6 +925,25 @@ describe("a recorded `main` maps back to a pattern key", () => {
       .toBe("system/profile-create.tsx");
   });
 
+  it("declines an /api path whose `/patterns/` is not the mount", () => {
+    // Matching "/api" plus the marker ANYWHERE resolved
+    // `/api/anything/at/all/patterns/x.tsx` to the repo key `x.tsx`, so an
+    // unrelated served path would name a real source file and be replayed as
+    // though it were that pattern. A wrong answer, not a refused one — which
+    // is the one thing this gate must never produce.
+    for (
+      const main of [
+        "/api/v2/patterns/system/home.tsx",
+        "/api/pieces/x/patterns/system/home.tsx",
+        "/apifoo/patterns/system/home.tsx",
+        "/patterns/system/home.tsx",
+      ]
+    ) {
+      expect(patternKeyFromMain(main, "/packages/patterns/"), main)
+        .toBeUndefined();
+    }
+  });
+
   it("declines anything that is neither", () => {
     expect(patternKeyFromMain(undefined, "/packages/patterns/"))
       .toBeUndefined();

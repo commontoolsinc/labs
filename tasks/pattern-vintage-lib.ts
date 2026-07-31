@@ -257,13 +257,13 @@ export function patternKeyFromMain(
 ): string | undefined {
   if (main === undefined) return undefined;
   if (main.startsWith(patternsPrefix)) return main.slice(patternsPrefix.length);
-  const route = "/patterns/";
-  const at = main.indexOf(route);
-  // Only a ROUTE, not any path containing the marker: a served pattern's path
-  // begins at the mount, so anything before it is the mount prefix itself.
-  if (at !== -1 && main.startsWith("/api")) {
-    return main.slice(at + route.length);
-  }
+  // The route EXACTLY, not "/api" plus the marker somewhere later. Matching
+  // loosely turned `/api/anything/at/all/patterns/x.tsx` into the repo key
+  // `x.tsx`, so an unrelated served path would resolve to a real source file
+  // and be replayed as though it were that pattern — a wrong answer rather
+  // than a refused one, which is the shape this gate must never produce.
+  const route = "/api/patterns/";
+  if (main.startsWith(route)) return main.slice(route.length);
   return undefined;
 }
 

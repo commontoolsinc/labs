@@ -725,6 +725,73 @@ describe("the vintage gate, end to end", () => {
     );
   });
 
+  it("still MATERIALIZES a served-route target, only skipping its identity", async () => {
+    // A pattern loaded BY URL records the route the toolshed serves it at, and
+    // the same file compiles to a different identity served than from the repo
+    // — so an identity comparison would call it changed on every run forever.
+    // That is the whole of what a served route may skip. Skipping the TARGET
+    // outright meant a recorded root got no materialize and no state
+    // comparison at all, and the committed lunch-poll fixture holds exactly
+    // this shape for `profile-create`: a breaking change to it left the run
+    // green.
+    //
+    // Proved by BREAKING the source the route maps to. Counting served routes
+    // would pass this case just as well if they were still skipped, so the
+    // assertion is on the failure the comparison produces.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-served-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    let subjectCell: string | undefined;
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // The entry that actually holds the subject's state, re-pointed at the
+      // ROUTE the same file would be served under. Same cell, same identity —
+      // only `main` changes, so anything that still fails is the served-route
+      // path and not a different fixture.
+      const subject = entries.find((entry) => entry.main?.endsWith(`/${KEY}`))!;
+      subjectCell = subject.cellId;
+      await writeVintageManifest(vintage, [
+        ...entries.filter((entry) => entry !== subject),
+        { ...subject, main: `/api/patterns/${KEY}` },
+      ]);
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+    expect(subjectCell, "the fixture no longer records the subject")
+      .toBeDefined();
+
+    // Green first: the route resolves to today's unchanged source, and a
+    // served route is materialized every run because it has no "changed"
+    // answer. Without this control the red below could be a route that never
+    // resolved at all.
+    const clean = await replayAll(roots);
+    expect(clean.failures, "an UNBROKEN served route should replay clean")
+      .toEqual([]);
+    expect(clean.servedRoute).toBe(1);
+    // ...and it is kept out of `changed`, which would otherwise report the
+    // same fixed number forever and stop meaning "something moved".
+    expect(clean.changed).toBe(0);
+
+    // Now break where the state is STORED, leaving the contract untouched —
+    // the class this tier exists for, and one only a materialize can see.
+    await Deno.writeTextFile(`${roots.patternsRoot}/${KEY}`, MOVED_KEY);
+    const broken = await replayAll(roots);
+
+    expect(
+      broken.failures.map((f) => f.detail).join("\n"),
+      "a served-route target was not materialized, so a moved storage key in " +
+        "it replayed clean — the hole this case exists to close",
+    ).toContain("stranded state the vintage held");
+  });
+
   it("FAILS a fixture with candidates but no upgrade TARGET, on its own", async () => {
     // Per fixture, not just in the run's total. `isClean` floors the SUM of
     // targets, which a fixture covering nothing slips under the moment another
