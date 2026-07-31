@@ -407,7 +407,9 @@ export function invocationPhaseReporter(
  * the runner. Every line goes to stderr so stdout stays exactly the settled
  * Invocation JSON an agent parses, and lines stream as transitions happen so
  * a failure exit keeps every span observed before the failure — `finish`
- * closes the in-flight span with the outcome that ended it.
+ * closes the in-flight span with the outcome that ended it: `settled`,
+ * `failed`, or `detached` for a `--no-wait` exit that left settlement to
+ * happen elsewhere.
  */
 export function pieceCallPhaseObserver(
   verbose: boolean,
@@ -416,7 +418,7 @@ export function pieceCallPhaseObserver(
   now: () => number = () => performance.now(),
 ): {
   onPhase: (phase: InvocationPhase) => void;
-  finish: (end?: "settled" | "failed") => void;
+  finish: (end?: "settled" | "failed" | "detached") => void;
 } {
   if (!verbose) {
     return { onPhase: onAdvance, finish: () => {} };
@@ -460,6 +462,96 @@ export function invocationJson(
       ? { result: outcome.result }
       : {}),
   };
+}
+
+/** How long `cf piece call` waits for a handler invocation (verb contract
+ * WS-F, F3). `settle` is the default: await this handling's commit
+ * acknowledgement plus receipt readback, optionally bounded by the caller's
+ * patience (`--wait <seconds>`). `detach` (`--no-wait`) returns as soon as
+ * the dispatch is on its way. */
+export interface PieceCallWaitControl {
+  mode: "settle" | "detach";
+  /** Caller-chosen patience bound in seconds (`--wait`). Never set for
+   * `detach` — there is no wait left to bound. */
+  boundSeconds?: number;
+}
+
+/**
+ * Resolve the wait flags into one control. `--await` is the explicit spelling
+ * of the default (flag parity, so a script can state its intent), which makes
+ * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
+ * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
+ * names the patience. A non-positive bound is refused: it would spell
+ * "don't wait" while claiming to be a wait.
+ */
+export function resolveWaitControl(
+  options: { await?: boolean; wait?: number | boolean },
+): PieceCallWaitControl {
+  if (options.wait === false) {
+    if (options.await) {
+      throw new ValidationError(
+        "--await and --no-wait contradict each other; pass one.",
+      );
+    }
+    return { mode: "detach" };
+  }
+  if (typeof options.wait === "number") {
+    if (!Number.isFinite(options.wait) || options.wait <= 0) {
+      throw new ValidationError(
+        "--wait requires a positive number of seconds",
+      );
+    }
+    return { mode: "settle", boundSeconds: options.wait };
+  }
+  return { mode: "settle" };
+}
+
+/**
+ * The caller's patience bound expired before the invocation settled. This is
+ * NOT a failed invocation: the dispatch (if it got that far) is still
+ * settling, and with a caller-supplied id a retry is safe in every phase, so
+ * the caller re-invokes with the same id or reads the receipt to learn the
+ * outcome. The exit reports the id and the furthest phase so it can.
+ */
+export class WaitBoundExpired extends Error {
+  constructor(readonly seconds: number) {
+    super(
+      `--wait bound of ${seconds}s expired before the invocation settled`,
+    );
+    this.name = "WaitBoundExpired";
+  }
+}
+
+/**
+ * Bound an in-flight settlement wait by the caller's chosen patience.
+ *
+ * This is a patience bound, not a correctness timeout (the distinction
+ * docs/development/waiting-in-tests.md draws): firing early is safe because a
+ * caller-supplied invocation id makes a same-id retry safe in EVERY phase —
+ * an early fire loses confirmation, never the invocation. That is what
+ * permits a wall-clock bound here at all, and only because the caller asked
+ * for one; nothing waits by default.
+ *
+ * Mechanism: one deadline racing the outermost await — the settlement work
+ * underneath is event-driven and untouched, and there is no polling anywhere.
+ * The timer is cleared once the race resolves, so a call that settles inside
+ * the bound leaves no armed timer behind (`AbortSignal.timeout` would keep
+ * ticking; a clearable timer is the same one-shot deadline without the
+ * leftover).
+ */
+export function boundedSettlement<T>(
+  settlement: Promise<T>,
+  boundSeconds: number | undefined,
+): Promise<T> {
+  if (boundSeconds === undefined) return settlement;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new WaitBoundExpired(boundSeconds)),
+      boundSeconds * 1000,
+    );
+  });
+  return Promise.race([settlement, expiry]).finally(() => clearTimeout(timer));
 }
 
 export function writePieceRenderStatus(
@@ -1272,10 +1364,30 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Print per-phase wall-clock timings to stderr (before the callable " +
       "name). stdout still carries only the command output.",
   )
+  .option(
+    "--await",
+    "Wait for settlement and receipt readback (before the callable name). " +
+      "This is the default; the flag exists so a script can say so " +
+      "explicitly. Contradicts --no-wait.",
+  )
+  .option(
+    "--wait <seconds:number>",
+    "Bound the settlement wait by a chosen patience, in seconds (before " +
+      "the callable name). On expiry the exit is nonzero with the " +
+      "invocation id and furthest phase on stderr; a same-id retry is safe " +
+      "in every phase, so nothing is lost but confirmation.",
+  )
+  .option(
+    "--no-wait",
+    "Exit 0 as soon as the invocation id is announced and the dispatch is " +
+      "sent (before the callable name), without awaiting commit " +
+      "acknowledgement or readback. Handler invocations only.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
     const invocationId = resolveInvocationId(options.invocation);
+    const waitControl = resolveWaitControl(options);
     let phase: InvocationPhase = "initial_sync";
     const observer = pieceCallPhaseObserver(
       !!options.verbose,
@@ -1291,25 +1403,29 @@ after --. Handlers interpret piped input when no input argument is present.`,
         ...options,
         json: invocation.jsonOutput,
       });
-      const result = await executePieceCallable(
-        pieceConfig,
-        callableName,
-        invocation.rawArgs,
-        {
-          invocationId,
-          onPhase: invocationPhaseReporter(
+      const result = await boundedSettlement(
+        executePieceCallable(
+          pieceConfig,
+          callableName,
+          invocation.rawArgs,
+          {
             invocationId,
-            observer.onPhase,
-          ),
-        },
-      ).catch((error) =>
-        reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
+            detachAfterDispatch: waitControl.mode === "detach",
+            onPhase: invocationPhaseReporter(
+              invocationId,
+              observer.onPhase,
+            ),
+          },
+        ).catch((error) =>
+          reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
+        ),
+        waitControl.boundSeconds,
       );
       if (result.helpText) {
         render(result.helpText);
         return;
       }
-      observer.finish();
+      observer.finish(waitControl.mode === "detach" ? "detached" : "settled");
       if (result.outputText) {
         render(result.outputText);
         if (result.resultRef) {
@@ -1328,11 +1444,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       if (result.invocation) {
         // The machine surface for a handler invocation: stdout carries the
-        // settled Invocation JSON, prose stays on stderr via hint().
+        // Invocation JSON — settled, or carrying the furthest phase for a
+        // detached dispatch — prose stays on stderr via hint().
         render(JSON.stringify(invocationJson(result.invocation), null, 2));
-        hint(cliText(`NEXT STEPS:
+        if (waitControl.mode === "detach") {
+          hint(cliText(`NEXT STEPS:
+  → Confirm outcome: cf piece call --piece ${pieceConfig.piece} --invocation ${invocationId} ${callableName} ... (a same-id retry deduplicates and settles on the original outcome)
+  → Verify state:    cf piece get --piece ${pieceConfig.piece} <path> ...`));
+        } else {
+          hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+        }
         return;
       }
       const confirmation =
@@ -1356,6 +1479,19 @@ after --. Handlers interpret piped input when no input argument is present.`,
       // past "dispatched" retries SAFELY ONLY with this same id (same-id
       // retries deduplicate; a fresh id would re-execute).
       console.error(`invocation: ${invocationId} phase: ${phase}`);
+      if (error instanceof WaitBoundExpired) {
+        // The caller's patience expired, not the invocation: it is still
+        // settling somewhere, so stdout carries the Invocation JSON with the
+        // furthest observed phase — the same machine surface as a settled
+        // call, letting a script parse one shape either way.
+        render(
+          JSON.stringify(
+            invocationJson({ id: invocationId, status: phase }),
+            null,
+            2,
+          ),
+        );
+      }
       Deno.exit(1);
     }
   })

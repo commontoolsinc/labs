@@ -140,12 +140,26 @@ export interface CallableExecutionDeps {
   invocationId?: string;
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
+  /** `--no-wait`: return as soon as the dispatch is on its way, without
+   * awaiting commit acknowledgement or receipt readback. Sound because a
+   * caller-supplied id makes a retry safe in EVERY phase (the create-only
+   * receipt deduplicates a same-id redelivery — verb contract D1/D3), so
+   * leaving early loses nothing but confirmation: the caller re-invokes with
+   * the same id later, or reads the receipt, to learn the outcome. Requires
+   * an `invocationId` — without one there is no handle to do either with —
+   * and only the handler send path supports it (a tool runs to completion in
+   * this process; detaching would abandon the run before its result exists). */
+  detachAfterDispatch?: boolean;
 }
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
 export interface InvocationOutcome {
   id: string;
-  status: "settled";
+  /** `"settled"` once receipt readback completed. Otherwise the furthest
+   * phase the caller chose to observe: a detached dispatch (`--no-wait`)
+   * returns at `"dispatched"`, and a caller-bounded wait reports the phase
+   * its bound expired in. */
+  status: "settled" | InvocationPhase;
   /** The verb's result read back from the handling's receipt, when the
    * receipt carried one (a reactive-bearing return, or a plain return under
    * the plainResultReceipts flag). Absent for value-less verbs. */
@@ -471,7 +485,29 @@ export async function executeResolvedCallable(
       const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
       const errorCountBefore = runtimeErrors.length;
       const invocationId = deps.invocationId;
+      if (deps.detachAfterDispatch && invocationId === undefined) {
+        // Refused before dispatch: a detached caller's only handles on the
+        // outcome are a same-id retry and the receipt, both of which need
+        // the id.
+        throw new Error(
+          "A detached dispatch (--no-wait) requires an invocation id",
+        );
+      }
       deps.onPhase?.("dispatched");
+      if (deps.detachAfterDispatch) {
+        // Fire the dispatch without awaiting its commit acknowledgement.
+        // A synchronous throw from send still propagates — that dispatch
+        // never left, so there is nothing to detach from.
+        send.call(
+          resolved.callableCell,
+          dispatchInput,
+          undefined,
+          { eventId: invocationId },
+        );
+        return {
+          invocation: { id: invocationId!, status: "dispatched" },
+        };
+      }
       const tx = await new Promise<CallableTransactionLike>(
         (resolve, reject) => {
           try {
@@ -542,11 +578,30 @@ export async function executeResolvedCallable(
       };
     }
 
+    if (deps.detachAfterDispatch) {
+      // This handler dispatches through a plain data write, outside the
+      // invocation receipt protocol — nothing durable would remain for a
+      // detached caller to read the outcome back from.
+      throw new Error(
+        `--no-wait is not available for "${resolved.cellKey}": ` +
+          "this callable dispatches without an invocation receipt",
+      );
+    }
     await resolved.piece[resolved.cellProp].set(input, [resolved.cellKey]);
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
 
     return {};
+  }
+
+  if (deps.detachAfterDispatch) {
+    // A tool runs to completion inside this process; detaching would abandon
+    // the run before its result exists, rather than leave it settling
+    // elsewhere the way a dispatched handler event does.
+    throw new Error(
+      `--no-wait is not available for tool "${resolved.cellKey}": ` +
+        "a tool runs to completion in this process",
+    );
   }
 
   const pattern = asCallablePattern(

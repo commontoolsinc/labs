@@ -12,6 +12,7 @@ import {
   PieceResultProjectionError,
 } from "../lib/piece.ts";
 import {
+  boundedSettlement,
   exitWithDataError,
   invocationJson,
   invocationPhaseReporter,
@@ -23,7 +24,9 @@ import {
   pieceLinkDataErrorReport,
   reportVerbInputErrorOrRethrow,
   resolveInvocationId,
+  resolveWaitControl,
   verbInputErrorReport,
+  WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
 
@@ -990,6 +993,12 @@ function createPieceCallableHarness(options: {
    * precondition "receipt-exists" while the link addresses the winner's
    * original receipt. */
   receiptExists?: boolean;
+  /** Hold settlement open: `send` records the dispatch but never invokes the
+   * commit callback, so anything awaiting acknowledgement waits forever.
+   * This is how a test proves a path does NOT await the commit — the path
+   * completes anyway — or exercises a wait bound against a call that can
+   * never beat it. */
+  neverCommit?: boolean;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -1054,6 +1063,7 @@ function createPieceCallableHarness(options: {
             if (options.handlerFailureMessage) {
               runtimeErrors.push({ message: options.handlerFailureMessage });
             }
+            if (options.neverCommit) return;
             onCommit?.({
               status: () =>
                 options.handlerFailureMessage
@@ -1751,6 +1761,253 @@ describe("piece call stdin payloads", () => {
         },
       ),
     ).rejects.toThrow(/Expected JSON from stdin/);
+  });
+});
+
+describe("piece call wait control", () => {
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+
+  it("waits for settlement by default, with --await as its explicit spelling", () => {
+    expect(resolveWaitControl({})).toEqual({ mode: "settle" });
+    expect(resolveWaitControl({ await: true })).toEqual({ mode: "settle" });
+  });
+
+  it("maps --no-wait to a detached dispatch", () => {
+    expect(resolveWaitControl({ wait: false })).toEqual({ mode: "detach" });
+  });
+
+  it("refuses the --await --no-wait contradiction", () => {
+    expect(() => resolveWaitControl({ await: true, wait: false })).toThrow(
+      /--await and --no-wait contradict/,
+    );
+  });
+
+  it("carries the --wait bound in seconds, compatible with --await", () => {
+    // --await is the explicit spelling of "wait", and --wait names the
+    // patience of that same wait, so the two compose rather than conflict.
+    expect(resolveWaitControl({ wait: 5 })).toEqual({
+      mode: "settle",
+      boundSeconds: 5,
+    });
+    expect(resolveWaitControl({ await: true, wait: 2.5 })).toEqual({
+      mode: "settle",
+      boundSeconds: 2.5,
+    });
+  });
+
+  it('refuses a bound that spells "don\'t wait"', () => {
+    expect(() => resolveWaitControl({ wait: 0 })).toThrow(/positive/);
+    expect(() => resolveWaitControl({ wait: -1 })).toThrow(/positive/);
+    expect(() => resolveWaitControl({ wait: Number.NaN })).toThrow(/positive/);
+  });
+
+  it("returns the settlement untouched when no bound is chosen", () => {
+    const settlement = Promise.resolve("done");
+    // The same promise, not a wrapper: the default path must not gain a
+    // deadline, a race, or any timer at all.
+    expect(boundedSettlement(settlement, undefined)).toBe(settlement);
+  });
+
+  it("resolves a settlement that beats the bound and disarms the deadline", async () => {
+    // The op sanitizer proves the second half: a deadline timer left armed
+    // after settlement would leak past the end of this test and fail it.
+    await expect(boundedSettlement(Promise.resolve("done"), 60)).resolves.toBe(
+      "done",
+    );
+  });
+
+  it("propagates a settlement failure unchanged", async () => {
+    await expect(
+      boundedSettlement(Promise.reject(new Error("boom")), 60),
+    ).rejects.toThrow("boom");
+  });
+
+  it("expires with WaitBoundExpired when the call outlives the caller's patience", async () => {
+    // A promise that never settles holds the wait open by construction, so
+    // the deadline firing is the only way this test can complete — nothing
+    // races, and no timing alignment is being relied on. The real (tiny)
+    // timer is deliberate: the deadline mechanism itself is what is under
+    // test here.
+    const never = new Promise<never>(() => {});
+    const error = await boundedSettlement(never, 0.01).catch((e) => e);
+    expect(error).toBeInstanceOf(WaitBoundExpired);
+    expect((error as WaitBoundExpired).message).toMatch(/--wait bound/);
+    expect((error as WaitBoundExpired).seconds).toBe(0.01);
+  });
+
+  it("returns at dispatch under detach without awaiting commit acknowledgement", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      // The commit callback NEVER fires, so this resolving at all proves the
+      // detached path awaited nothing past the dispatch itself.
+      neverCommit: true,
+    });
+    const phases: string[] = [];
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-detach",
+        detachAfterDispatch: true,
+        onPhase: (phase) => phases.push(phase),
+      },
+    );
+
+    // The furthest observed phase rides as `status`: this invocation is not
+    // settled, and the JSON must not claim it is.
+    expect(result.invocation).toEqual({
+      id: "inv-detach",
+      status: "dispatched",
+    });
+    expect(phases).toEqual(["dispatched"]);
+    // The dispatch went out carrying the idempotency key — the handle the
+    // detached caller retries with or reads the receipt through.
+    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-detach" }]);
+    // No readback, and no quiescence drain either.
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+    expect(harness.tracker.idleCalls).toBe(0);
+    expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("requires an invocation id to detach", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+    });
+
+    await expect(
+      executePieceCallable(config, "refresh", [], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        detachAfterDispatch: true,
+      }),
+    ).rejects.toThrow(/requires an invocation id/);
+
+    // Refused BEFORE dispatch: nothing went out that the caller now cannot
+    // find again.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
+  it("keeps the pre-dispatch gate ahead of a detached dispatch", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await expect(
+      executePieceCallable(
+        config,
+        "recordMessage",
+        ["--json", '{"mesage":"milk"}'],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          invocationId: "inv-detach-typo",
+          detachAfterDispatch: true,
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "recordMessage"/);
+
+    // A detached dispatch is the one a caller cannot watch fail, so the gate
+    // refusing it locally — id unspent — matters even more than usual.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  it("refuses to detach a tool run", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { ok: true },
+    });
+
+    await expect(
+      executePieceCallable(config, "search", ["--query", "tea"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-tool-detach",
+        detachAfterDispatch: true,
+      }),
+    ).rejects.toThrow(/--no-wait is not available for tool "search"/);
+
+    // The run was never started: an abandoned half-run would be worse than
+    // the refusal.
+    expect(harness.tracker.toolRunPattern).toBeUndefined();
+  });
+
+  it("carries the furthest phase as status for an unsettled invocation", () => {
+    expect(invocationJson({ id: "inv-1", status: "dispatched" })).toEqual({
+      invocation: "inv-1",
+      status: "dispatched",
+    });
+    expect(invocationJson({ id: "inv-1", status: "committed" })).toEqual({
+      invocation: "inv-1",
+      status: "committed",
+    });
+  });
+
+  it("closes the in-flight span as detached under --no-wait --verbose", () => {
+    const lines: string[] = [];
+    let t = 3000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 3020;
+    observer.onPhase("dispatched");
+    t = 3021;
+    observer.finish("detached");
+    // "settled" would be a lie here — settlement is happening elsewhere,
+    // after this process has gone.
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 20.0ms",
+      "timing: dispatched → detached 1.0ms",
+    ]);
   });
 });
 

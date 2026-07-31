@@ -694,7 +694,28 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   handler; use invoke() instead" — and the CLI read path
   (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
   and it saves an agent a wasted turn.
-- `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
+- ~~`--await` / `--no-wait` and the caller-controlled wait bound — with
+  WS-D.~~ — **done (F3)**, with these semantics: the default is unchanged —
+  wait for this handling's transaction-local commit acknowledgement plus
+  receipt readback (what D2 built) — and `--await` is that default's explicit
+  spelling, so a script can state its intent; combined with `--no-wait` it is
+  refused as a contradiction. `--no-wait` dispatches and exits 0 as soon as
+  the invocation id is announced on stderr and the dispatch is sent, without
+  awaiting commit acknowledgement or readback; stdout carries the Invocation
+  JSON with the furthest observed phase as its `status`
+  (`{"invocation": "<id>", "status": "dispatched"}`). Sound because a
+  caller-supplied id makes a same-id retry safe in EVERY phase (D1/D3), so
+  leaving early loses nothing but confirmation — the caller re-invokes with
+  the same id (deduplicates, settles on the original outcome) or reads the
+  receipt. Handler sends only: a tool runs to completion in this process, and
+  the receipt-less set-fallback dispatch leaves nothing to read back — both
+  refuse the flag. `--wait <seconds>` is a caller-chosen patience bound on
+  the default wait, not a correctness timeout: one clearable deadline racing
+  the outermost await (no polling, no bound anywhere inside the settlement
+  path), and on expiry the exit is nonzero with D2's failure shape —
+  invocation id plus furthest phase on stderr — while stdout carries the
+  Invocation JSON with that phase as `status`. An early fire loses only this
+  process's confirmation, the same argument as `--no-wait`.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
   makes them unnecessary.
