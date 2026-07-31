@@ -48,9 +48,9 @@ export function systemPatternSource(path: string): string {
  * not a well-formed one — a `cf:` ref, a bare path, an absolute URL, a module
  * filename. Callers resolve the result against the space's host.
  *
- * A ref may not climb out of the patterns route: `..` segments are normalized
- * before the prefix is re-checked, and a query or fragment is refused outright
- * (`?identity` is the updater's to add, not the ref's to carry).
+ * A ref may not climb out of the patterns route, and a query or fragment is
+ * refused outright (`?identity` is the updater's to add, not the ref's to
+ * carry).
  */
 export function resolveSystemPatternSource(
   source: string,
@@ -61,11 +61,33 @@ export function resolveSystemPatternSource(
   if (path.includes("?") || path.includes("#")) return undefined;
   // Resolving a `/`-rooted path against a fixed base neither throws nor can
   // reach another origin, whatever the ref holds — the prefix is prepended, so
-  // even `//evil.example/x` is just a path. What it CAN do is climb: `..`
-  // segments are normalized here, and the prefix is re-checked afterwards.
+  // even `//evil.example/x` is just a path. What it CAN do is climb, so `..`
+  // segments are normalized here and the prefix is re-checked afterwards.
   const resolved = new URL(PATTERNS_ROUTE_PREFIX + path, RESOLUTION_BASE);
-  if (!resolved.pathname.startsWith(PATTERNS_ROUTE_PREFIX)) return undefined;
+  if (!staysInPatternsRoute(resolved.pathname)) return undefined;
   return resolved.pathname;
+}
+
+/**
+ * Whether a resolved pathname still addresses a file under the patterns route.
+ *
+ * The URL parser normalizes `..` but never decodes `%2f`, so `..%2f..%2fx`
+ * survives normalization as a single opaque segment and passes a bare prefix
+ * check. The server rejects that before it reads a file, but the layer belongs
+ * here too: `systemPatternSourceForModuleName` is fed author-controlled strings.
+ * Decoding is checked separately because a malformed escape throws.
+ */
+function staysInPatternsRoute(pathname: string): boolean {
+  if (!pathname.startsWith(PATTERNS_ROUTE_PREFIX)) return false;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  // The prefix itself survives decoding — it was matched literally above — so
+  // only what follows it can climb.
+  return !decoded.split("/").includes("..");
 }
 
 /**
@@ -92,46 +114,60 @@ export function systemPatternSourceForModuleName(
  * Rewrite a pre-scheme provenance string into its `system:` ref, leaving
  * everything else untouched.
  *
- * Two legacy spellings are in the wild. Roots stamped by PiecesController
- * carry the rooted route path (`/api/patterns/system/home.tsx`), and any piece
- * whose source transition has been recorded since carries the absolute href
- * that `normalizePieceSourceOrigin` rewrote that path into against the space's
- * host. The absolute form is only rewritten when it names the space's own host,
- * so a ref pointing somewhere else — which the pre-scheme updater refused to
- * follow as cross-origin — is not silently repointed at the local host.
+ * Two legacy spellings are in the wild: the rooted route path
+ * (`/api/patterns/system/home.tsx`), and the absolute href that
+ * `normalizePieceSourceOrigin` rewrites that path into against the space's
+ * host once a source transition records it. The absolute form is rewritten only
+ * when it names the space's own host, so a locator pointing somewhere else is
+ * not silently re-pointed at the local toolshed — that would be a change of
+ * source, not of spelling.
  *
- * The updater re-stamps a piece it finds in a legacy spelling, so a piece
- * migrates on its next successful check.
+ * A query or fragment on a legacy locator is dropped: it selects nothing on the
+ * patterns route, which serves a file by path, and revalidation is the
+ * `?identity` ETag's job. Keeping it would leave the piece with a locator no
+ * ref can spell, and therefore one nothing would ever follow again.
  *
- * TODO(seefeldb) 2026-08-31: once a round of updates has re-stamped the
- * deployed pieces, delete this and require the scheme at the read sites.
+ * The result either resolves as a ref or is the input unchanged; nothing here
+ * can mint a ref the resolver rejects.
+ *
+ * TODO(seefeldb) 2026-08-31: revisit — do NOT delete on sight. Removal needs
+ * two things this change does not do. Durable pre-existing provenance has to be
+ * migrated, which only happens on a successful check and therefore never on a
+ * deployment running with `systemPatternAutoUpdate` off. And
+ * `isLegacyPieceRegistryRoot` reads this to recognise a root that tracks the
+ * official default app, on a path with no flag gate at all.
  */
 export function normalizePatternSource(
   source: string,
   host?: string | URL,
 ): string {
   const path = legacyPatternsRoutePath(source, host);
-  return path === undefined ? source : systemPatternSource(path);
+  if (path === undefined) return source;
+  const ref = systemPatternSource(path);
+  return resolveSystemPatternSource(ref) === undefined ? source : ref;
 }
 
 function legacyPatternsRoutePath(
   source: string,
   host: string | URL | undefined,
 ): string | undefined {
-  if (source.startsWith(PATTERNS_ROUTE_PREFIX)) {
-    return source.slice(PATTERNS_ROUTE_PREFIX.length);
-  }
-  if (host === undefined) return undefined;
+  // Both spellings are read as URLs so they get one set of checks: a rooted
+  // path against a syntactic base, an absolute locator against the space's own
+  // host. Reading only the rooted form as a string let `..`, a query, and a
+  // fragment through, each of which spells a ref that cannot resolve.
   let url: URL;
-  let hostUrl: URL;
-  try {
-    url = new URL(source);
-    hostUrl = new URL(host);
-  } catch {
-    return undefined;
+  if (source.startsWith("/")) {
+    url = new URL(source, RESOLUTION_BASE);
+  } else {
+    if (host === undefined) return undefined;
+    try {
+      url = new URL(source);
+      if (url.origin !== new URL(host).origin) return undefined;
+    } catch {
+      return undefined;
+    }
   }
-  if (url.origin !== hostUrl.origin) return undefined;
-  if (!url.pathname.startsWith(PATTERNS_ROUTE_PREFIX)) return undefined;
-  if (url.search.length > 0 || url.hash.length > 0) return undefined;
-  return url.pathname.slice(PATTERNS_ROUTE_PREFIX.length);
+  if (!staysInPatternsRoute(url.pathname)) return undefined;
+  const path = url.pathname.slice(PATTERNS_ROUTE_PREFIX.length);
+  return path.length === 0 ? undefined : path;
 }

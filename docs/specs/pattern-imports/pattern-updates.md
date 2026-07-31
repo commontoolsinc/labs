@@ -225,7 +225,11 @@ Migration rewrites a pre-scheme system locator — the rooted patterns-route
 path, and the absolute web URL that path resolves to under the space's own
 accepted host — into the `system:` ref naming the same file. A locator on any
 other host is left alone: re-pointing it at the local toolshed would be a
-change of source, not a change of spelling. If no accepted host can be
+change of source, not a change of spelling. A query or fragment on a legacy
+locator is dropped, since the patterns route serves a file by path and
+revalidation is the `?identity` ETag's job; the rewrite is otherwise exact, and
+a locator that cannot be spelled as a ref is left as authored rather than
+rewritten into one that would not resolve. If no accepted host can be
 established, migration does not invent an active origin. Because the ref is
 host-relative, a later host remapping needs no rewrite; changing which *file* a
 piece tracks still requires an ordinary repoint.
@@ -240,8 +244,10 @@ creates the space. In the target model, it passes that source through the same
 creation transition used for any other piece. That transition writes the first
 revision. It writes a normalized active origin only when creation also makes
 the ordinary explicit choice to accept future updates from a mutable default.
-The current implementation instead seeds a non-home root's raw `patternSource`
-from the home root's `defaultAppUrl`. Editing that template later does **not**
+The current implementation instead seeds a non-home root's `patternSource` from
+the home root's `defaultAppUrl`, canonicalized to the ref naming the same file
+so a root is born with the provenance it keeps rather than waiting on a
+migration to become followable. Editing that template later does **not**
 change an existing root. Changing that root's source is an ordinary repoint,
 edit, revert, or other lifecycle operation. Under the tentative identifier-only
 URL policy, a template stores a canonical space DID with a stable entity FID,

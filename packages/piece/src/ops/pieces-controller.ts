@@ -9,6 +9,7 @@ import {
   isStoredArgumentSchemaRefusal,
   type JSONSchema,
   type ModuleByteCache,
+  normalizePatternSource,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
   type PieceSourceTransition,
@@ -287,7 +288,14 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Read the default app URL from the home space's configuration.
+   * Read the configured default app source from the home space.
+   *
+   * The value is authored as a URL and canonicalized to the ref that names the
+   * same file, so a root is born with the provenance it will keep. Stamping the
+   * authored spelling instead would leave every new root waiting on a migration
+   * to become followable — and on a deployment with the update flag off, waiting
+   * forever. A locator naming no pattern route is returned as authored.
+   *
    * Returns empty string if not configured or if home space is not accessible.
    */
   private async getDefaultAppUrlFromHome(): Promise<string> {
@@ -304,7 +312,9 @@ export class PiecesController<T = unknown> {
           homeSpaceCell.key("defaultPattern")
             .asSchema(homeSchema).key("defaultAppUrl").get(),
       );
-      return typeof url === "string" ? url.trim() : "";
+      return typeof url === "string"
+        ? normalizePatternSource(url.trim(), this.#manager.runtime.apiUrl)
+        : "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
       return "";

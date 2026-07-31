@@ -132,6 +132,8 @@ const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 // A same-host custom-app path, as home config would supply via
 // `defaultAppUrl` (a published custom app, NOT a system pattern).
 const CUSTOM_APP_URL = "/api/patterns/custom/my-app.tsx";
+// What a root configured with that URL stores: the ref naming the same file.
+const CUSTOM_APP_SOURCE = "system:custom/my-app.tsx";
 
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(
@@ -2740,9 +2742,11 @@ describe("checkAndUpdateDefaultPattern", () => {
       stub.setCustomSource(customV1);
       await controller.recreateDefaultPattern();
       const root = (await manager.getDefaultPattern(false))!;
-      // patternSource freezes the exact source selected at birth — the
-      // configured custom path, not the default-app fallback.
-      expect(getPatternSource(root)).toBe(CUSTOM_APP_URL);
+      // patternSource freezes the source selected at birth — the configured
+      // custom app, not the default-app fallback. The authored URL is
+      // canonicalized to the ref naming the same file, so the root is born
+      // with the provenance it keeps rather than waiting on a migration.
+      expect(getPatternSource(root)).toBe(CUSTOM_APP_SOURCE);
       expect(getPatternIdentityRef(root)?.identity).toBe(
         await identityForSource(customV1, {}, CUSTOM_APP_URL),
       );
@@ -2756,9 +2760,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
       await runtime.idle();
       const updated = (await manager.getDefaultPattern(false))!;
-      // The check re-stamps the configured route path in its canonical `system:`
-      // spelling — the same migration any pre-scheme provenance gets.
-      expect(getPatternSource(updated)).toBe("system:custom/my-app.tsx");
+      expect(getPatternSource(updated)).toBe(CUSTOM_APP_SOURCE);
       expect(getPatternIdentityRef(updated)?.identity).toBe(
         await identityForSource(customV2, {}, CUSTOM_APP_URL),
       );

@@ -230,8 +230,8 @@ function fabricHostScheme(host: string): "http:" | "https:" {
  *
  * A `system:` ref, and the toolshed-relative path that is the legacy shape
  * system roots were stamped with, both resolve against the host accepted for
- * `space`, so the origin that leaves this function is always absolute. An unusable string throws rather than
- * becoming a silently inert origin.
+ * `space`, so the origin that leaves this function is always absolute. An
+ * unusable string throws rather than becoming a silently inert origin.
  */
 export function classifyOrigin(
   runtime: Runtime,

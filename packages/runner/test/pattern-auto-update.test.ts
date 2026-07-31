@@ -657,6 +657,15 @@ describe("lazy system-pattern auto-update", () => {
 
     expect(getPatternIdentityRef(piece)).toEqual(originalRef);
     expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+    // Re-spelling the origin is an origin change to the history, which is the
+    // accepted cost of migrating in place: the pair below is what a reader of
+    // the source panel sees once, per piece, and never again. Pinned here so
+    // it stays a decision rather than a side effect.
+    expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+      .toEqual(["baseline", "origin-update"]);
+    // Both revisions name the same file, so the migration moves no source.
+    const origins = getPieceSourceRevisions(piece).map((entry) => entry.origin);
+    expect(origins).toEqual([legacyOrigin, PARENT_SOURCE]);
   });
 
   it("repairs an active legacy origin whose retained source probe failed", async () => {

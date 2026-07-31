@@ -183,8 +183,10 @@ export class PatternUpdater {
         // Only a history-free legacy piece may have provenance reconstructed.
         if (sourceSnapshot.revisionId !== null) return "current";
         if (mode.kind === "default-root") {
-          // Callers may still name the official root by its route path; the
-          // same legacy rewrite applies, so the repair below stamps the ref.
+          // `checkDefaultPattern` is exported, and a caller outside this
+          // package may still name the official root by its route path. The
+          // same rewrite applies, so the repair below stamps the ref either
+          // way rather than refusing a caller that spells it the old way.
           source = normalizePatternSource(mode.officialSource, host);
         }
         if (mode.kind === "instantiated") {
