@@ -334,9 +334,61 @@ things do:
 **`claim-not-live` is the last claim-shaped fence, and it is LOAD-BEARING.**
 Kept in `e32a46e26` after measurement: deleting it lets an unprivileged client
 forging an `executionClaimAssertion` that names ANOTHER PRINCIPAL'S user lane
-commit into that principal's instance. Its `unservedAttempt` leg has no carrier
-at all. Deleting it needs one built first — authorising a LANE ASSERTION as
-such, independently of any claim. **Its own slice; do not fold it in.**
+commit into that principal's instance. **Its own slice; do not fold it in.**
+
+> **CORRECTED 2026-07-30 — the box above blocked two legs on each other, and
+> they are different sizes.** It said the `unservedAttempt` leg "has no carrier
+> at all" and that deleting it needs "a LANE ASSERTION authorised as such".
+> That is right for the FIRST site (`engine.ts` `admitExecutionCommitLanes`,
+> the forged-lane hole) and wrong for the second
+> (`acceptedSchedulerObservation`). **The `unservedAttempt` leg needs no lane
+> authorization at all** — an unserved marker grants no authority, and every
+> leg of it is self-depriving or self-penalizing: it authors no provenance and
+> no input basis, persists nothing, marks nothing clean, widens no scope, and
+> forces STRICTER read validation. What it needs is a **dirtiness carrier**,
+> which is a different and much smaller thing. Split them; do not block the
+> small one on the large one.
+>
+> **The measured fail-open, quantified.** Dropping the throw does not make an
+> unclaimed marker behave like the claimed unserved path — it makes it behave
+> like an ORDINARY client observation, whose dirt-clear is *unbounded*:
+> `coveredThroughSeq` falls to `Number.MAX_SAFE_INTEGER` (`engine.ts`
+> `upsertSchedulerObservationTransaction`), clearing all dirt at any seq,
+> consuming every cause row and NULLing `unknown_reason`. That is strictly
+> worse than the claimed path, not equal to it. The carrier's job is to make
+> an unserved attempt cover NOTHING (`coveredThroughSeq = 0`, which clears
+> nothing by construction — every dirty mark is provably ≥ 1, enforced by
+> `assertSchedulerActionCauseSeq`).
+>
+> **Two fences must be UN-GATED in the same change, and this is the
+> security-relevant part.** `unserved-marker-with-operations` and the
+> `merge-commit` reject both sit inside `if (boundedActionRun)`, which requires
+> `actingLane !== undefined`. A plain client commit carries no acting context,
+> so neither fires — today `claim-not-live` catches all of it, and after the
+> deletion nothing does. Un-gating them is what makes the "self-depriving"
+> argument true rather than merely usually-true.
+>
+> **A LATENT BUG the investigation surfaced, and it is the arc's problem.** The
+> CLAIMED unserved path *also* clears dirt (up to the input basis) for a run
+> that produced nothing. It is invisible today only because the unserved
+> settlement feeds back to the client, which drops its overlay with
+> `dirtyProducer: true` and re-runs. **Under blanket ownership there is no
+> client re-run and no settlement, so this becomes a live liveness hole.** The
+> correct rule for both arms is "an unserved attempt covers nothing"; no test
+> pins the claimed arm's coverage value, so changing both is available and is a
+> measurable A/B rather than a guess.
+>
+> **`settlementsUnserved` DIES SILENTLY unless the change carries it.** It is
+> claim-gated (via `actionAttempts`), and under blanket ownership every
+> unserved attempt is unclaimed — so the counter reads zero while the thing
+> keeps happening, which is this arc's own named instrument defect. Surface
+> `unservedDiagnosticCode` on `AppliedSchedulerObservationResult` and count it
+> where `schedulerObservationResults` is already read. Prefer a SEPARATE
+> `unservedObservations` counter during the transition, so the crossing reads
+> as one number migrating into another rather than as a drop. This arc's
+> instruments consume `settlementsUnserved` directly
+> (`server-execution-measurement.ts`, `server-primary-rollout-profile.test.ts`,
+> `server-execution-lunch-poll-placement-gate.test.ts`).
 
 **Other open items:**
 
@@ -701,6 +753,41 @@ for the issuance→commit race. Full write-up: client-passivity §5g.
 exists only because two executors write the same durable state. Expect more of
 them while both sides run, and expect them to disappear at P3 — that is an
 argument for crossing rather than lingering.
+
+### 2.10 The unserved-attempt marker — four facts that cost hours
+
+Found 2026-07-30 while designing the `claim-not-live` carrier. None of this is
+inferable from the fence site.
+
+1. **The unclaimed router path emits NO marker at all today.**
+   `action-transaction-router.ts`'s three `unservedRoute` call sites are ALL
+   inside `liveClaim !== undefined` branches; the unclaimed arms instead call
+   `reportUnservable(...)` and return `local` (executor-shadow). So an
+   unclaimed unservable run leaves no wire trace — the diagnostic goes
+   out-of-band. **This changes how the pinned blocker test reads:** its
+   scenario is currently unreachable from the product and only reachable from
+   a hand-built or hostile client, which is exactly why the fence looked
+   load-bearing.
+2. **Producer P2 goes live the instant the engine fence is deleted, with no
+   runner change.** `storage/v2.ts`'s firewall-rejection → canonical-unserved
+   re-commit is gated only on `route !== undefined` and is claim-blind. It
+   inherits the original observation wholesale (a spread), so it emits an
+   unclaimed marker the moment the original stops carrying an assertion.
+   **The carrier must therefore land in the SAME commit as the deletion** —
+   there is no window in which the fence is gone and no marker arrives.
+3. **`server.ts` fences a bound executor session's unassertioned action-run
+   observation with a `ProtocolError` BEFORE the engine sees it** ("bound
+   executor action is missing an execution claim incarnation"). Under blanket
+   ownership that is the ACTUAL blocker on the executor emitting unclaimed
+   markers — not `claim-not-live`. §2.2's fixture bullet names the symptom
+   but not the site or this consequence.
+4. **`recordExecutionCandidateUnserved` is a completely independent channel**
+   — in-process executor diagnostics, never the wire, no relation to
+   `executionUnservedAttempt`. The corrected §5h.5 gate's
+   `candidateUnservedByCode` arm therefore survives this deletion untouched.
+   Do not "unify" it with the observation path, and note `unservedDiagnosticCode`
+   has an unrelated namesake in `server-builtin-channel.ts` (a broker RPC error
+   envelope) — also not the same thing.
 
 ---
 
