@@ -60,7 +60,8 @@ function isSandboxResultContainer(
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
-      `Cannot store ${typeName} with extra enumerable properties`,
+      `Not representable as a \`FabricValue\`: ${typeName} with extra ` +
+        "enumerable properties",
     );
   }
 }

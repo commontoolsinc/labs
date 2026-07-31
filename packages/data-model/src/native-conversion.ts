@@ -32,7 +32,8 @@ import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
-      `Cannot store ${typeName} with extra enumerable properties`,
+      `Not representable as a \`FabricValue\`: ${typeName} with extra ` +
+        "enumerable properties",
     );
   }
 }
@@ -248,7 +249,8 @@ export function shallowFabricFromNativeValue(
       // rather than silently dropping it ("death before confusion").
       if (!isArrayWithOnlyIndexProperties(value)) {
         throw new Error(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index " +
+            "properties",
         );
       }
       // Delegate frozenness handling to `cloneHelper()`.
@@ -271,7 +273,8 @@ export function shallowFabricFromNativeValue(
       // properties are treated.
       if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
         throw new Error(
-          "Cannot store object that is not an inert plain object",
+          "Not representable as a `FabricValue`: object that is not an " +
+            "inert plain object",
         );
       }
       // Plain objects: delegate frozenness handling to `cloneHelper()`.
@@ -290,7 +293,8 @@ export function shallowFabricFromNativeValue(
       const converted = (value as { toJSON: () => unknown }).toJSON();
       if (!isFabricValueLayer(converted)) {
         throw new Error(
-          `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
+          `\`toJSON()\` on ${typeof value} returned something other than a ` +
+            "`FabricValue`",
         );
       }
       return cloneHelper(
@@ -336,19 +340,24 @@ export function shallowFabricFromNativeValue(
             const converted = value.toJSON();
             if (!isFabricValueLayer(converted)) {
               throw new Error(
-                `\`toJSON()\` on function returned something other than a fabric value`,
+                "`toJSON()` on function returned something other than a " +
+                  "`FabricValue`",
               );
             }
             return converted;
           }
           throw new Error(
-            "Cannot store function per se (needs to have a `toJSON()` method)",
+            "Not representable as a `FabricValue`: function per se (needs " +
+              "to have a `toJSON()` method)",
           );
         case "symbol":
           // Registry-interned symbols are valid fabric primitives; unique
           // ones have no portable representation and are rejected.
           if (Symbol.keyFor(value) === undefined) {
-            throw new Error("Cannot store unique (uninterned) symbol");
+            throw new Error(
+              "Not representable as a `FabricValue`: unique (uninterned) " +
+                "symbol",
+            );
           }
           return value;
         default:
@@ -363,7 +372,7 @@ export function shallowFabricFromNativeValue(
       // without `toJSON()`, etc.) -- not valid `FabricValue`. Death before
       // confusion!
       throw new Error(
-        `Cannot store ${
+        `Not representable as a \`FabricValue\`: ${
           (value as object).constructor?.name ?? typeof value
         } (not a recognized fabric type)`,
       );
@@ -436,7 +445,9 @@ function fabricFromNativeValueInternal(
   if (isOriginalRecord && converted.has(original)) {
     const cached = converted.get(original);
     if (cached === PROCESSING) {
-      throw new Error("Cannot store circular reference");
+      throw new Error(
+        "Not representable as a `FabricValue`: circular reference",
+      );
     }
     return cached;
   }
@@ -544,7 +555,7 @@ function fabricFromNativeValueInternal(
  * at serialization time, all nested values are already `FabricValue`.
  *
  * We create a new `Error` rather than mutating the original because the
- * caller's `Error` should not be modified as a side effect of storing it.
+ * caller's `Error` should not be modified as a side effect of converting it.
  */
 function rebuildFabricErrorDeep(
   shallow: FabricError,
