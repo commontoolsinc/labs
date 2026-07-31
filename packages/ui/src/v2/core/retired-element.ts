@@ -53,19 +53,18 @@ export function resetRetiredElementWarnings(): void {
  * Base class for a retired element: renders a default slot, nothing else.
  *
  * Subclasses declare their own tag name and any props the retired component
- * carried, so source that binds those props still type-checks and still hands
- * the runtime the same declarations (a `$cell` binding must keep meaning "a
- * cell", or the schema derived for the surrounding row changes).
+ * carried, so source that binds those props keeps working.
+ *
+ * They must also KEEP THAT COMPONENT'S HOST LAYOUT. This class deliberately
+ * imposes none: an inert element is not a layout-neutral one. Stored source
+ * was authored against the retired component's box — `display: block` with
+ * `flex: 1`, an inline variant, whatever it had — and collapsing every stub to
+ * `display: contents` would silently reflow the pages this exists to keep
+ * working. Copy the retired component's `:host` rules into the stub; the point
+ * is that nothing changes for source that still names it.
  */
 export abstract class RetiredElement extends BaseElement {
-  static override styles = [
-    BaseElement.baseStyles,
-    css`
-      :host {
-        display: contents;
-      }
-    `,
-  ];
+  static override styles = [BaseElement.baseStyles];
 
   /** The tag this stub stands in for. */
   protected abstract retiredTag: string;

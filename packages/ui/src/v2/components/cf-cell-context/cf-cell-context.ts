@@ -1,3 +1,4 @@
+import { css } from "lit";
 import { RetiredElement } from "../../core/retired-element.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { property } from "lit/decorators.js";
@@ -12,16 +13,38 @@ import { property } from "lit/decorators.js";
  * `<cf-cell-context $cell={item.cell}>`, and those pieces keep running the
  * source they were stored with.
  *
- * The `cell` property is declared for the same reason. `$cell` must keep
- * meaning "this prop is a cell": that declaration feeds the schema derived for
- * the surrounding row, and dropping it is what made stored favorites fail
- * argument validation and hang.
+ * The props are retained so that source keeps binding cleanly; nothing reads
+ * them. (An earlier revision claimed `$cell` had to stay typed as a cell to
+ * preserve the schema derived for the surrounding row. That was wrong, and
+ * review refuted it: neither the Lit property nor a JSX contextual type
+ * affects that schema.)
+ *
+ * The host layout is the retired component's, verbatim. An inert element is
+ * not a layout-neutral one: stored source was authored against this box, so
+ * collapsing it would reflow the very pages the stub exists to keep working.
  *
  * @element cf-cell-context
  * @deprecated Retired in #5132. Renders children and nothing else; use
  * cf-piece-menu for cell inspection. Stop emitting it from new patterns.
  */
 export class CFCellContext extends RetiredElement {
+  static override styles = [
+    ...RetiredElement.styles,
+    css`
+      :host {
+        display: block;
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+
+      :host([inline]) {
+        display: inline-block;
+        flex: none;
+      }
+    `,
+  ];
+
   protected override retiredTag = "cf-cell-context";
   protected override retiredReplacement = "cf-piece-menu";
 

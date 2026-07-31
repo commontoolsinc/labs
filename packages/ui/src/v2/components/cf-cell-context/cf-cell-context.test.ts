@@ -42,6 +42,23 @@ describe("CFCellContext (retired)", () => {
     expect(strings!.join("")).toContain("<slot></slot>");
   });
 
+  it("keeps the retired component's host layout", () => {
+    // An inert element is not a layout-neutral one. Stored source was authored
+    // against this box (`display: block` with `flex: 1`, plus the inline
+    // variant), so a stub that collapsed it — `display: contents`, say — would
+    // reflow the very pages the stub exists to keep working.
+    const css = CFCellContext.styles
+      .flat()
+      .map((sheet) => String(sheet))
+      .join("\n")
+      .replace(/\s+/g, " ");
+
+    expect(css).toContain(":host { display: block;");
+    expect(css).toContain("flex: 1;");
+    expect(css).toContain(":host([inline]) { display: inline-block;");
+    expect(css).not.toContain("display: contents");
+  });
+
   it("warns once when durable source reaches it", () => {
     resetRetiredElementWarnings();
     const lines: string[] = [];
