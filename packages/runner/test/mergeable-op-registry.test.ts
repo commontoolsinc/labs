@@ -33,6 +33,13 @@ describe("mergeable op registry consistency", () => {
     expect([...catalogWireOps].sort()).toEqual([...MERGEABLE_WIRE_OPS].sort());
   });
 
+  it("classifies exactly the mergeable wire ops as operation-based", () => {
+    const operationBased = Object.values(patchOpDescriptors)
+      .filter((descriptor) => descriptor.operationBased)
+      .map((descriptor) => descriptor.op);
+    expect(operationBased.sort()).toEqual([...MERGEABLE_WIRE_OPS].sort());
+  });
+
   it("maps each method to a distinct wire op", () => {
     const methods = MERGEABLE_OP_METHODS.map((op) => op.method);
     expect(new Set(methods).size).toBe(methods.length);

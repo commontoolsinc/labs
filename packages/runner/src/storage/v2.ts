@@ -43,6 +43,8 @@ import {
 } from "@commonfabric/memory/v2";
 import { parentPath } from "../../../memory/v2/path.ts";
 import {
+  applyPatch,
+  patchOpIsOperationBased,
   patchOpIsStructural,
   touchedPointerPaths,
 } from "../../../memory/v2/patch.ts";
@@ -501,9 +503,28 @@ const applyPendingVersion = (
       return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
       let next = base;
+      const operationBased = pending.patches.filter(patchOpIsOperationBased);
+      if (operationBased.length > 0) {
+        // Mergeable ops carry their complete relative intent on the wire. Apply
+        // that intent to the rebuilt live base just as the durable store does;
+        // pending.value is a full optimistic snapshot and may still contain
+        // data from an earlier pending layer that has since been rejected.
+        //
+        // The transaction builder emits mergeable ops before generated patches
+        // and suppresses overlapping generated writes, so applying this group
+        // first preserves its wire order and leaves only independent absolute
+        // effects for the projection pass below.
+        next = applyPatch(
+          (next ?? {}) as FabricValue,
+          operationBased,
+        ) as EntityDocument;
+      }
+      const projected = pending.patches.filter((patch) =>
+        !patchOpIsOperationBased(patch)
+      );
       for (
         const path of compactChangedPaths(
-          changedPathsForPendingPatch(base, pending.value, pending.patches),
+          changedPathsForPendingPatch(next, pending.value, projected),
         )
       ) {
         if (hasValueAtPath(pending.value, path)) {
