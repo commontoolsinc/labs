@@ -9,6 +9,10 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
+import {
+  normalizePatternSource,
+  systemPatternSource,
+} from "./pattern-source-scheme.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -285,7 +289,9 @@ export function getResultCellWithSourceSchema<T = unknown>(
   return cell;
 }
 
-const DEFAULT_APP_PATTERN_SOURCE = "/api/patterns/system/default-app.tsx";
+const DEFAULT_APP_PATTERN_SOURCE = systemPatternSource(
+  "system/default-app.tsx",
+);
 
 /**
  * Identifies a persisted default-app-shaped root that still exposes its piece
@@ -302,7 +308,14 @@ export function isLegacyPieceRegistryRoot(
     typeof patternIdentity.identity !== "string" ||
     typeof patternIdentity.symbol !== "string" ||
     (patternSource !== undefined &&
-      patternSource !== DEFAULT_APP_PATTERN_SOURCE)
+      (typeof patternSource !== "string" ||
+        // Compare in canonical form: a root that tracks the official default
+        // app is the same root whether it was stamped with the `system:` ref
+        // or with either pre-scheme spelling of that route.
+        normalizePatternSource(
+            patternSource,
+            root.runtime.hostForSpace(root.space),
+          ) !== DEFAULT_APP_PATTERN_SOURCE))
   ) {
     return false;
   }

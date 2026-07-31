@@ -220,6 +220,18 @@ describe("coverage", () => {
     expect(requiredPatternKeys(["/api/meta", ""])).toEqual([]);
   });
 
+  it("derives keys from the `system:` refs the runtime actually holds", () => {
+    expect(requiredPatternKeys([
+      "system:system/home.tsx",
+      "system:system/default-app.tsx",
+    ])).toEqual(["system/default-app.tsx", "system/home.tsx"]);
+    // A source naming no route is not silently dropped from the required set:
+    // it stays unmapped, and the caller refuses to run on it.
+    expect(unmappedPatternUrls(["system:system/home.tsx"])).toEqual([]);
+    expect(unmappedPatternUrls(["system:", "cf:published"]))
+      .toEqual(["system:", "cf:published"]);
+  });
+
   it("names a URL the derivation could not map, rather than dropping it", () => {
     // The dangerous shape: reroute the patterns endpoint and every required
     // key derives to nothing, leaving a gate that insists on nothing while

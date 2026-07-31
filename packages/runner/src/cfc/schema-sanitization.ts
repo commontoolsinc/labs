@@ -509,6 +509,38 @@ const typeMatches = (
   }
 };
 
+/**
+ * Whether `key` is an OPTIONAL property holding `undefined` that THIS caller
+ * has asked to read as absent rather than measure.
+ *
+ * Gated on the option, and off by default, because `undefined` is a value in
+ * this system rather than a hole: the codec stores its presence as
+ * `{"/Undefined@1": null}`, `type: "undefined"` is a type this validator
+ * supports, and `pull-materialization.test.ts` pins both halves ("does not hide
+ * present explicit undefined behind an optional alias", "retains explicit
+ * undefined at an optional derived Cell root"). A caller writing `undefined`
+ * where a number is declared has made a mistake worth rejecting while they can
+ * still see it.
+ *
+ * The stored-argument check a pattern update runs asks a different question,
+ * which is why it opts in — see `optionalUndefinedIsAbsent`.
+ *
+ * REQUIRED properties are never absent under this rule, and that carve-out is
+ * load-bearing rather than cautious: a required property declared
+ * `type: "undefined"` holds undefined legitimately and must still be measured
+ * to be ACCEPTED. A required property of any other type holding undefined keeps
+ * failing on its type, which is the right answer by a different route.
+ */
+const isAbsentOptional = (
+  value: FabricPlainObject,
+  key: string,
+  requiredKeys: ReadonlySet<string>,
+  options: SchemaValidationOptions,
+): boolean =>
+  options.optionalUndefinedIsAbsent === true &&
+  (value as Record<string, unknown>)[key] === undefined &&
+  !requiredKeys.has(key);
+
 const schemaValueEqual = (left: unknown, right: unknown): boolean => {
   try {
     return valueEqual(left as FabricValue, right as FabricValue);
@@ -1079,6 +1111,7 @@ interface SchemaValidationOptions {
     schema: JSONSchema,
     fullSchema: JSONSchema,
   ) => boolean;
+  optionalUndefinedIsAbsent?: boolean;
 }
 
 export interface SchemaValueValidationOptions {
@@ -1092,6 +1125,32 @@ export interface SchemaValueValidationOptions {
     schema: JSONSchema,
     fullSchema: JSONSchema,
   ) => boolean;
+  /**
+   * Read an OPTIONAL property whose value is `undefined` as absent instead of
+   * measuring it against the property's declared type.
+   *
+   * OFF by default, and deliberately: `undefined` is a value here, not a hole.
+   * The codec stores its presence (`{"/Undefined@1": null}`),
+   * `type: "undefined"` is a type this validator supports, and a caller writing
+   * `undefined` where a number is declared has made a mistake worth rejecting
+   * while they can still see it -- `pull-materialization.test.ts` pins that with
+   * "does not hide present explicit undefined behind an optional alias" and
+   * "retains explicit undefined at an optional derived Cell root".
+   *
+   * ON for one caller: the STORED-ARGUMENT check a pattern update runs. That
+   * asks a different question -- "can this version read the document already
+   * there" -- and answers it with a refusal that is PERMANENT
+   * (`isStoredArgumentSchemaRefusal` in `../runner.ts`: the same identity
+   * refuses identically, so a root pinned to a version whose schema cannot read
+   * its own document never opens again). A key holding `undefined` carries no
+   * data, and a handler mints one without meaning to: measured,
+   * `packages/patterns/topics/topic.tsx` does `comments.push({ author, ... })`
+   * with no author whenever `addComment` gets no `agentName`, and
+   * `lunch-poll/main.tsx` does the same with `imageUrl`. Refusing those
+   * documents forever is the wrong trade; rejecting a bad write now is the
+   * right one.
+   */
+  optionalUndefinedIsAbsent?: boolean;
 }
 
 const SANITIZATION_VALIDATION: SchemaValidationOptions = {
@@ -1275,12 +1334,29 @@ const validateAgainstSchemaInternal = (
     }
 
     if (Array.isArray(schema.allOf)) {
+      // `optionalUndefinedIsAbsent` is dropped for the branches. It decides
+      // "optional" from the `required` array on the node doing the check, and
+      // `allOf` is precisely the combinator that can put `required` on one node
+      // and `properties` on another — `{allOf: [{required: ["x"]}, {properties:
+      // {x: {type: "string"}}}]}` would then see `x` as optional in the branch
+      // that types it and skip the check, accepting `{x: undefined}` against a
+      // required string. Measured, and reported by review on #5251.
+      //
+      // Dropped rather than plumbed: requiredness would have to be accumulated
+      // conjunctively down the recursion, and nothing needs it. The generator
+      // emits no `allOf` at all (zero occurrences in `packages/schema-generator`
+      // and in every committed pattern baseline), so no pattern argument schema
+      // — the only place this option is enabled — can reach the branch. Strict
+      // is the safe direction for a shape that does not occur.
+      const branchOptions = options.optionalUndefinedIsAbsent === true
+        ? { ...options, optionalUndefinedIsAbsent: false }
+        : options;
       for (const branch of schema.allOf) {
         const failure = validateAgainstSchemaInternal(
           branch,
           value,
           schemaRoot,
-          options,
+          branchOptions,
           context,
         );
         if (failure !== undefined) return failure;
@@ -1366,13 +1442,22 @@ const validateAgainstSchemaInternal = (
     }
 
     if (isFabricPlainObjectValue(value)) {
-      for (const key of schema.required ?? []) {
+      const requiredKeys = new Set(schema.required ?? []);
+      // REQUIRED keeps asking only whether the key is there. A schema may
+      // declare `type: "undefined"`, and a required property of that type
+      // holds undefined legitimately — so whether undefined belongs at a key
+      // is the property schema's question, answered just below, not this
+      // loop's.
+      for (const key of requiredKeys) {
         if (!Object.hasOwn(value, key)) {
           return mismatch(`missing required property ${key}`);
         }
       }
       for (const [key, child] of Object.entries(schema.properties ?? {})) {
-        if (Object.hasOwn(value, key)) {
+        if (
+          Object.hasOwn(value, key) &&
+          !isAbsentOptional(value, key, requiredKeys, options)
+        ) {
           const failure = validateAgainstSchemaInternal(
             child,
             value[key],
