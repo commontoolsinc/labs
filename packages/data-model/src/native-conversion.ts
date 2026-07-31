@@ -3,7 +3,7 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   isArrayIndexPropertyName,
   isInertArray,
@@ -106,7 +106,7 @@ export function shallowCleanArray(
 /**
  * Returns a shallow clone of the given object carrying nothing but its
  * enumerable string-keyed properties, that is, one which satisfies
- * `isPlainObjectWithOnlyEnumerableStringKeys()`. Values are copied by reference
+ * `isInertPlainObject()`. Values are copied by reference
  * without themselves being converted or validated, this being a shallow
  * operation.
  *
@@ -278,7 +278,7 @@ export function shallowFabricFromNativeValue(
       // outright rather than dropping or flattening it on the way through
       // ("death before confusion"), matching how an array's non-index
       // properties are treated.
-      if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
+      if (!isInertPlainObject(value)) {
         throw new Error(
           "Not representable as a `FabricValue`: object that is not an " +
             "inert plain object",
@@ -697,7 +697,7 @@ function isFabricCompatibleInternal(
       // Plain objects -- check the key shape, then all property values
       // recursively. A symbol key or a non-enumerable string key has no fabric
       // representation, just as an array's non-index properties do not.
-      if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
+      if (!isInertPlainObject(value)) {
         seen.delete(value);
         return false;
       }
