@@ -74,8 +74,9 @@ export type UpdateOutcome = PatternUpdateOutcome;
 /**
  * A cold-start setup repair failed specifically because the CFC SCHEMA
  * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
- * the reused doc onto a now-required field that carries no default (the estuary
- * `favorites` case). This is ONE of the two repair-failure classes the
+ * preserved input or unclassified document data onto a now-required field that
+ * carries no default. Generated result fields are not in this class: pattern
+ * setup materializes them. This is ONE of the two repair-failure classes the
  * runnability backstop ({@link PiecesController.healDefaultRootByRollForward})
  * acts on — the other is a refused stored argument
  * ({@link isStoredArgumentSchemaRefusal}); every other failure stays

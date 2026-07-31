@@ -204,6 +204,7 @@ const recordSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "input" | "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema) ??
     storedSchemaForWritePolicyInput(tx, link);
@@ -221,6 +222,7 @@ const recordSchemaWritePolicyInput = (
     },
     schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -253,6 +255,7 @@ export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "input" | "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema);
   const cfcRelevant = schemaHasIfc(resolvedSchema) ||
@@ -265,6 +268,7 @@ export const recordRelevantSchemaWritePolicyInput = (
     tx,
     link,
     schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+    schemaRole,
   );
 };
 

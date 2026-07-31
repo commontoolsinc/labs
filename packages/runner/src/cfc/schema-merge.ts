@@ -5,7 +5,6 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
@@ -354,26 +353,30 @@ const assertNoDivergentIfcBranches = (
   });
 };
 
-// A stream slot is a runtime-materialized capability marker, not stored
-// document data — see the additive-required exemption in `mergeRequired`.
-//
-// Only the field's IMMEDIATE OUTER slot decides what it is, so read the first
-// `asCell` entry (mirroring the canonical stream test in link-utils.ts and
-// schema.ts, which both key on `getAsCellValues(schema).at(0)`). A bare
-// `.includes("stream")` was wrong twice: it exempted `["cell", "stream"]` — a
-// CELL of a stream, whose outer slot is a cell and which therefore holds
-// preservable data — and it missed the scoped-descriptor dialect
-// (`[{ kind: "stream", scope: … }]`), which is a string only under the legacy
-// form. `getAsCellKind` normalizes both dialects.
-const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
-  ContextualFlowControl.getAsCellKind(
-    ContextualFlowControl.getAsCellValues(schema).at(0),
-  ) === "stream";
+export interface MergeCfcSchemaEnvelopeOptions {
+  /**
+   * Logical paths generated as outputs by the running module. A path covers
+   * every required descendant below it. Required fields outside these paths
+   * still need defaults to preserve older documents.
+   */
+  generatedOutputPaths?: readonly (readonly string[])[];
+}
+
+const generatedOutputCovers = (
+  options: MergeCfcSchemaEnvelopeOptions,
+  path: readonly string[],
+): boolean =>
+  options.generatedOutputPaths?.some((outputPath) =>
+    outputPath.length <= path.length &&
+    outputPath.every((segment, index) => segment === path[index])
+  ) ?? false;
 
 const mergeRequired = (
   existing: readonly string[] | undefined,
   candidate: readonly string[] | undefined,
   mergedProperties: Readonly<Record<string, JSONSchema>>,
+  path: readonly string[],
+  options: MergeCfcSchemaEnvelopeOptions,
 ): readonly string[] | undefined => {
   if (existing === undefined && candidate === undefined) {
     return undefined;
@@ -384,19 +387,11 @@ const mergeRequired = (
       continue;
     }
     const property = mergedProperties[name];
-    // A newly-required field must carry a default so an old document that
-    // predates the field can still be read (the default synthesizes the
-    // missing value). This guard is about PRESERVABLE DOCUMENT DATA, so it
-    // does not apply to a stream slot: `asCell: ["stream"]` is a
-    // runtime-materialized capability marker, not stored data. Pattern setup
-    // re-materializes every stream marker on each run, so an old doc that
-    // lacks one has no value to preserve and there is no meaningful default a
-    // `Stream<…>` field could declare. Without this exemption, materializing a
-    // handler-rich pattern (e.g. home.tsx) over a doc that predates its
-    // handlers fails additive-required — the estuary cold-start-setup-repair
-    // cascade, where each defaulted DATA field just unmasked the next
-    // required-no-default handler.
-    if (isStreamSlot(property)) {
+    // A generated output is materialized by the module in this transaction,
+    // so it has no older value to preserve. Inputs and ordinary document writes
+    // remain default-gated: an older document may genuinely lack their newly
+    // required field.
+    if (generatedOutputCovers(options, [...path, name])) {
       continue;
     }
     if (!isRecord(property) || property.default === undefined) {
@@ -431,6 +426,8 @@ const mergeSchemaNode = (
   existing: JSONSchema,
   candidate: JSONSchema,
   path = "",
+  logicalPath: readonly string[] = [],
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): JSONSchema => {
   const left = asSchemaObject(existing, path);
   const right = asSchemaObject(candidate, path);
@@ -483,7 +480,13 @@ const mergeSchemaNode = (
     const rightClaim = right.properties?.[key] ?? rightAdditional;
     mergedProperties[key] = leftClaim !== undefined &&
         rightClaim !== undefined
-      ? mergeSchemaNode(leftClaim, rightClaim, `${path}/${key}`)
+      ? mergeSchemaNode(
+        leftClaim,
+        rightClaim,
+        `${path}/${key}`,
+        [...logicalPath, key],
+        options,
+      )
       : (rightClaim ?? leftClaim)!;
   }
 
@@ -496,6 +499,8 @@ const mergeSchemaNode = (
       leftAdditional,
       rightAdditional,
       `${path}/*`,
+      [...logicalPath, "*"],
+      options,
     );
   } else if (right.additionalProperties !== undefined) {
     mergedAdditionalProperties = right.additionalProperties;
@@ -503,7 +508,13 @@ const mergeSchemaNode = (
 
   let mergedItems = left.items;
   if (left.items !== undefined && right.items !== undefined) {
-    mergedItems = mergeSchemaNode(left.items, right.items, `${path}/*`);
+    mergedItems = mergeSchemaNode(
+      left.items,
+      right.items,
+      `${path}/*`,
+      [...logicalPath, "*"],
+      options,
+    );
   } else if (right.items !== undefined) {
     mergedItems = right.items;
   }
@@ -535,7 +546,13 @@ const mergeSchemaNode = (
       const rightSlot = slotClaim(right, index);
       slots.push(
         leftSlot !== undefined && rightSlot !== undefined
-          ? mergeSchemaNode(leftSlot, rightSlot, `${path}/${index}`)
+          ? mergeSchemaNode(
+            leftSlot,
+            rightSlot,
+            `${path}/${index}`,
+            [...logicalPath, String(index)],
+            options,
+          )
           : (rightSlot ?? leftSlot)!,
       );
     }
@@ -563,7 +580,13 @@ const mergeSchemaNode = (
       ? { additionalProperties: mergedAdditionalProperties }
       : {}),
     ifc: mergeIfc(left.ifc, right.ifc, path),
-    required: mergeRequired(left.required, right.required, mergedProperties),
+    required: mergeRequired(
+      left.required,
+      right.required,
+      mergedProperties,
+      logicalPath,
+      options,
+    ),
     default: mergeDefaults(left.default, right.default),
   };
 };
@@ -571,8 +594,9 @@ const mergeSchemaNode = (
 export const mergeCfcSchemaEnvelopes = (
   existing: JSONSchema,
   candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): JSONSchema => {
   assertNoDivergentIfcBranches(existing);
   assertNoDivergentIfcBranches(candidate);
-  return internSchema(mergeSchemaNode(existing, candidate));
+  return internSchema(mergeSchemaNode(existing, candidate, "", [], options));
 };

@@ -35,7 +35,12 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  isCell,
+  recordRelevantSchemaWritePolicyInput,
+} from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
@@ -292,6 +297,7 @@ const recordOutputSchemaPolicyInputs = (
           path: [...targetLink.path],
         },
         schema,
+        schemaRole: "output",
       });
     }
     return;
@@ -329,6 +335,7 @@ const recordSchemaPolicyInputForLink = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "input" | "output",
 ): void => {
   if (schema === undefined) {
     return;
@@ -342,6 +349,7 @@ const recordSchemaPolicyInputForLink = (
       path: [...link.path],
     },
     schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -368,8 +376,8 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
         ),
     );
     const schema = bindingLink.schema ?? link.schema;
-    recordSchemaPolicyInputForLink(tx, bindingLink, schema);
-    recordSchemaPolicyInputForLink(tx, link, schema);
+    recordSchemaPolicyInputForLink(tx, bindingLink, schema, "output");
+    recordSchemaPolicyInputForLink(tx, link, schema, "output");
     return;
   }
 
@@ -453,6 +461,7 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     tx,
     result.getAsNormalizedFullLink(),
     result.schema,
+    "output",
   );
 };
 
@@ -1206,6 +1215,12 @@ export class Runner {
     argument: T,
     argumentSchema: JSONSchema | undefined,
   ): void {
+    recordRelevantSchemaWritePolicyInput(
+      tx,
+      argumentLink,
+      argumentSchema,
+      "input",
+    );
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
       undefined,
@@ -1481,12 +1496,16 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
+      recordRelevantSchemaWritePolicyInput(
+        tx,
+        writableResultCell.getAsNormalizedFullLink(),
+        pattern.resultSchema,
+        "output",
+      );
       // Convert-and-freeze (default): a deep-frozen value lets the storage
       // write boundary's `cloneIfNecessary` identity-pass instead of
       // deep-cloning-to-freeze.
-      writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result),
-      );
+      writableResultCell.setRawUntyped(fabricFromNativeValue(result));
     }
   }
 

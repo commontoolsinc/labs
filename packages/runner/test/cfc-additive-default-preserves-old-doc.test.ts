@@ -73,11 +73,10 @@ const compileHomePattern = async (
 };
 
 describe("CFC additive-required default preserves old documents", () => {
-  // Tight pin on the guard itself: a newly-required STREAM slot must not need
-  // a default (a stream carries no preservable document value), while a plain
-  // newly-required data field still must. This isolates the schema-merge fix
-  // from the full home compile.
-  it("exempts an additive-required stream slot from the default requirement", () => {
+  // Tight pin on the guard itself: a generated output does not need a default,
+  // while an unclassified document field still does. This isolates the
+  // role-aware schema-merge rule from the full home compile.
+  it("exempts an additive-required generated output from the default requirement", () => {
     const stored: JSONSchema = {
       type: "object",
       properties: { owner: { type: "string" } },
@@ -97,8 +96,9 @@ describe("CFC additive-required default preserves old documents", () => {
       },
       required: ["owner", "addFavorite"],
     };
-    // Before the fix this threw: "required field addFavorite needs a default".
-    const merged = mergeCfcSchemaEnvelopes(stored, candidate) as JSONSchemaObj;
+    const merged = mergeCfcSchemaEnvelopes(stored, candidate, {
+      generatedOutputPaths: [[]],
+    }) as JSONSchemaObj;
     expect(merged.required).toContain("addFavorite");
   });
 
