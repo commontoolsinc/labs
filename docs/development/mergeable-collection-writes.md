@@ -289,9 +289,9 @@ first, since the op carries only the delta.
   correct combined local value. That transaction's write to that path forfeits
   merge-friendliness (it commits as a value diff, so it can false-conflict under
   contention) rather than being silently corrupted. Read that as a description of
-  the poisoned path, not as a closed-class guarantee for every op — see "Known
-  gaps" at the end of this section for a shape that still commits a value the
-  writer never saw. The rule is that every whole-value write poisons the ops it
+  the poisoned path, not as a closed-class guarantee for every op: what makes it
+  hold is the list of commit-time checks below, each of which had to be found.
+  The rule is that every whole-value write poisons the ops it
   covers, so the sites to keep in step are every path that performs one:
   `Cell.set`, `Cell.setRawUntyped`, the query-result proxy's in-place mutators,
   and the proxy's property-assignment trap — the last two being separate code
@@ -394,19 +394,34 @@ first, since the op carries only the delta.
   the working array exactly and keeps its op, so concurrent removals of distinct
   entries still merge.
 
-### Known gaps
+- **An op inside another op's payload falls back.** A tail op's payload is
+  `array.slice(tailStart)` — live values lifted out of the working document at
+  commit — so it carries whatever those elements contain, however deep. Push a
+  new inner list onto an outer list and then push into that inner list, and the
+  outer append's payload already holds the inner list *including* the element the
+  inner append would add: the store applies the outer op, then the inner op adds
+  its element a second time. Each array is individually dense and its own length
+  arithmetic individually consistent, so none of the checks above sees it — they
+  each judge one intent against the base, and this is a relationship *between*
+  two intents.
 
-One shape still commits a value the writer never saw. It is measured, it predates
-the commit-time checks above, and it is not caught by them. Treat this as the
-honest boundary of "falls back rather than corrupts".
+  So an intent whose path lies inside another op's payload is abandoned, and the
+  containing op carries the combined value — its suppression already covers the
+  region, so the diff candidates the abandoned intent leaves behind are dropped
+  with it. The *contained* intent is the one abandoned: the containing op is the
+  one that can still carry both changes, and keeping it is what preserves the
+  outer list's merge-friendliness. Containment is judged on what each intent
+  recorded, not on which ops survived, so an intent inside an op that is itself
+  abandoned falls back with it and the whole-value diff is the only thing
+  carrying that region.
 
-- **Nested arrays where one tail op's payload contains another's target.** Push a
-  new array onto an outer array, then push into that inner array: the outer
-  append's payload is `array.slice(start)`, which already contains the inner
-  array *including* the element the inner append will add again, so the store
-  applies it twice. Measured: local `[["a"],["x","y"]]`, durable
-  `[["a"],["x","y","x","y"]]`. Each array's own length arithmetic is individually
-  consistent, so neither guard sees it.
+  Only the tail ops carry live values this way. An `increment` sends a number and
+  a `removeByValue` sends the elements it removes, so neither contains another
+  intent's target, and a nested push landing *before* the outer tail
+  (`outer.key(0).push(...)` alongside `outer.push(...)`) is in no payload and
+  stays mergeable. `mergeableOpPayloadContains` is where an op declares what its
+  payload holds; `buildMergeableOps` is where the sibling intents on one document
+  are compared, since no single builder can see them.
 
 ## Conditional pushes stay protected: the read-set narrowing
 

@@ -60,6 +60,12 @@ const stringListSchema = {
   // deno-lint-ignore no-explicit-any
 } as any;
 
+const nestedListSchema = {
+  type: "array",
+  items: { type: "array", items: { type: "string" } },
+  // deno-lint-ignore no-explicit-any
+} as any;
+
 const numberSchema = {
   type: "number",
   // deno-lint-ignore no-explicit-any
@@ -87,6 +93,27 @@ async function readDurable(
     await cell.sync();
     await cell.pull();
     return (cell.get() ?? []) as string[];
+  } finally {
+    await rt.dispose();
+    await storage.close();
+  }
+}
+
+// The same fresh-session read for a list whose elements are themselves lists.
+async function readDurableNested(
+  server: MemoryV2Server.Server,
+  cause: string,
+): Promise<string[][]> {
+  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const rt = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+  });
+  try {
+    const cell = rt.getCell<string[][]>(space, cause, nestedListSchema);
+    await cell.sync();
+    await cell.pull();
+    return (cell.get() ?? []) as string[][];
   } finally {
     await rt.dispose();
     await storage.close();
@@ -1122,6 +1149,112 @@ describe("mergeable array appends", () => {
         await storage.close();
       }
     } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // Nested tail ops where one op's PAYLOAD contains the other's target: push a
+  // new inner list onto the outer list, then push into that inner list. A tail
+  // op's payload is read from the working array at commit, so the outer append
+  // already carries the inner list complete with the element the inner append
+  // would add again — the store would apply it twice. Only the durable value
+  // shows it: the writer's own local value is correct throughout.
+  it("a push into a just-appended nested list commits its element once", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const NESTED_CAUSE = "nested-tail-inside-tail";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx0)
+        .set([["a"]]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const outer = rt1.getCell<string[][]>(
+        space,
+        NESTED_CAUSE,
+        nestedListSchema,
+        tx1,
+      );
+      outer.push(["x"]);
+      (outer.key(1) as unknown as Cell<string[]>).push("y");
+      expect(outer.get()).toEqual([["a"], ["x", "y"]]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurableNested(server, NESTED_CAUSE)).toEqual([
+        ["a"],
+        ["x", "y"],
+      ]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The same two pushes with the inner one landing BEFORE the outer tail: that
+  // element is not in the outer append's payload, so both ops are sent and the
+  // durable value has to come out of the two of them applied together. That
+  // combination is what this pins; that the inner op stays a live intent rather
+  // than falling back is pinned on the intents themselves ("nested tail ops
+  // abandon only the contained one", below) — a durable value cannot show it,
+  // since a concurrent append is add-wins and lands either way.
+  it("a push into a pre-existing nested list stays mergeable alongside an outer push", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    const NESTED_CAUSE = "nested-tail-before-tail";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx0)
+        .set([["a"], ["b"]]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[][]>(
+        space,
+        NESTED_CAUSE,
+        nestedListSchema,
+      );
+      await cell2.sync();
+      await cell2.pull();
+
+      const tx1 = rt1.edit();
+      const outer = rt1.getCell<string[][]>(
+        space,
+        NESTED_CAUSE,
+        nestedListSchema,
+        tx1,
+      );
+      outer.push(["x"]);
+      (outer.key(0) as unknown as Cell<string[]>).push("y");
+      expect(outer.get()).toEqual([["a", "y"], ["b"], ["x"]]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2 appends against the pre-push basis. Both ops above stayed
+      // mergeable, so this merges rather than clobbering.
+      const tx2 = rt2.edit();
+      rt2.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx2)
+        .push(["z"]);
+      await tx2.commit();
+      await rt2.storageManager.synced();
+
+      expect(await readDurableNested(server, NESTED_CAUSE)).toEqual([
+        ["a", "y"],
+        ["b"],
+        ["x"],
+        ["z"],
+      ]);
+    } finally {
+      await rt2.dispose();
       await rt1.dispose();
     }
   });
@@ -2403,6 +2536,62 @@ describe("mergeable op guards and single-session branches", () => {
     expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
       [],
     );
+  });
+
+  // Two tail ops where one op's payload contains the other's target: exactly one
+  // intent — the CONTAINED one — is abandoned, and the containing op survives to
+  // carry the combined value. Which of the two is dropped only shows here: both
+  // choices commit the same durable value in the simple case, but abandoning the
+  // outer would forfeit the outer list's merge-friendliness instead of the inner
+  // one's.
+  //
+  // The same assertion pins the guard's lower edge: a nested push landing BEFORE
+  // the outer tail is in no payload, so both intents survive.
+  it("nested tail ops abandon only the contained one", async () => {
+    const nested = {
+      type: "array",
+      items: { type: "array", items: { type: "string" } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    // `["value"]` is the list itself within its document.
+    for (
+      const { name, seed, index, remains } of [
+        // Push a new inner list, then push into it: the outer payload already
+        // carries the "y" the inner op would add again, so only the outer op
+        // survives.
+        { name: "inside-tail", seed: [["a"]], index: 1, remains: [["value"]] },
+        // Push into an inner list that was already there: index 0 sits below the
+        // outer tail start, so nothing is sent twice and both ops survive.
+        {
+          name: "before-tail",
+          seed: [["a"], ["b"]],
+          index: 0,
+          remains: [["value"], ["value", "0"]],
+        },
+      ]
+    ) {
+      const cause = `nested-intents-${name}`;
+      const tx0 = rt.edit();
+      rt.getCell<string[][]>(space, cause, nested, tx0).set(seed);
+      await tx0.commit();
+      await rt.storageManager.synced();
+
+      const tx = rt.edit();
+      const outer = rt.getCell<string[][]>(space, cause, nested, tx);
+      outer.push(["x"]);
+      (outer.key(index) as unknown as Cell<string[]>).push("y");
+      expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+        .toBe(2);
+
+      // Building the commit is where the containment is discovered — both ops
+      // were recorded on paths neither write reshaped.
+      getDirectTransactionNativeCommit(tx, space);
+      expect(
+        [...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]
+          .map(({ path }) => path),
+      ).toEqual(remains);
+    }
   });
 
   // The proxy reshapes an array two ways: by calling an in-place mutator on it,

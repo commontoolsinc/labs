@@ -1,7 +1,8 @@
 import type { FabricValue } from "@commonfabric/api";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import type { PatchOp } from "@commonfabric/memory/v2";
-import { encodePointer } from "../../../memory/v2/path.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { encodePointer, isPrefixPath } from "../../../memory/v2/path.ts";
 
 /**
  * The mergeable patch operations: the {@link PatchOp} kinds an author invokes
@@ -110,6 +111,9 @@ export interface MergeableBuildResult {
 // - `fold` — how a delta combines into the path's accumulated intent.
 // - `build` — how an accumulated intent becomes wire ops and diff-suppression,
 //   or is abandoned in favour of the plain diff (see `abandon` above).
+// - `payloadContains` — whether a path lies inside the live values this op sends
+//   (see {@link mergeableOpPayloadContains}). Absent means "carries no live
+//   subtree", which is the answer for every op but the tail ops.
 interface MergeableOpDescriptor<
   Intent extends MergeableOpIntent = MergeableOpIntent,
   Delta extends MergeableOpDelta = MergeableOpDelta,
@@ -125,6 +129,11 @@ interface MergeableOpDescriptor<
     intent: Intent,
     ctx: MergeableBuildContext,
   ) => MergeableBuildResult;
+  readonly payloadContains?: (
+    intent: Intent,
+    ctx: MergeableBuildContext,
+    path: readonly string[],
+  ) => boolean;
 }
 
 const descriptor = <
@@ -151,6 +160,34 @@ const foldTail = (
   count: (existing?.op === delta.op ? existing.count : 0) + delta.count,
 });
 
+// The first index of the array a tail op sends: its recorded tail, or the whole
+// working array when there was no base to diff against.
+const tailOpStart = (
+  intent: AppendIntent,
+  array: readonly FabricValue[],
+  ctx: MergeableBuildContext,
+): number => ctx.hadInitialArray ? Math.max(0, array.length - intent.count) : 0;
+
+// A tail op's payload is `array.slice(start)` — live values lifted out of the
+// working document — so it carries every path at or past `start`, at any depth
+// beneath it.
+const tailOpPayloadContains = (
+  intent: AppendIntent,
+  ctx: MergeableBuildContext,
+  path: readonly string[],
+): boolean => {
+  const array = ctx.workingArray;
+  if (
+    !array || path.length <= intent.path.length ||
+    !isPrefixPath(intent.path, path)
+  ) {
+    return false;
+  }
+  const index = path[intent.path.length];
+  return index !== undefined && isArrayIndexPropertyName(index) &&
+    Number(index) >= tailOpStart(intent, array, ctx);
+};
+
 // A tail op emits its recorded tail slice (or the whole working array when there
 // was no base to diff against) and suppresses the whole-array / appended-element
 // diff candidates the op replaces, while leaving edits to existing elements
@@ -163,9 +200,7 @@ const buildTailOp = (
   if (!array) {
     return { ops: [], suppress: [], abandon: true };
   }
-  const start = ctx.hadInitialArray
-    ? Math.max(0, array.length - intent.count)
-    : 0;
+  const start = tailOpStart(intent, array, ctx);
   // The op says "add these elements to whatever the durable array is", and its
   // suppression drops the whole-array candidate at this path outright plus every
   // element candidate at or past `start`. What survives to carry the prefix is
@@ -292,12 +327,14 @@ const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
     isNoopDelta: isNoopTailDelta,
     fold: foldTail,
     build: buildTailOp,
+    payloadContains: tailOpPayloadContains,
   }),
   "add-unique": descriptor<AppendIntent, AppendDelta>({
     op: "add-unique",
     isNoopDelta: isNoopTailDelta,
     fold: foldTail,
     build: buildTailOp,
+    payloadContains: tailOpPayloadContains,
   }),
   increment: descriptor<
     Extract<MergeableOpIntent, { op: "increment" }>,
@@ -365,6 +402,34 @@ export const foldMergeableIntent = (
   delta: MergeableOpDelta,
 ): MergeableOpIntent =>
   mergeableOpDescriptors[delta.op].fold(existing, path, delta);
+
+/**
+ * Whether the op `intent` would build under `ctx` carries `path` inside its own
+ * payload — i.e. whether it already sends the value living there.
+ *
+ * Only the tail ops carry live values lifted out of the working document: their
+ * payload is `array.slice(tailStart)`, so it holds whatever those elements
+ * contain, however deep. An `increment` sends a number and a `remove-by-value`
+ * sends the element it removes, neither of which contains another intent's
+ * target, so both answer `false`.
+ *
+ * This is what makes two intents on one document mutually exclusive. An intent
+ * inside another op's payload has ALREADY had its change applied by that op — the
+ * payload is read from the working array at commit, after both writes — so
+ * sending it as its own op applies it a second time. The caller abandons the
+ * contained intent (see `buildMergeableOps`); the containing op carries the
+ * combined value, and its suppression covers the diff candidates the abandoned
+ * intent leaves behind.
+ *
+ * Containment is strict: an intent never contains itself.
+ */
+export const mergeableOpPayloadContains = (
+  intent: MergeableOpIntent,
+  ctx: MergeableBuildContext,
+  path: readonly string[],
+): boolean =>
+  mergeableOpDescriptors[intent.op].payloadContains?.(intent, ctx, path) ??
+    false;
 
 /**
  * Turns one accumulated intent into the wire ops the commit sends and the
