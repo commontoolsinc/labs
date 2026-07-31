@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
+  isInertArray,
 } from "@commonfabric/utils/arrays";
 
 describe("arrays", () => {
@@ -290,6 +291,110 @@ describe("arrays", () => {
           expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
         });
       }
+    });
+  });
+
+  describe("isInertArray()", () => {
+    describe("returns `true` for inert arrays", () => {
+      it("accepts a compact array", () => {
+        expect(isInertArray([1, 2, 3])).toBe(true);
+        expect(isInertArray([])).toBe(true);
+      });
+
+      it("accepts a sparse array", () => {
+        const arr: unknown[] = [];
+        arr[0] = 1;
+        arr[5] = 2;
+        expect(isInertArray(arr)).toBe(true);
+      });
+
+      it("accepts a frozen array", () => {
+        expect(isInertArray(Object.freeze([1, 2, 3]))).toBe(true);
+      });
+
+      it("accepts a non-enumerable data-backed index", () => {
+        // Unlike the plain-object check, index enumerability is not required:
+        // the check is about inertness (data-ness), and array contents are
+        // reached by index, not by enumeration-driven copying.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          value: 22,
+          enumerable: false,
+          writable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(true);
+      });
+    });
+
+    describe("subsumes the index-only check", () => {
+      // `isInertArray()` includes everything
+      // `isArrayWithOnlyIndexProperties()` checks; callers never need both.
+      it("rejects a named property", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects anything that isn't an array", () => {
+        expect(isInertArray({ 0: "a", length: 1 })).toBe(false);
+        expect(isInertArray(null)).toBe(false);
+        expect(isInertArray(undefined)).toBe(false);
+        expect(isInertArray("abc")).toBe(false);
+      });
+    });
+
+    describe("returns `false` for accessor-backed indices", () => {
+      it("rejects a getter-backed index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a setter-only index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, {
+          set: () => {},
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a getter-backed index even on a frozen array", () => {
+        // Freezing prevents reconfiguration but does not convert an accessor
+        // into data: its reads still execute code.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 0, {
+          get: () => "still live",
+          enumerable: true,
+          configurable: false,
+        });
+        Object.freeze(arr);
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a getter-backed final index", () => {
+        // The final index is the last key before `length`; this pins that the
+        // descriptor walk covers the whole index range, not just a prefix.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, {
+          get: () => 33,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(false);
+      });
     });
   });
 });

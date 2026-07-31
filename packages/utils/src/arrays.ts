@@ -119,3 +119,51 @@ export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
   // a named property would sort after it, and a symbol key after that.
   return Reflect.ownKeys(array).at(-1) === "length";
 }
+
+/**
+ * Indicates whether the given array is an _inert_ array: every own property an
+ * array index holding a _data_ property, `length` aside -- which is what a
+ * well-formed array means in this system. Beyond the index-only requirement of
+ * {@link isArrayWithOnlyIndexProperties} (which this check subsumes; there is
+ * no need to call both), an accessor-backed (getter and/or setter) index
+ * causes rejection, because it makes the array non-inert: an accessor is live
+ * code, a read of which executes it and can answer differently every time --
+ * and freezing the array does not change that. Index _enumerability_ is not
+ * required, only data-ness: array contents are reached by index, not by
+ * enumeration-driven copying, so an index's enumerability has no bearing on
+ * the array's inertness.
+ *
+ * The array-recognition, `Proxy`, and key-ordering caveats described on
+ * {@link isArrayWithOnlyIndexProperties} apply here as well.
+ *
+ * @param array The value to check.
+ * @returns `true` if the array is an inert array, `false` otherwise.
+ */
+export function isInertArray(array: unknown): boolean {
+  // `Array.isArray()` sees through a `Proxy` to its target, so a proxied array
+  // is still recognized as one here.
+  if (!Array.isArray(array)) {
+    return false;
+  }
+
+  // Given the spec-defined key ordering, `length` -- which is created along
+  // with the array itself, and so precedes every later-created string key --
+  // is the last own key exactly when there is no other non-index key at all:
+  // a named property would sort after it, and a symbol key after that.
+  const keys = Reflect.ownKeys(array);
+  if (keys.at(-1) !== "length") {
+    return false;
+  }
+
+  // Every index (each key before `length`, given the check above) must also
+  // hold a data property; an accessor answers `get` / `set` in its descriptor
+  // and has no `value`. (`length` itself is always a data property.)
+  for (let i = 0; i < keys.length - 1; i++) {
+    const descriptor = Object.getOwnPropertyDescriptor(array, keys[i]!)!;
+    if (!("value" in descriptor)) {
+      return false;
+    }
+  }
+
+  return true;
+}
