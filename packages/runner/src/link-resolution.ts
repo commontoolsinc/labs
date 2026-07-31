@@ -44,6 +44,13 @@ type LinkHop = {
   link: NormalizedFullLink;
   source: NormalizedFullLink;
   kind: "value" | "write-redirect";
+  /**
+   * How many of the resolving link's path segments the stored link sits under.
+   * Equal to `link.path.length` for a hop found at the full path, and shorter
+   * when the hop was discovered at an ancestor — which is the case that has to
+   * consult `scopeCaps` rather than the leaf schema.
+   */
+  depth: number;
 };
 
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
@@ -73,12 +80,32 @@ const recordDereferenceHop = (
 // follow (see ContextualFlowControl.getSchemaScopeCap for the precedence). This
 // caps *which* link scopes may be followed; it must never be copied onto the
 // followed link itself.
-const schemaScopeForLink = (
+//
+// `link.schema` describes the LEAF, so it only answers for a hop found at the
+// full path. A hop found at an ancestor is governed by whatever that ancestor's
+// schema declared, which `key()` recorded in `scopeCaps` on its way down —
+// narrowing had already replaced the declaring schema by the time we get here
+// (#5230). Fall back to the leaf schema when nothing was recorded, which is
+// both the pre-existing behavior and correct for a full-path hop.
+const schemaScopeForLinkAtDepth = (
   link: NormalizedFullLink,
-): SchemaScope | undefined =>
-  ContextualFlowControl.getSchemaScopeCap(link.schema);
+  depth: number,
+): SchemaScope | undefined => {
+  if (depth >= link.path.length) {
+    return ContextualFlowControl.getSchemaScopeCap(link.schema);
+  }
+  return link.scopeCaps?.find((cap) => cap.depth === depth)?.scope;
+};
 
-const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
+/**
+ * The link a blocked or dead-ended chain resolves to: undefined-data in place.
+ * Exported so every site that decides a link may not be followed produces the
+ * same shape — notably the asCell boundaries, which build a handle instead of
+ * following and so never reach the check below (#5230).
+ */
+export const undefinedDataLink = (
+  link: NormalizedFullLink,
+): NormalizedFullLink => ({
   ...link,
   id: dataUriFromValueWithResolvedLinks(undefined, link),
   path: [],
@@ -86,8 +113,12 @@ const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
 
 const canFollowLinkHop = (
   source: NormalizedFullLink,
-  target: NormalizedFullLink,
-): boolean => canFollowScopedLink(schemaScopeForLink(source), target.scope);
+  hop: LinkHop,
+): boolean =>
+  canFollowScopedLink(
+    schemaScopeForLinkAtDepth(source, hop.depth),
+    hop.link.scope,
+  );
 
 /**
  * Resolves a document path with support for links inside documents.
@@ -192,6 +223,7 @@ export function resolveLink(
         link: nextLink,
         source: { ...link, path: [...link.path] },
         kind: hopKindForLink(nextLink),
+        depth: link.path.length,
       };
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
@@ -230,6 +262,7 @@ export function resolveLink(
               link: nextLink,
               source: { ...link, path: [...lastValid] },
               kind: hopKindForLink(nextLink),
+              depth: lastValid.length,
             };
           }
         }
@@ -255,11 +288,11 @@ export function resolveLink(
     }
 
     if (nextHop !== undefined) {
-      if (!canFollowLinkHop(link, nextHop.link)) {
+      if (!canFollowLinkHop(link, nextHop)) {
         // Blocked narrower-scope follow during link resolution — resolves to
         // undefined silently. Warn (not info) so the drop is observable; see
         // the matching site in traverse.ts followPointer (CT-1642).
-        const schemaScope = schemaScopeForLink(link);
+        const schemaScope = schemaScopeForLinkAtDepth(link, nextHop.depth);
         logger.warn("scope: blocked narrower link follow", () => [
           `a "${schemaScope}"-scoped read cannot follow a ` +
           `"${nextHop.link.scope}"-scoped link, so it resolves to undefined. ` +

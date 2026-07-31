@@ -74,7 +74,7 @@ import {
   isWriteRedirectLink,
   type ValuePath,
 } from "./link-types.ts";
-import type { LastNode } from "./link-resolution.ts";
+import { type LastNode, undefinedDataLink } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { type CellLinkRefPayload, SigilLink } from "./sigil-types.ts";
@@ -4832,6 +4832,26 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
+    // An asCell boundary is the one place a link is turned into a handle
+    // instead of being followed, so followPointer's cap check never runs for
+    // it. Apply the same rule here, or the cap means nothing to anyone who
+    // reads THROUGH the handle (#5230). Resolve to undefined-data, matching
+    // what resolveLink hands back for a blocked follow, so the three routes to
+    // a capped handle agree.
+    const schemaScope = schemaFollowScopeCap(schema);
+    if (!canFollowScopedLink(schemaScope, lastLink.scope)) {
+      logger.warn("traverse", () => [
+        `blocked narrower-scope asCell handle: a "${schemaScope}"-scoped ` +
+        `read cannot hold a "${lastLink.scope}"-scoped link, so the handle ` +
+        `reads as undefined. Declare the handle's asCell scope at least as ` +
+        `narrow as the value it points at.`,
+        { schemaScope, linkScope: lastLink.scope, target: lastLink },
+      ]);
+      return {
+        ...undefinedDataLink(lastLink),
+        schema: combineSchema(schema, lastLink.schema ?? true),
+      };
+    }
     // The link may not have the asCell flags, so pull that from itemSchema
     return {
       ...lastLink,

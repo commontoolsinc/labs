@@ -4,6 +4,7 @@ import {
   type CellScope,
   type JSONSchema,
   type LinkScope,
+  type SchemaScope,
 } from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
@@ -39,6 +40,17 @@ function parseScopedIdSegment(idSegment: string): {
 }
 
 /**
+ * A follow cap declared by the schema at `depth` path segments from this
+ * link's root, remembered because narrowing past that segment drops the
+ * declaring schema. See {@link NormalizedLink.scopeCaps}.
+ */
+export type ScopeCapAtDepth = {
+  /** Number of leading `path` segments the declaring schema addresses. */
+  depth: number;
+  scope: SchemaScope;
+};
+
+/**
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
@@ -48,6 +60,19 @@ export type NormalizedLink = {
   scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
+  /**
+   * Follow caps declared by schemas ABOVE this link's leaf, ascending by
+   * depth. `schema` only describes the leaf, so a cap declared mid-path — an
+   * `asCell` entry's `scope` on an ancestor — is otherwise lost the moment
+   * `key()` narrows past it, and `resolveLink` has nothing to check when it
+   * discovers the stored link at that ancestor. Populated by `Cell.key()`,
+   * which is the one place that walks the schema segment by segment.
+   *
+   * Read-side only: this is never serialized into a sigil link, never part of
+   * link identity (`areNormalizedLinksSame`), and must never be stamped onto a
+   * followed link's own scope (CT-1623).
+   */
+  scopeCaps?: readonly ScopeCapAtDepth[];
 };
 
 /**

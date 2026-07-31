@@ -1931,10 +1931,25 @@ export class CellImpl<T extends FabricValue>
       // scope during writes. Stamping schema scope onto this link here would
       // re-address the value to the wrong scoped instance of the container doc
       // (see CT-1623).
+      const path = [...currentLink.path, key.toString()] as string[];
+      // Remember a follow cap declared at this segment. `schema` below is
+      // replaced by the child's, so a cap on an `asCell` ancestor would
+      // otherwise vanish as soon as the path continues past it, leaving
+      // resolveLink unable to check the hop it later finds there (#5230).
+      // Recording it costs nothing on the overwhelmingly common uncapped path.
+      const cap = ContextualFlowControl.getSchemaScopeCap(childSchema);
+      const scopeCaps = cap === undefined
+        ? currentLink.scopeCaps
+        : [...(currentLink.scopeCaps ?? []), {
+          depth: path.length,
+          scope: cap,
+        }];
+
       currentLink = {
         ...currentLink,
-        path: [...currentLink.path, key.toString()] as string[],
+        path,
         schema: childSchema,
+        ...(scopeCaps !== undefined && { scopeCaps }),
       };
     }
 

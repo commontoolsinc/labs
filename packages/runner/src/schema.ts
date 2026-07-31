@@ -22,9 +22,14 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
+import { canFollowScopedLink } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
-import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -1080,8 +1085,23 @@ export function validateAndTransform(
   if (SchemaObjectTraverser.hasAsCell(effectiveSchema)) {
     // We check for a link value, since we will follow links one step in get
     // We've already followed all the writeRedirect links above.
-    const next = readMaybeLink(tx, link);
+    let next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      // An asCell schema turns this link into a handle instead of following
+      // it, so resolveLink's cap check never sees this hop. Apply it here too,
+      // or reading THROUGH the handle escapes the cap the schema declared
+      // (#5230).
+      const schemaScope = ContextualFlowControl.getSchemaScopeCap(
+        effectiveSchema,
+      );
+      if (!canFollowScopedLink(schemaScope, next.scope)) {
+        logger.warn(
+          `blocked narrower-scope asCell handle: a "${schemaScope}"-scoped ` +
+            `read cannot hold a "${next.scope}"-scoped link, so the handle ` +
+            `reads as undefined.`,
+        );
+        next = undefinedDataLink(next);
+      }
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
         cfcLabelViewForDereference(
