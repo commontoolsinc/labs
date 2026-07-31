@@ -356,8 +356,10 @@ const assertNoDivergentIfcBranches = (
 export interface MergeCfcSchemaEnvelopeOptions {
   /**
    * Logical paths generated as outputs by the running module. A path covers
-   * every required descendant below it. Required fields outside these paths
-   * still need defaults to preserve older documents.
+   * every required descendant below it; `[]` therefore exempts the whole
+   * document, as it does for a pattern result projection that setup rewrites
+   * in full. Required fields outside these paths still need defaults to
+   * preserve older documents.
    */
   generatedOutputPaths?: readonly (readonly string[])[];
 }

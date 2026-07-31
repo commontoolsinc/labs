@@ -129,7 +129,7 @@ Measured on branch `tier2`, not assumed:
 | State written by an OLD pattern survives a NEW one adding a defaulted field | `state-continuity.test.ts`, green |
 | A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
-| The gate catches a real break, not just a synthetic one | its red/green control adds a required input without a default (exit 1 naming the field), then adds a default (exit 0); required defaultless outputs are deliberately compatible |
+| The gate catches a real break, not just a synthetic one | its red/green control adds a required input without a default (exit 1 naming the field), then adds a default (exit 0). This proves the update gate rejects an unfulfillable invocation; the CFC migration guard has its production-wiring red case in `cfc-additive-default-preserves-old-doc.test.ts`, and required defaultless outputs are deliberately compatible |
 | The gate CATCHES a moved storage key | measured by mutation on the ACTUAL `home.tsx`: renaming `.for("journal")` exits 1 with "APPLIED CLEANLY but stranded state the vintage held: journal (was [{\"eventType\":\"piece:created\",…}], now [])", restoring exits 0. The `notesMoved` case in `tasks/pattern-vintage-run.test.ts` pins it. A moved key whose new slot the pattern SEEDS reads back non-empty and only WARNS — see the grading note at the top |
 | A materialized root is NOT plain data | measured on the committed `home.tsx` fixture: at each of its six stream positions the read yields a live cell whose own properties reach the runtime, so a generic deep copy of it is CYCLIC. Before that was reduced, a UI-only edit to `home.tsx` did not merely misreport — `JSON.stringify` in the failure text threw and the gate ended with no verdict. Both sides are now reduced by shape first: a cell to the document it points at, a fabric special object to a tagged content hash (`deepEqual` compares those by own properties, of which they have none), a cycle to a marker |
 | The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded by NAME. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
@@ -325,9 +325,12 @@ automatic updater performs no structural check at all.
       that exists under today's source
 - [x] `deno task pattern-vintage` wired into CI
 
-Gate: **met, and verified by mutation.** Adding a required, defaultless output
-field to the real `home.tsx` makes the task exit 1 with the estuary rejection
-naming the field; restoring it returns exit 0.
+Gate: **met, and verified by mutation.** Adding a required, defaultless input
+to the gate subject makes the task exit 1 naming the unbound field; adding a
+default returns exit 0. A generated required output without a default is the
+compatible control and replays cleanly. The CFC migration guard's incompatible
+ordinary-document case is pinned separately through production wiring in
+`cfc-additive-default-preserves-old-doc.test.ts`.
 
 **What a green run does and does not assert.** Per fixture it asserts that the
 vintage RESTORED — its MANIFEST contains the identity the filename records,

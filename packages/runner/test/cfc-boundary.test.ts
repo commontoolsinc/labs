@@ -32,7 +32,8 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
 } from "../src/cfc/types.ts";
-import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import { ID, type JSONSchema, type Pattern } from "../src/builder/types.ts";
+import { diffAndUpdate } from "../src/data-updating.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
@@ -3424,6 +3425,68 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         origin: "declared",
       });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("propagates generated-output provenance to extracted collection entities", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-generated-output-nested-entity",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  body: {
+                    type: "string",
+                    ifc: { confidentiality: ["secret"] },
+                  },
+                },
+                required: ["body"],
+              },
+            },
+          },
+          required: ["messages"],
+        },
+        tx,
+      );
+      const root = cell.getAsNormalizedFullLink();
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        root,
+        { messages: [{ [ID]: "message-1", body: "hello" }] },
+        undefined,
+        { schemaRole: "output" },
+      );
+
+      expect(tx.getCfcState().writePolicyInputs).toContainEqual(
+        expect.objectContaining({
+          kind: "schema",
+          schemaRole: "output",
+          target: expect.objectContaining({
+            path: [],
+          }),
+        }),
+      );
+      expect(
+        tx.getCfcState().writePolicyInputs.some((input) =>
+          input.kind === "schema" &&
+          input.schemaRole === "output" &&
+          input.target.id !== root.id
+        ),
+      ).toBe(true);
+      tx.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();

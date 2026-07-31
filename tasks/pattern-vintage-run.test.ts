@@ -534,8 +534,11 @@ describe("the vintage gate, end to end", () => {
     expect(failures).toEqual([]);
   });
 
-  it("FAILS when today's source cannot read the vintage", async () => {
-    // The whole point. Everything else in this file is scaffolding for it.
+  it("FAILS when today's pattern requires an unbound new input", async () => {
+    // The Tier-1 input check is one real way an update can reject a vintage.
+    // CFC migration rejection is exercised through production wiring in
+    // cfc-additive-default-preserves-old-doc.test.ts; this gate also has the
+    // distinct job of finding state stranded by a schema-compatible update.
     await captureMissing(
       roots,
       [TEST_KEY],
@@ -558,8 +561,8 @@ describe("the vintage gate, end to end", () => {
 
   it("passes again once the new input carries a default", async () => {
     // The other half of the red/green pair: the two candidates differ by
-    // exactly `Default<[]>`, so the failure above is attributable to that and
-    // not to anything else about the change.
+    // exactly `Default<'ready'>`, so the failure above is attributable to that
+    // and not to anything else about the change.
     await captureMissing(
       roots,
       [TEST_KEY],

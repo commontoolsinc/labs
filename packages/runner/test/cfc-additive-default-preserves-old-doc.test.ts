@@ -13,12 +13,11 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 // The cold-start-setup-repair materializes the real home pattern over a home
 // root doc that predates some of home's fields, and CFC schema-merge's
 // additive-required guard ("required field <name> needs a default to preserve
-// old documents") refuses the setup commit. #4933 defaulted the six DATA
-// fields (favorites/journal/spaces/defaultAppUrl/profiles/mru), but that only
-// advanced the rejection to the next required-no-default field: `defaultProfile`
-// (genuinely `… | undefined`, so it should be optional) and then the six
-// exported handler streams — which cannot carry a meaningful `Default<>` and
-// so cannot be healed the #4933 way.
+// old documents") refused the setup commit. #4933 defaulted six data fields,
+// but a result projection can also contain required fields for which a
+// migration default is not the right contract. The relevant distinction is
+// provenance: setup rewrites the complete generated result, while ordinary
+// document paths must still preserve older values.
 //
 // These tests run with CFC enforcement ON (the runtime default,
 // "enforce-explicit"); the piece cold-start harness runs with enforcement

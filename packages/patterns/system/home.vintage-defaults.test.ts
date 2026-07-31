@@ -4,11 +4,11 @@ import { expect } from "@std/expect";
 // Home's published result contract already contains these defaults. Newly
 // required generated outputs do not need migration defaults, but removing an
 // existing default is still a contract change: older consumers may rely on its
-// materialization semantics, and the compatibility gate rejects that removal.
-// Pin the established spellings in source so an edit cannot silently change
-// Home's existing result contract. The generic generated-output behavior is
-// covered by the piece compatibility, CFC schema-merge, and vintage replay
-// suites.
+// materialization semantics. The generic compatibility gate does not reject
+// default removal, so these source pins are the protection against silently
+// changing Home's established result contract. Generic generated-output
+// behavior is covered by the piece compatibility, CFC schema-merge, and
+// vintage replay suites.
 
 const read = (relPath: string): string =>
   Deno.readTextFileSync(new URL(relPath, import.meta.url));

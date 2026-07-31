@@ -111,20 +111,38 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/required field.*default/i);
   });
 
-  it("allows additive required generated outputs without a default", () => {
+  it("allows additive required fields anywhere in a generated result document", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
-      properties: { secret: { type: "string" } },
+      properties: {
+        secret: { type: "string" },
+        meta: {
+          type: "object",
+          properties: { existing: { type: "string" } },
+          required: ["existing"],
+        },
+      },
       required: ["secret"],
     }, {
       type: "object",
       properties: {
         secret: { type: "string" },
-        evt: { type: "object", asCell: ["stream"] },
+        meta: {
+          type: "object",
+          properties: {
+            existing: { type: "string" },
+            generated: { type: "string" },
+          },
+          required: ["existing", "generated"],
+        },
       },
-      required: ["secret", "evt"],
+      required: ["secret", "meta"],
     }, { generatedOutputPaths: [[]] }) as JSONSchemaObj;
-    expect(merged.required).toEqual(["secret", "evt"]);
+    expect(merged.required).toEqual(["secret", "meta"]);
+    expect((merged.properties?.meta as JSONSchemaObj).required).toEqual([
+      "existing",
+      "generated",
+    ]);
   });
 
   it("does not infer output role from the value's stream capability", () => {
