@@ -72,12 +72,21 @@ export abstract class RetiredElement extends BaseElement {
   /** What to use instead, when there is a successor. */
   protected retiredReplacement?: string;
 
-  override connectedCallback(): void {
-    super.connectedCallback();
+  /**
+   * Emit this element's retirement warning.
+   *
+   * Idempotent by way of the warn-once ledger, which is what lets `render()`
+   * call it directly. Warning from render rather than `connectedCallback`
+   * keeps the signal on the path that proves the element was actually used,
+   * and keeps this class free of anything needing a live document — so the
+   * behaviour is unit-testable instead of reachable only from a browser lane.
+   */
+  notifyRetiredUsage(): void {
     warnRetiredElementUsed(this.retiredTag, this.retiredReplacement);
   }
 
   override render() {
+    this.notifyRetiredUsage();
     return html`
       <slot></slot>
     `;
