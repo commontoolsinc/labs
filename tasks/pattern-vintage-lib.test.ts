@@ -235,8 +235,9 @@ describe("coverage", () => {
     // neither helps nor hurts. (Deduplication is not tested here and cannot be:
     // the argument is a Set, so `new Set([x, x])` collapses before the call —
     // an earlier version of this case asserted exactly that and could not fail.
-    // What builds the set is `replayVintage`, and
-    // `pattern-vintage-run.test.ts` covers it.)
+    // What builds the set is `replayVintage`, covered by
+    // "credits coverage only for a PINNED fixture" in
+    // `pattern-vintage-run.test.ts`.)
     expect(uncoveredRequiredPatterns(
       ["system/home.tsx"],
       new Set(["system/home.tsx", "topics/main.tsx", "lunch-poll/main.tsx"]),

@@ -1128,15 +1128,24 @@ function lostAnything(before: unknown, after: unknown): boolean {
   // Held something, holds nothing now.
   if (isEmptyValue(after)) return true;
   if (isReduction(before) || isReduction(after)) return false;
+  // A CONTAINER that stopped being one took everything under it with it,
+  // whichever direction the flip went. Guarding only the array side let
+  // `{a:1}` → `["x"]` and `{a:1}` → `"x"` fall through to "merely changed" —
+  // a whole object's worth of state gone, reported as a warning, and NOT the
+  // pinned seeded-`.for()` limit, which is a moved key rather than a type
+  // change.
+  const beforeIsObject = typeof before === "object" && before !== null;
   if (Array.isArray(before)) {
     // A shorter array reaches this through the per-element `undefined`.
     if (!Array.isArray(after)) return true;
     return before.some((item, index) => lostAnything(item, after[index]));
   }
-  if (
-    typeof before === "object" && before !== null &&
-    typeof after === "object" && after !== null && !Array.isArray(after)
-  ) {
+  if (beforeIsObject) {
+    if (
+      typeof after !== "object" || after === null || Array.isArray(after)
+    ) {
+      return true;
+    }
     return Object.entries(before as Record<string, unknown>).some(
       ([key, value]) =>
         lostAnything(value, (after as Record<string, unknown>)[key]),

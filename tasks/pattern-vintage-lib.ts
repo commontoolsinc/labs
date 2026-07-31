@@ -10,11 +10,14 @@
  *
  * Layout:
  *
- *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
- *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.spaces/<did>.sqlite
+ *     packages/piece/test/vintages/<test key>/pinned/<iso>-<identity>.sqlite
+ *     packages/piece/test/vintages/<test key>/pinned/<iso>-<identity>.sqlite.spaces/<did>.sqlite
  *
- * `<pattern key>` is the pattern's repo path under `packages/patterns/`, so a
- * fixture sits next to nothing and is found by path alone.
+ * `<test key>` is the repo path under `packages/patterns/` of the TEST that
+ * produced the fixture, so a fixture sits next to nothing and is found by path
+ * alone. Keyed by test rather than by pattern because a test need not be named
+ * after what it drives — `topics/main.tsx` is tested by `topics/topics.test.tsx`
+ * — and one fixture routinely covers several patterns.
  *
  * The `.sqlite.spaces/` directory carries the run's OTHER spaces — a capture
  * that instantiates a pattern via `Factory.inSpace(...)` writes a second store,
@@ -82,7 +85,11 @@ export const AUTO = "auto";
 export const VINTAGE_SUFFIX = ".sqlite";
 
 export interface VintageRef {
-  /** Pattern path relative to `packages/patterns/`, e.g. `system/home.tsx`. */
+  /**
+   * TEST path relative to `packages/patterns/`, e.g. `system/home.test.tsx`.
+   * Named for the test, not the pattern: the fixture covers whatever that
+   * test instantiates, which is routinely several patterns.
+   */
   testKey: string;
   /** `pinned` or `auto`. */
   tier: string;
@@ -226,8 +233,8 @@ export async function collectVintages(
  * personal variants (`*-ben.tsx`) and modules that are not patterns at all
  * (`piece-registry-migration.ts`), and requiring a vintage for those would
  * either wedge the gate on files that cannot be materialized or pad coverage
- * with fixtures nobody replays. Any other pattern can still be pinned
- * deliberately (`--update <pattern key>`) — a vintage that exists is always
+ * with fixtures nobody replays. Any other TEST can still be pinned
+ * deliberately (`--update <test key>`) — a vintage that exists is always
  * replayed; it is only being REQUIRED that this list governs.
  */
 const PATTERN_ROUTE_MARKER = "/patterns/";

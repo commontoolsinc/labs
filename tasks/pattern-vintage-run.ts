@@ -581,6 +581,16 @@ export async function replayVintage(
         // for the collapse that produced. Read from the pre-materialize pass,
         // never re-derived here: this line runs AFTER the update, so asking the
         // root now would see the schema the replay just wrote.
+        //
+        // UNTESTED, deliberately and with the reason recorded. The no-schema
+        // half needs a root the presence control ACCEPTS — it demands a
+        // `patternSetupIdentity` marker — that carries no result schema, and a
+        // capture cannot make one: `runner.ts` stamps the marker and the schema
+        // in the same setup. An attempt to construct it by hand did not reach
+        // this branch at all, so the case is defensive (a hand-edited or
+        // corrupted fixture) rather than observed. What the pre-materialize
+        // read buys is that the OTHER half, which IS reachable, cannot be
+        // misreported as this one.
         report.failures.push({
           ...where,
           detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
@@ -922,14 +932,23 @@ export async function captureVintage(
   }
 }
 
-/** Capture a vintage for every required pattern that has none. */
+/** Capture a vintage for every required TEST that has none. */
 export async function captureMissing(
   roots: GateRoots,
   testKeys: readonly string[],
   now: Date,
 ): Promise<{ captured: string[]; problems: string[] }> {
+  // PINNED only, because PINNED is what coverage credits. An auto capture is
+  // regenerable and pruned by count, so counting one as "already have it"
+  // suppresses the pinned capture the gate is asking for and leaves a dead
+  // end: the gate reports the pattern uncovered and its own remedy prints
+  // "already has a pinned vintage" and changes nothing. That coupling used to
+  // hold because this went through `coveredPatternKeys`, which filtered by
+  // tier; the filter has to be restated now that it does not.
   const existing = new Set(
-    (await collectVintages(roots.vintagesRoot)).map((v) => v.testKey),
+    (await collectVintages(roots.vintagesRoot))
+      .filter((v) => v.tier === PINNED)
+      .map((v) => v.testKey),
   );
   const captured: string[] = [];
   const problems: string[] = [];
@@ -938,6 +957,10 @@ export async function captureMissing(
     // was asked for. Replacing a vintage could replace the very one that would
     // have caught a break.
     if (existing.has(key)) continue;
+    // Recorded before the attempt, so a key named twice on one command line is
+    // skipped the second time rather than failing the whole run with "already
+    // exists, and a capture never overwrites a pinned vintage".
+    existing.add(key);
     try {
       captured.push(await captureVintage(roots, key, now));
     } catch (error) {

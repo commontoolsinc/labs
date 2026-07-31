@@ -759,17 +759,21 @@ What a green run does NOT cover, stated so it is not read as more than it is:
   derived names rather than stored state, so nothing measured today is lost;
   what matters is that a key the schema does not reach still arrives as
   `undefined`, which the comparison reads as nothing to lose.
-- The value comparison runs only for a target whose identity CHANGED, which is
-  the same condition the auto-updater fires on. On an unchanged tree it runs
-  zero times — measured, `0 changed` when no pattern the fixtures name has
-  moved — so the
-  mutations above are the only thing keeping it honest.
+- The value comparison runs for a target whose identity CHANGED, which is the
+  same condition the auto-updater fires on, AND for every served-route target,
+  which has no changed answer to give — the same file compiles to a different
+  identity served than from the repo. So an unchanged tree is no longer a tree
+  on which the comparison runs zero times: measured, `0 changed` with 9 served
+  routes still materialized and compared. For the identity-compared targets the
+  mutations above remain the only thing keeping it honest.
 
-**Open, and it will bite eventually:** the comparison fails on any change to a
-non-rendering key, including a deliberate data migration that reformats a field.
-There are none today, and failing loudly is the right default for a gate whose
-subject is data loss — but the first real migration will need a way to declare
-"this key is expected to change, here is the shape it becomes". Deliberately
+**Open, and it will bite eventually:** a value that CHANGED is warned about
+rather than failed on, so the first deliberate data migration will not red the
+gate — but neither will it be checked, and the warning is the only trace. What
+still fails is a non-empty value going empty at any depth. The first real
+migration will want a way to declare "this key is expected to change, here is
+the shape it becomes" so the change can be asserted rather than merely noted.
+Deliberately
 not built speculatively; the shape of the escape hatch should be decided by the
 migration that needs it. Measured against the changes that are routine today, it
 is quiet: an additive defaulted field on a nested pattern (`note.tsx`), a

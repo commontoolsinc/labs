@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
+import { AUTO, collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
   openFileBackedRuntime,
   readVintageManifest,
@@ -790,6 +790,46 @@ describe("the vintage gate, end to end", () => {
       "a served-route target was not materialized, so a moved storage key in " +
         "it replayed clean — the hole this case exists to close",
     ).toContain("stranded state the vintage held");
+  });
+
+  it("credits coverage only for a PINNED fixture", async () => {
+    // An auto capture is regenerable and pruned by COUNT, so letting one
+    // satisfy the coverage gate means retention can delete the gate's only
+    // evidence for a pattern while the run still reads green. That guarantee
+    // used to live in `coveredPatternKeys`; coverage stopped going through it
+    // when it moved to what the replay actually replayed, and the condition
+    // that restored it survived deletion with every suite green — which is why
+    // this exists.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const covers = pinnedRef.testKey;
+
+    // The control: as PINNED, this fixture credits the pattern it replayed.
+    const asPinned = await replayAll(roots);
+    expect([...asPinned.covered], "the pinned fixture covered nothing")
+      .toContain(KEY);
+
+    // The same bytes under `auto/` credit NOTHING, though they still replay.
+    const autoDir = `${roots.vintagesRoot}/${covers}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    await Deno.copyFile(
+      pinnedRef.path,
+      `${autoDir}/${pinnedRef.stamp}-${pinnedRef.identity}.sqlite`,
+    );
+    await Deno.remove(pinnedRef.path);
+
+    const asAuto = await replayAll(roots);
+    // It was REPLAYED — otherwise "covers nothing" would be true for the
+    // uninteresting reason that nothing ran.
+    expect(asAuto.replayed, "the auto fixture was not replayed at all").toBe(1);
+    expect(asAuto.targets).toBe(asPinned.targets);
+    expect([...asAuto.covered], "an AUTO fixture credited coverage").toEqual(
+      [],
+    );
   });
 
   it("FAILS a fixture with candidates but no upgrade TARGET, on its own", async () => {
