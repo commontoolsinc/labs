@@ -419,12 +419,18 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * Rebinds one value, returning it unchanged when nothing under it rebound.
    *
    * The container branches hand back the original without checking whether a
-   * rebuild would have reproduced it exactly, because it always would:
-   * `binding` is a `FabricExecValue`, whose containers are an index-only array
-   * and a plain string-keyed object. The shapes a rebuild silently alters — a
-   * foreign prototype, a symbol key, a non-enumerable property, an array's
-   * named property — are all outside that declared domain. Validating fabric
-   * membership belongs in `isFabricValue()`, once, not as a re-check here.
+   * rebuild would have reproduced it exactly, because it always would.
+   * `binding` is a `FabricExecValue`, whose containers are the *inert* array
+   * and plain object of `isInertArray()` / `isInertPlainObject()`; every shape
+   * a name-driven rebuild would silently alter is non-inert by definition, so
+   * re-checking here would only restate the parameter type. Fabric membership
+   * is `isFabricValue()`'s job, once, and inertness is enforced at the fabric
+   * chokepoints rather than at each walk that happens to pass a value along.
+   *
+   * That an accessor-backed property is non-inert matters most here, since it
+   * is the one such shape a rebuild does not merely drop: it would *evaluate*
+   * the accessor into a data property, quietly converting live code into a
+   * value. Sharing leaves it alone for the chokepoint to reject.
    */
   function convert(
     binding: FabricExecValue,
