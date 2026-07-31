@@ -52,6 +52,11 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * them. Code with no such warrant should let the rejection happen ("death
  * before confusion").
  *
+ * The given array's index properties must all be enumerable data properties:
+ * the copy reads elements through enumeration, which would execute an
+ * accessor-backed index (silently flattening it to its momentary answer)
+ * and would turn a non-enumerable data index into a hole.
+ *
  * @param value The array to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
  */

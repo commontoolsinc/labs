@@ -350,6 +350,39 @@ describe("arrays", () => {
       });
     });
 
+    describe("`Proxy` handling", () => {
+      it("accepts a pass-through proxy over an inert array", () => {
+        // `Array.isArray()` sees through to the target, so a proxied inert
+        // array is still recognized as one.
+        expect(isInertArray(new Proxy([1, 2, 3], {}))).toBe(true);
+      });
+
+      it("rejects a pass-through proxy over a getter-indexed array", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(new Proxy(arr, {}))).toBe(false);
+      });
+
+      it("rejects a proxy whose descriptor trap disavows a reported key", () => {
+        // A spec-legal proxy may report a key from `ownKeys` and yet answer
+        // `undefined` for that key's descriptor. Such an inconsistent object
+        // is not an inert array, rather than being an error to ask about.
+        const proxy = new Proxy([1, 2, 3], {
+          getOwnPropertyDescriptor(target, key) {
+            if (key === "1") {
+              return undefined;
+            }
+            return Object.getOwnPropertyDescriptor(target, key);
+          },
+        });
+        expect(isInertArray(proxy)).toBe(false);
+      });
+    });
+
     describe("returns `false` for accessor-backed indices", () => {
       it("rejects a getter-backed index", () => {
         const arr = [1, 2, 3];
