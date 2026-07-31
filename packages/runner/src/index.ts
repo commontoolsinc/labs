@@ -182,7 +182,6 @@ export {
   FS,
   type FsProjection,
   type HandlerFactory,
-  ID,
   isModule,
   isPattern,
   isReactive,

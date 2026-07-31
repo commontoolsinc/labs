@@ -11,7 +11,7 @@ import type { FabricValue } from "@commonfabric/api";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import { ID, JSONSchema, type Pattern } from "../src/builder/types.ts";
+import { JSONSchema, type Pattern } from "../src/builder/types.ts";
 import {
   getMetaLink,
   isPrimitiveCellLink,
@@ -283,10 +283,10 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("should preserve holes and add IDs to objects in sparse arrays", () => {
+  it("should preserve holes and anchor objects in sparse arrays", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should preserve holes and add IDs to objects in sparse arrays",
+      "should preserve holes and anchor objects in sparse arrays",
       undefined,
       tx,
     );
@@ -750,7 +750,8 @@ describe("Cell circular references", () => {
       schema,
       tx,
     );
-    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+    // Anchoring turns the array element into a separate cell document.
+    const inner: any = { anchored: true };
     const outer: any = { list: [inner] };
     inner.parent = outer;
     c.set(outer);

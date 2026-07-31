@@ -329,7 +329,6 @@ export interface FabricExecPlainObject
 
 // Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
-export declare const ID: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -1668,7 +1667,6 @@ export type AnyCellWrapping<T> =
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
-          & { [ID]?: AnyCellWrapping<JSONValue> }
         | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
     : T | AnyBrandedCell<T>;
@@ -1749,17 +1747,11 @@ export type JSONValue =
   | number
   | string
   | JSONArray
-  | JSONObject & IDFields;
+  | JSONObject;
 
 export interface JSONArray extends ReadonlyArray<JSONValue> {}
 
 export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
-
-// Annotations when writing data that help determine the entity id. They are
-// removed before sending to storage.
-export interface IDFields {
-  readonly [ID]?: unknown;
-}
 
 /**
  * Deeply-mutable version of `JSONValue`.
@@ -1863,7 +1855,6 @@ export type JSONSchemaObj = {
   readonly $comment?: string;
 
   // Common Fabric extensions
-  readonly [ID]?: unknown;
   readonly scope?: SchemaScope;
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.

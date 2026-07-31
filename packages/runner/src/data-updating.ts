@@ -12,7 +12,7 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { type CellScope, ID, type JSONSchema } from "./builder/types.ts";
+import { type CellScope, type JSONSchema } from "./builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
@@ -357,11 +357,9 @@ export interface DiffWalkState {
  * Returns true if any changes were made.
  *
  * A plain object sitting in an array becomes an entity document of its own
- * when `anchorIds` is supplied, its id drawn from that source; an object
- * carrying an explicit `[ID]` property does so anywhere, with the property's
- * value as the id seed. Either way the entity id also derives from the
- * object's relative location and the passed context, and the changes are
- * written to that entity.
+ * when `anchorIds` is supplied, its id drawn from that source. The entity id
+ * also derives from the object's relative location and the passed context,
+ * and the changes are written to that entity.
  *
  * @param current - A doc link to the current value to compare against.
  * @param newValue - The new value to traverse.
@@ -427,11 +425,10 @@ export type ChangeSet = {
  * does not depend on its position. Array ancestry is read from transaction
  * pre-state, so on a fresh array's first write the indices remain in the
  * derivation and identity IS position-bearing there -- a long-standing
- * limitation this helper inherits from the `[ID]` branch it was extracted
- * from.
+ * limitation.
  *
  * `registerKey` is the caller's original value (which may differ from
- * `content` when a directive was stripped off it); it is registered in
+ * `content`, a distinct shallow copy); it is registered in
  * `state.seen` so shared references to it resolve to the same document.
  */
 function anchorValueAsEntity(
@@ -509,10 +506,8 @@ function anchorValueAsEntity(
  *
  * A plain object sitting in an array becomes an entity document of its own
  * when the walk state carries an id source (`nextAnchorId`, supplied by
- * writers running under a builder frame); an object carrying an explicit
- * `[ID]` directive does so anywhere, with the directive's value as the id
- * seed. Either way the changes are queued to be written to that entity, and
- * the slot holds a link to it.
+ * writers running under a builder frame). The changes are queued to be
+ * written to that entity, and the slot holds a link to it.
  *
  * Otherwise, when traversing and if the new value is a regular JSON value, but
  * the old value is an alias, follow the alias before writing. However document
@@ -1089,29 +1084,6 @@ export function normalizeAndDiff(
         },
       ];
     }
-  }
-
-  // Handle ID-based object (convert to entity)
-  const idValue = newValue as FabricPlainObject & { [ID]?: string };
-  if (isRecord(newValue) && idValue[ID] !== undefined) {
-    diffLogger.debug(
-      "diff",
-      () => `[BRANCH_ID_OBJECT] Processing ID-based object at path=${pathStr}`,
-    );
-    const { [ID]: id, ...rest } = idValue as
-      & { [ID]: string }
-      & FabricPlainObject;
-    return anchorValueAsEntity(
-      runtime,
-      tx,
-      link,
-      rest,
-      newValue,
-      id,
-      context,
-      options,
-      state,
-    );
   }
 
   // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
