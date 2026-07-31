@@ -542,7 +542,22 @@ describe("BackgroundPieceService", () => {
     assertEquals(watched, [[PIECE_ID]]);
   });
 
-  it("passes target-space exclusion control before starting a flagged manager", async () => {
+  // INVERTED 2026-07-31 (owner ruling). This used to pin that a flagged
+  // manager RECEIVES exclusion control. Under server-primary execution the
+  // service no longer runs at all — it is "a runtime that runs pieces on the
+  // server by pretending to be a client", which is what server-primary
+  // execution abolishes, so it is sunset rather than migrated and `bgUpdater`
+  // returns later in a simpler form.
+  //
+  // The subject is unchanged and the expected outcome is inverted, which is why
+  // the elaborate recording provider below is KEPT: `providerCalls` staying
+  // empty is a real measurement only because this stub would have recorded the
+  // calls. That assertion is the load-bearing one — acquiring the exclusion is
+  // what structurally locks the space executor OUT (the memory engine refuses
+  // to acquire or renew an execution lease while one is live, and the pool
+  // parks the slot `state: "excluded"`), so "no exclusion is taken" is the
+  // whole point of the ruling, not a side effect of doing less work.
+  it("takes no exclusion and starts no manager under server-primary execution", async () => {
     const entry = new FakeEntryCell(pieceEntry());
     const piecesCell = new FakePiecesCell([entry]);
     const runtime = fakeRuntime(piecesCell);
@@ -605,20 +620,19 @@ describe("BackgroundPieceService", () => {
     });
 
     await service.initialize();
-    assertEquals(lifecycle, ["watch", "start"]);
-    assertEquals(providerCalls, [["open", TEST_DID]]);
-    const control = managerOptions?.backgroundExclusion;
-    assert(control);
-    await control.acquire("");
-    await control.renew("", 1);
-    await control.release("", 1);
-    assertEquals(providerCalls, [
-      ["open", TEST_DID],
-      ["acquire", ""],
-      ["renew", "", 1],
-      ["release", "", 1],
-    ]);
-    await service.stop();
+
+    // No worker, no watch, no manager at all.
+    assertEquals(lifecycle, []);
+    assertEquals(managerOptions, undefined);
+
+    // THE ASSERTION THAT MATTERS: the space was never even opened, so no
+    // `LegacyBackgroundExclusion` can have been acquired — which is what
+    // permits the space executor into this space.
+    assertEquals(providerCalls, []);
+
+    // `isRunning` never went true, so teardown is a clean no-op rather than a
+    // teardown of things that were never built.
+    assertEquals(await service.stop(), []);
   });
 });
 

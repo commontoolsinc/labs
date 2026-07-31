@@ -58,6 +58,35 @@ export class BackgroundPieceService {
       return;
     }
 
+    // DISABLED UNDER SERVER-PRIMARY EXECUTION (owner ruling, 2026-07-31).
+    //
+    // This service is "a runtime that runs pieces on the server by pretending
+    // to be a client" — precisely what server-primary execution abolishes, so
+    // it is being sunset rather than migrated. `bgUpdater` is not in practical
+    // use today and will come back in a simpler form; until then, under this
+    // flag it simply does not run.
+    //
+    // The flag is the right gate because it is already the one this service
+    // branches on, and the correspondence is exact: the ONLY configuration in
+    // which the space executor competes with this service is flag-on, and
+    // flag-on is also the only configuration in which `ensurePieces` acquires a
+    // `LegacyBackgroundExclusion`. Bailing here — before any exclusion is taken
+    // — is therefore not merely a disable. The exclusion is what *structurally
+    // locks the executor out* of every space with a live bg registration
+    // (`memory/v2/engine.ts` refuses to acquire OR renew an execution lease
+    // while one is live, and the pool parks such a slot `state: "excluded"`).
+    // Never acquiring it is what lets the executor into those spaces at all.
+    //
+    // Flag OFF is byte-identical to before: no exclusion was ever taken there
+    // either, so legacy deployments keep today's behaviour exactly.
+    if (this.runtime.experimental.serverPrimaryExecution) {
+      console.log(
+        "background piece service disabled: server-primary execution is on " +
+          "(bgUpdater is sunset; the space executor owns these spaces)",
+      );
+      return;
+    }
+
     // Storage URL and signer are already configured in the Runtime
     this.piecesCell = await getBGPieces({
       bgSpace: this.bgSpace,
