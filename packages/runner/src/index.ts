@@ -253,7 +253,6 @@ export { schemaToTypeString } from "./schema-format.ts";
 export type { SchemaFormatOptions } from "./schema-format.ts";
 export { ACLManager } from "./acl-manager.ts";
 export {
-  cellAtPath,
   cellEntityIdString,
   type CellPath,
   cellWithScopedLinkRequiredsRelaxed,

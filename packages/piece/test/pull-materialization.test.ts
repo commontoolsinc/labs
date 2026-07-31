@@ -7266,4 +7266,98 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       await readerStorage.close();
     }
   });
+
+  // The narrow read reaches a path below an asCell slot with a plain `key()`
+  // chain, letting link resolution follow the handle mid-path rather than
+  // dereferencing it by hand. This pins the two properties that choice has to
+  // keep: the terminal handle still applies the scoped-link relaxation (so a
+  // scoped child voids only itself, not its whole object), and a path THROUGH
+  // the handle still lands on the right document.
+  it("relaxes a scoped link below an asCell handle, at and through it", async () => {
+    const sectionSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        inner: {
+          type: "object",
+          properties: {
+            plain: { type: "string" },
+            scoped: { type: "string" },
+          },
+          required: ["plain", "scoped"],
+        },
+      },
+      required: ["label"],
+    } as const satisfies JSONSchema;
+    const tx = writerRuntime.edit();
+    const scoped = writerRuntime.getCell<string>(
+      writerManager.getSpace(),
+      "handle-scoped-" + crypto.randomUUID(),
+      { type: "string" },
+      tx,
+      "session",
+    );
+    scoped.set("writer-only");
+    const section = writerRuntime.getCell(
+      writerManager.getSpace(),
+      "handle-section-" + crypto.randomUUID(),
+      sectionSchema,
+      tx,
+    );
+    section.set({
+      label: "hello",
+      inner: { plain: "visible", scoped },
+    } as never);
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerManager.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: { handle: { ...sectionSchema, asCell: ["cell"] } },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: section },
+      undefined,
+      { start: true },
+    );
+    await writerManager.synced();
+
+    const readerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerManager = new PieceManager(readerSession, readerRuntime);
+    try {
+      await readerManager.synced();
+      const readerPieces = new PiecesController(readerManager);
+      const readerPiece = await readerPieces.get(
+        entityRefToString(piece.entityId),
+        false,
+      );
+
+      // Terminal asCell: the handle is unwrapped and read through the same
+      // relaxation the root read uses, so `inner` survives without `scoped`.
+      expect(await readerPiece.input.get(["handle"])).toEqual({
+        label: "hello",
+        inner: { plain: "visible" },
+      });
+      // Through the asCell: link resolution follows the handle mid-path.
+      expect(await readerPiece.input.get(["handle", "label"])).toBe("hello");
+      expect(await readerPiece.input.get(["handle", "inner", "plain"]))
+        .toBe("visible");
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
+  });
 });

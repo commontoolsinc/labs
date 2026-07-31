@@ -1,7 +1,6 @@
 import {
   applyPieceSourceTransition,
   Cell,
-  cellAtPath,
   type CellPath,
   cellWithScopedLinkRequiredsRelaxed,
   ContextualFlowControl,
@@ -2290,46 +2289,36 @@ class PiecePropIo implements PieceCellIo {
     // started by pull() sends its path plus narrowed schema to Memory v2, so
     // this avoids traversing unrelated linked fields (an input can contain a
     // broad authoring graph even when the caller asks for one small durable
-    // field). Traverse one segment at a time so an intermediate asCell value
-    // can re-root the remaining path, matching resolveCellPath.
-    return await this.#getAtPath(targetCell, targetCell, path, 0);
-  }
-
-  async #getAtPath(
-    targetCell: Cell<unknown>,
-    parentCell: Cell<unknown>,
-    path: CellPath,
-    index: number,
-  ): Promise<unknown> {
-    const selectedCell = cellAtPath(parentCell, [path[index]]);
-    const isLast = index === path.length - 1;
-    const selectedSchema = selectedCell.schema;
-    const isAsCellProjection = schemaHasAsCell(selectedSchema);
-    // Ordinary inline ancestors need no read: extending their schema/path
-    // keeps the final query as narrow as possible. An asCell ancestor must
-    // be materialized so the rest of the path can move to its handle.
-    if (!isLast && !isAsCellProjection) {
-      return await this.#getAtPath(targetCell, selectedCell, path, index + 1);
-    }
-
+    // field). No per-segment asCell handling is needed on the way down: key()
+    // walks the schema (so an asCell ancestor's `properties` keep narrowing the
+    // query) and link resolution follows the stored link at that segment during
+    // the read. A TERMINAL asCell still needs unwrapping, because that is the
+    // one place the projection hands back a handle instead of a value.
+    const selectedCell = targetCell.key(...path);
     await selectedCell.pull();
-    if (isAsCellProjection) {
-      // An asCell projection materializes even an explicit `undefined` as
-      // a Cell, so inspect the stored slot before resolving the handle.
-      // Falling back preserves the root read's absent-vs-undefined rules.
+    const selectedSchema = selectedCell.schema;
+    if (schemaHasAsCell(selectedSchema)) {
+      // An asCell projection materializes even an absent or explicitly
+      // undefined slot as a Cell, so inspect the stored slot before resolving
+      // the handle. Falling back preserves the root read's absent-vs-undefined
+      // rules and its missing-path diagnostics.
       if (selectedCell.getRaw() === undefined) {
         return await this.#getFromRoot(targetCell, path);
       }
+      // resolveAsCell() applies the asCell descriptor's scope cap. The Cell the
+      // projection hands back from get() does NOT, and neither does a key()
+      // chain that continues past the handle — see #5230. Route through
+      // resolveAsCell() so a capped handle stays capped at this boundary.
       const handle = selectedCell.resolveAsCell().asSchema(
         consumeAsCellProjectionSchema(selectedSchema),
       );
-      if (isLast) {
-        const readableHandle = cellWithScopedLinkRequiredsRelaxed(handle);
-        await readableHandle.pull();
-        return readableHandle.get();
-      }
-      return await this.#getAtPath(targetCell, handle, path, index + 1);
+      const readableHandle = cellWithScopedLinkRequiredsRelaxed(handle);
+      await readableHandle.pull();
+      return readableHandle.get();
     }
+    // Relax `required` for scoped links that this session cannot materialize,
+    // at the selected subtree rather than the root — same boundary as
+    // #getFromRoot, see schemaWithScopedLinkRequiredsRelaxed.
     const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
     if (selected === undefined) {
       return await this.#getFromRoot(targetCell, path);
@@ -2382,7 +2371,7 @@ class PiecePropIo implements PieceCellIo {
       committedTargetCell = targetCell;
 
       // Build the path with transaction context
-      const txCell = cellAtPath(targetCell.withTx(tx), path ?? []);
+      const txCell = targetCell.withTx(tx).key(...(path ?? []));
 
       const writePath = path ?? [];
       const writeTargetDiffers = (
