@@ -429,6 +429,53 @@ export function invocationPhaseReporter(
 }
 
 /**
+ * Phase observer for `cf piece call`: always advances the furthest-phase
+ * tracker the failure report prints; under --verbose it also streams one
+ * wall-clock span per observed phase transition (verb contract WS-D, phase
+ * timings). Spans are bounded by the phases the `onPhase` callback already
+ * observes — initial sync up to dispatch, the dispatched handler run up to
+ * its transaction-local commit acknowledgement, the receipt classification,
+ * and the receipt readback up to settlement — because those boundaries are
+ * what the invocation actually reports; nothing new is instrumented inside
+ * the runner. Every line goes to stderr so stdout stays exactly the settled
+ * Invocation JSON an agent parses, and lines stream as transitions happen so
+ * a failure exit keeps every span observed before the failure — `finish`
+ * closes the in-flight span with the outcome that ended it.
+ */
+export function pieceCallPhaseObserver(
+  verbose: boolean,
+  onAdvance: (phase: InvocationPhase) => void,
+  emit: (line: string) => void = console.error,
+  now: () => number = () => performance.now(),
+): {
+  onPhase: (phase: InvocationPhase) => void;
+  finish: (end?: "settled" | "failed") => void;
+} {
+  if (!verbose) {
+    return { onPhase: onAdvance, finish: () => {} };
+  }
+  let current: InvocationPhase = "initial_sync";
+  let spanStart = now();
+  let finished = false;
+  const close = (next: string) => {
+    emit(`timing: ${current} → ${next} ${(now() - spanStart).toFixed(1)}ms`);
+  };
+  return {
+    onPhase: (next) => {
+      close(next);
+      current = next;
+      spanStart = now();
+      onAdvance(next);
+    },
+    finish: (end = "settled") => {
+      if (finished) return;
+      finished = true;
+      close(end);
+    },
+  };
+}
+
+/**
  * Shape a settled handler invocation for stdout. This is the wire contract an
  * agent parses, so the optional keys are load-bearing: `deduplicated` appears
  * only when the call collided on an existing receipt, and `result` only when
@@ -1275,11 +1322,20 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "outcome — but the handler body does re-run, so effects outside the " +
       "transaction repeat. Minted automatically when omitted.",
   )
+  .option(
+    "--verbose",
+    "Print per-phase wall-clock timings to stderr (before the callable " +
+      "name). stdout still carries only the command output.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
     const invocationId = resolveInvocationId(options.invocation);
     let phase: InvocationPhase = "initial_sync";
+    const observer = pieceCallPhaseObserver(
+      !!options.verbose,
+      (next) => phase = next,
+    );
     try {
       setQuietMode(!!options.quiet);
       const invocation = pieceCallInvocation(
@@ -1298,7 +1354,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
           invocationId,
           onPhase: invocationPhaseReporter(
             invocationId,
-            (next) => phase = next,
+            observer.onPhase,
           ),
         },
       ).catch((error) =>
@@ -1308,6 +1364,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
         render(result.helpText);
         return;
       }
+      observer.finish();
       if (result.outputText) {
         render(result.outputText);
         if (result.resultRef) {
@@ -1349,6 +1406,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
+      observer.finish("failed");
       // Where the invocation stopped decides retry semantics: anything at or
       // past "dispatched" retries SAFELY ONLY with this same id (same-id
       // retries deduplicate; a fresh id would re-execute).
