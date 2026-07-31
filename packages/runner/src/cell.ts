@@ -7,6 +7,7 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
+  FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -1667,6 +1668,13 @@ export class CellImpl<T extends FabricValue>
           )
         );
       }
+      // A cyclic candidate can never equal a stored element -- stored fabric
+      // values are acyclic (cycles persist as links) -- so it is new by
+      // definition, and must skip the strict normalization a cycle would
+      // break; the write path anchors it with the cycle as a self-link.
+      if (containsCycle(candidate)) {
+        return false;
+      }
       // Link-carrying candidates (query-result proxies, raw sigil links)
       // compare as themselves -- the write boundary passes them through
       // unconverted, and the strict conversion would reject their
@@ -2960,6 +2968,33 @@ function maybeConvertArrayPathToDataURILink(
  * @param value - The value to validate
  * @throws Error if value contains cells or has circular references
  */
+/**
+ * Whether `value` contains a reference cycle through plain containers.
+ * Cells, links, and other non-plain objects are treated as leaves -- a cycle
+ * through those resolves at read time and is not a structural cycle of the
+ * value itself.
+ */
+function containsCycle(value: unknown): boolean {
+  const ancestors = new Set<object>();
+  const walk = (node: unknown): boolean => {
+    if (
+      node === null || typeof node !== "object" || isCell(node) ||
+      isCellLink(node) || node instanceof FabricSpecialObject
+    ) {
+      return false;
+    }
+    if (ancestors.has(node)) return true;
+    ancestors.add(node);
+    const values = Array.isArray(node) ? node : Object.values(node);
+    for (const child of values) {
+      if (walk(child)) return true;
+    }
+    ancestors.delete(node);
+    return false;
+  };
+  return walk(value);
+}
+
 function validateStaticData(value: unknown): void {
   // Track ancestors in current path (for cycle detection)
   // Shared references are fine - only cycles back to ancestors are errors

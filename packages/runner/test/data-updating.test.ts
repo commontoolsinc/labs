@@ -1494,6 +1494,88 @@ describe("data-updating", () => {
       }
     });
 
+    it("pushing a reference to an untouched prefix's interior leaves the prefix alone", () => {
+      // An untouched prefix element must not be descended: registering its
+      // interior objects in the walk's seen map would let a pushed reference
+      // to one of them alias -- and repoint -- content INSIDE the untouched
+      // prefix, a write below the tail that the mergeable ops forbid. The
+      // pushed reference anchors as a fresh document instead.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "untouched prefix interior",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<{ inner: { name: string } }[]>(
+          space,
+          "untouched prefix interior",
+          undefined,
+          tx,
+        );
+        // Deep-frozen seed: the stored tree keeps reference identity through
+        // raw reads, so `inner` below IS the stored interior object.
+        const innerSeed = Object.freeze({ name: "Ada" });
+        cell.setRaw(Object.freeze([Object.freeze({ inner: innerSeed })]));
+        const stored = cell.getRaw() as { inner: { name: string } }[];
+        const inner = stored[0].inner;
+        expect(inner).toBe(innerSeed);
+
+        cell.push(inner as unknown as { inner: { name: string } });
+
+        const raw = cell.getRaw() as { inner: unknown }[];
+        // The prefix element is byte-for-byte untouched: still inline, its
+        // interior still an inline object, not a link.
+        expect(parseLink(raw[0])).toBe(undefined);
+        expect(parseLink((raw[0] as { inner: unknown }).inner)).toBe(
+          undefined,
+        );
+        expect(raw[0]).toEqual({ inner: { name: "Ada" } });
+        // The pushed element anchored as its own fresh document.
+        const tailLink = parseLink(raw[1], cell);
+        expect(tailLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(tailLink!, undefined, tx);
+        expect(doc.get()).toEqual({ name: "Ada" });
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("framed addUnique accepts a new self-referential candidate", () => {
+      // A cyclic candidate can never equal a stored element -- stored fabric
+      // values are acyclic (cycles persist as links) -- so the dedup must
+      // treat it as new without attempting the strict normalization that a
+      // cycle would break, and the write path then anchors it with the cycle
+      // as a self-link.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique cyclic candidate",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<unknown[]>(
+          space,
+          "addUnique cyclic candidate",
+          undefined,
+          tx,
+        );
+        cell.set([]);
+        const loop: { tag: string; self?: unknown } = { tag: "loop" };
+        loop.self = loop;
+        cell.addUnique(loop);
+
+        const raw = cell.getRaw() as unknown[];
+        expect(raw.length).toBe(1);
+        const elementLink = parseLink(raw[0], cell);
+        expect(elementLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(elementLink!, undefined, tx);
+        const docRaw = doc.getRaw() as { tag: string; self: unknown };
+        expect(docRaw.tag).toBe("loop");
+        expect(parseLink(docRaw.self, doc)?.id).toBe(elementLink?.id);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
     it("draws no anchor id for an addUnique candidate rejected as duplicate", () => {
       // A candidate `addUnique` rejects never reaches the write, so it draws
       // no id. (The annotation scheme anchored all candidates before

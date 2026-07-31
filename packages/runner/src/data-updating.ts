@@ -1124,14 +1124,16 @@ export function normalizeAndDiff(
   // and atomic fabric objects are excluded here; arrays never anchor, only
   // the objects inside them.
   //
-  // An element carried through UNTOUCHED from the stored array is NOT
-  // anchored: anchoring is for new content, and an untouched element must
-  // diff to nothing. This is load-bearing for the mergeable collection ops
-  // (`push`/`addUnique`): their array read is excluded from the commit's
-  // conflict set (see docs/development/mergeable-collection-writes.md), which
-  // is only safe while the op emits no writes below the tail -- rewriting an
-  // unchanged inline prefix here would let a stale session clobber a
-  // concurrent element edit without conflict.
+  // An element carried through UNTOUCHED from the stored array diffs to
+  // NOTHING -- returned here without descending. This is load-bearing for
+  // the mergeable collection ops (`push`/`addUnique`) twice over: their
+  // array read is excluded from the commit's conflict set (see
+  // docs/development/mergeable-collection-writes.md), which is only safe
+  // while the op emits no writes below the tail, so (1) the element itself
+  // must not be re-anchored or rewritten, and (2) it must not be DESCENDED
+  // either -- descending would register its interior objects in
+  // `state.seen`, letting a later occurrence in the same write alias (and
+  // promotion would then repoint!) content inside the untouched prefix.
   //
   // "Untouched" is exact identity with the stored value, deliberately NOT
   // content equality: the ops build their combined arrays by carrying the
@@ -1145,9 +1147,15 @@ export function normalizeAndDiff(
     isArrayElement &&
     isObject(newValue) &&
     !(newValue instanceof FabricSpecialObject) &&
-    !isCellLink(newValue) &&
-    !Object.is(currentValue, preConversionValue)
+    !isCellLink(newValue)
   ) {
+    if (Object.is(currentValue, preConversionValue)) {
+      diffLogger.debug(
+        "diff",
+        () => `[BRANCH_ANCHOR] Untouched element, no-op at path=${pathStr}`,
+      );
+      return [];
+    }
     diffLogger.debug(
       "diff",
       () => `[BRANCH_ANCHOR] Anchoring array element at path=${pathStr}`,
