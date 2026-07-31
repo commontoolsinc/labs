@@ -34,6 +34,20 @@ export function parseCellPath(path: string): CellPath {
   });
 }
 
+/** Return the Cell view at `path` without reading or dereferencing it. */
+export function cellAtPath<T>(
+  cell: Cell<T>,
+  path: CellPath,
+): Cell<unknown> {
+  let currentCell = cell as Cell<unknown>;
+  for (const segment of path) {
+    currentCell = currentCell.key(
+      segment as keyof unknown,
+    ) as Cell<unknown>;
+  }
+  return currentCell;
+}
+
 export function resolveCellPath<T>(
   cell: Cell<T>,
   path: CellPath,
@@ -102,8 +116,9 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
  * ENTIRE object (`traverseObjectWithSchema`'s required check) — so a path-less
  * piece read returns `undefined` while every child-path read works. Per the
  * #4746 contract, partial visibility must be expressed in the schema rather
- * than special-cased in the traverser; this helper is the piece read boundary
- * doing exactly that, driven by the stored links' own declared scopes.
+ * than special-cased in the traverser; piece reads apply this helper at both
+ * the root and a selected subtree boundary, driven by the stored links' own
+ * declared scopes.
  *
  * Also relaxed: a property whose chain resolution is SCOPE-BLOCKED (a schema
  * scope cap forbade following a narrower link, CT-1642) — the member is just
@@ -240,10 +255,11 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 }
 
 /**
- * Return `cell` re-schema'd for a terminal whole-object read: `required`
- * entries that point at narrower-scoped stored links are relaxed via
- * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged
- * when it carries no schema, the raw value is unreadable, or nothing needed
+ * Return `cell` re-schema'd for a terminal object read, whether it is the piece
+ * root or a selected subtree: `required` entries that point at
+ * narrower-scoped stored links are relaxed via
+ * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged when
+ * it carries no schema, the raw value is unreadable, or nothing needed
  * relaxing.
  */
 export function cellWithScopedLinkRequiredsRelaxed<T>(
