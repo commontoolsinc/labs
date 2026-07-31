@@ -446,8 +446,15 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   (`initial_sync | dispatched | committed | readback`) beside the invocation
   id — **done (D2)** for the annotation (tracked through an `onPhase`
   callback, printed on failure exits); verbose output adds per-phase timings
-  (initial sync / dispatch / handler / commit / result sync / readback) —
-  still open. With a caller-supplied id a retry is safe in every phase, so
+  — **done**: `cf piece call --verbose` streams one wall-clock span per
+  observed phase transition to stderr (stdout stays exactly the settled
+  Invocation JSON), at the granularity the `onPhase` callback observes:
+  initial sync→dispatch, dispatch→commit acknowledgement (the handler run
+  and its commit are one span — nothing between them is observable from the
+  CLI without new runner instrumentation, and result sync is inside the
+  readback span for the same reason), receipt classification, and
+  readback→settlement; a failure exit closes the in-flight span with
+  `failed`. With a caller-supplied id a retry is safe in every phase, so
   phase is diagnosis; a derived `retrySafe` convenience flag may ride along.
 - ~~**Acknowledgement is transaction-local.** The call path awaits *this
   handling's* commit (D1's commit callback) plus receipt sync — never
