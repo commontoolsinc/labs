@@ -4137,8 +4137,9 @@ const assertExecutionLeaseFenceTransaction = (
      * two lane authority checks below. `undefined` names no lane. */
     actingLane?: SchedulerExecutionContextKey;
     /** True for a commit carrying semantic operations, i.e. one that will
-     * WRITE. Triggers both the lease-level admission below and the
-     * transitional `claim-arity` residual. */
+     * WRITE. Triggers the lease-level admission below — since the claim slice
+     * deleted `claim-arity`, this is the only thing that binds the population.
+     */
     semanticTransaction?: boolean;
     /** §2b row 8: whether this commit is a SERVED REACTIVE ACTION RUN
      * that named the lane it acted as — `firewalledActionRun`, the write
@@ -4199,19 +4200,21 @@ const assertExecutionLeaseFenceTransaction = (
   // arbitrary unobserved operations with no firewall at all — the same
   // fail-open shape §2a found, one fence further on.
   //
-  // Sourced from the lease and the acting context only. It runs BEFORE the
-  // claim residual, so where both apply this is the cause — a RELABELLING,
-  // never a widening. On the host path `claims.length === 1` implies a bounded
-  // run (the host mints a claim only for an action-run, non-event-handler
-  // observation with a lane assertion, and `applyCommitTransaction` rejects a
-  // with-operations commit that also carries a batch), so every commit this
-  // refuses is one `claim-arity` refuses today.
+  // Sourced from the lease and the acting context only. `claim-arity` is now
+  // DELETED, so this is the sole admission of a lease-bound semantic
+  // transaction. On the host path it refused a strict superset of what
+  // `claim-arity` refused: `claims.length === 1` implied a bounded run (the
+  // host mints a claim only for an action-run, non-event-handler observation
+  // with a lane assertion, and `applyCommitTransaction` rejects a
+  // with-operations commit that also carries a batch), and at the ENGINE seam
+  // this also refuses what arity could not — `claims.length` counted the MAP,
+  // so a claim keyed at a localSeq the commit does not carry satisfied arity
+  // while naming no observation. The lease does not need to trust the map's
+  // keys.
   //
-  // At the ENGINE seam it also refuses one thing `claim-arity` does not, and
-  // that is a hole being closed rather than a delta: `claims.length` counts
-  // the MAP, so a claim keyed at a localSeq the commit does not carry
-  // satisfies arity while naming no observation — writes with neither a claim
-  // nor a firewall. The lease does not need to trust the map's keys.
+  // The one thing `claim-arity` refused that this ADMITS is §2a's delta: an
+  // unclaimed scoped-lane action run, bounded by the firewall and committed by
+  // the sole lease holder. Admitting it is the point of the deletion.
   if (
     options.semanticTransaction === true && options.boundedActionRun !== true
   ) {
@@ -4220,30 +4223,33 @@ const assertExecutionLeaseFenceTransaction = (
       "execution lease admits a semantic transaction only as a bounded reactive action run",
     );
   }
-  // TRANSITIONAL, and deleted by the claim slice: while claims are minted, a
-  // bounded run must also carry its exact claim incarnation.
-  if (options.semanticTransaction === true && options.claims.length !== 1) {
-    throw new ExecutionLeaseFenceError(
-      "claim-arity",
-      "bound executor semantic transaction requires one exact execution claim incarnation",
-    );
-  }
+  // DELETED HERE, and each one's carrier is named because the deletion is only
+  // safe while the carrier is live (pins: `v2-execution-lane-firewall-test.ts`,
+  // "§2b ROW 8 — THE LEASE, PROMOTED"):
+  //
+  // - `claim-arity` (a semantic transaction needed exactly one claim
+  //   incarnation) → the `lease-unbounded-commit` check directly above. It
+  //   binds the identical population off the lease and the write firewall's own
+  //   precondition instead of off the arity of a claim map. Its DELTA is
+  //   §2a's: an unclaimed scoped-lane action run is now admitted, which is the
+  //   point of the slice.
+  // - `claim-expired` (a claim past its own fuse) → `lease-stale` above. The
+  //   host mints `expiresAt: min(claimNow + ttlMs, lease.expiresAt)`, so claim
+  //   expiry never outlives lease expiry; at the bound the two coincide and
+  //   `lease-stale` — sampled from the same clock, checked first — is already
+  //   the cause. The dropped window is a short-TTL claim dying inside a live
+  //   lease, where the committer is still the sole authority and its writes are
+  //   still firewall-bounded.
+  // - `claim-lease-generation` → `leaseOwnerMatches` inside `lease-stale`,
+  //   which pins generation + hostId + onBehalfOf against the durable row
+  //   before any claim is read. Its space/branch leg was already unreachable:
+  //   `acceptedSchedulerObservation` makes the byte-identical comparison first
+  //   (`claim-observation-mismatch`).
+  //
+  // The loop survives for the two checks that decide WHO MAY WRITE
+  // (`lane-generation-stale`, `lane-write-authority`) — those are write
+  // bounding, not arbitration, and they survive the claim mechanism.
   for (const claim of options.claims) {
-    if (claim.expiresAt <= nowMs) {
-      throw new ExecutionLeaseFenceError(
-        "claim-expired",
-        "execution claim incarnation is expired",
-      );
-    }
-    if (
-      claim.branch !== options.branch || claim.space !== options.space ||
-      claim.leaseGeneration !== current.lease_generation
-    ) {
-      throw new ExecutionLeaseFenceError(
-        "claim-lease-generation",
-        "execution claim does not match the durable lease generation",
-      );
-    }
     if (
       claim.contextKey !== "space" &&
       fence.laneAuthority?.({ contextKey: claim.contextKey, claim }) === false
@@ -8804,6 +8810,25 @@ const admitExecutionCommitLanes = (
     );
   for (const assertion of checked) {
     const claim = options.executionClaims?.get(assertion.localSeq);
+    // NOT DELETED BY THE CLAIM SLICE, and the reason is measured rather than
+    // argued. §2b row 8 listed `claim-not-live` as going, carried by the
+    // acting-lane grant consult. That consult lives inside the LEASE fence, so
+    // it never runs for a commit with no lease — and the lane a commit is
+    // resolved AT comes from `assertedLane`, i.e. straight off the wire
+    // observation, for exactly that population. With this throw removed, an
+    // unprivileged client that forges an `executionClaimAssertion` naming
+    // another principal's user lane COMMITS INTO THAT PRINCIPAL'S INSTANCE
+    // (pinned: "claim-not-live: a forged claim assertion cannot name another
+    // principal's lane"). That is cross-principal leak prevention, which the
+    // survival test puts in the surviving column, not arbitration.
+    //
+    // Deleting it needs a carrier first: authorise a LANE ASSERTION as such,
+    // independent of whether a claim exists. Two more open residuals, both
+    // pinned in `v2-execution-lane-firewall-test.ts`: this site fences BEFORE
+    // preconditions/read validation/firewall (C1.4) while the promoted consult
+    // fences after, and the second site below still requires a live claim for
+    // an `executionUnservedAttempt` marker — which under blanket ownership
+    // every unserved marker lacks.
     if (claim === undefined) {
       throw new ExecutionLeaseFenceError(
         "claim-not-live",
@@ -9869,6 +9894,15 @@ const acceptedSchedulerObservation = (
   } = observation;
   const claim = options.executionClaim;
   if (claim === undefined) {
+    // The SECOND `claim-not-live` site, also NOT deleted by the claim slice.
+    // Its `unservedAttempt` leg has no carrier at all: `untrustedObservation`
+    // strips `executionUnservedAttempt`, and the unclaimed return below
+    // reports no `unservedDiagnosticCode`, so merely dropping this throw would
+    // record a run that declared itself UNSERVED as an ordinary served
+    // observation — losing the attempt and clearing the action's dirtiness.
+    // Under blanket ownership every unserved marker is unclaimed, so a carrier
+    // must exist before this goes. See the sibling site in
+    // `admitExecutionCommitLanes` for the measured forged-assertion hole.
     if (assertedClaim !== undefined || unservedAttempt !== undefined) {
       throw new ExecutionLeaseFenceError(
         "claim-not-live",

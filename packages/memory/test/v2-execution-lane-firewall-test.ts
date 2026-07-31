@@ -1668,10 +1668,26 @@ Deno.test("an UNCLAIMED BATCH item acting as a user lane reaches both the firewa
 // `leaseGeneration` survive; `claim-arity`, `claim-expired`,
 // `claim-lease-generation`, `claim-not-live` go."
 //
-// This slice PROMOTES, it deletes nothing: all four claim-shaped fences stay
-// exactly where they are, and the pins below establish, one fence at a time,
-// what rejects the SAME commit once the lease is asked instead of the claim.
-// That is what makes the deletion slice safe to take separately.
+// The promotion slice deleted nothing; the pins below established, one fence
+// at a time, what rejects the SAME commit once the lease is asked instead of
+// the claim. THE DELETION SLICE HAS NOW RUN and the outcome was 3 of 4:
+//
+// | fence | outcome | carrier |
+// | --- | --- | --- |
+// | `claim-arity` | DELETED | `lease-unbounded-commit` |
+// | `claim-expired` | DELETED | `lease-stale` (claim expiry <= lease expiry) |
+// | `claim-lease-generation` | DELETED | `leaseOwnerMatches` inside `lease-stale` |
+// | `claim-not-live` | **KEPT — no carrier** | see its section below |
+//
+// `claim-not-live` was measured, not argued: with both its sites removed an
+// unprivileged client forging an `executionClaimAssertion` wrote into ANOTHER
+// principal's user instance. §2b row 8's list was wrong about it in the
+// fail-open direction, the same way §2a's precondition, row 5's gate, rows
+// 3-4's swap and row 8's own straight swap were.
+//
+// The pins that named a deleted fence are RETITLED and RE-EXPECTED, never
+// removed (`cf09a186b`), so the widening each deletion takes is visible here
+// rather than inferred.
 //
 // THE ONE FENCE WITH NO CARRIER, and it is a fail-open. `claim-arity` is the
 // only thing that makes a lease-bound session's SEMANTIC transaction be an
@@ -1812,16 +1828,22 @@ Deno.test("claim-arity subsumption: a claim for another localSeq no longer buys 
   }
 });
 
-Deno.test("claim-arity subsumption: THE DELTA — an unclaimed scoped-lane action run is bounded, and only claim-arity still refuses it", async () => {
+// RE-EXPECTED by the deletion slice (retitled, never deleted — `cf09a186b`).
+// This pinned §2a's delta as still-refused, by `claim-arity`, the last fence
+// standing between it and the store. `claim-arity` is now gone and the delta
+// COMMITS — that is the whole point of the slice, and the assertion below is
+// what makes the widening visible rather than inferred.
+//
+// What did NOT widen is asserted first and it is the load-bearing half: the
+// firewall's bound is unchanged and still taken BEFORE any lease/claim fence,
+// so an unclaimed scoped-lane run may write only inside its own lane.
+Deno.test("claim-arity DELETED: THE DELTA lands — an unclaimed scoped-lane action run commits, still firewall-bounded", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
     const lease = acquire(engine, nowMs);
-    // §2a's delta. The lease-level check ADMITS it — it is a bounded action
-    // run — so the only refusal left is `claim-arity` itself, which is what
-    // the next slice deletes. The bound is real and it is taken FIRST: the
-    // same commit with an inadmissible write rejects at the firewall, before
-    // any claim fence is consulted.
+    // The bound is real and it is taken FIRST: the same commit with an
+    // inadmissible write rejects at the firewall, before any lease fence.
     assertFirewallReject(
       () =>
         applyActingLane(engine, {
@@ -1833,16 +1855,33 @@ Deno.test("claim-arity subsumption: THE DELTA — an unclaimed scoped-lane actio
         }),
       "non-lane-scope",
     );
-    assertFenceCause(
-      () =>
-        applyActingLane(engine, {
-          actingContext: USER_CONTEXT_KEY,
-          operations: [userInstanceOperation],
-          surfaces: { writes: [USER_OUTPUT] },
-          lease,
-          nowMs: nowMs + 1,
-        }),
-      "claim-arity",
+    // And the admissible twin — identical in every respect except that its
+    // write is inside the lane it acted as — now lands with no claim at all.
+    const applied = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [userInstanceOperation],
+      surfaces: { writes: [USER_OUTPUT] },
+      lease,
+      nowMs: nowMs + 1,
+    });
+    assert(applied.schedulerObservationResults?.[0].status === "kept");
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      { value: 7 },
+    );
+    // The inadmissible twin still landed NOTHING at the session instance.
+    assertEquals(
+      Engine.read(engine, {
+        id: SESSION_OUTPUT.id,
+        scope: "session",
+        principal: PRINCIPAL,
+        sessionId: "executor-session",
+      }),
+      null,
     );
   } finally {
     Engine.close(engine);
@@ -1927,34 +1966,34 @@ Deno.test("claim-expired subsumption: the LEASE's own fuse fires first, because 
   }
 });
 
-Deno.test("claim-expired subsumption: THE WIDENING — a short-TTL claim expires inside a live lease, and that refusal is the one being dropped", async () => {
+// RE-EXPECTED by the deletion slice (retitled, never deleted — `cf09a186b`).
+// The promotion pinned this window as the one refusal `claim-expired` made
+// that no carrier makes; the deletion TAKES it, and this is where that shows.
+// The committer is still the sole authority (`lease-stale` passes, asserted
+// by its sibling pin above) and its writes are still firewall-bounded, so the
+// dropped refusal is work the server did and then threw away — the arc's
+// operational target.
+Deno.test("claim-expired DELETED: THE WIDENING taken — a short-TTL claim expiring inside a live lease no longer refuses", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
     const lease = acquire(engine, nowMs);
-    // The measured delta, stated rather than assumed: with claimTtlMs shorter
-    // than the lease's remaining life the claim dies first, and TODAY that
-    // window refuses. Under the promoted lease it does not — the committer is
-    // still the sole authority (`lease-stale` passes) and its writes are still
-    // firewall-bounded, so the refusal is work the server did and threw away
-    // (the arc's operational target). This pin NAMES the window so the
-    // deletion slice cannot take it silently.
+    // With claimTtlMs shorter than the lease's remaining life the claim dies
+    // first. That window used to refuse `claim-expired`; now it commits.
     const shortLived: ExecutionClaim = {
       ...claimFor(lease, USER_CONTEXT_KEY),
       expiresAt: nowMs + 10,
     };
     assert(shortLived.expiresAt < lease.expiresAt);
-    assertFenceCause(
-      () =>
-        applyClaimed(engine, lease, shortLived, {
-          operations: [userInstanceOperation],
-          surfaces: { writes: [USER_OUTPUT] },
-          nowMs: nowMs + 11,
-        }),
-      "claim-expired",
-    );
-    // The lease itself is untouched by the claim's death: the identical commit
-    // at the identical clock, with the claim's own fuse removed, commits.
+    const widened = applyClaimed(engine, lease, shortLived, {
+      operations: [userInstanceOperation],
+      surfaces: { writes: [USER_OUTPUT] },
+      nowMs: nowMs + 11,
+    });
+    assert(widened.schedulerObservationResults?.[0].status === "kept");
+    // The lease itself was always untouched by the claim's death: the
+    // identical commit at the identical clock, with the claim's own fuse
+    // removed, commits — as it did before the deletion.
     const applied = applyClaimed(
       engine,
       lease,
@@ -1970,6 +2009,19 @@ Deno.test("claim-expired subsumption: THE WIDENING — a short-TTL claim expires
       },
     );
     assert(applied.schedulerObservationResults?.[0].status === "kept");
+    // AND THE BOUND THAT REMAINS, so the widening cannot be read as "the claim
+    // clock stopped mattering, therefore nothing does": past the LEASE's own
+    // fuse the same expired-claim commit is still refused, by the carrier.
+    assertFenceCause(
+      () =>
+        applyClaimed(engine, lease, shortLived, {
+          operations: [userInstanceOperation],
+          surfaces: { writes: [USER_OUTPUT] },
+          nowMs: lease.expiresAt,
+          localSeq: 3,
+        }),
+      "lease-stale",
+    );
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
@@ -2062,6 +2114,83 @@ Deno.test("claim-lease-generation subsumption: its space/branch half is ALREADY 
 });
 
 // --- claim-not-live ---------------------------------------------------------
+
+/** THE PROBE THE DELETION SLICE OWED, and it is why `claim-not-live` is STILL
+ * HERE while the other three fences are gone.
+ *
+ * An ORDINARY client — no lease fence, no acting context, no live claim —
+ * forges an `executionClaimAssertion` naming ANOTHER principal's user lane and
+ * writes into that lane's instance. `commitLaneAssertions` reads the assertion
+ * straight off the wire observation, so the forged key is what resolves the
+ * commit's lane AND its scope identity. `claim-not-live` is what refuses it.
+ *
+ * MEASURED, not argued. With both `claim-not-live` sites removed this exact
+ * commit APPLIED, at `scopeKey: "user:did%3Akey%3Az6Mk-lane-firewall-bob"` —
+ * alice writing into bob's user instance with no authority of any kind. That
+ * is cross-principal leak prevention, which the arc's survival test puts in
+ * the SURVIVES column, not arbitration.
+ *
+ * The acting-lane grant consult cannot carry this case: it lives inside the
+ * lease fence and this commit carries no lease. `claim-not-live` therefore has
+ * no carrier for the unbound-client population and the deletion is BLOCKED on
+ * building one — a lane assertion must be authorised as a lane assertion,
+ * independent of whether a claim happens to exist. */
+Deno.test("claim-not-live: a forged claim assertion cannot name another principal's lane", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const forged: ExecutionClaim = {
+      branch: "",
+      space: SPACE,
+      contextKey: OTHER_USER_CONTEXT_KEY,
+      pieceId: PIECE_ID,
+      actionId: ACTION_ID,
+      actionKind: "computation",
+      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+      leaseGeneration: 1,
+      claimGeneration: 1,
+      expiresAt: 0,
+    };
+    assertFenceCause(
+      () =>
+        Engine.applyCommit(engine, {
+          sessionId: "client-session",
+          scopeSessionId: "client-session",
+          space: SPACE,
+          principal: PRINCIPAL,
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [userInstanceOperation],
+            schedulerObservation: observationFor(forged, {
+              writes: [USER_OUTPUT],
+            }),
+          },
+        }),
+      "claim-not-live",
+    );
+    // Nothing landed at EITHER principal's instance.
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: OTHER_PRINCIPAL,
+      }),
+      null,
+    );
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      null,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
 
 Deno.test("claim-not-live subsumption: the acting lane's own grant consult refuses the same drained lane", async () => {
   const { directory, engine } = await openTempEngine();
@@ -2170,6 +2299,14 @@ Deno.test("claim-not-live subsumption: BLOCKER — an unserved-attempt marker st
     // live claim is refused outright. Under blanket ownership EVERY unserved
     // marker is unclaimed, so this fence has no carrier and no replacement —
     // it must be resolved before `claim-not-live` is deleted.
+    //
+    // STILL OPEN after the deletion slice, and now with the shape of the fix
+    // named: simply dropping the throw is NOT the fix. `untrustedObservation`
+    // strips `executionUnservedAttempt` and the unclaimed return reports no
+    // `unservedDiagnosticCode`, so the marker would vanish and the attempt
+    // would be recorded as an ordinary SERVED observation — clearing the
+    // action's dirtiness for a run that never served. The carrier has to
+    // PRESERVE the marker on the unclaimed path, not just stop refusing it.
     const marker: SchedulerActionObservation = {
       ...unclaimedObservation({ writes: [USER_OUTPUT] }),
       executionUnservedAttempt: { diagnosticCode: "unknown-effect-surface" },

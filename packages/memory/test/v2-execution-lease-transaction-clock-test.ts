@@ -1,5 +1,5 @@
 import { download } from "@denosaurs/plug";
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import type { ExecutionLease } from "../v2.ts";
@@ -235,7 +235,22 @@ Deno.test("leased commits sample the configured clock after BEGIN IMMEDIATE", as
   });
 });
 
-Deno.test("claimed commits reject a claim that expires after selection but before transaction apply", async () => {
+// RE-EXPECTED by the claim-fence deletion slice (retitled, never deleted —
+// `cf09a186b`). This pinned the CLAIM's own fuse at the write-lock seam:
+// selected live at `claimExpiresAt - 1`, applied at `claimExpiresAt`, refused
+// by `claim-expired`. `claim-expired` is deleted, and this harness is the
+// host-path instance of the widening its unit pin names — `CLAIM_TTL_MS`
+// (10 s) is far shorter than `LEASE_TTL_MS` (100 s), so the claim dies inside
+// a live lease and the sole lease holder's firewall-bounded write now lands.
+//
+// WHAT THE SEAM STILL PROVES, and it is why the test is re-expected rather
+// than weakened: the clock is still sampled INSIDE the transaction, after
+// BEGIN IMMEDIATE, not at selection — the two `clock-sampled` assertions are
+// unchanged. The carrier that still refuses at this exact seam is the LEASE's
+// fuse, pinned one test above ("leased commits sample the configured clock
+// after BEGIN IMMEDIATE"): same harness, same clock, same write lock, and an
+// elapsed lease does not commit.
+Deno.test("a claim expiring between selection and transaction apply no longer refuses — the lease is the fuse", async () => {
   await withHarness(async (harness) => {
     Atomics.store(harness.clock, 0, harness.claimExpiresAt - 1);
     await holdWriteLock(harness);
@@ -260,9 +275,13 @@ Deno.test("claimed commits reject a claim that expires after selection but befor
       nowMs: harness.claimExpiresAt,
     });
     const commit = await result;
-    assertEquals(commit.accepted, false);
-    assertEquals(commit.errorName, "ExecutionLeaseFenceError");
-    assertEquals(commit.errorMessage?.includes("execution claim"), true);
-    assertEquals(commit.document, null);
+    // The claim is dead at apply time and the commit lands anyway — the
+    // widening, stated at the host seam rather than inferred from the unit.
+    assertEquals(commit.accepted, true);
+    assertEquals(commit.errorName, undefined);
+    // And it really wrote: the refusal that was dropped was work the server
+    // had already done.
+    assertEquals(harness.claimExpiresAt < harness.expiresAt, true);
+    assertExists(commit.document);
   });
 });
