@@ -1,9 +1,39 @@
 # Pattern update state continuity (Tier 2)
 
 Status: In progress. Stages 1–4 are complete and the tier is now a REAL GATE:
-`deno task pattern-vintage` runs on every PR, replaying committed vintages of
-`system/home.tsx` and `system/default-app.tsx` under the source being merged.
-Stage 2 landed as [#5148]; stage 4 as [#5196].
+`deno task pattern-vintage` runs on every PR, replaying committed vintages
+under the source being merged. Stage 2 landed as [#5148]; stage 4 as [#5196].
+
+A fixture is keyed by the TEST that produced it, not by a pattern whose name
+the test had to match, because the convention held for 91 of 120 tests in
+`packages/patterns` and not for the interesting ones — `topics/main.tsx` is
+tested by `topics/topics.test.tsx`, and `lunch-poll/main.test.tsx` is named
+after none of the several patterns it drives. Both were uncapturable rather
+than merely un-required. There are now FOUR fixtures — `system/home.test.tsx`,
+`system/default-app.test.tsx`, `topics/topics.test.tsx`,
+`lunch-poll/main.test.tsx` — carrying 84 recorded instantiations and 73 upgrade
+targets. Coverage is judged from what the replay actually REPLAYED, since a
+fixture routinely covers several patterns and a directory name stopped being
+the evidence.
+
+**A finding is GRADED.** A replay recomputes as well as reads, so a derived
+value the vintage never pulled on resolves to something better this time —
+measured, `createdBy` goes `{name:""}` → `{name:"t"}` (the pattern backfilling
+from its own compatibility shadow), `$NAME` goes `"Topics (2)"` →
+`"Topics (3)"`. None of those is data going missing. So a value that merely
+CHANGED is reported with `console.warn` and does not fail the gate; a non-empty
+value that went EMPTY does. Emptiness is asked per leaf at any depth, not of
+the top-level value: judged only at the top, a `.for()` list failed solely when
+it emptied entirely, so two rows of three disappearing passed as a warning.
+
+The limit that grading buys, pinned in `tasks/pattern-vintage-run.test.ts` as
+"only WARNS on a moved storage key whose new slot is SEEDED": a moved `.for()`
+key does not always read back as nothing. Where the pattern seeds the new cell
+the fresh value is non-empty and only warns. The companion case — an
+undeclared `notes` moved to `notesMoved`, reading back `[]` — still fails, so
+the class is caught when the new slot stays empty. Weighting a key by whether
+it is backed by an `of:` document rather than a `computed:` one is the
+candidate for closing that gap.
 
 Vintages are now TEST-POPULATED: capture runs a pattern's own tests against a
 file-backed store, so the state in a fixture arrived through real handlers, and
@@ -93,19 +123,19 @@ Measured on branch `tier2`, not assumed:
 | A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
-| The gate CATCHES a moved storage key | measured by mutation on the ACTUAL `home.tsx`: renaming `.for("journal")` exits 1 with "APPLIED CLEANLY but stranded state the vintage held: journal (was [{\"eventType\":\"piece:created\",…}], now [])", restoring exits 0. The pinned limit in `tasks/pattern-vintage-run.test.ts` is now INVERTED, which is what it was written to receive |
+| The gate CATCHES a moved storage key | measured by mutation on the ACTUAL `home.tsx`: renaming `.for("journal")` exits 1 with "APPLIED CLEANLY but stranded state the vintage held: journal (was [{\"eventType\":\"piece:created\",…}], now [])", restoring exits 0. The `notesMoved` case in `tasks/pattern-vintage-run.test.ts` pins it. A moved key whose new slot the pattern SEEDS reads back non-empty and only WARNS — see the grading note at the top |
 | A materialized root is NOT plain data | measured on the committed `home.tsx` fixture: at each of its six stream positions the read yields a live cell whose own properties reach the runtime, so a generic deep copy of it is CYCLIC. Before that was reduced, a UI-only edit to `home.tsx` did not merely misreport — `JSON.stringify` in the failure text threw and the gate ended with no verdict. Both sides are now reduced by shape first: a cell to the document it points at, a fabric special object to a tagged content hash (`deepEqual` compares those by own properties, of which they have none), a cycle to a marker |
 | The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded by NAME. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
 | A NAME cannot find every rendering | measured on the same fixture, which records two `map`-body hoists (`__cfPattern_2`) whose whole result is a vnode — keys `type`/`name`/`props`/`children`, no `$UI` to exclude: a UI-only edit inside that map body reported `children` stranded on both roots and exited 1 for a change that stores nothing. A rendering is now also reduced by SHAPE (`type: "vnode"`, which is what the runner's own `vnodeSchema` requires), so it is out of the comparison wherever it sits. Re-measured: that edit exits 0, the moved-key mutation still exits 1 |
 | A schema-less read is not empty, it is NON-DETERMINISTIC | measured on the committed `home.tsx` fixture: a schema-less read returns every key, and materializes `$UI`, which the stored schema VERBATIM (`unknown` at that key) leaves `undefined`. The reason to read under the root's own stored `schema` meta is that a schema-driven read pulls exactly what the schema descends into, where a schema-less one resolves what happens to be resident — the shape of [#3830]. Relaxing that schema's `unknown` positions, per the row below, keeps the read schema-driven while reaching the same keys |
-| The stored schema verbatim reads back LESS than the document holds | measured on the committed `default-app.tsx` fixture, whose declared output carries an index signature: `recentPieces`, `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream) are stored under `additionalProperties: {"type": "unknown"}` and a schema-driven read resolves NOTHING at an `unknown` position, so all three read `undefined` — which the comparison cannot tell from "the document does not hold this", and so treats as nothing to lose. Red/green on the real tree: DROPPING `trackRecent` from `default-app.tsx`'s result replayed `3 updated cleanly with no state stranded`, and after the read relaxes `type: "unknown"` on both sides it exits 1 naming the key. Re-measured for false reds: a comment-only edit to EVERY file the two fixtures name — all 14 targets changed, the whole comparison surface exercised — is `14 updated cleanly` |
+| The stored schema verbatim reads back LESS than the document holds | measured on the committed `default-app.tsx` fixture, whose declared output carries an index signature: `recentPieces`, `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream) are stored under `additionalProperties: {"type": "unknown"}` and a schema-driven read resolves NOTHING at an `unknown` position, so all three read `undefined` — which the comparison cannot tell from "the document does not hold this", and so treats as nothing to lose. Red/green on the real tree: DROPPING `trackRecent` from `default-app.tsx`'s result replayed `3 updated cleanly with no state stranded`, and after the read relaxes `type: "unknown"` on both sides it exits 1 naming the key. Re-measured for false reds: forcing an identity change on every pattern the four fixtures name exercises the whole comparison surface at once |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed`, `candidates` and `targets`, and requires all three positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
 | The committed fixtures really do restore, and their names are provenance | the same controls, run against them: both replay clean, so each fixture contains the identity its filename records |
 | A root in ANOTHER space would have read green too | measured over a subject that instantiates a child via `Factory.inSpace(…)` — the shape `profile-create.tsx` uses. An entity id is content-derived and carries no space, so reading the child's recorded id under the FIXTURE's DID succeeds at finding nothing: the cell is absent, the broken candidate materializes onto it, and the run reports `changed: 2, updated: 2, failures: []` over a break. Two things were wrong and each alone still produced that green — the replay read `vintage.space` instead of the recorded `entry.space`, and `snapshot` copied only the primary space's SQLite file while the run had written two. Fixed by reading the recorded space and carrying every space the run wrote in a `.sqlite.spaces/` companion directory. Red/green: reverting the read reds exactly the cross-space case; disabling the companion copy reds all four |
 | A fixture covering NOTHING hides behind one that covers something | measured: two fixtures, the second's manifest rewritten so every recorded instantiation is a test pattern, reports `targets: 1, failures: []` and `isClean` true — the second applied today's source to nothing and said so nowhere. The `targets` floor is a SUM, so it only catches the case where every fixture covers nothing. Fixed with a per-fixture failure, which is what `candidates` already had. Reachable rather than theoretical: `isUpgradeTarget` has grown four exclusions, two added after fixtures already existed, and fixtures are append-only — a new exclusion silently zeroes an old fixture's coverage |
-| The cross-space mechanism is exercised only by a SYNTHETIC fixture | both committed fixtures are single-space. `profile-create.tsx` is recorded, but `home.test.tsx` never fires the create, so its `inSpace` child never materializes. `tasks/pattern-vintage-run.test.ts` is therefore the whole of the coverage for companion stores, and it is meant to be: it can break a child on purpose, which a pinned fixture cannot. A real cross-space fixture would follow a required pattern's tests actually creating a profile — worth having, not a substitute |
+| The cross-space mechanism is exercised only by a SYNTHETIC fixture | all four committed fixtures are single-space. `profile-create.tsx` is recorded, but `home.test.tsx` never fires the create, so its `inSpace` child never materializes. `tasks/pattern-vintage-run.test.ts` is therefore the whole of the coverage for companion stores, and it is meant to be: it can break a child on purpose, which a pinned fixture cannot. A real cross-space fixture would follow a required pattern's tests actually creating a profile — worth having, not a substitute |
 | ABSENT, not just cross-space, is the real class — and a space-level control does not cover it | measured two further ways, both green over the same break without a PER-ROOT control: a companion store truncated to zero bytes (a valid empty SQLite database, so it restores and `restoredSpaces` lists it), and a recorded cell id that names nothing in the primary space. "Carries the space" is not "holds the root": `engine.ts` opens with `{ create: true }`, so merely reaching a space leaves a store file behind. Fixed with `vintageHoldsRoot`, run per target before anything is applied — the evidence being the `patternSetupIdentity` marker, which the runner stamps under the SAME condition that reports an instantiation to the capture observer, so every manifest entry's cell carries one by construction. A value check would instead depend on the pattern's result shape and would misread a root whose result is legitimately `{}`. Red/green: forcing the control true reds both absence cases |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
@@ -424,7 +454,7 @@ Two constraints the harness imposes, both measured:
   space, so an owner-scoped label may behave differently across DIDs.
 - **One root key per pattern.** Roots are addressed by cause and the cause
   alone determines the entity id, so a fixture holding two patterns needs two
-  keys (`vintageRoot(vintage, schema, key)`). One fixture per pattern needs
+  keys (`vintageRoot(vintage, schema, key)`). One fixture per TEST needs
   nothing further.
 
 Three bugs the gate found in itself, all now pinned by tests, all of the class
@@ -731,7 +761,8 @@ What a green run does NOT cover, stated so it is not read as more than it is:
   `undefined`, which the comparison reads as nothing to lose.
 - The value comparison runs only for a target whose identity CHANGED, which is
   the same condition the auto-updater fires on. On an unchanged tree it runs
-  zero times — measured, `0 changed` on both committed fixtures — so the
+  zero times — measured, `0 changed` when no pattern the fixtures name has
+  moved — so the
   mutations above are the only thing keeping it honest.
 
 **Open, and it will bite eventually:** the comparison fails on any change to a
@@ -746,8 +777,8 @@ comment-only edit to `default-app.tsx` (3 changed, 3 clean), a UI-only edit to
 `home.tsx`'s header (1 changed, 1 clean), and a UI-only edit inside
 `default-app.tsx`'s own `map` body all exit 0. The strongest version of that
 measurement, because it leaves nothing unexercised: a comment-only edit to
-EVERY file the two committed fixtures name changes all 14 targets at once, and
-exits 0 with `14 updated cleanly with no state stranded`.
+every pattern the four committed fixtures name changes all their targets at
+once, and exits 0 with each of them updated cleanly.
 
 ### What stage 5 does NOT compare
 

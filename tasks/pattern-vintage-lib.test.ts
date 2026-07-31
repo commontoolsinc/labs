@@ -4,7 +4,6 @@ import {
   armVerdictGuard,
   AUTO,
   collectVintages,
-  coveredPatternKeys,
   describeError,
   isClean,
   parseVintagePath,
@@ -184,32 +183,6 @@ describe("vintage paths", () => {
 });
 
 describe("coverage", () => {
-  const pinned = (testKey: string, identity: string) => ({
-    testKey,
-    tier: PINNED,
-    stamp: "2026-07-29T00-00-00.000Z",
-    identity,
-    path: `${vintageDir(testKey, PINNED)}/x`,
-  });
-
-  it("counts only PINNED vintages as coverage", () => {
-    // An auto capture is regenerable and pruned by count; it cannot be what
-    // keeps a system pattern covered, or retention would silently delete the
-    // gate's only evidence.
-    const covered = coveredPatternKeys([
-      pinned("system/home.tsx", ID_A),
-      {
-        testKey: "system/journal.tsx",
-        tier: AUTO,
-        stamp: "2026-07-29T00-00-00.000Z",
-        identity: ID_B,
-        path: "x",
-      },
-    ]);
-
-    expect([...covered]).toEqual(["system/home.tsx"]);
-  });
-
   it("reports a required pattern with no vintage", () => {
     // Coverage is what the replay actually REPLAYED, not what the fixture tree
     // looks like: a fixture is named after the test that made it and covers
@@ -257,15 +230,22 @@ describe("coverage", () => {
     expect(unmappedPatternUrls(["/api/patterns/system/home.tsx"])).toEqual([]);
   });
 
-  it("treats several vintages of one pattern as one covered pattern", () => {
-    // One pattern replayed by two different fixtures is still one covered
-    // pattern — the union is what counts.
-    const uncovered = uncoveredRequiredPatterns(
+  it("ignores covered keys nothing required", () => {
+    // Coverage is asked per REQUIRED key, so a fixture covering extra patterns
+    // neither helps nor hurts. (Deduplication is not tested here and cannot be:
+    // the argument is a Set, so `new Set([x, x])` collapses before the call —
+    // an earlier version of this case asserted exactly that and could not fail.
+    // What builds the set is `replayVintage`, and
+    // `pattern-vintage-run.test.ts` covers it.)
+    expect(uncoveredRequiredPatterns(
       ["system/home.tsx"],
-      new Set(["system/home.tsx", "system/home.tsx"]),
-    );
-
-    expect(uncovered).toEqual([]);
+      new Set(["system/home.tsx", "topics/main.tsx", "lunch-poll/main.tsx"]),
+    )).toEqual([]);
+    // ...and a near-miss is still uncovered: matching is by exact key.
+    expect(uncoveredRequiredPatterns(
+      ["system/home.tsx"],
+      new Set(["system/home.test.tsx"]),
+    )).toEqual(["system/home.tsx"]);
   });
 });
 
@@ -368,12 +348,31 @@ describe("reporting", () => {
       targets: 5,
       changed: 3,
       updated: 3,
+      servedRoute: 0,
     });
 
     expect(summary).toBe(
       "Replayed 2 vintage(s): 12 recorded instantiation(s), all mappable to " +
         "a file; 5 upgrade target(s), 3 changed since capture, 3 updated " +
         "cleanly with no state stranded.",
+    );
+  });
+
+  it("says when targets went unexamined as SERVED ROUTES", () => {
+    // A served route is a target the run deliberately did not identity-compare
+    // — the same file compiles to a different identity served than from the
+    // repo, so comparing would report it changed forever. The count existed to
+    // stop a mostly-served-route fixture reading as thorough coverage, and
+    // nothing displayed it, so it stopped one from nothing at all.
+    expect(reportReplaySummary({
+      replayed: 1,
+      candidates: 12,
+      targets: 5,
+      changed: 3,
+      updated: 3,
+      servedRoute: 2,
+    })).toContain(
+      "2 target(s) were served routes and not identity-compared.",
     );
   });
 
@@ -620,6 +619,53 @@ describe("stranded-state comparison", () => {
     }
   });
 
+  it("grades PARTIAL loss as lost, not merely changed", () => {
+    // The class whole-value grading missed. `isEmptyValue` is shallow, so
+    // judging emptiness only at the top means a key fails only when it empties
+    // ENTIRELY — and a `.for()` list, the commonest durable shape here, almost
+    // never does. Every row below was measured WARNING before the emptiness
+    // test recursed, which is the gate reporting "state changed" for state that
+    // is gone.
+    for (
+      const [label, before, after] of [
+        ["rows unreadable", { items: ["a", "b", "c"] }, {
+          items: [undefined, undefined, undefined],
+        }],
+        ["array truncated", { items: ["a", "b", "c"] }, { items: ["a"] }],
+        ["sibling survives", { profile: { name: "ada", id: 1 } }, {
+          profile: { id: 1 },
+        }],
+        ["row body emptied", { items: [{ t: "x", body: "real" }] }, {
+          items: [{ t: "x", body: "" }],
+        }],
+        ["array became an object", { items: ["a"] }, { items: { 0: "a" } }],
+      ] as const
+    ) {
+      const findings = strandedKeys(before, after);
+      expect(findings.length, label).toBe(1);
+      expect(findings[0].lost, `${label} should FAIL, not warn`).toBe(true);
+    }
+
+    // ...and the recursion costs none of the warnings it was added alongside:
+    // a leaf that was ALREADY empty had nothing to lose, and two non-empty
+    // scalars differing is a change.
+    for (
+      const [label, before, after] of [
+        ["nested gain", { createdBy: { kind: "person", name: "" } }, {
+          createdBy: { kind: "person", name: "t" },
+        }],
+        ["row gained a field", { items: [{ t: "x" }] }, {
+          items: [{ t: "x", extra: "new" }],
+        }],
+        ["scalar replaced", { note: "written" }, { note: "captured" }],
+      ] as const
+    ) {
+      const findings = strandedKeys(before, after);
+      if (findings.length === 0) continue; // an addition is not a finding
+      expect(findings[0].lost, `${label} should only warn`).toBe(false);
+    }
+  });
+
   it("does not call a value lost when it was already empty", () => {
     // Nothing to lose. An empty-to-different transition is the ordinary
     // additive case a replay produces constantly, and grading it as loss would
@@ -628,18 +674,32 @@ describe("stranded-state comparison", () => {
     expect(findings.map((finding) => finding.lost)).toEqual([false]);
   });
 
-  it("does not call a reduction empty — a cell names a document", () => {
-    // `{"[cell]": {...}}` is an identity, not a container, so an
-    // empty-LOOKING one is a cell that exists and points somewhere. Reading it
-    // as empty would grade every cell-valued key that moved as merely changed,
-    // which is exactly backwards: a moved document is the class the gate is
-    // for.
+  it("grades a REPOINTED cell as changed, and a vanished one as lost", () => {
+    // `{"[cell]": {...}}` is an identity, not a container: a cell that looks
+    // empty still names a document. So a cell pointing somewhere ELSE is a
+    // change, not an emptying, and only WARNS.
+    //
+    // That is a real limit and it is deliberate, not an oversight: a pattern
+    // update rotates compiler-generated internal cell identities on purpose,
+    // so failing on a moved reduction would red every legitimate edit. The
+    // consequence is that a genuinely repointed `of:` document is warned about
+    // rather than failed on — the `of:`-versus-`computed:` weighting noted on
+    // `StateFinding` is what would separate the two, and the reduction carries
+    // the id that would answer it.
     const cell = (id: string) => ({ "[cell]": { space: "s", id, path: [] } });
     const findings = strandedKeys({ ref: cell("a") }, { ref: cell("b") });
     expect(findings.map((finding) => finding.key)).toEqual(["ref"]);
     expect(findings[0].lost).toBe(false);
-    // ...but a cell-valued key that became nothing IS lost.
+    // A cell that became NOTHING is lost — the emptiness test runs before the
+    // identity comparison, so this is not covered by the warn above.
     expect(strandedKeys({ ref: cell("a") }, {})[0].lost).toBe(true);
+    // ...including one nested inside a container that survives, which is the
+    // shape whole-value grading used to miss.
+    expect(
+      strandedKeys({ box: { ref: cell("a"), keep: 1 } }, {
+        box: { keep: 1 },
+      })[0].lost,
+    ).toBe(true);
   });
 
   it("survives a value that points back at itself", () => {

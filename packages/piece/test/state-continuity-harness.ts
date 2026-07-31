@@ -170,42 +170,69 @@ export interface VintageRuntime {
  * Shrink a just-written fixture, in place, without changing what it holds for
  * a replay.
  *
- * Two measured wins, on the four committed fixtures (41.2 MiB together):
+ * Two measured wins, on the four committed fixtures (42.2 MiB together):
  *
- * - **`commit.original` is a byte-for-byte duplicate of the whole `revision`
- *   table.** Verified by joining `json_each(original,'$.operations')` to
- *   `revision` on `commit_seq`+`op_index`: equal counts, ids, ops and payloads
- *   in all four. The `commit` table is 42-50% of each file and outweighs
- *   `revision` itself in three of them. The column has exactly ONE read site —
- *   `sameStoredOriginal` in `memory/v2/engine.ts`, a string equality reached
- *   only through `SELECT_EXISTING_COMMIT`, keyed `session_id`+`local_seq`. That
- *   is the same-session commit-replay check, and a fresh replay session can
- *   never match the key. The commit ROWS stay, so `MAX(seq)` allocation, the
- *   `revision.commit_seq` foreign key and the conflict scans are untouched.
+ * - **`commit.original.operations` is a byte-for-byte duplicate of the whole
+ *   `revision` table.** Verified by joining `json_each(original,'$.operations')`
+ *   to `revision` on `commit_seq`+`op_index`: equal counts, ids, ops and
+ *   payloads in all four. The `commit` table is 42-50% of each file and
+ *   outweighs `revision` itself in three of them.
  * - **`page_size` is 32 KiB**, which costs 1.2-1.4 MiB of near-empty pages per
  *   file — 38% of the smallest one. Plain `VACUUM` reclaims nothing
  *   (`freelist_count` is already 0); the waste is inside pages, not between
  *   them.
  *
- * Together: 41.2 MiB → 16.7 MiB checked out, and ~4.7 → ~1.7 MiB packed. The
- * fixtures stay RAW rather than compressed, which is a separate measurement:
- * git's own zlib beats pre-gzipping (3.11 vs 3.25 MiB packed at one
- * generation) and deltas a recapture ~5x better (+0.21 vs +1.03 MiB on a
- * second topics generation), because it cannot delta a gzip stream.
+ * Together: 42.2 MiB → 21.8 MiB checked out. The fixtures stay RAW rather than
+ * compressed, which is a separate measurement: git's own zlib beats
+ * pre-gzipping (3.11 vs 3.25 MiB packed at one generation) and deltas a
+ * recapture ~5x better (+0.21 vs +1.03 MiB on a second topics generation),
+ * because it cannot delta a gzip stream.
+ *
+ * **Only `operations` goes, and the rest of the envelope stays.** Blanking the
+ * whole column is smaller still (16.7 MiB) and was measured to leave the gate
+ * byte-identical — but `commit.original` has THREE readers, not the one the
+ * engine has, and the other two are the shipping `cf inspect`:
+ *
+ * - `state-inspector/conflicts.ts` prefilters candidate reader commits with
+ *   `WHERE original LIKE '%'||id||'%'` and then reads `$.reads.confirmed`.
+ *   With the column blanked, that prefilter matched 0 of topics' 353 commits,
+ *   so the stale-read detector returned "no anomalies" for every fixture —
+ *   a CONFIDENT CLEAN BILL it cannot otherwise produce, and the one output
+ *   whose whole purpose is flagging corruption. Keeping `reads` restores it:
+ *   309 of 353 match again.
+ * - `state-inspector/queries.ts` `listCommits` decodes `original` for its
+ *   `ops`/`reads` counts. Its `ops` column reads 0 on these fixtures, which is
+ *   the one degradation this transform knowingly keeps: the operations are
+ *   still all there in `revision`, which is where `cf inspect history`,
+ *   `timeline` and `diff` read them from.
+ *
+ * The engine's own use is unaffected either way: `sameStoredOriginal`
+ * (`memory/v2/engine.ts`) is a string equality reached only through
+ * `SELECT_EXISTING_COMMIT`, keyed `session_id`+`local_seq`, and a fresh replay
+ * session cannot match a stored session id. Commit ROWS always stay, so
+ * `MAX(seq)` allocation and the `revision.commit_seq` foreign key are intact.
  *
  * Proven equivalent rather than assumed: the gate was run against a pruned
  * copy and an untouched one with every pattern's identity forced to change, so
  * 50 targets actually materialized, and the two produced byte-identical output
  * including all 18 failure diagnostics.
  *
- * The right long-term fix is in the engine — storing a hash of the commit
- * envelope instead of the envelope — at which point this becomes a no-op and
- * should be deleted.
+ * The right long-term fix is in the engine — storing a hash of the operations
+ * rather than the operations — at which point this becomes a no-op and should
+ * be deleted.
  */
 function compactVintageStore(path: string): void {
   const db = new Database(path);
   try {
-    db.exec(`UPDATE "commit" SET original = '{}'`);
+    // Guarded on the codec prefix rather than assuming it: `json_remove` over a
+    // string that is not JSON returns NULL, and the column is NOT NULL, so an
+    // unprefixed row would fail the statement rather than corrupt quietly — but
+    // the guard says which rows are meant to change instead of relying on that.
+    db.exec(
+      `UPDATE "commit" SET original = 'fvj1:' || ` +
+        `json_remove(substr(original, 6), '$.operations') ` +
+        `WHERE substr(original, 1, 5) = 'fvj1:'`,
+    );
   } finally {
     db.close();
   }
@@ -1061,10 +1088,62 @@ export function strandedKeys(
       key,
       before: wasThere,
       after: nowThere,
-      lost: !isEmptyValue(wasThere) && isEmptyValue(nowThere),
+      lost: lostAnything(wasThere, nowThere),
     });
   }
   return findings;
+}
+
+/**
+ * Whether anything that carried a value now carries nothing, AT ANY DEPTH.
+ *
+ * Asked per leaf rather than of the top-level value, and that is the whole
+ * point: a durable root's keys are mostly containers, and `.for()` lists are
+ * the commonest shape in the system. Judging emptiness only at the top means a
+ * key FAILS only when it empties ENTIRELY, so the losses that actually happen
+ * pass as warnings — measured, before this recursed:
+ *
+ *   items ["a","b","c"] → ["a"]                     two rows gone, WARNED
+ *   items ["a","b","c"] → [undefined,undefined,…]   every row unreadable, WARNED
+ *   profile {name:"ada",id:1} → {id:1}              field gone, WARNED
+ *   items [{t,body:"real"}] → [{t,body:""}]         row emptied, WARNED
+ *
+ * Recursing restores all four to failures and costs none of the measurements
+ * that motivated the grading in the first place — `createdBy {name:""} →
+ * {name:"t"}`, `$NAME "Topics (2)" → "Topics (3)"`, `artSyncState "" →
+ * "generated"` and the pinned seeded `note "written" → "captured"` all still
+ * warn, because a leaf that was ALREADY empty had nothing to lose and two
+ * non-empty scalars are a change rather than a loss.
+ *
+ * A REDUCTION compares as an identity, not a container. `{"[cell]": {space,
+ * id, path}}` naming a different document is a change, not an emptying — and
+ * it must stay that way: a pattern update rotates compiler-generated internal
+ * cell identities on purpose, so failing on a moved reduction would red every
+ * edit. A reduction that became NOTHING is still lost, caught by the emptiness
+ * test above before this branch is reached.
+ */
+function lostAnything(before: unknown, after: unknown): boolean {
+  // Nothing to lose.
+  if (isEmptyValue(before)) return false;
+  // Held something, holds nothing now.
+  if (isEmptyValue(after)) return true;
+  if (isReduction(before) || isReduction(after)) return false;
+  if (Array.isArray(before)) {
+    // A shorter array reaches this through the per-element `undefined`.
+    if (!Array.isArray(after)) return true;
+    return before.some((item, index) => lostAnything(item, after[index]));
+  }
+  if (
+    typeof before === "object" && before !== null &&
+    typeof after === "object" && after !== null && !Array.isArray(after)
+  ) {
+    return Object.entries(before as Record<string, unknown>).some(
+      ([key, value]) =>
+        lostAnything(value, (after as Record<string, unknown>)[key]),
+    );
+  }
+  // Two non-empty values that simply differ.
+  return false;
 }
 
 /**

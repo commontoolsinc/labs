@@ -317,11 +317,14 @@ export async function replayVintage(
       updated: 0,
       stranded: 0,
       servedRoute: 0,
-      covered: new Set(
-        targets
-          .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
-          .filter((key): key is string => key !== undefined),
-      ),
+      // Empty here, and filled as each target is actually REPLAYED. Seeding it
+      // from `targets` up front was the same silent-narrowing shape this file
+      // keeps hitting from the other side: a target skipped as a served route,
+      // or one the presence control already reported, still counted as covered,
+      // so a required pattern reachable ONLY that way satisfied the coverage
+      // gate without ever being materialized or compared. The docstring says
+      // coverage means "X was replayed"; now it does.
+      covered: new Set<string>(),
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -462,6 +465,20 @@ export async function replayVintage(
         report.servedRoute++;
         continue;
       }
+      // Covered from HERE: today's source for this target resolved, compiled,
+      // and was not skipped. An UNCHANGED identity below still counts — the
+      // fixture exercised the pattern and found no migration to run, which is
+      // the common case and a real answer. What must not count is a target
+      // that never got this far.
+      //
+      // PINNED only. An auto capture is regenerable and pruned by count, so
+      // letting one satisfy the coverage gate means retention can delete the
+      // gate's only evidence for a pattern and the run still reads green. That
+      // guarantee used to live in `coveredPatternKeys`, which coverage stopped
+      // going through when it moved to what the replay actually replayed; it is
+      // restored here rather than left to the fact that nothing writes an auto
+      // capture yet.
+      if (vintage.tier === PINNED) report.covered.add(key);
       const today = runtimeVintage.runtime.patternManager
         .getArtifactEntryRef(pattern)?.identity;
       // Unchanged identity, no migration to exercise. This is the common case
@@ -807,10 +824,18 @@ export async function captureVintage(
     // exactly why `isUpgradeTarget` already rejects it. Refusing a whole
     // capture because one appeared would block any test that builds a pattern
     // in hand; `topics/topics.test.tsx` has six.
+    // Asked with the SAME question the replay asks — `patternKeyFromMain` —
+    // rather than the weaker "starts with a slash". The two disagreeing is the
+    // defect this capture guard exists to prevent, and it had drifted back in
+    // on a new axis: a pattern instantiated from outside `packages/patterns/`
+    // (a `/packages/home-schemas/...` path) satisfied the slash test, captured
+    // fine, and then hard-failed EVERY replay with "neither a repo path nor a
+    // served pattern route". A capture the gate accepts must be a replay it
+    // accepts.
     const unaddressable = entries.filter(
       (e) =>
         !e.identity.startsWith("keyless:") &&
-        (e.main === undefined || !e.main.startsWith("/")),
+        patternKeyFromMain(e.main, patternsPrefix(roots)) === undefined,
     );
     if (unaddressable.length > 0) {
       throw new Error(

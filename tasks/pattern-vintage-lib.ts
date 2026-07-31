@@ -213,17 +213,6 @@ export async function collectVintages(
   return found;
 }
 
-/** Pattern keys with at least one PINNED vintage. */
-export function coveredPatternKeys(
-  vintages: readonly VintageRef[],
-): Set<string> {
-  const covered = new Set<string>();
-  for (const vintage of vintages) {
-    if (vintage.tier === PINNED) covered.add(vintage.testKey);
-  }
-  return covered;
-}
-
 /**
  * Pattern keys that MUST have a pinned vintage.
  *
@@ -401,12 +390,21 @@ export function reportReplaySummary(
     targets: number;
     changed: number;
     updated: number;
+    servedRoute: number;
   },
 ): string {
+  // Served routes are PRINTED, not merely counted. They are targets the run
+  // deliberately did not identity-compare, so a summary that omitted them
+  // described more coverage than the run bought — and the count existed for
+  // exactly that reason while nothing displayed it.
+  const served = counts.servedRoute > 0
+    ? ` ${counts.servedRoute} target(s) were served routes and not ` +
+      `identity-compared.`
+    : "";
   return `Replayed ${counts.replayed} vintage(s): ${counts.candidates} ` +
     `recorded instantiation(s), all mappable to a file; ${counts.targets} ` +
     `upgrade target(s), ${counts.changed} changed since capture, ` +
-    `${counts.updated} updated cleanly with no state stranded.`;
+    `${counts.updated} updated cleanly with no state stranded.${served}`;
 }
 
 /** What the gate prints when it found no fixture to replay at all. */
