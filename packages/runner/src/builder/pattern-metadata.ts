@@ -178,6 +178,66 @@ export function getArtifactEntryRef(
     entryRefByValue.get(resolveOriginal(key) as object);
 }
 
+// The authored file a pattern was defined in, per live builder artifact.
+//
+// Distinct from `programByPattern`, which holds the whole source CLOSURE and is
+// deliberately absent on the by-identity reload path. This is just the
+// filename, which that path does know and can afford to keep — enough to map a
+// live pattern back to a file without carrying its sources.
+//
+// A WeakMap for the same reason `programByPattern` is one: an evaluated
+// module's exports are HARDENED, so defining a property on one throws ("object
+// is not extensible"). The association has to live beside the value, not on it.
+const sourcePathByValue = new WeakMap<object, string>();
+
+/**
+ * Associate the authored file a builder artifact came from. Written by the
+ * PatternManager when it indexes an evaluated module, alongside the entry ref.
+ *
+ * LAST write wins, which is the opposite of {@link setArtifactEntryRef} and is
+ * load-bearing rather than incidental. A re-export barrel puts the SAME artifact
+ * object in two namespaces, so this is called twice for it — once with the
+ * barrel's filename, once with the defining module's. The defining module is the
+ * answer that is useful (it is the file a reader must edit, and the only one
+ * whose default export is this artifact), and it comes LAST because the evaluate
+ * loop walks `graph.specifierByPath` importer-first. First-write-wins would name
+ * the barrel. `Engine.recordModuleProvenance` solves the same re-export
+ * ambiguity explicitly; here the traversal order supplies it, so a change to
+ * that order has to preserve this.
+ *
+ * Gated on trusted-builder provenance to match the two writes it sits beside in
+ * `registerEvaluatedModules` — `indexArtifact` and `recordModuleProvenance` both
+ * gate the same way. Nothing that reaches {@link getPatternSourcePath} is
+ * untrusted, so the gate costs no coverage and keeps the table's population
+ * equal to the artifact index's.
+ */
+export function setPatternSourcePath(
+  value: unknown,
+  sourcePath: string,
+): void {
+  if (!isTrustedBuilderArtifact(value)) return;
+  const key = asKey(value);
+  if (key) sourcePathByValue.set(key, sourcePath);
+}
+
+/**
+ * The authored file a builder artifact came from — the exact object first, then
+ * its root original.
+ *
+ * The derivation walk is load-bearing, not defensive: a nested pattern reaches
+ * the runner as a derivation COPY (binding and traversal copies), and the
+ * source path is stamped post-evaluation on the module export it was copied
+ * from. Probing only the exact object misses every sub-pattern, which is the
+ * whole population this table exists to name. Same lazy resolution, and for the
+ * same reason, as {@link getArtifactEntryRef}.
+ */
+export function getPatternSourcePath(value: unknown): string | undefined {
+  const key = asKey(value);
+  if (!key) return undefined;
+  return sourcePathByValue.get(key) ??
+    sourcePathByValue.get(resolveOriginal(key) as object);
+}
+
 /**
  * True only for a value that is structurally a pattern AND has trusted builder
  * provenance — either it carries the brand directly, or it is a derivation /

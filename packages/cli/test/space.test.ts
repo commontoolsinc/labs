@@ -15,6 +15,21 @@ import { cf, withEnv } from "./utils.ts";
 /** `CliResult` streams are line arrays; join before substring assertions. */
 const text = (lines: string[]): string => lines.join("\n");
 
+/**
+ * Staging directories `--from <url>` may have created, by name.
+ *
+ * Callers compare a before/after set rather than asserting the system temp
+ * directory holds none: it is shared, so an unrelated leftover would fail that
+ * spuriously and forever.
+ */
+async function stagingDirs(): Promise<Set<string>> {
+  const found = new Set<string>();
+  for await (const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")) {
+    if (entry.name.startsWith("cf-space-clone-")) found.add(entry.name);
+  }
+  return found;
+}
+
 const SPACE = "did:key:z6MkCliCloneTest";
 const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
 const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
@@ -194,6 +209,34 @@ describe("cf space", () => {
     });
   });
 
+  it("--expect-migration passes a rewrite and still fails a removal", async () => {
+    // The flag decides verify's EXIT CODE, which is the only machine-readable
+    // signal a rehearsal script has. Without it a successful migration exits
+    // nonzero and the script stops on success; with it, a removal must still
+    // fail or the gate is worthless.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+
+      // What a migration looks like: derived values rewritten, nothing dropped.
+      writeToWorkingCopy(clone, [
+        ["of:named", { value: "rewritten", result: link("of:piece") }],
+      ]);
+      const strict = await cf(`space verify ${clone}`);
+      expect(strict.code).toBe(1); // any change fails the strict default
+      const relaxed = await cf(`space verify ${clone} --expect-migration`);
+      expect(relaxed.code).toBe(0); // ...but is the expected migration outcome
+      expect(text(relaxed.stdout)).toContain("removed    0");
+
+      // A removal must fail even with the flag, or the gate protects nothing.
+      const db = new Database(workingCopy(clone));
+      db.exec(`DELETE FROM revision WHERE id = 'of:named'`);
+      db.close();
+      const removed = await cf(`space verify ${clone} --expect-migration`);
+      expect(removed.code).toBe(1);
+      expect(text(removed.stdout)).toContain("ENTITIES REMOVED");
+    });
+  });
+
   it("requires --from and --to, and says what they are for", async () => {
     await withFixture(async ({ snapshot, clone }) => {
       const noFrom = await cf(`space clone ${SPACE} --to ${clone}`);
@@ -214,18 +257,6 @@ describe("cf space", () => {
     // snapshot across operators. A real snapshot is gigabytes, so the staging
     // copy must not survive the command.
     await withFixture(async ({ snapshot, clone }) => {
-      // Compare staging directories before and after rather than asserting the
-      // system temp directory holds none: it is shared, so an unrelated
-      // leftover would fail this spuriously and forever.
-      const stagingDirs = async (): Promise<Set<string>> => {
-        const found = new Set<string>();
-        for await (
-          const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")
-        ) {
-          if (entry.name.startsWith("cf-space-clone-")) found.add(entry.name);
-        }
-        return found;
-      };
       const before = await stagingDirs();
 
       const body = await Deno.readFile(snapshot);
@@ -249,6 +280,225 @@ describe("cf space", () => {
       const after = await stagingDirs();
       const leaked = [...after].filter((name) => !before.has(name));
       expect(leaked).toEqual([]);
+    });
+  });
+
+  it("cleans up staging when the download dies mid-stream", async () => {
+    // The failure a status check cannot catch: headers say 200, then the
+    // connection drops. At the gigabyte scale `--from <url>` exists for, the
+    // partial file stranded in the system temp directory is however much
+    // arrived — so cleanup has to live where the failure does, not with a
+    // caller that never received a directory to clean.
+    await withFixture(async ({ snapshot, clone }) => {
+      const before = await stagingDirs();
+
+      const body = await Deno.readFile(snapshot);
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          // Promise a full-length body and deliver a prefix, so the truncation
+          // surfaces on the CLIENT as a short read. Erroring the stream instead
+          // would work too, but the server-side abort prints a stack trace into
+          // every run of this suite.
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(body.slice(0, 512));
+                controller.close();
+              },
+            }),
+            { headers: { "content-length": String(body.length) } },
+          ),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/snapshot.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+      } finally {
+        await server.shutdown();
+      }
+
+      const leaked = [...await stagingDirs()].filter((n) => !before.has(n));
+      expect(leaked).toEqual([]);
+    });
+  });
+
+  it("refuses a redirect that downgrades to plaintext http", async () => {
+    // Validating only the URL an operator typed proves nothing about where the
+    // bytes came from: `fetch` follows redirects itself and reports only the
+    // final response, so a permitted origin that 302s elsewhere would carry the
+    // whole space over the redirected transport, having passed the check.
+    await withFixture(async ({ clone }) => {
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: "http://example.com/snapshot.sqlite" },
+          }),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/snapshot.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain("refusing to download");
+      } finally {
+        await server.shutdown();
+      }
+    });
+  });
+
+  it("follows a permitted redirect and clones what it lands on", async () => {
+    // The other half: refusing the downgrade must not refuse redirects as
+    // such, or `--from <s3-url>` — the whole reason the flag takes a URL —
+    // stops working the first time a bucket redirects.
+    await withFixture(async ({ snapshot, clone }) => {
+      const body = await Deno.readFile(snapshot);
+      const target = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () => new Response(body),
+      );
+      const redirector = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(null, {
+            status: 302,
+            // Relative, so this also pins that a bare `Location` resolves
+            // against the URL it came from rather than being taken verbatim.
+            headers: {
+              location: `http://127.0.0.1:${target.addr.port}/s.sqlite`,
+            },
+          }),
+      );
+      try {
+        const result = await cf(
+          `space clone ${SPACE} ` +
+            `--from http://127.0.0.1:${redirector.addr.port}/go --to ${clone}`,
+        );
+        expect(result.code).toBe(0);
+        expect((await cf(`space verify ${clone}`)).code).toBe(0);
+      } finally {
+        await redirector.shutdown();
+        await target.shutdown();
+      }
+    });
+  });
+
+  it("refuses to pull a whole-space snapshot over plaintext http", async () => {
+    // A snapshot is the entire contents of a space — the same confidentiality
+    // judgement that keeps the dump endpoint off in production. Loopback is
+    // exempt (it never leaves the machine) and the tests above rely on that.
+    await withFixture(async ({ clone }) => {
+      const result = await cf(
+        `space clone ${SPACE} --from http://example.com/s.sqlite --to ${clone}`,
+      );
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).toContain("refusing to download");
+    });
+  });
+
+  it("accepts https and fails on the network, not on the transport check", async () => {
+    // The guard must let the transport it exists to require actually through.
+    // Nothing listens on this port, so the request fails at connect — the point
+    // is that it got as far as connecting.
+    await withFixture(async ({ clone }) => {
+      const result = await cf(
+        `space clone ${SPACE} --from https://127.0.0.1:9/s.sqlite --to ${clone}`,
+      );
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).not.toContain("refusing to download");
+    });
+  });
+
+  it("gives up on a redirect loop instead of following it forever", async () => {
+    await withFixture(async ({ clone }) => {
+      let hops = 0;
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        (request) => {
+          hops++;
+          return new Response(null, {
+            status: 302,
+            headers: { location: new URL(request.url).pathname + "x" },
+          });
+        },
+      );
+      try {
+        const result = await cf(
+          `space clone ${SPACE} ` +
+            `--from http://127.0.0.1:${server.addr.port}/go --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain("redirects");
+        // Bounded, and bounded by the hop limit rather than by exhaustion.
+        expect(hops).toBeLessThanOrEqual(6);
+      } finally {
+        await server.shutdown();
+      }
+    });
+  });
+
+  it("warns that an ambiguous id could hide a change to it", async () => {
+    // An id one manifest calls generated and another calls named is counted as
+    // generated and excluded, so a change to it never reaches the verdict.
+    // Nothing gates on this, which makes saying it the whole protection.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const manifestPath = `${clone}/clone.json`;
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+      manifest.fingerprint.ambiguous = 1;
+      await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("would not show");
+    });
+  });
+
+  it("says so when a clone cannot report what its BASELINE excluded", async () => {
+    // An entity excluded from the baseline is absent from the "before" side, so
+    // if it is still excluded now the diff cannot compare it at all and a change
+    // to it is silent. That blind spot belongs to the baseline and never shows
+    // up in a working-copy count — and on a clone predating the recording its
+    // size is unknown, which is a weaker claim than zero and must not render as
+    // zero.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+
+      const manifestPath = `${clone}/clone.json`;
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+      expect(manifest.fingerprint.unhashable).toBe(0);
+      delete manifest.fingerprint.unhashable;
+      delete manifest.fingerprint.ambiguous;
+      await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("predates uncertainty recording");
+    });
+  });
+
+  it("reports uncertainty the BASELINE carried, not just the working copy", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+
+      // Stand in for a baseline that excluded entities: the working copy is
+      // untouched, so nothing on the "after" side would mention them.
+      const manifestPath = `${clone}/clone.json`;
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+      manifest.fingerprint.unhashable = 2;
+      await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      const out = text(result.stdout);
+      expect(out).toContain("content    unchanged");
+      expect(out).toContain("in the BASELINE");
+      expect(out).toContain("2 entities could not be hashed");
     });
   });
 

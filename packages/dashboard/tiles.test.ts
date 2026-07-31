@@ -43,6 +43,7 @@ function ctx(
 let nextRunId = 1;
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: nextRunId++,
     status: "completed",
@@ -51,7 +52,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
@@ -141,6 +143,7 @@ Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the mo
   const now = Date.now();
   const at = (minsAgo: number) =>
     run({
+      created_at: new Date(now - minsAgo * 60_000).toISOString(),
       run_started_at: new Date(now - minsAgo * 60_000).toISOString(),
       updated_at: new Date(now - minsAgo * 60_000 + 5 * 60_000).toISOString(),
     });
@@ -165,6 +168,7 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
   const now = Date.now();
   const at = (i: number, over: Partial<Run>) =>
     run({
+      created_at: new Date(now - i * 60_000).toISOString(),
       run_started_at: new Date(now - i * 60_000).toISOString(),
       updated_at: new Date(now - i * 60_000 + 5 * 60_000).toISOString(),
       ...over,
@@ -175,12 +179,47 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
     at(1, { conclusion: "cancelled" }),
     at(2, { conclusion: "timed_out" }),
     at(3, { status: "in_progress", conclusion: null }),
+    at(4, { event: "workflow_dispatch", conclusion: "success" }),
   ];
-  // Only the 20 successful runs are counted; the rest are ignored.
+  // Only the 20 successful push runs are counted; the rest are ignored.
   assertStringIncludes(
     (await labsCiDuration.collect(ctx(runs))).sub ?? "",
     "20 passing runs in the last 6h",
   );
+});
+
+Deno.test("ci-duration: a run without a usable landing span is dropped", async () => {
+  const now = Date.now();
+  const usable = run({
+    created_at: new Date(now - 10 * 60_000).toISOString(),
+    run_started_at: new Date(now - 10 * 60_000).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  });
+  // A final update at or before the landing trigger, and a landing trigger that
+  // does not parse. Both would otherwise reach the median as a duration of zero
+  // or NaN minutes.
+  const endsBeforeItLands = run({
+    created_at: new Date(now).toISOString(),
+    run_started_at: new Date(now).toISOString(),
+    updated_at: new Date(now - 60_000).toISOString(),
+  });
+  const unparseableLanding = run({
+    created_at: "the fourteenth of never",
+    run_started_at: new Date(now - 20 * 60_000).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  });
+
+  const mixed = await labsCiDuration.collect(
+    ctx([usable, endsBeforeItLands, unparseableLanding]),
+  );
+  assertEquals(mixed.value, "10m");
+  assertStringIncludes(mixed.sub ?? "", "last 1 passing runs");
+
+  const none = await labsCiDuration.collect(
+    ctx([endsBeforeItLands, unparseableLanding]),
+  );
+  assertEquals(none.status, "unknown");
+  assertEquals(none.value, "—");
 });
 
 Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {

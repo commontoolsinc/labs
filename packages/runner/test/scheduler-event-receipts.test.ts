@@ -1351,6 +1351,107 @@ describe("scheduler event receipts", () => {
     expect(handlerInvocations).toBe(2);
     expect(root.key("effectsTotal").get()).toBe(10);
   });
+
+  it("delivers a schema-missing payload as an absent event and still receipts it", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const seenEvents: unknown[] = [];
+    const strictVerb = handler(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      },
+      { type: "object", properties: {} },
+      (event: { value: number } | undefined) => {
+        handlerInvocations++;
+        seenEvents.push(event);
+      },
+    );
+    const rootPattern = pattern(() => ({ stream: strictVerb({}) }));
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "invalid payload receipt root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const eventId = "evt:invalid-payload:0:invalid-root";
+    runtime.scheduler.queueEvent(
+      resolvedStreamLink(root.key("stream"), runtime),
+      { valu: 21 },
+      undefined,
+      undefined,
+      false,
+      { eventId },
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    // `generateHandlerSchema` requires only `$ctx`, so a payload that misses
+    // the event schema does not make the argument invalid — `$event` simply
+    // reads back undefined. The body runs with no event and its receipt spends
+    // the id, which is why a mismatched payload has to be refused before it is
+    // ever dispatched rather than caught here.
+    expect(handlerInvocations).toBe(1);
+    expect(seenEvents).toEqual([undefined]);
+    const receipt = receiptCellForEvent<Record<string, unknown>>(
+      runtime,
+      eventId,
+    );
+    await receipt.pull();
+    expect(receipt.get()).toEqual({});
+  });
+
+  it("withholds the receipt address while receipts are disabled", async () => {
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { experimental: { commitPreconditions: false } },
+    ));
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const noop = handler<unknown, Record<string, never>>(
+      () => {
+        handlerInvocations++;
+      },
+      { proxy: true },
+    );
+    const rootPattern = pattern(() => ({ stream: noop({}) }));
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "receipt link flag off root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const receiptLinks: Array<unknown> = [];
+    const streamCell = root.key("stream") as Cell<unknown>;
+    streamCell.send({}, (t: IExtendedStorageTransaction) => {
+      receiptLinks.push(t.handlingReceiptLink);
+    }, { eventId: "evt:receipt-link-off:0:flag-off-root" });
+
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 1 && receiptLinks.length === 1,
+      "flag-off send did not settle",
+    );
+
+    // No receipt is created or create-only marked while the flag is off, so
+    // there is no address to hand back. Publishing one would advertise a
+    // witness that does not exist.
+    expect(receiptLinks).toEqual([undefined]);
+  });
 });
 
 Deno.test("navigateTo handler results navigate once and deduplicate redelivery", async () => {

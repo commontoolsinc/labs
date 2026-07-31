@@ -146,7 +146,7 @@ describe("TypeScriptCompiler", () => {
     expect(main.js).toContain('require("./math/subtract.ts")');
     expect(main.js).toContain("exports.run");
     expect(main.sourceMap).toBeDefined();
-    // No AMD wrapper / define() — this is bare CommonJS.
+    // Bare CommonJS: no bundler wrapper, no `define()` registration.
     expect(main.js).not.toContain("define(");
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });

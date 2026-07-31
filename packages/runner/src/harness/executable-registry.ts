@@ -151,11 +151,10 @@ export class ExecutableRegistry {
  * (used by {@link ExecutableRegistry.trustHostValue}'s
  * `collectHostFunctions`).
  *
- * Data properties — the AMD/CommonJS bundle shape (`exports.x = …`) — expose
- * their value directly. SES module-namespace exports — the ESM module-record
- * loader shape — are live-binding ACCESSOR properties (`get`/`set`, no `value`).
- * Reading only `descriptor.value` therefore never descends into an ESM module's
- * exports (CT-1623).
+ * Data properties — the CommonJS shape (`exports.x = …`) — expose their value
+ * directly. SES module-namespace exports are live-binding ACCESSOR properties
+ * (`get`/`set`, no `value`). Reading only `descriptor.value` therefore never
+ * descends into a module namespace's exports (CT-1623).
  *
  * Reading via [[Get]] is scoped to genuine module namespaces (see
  * {@link isModuleNamespaceObject}), whose getters are spec-defined live bindings

@@ -1,4 +1,5 @@
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isInertArray } from "@commonfabric/utils/arrays";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
@@ -41,13 +42,16 @@ export function isFabricValueLayer(
       }
       if (Array.isArray(value)) {
         // Arrays with `undefined` elements and sparse holes are accepted, but
-        // not arrays carrying named or symbol-keyed properties.
-        return isArrayWithOnlyIndexProperties(value);
+        // not arrays carrying named or symbol-keyed properties, nor an
+        // accessor-backed index (live code rather than inert data).
+        return isInertArray(value);
       }
       // Plain objects are accepted; class instances are not (except
-      // `FabricSpecialObject`, handled above).
-      const proto = Object.getPrototypeOf(value);
-      return proto === null || proto === Object.prototype;
+      // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
+      // `string`, so a symbol key has no representation either, and neither
+      // does a non-enumerable string key; an accessor-backed property is live
+      // code rather than inert data.
+      return isInertPlainObject(value);
     }
 
     case "symbol": {
@@ -73,8 +77,10 @@ export function isFabricValueLayer(
  * properties, `length` aside (sparse holes allowed), or a plain object whose
  * values are all
  * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
- * symbol -- whether the value itself or reached anywhere within it -- and for
- * any other class instance (`Date`, `Map`, ...) not representable as a
+ * symbol -- whether the value itself or reached anywhere within it -- for an
+ * accessor-backed (getter/setter) property anywhere, plain-object keyed or
+ * array-indexed alike, which makes its container non-inert, and for any
+ * other class instance (`Date`, `Map`, ...) not representable as a
  * `FabricValue`. Handles circular references.
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
@@ -134,14 +140,19 @@ export function isFabricValue(value: unknown): value is FabricValue {
       return true;
     } else if (Array.isArray(item)) {
       // Arrays with named (non-index) or symbol-keyed properties have no
-      // fabric representation.
-      if (!isArrayWithOnlyIndexProperties(item)) return false;
+      // fabric representation; an accessor-backed index is live code rather
+      // than inert data.
+      if (!isInertArray(item)) return false;
       for (let i = 0; i < item.length; i++) {
         if (!(i in item)) continue; // sparse hole
         if (!check(item[i])) return false;
       }
       return true;
     } else if (isPlainObject(item)) {
+      // Symbol-keyed and non-enumerable string-keyed properties have no fabric
+      // representation, the same as an array's non-index properties; an
+      // accessor-backed property is live code rather than inert data.
+      if (!isInertPlainObject(item)) return false;
       const record = item as Record<string, unknown>;
       for (const key of Object.keys(record)) {
         if (!check(record[key])) return false;

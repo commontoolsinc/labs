@@ -2,21 +2,22 @@ import { parse } from "./commands/mod.ts";
 import { main as rootCommand } from "./commands/main.ts";
 import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
 import { ValidationError } from "@cliffy/command";
+import { VerbInputValidationError } from "./lib/callable.ts";
 import { cliName } from "./lib/cli-name.ts";
 import { applyLogLevel } from "./lib/log-level.ts";
 import { applyColorMode } from "./lib/color-mode.ts";
 import { reservesStdoutForCommandOutput } from "./lib/json-output.ts";
 
 /**
- * The value to print for a top-level CLI failure. Validation, transformer, and
- * compiler errors carry user-facing messages, so print those without a stack
- * trace. Other Errors print their stack, falling back to the message. Anything
- * else prints as-is.
+ * The value to print for a top-level CLI failure. Validation, transformer,
+ * compiler, and verb-input errors carry user-facing messages, so print those
+ * without a stack trace. Other Errors print their stack, falling back to the
+ * message. Anything else prints as-is.
  */
 export function renderCliError(e: unknown): unknown {
   if (
     e instanceof ValidationError || e instanceof TransformerError ||
-    e instanceof CompilerError
+    e instanceof CompilerError || e instanceof VerbInputValidationError
   ) {
     return e.message;
   }

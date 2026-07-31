@@ -841,8 +841,11 @@ export interface IStorageTransaction {
    * by identity, a numeric increment, or a value removed by identity. The commit
    * emits these as the corresponding mergeable op (which the server resolves
    * against durable state) and drops the op's path from the commit's conflict
-   * read set, so concurrent and stale-base writes merge rather than clobber. The
-   * op catalog and folding rules live in ./mergeable-ops.ts.
+   * read set, so concurrent and stale-base writes merge rather than clobber.
+   * Recording is an intent, not a guarantee: a later write that reshapes the
+   * same collection, or a recorded tail that no longer describes the local value
+   * at commit, falls the path back to the whole-value diff. The op catalog,
+   * folding rules, and that fallback live in ./mergeable-ops.ts.
    */
   recordMergeableOp?(
     address: IMemorySpaceAddress,
@@ -850,12 +853,19 @@ export interface IStorageTransaction {
   ): void;
 
   /**
-   * Abandon the mergeable fast path for the array at `address`. A caller that
-   * rewrites the whole array in a way a recorded mergeable op cannot represent —
-   * an in-place reshape such as sort/reverse/splice after a push — calls this so
-   * the commit emits the whole-array diff (the correct local value) instead of a
-   * tail-relative op whose recorded tail no longer identifies the appended
-   * elements. A path with no recorded op is left untouched.
+   * Abandon the mergeable fast path for the arrays covered by `address`. A
+   * caller that rewrites an array in a way a recorded mergeable op cannot
+   * represent — an in-place reshape such as sort/reverse/splice after a push, or
+   * a whole-value overwrite — calls this so the commit emits the whole-array
+   * diff (the correct local value) instead of a tail-relative op whose recorded
+   * tail no longer identifies the appended elements.
+   *
+   * This covers every recorded op AT or BENEATH `address`, since a write to an
+   * enclosing object rewrites the arrays inside it too, and nothing above it, so
+   * a write beneath an array (an element edit) leaves that array's op alone. A
+   * path carrying no op yet is left untouched — not because a reshape before an
+   * op is harmless, but because that case is caught at commit instead, when the
+   * op's recorded tail is checked against the value it claims to describe.
    */
   poisonMergeableOp?(address: IMemorySpaceAddress): void;
 

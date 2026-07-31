@@ -66,10 +66,18 @@ const bigQueryStub = (rows: (string | null)[][]) => (url: string): Response =>
 const DAY = 86_400_000;
 const TABLE = "billing-proj.billing.gcp_billing_export_v1_XXXX";
 
+// One row per day, in the shape the query returns: the day, its cost before
+// credits, the credit that came off it (negative, as the export records it), and
+// the seconds-epoch time the export last added to that day. These fixtures export
+// each day eight hours in, so every day but the newest has a later day written
+// after it, which is what marks a day finished.
+const exportedAt = (day: string) => (Date.parse(`${day}T08:00:00Z`) / 1000);
+
 function dailyRows(
   first: string,
   last: string,
   amount: (day: string) => number,
+  credit: (day: string) => number = () => 0,
 ): string[][] {
   const rows: string[][] = [];
   for (
@@ -78,16 +86,24 @@ function dailyRows(
     time += DAY
   ) {
     const day = new Date(time).toISOString().slice(0, 10);
-    rows.push([day, String(amount(day))]);
+    rows.push([
+      day,
+      String(amount(day)),
+      String(credit(day)),
+      String(exportedAt(day)),
+    ]);
   }
   return rows;
 }
 
-const earlyMonthRows = () =>
+// Through to today, which the export is still writing: the newest finished day
+// is 2026-01-09, and today's own partial cost is $5.
+const earlyMonthRows = (credit: (day: string) => number = () => 0) =>
   dailyRows(
     "2025-11-26",
-    "2026-01-09",
-    (day) => day.startsWith("2026-01") ? 20 : 10,
+    "2026-01-10",
+    (day) => day === "2026-01-10" ? 5 : day.startsWith("2026-01") ? 20 : 10,
+    credit,
   );
 
 Deno.test(
@@ -105,7 +121,7 @@ Deno.test(
   "cloud spend: an unsafe table id is refused before any query",
   async () => {
     const { result, calls } = await withFetch(
-      bigQueryStub([["2026-01-09", "10"]]),
+      bigQueryStub([["2026-01-09", "10", "0"]]),
       () =>
         gcpSpend.collect(
           ctx({
@@ -134,13 +150,14 @@ Deno.test(
         ),
     );
 
-    // Nine complete January days at $20 plus five December days at $10 form
-    // the 14-day rate: $230 / 14 * 31 = about $509.
+    // Nine finished January days at $20 plus five December days at $10 form
+    // the 14-day rate: $230 / 14 * 31 = about $509. Today's $5 is in the
+    // month-to-date total and out of the rate.
     assertEquals(result.status, "good");
     assertEquals(result.value, "~$509/mo");
     assertEquals(
       result.aside,
-      '<span class="hmtd">$180 MTD</span>',
+      '<span class="hmtd">$185 MTD</span>',
     );
     assertEquals(result.sub, "billing account spend");
     assertEquals(result.duration, 45 * DAY);
@@ -161,6 +178,10 @@ Deno.test(
     );
     const sql = JSON.parse(query.body).query as string;
     assertStringIncludes(sql, "SUM(cost)");
+    assertStringIncludes(
+      sql,
+      "SUM((SELECT SUM(credit.amount) FROM UNNEST(credits) AS credit))",
+    );
     assertStringIncludes(sql, `\`${TABLE}\``);
     assertStringIncludes(sql, "INTERVAL 45 DAY");
     assertStringIncludes(
@@ -168,6 +189,44 @@ Deno.test(
       "DATE(usage_start_time) <= CURRENT_DATE()",
     );
     assertStringIncludes(sql, "GROUP BY day ORDER BY day");
+  },
+);
+
+Deno.test(
+  "cloud spend: credits come off every figure the tile reports",
+  async () => {
+    // A quarter off every day: $20 days cost $15, $10 days cost $7.50, and
+    // today's $5 so far costs $3.75. The tile reports only those amounts.
+    const { result } = await withFetch(
+      bigQueryStub(
+        earlyMonthRows((day) =>
+          day === "2026-01-10" ? -1.25 : day.startsWith("2026-01") ? -5 : -2.5
+        ),
+      ),
+      () =>
+        gcpSpend.collect(
+          ctx({
+            GCP_BILLING_TABLE: TABLE,
+            GCP_DAILY_BUDGET: "17",
+          }),
+        ),
+    );
+
+    // The same 14-day window, after credits: nine January days at $15 plus five
+    // December days at $7.50 is $172.50 / 14 * 31 = about $382.
+    assertEquals(result.value, "~$382/mo");
+    assertEquals(
+      result.aside,
+      '<span class="hmtd">$139 MTD</span>',
+    );
+    assertEquals(result.sub, "billing account spend");
+    // One line, for what the account pays. The credit is not a figure the tile
+    // reports, so nothing on it names or charts the cost before credits.
+    const polylines = [
+      ...(result.extra ?? "").matchAll(/<polyline points="([^"]+)"/g),
+    ];
+    assertEquals(polylines.length, 2);
+    assert(!(result.extra ?? "").includes("$185"));
   },
 );
 
@@ -204,7 +263,7 @@ Deno.test(
             "2025-12-31",
             () => 10,
           ),
-          ["2026-01-01", "7"],
+          ["2026-01-01", "7", "0", String(exportedAt("2026-01-01"))],
         ],
       ),
       () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
@@ -230,14 +289,16 @@ Deno.test(
   "cloud spend: a short export history does not invent earlier zero-cost days",
   async () => {
     const { result } = await withFetch(
-      bigQueryStub([["2026-01-09", "20"]]),
+      bigQueryStub(dailyRows("2026-01-09", "2026-01-10", () => 20)),
       () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
     );
 
+    // One finished day at $20 rates the month; today's $20 so far is only part
+    // of the month-to-date total, and one day is too few to chart.
     assertEquals(result.value, "~$620/mo");
     assertEquals(
       result.aside,
-      '<span class="hmtd">$20 MTD</span>',
+      '<span class="hmtd">$40 MTD</span>',
     );
     assertEquals(result.duration, 0);
     assertEquals(result.extra, "");
@@ -258,13 +319,11 @@ Deno.test(
 );
 
 Deno.test(
-  "cloud spend: a missing last complete day means billing data has not arrived",
+  "cloud spend: a single exported day is one the export has not finished",
   async () => {
+    // Nothing later has been written, so the export may still be adding to it.
     const { result } = await withFetch(
-      bigQueryStub([
-        ["2026-01-08", "20"],
-        ["2026-01-10", "5"],
-      ]),
+      bigQueryStub(dailyRows("2026-01-09", "2026-01-09", () => 20)),
       () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
     );
     assertEquals(result.status, "unknown");
@@ -274,15 +333,57 @@ Deno.test(
 );
 
 Deno.test(
+  "cloud spend: days the export is still adding to stay out of the rate",
+  async () => {
+    const { result } = await withFetch(
+      bigQueryStub([
+        ...dailyRows("2026-01-01", "2026-01-07", () => 20),
+        // The export's newest write touched both of these days, so it has
+        // finished neither, and each holds part of a day's cost so far.
+        ["2026-01-08", "5", "0", String(exportedAt("2026-01-10"))],
+        ["2026-01-09", "5", "0", String(exportedAt("2026-01-10"))],
+      ]),
+      () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
+    );
+
+    // Seven finished days at $20 rate the month at $620. Rating the two
+    // part-days as well would put it near $517.
+    assertEquals(result.value, "~$620/mo");
+    assertEquals(
+      result.aside,
+      '<span class="hmtd">$150 MTD</span>',
+    );
+    assertEquals(result.duration, 7 * DAY);
+  },
+);
+
+Deno.test(
+  "cloud spend: an export that has finished nothing for days is gray",
+  async () => {
+    const { result } = await withFetch(
+      bigQueryStub(dailyRows("2026-01-01", "2026-01-03", () => 20)),
+      () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
+    );
+    assertEquals(result.status, "unknown");
+    assertEquals(result.value, "—");
+    assertEquals(result.sub, "billing export 8 days behind");
+  },
+);
+
+Deno.test(
   "cloud spend: malformed history is gray and never becomes a figure",
   async () => {
     for (
       const rows of [
-        [["2026-01-09", "not-a-number"]],
-        [["not-a-day", "10"]],
-        [["2026-99-99", "10"]],
-        [["2026-01-11", "10"]],
-        [["2026-01-09", null]],
+        [["2026-01-09", "not-a-number", "0", "1767000000"]],
+        [["not-a-day", "10", "0", "1767000000"]],
+        [["2026-99-99", "10", "0", "1767000000"]],
+        [["2026-01-11", "10", "0", "1767000000"]],
+        [["2026-01-09", null, "0", "1767000000"]],
+        [["2026-01-09", "10", "not-a-number", "1767000000"]],
+        [["2026-01-09", "10", null, "1767000000"]],
+        [["2026-01-09", "10", "0", "not-a-number"]],
+        [["2026-01-09", "10", "0", null]],
       ] as (string | null)[][][]
     ) {
       const { result } = await withFetch(

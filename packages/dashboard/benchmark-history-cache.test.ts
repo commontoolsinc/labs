@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   BENCHMARK_HISTORY_CACHE_DAYS,
+  BENCHMARK_HISTORY_SAMPLING_VERSION,
   BenchmarkHistoryStore,
   type BenchmarkStats,
 } from "./benchmark-history-cache.ts";
@@ -438,7 +439,7 @@ Deno.test("runtime benchmark history rejects malformed cache structures before m
   }
 });
 
-Deno.test("runtime benchmark history reads manifests written before result labels", async () => {
+Deno.test("runtime benchmark history refreshes legacy manifests without dropping their runs", async () => {
   const directory = await Deno.makeTempDir({ prefix: "benchmark-history-" });
   const file = `${directory}/history.json`;
   const now = Date.now();
@@ -462,6 +463,16 @@ Deno.test("runtime benchmark history reads manifests written before result label
     const store = new BenchmarkHistoryStore(file);
     await store.load();
     assertEquals(store.refresh?.result, "data");
+    assertEquals(store.refresh?.samplingVersion, undefined);
+    assertEquals(store.refreshedAt, 0);
+    assertEquals(store.refreshedRuns()?.map((run) => run.runId), [550]);
+
+    store.markRefreshed(now, store.list());
+    assertEquals(
+      store.refresh?.samplingVersion,
+      BENCHMARK_HISTORY_SAMPLING_VERSION,
+    );
+    assertEquals(store.refreshedAt, now);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

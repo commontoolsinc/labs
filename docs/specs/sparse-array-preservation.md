@@ -96,7 +96,7 @@ Data flows through the reactive pipeline in this order. Every layer preserves
 sparseness:
 
 ```
-Write path:  value → fabricFromNativeValue → recursivelyAddIDIfNeeded → storage
+Write path:  value → normalizeAndDiff (conversion + anchoring) → storage
 Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc.)
 ```
 
@@ -150,12 +150,14 @@ between Chronicle's `IAttestation`-shaped inputs and
 `applyMutablePathWrite`'s `FabricValue`-rooted form. Sparse-array
 handling is therefore identical between the two layers.
 
-### Cell write path (`packages/runner/src/cell.ts`)
+### Cell write path (`packages/runner/src/data-updating.ts`)
 
-`recursivelyAddIDIfNeeded` adds internal ID fields to objects in arrays for
-change tracking. It uses `forEach` into a pre-allocated `new Array(value.length)`
-— the callback is only called for present elements, so holes are preserved. The
-ID counter only increments for object elements; holes are skipped.
+Objects in arrays are anchored into entity documents inside
+`normalizeAndDiff()`'s array branch, driven by the writer's anchor id source
+(`DiffWalkState.nextAnchorId`, a builder frame's counter). The branch's
+per-index loop skips hole→hole positions outright (`!inNew && !inCur →
+continue`), so holes are preserved and draw no ids; the counter is consumed
+only for present object elements.
 
 The cell `push` method concatenates arrays using `forEach` on the original
 (sparse) array, then a `for` loop for the appended (dense) values.

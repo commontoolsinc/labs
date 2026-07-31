@@ -240,7 +240,8 @@ member of `FabricValue`.
 > through `shallowFabricFromNativeValue()` and `fabricFromNativeValue()`
 > (Section 4.9) unchanged: round-trip via `Symbol.for(key)` yields a result
 > that is `===` to any other `Symbol.for(key)` in the same realm. Unique
-> symbols throw with the message `"Cannot store unique (uninterned) symbol"`.
+> symbols throw with the message
+> ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``.
 
 ### 1.4 Native Object Wrapper Classes
 
@@ -1189,6 +1190,11 @@ Section 4.5.
   (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
 - Non-index keys cause rejection, `length` aside: named (string-keyed) and
   symbol-keyed properties alike, whether or not they are enumerable
+- Every present index must hold a *data* property: an accessor-backed
+  (getter and/or setter) index causes rejection, because an accessor is live
+  code rather than an inert value. Index enumerability is not significant,
+  because array contents are reached by index rather than by
+  enumeration-driven copying
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
 > explicitly-set `undefined` element. Given `const a = [1, , 3]`, index `1` is
@@ -1216,6 +1222,11 @@ Section 4.5.
 - Keys must be strings; symbol-keyed *properties* cause rejection (this
   is distinct from symbol *values*, which are admitted per Section 1.2
   with the runtime restriction in Section 1.3)
+- Every property must be an enumerable *data* property: an accessor-backed
+  (getter and/or setter) property causes rejection, because an accessor is
+  live code rather than an inert value, and a non-enumerable key causes
+  rejection because it has no representation as a property name in
+  name-driven copying or serialization
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - No distinction between regular and null-prototype objects; reconstruction
@@ -3032,7 +3043,7 @@ export function fabricFromNativeValue(
 | Input Type | Output |
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). All numbers pass through unchanged, including `-0`, `NaN`, and `±Infinity`. See Section 1.3 callout for layer-by-layer details. |
-| `symbol` | Registry-interned symbols (`Symbol.keyFor(s)` returns a string) returned as-is; unique symbols (`Symbol(desc)`) throw with the message `"Cannot store unique (uninterned) symbol"`. See Section 1.3 callout for layer-by-layer details. |
+| `symbol` | Registry-interned symbols (`Symbol.keyFor(s)` returns a string) returned as-is; unique symbols (`Symbol(desc)`) throw with the message ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``. See Section 1.3 callout for layer-by-layer details. |
 | `FabricPrimitive` (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
 | `FabricInstance` (including wrapper classes) | Returned as-is (already `FabricValue`). |
 | `Error` | Wrapped into `FabricError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `FabricValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time the `FabricError` codec's `encode()` runs, all nested values are already valid `FabricValue`. |

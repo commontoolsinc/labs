@@ -110,6 +110,51 @@ describe("type-check", () => {
       });
     });
 
+    describe("given a plain object with unrepresentable keys", () => {
+      // A symbol is a valid fabric *value* but not a property *name*:
+      // `FabricPlainObject` is keyed by `string`. A non-enumerable string key
+      // has no representation either, being dropped by every serialization.
+
+      it("returns `false` for a symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for a registered symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol.for("s")] = 2;
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for a non-enumerable string-keyed property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for an accessor-backed property", () => {
+        // An accessor is live code, not inert data: a read executes it and
+        // can answer differently every time. Freezing does not change that.
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
+        expect(isFabricValueLayer(obj)).toBe(false);
+        expect(isFabricValueLayer(Object.freeze(obj))).toBe(false);
+      });
+
+      it("returns `false` for a setter-only property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "s", { set: () => {}, enumerable: true });
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `true` for an object whose keys are all enumerable strings", () => {
+        expect(isFabricValueLayer({ a: 1, b: 2 })).toBe(true);
+        expect(isFabricValueLayer({})).toBe(true);
+        expect(isFabricValueLayer(Object.create(null))).toBe(true);
+      });
+    });
+
     describe("given a non-`FabricValue`", () => {
       it("returns `false` for an array with extra non-numeric properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
@@ -120,6 +165,25 @@ describe("type-check", () => {
       it("returns `false` for an array with a symbol-keyed property", () => {
         const arr = [1, 2, 3];
         (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(isFabricValueLayer(arr)).toBe(false);
+      });
+
+      it("returns `false` for an array with an accessor-backed index", () => {
+        // An accessor is live code, not inert data: a read executes it and
+        // can answer differently every time. Freezing does not change that.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: false,
+        });
+        expect(isFabricValueLayer(arr)).toBe(false);
+        expect(isFabricValueLayer(Object.freeze(arr))).toBe(false);
+      });
+
+      it("returns `false` for an array with a setter-only index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, { set: () => {}, enumerable: true });
         expect(isFabricValueLayer(arr)).toBe(false);
       });
 
@@ -210,6 +274,24 @@ describe("type-check", () => {
         expect(isFabricValue(obj)).toBe(true);
       });
 
+      it("returns `false` for an object with a symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(isFabricValue(obj)).toBe(false);
+      });
+
+      it("returns `false` for an object with a non-enumerable string key", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(isFabricValue(obj)).toBe(false);
+      });
+
+      it("returns `false` for a symbol-keyed object nested in the graph", () => {
+        const inner = { a: 1 } as Record<string | symbol, unknown>;
+        inner[Symbol("s")] = 2;
+        expect(isFabricValue({ outer: [inner] })).toBe(false);
+      });
+
       it("returns `true` for an array of `FabricValue`s", () => {
         expect(isFabricValue([])).toBe(true);
         expect(isFabricValue([1, 2, 3])).toBe(true);
@@ -286,6 +368,20 @@ describe("type-check", () => {
         expect(isFabricValue([1, [2, new Map()]])).toBe(false);
       });
 
+      it("returns `false` for an accessor-backed property, at any depth", () => {
+        // An accessor is live code, not inert data: a read executes it and
+        // can answer differently every time. Freezing does not change that.
+        const top = { a: 1 };
+        Object.defineProperty(top, "g", { get: () => 2, enumerable: true });
+        expect(isFabricValue(top)).toBe(false);
+        expect(isFabricValue(Object.freeze(top))).toBe(false);
+
+        const inner = { b: 3 };
+        Object.defineProperty(inner, "g", { get: () => 4, enumerable: true });
+        expect(isFabricValue({ outer: inner })).toBe(false);
+        expect(isFabricValue([1, [inner]])).toBe(false);
+      });
+
       it("returns `false` for an array with enumerable named (non-index) properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
@@ -308,6 +404,24 @@ describe("type-check", () => {
         const arr = [1, 2, 3];
         Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
         expect(isFabricValue(arr)).toBe(false);
+      });
+
+      it("returns `false` for an accessor-backed array index, at any depth", () => {
+        // An accessor is live code, not inert data, no matter the container:
+        // an array index reaches it just as a plain-object key does.
+        const top = [1, 2, 3];
+        Object.defineProperty(top, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: false,
+        });
+        expect(isFabricValue(top)).toBe(false);
+        expect(isFabricValue(Object.freeze(top))).toBe(false);
+
+        const inner = [4, 5];
+        Object.defineProperty(inner, 0, { set: () => {}, enumerable: true });
+        expect(isFabricValue({ data: inner })).toBe(false);
+        expect(isFabricValue([1, [inner]])).toBe(false);
       });
 
       it("returns `false` for a symbol-keyed-property array nested in the graph", () => {

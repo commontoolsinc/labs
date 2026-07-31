@@ -2193,10 +2193,7 @@ export async function getCellValue(
       await piece.getCell().pull();
       const rootCell =
         await (options.input ? piece.input.getCell() : piece.result.getCell());
-      let targetCell = rootCell;
-      for (const segment of path) {
-        targetCell = targetCell.key(segment as keyof unknown) as Cell<unknown>;
-      }
+      const targetCell = rootCell.key(...path);
       await targetCell.pull();
       await manager.synced();
       await manager.runtime.idle();
@@ -2205,9 +2202,11 @@ export async function getCellValue(
 
     let value: unknown;
     try {
-      value = options.input
-        ? await piece.input.get(path)
-        : await piece.result.get(path);
+      const prop = options.input ? "input" : "result";
+      value = await timeCliPhase(
+        `getCellValue.${prop}.get`,
+        () => piece[prop].get(path),
+      );
     } catch (error) {
       if (
         !options.input && error instanceof Error &&

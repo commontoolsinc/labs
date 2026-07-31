@@ -145,9 +145,9 @@ against it:
 
 - `.github/actions/deno-setup` reads `mise.toml` at job time, so CI uses the
   pinned version.
-- `tasks/check.sh` (run by `deno task check`, the pre-commit hook, and CI)
-  reads the pin for its version warning, and accepts the surrounding range set
-  in its `DENO_VERSION_MIN`/`DENO_VERSION_MAX` variables.
+- `tasks/check.sh` (run by `deno task check` and by CI) reads the pin for its
+  version warning, and accepts the surrounding range set in its
+  `DENO_VERSION_MIN`/`DENO_VERSION_MAX` variables.
 - `Dockerfile.dashboard` and `Dockerfile.toolshed` repeat the version in their
   `FROM` lines, which cannot read another file.
 

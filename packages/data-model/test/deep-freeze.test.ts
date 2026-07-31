@@ -403,6 +403,51 @@ describe("deep-freeze", () => {
     });
   });
 
+  describe("`isDeepFrozenFabricValue()` accessor properties", () => {
+    it("returns `false` for a frozen object with a getter", () => {
+      // Freezing an object does not make an accessor inert: a read still
+      // executes it and can answer differently every time. Such an object
+      // must not be granted the deep-frozen-fabric-value trust level.
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
+      Object.freeze(obj);
+      expect(isDeepFrozenFabricValue(obj)).toBe(false);
+    });
+
+    it("returns `false` for a frozen tree with a getter-bearing record inside", () => {
+      const inner = { b: 3 };
+      Object.defineProperty(inner, "g", { get: () => 4, enumerable: true });
+      Object.freeze(inner);
+      const tree = Object.freeze({ data: inner });
+      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+    });
+
+    it("returns `false` for a frozen array with a getter-backed index", () => {
+      // The same principle applies with an array as the container: an index
+      // whose reads execute code is not inert, frozen or not.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, 1, {
+        get: () => 22,
+        enumerable: true,
+        configurable: false,
+      });
+      Object.freeze(arr);
+      expect(isDeepFrozenFabricValue(arr)).toBe(false);
+    });
+
+    it("returns `false` for a frozen tree with a getter-index array inside", () => {
+      const inner = [4, 5];
+      Object.defineProperty(inner, 0, {
+        get: () => 44,
+        enumerable: true,
+        configurable: false,
+      });
+      Object.freeze(inner);
+      const tree = Object.freeze({ data: inner });
+      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+    });
+  });
+
   describe("`isDeepFrozenFabricValue()` symbols", () => {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, consistent with

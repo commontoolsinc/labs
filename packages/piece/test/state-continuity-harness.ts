@@ -35,6 +35,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  listSpaceStores,
   snapshotSpaceStore,
   spaceStorePath,
 } from "@commonfabric/memory/v2/dump";
@@ -45,8 +46,29 @@ import {
   type SessionFactory,
   StorageManager,
 } from "../../runner/src/storage/v2.ts";
-import { type Cell, Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  CHIP_UI,
+  getPatternSetupIdentityRef,
+  isCell,
+  isStream,
+  Runtime,
+  TILE_UI,
+  UI,
+} from "@commonfabric/runner";
+import {
+  companionFileName,
+  companionSpace,
+  vintageCompanionDir,
+} from "./vintage-layout.ts";
 import type { RuntimeProgram } from "@commonfabric/runner";
+// The comparison's two leaf cases. A materialized root is not plain data: at an
+// `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
+// a fabric special object (bytes, an epoch). Neither survives a structural
+// comparison unaided — see `comparableState`.
+import { FabricSpecialObject } from "@commonfabric/data-model/interface";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
 // runtime itself reaches a root's argument document, and re-deriving that
@@ -105,11 +127,71 @@ function serverOver(storeDir: string): MemoryV2Server.Server {
 
 export interface VintageRuntime {
   runtime: Runtime;
+  /**
+   * The store behind `runtime`, exposed so another harness can write into the
+   * same file. The vintage capture hands this to the pattern-test runner so a
+   * pattern's OWN tests populate the fixture — real state through real
+   * handlers, rather than a bare materialized root with nothing in it.
+   */
+  storageManager: StorageManager;
+  /** The PRIMARY space: the signer's own, and the one a fixture is named for. */
   space: string;
+  /**
+   * Every space this runtime was restored WITH, primary and companions alike,
+   * sorted. Empty for a fresh store.
+   *
+   * Read at open, before anything can write, so it answers "what did this
+   * fixture CARRY" rather than "what has been touched since" — the engine opens
+   * a store with `{ create: true }`, so by the time a replay has read anything
+   * the answer would already have changed.
+   *
+   * It is a DIAGNOSIS, not a control: "carries the space" does not imply "holds
+   * the root", since a store that opened but never committed restores as a
+   * valid empty database. `vintageHoldsRoot` is the control; this is what lets
+   * a failure say "the fixture does not carry did:key:…" instead of leaving the
+   * reader to work out why a root was not there.
+   */
+  restoredSpaces: readonly string[];
   storeDir: string;
-  /** Snapshot this space to `destPath`. Crash-consistent, runs no migrations. */
+  /**
+   * Snapshot EVERY space this runtime wrote — the primary to `destPath`, the
+   * rest into its companion directory. Crash-consistent, runs no migrations.
+   *
+   * Not atomic: it writes the primary first, then one companion at a time, so a
+   * caller that publishes into a shared tree has to clean up after a partial
+   * write itself (`captureVintage` does).
+   */
   snapshot(destPath: string): Promise<void>;
   dispose(): Promise<void>;
+}
+
+/** Every companion store beside `fixturePath`, as `[space, path]`. */
+async function companionStores(
+  fixturePath: string,
+): Promise<[string, string][]> {
+  const dir = vintageCompanionDir(fixturePath);
+  const found: [string, string][] = [];
+  try {
+    for await (const entry of Deno.readDir(dir)) {
+      if (!entry.isFile) continue;
+      // A name this repo could not have written is not a companion — skipping
+      // it cannot lose a real space, and every root whose space did not restore
+      // is reported by the replay anyway.
+      const space = companionSpace(entry.name);
+      if (space === undefined) continue;
+      found.push([space, `${dir}/${entry.name}`]);
+    }
+  } catch (error) {
+    // No companion directory means a single-space fixture, which is the common
+    // case and not a problem. Anything else must surface.
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
+  }
+  // Sorted so a restore is reproducible rather than directory-order dependent.
+  // By code point, not `localeCompare`, which is locale-dependent and so is not
+  // the same order on two machines — the property being bought here.
+  found.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return found;
 }
 
 /**
@@ -132,6 +214,13 @@ export async function openFileBackedRuntime(
     // re-keying is an unbounded migration that would destroy the fidelity the
     // fixture exists to buy (CFC labels name the space, among other things).
     await seedSpaceStore(storeDir, space, fromSnapshot);
+    // Companions restore under the DID they were captured in, for the same
+    // reason and more strictly: a cross-space child's recorded root names that
+    // DID, so re-keying would leave the root unaddressable rather than merely
+    // relabelled.
+    for (const [companion, path] of await companionStores(fromSnapshot)) {
+      await seedSpaceStore(storeDir, companion, path);
+    }
   }
 
   const server = serverOver(storeDir);
@@ -143,12 +232,27 @@ export async function openFileBackedRuntime(
 
   return {
     runtime,
+    storageManager,
     space,
+    // Enumerated from disk rather than assumed from `fromSnapshot`, so this is
+    // what actually landed where the engine looks — the thing the replay needs
+    // to know.
+    restoredSpaces: fromSnapshot === undefined
+      ? []
+      : listSpaceStores(storeUrl).map((info) => info.space).sort(),
     storeDir,
     async snapshot(destPath: string) {
       // Everything must be durable before the copy, or the fixture records a
-      // state the capture never actually reached.
+      // state the capture never actually reached. `idle()` waits for scheduler
+      // quiescence and no further; a COLD compile's write-back is awaited by
+      // `compilePattern` itself, but the recovery and cross-space replication
+      // paths are tracked separately and drained only by this flush. A fixture
+      // is read by a FRESH runtime, which is precisely the case it exists for —
+      // cheap insurance rather than a fix for a measured loss, since the
+      // replication a companion store would carry does not currently succeed
+      // under the pattern-test runner at all.
       await runtime.idle();
+      await runtime.patternManager.flushCompileCacheWrites();
       await runtime.storageManager.synced();
       const path = spaceStorePath(storeUrl, space);
       if (path === null) {
@@ -157,6 +261,30 @@ export async function openFileBackedRuntime(
         );
       }
       snapshotSpaceStore(path, destPath);
+      // Every OTHER space the run wrote travels too, enumerated from the store
+      // itself rather than from what an observer recorded: the two can disagree,
+      // and the copy has to be a statement about what is on disk.
+      //
+      // "Has a store file" is NOT "holds state" — the engine opens with
+      // `{ create: true }`, so merely reaching a space leaves an empty database
+      // behind, and copying one carries nothing. That is why the replay's
+      // per-root control is `vintageHoldsRoot` and not a question about spaces.
+      const companionDir = vintageCompanionDir(destPath);
+      const companions = listSpaceStores(storeUrl).filter((info) =>
+        info.space !== space
+      );
+      if (companions.length > 0) {
+        await Deno.mkdir(companionDir, { recursive: true });
+      }
+      for (const info of companions) {
+        // `listSpaceStores` just stat'd this file, so re-resolving it cannot
+        // legitimately come back null; `!` rather than a branch nothing can
+        // reach. `snapshotSpaceStore` throws on a path that is not there.
+        snapshotSpaceStore(
+          spaceStorePath(storeUrl, info.space)!,
+          `${companionDir}/${companionFileName(info.space)}`,
+        );
+      }
     },
     async dispose() {
       await runtime.dispose();
@@ -198,7 +326,8 @@ async function seedSpaceStore(
 export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
 
 /**
- * A stable root cell for a captured space.
+ * The cause of a captured space's root cell — shared by the harness helper
+ * below and by the capture, which pins the test pattern's result cell to it.
  *
  * The cause is fixed rather than minted, because `PieceManager.setupPersistent`
  * otherwise defaults to `{ space, random: crypto.randomUUID() }` and the root's
@@ -216,6 +345,13 @@ export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
  * replay something nobody captured. One key per pattern keeps roots distinct
  * while each stays addressable across captures.
  */
+export function vintageRootCause(
+  key: string = DEFAULT_VINTAGE_ROOT_KEY,
+): { stateContinuity: string } {
+  return { stateContinuity: key };
+}
+
+/** A stable root cell for a captured space, addressable across captures. */
 export function vintageRoot<T>(
   vintage: VintageRuntime,
   schema: unknown,
@@ -223,9 +359,116 @@ export function vintageRoot<T>(
 ): Cell<T> {
   return vintage.runtime.getCell<T>(
     vintage.space as never,
-    { stateContinuity: key },
+    vintageRootCause(key),
     schema as never,
   );
+}
+
+/**
+ * Cause of the doc a fixture stores its instantiation manifest under.
+ *
+ * The manifest lives INSIDE the store rather than in a sidecar file. A sidecar
+ * would be a second artifact that can drift from the state it describes and
+ * would need its own append-only discipline; an in-store doc travels in the
+ * same file, is copied atomically with the state, and keeps "restore is a
+ * single `Deno.copyFile`" true. The cost is one doc no pattern wrote —
+ * acceptable for a fixture, and namespaced here so it cannot collide.
+ */
+export const VINTAGE_MANIFEST_CAUSE = {
+  stateContinuity: "vintage-manifest",
+} as const;
+
+/** What a capture recorded about one pattern materialization. */
+export interface VintageManifestEntry {
+  identity: string;
+  symbol: string;
+  /** Entry filename, repo-root-relative (`/packages/patterns/system/home.tsx`). */
+  main?: string;
+  /** Entity id of the result cell the pattern was materialized onto. */
+  cellId: string;
+  space: string;
+}
+
+export interface VintageManifest {
+  entries: VintageManifestEntry[];
+}
+
+/**
+ * Schema for the manifest doc.
+ *
+ * Explicit rather than `undefined`: a schema-less read comes back as a
+ * query-result proxy whose array elements resolve lazily, and iterating it gave
+ * `undefined` entries — the manifest has to materialize as plain data before
+ * anything reads it.
+ */
+const VINTAGE_MANIFEST_SCHEMA = {
+  type: "object",
+  properties: {
+    entries: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          identity: { type: "string" },
+          symbol: { type: "string" },
+          main: { type: "string" },
+          cellId: { type: "string" },
+          space: { type: "string" },
+        },
+        required: ["identity", "symbol", "cellId", "space"],
+      },
+    },
+  },
+  required: ["entries"],
+} as const;
+
+/** Write the manifest into the store, so it travels with the state. */
+export async function writeVintageManifest(
+  vintage: VintageRuntime,
+  entries: readonly VintageManifestEntry[],
+): Promise<void> {
+  const cell = vintage.runtime.getCell<VintageManifest>(
+    vintage.space as never,
+    VINTAGE_MANIFEST_CAUSE,
+    VINTAGE_MANIFEST_SCHEMA as never,
+  );
+  const { error } = await vintage.runtime.editWithRetry((tx) => {
+    cell.withTx(tx).set({ entries: entries.map((e) => ({ ...e })) } as never);
+  });
+  if (error !== undefined) {
+    throw new Error(`could not write vintage manifest: ${error.message}`);
+  }
+  await vintage.runtime.idle();
+  // The snapshot copies the FILE, so the write has to be durable before it —
+  // an in-flight manifest would produce a fixture whose state is real and whose
+  // update targets are missing.
+  await vintage.runtime.storageManager.synced();
+}
+
+/** Read a restored fixture's manifest. `undefined` = none recorded. */
+export async function readVintageManifest(
+  vintage: VintageRuntime,
+): Promise<VintageManifest | undefined> {
+  const cell = vintage.runtime.getCell<VintageManifest>(
+    vintage.space as never,
+    VINTAGE_MANIFEST_CAUSE,
+    VINTAGE_MANIFEST_SCHEMA as never,
+  );
+  await cell.sync();
+  try {
+    const value = cell.get() as VintageManifest | undefined;
+    if (value === undefined || !Array.isArray(value.entries)) return undefined;
+    // Detach from the query-result proxy: its array elements resolve lazily,
+    // and a caller that iterates the live view sees `undefined` entries.
+    const entries = value.entries
+      .map((entry) => (entry === undefined ? undefined : { ...entry }))
+      .filter((entry): entry is VintageManifestEntry => entry !== undefined);
+    return { entries };
+  } catch {
+    // An absent doc reads as a throw rather than undefined; for this question
+    // the two are the same answer.
+    return undefined;
+  }
 }
 
 /**
@@ -264,40 +507,514 @@ export async function vintageArgumentLink(
   return link;
 }
 
+/** What a cycle in a materialized root becomes. Structural, so two of them
+ * compare equal, and JSON-safe, so a report can print it. */
+const CYCLE = Object.freeze({ "[cycle]": true });
+
+/** What a RENDERING becomes. Carries nothing, so two of them always compare
+ * equal — which is the point: a rendering is not state. */
+const VNODE = Object.freeze({ "[vnode]": true });
+
 /**
- * The pattern identity a captured vintage's root is already stamped with.
+ * Whether a value is a RENDERING rather than state.
  *
- * This is a CONTROL, and the replay gate is unsound without one. A fixture
- * that did not restore — truncated, empty, or seeded where the engine does not
- * look — presents to the runtime as a fresh empty space, and materializing
- * today's source onto a fresh empty space succeeds. The replay would then read
- * green having proved nothing at all, which is the same trap the storage-move
- * case hits in `state-continuity.test.ts`: emptiness is indistinguishable from
- * a fixture that was never there.
- *
- * `undefined` means no root was captured. A value that disagrees with the
- * fixture's filename means the name is not provenance but decoration.
+ * `type: "vnode"` is the whole test, and it is the runner's own definition of
+ * one — `vnodeSchema` in `runner/src/schemas.ts` requires that tag. It is
+ * deliberately NOT `html`'s `isVNodeish`, which also answers yes to any object
+ * carrying a `$UI`: that shape is a piece with a rendering ON it, whose other
+ * keys are exactly the state this comparison exists to check.
  */
-export async function vintageStoredIdentity(
+function isVNode(value: object): boolean {
+  return (value as { type?: unknown }).type === "vnode";
+}
+
+/**
+ * A materialized root, detached and reduced to something two of can be
+ * COMPARED.
+ *
+ * A materialized root is not plain data, and three of the things in it defeat a
+ * structural comparison outright:
+ *
+ * - **A live cell.** At every `asCell`/`asStream` position — the six handler
+ *   streams on `home.tsx`'s root, among others — the read yields a `Cell`,
+ *   whose own enumerable properties include `runtime`. A generic deep copy
+ *   therefore copies the whole runtime object graph into the snapshot, cycles
+ *   and all. Measured on the committed `home.tsx` fixture: the copy is cyclic
+ *   (`scheduler` → `runtime` → back), `JSON.stringify` on it throws, and the
+ *   copy compares UNEQUAL to the live cell it came from because one side is a
+ *   plain object and the other a class instance — so every stream key reports
+ *   as stranded and printing the finding takes the run down with it. Reduced
+ *   here to the DOCUMENT the cell points at, which is the durable thing about
+ *   it: a stream that moved to a different doc still shows up, and the schema
+ *   is deliberately dropped, being a view rather than data.
+ * - **A fabric special object** (`FabricBytes`, an epoch). These hold their
+ *   state in private fields, so a structural comparison sees two objects with
+ *   no properties and calls them equal REGARDLESS of contents —
+ *   `deepEqual`'s own documentation says so, and it is the quietest way a
+ *   comparison can pass. Reduced to a tagged content hash, which is the
+ *   data-model's own notion of equality for them (`valueEqual` ends in the same
+ *   hash) without needing a comparator that also has to survive link sigils.
+ * - **A cycle.** Even with cells reduced, the data itself may point back at
+ *   itself; `deepEqual` recurses until the stack ends. Cut with a marker rather
+ *   than by sharing the copy, so what comes out of here is acyclic — which is
+ *   what lets a failure report stringify it.
+ * - **A rendering.** A VNode is recomputed by the setup from the pattern body,
+ *   so the stored one and a fresh one differ whenever the source that renders
+ *   them was touched at all. `strandedKeys` excludes the `$UI` FAMILY by name,
+ *   which reaches a rendering stored AT a known key and nothing else — and a
+ *   transformer hoist (`__cfPattern_N`, the body of a `map`) is a recorded
+ *   instantiation whose whole result IS a vnode, with keys `type`/`name`/
+ *   `props`/`children`. Measured on the committed `default-app.tsx` fixture: a
+ *   UI-only edit inside that map body reported `children` stranded on both
+ *   recorded hoist roots and took the gate to exit 1, for a change that stores
+ *   nothing. Reduced by SHAPE here, so a rendering is out of the comparison
+ *   wherever it sits rather than only where it is named.
+ *
+ * Everything else is copied plainly, and `bigint` and `undefined` pass through
+ * as themselves — the two values a JSON round-trip could not carry.
+ *
+ * Idempotent: run over its own output it returns an equal structure, so a
+ * caller that normalizes early and a caller that normalizes late agree.
+ */
+export function comparableState(value: unknown): unknown {
+  // Cycle detection is per-PATH, not per-value: a shared subtree is expanded at
+  // each place it appears, which keeps the copy an honest picture of what was
+  // read. Only a genuine loop is cut.
+  const onPath = new Set<object>();
+  const walk = (current: unknown): unknown => {
+    if (current === null || typeof current !== "object") return current;
+    if (current instanceof FabricSpecialObject) {
+      return { "[fabric]": taggedHashStringOf(current) };
+    }
+    if (isCell(current) || isStream(current)) {
+      const link = current.getAsNormalizedFullLink();
+      return {
+        "[cell]": {
+          space: link.space,
+          id: link.id,
+          path: [...link.path],
+        },
+      };
+    }
+    if (isVNode(current)) return VNODE;
+    if (onPath.has(current)) return CYCLE;
+    onPath.add(current);
+    try {
+      if (Array.isArray(current)) return current.map(walk);
+      const copy: Record<string, unknown> = {};
+      for (const key of Object.keys(current)) {
+        copy[key] = walk((current as Record<string, unknown>)[key]);
+      }
+      return copy;
+    } finally {
+      onPath.delete(current);
+    }
+  };
+  return walk(value);
+}
+
+/**
+ * `schema` with every `unknown` TYPE dropped, so a read descends where the
+ * declared type stopped it.
+ *
+ * A schema-driven read resolves nothing at a `{"type": "unknown"}` position —
+ * `schemaTypeValidity` in `traverse.ts` answers `Unknown` there, and the value
+ * comes back `undefined` WHATEVER the document holds. That is the right answer
+ * for a reader; it is the wrong one for this comparison, because "the schema
+ * did not resolve it" then reads exactly like "the document does not hold it",
+ * and `isPreserved` treats the second as nothing to lose.
+ *
+ * It is not a corner. Measured on the committed fixtures, `unknown` is what a
+ * declared `unknown` field and an INDEX SIGNATURE both lower to — the second
+ * as `additionalProperties: {"type": "unknown"}` — and `default-app.tsx`
+ * declares `[key: string]: unknown` on its output. Its root holds `recentPieces`,
+ * `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream);
+ * under the stored schema verbatim all three read `undefined`, and a change
+ * that stranded any of them would have replayed clean.
+ *
+ * Only the `type` keyword is dropped, and only where it says `unknown`. That is
+ * what keeps this a RELAXATION rather than a different read: `asCell`, `ifc`
+ * and every other keyword survive, so a stream still reduces to the document it
+ * points at (reading under a bare `{}` instead would resolve it to its value
+ * and lose the moved-document class this comparison exists for). The result is
+ * still a schema-driven read, so it is still deterministic — unlike a
+ * schema-less `.get()`, which resolves whatever is already loaded and is the
+ * shape of bug that made a cross-space profile read as absent (#3830).
+ */
+export function schemaWithUnknownsRelaxed(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(schemaWithUnknownsRelaxed);
+  if (typeof schema !== "object" || schema === null) return schema;
+  const relaxed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    // `type: "unknown"` and `type: [… "unknown" …]` both match anything, so
+    // dropping the keyword loses no constraint. Matched on the KEY as well as
+    // the value, so a property that happens to be NAMED `type` — whose value is
+    // a schema object, never the string — is recursed into rather than dropped.
+    if (
+      key === "type" &&
+      (value === "unknown" ||
+        (Array.isArray(value) && value.includes("unknown")))
+    ) {
+      continue;
+    }
+    relaxed[key] = schemaWithUnknownsRelaxed(value);
+  }
+  return relaxed;
+}
+
+/**
+ * A root's state under `schema`, detached and reduced so two of them can be
+ * compared.
+ *
+ * One spelling, used for the BEFORE state (under the root's stored schema) and
+ * for the AFTER state (under the candidate's compiled one). The two sides have
+ * to be read the same way or the comparison measures the reading rather than
+ * the data — a relaxation applied to one side alone would report every key it
+ * newly resolves as stranded.
+ *
+ * Returns a copy: the live value is a query-result proxy that re-reads through
+ * the transaction, so holding it across a materialize would compare the new
+ * state against itself. `comparableState`, not a JSON round-trip and not a
+ * generic deep copy — a JSON round-trip is lossy on exactly the values a
+ * durable doc may hold (`FabricBytes` and epoch wrappers collapse to `{}`, a
+ * `bigint` throws), and a generic copy drags the runtime object graph in behind
+ * every live cell.
+ */
+export async function readStateUnder(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+  schema: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    const cell = vintage.runtime.getCellFromEntityId(
+      space as never,
+      cellId as never,
+      [],
+      schemaWithUnknownsRelaxed(schema) as never,
+    );
+    await cell.sync();
+    const detached = comparableState(cell.get());
+    // Narrow rather than cast. A root is an object in practice, but asserting
+    // it would hand `strandedKeys` a non-object to enumerate — and "no keys"
+    // reads exactly like "nothing stranded".
+    if (typeof detached !== "object" || detached === null) return undefined;
+    return detached as Record<string, unknown>;
+  } catch {
+    // A cell that cannot be read is `undefined`, not a throw. The caller treats
+    // that as a FAILURE for this entry (a recorded root the fixture does not
+    // hold), which is the right verdict — but only if it can be reported. Left
+    // throwing, one unreadable cell would abort the whole vintage and take
+    // every remaining target and fixture with it.
+    return undefined;
+  }
+}
+
+/**
+ * A captured root's state, read the way the version that WROTE it saw it.
+ *
+ * Read under the root's OWN stored result schema, which it carries in meta — so
+ * the writing version's view of its data is recoverable without its source, and
+ * without this replay having to decide what that view should be. Relaxed at its
+ * `unknown` positions first — see `schemaWithUnknownsRelaxed` for what that
+ * buys and why it is still the writer's own schema.
+ */
+export async function readVintageState(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<Record<string, unknown> | undefined> {
+  let storedSchema: unknown;
+  try {
+    const raw = vintage.runtime.getCellFromEntityId(
+      space as never,
+      cellId as never,
+      [],
+      undefined as never,
+    );
+    await raw.sync();
+    storedSchema = raw.getMetaRaw("schema");
+  } catch {
+    return undefined;
+  }
+  // No stored schema is not "read it some other way": the caller reports it,
+  // because a recorded root with none is a fixture that does not hold what it
+  // claims.
+  if (storedSchema === undefined) return undefined;
+  return await readStateUnder(vintage, space, cellId, storedSchema);
+}
+
+/**
+ * The result keys that hold a RENDERING rather than state.
+ *
+ * Taken from the runner's own constants rather than spelled as strings here:
+ * the set of UI variants is the runtime's to define, and a copy would silently
+ * stop matching the day a variant is added.
+ */
+const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
+
+/**
+ * The single-key objects `comparableState` reduces a value TO.
+ *
+ * Every one of them stands for something the comparison cannot see through, so
+ * every one of them has to be compared WHOLE — see `isPreserved`, which would
+ * otherwise apply its subset rule to the reduction's own innards.
+ */
+const REDUCTIONS: ReadonlySet<string> = new Set([
+  "[cell]",
+  "[fabric]",
+  "[cycle]",
+  "[vnode]",
+]);
+
+/** Whether `value` is one of `comparableState`'s reductions. */
+function isReduction(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  return keys.length === 1 && REDUCTIONS.has(keys[0]);
+}
+
+/**
+ * Whether everything `before` held is still reachable, at the same path, in
+ * `after`.
+ *
+ * SUBSET, not equality — and the difference is not a nicety. An update may
+ * legitimately ADD, which is what `Default<>` is for, and additions are not
+ * only top-level: a nested pattern gaining a defaulted field turns
+ * `{note, owner}` into `{note, owner, addedLater: []}` several levels down.
+ * Comparing those for equality reports the whole key stranded and reds a
+ * perfectly compatible change — measured, on the cross-space case in
+ * `pattern-vintage-run.test.ts`.
+ *
+ * Arrays compare elementwise by INDEX, so appending is fine while truncating or
+ * reordering is not: an element that moved is an element the old reader can no
+ * longer find where it left it.
+ *
+ * Two things the subset rule does NOT apply to, both of them ways it would
+ * otherwise pass on a value that changed:
+ *
+ * - **A reduction is an identity, not a structure.** `{"[cell]": {space, id,
+ *   path}}` says WHICH document a cell-valued key points at; descending into it
+ *   makes its `path` a subset-able array, so a stream that moved from `[]` to
+ *   `["value"]` in the same document — a longer path, nothing missing from it —
+ *   reads as preserved. Compared whole instead.
+ * - **A before-value of `undefined` is not data.** The before state is read
+ *   under the root's stored schema, and a schema-driven read enumerates the
+ *   keys the schema declares whether or not the document holds them: measured
+ *   on the committed fixtures, `defaultProfile` on `home.tsx` reads as
+ *   `undefined` because the root predates any profile being created.
+ *   Comparing that would report an update that starts filling it in — adding a
+ *   `Default<>` to a field already declared — as having stranded state that
+ *   was never there. Held nothing, lost nothing.
+ *
+ *   This branch is only honest because the read cannot ALSO return `undefined`
+ *   for a key the document does hold. It could, before
+ *   `schemaWithUnknownsRelaxed`: an `unknown` position resolves to `undefined`
+ *   whatever is stored there, and measured on the committed `default-app.tsx`
+ *   fixture that hid `recentPieces`, `summaryIndex` and `trackRecent` — three
+ *   keys holding real state, indistinguishable here from three keys holding
+ *   nothing. Whatever else changes, the two must not be allowed to collapse
+ *   again.
+ */
+function isPreserved(before: unknown, after: unknown): boolean {
+  if (before === undefined) return true;
+  if (isReduction(before) || isReduction(after)) {
+    return deepEqual(before, after);
+  }
+  if (Array.isArray(before)) {
+    if (!Array.isArray(after) || after.length < before.length) return false;
+    return before.every((item, index) => isPreserved(item, after[index]));
+  }
+  if (
+    typeof before === "object" && before !== null &&
+    typeof after === "object" && after !== null && !Array.isArray(after)
+  ) {
+    return Object.entries(before as Record<string, unknown>).every(
+      ([key, value]) =>
+        isPreserved(value, (after as Record<string, unknown>)[key]),
+    );
+  }
+  return deepEqual(before, after);
+}
+
+/**
+ * Keys whose value the update did not preserve.
+ *
+ * Only keys present BEFORE are compared: an update may legitimately ADD a
+ * field (that is what `Default<>` is for), so a new key is not a finding. An
+ * existing key whose value changed is — that is data the old version wrote and
+ * the new one no longer reads back.
+ *
+ * The RENDERINGS are excluded BY NAME, and nothing else is. A root's
+ * `$UI`/`$TILE_UI`/`$CHIP_UI` is a projection the setup recomputes, and the
+ * stored rendering and a fresh one are not the same artifact even when nothing
+ * about the data changed: measured on the committed `default-app.tsx` fixture,
+ * a COMMENT-only edit to `piece-grid.tsx` reports `$UI` as stranded —
+ * `children: [null]` where the vintage held it against `children: [[]]` freshly
+ * rendered — and the same edit to `note.tsx` reports `$UI` and `$TILE_UI`, one
+ * side carrying a `type: "vnode"` tag the other does not. Comparing those keys
+ * says nothing about data and reds every pattern edit, so the gate would be
+ * turned off within a week of landing.
+ *
+ * A name is not enough on its own, which is why `comparableState` also reduces
+ * a rendering by SHAPE: a transformer hoist's whole result is a vnode, stored
+ * under no `$UI` at all. The name list stays because the shape check cannot
+ * replace it — the `note.tsx` measurement above is one side that carries the
+ * `type: "vnode"` tag against one side that does not.
+ *
+ * The exclusion is deliberately not "derived values" in general: `$NAME` is
+ * derived too and stayed equal across both of those edits, so it is compared —
+ * it is a cheap tell that the data behind it went missing. The cost is real and
+ * worth naming: a root whose only key is a rendering (`profile-picker.tsx`) has
+ * nothing left for this check to compare, and rests on the refusal, completion
+ * and reads-as-something checks instead.
+ *
+ * Everything else is compared by SHAPE rather than by name. A value the
+ * comparison cannot see through — a live cell, a fabric special object, a
+ * cycle, a rendering — is reduced by `comparableState` on both sides rather
+ * than skipped.
+ *
+ * Both sides go through it here rather than only at the call site: the before
+ * state arrives already reduced, but the after state is whatever the
+ * materialize returned — a LIVE root value — and comparing a detached copy
+ * against a live one reports every cell-valued key as stranded. It is
+ * idempotent, so normalizing the already-normalized side costs a walk and
+ * removes a way to hold this wrong.
+ *
+ * Compared with `deepEqual`, not stringified. Serialization is the wrong
+ * instrument twice over: it is key-order sensitive, so two equivalent objects
+ * whose properties were emitted in a different order would report as stranded,
+ * and it cannot represent everything a durable doc may hold — a `bigint` throws.
+ *
+ * `deepEqual` rather than the data-model's `valueEqual`, which is the more
+ * obvious choice. `valueEqual` refuses a materialized root outright — measured,
+ * it throws `Cannot compare value {"/":{"link@1":{…}}}` — but NOT for the
+ * reason that message reads as: a link sigil compares fine, and the value it
+ * actually refused was a live CELL, rendered through its `toJSON()` and so
+ * printed as the sigil it points at. That is the same fact `comparableState`
+ * exists for. Both comparators work once the reduction has run, and this one is
+ * kept because it needs no value to be a well-formed `FabricValue` and
+ * short-circuits instead of hashing a whole VNode tree; the one class it cannot
+ * judge, a fabric special object with its state in private fields, is reduced
+ * to a content hash before it gets here rather than being compared by it.
+ */
+export function strandedKeys(
+  before: Record<string, unknown>,
+  after: unknown,
+): string[] {
+  const beforeState = comparableState(before) as Record<string, unknown>;
+  const afterState = comparableState(after);
+  const afterView = typeof afterState === "object" && afterState !== null
+    ? afterState as Record<string, unknown>
+    : undefined;
+  const stranded: string[] = [];
+  for (const key of Object.keys(beforeState)) {
+    if (RENDERINGS.has(key)) continue;
+    if (!isPreserved(beforeState[key], afterView?.[key])) stranded.push(key);
+  }
+  return stranded;
+}
+
+/**
+ * Whether a root value counts as STATE rather than nothing.
+ *
+ * One predicate, shared by the pre-check below and by the replay's post-check on
+ * each migrated root — the two ask the same question, and answering it two ways
+ * is how "the root reads as something" comes to mean different things at the two
+ * ends of the same run.
+ */
+export function isPresentRootValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  // An object with no keys is what a fresh space yields for a doc nobody
+  // wrote, so it is not evidence either.
+  return typeof value !== "object" ||
+    Object.keys(value as Record<string, unknown>).length > 0;
+}
+
+/**
+ * Whether the fixture actually HOLDS the root a manifest entry names.
+ *
+ * The control that has to run per entry, before today's source is applied to
+ * it. "The fixture carries this space" is not the same claim: a space store
+ * that opened but never committed is a valid empty database, an entity id is
+ * content-derived and so names a cell in any space, and a cell nobody wrote
+ * reads as absent rather than as an error. Materializing onto one of those
+ * SUCCEEDS — the root then holds today's defaults, `isPresentRootValue` is
+ * satisfied, and the entry counts as updated cleanly over state that was never
+ * there. Measured: with a companion store truncated to zero bytes, a break that
+ * the gate is built to catch replays with no failures at all.
+ *
+ * The evidence is the SETUP MARKER, not a value. The runner stamps
+ * `patternSetupIdentity` under the same condition that reports an instantiation
+ * to the capture observer (`runner.ts` — deliberately the same, so the store
+ * cannot label roots the observer missed or vice versa), so every manifest
+ * entry's cell carries one by construction. A value check would instead depend
+ * on the pattern's result shape, and a root whose result is legitimately `{}`
+ * would read as missing.
+ *
+ * PRESENCE only — this does not check that the marker names the entry's own
+ * identity and symbol. Deliberately: a root set up twice under different
+ * identities in one capture would then false-red, and correspondence is not
+ * reachable from a legitimate capture anyway, since the observer and the stamp
+ * describe the same `resultCell`.
+ */
+export async function vintageHoldsRoot(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<boolean> {
+  const cell = vintage.runtime.getCellFromEntityId(
+    space as never,
+    cellId as never,
+    [],
+    undefined as never,
+  );
+  try {
+    await cell.sync();
+    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined;
+  } catch {
+    // An absent doc surfaces as a throw rather than `undefined`, and for this
+    // question the two are the same answer: nothing was captured here.
+    return false;
+  }
+}
+
+/**
+ * Whether a restored fixture's root already holds state.
+ *
+ * This is a CONTROL, and the replay gate is unsound without one. A fixture that
+ * did not restore — truncated, empty, or seeded where the engine does not look
+ * — presents to the runtime as a fresh empty space, and materializing today's
+ * source onto a fresh empty space succeeds. The replay would then read green
+ * having proved nothing at all: emptiness is indistinguishable from a fixture
+ * that was never there.
+ *
+ * The evidence is "the root holds a value", NOT "the root carries a matching
+ * patternIdentity stamp". A vintage is captured by running the pattern's own
+ * TESTS, and the test harness roots its graph with `runtime.run`, so the stamp
+ * at the root belongs to the TEST pattern rather than to the pattern the
+ * fixture is named for — an identity check would reject every fixture the
+ * capture produces.
+ */
+export async function vintageRootHasState(
   vintage: VintageRuntime,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
-): Promise<string | undefined> {
+): Promise<boolean> {
   const root = vintageRoot<Record<string, unknown>>(
     vintage,
     undefined,
     rootKey,
   );
   await root.sync();
-  let stamp: unknown;
   try {
-    stamp = root.getMetaRaw("patternIdentity");
+    return isPresentRootValue(root.get());
   } catch {
     // An absent doc reads as a throw rather than `undefined`, and for this
     // question the two are the same answer: nothing was captured here.
-    return undefined;
+    return false;
   }
-  const identity = (stamp as { identity?: unknown } | undefined)?.identity;
-  return typeof identity === "string" ? identity : undefined;
 }
 
 /** Read a vintage's stored argument under `schema` (`undefined` = raw). */
@@ -395,19 +1112,113 @@ export async function materializeOver(
   program: RuntimeProgram,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Promise<MaterializeOutcome> {
+  return await materializeOnCell(
+    vintage,
+    program,
+    (v, schema) => vintageRoot<Record<string, unknown>>(v, schema, rootKey),
+  );
+}
+
+/**
+ * Materialize `program` onto a cell chosen by `locate`, through the production
+ * repair call.
+ *
+ * The indirection exists so the replay can target a cell recorded in a
+ * fixture's manifest rather than only the well-known vintage root. `locate`
+ * receives the compiled result schema, because a root has to be read under the
+ * schema of the pattern being applied to it.
+ *
+ * `options.symbol` names WHICH artifact in the module to apply. A module
+ * contributes more than one instantiable pattern — its default export, plus
+ * every transformer hoist (`__cfPattern_N`, the body of a `map`/`filter`/
+ * `flatMap`) — and a stored root records the one it was materialized from.
+ * Defaulting to the entry export would apply the module's ROOT pattern to a
+ * nested pattern's cell, which can refuse a valid migration or, worse, accept
+ * an invalid one having checked the wrong artifact.
+ *
+ * `options.space` is the space to COMPILE in, which production takes from the
+ * root being updated (`pattern-updater.ts` compiles with the piece's space).
+ * It is not cosmetic: it selects the space a `cf:` fabric import resolves
+ * against and the space the compiled/source closure is persisted into
+ * (`compileViaCellCache`), so compiling a cross-space root's candidate in the
+ * fixture's primary space could resolve a different closure than the one that
+ * root actually loads. Defaults to the primary space, which is where a
+ * single-space fixture's roots live.
+ */
+export async function materializeOnCell(
+  vintage: VintageRuntime,
+  program: RuntimeProgram,
+  locate: (
+    vintage: VintageRuntime,
+    resultSchema: unknown,
+  ) => Cell<Record<string, unknown>>,
+  options: { symbol?: string; space?: string } = {},
+): Promise<MaterializeOutcome> {
   const { runtime } = vintage;
-  const pattern = await runtime.patternManager.compilePattern(program, {
-    space: vintage.space as never,
+  const { symbol, space = vintage.space } = options;
+  const entryPattern = await runtime.patternManager.compilePattern(program, {
+    space: space as never,
   });
-  const ref = runtime.patternManager.getArtifactEntryRef(pattern);
-  if (ref === undefined) {
+  const entryRef = runtime.patternManager.getArtifactEntryRef(entryPattern);
+  if (entryRef === undefined) {
     throw new Error("compiled candidate has no artifact entry ref");
   }
-  const root = vintageRoot<Record<string, unknown>>(
-    vintage,
-    pattern.resultSchema,
-    rootKey,
-  );
+  // `compilePattern` registers the whole evaluated module — exports and
+  // `__cfReg` hoists alike — so the named artifact is resolvable in-index
+  // under the identity just compiled.
+  const selected = symbol === undefined || symbol === entryRef.symbol
+    ? entryPattern
+    : runtime.patternManager.artifactFromIdentitySync(
+      entryRef.identity,
+      symbol,
+    ) as typeof entryPattern | undefined;
+  if (selected === undefined) {
+    // Fails CLOSED rather than falling back to the entry pattern: a stored root
+    // naming a symbol today's module does not define is a migration hazard to
+    // report, not one to paper over.
+    //
+    // ABSENCE is all this catches, and hoist symbols have a second failure mode
+    // it does not. `__cfPattern_N` is positional, so inserting an earlier `map`
+    // REBINDS the name instead of removing it — measured: with one `map` the
+    // hoist `__cfPattern_1` carried result `{shout}`, and after an earlier `map`
+    // was added the same name carried `{other}` while `{shout}` moved to
+    // `__cfPattern_2`. A root recorded as `__cfPattern_1` then resolves here to a
+    // DIFFERENT nested pattern and this branch never fires. The schema merge
+    // catches it only when the two bodies differ in shape. That is a property of
+    // positional addressing which `PatternUpdater` shares, not something this
+    // gate can fix; selecting the recorded symbol is still strictly better than
+    // applying the module's entry export to every nested root.
+    return {
+      error:
+        `today's ${program.main} defines no "${symbol}"; the stored root ` +
+        `names an artifact this version does not have`,
+      resultSchema: entryPattern.resultSchema,
+      argumentSchema: entryPattern.argumentSchema,
+      identity: entryRef.identity,
+    };
+  }
+  const pattern = selected;
+  // The ref the RUNNER will write, not the one the caller asked by. `setup()`
+  // stamps `getArtifactEntryRef(pattern)`, and that map is first-write-wins — so
+  // an artifact exported under two names has ONE canonical symbol, decided by
+  // export enumeration order, which need not be the name the fixture recorded.
+  // Deriving the stamp and the completion comparison from anything else makes a
+  // cosmetic export reorder read as a failed migration: measured, flipping
+  // `export { Row }` and `export { Row as RowAlias }` reported "setup did not
+  // complete for …#Row: the root carries …#RowAlias" for a swap that in fact
+  // succeeded, on the same artifact object.
+  //
+  // Constrained to the identity just compiled. `setArtifactEntryRef` is
+  // first-write-wins over the whole session, so an artifact re-registered under a
+  // changed identity keeps its original ref — and stamping THAT would write a
+  // root's pointer to a version this replay did not compile. Taking the canonical
+  // ref only when its identity agrees keeps the alias fix (same module, different
+  // name) without inheriting a stale one.
+  const canonical = runtime.patternManager.getArtifactEntryRef(pattern);
+  const ref = canonical?.identity === entryRef.identity
+    ? canonical
+    : { identity: entryRef.identity, symbol: symbol ?? entryRef.symbol };
+  const root = locate(vintage, pattern.resultSchema);
   await root.sync();
 
   const { error: stampError } = await runtime.editWithRetry((tx) => {
@@ -434,6 +1245,26 @@ export async function materializeOver(
     await runtime.idle();
   } catch (error) {
     return { error: describeError(error), ...schemas };
+  }
+  // `expectedPatternIdentity` makes a rejected setup COMMIT throw, but a swap
+  // whose setup itself fails (the candidate refusing the root's stored
+  // arguments, say) is only LOGGED as `pattern-swap-setup-error` — `runSynced`
+  // returns normally and the migration reads as applied. The completion marker
+  // is the honest signal: `setup()` stamps `patternSetupIdentity` only once it
+  // has staged the schema, arguments, internal cells, and result projection, so
+  // a root that does not carry the candidate's ref was not actually migrated.
+  await root.sync();
+  const staged = getPatternSetupIdentityRef(root as Cell<unknown>);
+  if (staged?.identity !== ref.identity || staged?.symbol !== ref.symbol) {
+    return {
+      error: `setup did not complete for ${ref.identity}#${ref.symbol}: the ` +
+        `root carries ${
+          staged === undefined
+            ? "no setup marker"
+            : `${staged.identity}#${staged.symbol}`
+        }`,
+      ...schemas,
+    };
   }
   await root.pull();
   return {

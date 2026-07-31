@@ -93,7 +93,7 @@ into the same active-origin and revision model.
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
-| Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `runtime.ts:1423` / `:1444`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
+| Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `Runtime.mappedHostFor` / `registerSpaceHost` in `packages/runner/src/runtime.ts`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Identity computation: `transformInjectHelperModule` + `computeModuleIdentities` | `harness/pretransform.ts`, `sandbox/module-record-compiler.ts` | What toolshed runs to answer `?identity` |
 | Entry-doc `annotations` + `annotatePattern` | `pattern-manager.ts`, `cell-cache.ts` | **Rejected as the carrier** — see below |
 
@@ -101,7 +101,8 @@ into the same active-origin and revision model.
 non-hashed, excluded from `verifySourceDocs`) and looks like a natural home for
 "where updates live" — but it is **space-local**: `writeSourceDocs` preserves
 the *destination* cell's annotations, and replication does not copy the
-*source's* (`cell-cache.ts:475`). An `updatesAt` written in a publisher's space
+*source's* (`packages/runner/src/compilation-cache/cell-cache.ts`). An
+`updatesAt` written in a publisher's space
 would not appear on a consumer's replicated copy. The **piece** is the reliable
 carrier: explicit source provenance travels with it. For an unstamped non-root
 piece, its verified source-doc closure supplies the authored entry path; the
@@ -292,7 +293,29 @@ The apply is: ensure the new closure is loadable in the space
 the normal pattern setup path to install the new result schema, result
 projection, `{ identity, symbol }`, and `patternSetupIdentity` completion marker
 on the existing result cell. The completion marker is not a pattern pointer;
-it records which identity had its complete setup staged. During space open,
+it records which identity had its complete setup staged. It is also what tells
+an apply from a same-version replay when the pointer moved first — the
+roll-forward materialize commits the new `{ identity, symbol }` and then runs
+setup, and an identity moved with no setup at all leaves the same shape. The
+pointer then reads as unchanged, while the marker still names the version that
+staged the state.
+
+Setup re-points the piece's stored argument at the incoming argument schema and
+validates it in the same transaction, so an apply whose durable argument the new
+schema cannot read is refused rather than committed. Two cases are deferred
+rather than refused: a slot whose stored value is a link that cannot be
+dereferenced in that transaction (a nested piece's argument lives in its host's
+document, and "not yet synced" is not "invalid"), and a root carrying no
+completion marker at all, which gets one unvalidated setup because absence
+cannot be distinguished from a pending apply.
+
+A refusal is a repair failure, not a silent one. The pointer has already moved
+by the time setup runs, so re-running the same identity refuses identically;
+the boot repair therefore classifies this failure and escalates it to the
+roll-forward backstop — the same route a refused CFC migration takes — rather
+than retrying a version that cannot read its own root.
+
+During space open,
 `ensureDefaultPattern` performs this transaction before calling `startPiece`,
 and the updated root still takes the persisted-result dependency-sync path
 before its first start. This lets an obsolete pattern that cannot load be

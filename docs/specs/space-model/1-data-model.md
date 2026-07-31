@@ -49,6 +49,8 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 - Non-index keys cause rejection as non-fabric, `length` aside: named
   (string-keyed) and symbol-keyed properties alike, whether or not they are
   enumerable
+- Every present index must hold a *data* property; an accessor-backed
+  (getter and/or setter) index causes rejection as non-fabric
 
 See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
 authoritative statement of these rules.
@@ -57,6 +59,9 @@ authoritative statement of these rules.
 
 - Plain objects only (no class instances)
 - Keys must be strings; symbol keys cause rejection as non-fabric
+- Every property must be an enumerable *data* property; accessor-backed
+  (getter and/or setter) and non-enumerable properties cause rejection as
+  non-fabric
 - Values must be valid fabric values
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
@@ -89,7 +94,7 @@ Symbol handling at the fabric-value conversion gate:
   returns a string) are first-class fabric values, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
-  `"Cannot store unique (uninterned) symbol"`
+  ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
 - Round-trip via the `Symbol@1` JSON envelope (see
   `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
   byte-level form in `space-model-formal-spec/2-hash-byte-format.md`

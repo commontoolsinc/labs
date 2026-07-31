@@ -43,10 +43,21 @@ Warnings summary line, never Failed.
   `docs/common/patterns/multi-user-patterns.md#presenting-identity`
   (critique-guide category 16).
 
+- **Oversized cross-pattern contracts:** for every type describing linked,
+  wished, registered, or otherwise external data — imported or declared inline —
+  compare the declared shape with the fields and bindings the consumer actually
+  uses. Prefer a consumer-owned minimal structural type, or a producer-exported
+  shallow role model, over the full pattern schema and over `Pick`/`Omit`
+  coupling. Extra schema fields cause extra traversal and validation/migration
+  coupling; unnecessary `Writable<>`/`Cell<>` brands preserve a live-cell
+  binding but do not grant runtime authority. Report these under critique-guide
+  category 17.
+
 Then use the detailed references already maintained in the repo for:
 
 - `docs/development/debugging/README.md`
 - `docs/development/debugging/gotchas/`
+- `docs/common/patterns/composition.md`
 - `docs/common/components/COMPONENTS.md`
 - `docs/common/patterns/multi-user-patterns.md`
 - `docs/common/patterns/ui-cookbook.md`

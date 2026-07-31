@@ -64,7 +64,11 @@ mergeable ops plus plain entity edits:
   same field resolves last-writer-wins; edits to different records never interact.
 - **Delete** — `array.removeByValue(array.elementById(key))`. `removeByValue`
   matches the membership entry by link and is idempotent, so concurrent deletes of
-  distinct keys merge.
+  distinct keys merge. It stays mergeable as long as the removals are the
+  transaction's only change to *that array* — editing a keyed element writes the
+  entity document, so it does not count, but rewriting the list in the same
+  handler falls the path back to a whole-array diff (see
+  `mergeable-collection-writes.md`).
 
 The lunch poll derives a vote's key as `JSON.stringify([voterName, optionId])`
 and an option's key as its generated `id`; castVote, clearMyVote, and the
@@ -116,6 +120,21 @@ Like the whole-value ops, a keyed op drops only the reads its own write issues
 (the list value and the `["cfc"]` policy label), so operations on different keys
 do not false-conflict. The op's touched path for *other* readers stays the array
 path, so a reader of the whole list is still invalidated.
+
+## Clear-and-reseed commits as a plain overwrite
+
+Replacing a list's whole membership in one handler — `list.set([])`, then
+`elementById(id).set(record)` and `addUnique(elementById(id))` per record, the
+shape that seeds records the runtime can address by key — mixes a whole-value
+overwrite with mergeable adds at the same path. The overwrite wins: because the
+transaction changed the array's length ahead of the recorded tail, the commit
+abandons the mergeable intent and sends the plain whole-array diff, so the
+durable list holds exactly the reseeded members. That transaction forfeits
+merge-friendliness for the list (it can false-conflict with a concurrent add),
+which is the right trade — replacing a list wholesale is not an operation that
+should merge with a concurrent append. See "Mixed ops on one path fall back to
+the whole-array diff" in `mergeable-collection-writes.md`. The reseeded entity
+documents themselves are ordinary writes and are unaffected.
 
 ## The entity outlives its link: clear on remove
 

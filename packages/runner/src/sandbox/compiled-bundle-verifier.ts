@@ -4,7 +4,7 @@ import {
   findTopLevelEquals,
   isStringLiteralRange,
   locationFromOffset,
-  type ParsedDefineCall,
+  type ParsedFunction,
   parseFunctionText,
   splitTopLevelCommaList,
   type StatementChunk,
@@ -52,17 +52,31 @@ export interface BindingInfo {
 }
 
 /**
- * Configuration that lets the format-agnostic security classifier
- * ({@link classifyModuleItems}) serve both the AMD factory body and a
- * per-module ESM record body. AMD passes the canonical wrapper shadow guards
- * and reserved bindings; the ESM path passes empty sets (no `define`/
- * `runtimeDeps`/`__cfAmdHooks` in scope to shadow). See
- * docs/history/specs/module-loading-verifier-and-engine-design.md.
+ * Packaging-specific configuration for the format-agnostic security classifier
+ * ({@link classifyModuleItems}), which is otherwise independent of how a module
+ * body is wrapped.
+ *
+ * {@link verifyCompiledModuleBody} — the only production caller — passes EMPTY
+ * sets, and that is not a stub: it is mutually exclusive with what the
+ * transformer emits. `RESERVED_FACTORY_BINDINGS` is exactly
+ * `SHADOWED_FACTORY_BINDINGS`, and the transformer emits one
+ * `const <name> = undefined;` guard per shadowed name
+ * (`createFactoryShadowGuardSource`). Reserving those names would therefore
+ * reject every transformed module on its own guards, and requiring them would
+ * reject any module that stopped emitting them. Empty sets are what make the
+ * guards verify as ordinary primitive `const`s.
+ *
+ * Non-empty sets belong to a hypothetical wrapper that puts loader bindings in
+ * scope around a module body. Nothing does that here, so the branches exist for
+ * that contingency and are exercised only by
+ * `runner/test/module-item-classifier.test.ts`. `reserved` is a REQUIRED
+ * argument everywhere it is threaded: a default of the canonical reserved set
+ * would silently enable the check that rejects transformer output.
  */
 export interface ModuleItemClassificationOptions {
-  /** Canonical shadow-guard statements that MUST be present (AMD) or none (ESM). */
+  /** Canonical shadow-guard statements that MUST be present, or none. */
   requiredGuards: ReadonlySet<string>;
-  /** Reserved wrapper bindings authored code may not declare (AMD) or none (ESM). */
+  /** Reserved wrapper bindings authored code may not declare, or none. */
   reservedBindings: ReadonlySet<string>;
   /** Source offset used for the "missing required shadow guards" error. */
   missingGuardsErrorAt: number;
@@ -77,7 +91,18 @@ const CANONICAL_BINDING_IDENTITY_HELPER = stripJsTrivia(
   createBindingIdentityHelperSource(),
 );
 
-const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
+/**
+ * The canonical reserved-binding set from the shared sandbox contract — the
+ * value a wrapper-bearing caller would pass as
+ * {@link ModuleItemClassificationOptions.reservedBindings}. Deliberately NOT a
+ * default on any parameter: see that interface for why the production path
+ * passes an empty set instead.
+ */
+export const RESERVED_FACTORY_BINDING_SET: ReadonlySet<string> = new Set<
+  string
+>(
+  RESERVED_FACTORY_BINDINGS,
+);
 const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
   "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
 
@@ -94,10 +119,10 @@ interface ParsedNormalizedCallReference {
  * against the SES module-item rules (direct functions, trusted-builder calls
  * with direct callbacks, `__cf_data`/`schema` wrappers, export assignments,
  * reexport getters, function-hardening/binding-identity statements) and rejects
- * everything else. `env` arrives pre-seeded with the module's imports
- * (AMD: factory dependency params; ESM: record imports). Packaging differences
- * (shadow guards, reserved bindings) are supplied via `options`, so the same
- * core serves both the AMD factory body and a per-module ESM record body.
+ * everything else. `env` arrives pre-seeded with the module's imports (for a
+ * module record, the specifiers its body requires). Packaging differences
+ * (shadow guards, reserved bindings) are supplied via `options`, so the core
+ * stays independent of how a body is wrapped.
  */
 export function classifyModuleItems(
   source: string,
@@ -232,8 +257,8 @@ export function classifyModuleItems(
 
       // The single trailing `__cfReg({ __cfPattern_1, … })` hoist-registration
       // call: a shorthand object of top-level builder-artifact bindings. `__cfReg`
-      // is supplied by the module wrapper (the registrar param under the ESM
-      // loader; a no-op global on the AMD path) and is intentionally NOT a
+      // is supplied by the module wrapper (its registrar param, which shadows a
+      // no-op compartment global) and is intentionally NOT a
       // referenceable binding — so any OTHER use (nested, aliased, dynamic) falls
       // through to the unknown-identifier rejection below. Trust of the registered
       // values, single-call, and the closed-window guarantee are enforced at
@@ -255,7 +280,7 @@ export function classifyModuleItems(
         source,
         filename,
         statement.start,
-        "Compiled AMD module contains unsupported top-level executable code",
+        "Compiled module contains unsupported top-level executable code",
       );
     }
 
@@ -264,7 +289,7 @@ export function classifyModuleItems(
         source,
         filename,
         options.missingGuardsErrorAt,
-        "Compiled AMD factory is missing required wrapper shadow guards",
+        "Compiled module is missing required wrapper shadow guards",
       );
     }
   } finally {
@@ -340,12 +365,8 @@ function verifyVariableStatement(
   filename: string,
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
-  kind = getVariableStatementKindFromRange(
-    source,
-    trimRange(source, statement.start, statement.end).start,
-    trimRange(source, statement.start, statement.end).end,
-  ),
-  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
+  kind: ReturnType<typeof getVariableStatementKindFromRange>,
+  reserved: ReadonlySet<string>,
 ): void {
   const start = performance.now();
   try {
@@ -1431,7 +1452,7 @@ function tryParseDirectFunction(
   source: string,
   start: number,
   end: number,
-): ParsedDefineCall["factory"] | undefined {
+): ParsedFunction | undefined {
   if (!looksLikeDirectFunctionSyntax(source, start, end)) {
     return undefined;
   }
@@ -1753,7 +1774,7 @@ function assertFactoryBindingIsNotReserved(
   filename: string,
   offset: number,
   name: string,
-  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
+  reserved: ReadonlySet<string>,
 ): void {
   if (!reserved.has(name)) {
     return;

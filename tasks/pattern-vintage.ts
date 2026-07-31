@@ -8,15 +8,38 @@
  * that a real document written by an older version is still materializable by
  * the version about to be merged.
  *
- * Precisely what a green run asserts, per fixture: today's source RESOLVES,
- * the setup commit that carries it onto the vintage's root is NOT REFUSED, and
- * the root then reads as something rather than nothing. It does not compare
- * VALUES, and a captured vintage holds a freshly set-up root rather than a
- * populated one — so the class where a moved `.for()` key strands real data
- * replays clean here. Measured on the real `home.tsx`: renaming
- * `.for("favorites")` exits 0. That class is covered by
- * `packages/piece/test/state-continuity.test.ts` and closing it in the gate is
- * stage 5 of `docs/plans/pattern-update-state-continuity.md`.
+ * Precisely what a green run asserts, per fixture: today's source RESOLVES for
+ * every recorded instantiation, the setup that carries the artifact each root
+ * NAMES onto that root is not refused and completes, the root then reads as
+ * something rather than nothing, AND every value the vintage held is still
+ * readable afterwards.
+ *
+ * That last clause is the one that makes this a state-continuity gate rather
+ * than an applies-cleanly gate. An update can materialize perfectly and still
+ * lose data: move where a field is stored — `.for("journal")` becomes
+ * `.for("journalMoved")` — and the declared contract does not change by a byte
+ * while every document written under the old name goes unreachable. Nothing
+ * throws. Measured on the real `home.tsx`, that now exits 1 naming the key and
+ * showing what was there.
+ *
+ * The comparison reads the vintage under the root's OWN stored schema, so it
+ * sees the data as the version that wrote it did, and compares only keys that
+ * were present BEFORE: an update may legitimately ADD a field — that is what
+ * `Default<>` is for — so a new key is not a finding, while an existing key
+ * whose value changed is. That schema is relaxed at its `unknown` positions
+ * first, on both sides: a schema-driven read resolves nothing there, so a key
+ * an index signature covers would otherwise arrive as `undefined` however much
+ * state it holds — indistinguishable from a key the document does not hold.
+ *
+ * It compares STATE, not renderings. `$UI` and its variants are recomputed by
+ * the setup and the stored rendering never matches a fresh one, so comparing
+ * them would red every pattern edit while saying nothing about data; every
+ * other key is compared, `$NAME` included. Excluding those NAMES is not enough
+ * on its own — a `map`-body hoist is a recorded instantiation whose whole
+ * result is a vnode, under no `$UI` — so a rendering is recognised by shape
+ * too, wherever it sits. What a root holds at a cell or stream position is
+ * compared as the DOCUMENT it points at, so a field that moved to a different
+ * doc is still a finding.
  *
  *   deno task pattern-vintage                      # replay; fail on a stranded fixture
  *   deno task pattern-vintage --update             # capture where a REQUIRED one is missing
@@ -28,6 +51,13 @@
  * break. Deleting one is a deliberate act that shows up in review as a deleted
  * file. Naming keys explicitly does not weaken that — a key that already has a
  * pinned vintage is skipped whichever way it was asked for.
+ *
+ * That discipline is enforced HERE, in what the command will do, and otherwise
+ * rests on review — deliberately, and unlike Tier 1, whose baselines have a
+ * mechanical checker (`tasks/check-baselines-append-only.ts`). There is no
+ * equivalent gate over `packages/piece/test/vintages/`, so a deleted fixture is
+ * caught by a human reading the diff and nothing else. Recapturing one is
+ * therefore a decision to make out loud, not a routine step.
  *
  * This file is the shell — roots, argument parsing, printing, exit code. The
  * work is in `pattern-vintage-run.ts`, which takes its roots as arguments so
@@ -47,6 +77,7 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
+  reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
   requiredPatternKeys,
@@ -127,17 +158,25 @@ async function main() {
     return;
   }
 
-  const { vintages, replayed, failures } = await replayAll(roots);
-  const uncovered = uncoveredRequiredPatterns(required, vintages);
+  const replay = await replayAll(roots);
+  // Coverage is judged against the SAME list that was replayed. A second walk
+  // would be a second answer to one question, and "replayed nothing" paired with
+  // "everything is covered" is the disagreement that reads as a pass.
+  const uncovered = uncoveredRequiredPatterns(required, replay.vintages);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
-  if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);
-  if (failures.length > 0) console.error(`\n${reportFailures(failures)}`);
+  if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);
+  if (replay.failures.length > 0) {
+    console.error(`\n${reportFailures(replay.failures)}`);
+  }
 
-  if (!isClean(failures, uncovered, replayed)) Deno.exit(1);
-  console.log(
-    `Replayed ${replayed} vintage(s) under today's source; all readable.`,
-  );
+  // CANDIDATES and TARGETS are the soundness floor, not `updated`. A run where
+  // nothing changed legitimately updates nothing — that is the common case, and
+  // the auto-updater fires on the same condition. But a run with no candidates,
+  // or none that today's source could be applied to, examined no update targets
+  // at all — the shape that has read as success three separate times here.
+  if (!isClean(replay.failures, uncovered, replay)) Deno.exit(1);
+  console.log(reportReplaySummary(replay));
 }
 
 if (import.meta.main) {

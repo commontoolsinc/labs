@@ -6,7 +6,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ID } from "../src/builder/types.ts";
 import {
   markRendererTrustedEvent,
   recordTrustedEventPolicyInputs,
@@ -1554,7 +1553,6 @@ describe("CFC trusted UI event enforcement", () => {
           bindingPath: ["commitTrustedMessageSend"],
         });
         messages.withTx(tx).push({
-          [ID]: "trusted-sent-1",
           origin: "sent",
           body: "accepted",
         } as any);
@@ -1569,7 +1567,6 @@ describe("CFC trusted UI event enforcement", () => {
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         messages.withTx(tx).push({
-          [ID]: "fake-sent-1",
           origin: "sent",
           body: "rejected",
         } as any);
@@ -1584,7 +1581,6 @@ describe("CFC trusted UI event enforcement", () => {
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         messages.withTx(tx).push({
-          [ID]: "imported-1",
           origin: "imported",
           body: "allowed",
         } as any);
@@ -1776,7 +1772,6 @@ describe("CFC trusted UI event enforcement", () => {
           bindingPath: ["commitTrustedMessageSend"],
         });
         state.withTx(tx).key("messages").push({
-          [ID]: "trusted-sent-1",
           origin: "sent",
           body: "accepted",
         } as any);
@@ -1791,7 +1786,6 @@ describe("CFC trusted UI event enforcement", () => {
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         state.withTx(tx).key("messages").push({
-          [ID]: "fake-sent-1",
           origin: "sent",
           body: "rejected",
         } as any);
@@ -1806,7 +1800,6 @@ describe("CFC trusted UI event enforcement", () => {
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         state.withTx(tx).key("messages").push({
-          [ID]: "imported-1",
           origin: "imported",
           body: "allowed",
         } as any);

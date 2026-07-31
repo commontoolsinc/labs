@@ -3,9 +3,10 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   isArrayIndexPropertyName,
-  isArrayWithOnlyIndexProperties,
+  isInertArray,
 } from "@commonfabric/utils/arrays";
 
 import {
@@ -31,7 +32,8 @@ import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
-      `Cannot store ${typeName} with extra enumerable properties`,
+      `Not representable as a \`FabricValue\`: ${typeName} with extra ` +
+        "enumerable properties",
     );
   }
 }
@@ -39,7 +41,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
 /**
  * Returns a shallow clone of the given array carrying nothing but its
  * enumerable index properties and `length`, that is, one which satisfies
- * `isArrayWithOnlyIndexProperties()`. Holes are preserved as holes, and
+ * `isInertArray()`. Holes are preserved as holes, and
  * elements are copied by reference without themselves being converted or
  * validated, this being a shallow operation.
  *
@@ -49,6 +51,11 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * Calling this is how such a caller says explicitly that it means to drop
  * them. Code with no such warrant should let the rejection happen ("death
  * before confusion").
+ *
+ * The given array's index properties must all be enumerable data properties:
+ * the copy reads elements through enumeration, which would execute an
+ * accessor-backed index (silently flattening it to its momentary answer)
+ * and would turn a non-enumerable data index into a hole.
  *
  * @param value The array to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
@@ -88,6 +95,44 @@ export function shallowCleanArray(
       to[key] = from[key];
     }
   }
+
+  if (frozen) {
+    Object.freeze(result);
+  }
+
+  return result as FabricValueLayer;
+}
+
+/**
+ * Returns a shallow clone of the given object carrying nothing but its
+ * enumerable string-keyed properties, that is, one which satisfies
+ * `isInertPlainObject()`. Values are copied by reference
+ * without themselves being converted or validated, this being a shallow
+ * operation.
+ *
+ * This is the object counterpart of `shallowCleanArray()`, and exists for the
+ * same reason: a caller holding an object that has picked up keys which it
+ * knows are not content -- a runtime annotation, say -- uses this to say
+ * explicitly that it means to drop them. Code with no such warrant should let
+ * the rejection happen ("death before confusion").
+ *
+ * The result is always `Object.prototype`-based, so a null-prototype input
+ * comes back with an ordinary prototype. That is not a loss here: the fabric
+ * model draws no distinction between the two, and reconstruction produces
+ * ordinary plain objects either way.
+ *
+ * @param value The object to clean.
+ * @param frozen Whether to freeze the result. Defaults to `true`.
+ */
+export function shallowCleanPlainObject(
+  value: object,
+  frozen = true,
+): FabricValueLayer {
+  // `Object.entries()` yields exactly the enumerable string keys, which is the
+  // set being kept, so rebuilding from it drops symbol keys and non-enumerable
+  // string keys alike. A key holding `undefined` is still a present key and
+  // survives as one, `undefined` being a fabric value in its own right.
+  const result = Object.fromEntries(Object.entries(value));
 
   if (frozen) {
     Object.freeze(result);
@@ -204,12 +249,15 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Array: {
-      // Arrays may only carry numeric index properties. A named property or a
-      // symbol-keyed one has no fabric representation, so reject it outright
-      // rather than silently dropping it ("death before confusion").
-      if (!isArrayWithOnlyIndexProperties(value)) {
+      // An array in this system is INERT: it may only carry numeric index
+      // properties, each a data property. A named or symbol-keyed property
+      // has no fabric representation, and an accessor-backed index is live
+      // code rather than inert data; reject any of them outright rather than
+      // silently dropping or flattening ("death before confusion").
+      if (!isInertArray(value)) {
         throw new Error(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an " +
+            "inert array",
         );
       }
       // Delegate frozenness handling to `cloneHelper()`.
@@ -222,7 +270,20 @@ export function shallowFabricFromNativeValue(
       ) as FabricValueLayer;
     }
 
-    case NATIVE_TAGS.Object:
+    case NATIVE_TAGS.Object: {
+      // A plain object in this system is INERT: `FabricPlainObject` is keyed
+      // by `string`, so a symbol key has no fabric representation, and
+      // neither does a non-enumerable string key; an accessor-backed
+      // property is live code rather than inert data. Reject any of them
+      // outright rather than dropping or flattening it on the way through
+      // ("death before confusion"), matching how an array's non-index
+      // properties are treated.
+      if (!isInertPlainObject(value)) {
+        throw new Error(
+          "Not representable as a `FabricValue`: object that is not an " +
+            "inert plain object",
+        );
+      }
       // Plain objects: delegate frozenness handling to `cloneHelper()`.
       return cloneHelper(
         value as FabricValue,
@@ -231,6 +292,7 @@ export function shallowFabricFromNativeValue(
         false,
         null,
       ) as FabricValueLayer;
+    }
 
     case NATIVE_TAGS.HasToJSON: {
       // Objects (or arrays/class instances) with a `toJSON()` method.
@@ -238,7 +300,8 @@ export function shallowFabricFromNativeValue(
       const converted = (value as { toJSON: () => unknown }).toJSON();
       if (!isFabricValueLayer(converted)) {
         throw new Error(
-          `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
+          `\`toJSON()\` on ${typeof value} returned something other than a ` +
+            "`FabricValue`",
         );
       }
       return cloneHelper(
@@ -284,19 +347,24 @@ export function shallowFabricFromNativeValue(
             const converted = value.toJSON();
             if (!isFabricValueLayer(converted)) {
               throw new Error(
-                `\`toJSON()\` on function returned something other than a fabric value`,
+                "`toJSON()` on function returned something other than a " +
+                  "`FabricValue`",
               );
             }
             return converted;
           }
           throw new Error(
-            "Cannot store function per se (needs to have a `toJSON()` method)",
+            "Not representable as a `FabricValue`: function per se (needs " +
+              "to have a `toJSON()` method)",
           );
         case "symbol":
           // Registry-interned symbols are valid fabric primitives; unique
           // ones have no portable representation and are rejected.
           if (Symbol.keyFor(value) === undefined) {
-            throw new Error("Cannot store unique (uninterned) symbol");
+            throw new Error(
+              "Not representable as a `FabricValue`: unique (uninterned) " +
+                "symbol",
+            );
           }
           return value;
         default:
@@ -311,7 +379,7 @@ export function shallowFabricFromNativeValue(
       // without `toJSON()`, etc.) -- not valid `FabricValue`. Death before
       // confusion!
       throw new Error(
-        `Cannot store ${
+        `Not representable as a \`FabricValue\`: ${
           (value as object).constructor?.name ?? typeof value
         } (not a recognized fabric type)`,
       );
@@ -384,7 +452,9 @@ function fabricFromNativeValueInternal(
   if (isOriginalRecord && converted.has(original)) {
     const cached = converted.get(original);
     if (cached === PROCESSING) {
-      throw new Error("Cannot store circular reference");
+      throw new Error(
+        "Not representable as a `FabricValue`: circular reference",
+      );
     }
     return cached;
   }
@@ -492,7 +562,7 @@ function fabricFromNativeValueInternal(
  * at serialization time, all nested values are already `FabricValue`.
  *
  * We create a new `Error` rather than mutating the original because the
- * caller's `Error` should not be modified as a side effect of storing it.
+ * caller's `Error` should not be modified as a side effect of converting it.
  */
 function rebuildFabricErrorDeep(
   shallow: FabricError,
@@ -593,8 +663,9 @@ function isFabricCompatibleInternal(
       seen.add(value);
 
       if (Array.isArray(value)) {
-        // Check array structure (no non-index properties).
-        if (!isArrayWithOnlyIndexProperties(value)) {
+        // Check array structure (no non-index properties, no
+        // accessor-backed indices).
+        if (!isInertArray(value)) {
           seen.delete(value);
           return false;
         }
@@ -623,7 +694,13 @@ function isFabricCompatibleInternal(
         return false;
       }
 
-      // Plain objects -- check all property values recursively.
+      // Plain objects -- check the key shape, then all property values
+      // recursively. A symbol key or a non-enumerable string key has no fabric
+      // representation, just as an array's non-index properties do not.
+      if (!isInertPlainObject(value)) {
+        seen.delete(value);
+        return false;
+      }
       for (const val of Object.values(value)) {
         if (!isFabricCompatibleInternal(val, seen)) {
           seen.delete(value);

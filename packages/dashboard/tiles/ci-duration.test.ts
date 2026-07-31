@@ -19,6 +19,7 @@ import {
   renderGantt,
   renderGanttRoute,
 } from "./ci-duration.ts";
+import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
 
 const SVG = new TextEncoder().encode(
   '<svg xmlns="http://www.w3.org/2000/svg"><text>chart</text></svg>',
@@ -33,6 +34,7 @@ function ctx(runs: Run[]): Ctx {
 }
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: 1,
     status: "completed",
@@ -41,7 +43,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
@@ -197,6 +200,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
   );
   assertStringIncludes(html, "<title>CI run Gantt</title>");
+  assertStringIncludes(html, PERFORMANCE_VIEW_STYLES);
   assertStringIncludes(html, `${REPO} · ${CI_WORKFLOW}`);
   assertStringIncludes(html, `href="/"`); // a way back to the dashboard
   assertStringIncludes(
@@ -702,6 +706,7 @@ Deno.test("ci-duration: no passing runs is gray, never a false green", async () 
 Deno.test("ci-duration: the median minutes set the status against the thresholds", async () => {
   const mins = (m: number) =>
     run({
+      created_at: new Date(Date.now() - m * 60_000).toISOString(),
       run_started_at: new Date(Date.now() - m * 60_000).toISOString(),
       updated_at: new Date().toISOString(),
     });
@@ -727,6 +732,21 @@ Deno.test("ci-duration: the median minutes set the status against the thresholds
   const v = await labsCiDuration.collect(ctx([mins(10), mins(10), mins(180)]));
   assertEquals([v.status, v.value], ["good", "10m"]);
   assertStringIncludes(v.sub ?? "", "last 3 passing runs"); // under the 20-run bar -> count window
+});
+
+Deno.test("ci-duration measures from landing through completion", async () => {
+  const now = Date.now();
+  const view = await labsCiDuration.collect(
+    ctx([
+      run({
+        created_at: new Date(now - 15 * 60_000).toISOString(),
+        run_started_at: new Date(now - 5 * 60_000).toISOString(),
+        updated_at: new Date(now).toISOString(),
+      }),
+    ]),
+  );
+
+  assertEquals(view.value, "15m");
 });
 
 Deno.test("ci-duration: an even window takes the mean of the two middle runs", () => {

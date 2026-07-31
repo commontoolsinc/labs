@@ -132,7 +132,12 @@ async function test() {
   // so instead I'll extract the link myself, and check in the heap.
   // This will be the link to the employee's address field
   const sigilLink = JSON.parse(JSON.stringify(newCell.key(0).getRaw()));
-  const normalizedLink = parseLink(sigilLink) as NormalizedLink;
+  // The stored link elides what it shares with the slot holding it, so it has
+  // to be parsed against that slot to recover the space it lives in.
+  const normalizedLink = parseLink(
+    sigilLink,
+    newCell.key(0),
+  ) as NormalizedLink;
   const record = read(
     runtime2.storageManager,
     normalizedLink.space!,

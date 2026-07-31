@@ -118,6 +118,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
   — a completed transaction kept the activity of everything it read, and the
   unbounded document cache that still exhausts a browser tab, July 2026.
+- [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
+  — why the open-argument update class went unvalidated on the repair path, and
+  the correction of an earlier measurement that named the wrong mechanism,
+  July 2026.
 
 ### Executed plans and work orders
 
@@ -191,6 +195,9 @@ One line per archived document; each document's header carries the fuller
   — trusted-agent tool-input integrity scoping.
 - [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
   compilation cache.
+- [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
+  — the removed AMD bundle pipeline and the bundle-grained identity defect that
+  motivated content-addressed module loading.
 - [module-loading-verifier-and-engine-design.md](specs/module-loading-verifier-and-engine-design.md)
   — verifier port and engine integration.
 - [capability-wrappers.md](specs/pattern-construction/capability-wrappers.md)

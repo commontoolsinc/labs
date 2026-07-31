@@ -2,11 +2,11 @@
 // disable lint for this type
 // deno-lint-ignore-file ban-types
 import type {
+  AnyStream,
   CELL_LIKE,
   CellLike,
   JSXElement,
   RenderNode,
-  Stream,
 } from "commonfabric";
 
 /**
@@ -2873,12 +2873,22 @@ type CFEvent<T> = {
   };
 };
 
+// A stream of ANY arity is bindable, including one that declares a result.
+// Deliberate, not incidental: the point of the verb contract is that one verb
+// serves both the UI and an agent calling it through `cf piece call`, so a
+// verb must not become UI-unbindable by declaring what it returns. The result
+// is simply unobserved here — the DOM has nowhere to put it, and the caller
+// that wants it reads the invocation receipt.
+//
+// Spelled `AnyStream` rather than `Stream<T> | Stream<void>` because that pair
+// pins the arity: it means `Stream<T, void> | Stream<void, void>`, which a
+// returning verb does not satisfy, making `onClick={addTopic}` a hard error
+// for exactly the verbs the contract exists to enable.
 type EventHandler<T> =
   | CellLike<CFEvent<T> | T>
   | ((event: CFEvent<T>) => void)
   | (() => void)
-  | Stream<T>
-  | Stream<void>;
+  | AnyStream;
 
 // `Piece` is not a pattern type.
 type Piece = any;

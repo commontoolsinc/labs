@@ -33,11 +33,19 @@ import {
 import {
   type CachedCiHistoryRefresh,
   CI_JOB_CACHE_DAYS,
+  CI_JOB_HISTORY_SAMPLING_VERSION,
   CiJobHistoryStore,
 } from "./ci-job-cache.ts";
-import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
+import {
+  CI_RUNS_MAX,
+  CI_WORKFLOW,
+  LOOM_CI_WORKFLOW,
+  LOOM_REPO,
+  REPO,
+} from "./config.ts";
 import { github } from "./lib.ts";
 import { GitHubRateLimitBudgetError } from "./github-rate-limit.ts";
+import { PERFORMANCE_VIEW_STYLES } from "./performance-views.ts";
 
 // Existing collector tests exercise history and persistence behavior against
 // precise request stubs. The rate-budget implementation has its own tests.
@@ -185,16 +193,21 @@ Deno.test("CI job history keeps every eligible build at the point target", () =>
   );
 });
 
-Deno.test("CI job history samples the newest build per bucket above the point target", () => {
+Deno.test("CI job history sampling matches the main tile run limit", () => {
+  assertEquals(CI_HISTORY_POINT_TARGET, CI_RUNS_MAX);
+});
+
+Deno.test("CI job history keeps the exact target across clustered builds", () => {
   const clustered = Array.from(
     { length: CI_HISTORY_POINT_TARGET + 1 },
     (_, index) => workflowRun(1_000 + index, NOW - HOUR - index * 1_000),
   );
 
-  assertEquals(
-    sampleWorkflowRuns(clustered, NOW).map((run) => run.id),
-    [1_000],
-  );
+  const sampled = sampleWorkflowRuns(clustered, NOW);
+  assertEquals(sampled.length, CI_HISTORY_POINT_TARGET);
+  assertEquals(new Set(sampled.map((run) => run.id)).size, sampled.length);
+  assertEquals(sampled[0].id, 1_000 + CI_HISTORY_POINT_TARGET);
+  assertEquals(sampled.at(-1)?.id, 1_000);
 });
 
 Deno.test("CI job history keeps a similar point count when the window gets shorter", () => {
@@ -218,10 +231,8 @@ Deno.test("CI job history keeps a similar point count when the window gets short
     CI_HISTORY_MIN_DAYS,
   );
 
-  assert(full.length <= CI_HISTORY_POINT_TARGET + 1);
-  assert(short.length <= CI_HISTORY_POINT_TARGET + 1);
-  assert(full.length >= CI_HISTORY_POINT_TARGET - 1);
-  assert(short.length >= CI_HISTORY_POINT_TARGET - 1);
+  assertEquals(full.length, CI_HISTORY_POINT_TARGET);
+  assertEquals(short.length, CI_HISTORY_POINT_TARGET);
   assert(
     short.every((run) =>
       Date.parse(run.run_started_at) >= NOW - CI_HISTORY_MIN_DAYS * DAY
@@ -319,6 +330,7 @@ Deno.test("CI job history page shows the slowest shard, every shard, and unshard
   );
 
   assertStringIncludes(html, "<title>CI job history</title>");
+  assertStringIncludes(html, PERFORMANCE_VIEW_STYLES);
   assertStringIncludes(
     html,
     'href="/bench?view=ci&amp;repo=labs&amp;days=45&amp;sort=job&amp;stat=p99" aria-current="page"',
@@ -360,7 +372,11 @@ Deno.test("CI job history page shows the slowest shard, every shard, and unshard
   assertStringIncludes(html, "Slowest shard duration · last seen Jun 20");
   assertStringIncludes(
     html,
-    "Every successful main run is sampled when the selected window contains at most 90",
+    "Every successful main run is sampled when the selected window contains at most 200",
+  );
+  assertStringIncludes(
+    html,
+    "Larger sets keep exactly 200 builds spread evenly through the chronological run sequence",
   );
   assertStringIncludes(
     html,
@@ -369,6 +385,46 @@ Deno.test("CI job history page shows the slowest shard, every shard, and unshard
   assertStringIncludes(html, '<strong id="fetch-title">Idle</strong>');
   assertStringIncludes(html, "0 outstanding");
   assertEquals([...html.matchAll(/class="crow /g)].length, 6);
+});
+
+Deno.test("CI history graphs ignore two values at each end when twenty are shown", () => {
+  const seconds = [
+    102,
+    11,
+    1,
+    26,
+    101,
+    12,
+    2,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+  ];
+  const snapshot = buildCiJobHistory(seconds.map((value, index) => ({
+    runId: 10_000 + index,
+    runUrl: `https://example.test/runs/${10_000 + index}`,
+    at: NOW - (seconds.length - 1 - index) * HOUR,
+    overallSeconds: value,
+    jobs: [{ name: "Check", seconds: value }],
+  })));
+  const points = ciJobHistoryPage(snapshot, "job")
+    .match(/<polyline points="([^"]+)"/)?.[1]
+    .split(" ")
+    .map((point) => Number(point.split(",")[1]));
+
+  assert(points);
+  assertEquals(points.filter((point) => point < 0).length, 2);
+  assertEquals(points.filter((point) => point > 26).length, 2);
 });
 
 Deno.test("CI job history trend sort is flat and includes groups and exact job names", () => {
@@ -517,6 +573,18 @@ Deno.test("CI job history page exposes live collection progress without disablin
   );
   assertStringIncludes(
     html,
+    'else if ("lastRequestError" in state) renderIdle(state.lastRequestError || "");',
+  );
+  assertStringIncludes(
+    html,
+    "else if (!collectionFailed) renderIdle();",
+  );
+  assertStringIncludes(
+    html,
+    "else delete fetchProgress.dataset.lastRequestError;",
+  );
+  assertStringIncludes(
+    html,
     "if (!eventStream && !collectionFailed && !transportFailed) renderIdle()",
   );
   assertStringIncludes(html, "transportFailed = true");
@@ -618,6 +686,73 @@ Deno.test("CI fetch progress panel retains a completed collection warning", () =
   );
 });
 
+Deno.test("CI fetch progress panel retains the last failed collection", () => {
+  const html = ciFetchProgressPanel({
+    id: "ci-failed",
+    source: "labs",
+    days: 45,
+    phase: "error",
+    discoveryRequestsMade: 1,
+    discoveryResponsesReceived: 1,
+    discoveryOutstandingRequests: 0,
+    totalRuns: 12,
+    cachedRuns: 0,
+    requestsMade: 0,
+    responsesReceived: 0,
+    sharedRequests: 0,
+    sharedResponses: 0,
+    successfulResponses: 0,
+    failedResponses: 1,
+    completedRuns: 0,
+    queuedRuns: 12,
+    outstandingRequests: 0,
+    needsReload: false,
+    updatedAt: NOW,
+    error: "source unreachable",
+  });
+
+  assertStringIncludes(html, 'class="fetch-progress error"');
+  assertStringIncludes(html, '<strong id="fetch-title">Idle</strong>');
+  assertStringIncludes(
+    html,
+    'data-last-request-error="source unreachable"',
+  );
+  assertStringIncludes(
+    html,
+    '<p id="fetch-detail">Last collection stopped: source unreachable</p>',
+  );
+  assert(!html.includes("No requests in progress."));
+});
+
+Deno.test("CI job history response keeps a remembered failure in its idle panel", async () => {
+  const cached = buildCiJobHistory(historySamples());
+  const provider = {
+    cached: () => Promise.resolve(cached),
+    startRefresh: () => ({
+      progress: null,
+      result: Promise.resolve(cached),
+    }),
+    lastRefreshError: () => "source unreachable",
+  };
+
+  const response = await ciJobHistoryResponse(
+    new URL("http://x/bench?view=ci"),
+    provider,
+    "response-token",
+  );
+  const html = await response.text();
+
+  assertStringIncludes(html, 'class="fetch-progress error"');
+  assertStringIncludes(
+    html,
+    '<p id="fetch-detail">Last collection stopped: source unreachable</p>',
+  );
+  assertStringIncludes(
+    html,
+    'else if ("lastRequestError" in state) renderIdle(state.lastRequestError || "");',
+  );
+});
+
 Deno.test("CI job history response uses a refresh that completed after its cache read", async () => {
   const cached = buildCiJobHistory([{
     runId: 7_101,
@@ -711,6 +846,7 @@ Deno.test("CI job history update check uses the selected repository and window",
   assertEquals(selected?.source, CI_HISTORY_SOURCES.loom);
   assertEquals(selected?.days, 9);
   assertEquals(state.progress, progress);
+  assertEquals(state.lastRequestError, null);
   assertEquals(typeof state.version, "string");
   assertEquals(response.headers.get("cache-control"), "no-store");
 });
@@ -741,10 +877,120 @@ Deno.test("CI job history update checks freshness-gate a failed collection", asy
       ),
       null,
     );
+    const checked = await ciJobHistoryCheckResponse(
+      new URL("http://x/bench/check?view=ci&repo=labs&days=7"),
+      test.collector,
+      "check-token",
+    );
+    const state = await checked.json();
+    assertEquals(state.progress, null);
+    assertEquals(state.lastRequestError, "temporarily unavailable");
+    assertEquals(
+      test.collector.lastRefreshError(CI_HISTORY_SOURCES.labs, 14),
+      null,
+    );
     assertEquals(calls, 1);
+
+    let releaseRecovery!: (response: Response) => void;
+    const recoveryResponse = new Promise<Response>((resolve) => {
+      releaseRecovery = resolve;
+    });
+    globalThis.fetch = () => recoveryResponse;
+    const recovery = test.collector.startRefresh(
+      "check-token",
+      CI_HISTORY_SOURCES.labs,
+      7,
+    );
+    const joinedRecovery = test.collector.startRefreshForCheck(
+      "check-token",
+      CI_HISTORY_SOURCES.labs,
+      7,
+    );
+    releaseRecovery(Response.json({
+      total_count: 0,
+      workflow_runs: [],
+    }));
+    assert(joinedRecovery);
+    assertEquals(joinedRecovery.progress?.id, recovery.progress?.id);
+    await recovery.result;
+    assertEquals(
+      test.collector.lastRefreshError(CI_HISTORY_SOURCES.labs, 7),
+      null,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     await test.cleanup();
+  }
+});
+
+Deno.test("CI history retains a failed request until replacement data is persisted", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "ci-job-history-failure-persistence-",
+  });
+  const originalFetch = globalThis.fetch;
+  let blockSave = false;
+  let markSaveStarted!: () => void;
+  let releaseSave!: () => void;
+  const saveStarted = new Promise<void>((resolve) => {
+    markSaveStarted = resolve;
+  });
+  const saveGate = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  class BlockingStore extends CiJobHistoryStore {
+    override async save(now = Date.now()): Promise<void> {
+      if (blockSave) {
+        markSaveStarted();
+        await saveGate;
+      }
+      await super.save(now);
+    }
+  }
+  const collector = new CiJobHistoryCollector(
+    new BlockingStore(`${directory}/history.json`),
+  );
+
+  try {
+    globalThis.fetch = () =>
+      Promise.resolve(new Response("unavailable", { status: 503 }));
+    const failed = collector.startRefresh(
+      "failure-token",
+      CI_HISTORY_SOURCES.labs,
+      7,
+    );
+    await assertRejects(() => failed.result);
+    assertEquals(
+      collector.lastRefreshError(CI_HISTORY_SOURCES.labs, 7),
+      "temporarily unavailable",
+    );
+
+    globalThis.fetch = () =>
+      Promise.resolve(Response.json({
+        total_count: 0,
+        workflow_runs: [],
+      }));
+    blockSave = true;
+    const recovery = collector.startRefresh(
+      "recovery-token",
+      CI_HISTORY_SOURCES.labs,
+      7,
+    );
+    await saveStarted;
+    assertEquals(
+      collector.lastRefreshError(CI_HISTORY_SOURCES.labs, 7),
+      "temporarily unavailable",
+    );
+
+    releaseSave();
+    await recovery.result;
+    assertEquals(
+      collector.lastRefreshError(CI_HISTORY_SOURCES.labs, 7),
+      null,
+    );
+  } finally {
+    releaseSave();
+    globalThis.fetch = originalFetch;
+    await Deno.remove(directory, { recursive: true });
   }
 });
 
@@ -1799,6 +2045,10 @@ Deno.test("CI job history reuses a fresh completed collection after a dashboard 
     const persisted = JSON.parse(await Deno.readTextFile(test.file));
     assertEquals(persisted.refreshes.length, 1);
     assertEquals(persisted.refreshes[0].days, CI_HISTORY_DAYS);
+    assertEquals(
+      persisted.refreshes[0].samplingVersion,
+      CI_JOB_HISTORY_SAMPLING_VERSION,
+    );
     assertEquals(persisted.refreshes[0].successfulRunTimes, [now]);
     assertEquals(persisted.refreshes[0].sampledRuns, [{
       runId: run.id,
@@ -1877,7 +2127,185 @@ Deno.test("CI job history reuses a fresh completed collection after a dashboard 
   }
 });
 
-Deno.test("CI job history preserves an all-failed refresh warning after restart", async () => {
+Deno.test("CI job history does not rebuild a matching persisted manifest", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-history-test-" });
+  class CachedReadCollector extends CiJobHistoryCollector {
+    cachedReads = 0;
+
+    override cached(
+      ...args: Parameters<CiJobHistoryCollector["cached"]>
+    ): ReturnType<CiJobHistoryCollector["cached"]> {
+      this.cachedReads++;
+      return super.cached(...args);
+    }
+  }
+  const run = workflowRun(9_105, Date.now() - HOUR);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input) => {
+    const url = String(input);
+    return Promise.resolve(
+      url.includes(`/actions/workflows/${CI_WORKFLOW}/runs?`)
+        ? Response.json({ workflow_runs: [run] })
+        : Response.json({ jobs: [apiJob("Check", 90)] }),
+    );
+  };
+
+  try {
+    const collector = new CachedReadCollector(
+      new CiJobHistoryStore(`${directory}/history.json`),
+    );
+    assertEquals(
+      (await collector.startRefresh("matching-manifest-token").result)
+        .runCount,
+      1,
+    );
+    assertEquals(collector.cachedReads, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("CI job history does not bless a preserved legacy sample", async () => {
+  const test = await temporaryCollector();
+  const now = Date.now();
+  const first = workflowRun(9_106, now - HOUR);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input) => {
+    const url = String(input);
+    return Promise.resolve(
+      url.includes(`/actions/workflows/${CI_WORKFLOW}/runs?`)
+        ? Response.json({ workflow_runs: [first] })
+        : Response.json({ jobs: [apiJob("Check", 90)] }),
+    );
+  };
+
+  try {
+    await test.collector.startRefresh("legacy-sample-token").result;
+    const persisted = JSON.parse(await Deno.readTextFile(test.file));
+    delete persisted.refreshes[0].samplingVersion;
+    const reruns = Array.from(
+      { length: CI_HISTORY_POINT_TARGET + 1 },
+      (_, index) =>
+        workflowRun(
+          first.id + index,
+          now - HOUR - index * 1_000,
+          { run_attempt: 2 },
+        ),
+    );
+    persisted.refreshes[0].successfulRunTimes = reruns.map((run) =>
+      Date.parse(run.run_started_at)
+    );
+    await Deno.writeTextFile(test.file, JSON.stringify(persisted));
+
+    globalThis.fetch = (input) => {
+      const url = String(input);
+      return Promise.resolve(
+        url.includes(`/actions/workflows/${CI_WORKFLOW}/runs?`)
+          ? Response.json({ workflow_runs: reruns })
+          : new Response("unavailable", { status: 503 }),
+      );
+    };
+    const store = new CiJobHistoryStore(test.file);
+    const collector = new CiJobHistoryCollector(store);
+    const baseline = await collector.cached(
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      now,
+    );
+    assertEquals(baseline?.runCount, 1);
+
+    const result = await collector.startRefresh(
+      "legacy-sample-token",
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      baseline,
+    ).result;
+    assertEquals(result.runCount, 1);
+    assertEquals(result.stale, true);
+    assertEquals(
+      store.refresh(REPO, CI_WORKFLOW, CI_HISTORY_DAYS)?.samplingVersion,
+      undefined,
+    );
+    assertEquals(
+      store.freshRefresh(REPO, CI_WORKFLOW, CI_HISTORY_DAYS),
+      undefined,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await test.cleanup();
+  }
+});
+
+Deno.test("CI job history does not bless a preserved manifestless sample", async () => {
+  const test = await temporaryCollector();
+  const now = Date.now();
+  const first = workflowRun(9_107, now - HOUR);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input) => {
+    const url = String(input);
+    return Promise.resolve(
+      url.includes(`/actions/workflows/${CI_WORKFLOW}/runs?`)
+        ? Response.json({ workflow_runs: [first] })
+        : Response.json({ jobs: [apiJob("Check", 90)] }),
+    );
+  };
+
+  try {
+    await test.collector.startRefresh("manifestless-sample-token").result;
+    const persisted = JSON.parse(await Deno.readTextFile(test.file));
+    persisted.refreshes = [];
+    await Deno.writeTextFile(test.file, JSON.stringify(persisted));
+    const reruns = Array.from(
+      { length: CI_HISTORY_POINT_TARGET + 1 },
+      (_, index) =>
+        workflowRun(
+          first.id + index,
+          now - HOUR - index * 1_000,
+          { run_attempt: 2 },
+        ),
+    );
+
+    globalThis.fetch = (input) => {
+      const url = String(input);
+      return Promise.resolve(
+        url.includes(`/actions/workflows/${CI_WORKFLOW}/runs?`)
+          ? Response.json({ workflow_runs: reruns })
+          : new Response("unavailable", { status: 503 }),
+      );
+    };
+    const store = new CiJobHistoryStore(test.file);
+    const collector = new CiJobHistoryCollector(store);
+    const baseline = await collector.cached(
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      now,
+    );
+    assertEquals(baseline?.runCount, 1);
+
+    const result = await collector.startRefresh(
+      "manifestless-sample-token",
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      baseline,
+    ).result;
+    assertEquals(result.runCount, 1);
+    assertEquals(result.stale, true);
+    assertEquals(
+      store.refresh(REPO, CI_WORKFLOW, CI_HISTORY_DAYS)?.samplingVersion,
+      undefined,
+    );
+    assertEquals(
+      store.freshRefresh(REPO, CI_WORKFLOW, CI_HISTORY_DAYS),
+      undefined,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await test.cleanup();
+  }
+});
+
+Deno.test("CI job history preserves an all-failed refresh warning and retries after restart", async () => {
   const test = await temporaryCollector();
   const now = Date.now();
   const run = workflowRun(9_104, now - HOUR);
@@ -1942,10 +2370,93 @@ Deno.test("CI job history preserves an all-failed refresh warning after restart"
       7,
       cached,
     );
+    assert(refresh.progress);
+    assertEquals((await refresh.result).stale, true);
+    assertEquals(calls, callsBeforeRestart + 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await test.cleanup();
+  }
+});
+
+Deno.test("CI job history preserves current sampling provenance after an all-failed refresh", async () => {
+  const test = await temporaryCollector();
+  const now = Date.now();
+  let clock = now;
+  const run = workflowRun(9_108, now - HOUR);
+  let failing = false;
+  let calls = 0;
+  const originalNow = Date.now;
+  const originalFetch = globalThis.fetch;
+  Date.now = () => clock;
+  globalThis.fetch = (input) => {
+    const url = String(input);
+    calls++;
+    if (url.includes(`/actions/workflows/${CI_WORKFLOW}/runs?`)) {
+      return Promise.resolve(Response.json({
+        workflow_runs: [{ ...run, run_attempt: failing ? 2 : 1 }],
+      }));
+    }
+    if (url.includes(`/actions/runs/${run.id}/`)) {
+      if (failing) {
+        clock++;
+        return Promise.resolve(new Response("unavailable", { status: 503 }));
+      }
+      return Promise.resolve(Response.json({ jobs: [apiJob("Check", 90)] }));
+    }
+    return Promise.resolve(new Response("not found", { status: 404 }));
+  };
+
+  try {
+    await test.collector.startRefresh(
+      "current-sample-token",
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+    ).result;
+    clock += HOUR;
+    failing = true;
+
+    const store = new CiJobHistoryStore(test.file);
+    const second = new CiJobHistoryCollector(store);
+    const baseline = await second.cached(
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      clock,
+    );
+    assertEquals(baseline?.runCount, 1);
+    const failed = await second.startRefresh(
+      "current-sample-token",
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      baseline,
+    ).result;
+    assertEquals(failed.runCount, 1);
+    assertEquals(failed.stale, true);
+    assertEquals(
+      store.refresh(REPO, CI_WORKFLOW, CI_HISTORY_DAYS)?.samplingVersion,
+      CI_JOB_HISTORY_SAMPLING_VERSION,
+    );
+
+    const callsBeforeRestart = calls;
+    const restarted = new CiJobHistoryCollector(
+      new CiJobHistoryStore(test.file),
+    );
+    const cached = await restarted.cached(
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      Date.now(),
+    );
+    const refresh = restarted.startRefresh(
+      "current-sample-token",
+      CI_HISTORY_SOURCES.labs,
+      CI_HISTORY_DAYS,
+      cached,
+    );
     assertEquals(refresh.progress, null);
     assertEquals((await refresh.result).stale, true);
     assertEquals(calls, callsBeforeRestart);
   } finally {
+    Date.now = originalNow;
     globalThis.fetch = originalFetch;
     await test.cleanup();
   }
@@ -2593,6 +3104,132 @@ Deno.test("a selected-run Gantt repairs cached responses with no drawable jobs",
     );
   } finally {
     console.error = originalError;
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a selected-run Gantt expands a collapsed rerun cache", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "ci-gantt-selected-rerun-cache-test-",
+  });
+  const file = `${directory}/history.json`;
+  const run = workflowRun(9_118, NOW, {
+    run_attempt: 2,
+    name: "CI",
+    head_sha: HEAD_SHA,
+    path: `.github/workflows/${CI_WORKFLOW}`,
+  });
+  const firstStart = NOW - HOUR;
+  const retryStart = NOW;
+  const jobAt = (
+    attempt: number,
+    start: number,
+    conclusion: string,
+  ) => ({
+    ...apiJob("Retried job", attempt * 60, conclusion),
+    started_at: new Date(start).toISOString(),
+    completed_at: new Date(start + attempt * 60_000).toISOString(),
+  });
+  const store = new CiJobHistoryStore(file);
+  await store.load();
+  store.set({
+    repo: REPO,
+    workflow: CI_WORKFLOW,
+    runId: run.id,
+    runAttempt: run.run_attempt,
+    headSha: HEAD_SHA,
+    runUrl: run.html_url,
+    at: NOW,
+    overallSeconds: 120,
+    jobs: [{ name: "Retried job", seconds: 120 }],
+    gantt: {
+      status: run.status,
+      conclusion: run.conclusion,
+      event: run.event,
+      headBranch: run.head_branch ?? undefined,
+      startedAt: run.run_started_at,
+      workflowName: run.name,
+      jobs: [{
+        name: "Retried job",
+        status: "completed",
+        conclusion: "success",
+        started_at: new Date(firstStart).toISOString(),
+        completed_at: new Date(firstStart + 60_000).toISOString(),
+        steps: [],
+      }],
+    },
+  });
+  await store.save(NOW);
+  const requestedAttempts: number[] = [];
+  const collector = new RateLimitedCiJobHistoryCollector(
+    store,
+    <T>(path: string): Promise<T> => {
+      const match = path.match(/\/attempts\/(\d+)\/jobs/);
+      if (!match) throw new Error(`unexpected selected-run request: ${path}`);
+      const attempt = Number(match[1]);
+      requestedAttempts.push(attempt);
+      return Promise.resolve({
+        jobs: [
+          attempt === 1
+            ? jobAt(1, firstStart, "failure")
+            : jobAt(2, retryStart, "success"),
+        ],
+      } as T);
+    },
+  );
+  try {
+    await assertRejects(
+      () =>
+        collector.gantt(
+          undefined,
+          CI_HISTORY_SOURCES.labs,
+          { limit: 1, mainOnly: true },
+          NOW,
+        ),
+      Error,
+      "Set GH_TOKEN",
+    );
+    const result = await collector.gantt(
+      "selected-run-token",
+      CI_HISTORY_SOURCES.labs,
+      {
+        limit: 1,
+        mainOnly: true,
+        headSha: HEAD_SHA,
+        selectedRuns: [{ runId: run.id, runAttempt: run.run_attempt }],
+      },
+      NOW,
+      [run],
+    );
+    assertEquals(requestedAttempts, [1, 2]);
+    assertEquals(
+      result.runs[0].jobs.map((job) => [
+        job.attempt,
+        job.conclusion,
+        job.started_at,
+      ]),
+      [
+        [1, "failure", new Date(firstStart).toISOString()],
+        [2, "success", new Date(retryStart).toISOString()],
+      ],
+    );
+    const persisted = JSON.parse(await Deno.readTextFile(file));
+    assertEquals(
+      persisted.runs[0].gantt.jobs.map(
+        (job: { attempt?: number }) => job.attempt,
+      ),
+      [1, 2],
+    );
+    assertEquals(
+      (await collector.gantt(
+        undefined,
+        CI_HISTORY_SOURCES.labs,
+        { limit: 1, mainOnly: true },
+        NOW,
+      )).runs[0].jobs.map((job) => job.attempt),
+      [1, 2],
+    );
+  } finally {
     await Deno.remove(directory, { recursive: true });
   }
 });
@@ -4151,7 +4788,7 @@ Deno.test("CI job history refreshes the complete latest job set after a subset r
   }
 });
 
-Deno.test("CI Gantt keeps rerun jobs on the first attempt timeline", async () => {
+Deno.test("CI Gantt keeps every execution of a rerun job", async () => {
   const test = await temporaryCollector();
   const runId = 9_205;
   const firstStart = NOW - HOUR;
@@ -4167,14 +4804,20 @@ Deno.test("CI Gantt keeps rerun jobs on the first attempt timeline", async () =>
     if (url.includes(`/actions/runs/${runId}/attempts/1/jobs`)) {
       return Promise.resolve(Response.json({
         jobs: [
-          jobAt("Check", 100, firstStart),
-          jobAt("Retried job", 100, firstStart + 120_000),
+          { ...jobAt("Check", 100, firstStart), id: 100 },
+          {
+            ...jobAt("Retried job", 100, firstStart + 120_000),
+            conclusion: "failure",
+          },
         ],
       }));
     }
     if (url.includes(`/actions/runs/${runId}/attempts/2/jobs`)) {
       return Promise.resolve(Response.json({
-        jobs: [jobAt("Retried job", 200, retryStart)],
+        jobs: [
+          { ...jobAt("Check", 100, firstStart), id: 200 },
+          jobAt("Retried job", 200, retryStart),
+        ],
       }));
     }
     return Promise.resolve(new Response("not found", { status: 404 }));
@@ -4202,16 +4845,39 @@ Deno.test("CI Gantt keeps rerun jobs on the first attempt timeline", async () =>
       NOW,
       [run],
     );
-    const retried = gantt.runs[0].jobs.find((job) =>
-      job.name === "Retried job"
+    assertEquals(
+      gantt.runs[0].jobs.filter((job) => job.name === "Check").map((job) => ({
+        attempt: job.attempt,
+        startedAt: job.started_at,
+      })),
+      [{
+        attempt: 1,
+        startedAt: new Date(firstStart).toISOString(),
+      }],
     );
     assertEquals(
-      retried?.started_at,
-      new Date(firstStart + 120_000).toISOString(),
-    );
-    assertEquals(
-      retried?.completed_at,
-      new Date(firstStart + 220_000).toISOString(),
+      gantt.runs[0].jobs.filter((job) => job.name === "Retried job").map(
+        (job) => ({
+          attempt: job.attempt,
+          conclusion: job.conclusion,
+          startedAt: job.started_at,
+          completedAt: job.completed_at,
+        }),
+      ),
+      [
+        {
+          attempt: 1,
+          conclusion: "failure",
+          startedAt: new Date(firstStart + 120_000).toISOString(),
+          completedAt: new Date(firstStart + 220_000).toISOString(),
+        },
+        {
+          attempt: 2,
+          conclusion: "success",
+          startedAt: new Date(retryStart).toISOString(),
+          completedAt: new Date(retryStart + 200_000).toISOString(),
+        },
+      ],
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -4555,9 +5221,10 @@ Deno.test("CI job history ignores invalid job times and uses a timed rerun in th
       { limit: 1, mainOnly: true, allConclusions: false },
       NOW,
     );
-    assertEquals(gantt.runs[0].jobs[0].conclusion, "success");
+    const retry = gantt.runs[0].jobs.find((job) => job.attempt === 2);
+    assertEquals(retry?.conclusion, "success");
     assertEquals(
-      gantt.runs[0].jobs[0].started_at,
+      retry?.started_at,
       apiJob("Retry", 30).started_at,
     );
   } finally {
