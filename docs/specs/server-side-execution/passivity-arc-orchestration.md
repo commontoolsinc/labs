@@ -190,9 +190,11 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `e519ec83e` — toolshed's webhook egress routed through the
-executor (D12), and with it the arc's **first gate probe that can see egress**
-(terminal-condition item 4 closed).
+**Last landed:** item 3 closed as a DEFINITION fix (no code change) — **all four
+terminal-condition items are now closed**, and only D12's
+`background-piece-service` sunset stands between here and the flip. Code head is
+`e519ec83e`: toolshed's webhook egress routed through the executor (D12), plus
+the arc's **first gate probe that can see egress** (item 4).
 
 Earlier, most recent first: `64d9d76e5` §2.11, any process that writes to a
 stream cell is a pattern runtime; `f2bf77cd8` **D12** — background-piece-service
@@ -251,11 +253,8 @@ arbitration.
 Terminal-condition items 1 and 2 are CLOSED. Remaining, in the order they
 unblock each other:
 
-1. **`wish`'s egress bypasses the gate** (`wish.ts`) — item 3. Note the
-   `streamData` refusal in `2e42bb62d` sharpened what the owner's ruling on
-   this actually covers: it turned on `wish`'s destination being FIXED
-   (`patternUrl()`, our own API). It does not generalise to an
-   author-supplied url. The eventual fix is to load from disk server-side.
+1. ~~`wish`'s egress bypasses the gate~~ — **CLOSED as a definition fix**; see
+   item 3 above. **ALL FOUR TERMINAL-CONDITION ITEMS ARE NOW CLOSED.**
 2. ~~A gate probe containing a pattern effect~~ — **DONE `e519ec83e`.** Use it:
    it is the only instrument that reads the corrected gate and an egress count
    off the same run, so it is how the flip gets measured.
@@ -269,10 +268,35 @@ unblock each other:
    it doubles as an early acceptance sample: whatever the flip does globally,
    it has already been done to one server runtime and measured.
 
-Also open, and neither is on the critical path: the claimed-arm unserved
-dirt-clear (§1's `claim-not-live` box records it — it becomes a live liveness
-hole under blanket ownership), and `#31` decoupling the write firewall's
-on-switch from lane presence, which is what would unblock `claim-not-live`.
+**With item 3 closed as a definition fix, only the BPS sunset stands between
+here and the flip.**
+
+Also open, none on the critical path:
+
+- The **claimed-arm unserved dirt-clear** (§1's `claim-not-live` box) — becomes
+  a live liveness hole under blanket ownership.
+- **Decoupling the write firewall's on-switch from lane presence** — what would
+  unblock `claim-not-live`'s `assertedLane` leg.
+- **EXECUTOR HARDENING, a separate line from the flip.** Item 3's ruling
+  surfaced two real defects that are *not* the terminal condition, and this
+  distinction is the point — do not let them back onto the flip's critical path:
+  1. **`wish`'s destination-fixedness is ASSERTED, never ENFORCED.** The whole
+     ruling rests on the URL being three module-level constants pointing at our
+     own API; nothing in the type system or runtime holds it there. The fix is a
+     **deletion** — remove `HttpProgramResolver`'s default `fetchImpl` so a
+     resolver cannot silently acquire network reach — but it touches four
+     packages and does not serve item 3. Its own slice.
+  2. **The executor's `denyExternalBuiltinFetch` is not categorical either.**
+     This is what the owner's "load from disk server-side" fix actually buys —
+     it removes the EXECUTOR's egress, not the client's, so it belongs here and
+     not on the terminal-condition list. **It does not close item 3 and never
+     could**: the client has no disk and must keep fetching the sidecar to
+     render `wish`'s `[UI]`. Feasible (the Worker inherits read permission and
+     `packages/patterns` is `--include`d in the binary), with one trap: content
+     identity folds in each module's authored NAME, and `HttpProgramResolver`
+     names modules by URL pathname — a naïve `FileSystemProgramResolver` would
+     name main `/system/suggestion.tsx` and silently desync the compile cache
+     and version gate. Identity parity is the load-bearing assertion.
 
 **Deliberately stopped, not finished:** the `map` chase is closed as
 arbitration polish — one router residual from served, and that residual does
@@ -366,11 +390,62 @@ things do:
    url, plus a contract that is the exact negation of the broker's deliberate
    bounded/buffered invariant. Serving it needs a streaming broker seam, not an
    allowlist edit.
-3. **`wish`'s egress bypasses the gate entirely** (`wish.ts`), so the flip
-   cannot make the categorical statement true even once it works. Owner ruled
-   the system-pattern load a special case needing no quota; the eventual fix is
-   to load from disk server-side. **Sharpened by item 2's refusal:** that ruling
-   turned on the destination being FIXED and does not generalise.
+3. ~~**`wish`'s egress bypasses the gate entirely.**~~ **CLOSED 2026-07-31 as a
+   DEFINITION fix — the item was a category error, and this is the whole of it.**
+
+   The item said "the flip cannot make the categorical statement true even once
+   it works." That is **true of the sentence and false of the property the
+   sentence was trying to name.** The property is *"no pattern-authored side
+   effect dispatches from a client"*, and `wish`'s sidecar load does not violate
+   it.
+
+   **Definition, and it is now load-bearing for the flip's acceptance: an
+   "egress effect" is a POST-COMMIT SINK-REQUEST DISPATCH. Module resolution is
+   excluded by construction.** The grounds:
+
+   - **The gate is structurally an at-most-once post-commit dispatcher.** Every
+     consult site reaches it through `enqueueSinkRequestPostCommitEffect`, whose
+     contract is: record a CFC policy input, then either suppress or enqueue an
+     effect that runs after the commit and **writes its result into a cell**.
+     Suppression is coherent ONLY because the result arrives by settlement.
+   - **`wish` has no such shape.** Its sidecar cache produces a compiled
+     `Pattern` **object in a module-level JS closure** and immediately runs it.
+     No settlement can deliver a live JS object to another process. So
+     suppressing it would not defer the work to the claim holder — **it would
+     make the run impossible.** That is the fail-toward-silence this arc has now
+     caught five times, and it would have been introduced deliberately.
+   - **The repo already ruled this in code.** `compile-and-run.ts` omits both
+     the policy input and the gate, on the recorded ground that "there is no
+     external sink here, only local compilation and a nested pattern run."
+     Fetching the source for that compilation is the same activity one step
+     earlier; item 3 would have had to overturn that ruling.
+   - **The owner's own fix confirms the category.** "Load from disk
+     server-side" is not "route it through the broker". *A thing you fix by
+     replacing it with a file read was never an effect* — it was a module-
+     resolution strategy that happened to pick HTTP as its transport.
+   - All three things the gate exists for are absent: no quota (owner-ruled),
+     no authority (an unauthenticated GET of our own static route carries no
+     principal), no double-dispatch consequence (idempotent GET of static
+     source, N>1 indistinguishable from N=1 to any observer).
+
+   **The right classification is NOT "pattern loading".** It is *who supplies
+   the destination, and can the result be delivered by settlement*. On that
+   axis `fetchProgram` (author-supplied URL, result lands in a cell, carries
+   `reopenClaimedWork` for the suppressed-shadow case) is correctly GATED and
+   `wish` (three module-level constants, result is a live JS object) is
+   correctly NOT — they are opposite sides of a real line, not an
+   inconsistency. `ensurePieceRunning` is in neither, being storage-backed
+   (§2.11).
+
+   **The client keeps loading its sidecar after the flip, and should.** The arc
+   permits a client to compute for its own rendering, and `wish`'s `[UI]` needs
+   the pattern in the client's own memory. Consistent with the flip trial's
+   measured **zero rendering effects broken**. Note `headless` is an
+   AUTHOR-SUPPLIED INPUT, not a runtime mode, so "just run wish headless on the
+   server" was never available.
+
+   **Two real defects survive this ruling; neither is the terminal condition.**
+   See the executor-hardening entries below.
 4. ~~**A gate probe containing a pattern effect.**~~ **CLOSED `e519ec83e`** —
    `packages/patterns/integration/server-execution-webhook-egress-gate.test.ts`.
    The webhook topology WAS the missing instrument: a real pool, a real
@@ -1054,9 +1129,19 @@ investigation.
 **client-authority execution entry point reachable from a plain stream write.**
 The chain: a `Cell.send` is a `Cell.set`; the commit queues a scheduler event;
 if no local handler is registered, the scheduler calls `ensurePieceRunning`,
-which **loads the user's pattern from `patternApiUrl` and calls
-`runtime.start()`** — instantiating that piece's entire reactive graph, effect
-builtins included, inside the calling process.
+which **loads the user's pattern and calls `runtime.start()`** — instantiating
+that piece's entire reactive graph, effect builtins included, inside the calling
+process.
+
+> **CORRECTED 2026-07-31 — this section first said the load was an HTTP fetch
+> from `patternApiUrl`. It is not.** `loadPatternByIdentity`'s whole ladder is
+> STORAGE-backed: compiled-closure docs → verified source docs → `cf:` fabric
+> imports, all from the memory space. No HTTP anywhere. The conclusion below is
+> unaffected — and the correction makes it STRONGER, because the process needs
+> no pattern-API access at all: **write access to the space is sufficient to
+> become a pattern runtime.** The wrong mechanism also mattered downstream: it
+> made `wish`'s HTTP sidecar load look like an instance of the same class, and
+> it is not (see item 3's ruling in §1).
 
 Consequences that are easy to miss:
 
