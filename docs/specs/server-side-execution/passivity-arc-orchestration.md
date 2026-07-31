@@ -157,15 +157,51 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `2663771ec` — navigateTo's seam + rank-containment invariant;
-demand-closure roll-up makes child sub-patterns servable. **Keep this line
+**Last landed:** `8de47f7e3` — ALL of §2b; the claim mechanism's survivors now
+have claim-free carriers and the fence deletions are unblocked. (Earlier:
+`2663771ec` — navigateTo's seam + rank-containment invariant;
+demand-closure roll-up makes child sub-patterns servable.) **Keep this line
 current — it is the resume pointer, and it has rotted three times. Edit it by
 hand; a `sed` on this line broke the file once.**
 
-**Next up — REORDERED 2026-07-29 by the survival test above.** The `map` chase
-is CLOSED as arbitration polish, not because it is finished: it is one router
-residual away from served, and that residual does not survive the deletion.
-Stop there deliberately.
+**ALL OF §2b IS LANDED (2026-07-29).** Every survivor of the survival test now
+has a claim-free carrier, and the lease holds the single-executor guarantee in
+its own right. **The fence deletions are unblocked.**
+
+| §2b row | landed as |
+| --- | --- |
+| write firewall off `provenance` | `5aa63e6d3` (+ batch-path hole closed in `1ac795d52`) |
+| acting lane for scope resolution | `768aab2dc` (slice 1) |
+| write re-resolution + lane liveness | `1ac795d52` — a UNION query, not the swap §2b described |
+| §4 pair emission | `7b932b6f3` — `actingRank ?? contextRank`, a strict superset |
+| overlay drop | `2d5eac421` — family-keyed; fixed a live flicker at HEAD |
+| pool sponsor re-anchor | `8de47f7e3` — lease-level authority loss |
+| single-executor guarantee | `63a5a32ca` — lease promoted, `lease-unbounded-commit` added |
+
+**THE LESSON FROM §2b, and apply it to whatever the scope doc says next:
+FOUR of its seven rows carried a FAIL-OPEN in the paper design**, plus §1d
+misclassified `lease-stale` as deletable when the promotion depends on it.
+§2b was an excellent map of WHAT to move and an unreliable guide to HOW,
+failing consistently toward silence. Every one was caught the same way — by
+measuring **what the change stops rejecting**, not what it starts doing.
+Treat every remaining row as guilty until measured.
+
+Also: §2a shipped a superset proof over CALL SITES that missed a path which
+never populated the new required input, silently unguarding batched commits.
+**A superset argument over call sites is not enough when the new precondition
+has its own population path.**
+
+**Next up:** (1) delete the claim-shaped fences now that the lease carries
+them — `claim-arity` (subsumed by the new `lease-unbounded-commit`),
+`claim-expired`, `claim-lease-generation`, `claim-not-live`; **do NOT delete
+`lease-stale`, `leaseOwnerMatches` or `leaseGeneration`** — they are carriers,
+not arbitration. Then (2) the TERMINAL CONDITION in the box above: flip
+`externalSinkDisposition`'s client default to `suppress` and see whether
+anything breaks.
+
+**Deliberately stopped, not finished:** the `map` chase is closed as
+arbitration polish — one router residual from served, and that residual does
+not survive the deletion.
 
 The work is now the deletion itself: **replace per-action claim arbitration
 with blanket server ownership of a space's demanded closure.** Under that model
