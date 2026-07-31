@@ -34,20 +34,6 @@ export function parseCellPath(path: string): CellPath {
   });
 }
 
-/** Return the Cell view at `path` without reading or dereferencing it. */
-export function cellAtPath<T>(
-  cell: Cell<T>,
-  path: CellPath,
-): Cell<unknown> {
-  let currentCell = cell as Cell<unknown>;
-  for (const segment of path) {
-    currentCell = currentCell.key(
-      segment as keyof unknown,
-    ) as Cell<unknown>;
-  }
-  return currentCell;
-}
-
 export function resolveCellPath<T>(
   cell: Cell<T>,
   path: CellPath,

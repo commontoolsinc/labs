@@ -1,4 +1,5 @@
 import type { FabricValue } from "@commonfabric/api";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { encodePointer, isPrefixPath } from "../../../memory/v2/path.ts";
@@ -256,6 +257,70 @@ const buildTailOp = (
   };
 };
 
+type RemoveIntent = Extract<MergeableOpIntent, { op: "remove-by-value" }>;
+
+// The array the store will hold once the intent's removals have been applied to
+// `base`, mirroring how the wire op applies (`removeByValueAtPath` in
+// `@commonfabric/memory/v2/patch`): every occurrence of each value goes, in the
+// order the values were recorded.
+const withRemovalsApplied = (
+  base: readonly FabricValue[],
+  values: readonly FabricValue[],
+): FabricValue[] => {
+  const result = base.slice() as FabricValue[];
+  for (const value of values) {
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (valueEqual(result[index], value)) {
+        result.splice(index, 1);
+      }
+    }
+  }
+  return result;
+};
+
+// A remove-by-value rebuilds the array's membership by value, so it suppresses
+// the whole subtree the local removal produced (a positional splice/shrink)
+// rather than a tail slice. Nothing at or under the array path survives that, so
+// the op is the commit's ONLY carrier for this array — a stronger claim than a
+// tail op's, which leaves the prefix's per-index candidates alive. It may make
+// that claim only when it fully explains the local value: the working array has
+// to be exactly the base with the removed values taken out.
+//
+// Anything else the transaction changed on the same array — an element edit, a
+// whole-value `set` at this path or at a parent — otherwise loses the candidate
+// that would have carried it and is silently discarded, while the writing
+// session's own value shows the change. Neither shape is caught earlier: an
+// element edit writes BENEATH the array and so deliberately does not poison the
+// intent, and a `set` landing before the op has no intent to poison yet. When
+// the check fails, abandon the intent and let the whole-array diff commit the
+// local value.
+const buildRemoveByValue = (
+  intent: RemoveIntent,
+  ctx: MergeableBuildContext,
+): MergeableBuildResult => {
+  const array = ctx.workingArray;
+  const base = ctx.initialArray;
+  // With no base array the transaction materialized the array itself, so there
+  // is nothing to check the removals against — and the subtree suppression would
+  // drop the creation whole, writing nothing at all.
+  if (!array || !ctx.hadInitialArray || !base) {
+    return { ops: [], suppress: [], abandon: true };
+  }
+  // `valueEqual` compares arrays by canonical content hash, so this also holds
+  // the op to the base's hole layout rather than flattening it away.
+  if (!valueEqual(withRemovalsApplied(base, intent.values), array)) {
+    return { ops: [], suppress: [], abandon: true };
+  }
+  return {
+    ops: intent.values.map((value) => ({
+      op: "remove-by-value",
+      path: encodePointer(intent.path),
+      value,
+    })),
+    suppress: [{ path: intent.path, subtree: true }],
+  };
+};
+
 const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
   append: descriptor<AppendIntent, AppendDelta>({
     op: "append",
@@ -314,16 +379,7 @@ const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
         delta.value,
       ],
     }),
-    // The op rebuilds the array's membership by value; suppress the whole subtree
-    // the local removal produced (a positional splice/shrink).
-    build: (intent) => ({
-      ops: intent.values.map((value) => ({
-        op: "remove-by-value",
-        path: encodePointer(intent.path),
-        value,
-      })),
-      suppress: [{ path: intent.path, subtree: true }],
-    }),
+    build: buildRemoveByValue,
   }),
 };
 

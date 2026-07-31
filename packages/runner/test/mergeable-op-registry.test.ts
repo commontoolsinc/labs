@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/api";
 import { MERGEABLE_OP_METHODS } from "@commonfabric/api";
 import { patchOpDescriptors } from "@commonfabric/memory/v2/patch";
-import type { FabricValue } from "@commonfabric/api";
 import {
   buildMergeableIntent,
   MERGEABLE_WIRE_OPS,
@@ -208,6 +208,93 @@ describe("mergeable tail-op build guards", () => {
           initialArray: [],
         },
       ),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+});
+
+// A remove-by-value suppresses the array path AND its whole subtree, so unlike a
+// tail op it leaves the commit no other carrier for that array. It may therefore
+// be emitted only when it fully explains the local value: the working array must
+// be exactly the base with the removed values taken out. Anything else the
+// transaction changed on that array would otherwise be silently discarded.
+describe("mergeable remove-by-value build guards", () => {
+  const removeIntent = (...values: string[]) =>
+    ({ op: "remove-by-value", path: ["value"], values }) as const;
+
+  const ctx = (
+    workingArray: FabricValue[] | undefined,
+    initialArray?: FabricValue[],
+  ) => ({
+    workingArray,
+    hadInitialArray: initialArray !== undefined,
+    hadInitialValue: initialArray !== undefined,
+    initialArray,
+  });
+
+  it("emits one wire op per removed value and suppresses the subtree", () => {
+    expect(
+      buildMergeableIntent(removeIntent("a", "c"), ctx(["b"], ["a", "b", "c"])),
+    ).toEqual({
+      ops: [
+        { op: "remove-by-value", path: "/value", value: "a" },
+        { op: "remove-by-value", path: "/value", value: "c" },
+      ],
+      suppress: [{ path: ["value"], subtree: true }],
+    });
+  });
+
+  // Every occurrence of a removed value goes, matching how the store applies the
+  // wire op — so a base holding duplicates still lines up with the local value
+  // and keeps its op.
+  it("accounts for every occurrence of a removed value", () => {
+    expect(
+      buildMergeableIntent(removeIntent("a"), ctx(["b"], ["a", "b", "a"])).ops
+        .length,
+    ).toBe(1);
+  });
+
+  // An element edit alongside the removal: the working array is the base minus
+  // "c" but with index 0 rewritten, which the removals alone cannot produce.
+  it("abandons the intent when the working array holds an edited element", () => {
+    expect(
+      buildMergeableIntent(removeIntent("c"), ctx(["A", "b"], ["a", "b", "c"])),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
+  // A whole-array set alongside the removal: neither the surviving element nor
+  // the disappearance of the base's members is expressed by the removals.
+  it("abandons the intent when the array was replaced wholesale", () => {
+    expect(
+      buildMergeableIntent(removeIntent("p"), ctx(["q"], ["a", "b", "c"])),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
+  // Hole layout is part of "explains the local value": the base's hole at index
+  // 1 was filled, which the removals do not express and no surviving candidate
+  // carries. `valueEqual` compares by canonical content hash, which keeps a hole
+  // distinct from a value (and from a stored `undefined`) rather than flattening
+  // the distinction the way a length check would.
+  it("abandons the intent when a hole in the base was filled", () => {
+    const base: FabricValue[] = ["a", , "c"] as FabricValue[];
+    expect(
+      buildMergeableIntent(removeIntent("c"), ctx(["a", "b"], base)),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
+  // No base array to check against — the transaction materialized the array
+  // itself — so the op cannot be shown to explain the local value, and its
+  // subtree suppression would drop the creation entirely.
+  it("abandons the intent when there was no base array", () => {
+    expect(
+      buildMergeableIntent(removeIntent("p"), ctx(["q"])),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
+  // The op path holds no array at commit (overwritten with a scalar, or gone),
+  // so there is no local value for the removals to describe.
+  it("abandons the intent when there is no working array", () => {
+    expect(
+      buildMergeableIntent(removeIntent("a"), ctx(undefined, ["a", "b"])),
     ).toEqual({ ops: [], suppress: [], abandon: true });
   });
 });

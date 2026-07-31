@@ -1582,6 +1582,287 @@ describe("mergeable array appends", () => {
     }
   });
 
+  // The ordinary "edit one row and delete another in the same handler" shape. A
+  // remove-by-value suppresses the array path AND everything under it, so the
+  // edit's per-index candidate has no surviving carrier: without the builder's
+  // own commit-time check the store applies the removal to the untouched base
+  // and the edit is gone, while the writing session's local value shows it. The
+  // edit writes BENEATH the array, so it deliberately does not poison the
+  // intent — the check at build is the only thing that can catch this.
+  it("an element edit before a removeByValue survives the removal", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.key(0).set("A");
+      cell.removeByValue("c");
+      expect(cell.get()).toEqual(["A", "b"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["A", "b"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The same composition in the other order. Recording the op first does not
+  // help: the edit still lands beneath the array and leaves the intent alive, so
+  // the suppression discards it just the same.
+  it("an element edit after a removeByValue survives the removal", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.removeByValue("c");
+      cell.key(0).set("A");
+      expect(cell.get()).toEqual(["A", "b"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["A", "b"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A whole-array set BEFORE the removal: no intent exists yet for the set's
+  // write to poison, so the op is recorded against an array the transaction had
+  // already replaced. Its suppression then discards the set's entire diff and
+  // only the removals reach the store, leaving the durable list untouched apart
+  // from them.
+  it("a whole-array set before a removeByValue commits the set array", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["p", "q"]);
+      cell.removeByValue("p");
+      expect(cell.get()).toEqual(["q"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["q"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // Creating the array and removing from it in one transaction: there is no base
+  // array for the op to describe at all. The removals alone say nothing about
+  // the elements the transaction created, and the subtree suppression discards
+  // the diff that carries them — so without the fallback the entity is never
+  // written and the durable value stays absent.
+  it("a removeByValue on an array the transaction created commits the array", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const CREATED_CAUSE = "created-then-removed-list";
+    try {
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(
+        space,
+        CREATED_CAUSE,
+        stringListSchema,
+        tx1,
+      );
+      cell.set(["p", "q"]);
+      cell.removeByValue("p");
+      expect(cell.get()).toEqual(["q"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      const storage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const readBack = rt2.getCell<string[]>(
+          space,
+          CREATED_CAUSE,
+          stringListSchema,
+        );
+        await readBack.sync();
+        await readBack.pull();
+        expect(readBack.get()).toEqual(["q"]);
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The same reshape reached from a PARENT path — a `set` on the enclosing
+  // object, landing before the op, so neither the write-time poison (nothing
+  // recorded yet) nor a check scoped to the array's own path would see it.
+  it("a parent-object set before a nested removeByValue commits the set list", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const holderSchema = {
+      type: "object",
+      properties: { rows: stringListSchema },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const HOLDER_CAUSE = "nested-remove-holder";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
+        rows: ["a", "b", "c"],
+      });
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const holder = rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx1);
+      holder.set({ rows: ["p", "q"] });
+      holder.key("rows").removeByValue("p");
+      expect(holder.get()).toEqual({ rows: ["q"] });
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      const storage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const cell = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
+        await cell.sync();
+        await cell.pull();
+        expect(cell.get()).toEqual({ rows: ["q"] });
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The fallback is scoped: a removal that IS the transaction's only change to
+  // the array stays mergeable, so two sessions removing distinct elements
+  // against the same base still merge. Without this the fix would trade one
+  // silent loss for the clobbering the mergeable op exists to prevent. (The
+  // sibling test above removes concurrently from a shared base; this one pins
+  // that a same-transaction change to a DIFFERENT array leaves the removal
+  // mergeable.)
+  it("a removeByValue stays mergeable when the other change is to a sibling field", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    const holderSchema = {
+      type: "object",
+      properties: { rows: stringListSchema, title: { type: "string" } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const HOLDER_CAUSE = "sibling-remove-holder";
+    const readHolder = async () => {
+      const storage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const cell = rt.getCell(space, HOLDER_CAUSE, holderSchema);
+        await cell.sync();
+        await cell.pull();
+        return cell.get();
+      } finally {
+        await rt.dispose();
+        await storage.close();
+      }
+    };
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
+        rows: ["a", "b", "c"],
+        title: "before",
+      });
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      // Session 1 removes "a".
+      const txA = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, txA)
+        .key("rows").removeByValue("a");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2, still at the pre-removal basis, removes a different element
+      // and edits an unrelated field. The sibling write does not touch the
+      // array, so the removal stays mergeable and both removals land.
+      const txB = rt2.edit();
+      const holderB = rt2.getCell(space, HOLDER_CAUSE, holderSchema, txB);
+      holderB.key("rows").removeByValue("c");
+      holderB.key("title").set("after");
+      const result = await txB.commit();
+      await rt2.storageManager.synced();
+
+      expect(result.error).toBeUndefined();
+      expect(await readHolder()).toEqual({ rows: ["b"], title: "after" });
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
   // A zero increment is a programming no-op and is rejected.
   it("increment(0) throws", async () => {
     const rt1 = new Runtime({
