@@ -328,7 +328,7 @@ server; closing them all is what makes the claim mechanism unnecessary.
 | `wish` | **DONE** `b3304e771` | Owner accepted the egress (idempotent GET of our own API). W2.15a descriptor; classifies claim-ready. A4's pins updated, not deleted |
 | `llmDialog` | **DONE** `b3304e771` | Effect route. Turn starts from DOCUMENT state, so a client handler's append is an ordinary doc change. Four-doc surface (A3 said three — verify, don't trust) |
 | `sqliteDatabase` | **DONE** `adf1e3dfe` + `5fea987a5` | Owner from the acting lane via the read-only `actingExecutionLane`; then its descriptor, once a minted-document declaration was made to implicitly cover the provenance meta paths `["result"]`/`["pattern"]` (`provenanceMetaWriteEnvelopes` in `scheduler/run.ts`). That rule generalizes to every computation-shaped minter. Materializer route declined — it changes scheduling, not just the write surface |
-| `navigateTo` | **RATIFIED, BLOCKED** | [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates 1 and 2 ruled: interim scope is "all sessions of the issuing principal", and the design splits at a seam — decision server-side, actuation a client rendering effect, the message IS the seam. **§8: gate 4 FIRED.** `addExecutionDemand` has one call site (in `start()`), and the commit-gated deferred navigate root reaches `startWithTx` instead, so its piece is never demanded and cannot be claimed at session rank. Blocking question: does demand closure-growth cover a deferred root? |
+| `navigateTo` | **RATIFIED, BLOCKED** | [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates 1 and 2 ruled: interim scope is "all sessions of the issuing principal", and the design splits at a seam — decision server-side, actuation a client rendering effect, the message IS the seam. **§8: gate 4 FIRED.** `addExecutionDemand` had one call site (in `start()`) at the time, and the commit-gated deferred navigate root reaches `startWithTx` instead, so its piece is never demanded and cannot be claimed at session rank. Blocking question: does demand closure-growth cover a deferred root? **STALE 2026-07-31 — there are now TWO call sites**: `runner.ts` `start()`, and `publishDeferredRootExecutionDemand`, which this row's own fix added. Anyone reading "one call site" as current will mis-trace demand. |
 | `compileAndRun` | **UNBLOCKED** `5f5d3ffe0`; servability in flight | Owner ruled the `manager.add([piece])` coupling out entirely and `pieceCreatedCallback` was deleted (12 sites). The ruling was sharper than it looked: `PieceManager.add` never pushed to `allPieces` — it pulls the default pattern's `addPiece` STREAM and sends, so the callback was already on the sanctioned route and only the CALLER was wrong. One accepted behavior delta: `fetchAndRunPattern` outputs no longer auto-register, so they leave the backlinks index and `getPieces()`; that capability moves to the pattern author's `addPiece` send. **Three earlier readings of this row were wrong** — "unbounded async writes" (`llm` is async and serves; `sqliteQuery` writes post-commit through a gate), then "same problem as navigateTo" (the callbacks differ in kind — owner caught it), then "move the registration server-side" (owner: delete it). Open: whether it needs a descriptor, and whether `runSynced`'s spawned-pattern writes are attributed to it or to the spawned actions |
 | `map` — `claim-key-mismatch` ×2, `claim-authority-lost` ×2 | **NOT SERVED. One question away** | Two independent causes were found and one is fixed. FIXED (`3a48d6731`): child sub-pattern actions could never be scoped candidates because scoped candidacy was piece-filtered against demand ROOTS — now rolled up to the root's closure, which nearly doubled committed settlements (session arm 15 → 28). REMAINING: `map`'s durable floor is `session` while the executor classifies it `user`, and **CA9's rank filter forbids a user-rank action from candidating at a session lane**, so no session proposal is possible. **The single open question: is CA9's thrash finding still real, given CA3 admits a user-rank action's READS on a session lane?** Do NOT answer it by reconciling the two rank computations so a claim key matches — see the box at the top of this file. The rank oscillates because the "static" summary folds each run's observed read log (`scheduler/run.ts:1428-1436`); per §5h.4 that is an observation, and scope is discovered by running |
 | `malformed-output-surface` ×1, `non-space-read-scope` ×1 | **CLOSED** `cf09a186b` | **NOT cross-space** — my C3.6 attribution here was wrong, inferred from the sibling code name `foreign-read-access-denied` without checking. Both observations measure `foreignSpaceReads: 0` in a single-space fixture. They survived a wave undiagnosed because `recordExecutionCandidateUnserved` dedupes offenders by implementation fingerprint and cannot NAME them; the probe now records derivation keys. `non-space-read-scope` ×1 is correct behavior (a session-scoped read is admissible only at session lane rank). `malformed-output-surface` ×1 was the `c2cc3891e` relabel left half-applied — a rescue branch gated `laneRank === "space"`, so a SESSION twin outside a user lane's chain fell through to a shape complaint for a rank-admission fact. Label-only fix; user arm goes `{malformed:1, non-space-read:1}` → `{non-space-read:2}`, same total |
@@ -1030,6 +1030,37 @@ exists only because two executors write the same durable state. Expect more of
 them while both sides run, and expect them to disappear at P3 — that is an
 argument for crossing rather than lingering.
 
+### 2.11 ANY process that writes to a stream cell is a pattern runtime
+
+Measured 2026-07-31 while routing toolshed through the executor, and it
+generalises well beyond toolshed — this is the most reusable finding of that
+investigation.
+
+`ensurePieceRunning` (`packages/runner/src/ensure-piece-running.ts`) is a
+**client-authority execution entry point reachable from a plain stream write.**
+The chain: a `Cell.send` is a `Cell.set`; the commit queues a scheduler event;
+if no local handler is registered, the scheduler calls `ensurePieceRunning`,
+which **loads the user's pattern from `patternApiUrl` and calls
+`runtime.start()`** — instantiating that piece's entire reactive graph, effect
+builtins included, inside the calling process.
+
+Consequences that are easy to miss:
+
+- **A process does not have to think it is a pattern runtime to be one.**
+  Toolshed's docblock said it "only executes patterns for webhook deliveries";
+  the route claim was accurate but the implication was wrong in KIND. One
+  delivery starts the whole graph, and `start` is idempotent with nothing
+  stopping it — so the piece stays live for the process lifetime and thereafter
+  reacts to **every** subsequent storage change in its closure, including
+  unrelated writes the process makes for other reasons. Such a process
+  accumulates live pieces.
+- **The local start IS the demand publication**, so "just stop running it
+  locally" is a trap that fails toward silence — see the `claim-conditional`
+  seam note in §1's D12 entry.
+- When auditing which processes the egress flip affects, **do not look for
+  effect-builtin calls.** Look for stream writes. Toolshed calls no effect
+  builtin anywhere; it egresses because it starts other people's patterns.
+
 ### 2.10 The unserved-attempt marker — four facts that cost hours
 
 Found 2026-07-30 while designing the `claim-not-live` carrier. None of this is
@@ -1503,8 +1534,11 @@ Append one line per landed item: date, item, commit, one-sentence outcome.
   unidentified. The probe now records derivation keys. When adding a
   candidate-diagnostic counter, record something that identifies the offender.
 - 2026-07-29 — navigateTo gate 4 FIRED before any build:
-  `addExecutionDemand` has one call site (inside `start()`), and the
+  `addExecutionDemand` had one call site (inside `start()`), and the
   commit-gated deferred navigate root reaches `startWithTx` instead — so its
   piece is never demanded and can never be claimed at session rank. Open
   question: does demand closure-growth cover a deferred root? See
   [`navigate-to-server-side.md`](navigate-to-server-side.md) §8.
+  **This log entry is a point-in-time record and its "one call site" is now
+  STALE — the fix it led to added a second (`publishDeferredRootExecutionDemand`).
+  Left as written, per the log's purpose; the correction lives in §4's row.**
