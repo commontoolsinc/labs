@@ -397,7 +397,7 @@ function valueAtPredicatePath(
 }
 
 function predicateTruthiness(value: unknown): boolean {
-  return value !== false && value !== null;
+  return value !== false && value != null;
 }
 
 function comparePredicateValues(
@@ -717,16 +717,22 @@ function filteredOutputSchema(
   };
 }
 
-type ObjectProjectionMask = {
+interface ObjectMask<Child> {
   type: "object";
-  properties: Record<string, ProjectionMask>;
+  properties: Record<string, Child>;
   additionalProperties: false;
-};
+}
+interface ArrayProjectionMask {
+  type: "array";
+  items: ProjectionMask;
+}
+interface ObjectProjectionMask extends ObjectMask<ProjectionMask> {}
 type ProjectionMask =
   | true
-  | { type: "array"; items: ProjectionMask }
+  | ArrayProjectionMask
   | ObjectProjectionMask;
-type PredicateMask = true | ObjectProjectionMask;
+interface ObjectPredicateMask extends ObjectMask<PredicateMask> {}
+type PredicateMask = true | ObjectPredicateMask;
 
 function projectionMask(schema: JSONSchema): ProjectionMask {
   if (schema === true) return true;
@@ -810,7 +816,7 @@ function mergeMasks(
       ? rightChild!
       : rightChild === undefined
       ? leftChild
-      : mergeMasks(leftChild as PredicateMask, rightChild);
+      : mergeMasks(leftChild, rightChild);
   }
   return { type: "object", properties, additionalProperties: false };
 }

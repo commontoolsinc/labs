@@ -132,7 +132,8 @@ cf piece get --piece ID items \
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
 `.tags[-1]`), JSON literals, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`,
 `not`, and parentheses. Like jq, only `false` and `null` are falsey, so a
-missing path simply does not match. Filtering happens before schema projection.
+missing path simply does not match. A stored `undefined` is treated like a
+missing value and is also falsey. Filtering happens before schema projection.
 
 `--schema` accepts one of three forms:
 
@@ -145,7 +146,10 @@ Schema describes the complete returned value, so a schema combined with
 `--filter` must have an array root. Object `properties` are a whitelist by
 default; use `"additionalProperties": true` to retain unspecified properties.
 Projection schemas support structural `properties`, `items`, and scalar leaf
-schemas. Schema combinators and references are rejected.
+schemas. In an array-item projection, a scalar leaf whose declared type does not
+match the stored value is omitted by the runtime rather than reported as an
+error; prefer `true` leaves unless that type filtering is intentional. Schema
+combinators and references are rejected.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 The runtime's list filter/map builtins therefore handle CFC exactly as authored

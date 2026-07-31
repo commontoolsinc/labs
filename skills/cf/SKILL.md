@@ -229,14 +229,17 @@ callers can request the format explicitly.
 
 `piece get --filter` accepts a jq-inspired predicate over array items: paths,
 JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
-`null` are falsey, and non-array inputs are rejected. `--schema` projects output
-from a comma-separated field list, an inline JSON Schema, or `@schema.json`;
-concise fields apply per item for arrays, while JSON Schema describes the whole
-output. The two flags compose as filter-then-project. Both run through runtime
-filter/map/lift nodes, so CFC behavior is the same as a computed pattern
-expression. Source schema metadata is authoritative; projection schemas cannot
-supply `ifc`, `asCell`, `scope`, or `default`. See `packages/cli/README.md` for
-the exact syntax and supported schema subset.
+`null` are falsey; stored `undefined` is treated like a missing value and is
+also falsey. Non-array inputs are rejected. `--schema` projects output from a
+comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
+fields apply per item for arrays, while JSON Schema describes the whole output.
+In an array-item projection, a typed scalar leaf that does not match stored data
+is omitted rather than reported as an error; prefer `true` leaves unless type
+filtering is intentional. The two flags compose as filter-then-project. Both run
+through runtime filter/map/lift nodes, so CFC behavior is the same as a computed
+pattern expression. Source schema metadata is authoritative; projection schemas
+cannot supply `ifc`, `asCell`, `scope`, or `default`. See
+`packages/cli/README.md` for the exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

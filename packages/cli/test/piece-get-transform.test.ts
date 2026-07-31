@@ -77,6 +77,7 @@ describe("cf piece get transforms", () => {
       empty: "",
       disabled: false,
       nil: null,
+      unset: undefined,
     };
     for (
       const source of [
@@ -93,7 +94,7 @@ describe("cf piece get transforms", () => {
         value,
       )).toBe(true);
     }
-    for (const source of [".disabled", ".nil", ".missing"]) {
+    for (const source of [".disabled", ".nil", ".unset", ".missing"]) {
       expect(evaluatePieceGetPredicate(
         parsePieceGetFilter(source).predicate,
         value,
@@ -363,6 +364,17 @@ describe("cf piece get transforms", () => {
     expect(result).toEqual([
       { id: 1, title: "First" },
       { id: 3, title: "Third" },
+    ]);
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection(
+          '{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":true}}}',
+        ),
+      }),
+    ).toEqual([
+      { title: "First" },
+      { title: "Second" },
+      { title: "Third" },
     ]);
   });
 
