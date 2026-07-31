@@ -9,13 +9,13 @@
     />
     <meta name="color-scheme" content="light dark" />
     <script>
-    // Apply saved theme preference before first paint to prevent flash
-    try {
-      const t = localStorage.getItem("cf-theme-preference");
-      if (t === "light" || t === "dark") {
-        document.documentElement.setAttribute("data-theme", t);
-      }
-    } catch (e) {}
+      // Apply saved theme preference before first paint to prevent flash
+      try {
+        const t = localStorage.getItem("cf-theme-preference");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
     </script>
     <title>Common Fabric</title>
     <link rel="stylesheet" href="/styles/index.css" />

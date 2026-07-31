@@ -1,5 +1,6 @@
 import {
   type ACL,
+  aclDocId,
   type ACLUser,
   type DID,
   hasConcreteOwner,
@@ -85,7 +86,7 @@ export class ACLManager {
     // server's storage invariant asks for.
     const address: IMemorySpaceAddress = {
       space: this.#spaceDid,
-      id: `of:${this.#spaceDid}` as URI,
+      id: aclDocId(this.#spaceDid) as URI,
       type: "application/json",
       path: [],
     };
@@ -120,7 +121,7 @@ export class ACLManager {
 
   #getCell(): Cell<unknown> {
     return this.#runtime.getCellFromLink({
-      id: `of:${this.#spaceDid}` as URI,
+      id: aclDocId(this.#spaceDid) as URI,
       path: [],
       space: this.#spaceDid,
     });

@@ -125,9 +125,9 @@ export class CFAutoLayout extends BaseElement {
     .sidebar-left {
       border-right: 1px solid
         var(
-        --cf-theme-color-border,
-        #e5e7eb
-      );
+          --cf-theme-color-border,
+          #e5e7eb
+        );
       border-top-right-radius: var(
         --cf-theme-border-radius,
         var(--cf-border-radius-md, 0.375rem)
@@ -140,9 +140,9 @@ export class CFAutoLayout extends BaseElement {
     .sidebar-right {
       border-left: 1px solid
         var(
-        --cf-theme-color-border,
-        #e5e7eb
-      );
+          --cf-theme-color-border,
+          #e5e7eb
+        );
       border-top-left-radius: var(
         --cf-theme-border-radius,
         var(--cf-border-radius-md, 0.375rem)
@@ -191,9 +191,9 @@ export class CFAutoLayout extends BaseElement {
         background: transparent;
         border: 1px solid
           var(
-          --cf-theme-color-border,
-          #e5e7eb
-        );
+            --cf-theme-color-border,
+            #e5e7eb
+          );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-md, 0.375rem)
@@ -344,9 +344,9 @@ export class CFAutoLayout extends BaseElement {
         );
         border-top: 1px solid
           var(
-          --cf-theme-color-border,
-          #e0e0e0
-        );
+            --cf-theme-color-border,
+            #e0e0e0
+          );
         padding: 0 var(--cf-theme-spacing-normal, 0.5rem);
         z-index: 40;
       }
@@ -356,9 +356,9 @@ export class CFAutoLayout extends BaseElement {
         border-top: none;
         border-bottom: 1px solid
           var(
-          --cf-theme-color-border,
-          #e0e0e0
-        );
+            --cf-theme-color-border,
+            #e0e0e0
+          );
       }
       .mobile-bar .tabs {
         display: flex;
@@ -607,7 +607,8 @@ export class CFAutoLayout extends BaseElement {
           class="scrim"
           @click="${() => this._closePanels()}"
           aria-hidden="true"
-        ></div>
+        >
+        </div>
 
         <div class="mobile-bar ${classMap({
           top: this.tabsPosition === "top",

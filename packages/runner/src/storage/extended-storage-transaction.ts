@@ -1729,10 +1729,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
-      // writes (S18). Structurally inert today — the NormalizedFullLink
-      // signature means toMemorySpaceAddress always yields path ["value", ...]
-      // — but the guard must not silently fall away if the signature is ever
-      // widened to document-root addresses.
+      // writes (S18). This is not inert, and never was: `noteSystemWrite`'s
+      // ID-keyed arms do not care about the path at all. The
+      // `cfcPolicyManifest` immutability guard has always been reachable here,
+      // and the space-ACL guard now joins it — that one fires on exactly
+      // `path.length > 0`, and `toMemorySpaceAddress` prefixes "value", so
+      // EVERY link-shaped write to the ACL document throws from here,
+      // including one whose link path is [].
+      //
+      // That throw escapes mid-batch. `writeBatch` groups the generator's
+      // writes into same-document runs and applies each run as it pulls the
+      // next write, so a throw on write k leaves runs 1..k-1 already applied to
+      // the transaction while the call fails: a partial write plus a throw, not
+      // an atomic refusal. Nothing rolls those writes back — the transaction is
+      // still open and still writable, so a caller that swallows the error and
+      // commits anyway lands the prefix. Callers must treat a throw from
+      // `writeValuesOrThrow` as poisoning the transaction (abort it, or let the
+      // throw propagate past the commit, which is what every caller does
+      // today). See `writeValuesOrThrow` partial-batch coverage in
+      // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
       // Note the write identity per yielded write (not once up front): an

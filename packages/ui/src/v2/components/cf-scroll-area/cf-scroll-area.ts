@@ -240,8 +240,8 @@ export class CFScrollArea extends BaseElement {
         ${showVertical
           ? html`
             <div class="scrollbar scrollbar-vertical" part="scrollbar-vertical">
-              <div class="scrollbar-thumb scrollbar-thumb-vertical"
-                part="thumb-vertical"></div>
+              <div class="scrollbar-thumb scrollbar-thumb-vertical" part="thumb-vertical">
+              </div>
             </div>
           `
           : ""} ${showHorizontal
@@ -250,7 +250,8 @@ export class CFScrollArea extends BaseElement {
               <div
                 class="scrollbar-thumb scrollbar-thumb-horizontal"
                 part="thumb-horizontal"
-              ></div>
+              >
+              </div>
             </div>
           `
           : ""}

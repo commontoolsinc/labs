@@ -38,15 +38,21 @@ interface RecordedOperation {
  * document, so a test can assert on commit shape and commit count.
  */
 class RecordingLoopbackSessionFactory implements SessionFactory {
-  readonly supportsAclBootstrap = true;
+  readonly supportsAclBootstrap: boolean;
   readonly aclOperations: RecordedOperation[] = [];
   #aclDocId: string;
 
   constructor(
     private readonly server: MemoryV2Server.Server,
     space: MemorySpace,
+    // `false` suppresses the storage manager's ACL genesis at session open
+    // (storage/v2.ts returns early when the factory does not advertise
+    // support), which is the only way to reach a real server holding a space
+    // whose ACL document does not exist yet.
+    supportsAclBootstrap = true,
   ) {
     this.#aclDocId = `of:${space}`;
+    this.supportsAclBootstrap = supportsAclBootstrap;
   }
 
   /** Operations recorded since the marker returned by `mark()`. */
@@ -181,6 +187,210 @@ const withGenesisedSpace = async (label: string) => {
     },
   };
 };
+
+/**
+ * A real server holding a space whose ACL document has never been written, and
+ * a runtime mounted AS THE SPACE IDENTITY. Two things make the un-genesised
+ * state reachable: the factory does not advertise `supportsAclBootstrap`, so
+ * the storage manager's genesis at session open is skipped entirely; and the
+ * server grants an implicit OWNER to a principal equal to the space
+ * (`#resolveCapability`), which is also the only principal its
+ * `#validateAclCommit` lets initialize a missing ACL. The caller owns teardown.
+ */
+const withUnGenesisedSpace = async (label: string) => {
+  const spaceIdentity = await Identity.fromPassphrase(`${label} space`);
+  const space = spaceIdentity.did();
+
+  const server = createServer(label);
+  const factory = new RecordingLoopbackSessionFactory(server, space, false);
+  const storageManager = TestStorageManager.overServer(
+    { as: spaceIdentity },
+    factory,
+  );
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  const sync = await storageManager.open(space).sync(`of:${space}` as URI);
+  assert(!sync.error, sync.error?.message);
+
+  return {
+    space,
+    server,
+    factory,
+    runtime,
+    acl: new ACLManager(runtime, space),
+    readStoredAcl: async () =>
+      (await server.readDocument(space, `of:${space}`))?.value,
+    dispose: async () => {
+      await runtime.dispose();
+      await storageManager.close();
+      await server.close();
+    },
+  };
+};
+
+Deno.test("ACLManager can request space-authorized initialization", async () => {
+  // Restores coverage the mocked `acl-manager.test.ts` used to carry: the
+  // `current === null` branch of `#write`, i.e. creating the FIRST ACL rather
+  // than replacing an existing one. Every other test here starts from a
+  // genesised space, so without this the whole-document write is only ever
+  // exercised against a document that already exists — and the mocked version
+  // could not tell whether the server would accept the commit at all.
+  const ctx = await withUnGenesisedSpace("runner-acl-mutation-init");
+  const alice = await Identity.fromPassphrase("runner-acl-mutation-init alice");
+  try {
+    assertEquals(
+      await ctx.readStoredAcl(),
+      undefined,
+      "fixture must start with no ACL document",
+    );
+    assertEquals(await ctx.acl.get(), null);
+
+    const marker = ctx.factory.mark();
+    await ctx.acl.set(alice.did(), "OWNER");
+
+    assertEquals(await ctx.readStoredAcl(), { [alice.did()]: "OWNER" });
+    // A genesis commit is subject to the same shape invariant as any later
+    // mutation, and takes exactly one attempt.
+    assertEquals(ctx.factory.since(marker), [{
+      op: "set",
+      id: `of:${ctx.space}`,
+      scope: "space",
+    }]);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+Deno.test("ACLManager surfaces rejected writes with the server's error name", async () => {
+  // Also restored from the mocked suite, which was the only assertion that
+  // `#write` rethrows with `error.name` preserved rather than collapsing the
+  // rejection into a generic Error. The name is load-bearing: it is what
+  // `isRetryableCommitRejection` keys off, so losing it would silently enroll
+  // a deterministic refusal in `editWithRetry`'s retry loop. Against a real
+  // server the refusal is genuine — the ACL validity rule in
+  // `#validateAclCommit` — instead of a hand-written mock result.
+  const ctx = await withUnGenesisedSpace("runner-acl-mutation-rejected");
+  const alice = await Identity.fromPassphrase("runner-acl-mutation-rej alice");
+  try {
+    await ctx.acl.set(alice.did(), "OWNER");
+
+    let failure: Error | undefined;
+    try {
+      // Downgrading the only concrete OWNER leaves the ACL ownerless, which
+      // the server refuses as a ProtocolError.
+      await ctx.acl.set(alice.did(), "WRITE");
+    } catch (error) {
+      failure = error as Error;
+    }
+
+    assert(failure, "an ownerless ACL must be refused");
+    assertEquals(
+      failure.name,
+      "ProtocolError",
+      `#write must preserve the rejection's name, got: ${failure.name}`,
+    );
+    assert(
+      /concrete OWNER/.test(failure.message),
+      `unexpected message: ${failure.message}`,
+    );
+    assertEquals(await ctx.readStoredAcl(), { [alice.did()]: "OWNER" });
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+Deno.test("a batched value-path ACL write throws and leaves the earlier run applied", async () => {
+  // The batch path runs writes through the same `noteSystemWrite` chokepoint as
+  // single writes, so the ACL guard fires there too. But `writeBatch`
+  // (storage/v2-transaction.ts) applies same-document runs as it PULLS from the
+  // generator, and the generator calls `noteSystemWrite` before it yields — so
+  // a throw on write k escapes after runs 1..k-1 have already been applied.
+  // This is a partial write plus a throw, not an atomic refusal, and the
+  // behavior is asserted rather than assumed so a future change to either side
+  // has to confront it.
+  //
+  // Three writes are needed to observe it: a run is only flushed when a write
+  // for a DIFFERENT document arrives, so with only [ordinary, acl] the throw
+  // would beat the first flush.
+  const ctx = await withGenesisedSpace("runner-acl-mutation-batch");
+  const bob = await Identity.fromPassphrase("runner-acl-mutation-batch bob");
+  const first = `of:${ctx.space}-batch-first` as URI;
+  const second = `of:${ctx.space}-batch-second` as URI;
+  try {
+    const marker = ctx.factory.mark();
+    const tx = ctx.runtime.edit();
+    const link = (id: URI, path: readonly string[]) => ({
+      id,
+      space: ctx.space,
+      scope: "space" as const,
+      path,
+    });
+
+    const writeValuesOrThrow = tx.writeValuesOrThrow?.bind(tx);
+    assert(writeValuesOrThrow, "the batch write API must be available");
+
+    let thrown: Error | undefined;
+    try {
+      writeValuesOrThrow([
+        { address: link(first, []), value: "first" },
+        { address: link(second, []), value: "second" },
+        // Even path `[]` reaches the guard: `toMemorySpaceAddress` prefixes
+        // "value", so no link-shaped write can ever address the ACL document's
+        // root. The value surface is the ONLY surface this API can reach.
+        {
+          address: link(`of:${ctx.space}` as URI, [bob.did()]),
+          value: "WRITE",
+        },
+      ]);
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    assert(thrown, "a batched ACL write must throw");
+    assert(
+      /mutate it through ACLManager/.test(thrown.message),
+      `error should name ACLManager, got: ${thrown.message}`,
+    );
+
+    // The partial write: run 1 was flushed when write 2 arrived; run 2 never
+    // was. Nothing rolled run 1 back, and the transaction is still open and
+    // still writable — a caller that swallowed the throw and committed would
+    // land the prefix.
+    assertEquals(
+      tx.readOrThrow({
+        space: ctx.space,
+        id: first,
+        type: "application/json",
+        path: ["value"],
+      }),
+      "first",
+    );
+    assertEquals(
+      tx.readOrThrow({
+        space: ctx.space,
+        id: second,
+        type: "application/json",
+        path: ["value"],
+      }),
+      undefined,
+    );
+    assertEquals(tx.status().status, "ready");
+
+    // The obligation that fact creates: the caller must not commit. Aborting is
+    // what keeps the prefix off the server.
+    tx.abort("batched ACL write refused");
+    assertEquals(ctx.factory.since(marker), []);
+    assertEquals(await ctx.readStoredAcl(), {
+      [ctx.user.did()]: "OWNER",
+      "*": "WRITE",
+    });
+  } finally {
+    await ctx.dispose();
+  }
+});
 
 Deno.test("ACL grant after genesis emits one whole-document set", async () => {
   const ctx = await withGenesisedSpace("runner-acl-mutation-grant");

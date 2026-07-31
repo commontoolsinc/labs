@@ -403,7 +403,8 @@ export class CFSlider extends BaseElement {
             role="presentation"
             @mousedown="${this._handleThumbMouseDown}"
             @touchstart="${this._handleThumbTouchStart}"
-          ></div>
+          >
+          </div>
         </div>
       </div>
     `;

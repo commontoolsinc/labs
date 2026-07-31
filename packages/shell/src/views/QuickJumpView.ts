@@ -276,6 +276,7 @@ export class XQuickJumpView extends BaseView {
   override render() {
     if (!this.visible) {
       return html`
+
       `;
     }
     const results = this.filtered();

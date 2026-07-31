@@ -127,12 +127,32 @@ subcommands (`packages/cli/commands/acl.ts`):
 # Grant, or change an existing grant. Capability is READ, WRITE, or OWNER.
 cf acl set did:key:z6Mkk... WRITE --space my-space
 
-# Revoke one identity.
+# Revoke one identity — but while `*` is still present this revokes nothing;
+# see the caveat below.
 cf acl remove did:key:z6Mkk... --space my-space
 
 # Drop the bootstrap wildcard — this is what makes the space private.
 cf acl remove ANYONE --space my-space
 ```
+
+**Drop the wildcard first, or the per-identity commands do not mean what they
+look like.** The server resolves a principal's capability as *its own entry if
+it has one, otherwise the wildcard's* (`#resolveCapability` in
+`packages/memory/v2/server.ts`: `acl[principal] ?? acl["*"]`). While
+`"*": "WRITE"` is in the ACL, that fallback is WRITE, and it produces two
+counter-intuitive results:
+
+- `cf acl remove <did>` **revokes nothing.** It deletes that identity's
+  explicit entry, which drops them onto the wildcard's WRITE. `cf acl ls` will
+  stop listing them and they will keep writing.
+- `cf acl set <did> READ` is a **downgrade, not a grant.** An explicit entry
+  shadows the wildcard, so a principal who had WRITE via `*` ends up with only
+  READ. (`cf acl set <did> WRITE` changes nothing today, but is a durable grant
+  that survives removing the wildcard.)
+
+So the order that works is `cf acl remove ANYONE` first, then grant each
+identity what it should have. Until the wildcard is gone, treat the space as
+world-writable regardless of what the per-identity rows say.
 
 `--identity` and `--api-url` fall back to `CF_IDENTITY` and `CF_API_URL`;
 `--space` takes a space name or a DID and has no environment fallback. `ANYONE`

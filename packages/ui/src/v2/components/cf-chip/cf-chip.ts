@@ -88,12 +88,12 @@ export class CFChip extends BaseElement {
         );
         border: 1px solid
           var(
-          --cf-chip-border-color,
-          var(
-            --cf-theme-color-border,
-            var(--cf-colors-gray-300, #d5d7dd)
-          )
-        );
+            --cf-chip-border-color,
+            var(
+              --cf-theme-color-border,
+              var(--cf-colors-gray-300, #d5d7dd)
+            )
+          );
         border-radius: var(
           --cf-chip-border-radius,
           var(--cf-border-radius-full, 9999px)
@@ -158,9 +158,9 @@ export class CFChip extends BaseElement {
       .chip:has(.chip-action:focus-visible) {
         outline: 2px solid
           var(
-          --cf-theme-color-focus-ring,
-          var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa))
-        );
+            --cf-theme-color-focus-ring,
+            var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa))
+          );
         outline-offset: 2px;
       }
 
@@ -312,9 +312,9 @@ export class CFChip extends BaseElement {
       .chip-remove:focus-visible {
         outline: 2px solid
           var(
-          --cf-theme-color-focus-ring,
-          var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa))
-        );
+            --cf-theme-color-focus-ring,
+            var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa))
+          );
         outline-offset: 2px;
         opacity: 1;
       }

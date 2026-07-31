@@ -348,7 +348,8 @@ export class CFMap extends BaseElement {
         role="application"
         aria-label="Interactive map"
         tabindex="0"
-      ></div>
+      >
+      </div>
     `;
   }
 

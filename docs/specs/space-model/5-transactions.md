@@ -124,16 +124,23 @@ const result = await runtime.editWithRetry(async (tx) => {
   attempt is the only attempt
 - Returns success or error after exhausting retries
 
-Retryability is an **allow-list**, defined once in the shared rejection
-vocabulary (`isRetryableCommitRejection`, `packages/runner/src/storage/rejection.ts`)
-and shared with the scheduler's own classifier. A rejection is retried only when
-re-running the function against fresh state can produce a different outcome:
+Retryability is an **allow-list**: `isRetryableCommitRejection`, defined in the
+shared rejection vocabulary (`packages/runner/src/storage/rejection.ts`) and
+consumed only by `editWithRetry()`. The scheduler's commit classifier
+(`classifyCommitDisposition`, `packages/runner/src/scheduler/events.ts`) draws
+its predicates from that same module but composes them itself, so the two
+classifiers are independent and can disagree — the scheduler retries only a
+stale basis (`ConflictError`, `StorageTransactionInconsistent`) and drops
+everything else on the first attempt, including the liveness and abort classes
+`editWithRetry()` does retry. A rejection is retried by `editWithRetry()` only
+when re-running the function against fresh state can produce a different
+outcome:
 
 | Class | Why a re-run can converge |
 | --- | --- |
 | `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
 | `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
-| `ConnectionError`, `SessionError` | Liveness failure: the commit never reached a verdict, so a re-established connection or session can land the identical write. |
+| `ConnectionError`, `SessionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, so a re-established connection or session can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
 | `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or CFC enforcement refused to hand the transaction over. A re-run is a genuinely new attempt, and costs no round-trip. |
 | `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
 

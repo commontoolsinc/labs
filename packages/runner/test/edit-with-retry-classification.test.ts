@@ -172,6 +172,14 @@ describe("editWithRetry rejection classification", () => {
       name: "SessionError",
       message: "Unknown session for space",
     }],
+    // Liveness by collateral damage: an undecodable frame makes the client's
+    // `rejectPending` sweep (memory/v2/client.ts `onMessage`) reject EVERY
+    // in-flight request, including commits the server may never have seen and
+    // certainly never refused.
+    ["InvalidMessageError", {
+      name: "InvalidMessageError",
+      message: "Unable to parse memory server message",
+    }],
     // The callback discarded this attempt; also the CFC pre-storage refusal.
     ["StorageTransactionAborted", {
       name: "StorageTransactionAborted",

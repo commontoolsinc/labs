@@ -55,6 +55,7 @@ import {
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 import {
+  aclDocId,
   ANYONE_USER,
   type Capability,
   hasConcreteOwner,
@@ -260,11 +261,6 @@ type AclState =
   | { kind: "missing" }
   | { kind: "invalid" }
   | { kind: "valid"; acl: Record<string, Capability | undefined> };
-
-/** Engine doc id of a space's ACL document: the doc whose entity id is the
- *  space DID itself, as managed by the runner's `ACLManager` / `cf acl`
- *  (runner `toURI` prefixes bare ids with `of:`). */
-const aclDocId = (space: string): string => `of:${space}`;
 
 const commitTouchesAclDoc = (
   operations: readonly Operation[],

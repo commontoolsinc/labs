@@ -235,7 +235,8 @@ export class XOmniLayout extends LitElement {
           <div
             class="resize-handle"
             @pointerdown="${this.handleResizeStart}"
-          ></div>
+          >
+          </div>
           <div class="sidebar-content">
             <slot name="sidebar"></slot>
           </div>

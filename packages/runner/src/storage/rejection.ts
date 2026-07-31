@@ -100,6 +100,18 @@ export function isStorageTransactionInconsistent(
  * route a commit to a session it no longer knows (memory/v2/server.ts "Unknown
  * session for space"), which the client's reconnect re-opens.
  *
+ * `InvalidMessageError` is the third liveness class, and the least obvious.
+ * The client raises it when a frame off the wire will not decode
+ * (memory/v2/client.ts `onMessage`), and then calls `rejectPending(error)` —
+ * which rejects EVERY in-flight request with it, not just the request whose
+ * response was malformed. An in-flight `transact` is collateral: the server may
+ * never have seen it, may have committed it, may have replied successfully in a
+ * frame that was garbled after the fact. What is certain is that nothing about
+ * the commit was evaluated and refused, so it is a liveness failure and not a
+ * verdict, and a re-run over a healthy connection can land the identical write.
+ * (For it to be classified at all the name must survive normalization —
+ * `toRejectedError` in storage/v2.ts preserves it explicitly for that reason.)
+ *
  * This is deliberately narrow. An `AuthorizationError` is NOT a liveness
  * failure even though it also arrives from the network: the server evaluated
  * the request and denied it. The one exception the server marks itself —
@@ -110,7 +122,8 @@ export function isStorageTransactionInconsistent(
 export function isTransientCommitRejection(
   error: { name?: string } | undefined | null,
 ): boolean {
-  return error?.name === "ConnectionError" || error?.name === "SessionError";
+  return error?.name === "ConnectionError" || error?.name === "SessionError" ||
+    error?.name === "InvalidMessageError";
 }
 
 /**
@@ -120,8 +133,15 @@ export function isTransientCommitRejection(
  * the transaction to storage (`rejectCommitBeforeStorage` in
  * extended-storage-transaction.ts). Re-running produces a genuinely new
  * attempt, and — unlike every other rejection class — a discarded attempt costs
- * no round-trip, no `finalizeRejection`, and no subscriber revert notification,
- * so retrying one is local work rather than churn against the server.
+ * no round-trip and no `finalizeRejection`, so retrying one is local work
+ * rather than churn against the server.
+ *
+ * It is NOT free of observable churn: `rejectCommitBeforeStorage` calls
+ * `runCommitCallbacks(result)`, so every `cell.set(v, cb)` callback and every
+ * `tx.addCommitCallback` consumer registered on the discarded transaction fires
+ * with the failure — once per doomed attempt, same as any other rejection. The
+ * cheapness argument is about server round-trips, not about staying invisible
+ * to commit-callback consumers.
  *
  * NOTE the asymmetry with a callback that THROWS: `editWithRetry` aborts that
  * transaction and returns immediately without retrying, because a thrown

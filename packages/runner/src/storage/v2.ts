@@ -18,6 +18,7 @@ import {
   type URI,
 } from "@commonfabric/memory/interface";
 import { assert, unclaimed } from "@commonfabric/memory/fact";
+import { aclDocId } from "@commonfabric/memory/acl";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
@@ -1013,7 +1014,7 @@ export class StorageManager implements IStorageManager {
     if (spaceIdentity === undefined) return normal;
 
     const openedServerSeq = normal.session.serverSeq;
-    const aclId = `of:${space}`;
+    const aclId = aclDocId(space);
     const aclResult = await normal.session.queryGraph({
       roots: [{ id: aclId, selector: { path: [], schema: false } }],
     });
@@ -4305,12 +4306,21 @@ const toRejectedError = (
   //    clear from the ones that cannot.
   //  - `SessionError`: the commit was routed to a session the server no longer
   //    knows; the client's reconnect re-opens one, so a retry can land it.
+  //  - `InvalidMessageError`: a frame off the wire would not decode, and the
+  //    client's `rejectPending` sweep (memory/v2/client.ts `onMessage`) rejected
+  //    every in-flight request with it — including this commit, which may never
+  //    have been evaluated. That makes it a liveness failure, classified
+  //    retryable by `isTransientCommitRejection`; the name has to survive here
+  //    or that classification can never fire. It is raised client-side, so
+  //    unlike the names above it is not part of the server's wire contract.
   //
-  // The memory server MUST keep emitting these names unchanged (server.ts
-  // `transact` catch, and the ACL validation errors it returns directly).
+  // The memory server MUST keep emitting the server-side names unchanged
+  // (server.ts `transact` catch, and the ACL validation errors it returns
+  // directly).
   if (
     name === "RowLabelCommitError" || name === "ProtocolError" ||
-    name === "AuthorizationError" || name === "SessionError"
+    name === "AuthorizationError" || name === "SessionError" ||
+    name === "InvalidMessageError"
   ) {
     const retriable = (error as { retriable?: unknown })?.retriable === true;
     return {
