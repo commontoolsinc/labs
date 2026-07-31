@@ -873,9 +873,19 @@ change that alters them.
   verb-event-role rule in the checker, taking the position that
   accepted-and-STRIPPED was never contract — defensible precisely because
   the runtime never delivered an undeclared field to any handler — or a
-  deliberate baseline migration. Until decided, generated event schemas stay
-  open and closed-world enforcement is per-schema opt-in at dispatch (C5's
-  runner gate).
+  deliberate baseline migration. Whichever is chosen must also weigh the
+  FORWARD skew case the stripped-was-never-contract argument does not cover:
+  adding an optional event field is legal argument widening, but during any
+  deploy window a newer client sends that field to a still-running older
+  piece whose closed schema does not declare it — today stripped and
+  harmless, under closed-world a hard reject at dispatch. Mixed-version
+  callers are exactly the live board's incident history (the cross-version
+  write storms, the legacy-field mirroring `topics` still carries), so the
+  decision needs a story for widened payloads against not-yet-updated
+  pieces — deploy ordering, a skew-tolerant reject-only-on-collision rule,
+  or an explicit versioning step — before emission lands. Until decided,
+  generated event schemas stay open and closed-world enforcement is
+  per-schema opt-in at dispatch (C5's runner gate).
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.
