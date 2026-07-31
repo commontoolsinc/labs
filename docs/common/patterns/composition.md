@@ -71,12 +71,15 @@ Both patterns receive the same `items` cell - changes sync automatically.
 
 ## Keep External Data Contracts Narrow
 
-A pattern schema is a runtime projection and capability contract, not only a
+A pattern schema is a runtime projection and binding contract, not only a
 TypeScript annotation. When a pattern receives externally owned data through a
 link, wish result, registry entry, or other cell, declare only the fields it
-reads and only the write or stream capabilities it uses. Extra fields can make
-the runtime traverse more linked data, make otherwise compatible stored values
-fail validation, and couple the consumer to unrelated producer migrations.
+reads and only the live-cell or stream bindings it uses. Extra optional fields
+can make the runtime traverse more linked data. An extra required field whose
+value is absent or incompatible and whose schema does not accept `undefined`
+invalidates the containing object; if that object is an array element, one
+invalid element voids the entire array read. See
+`packages/runner/test/traverse-required-links.test.ts`.
 
 The consumer normally owns this structural type:
 
@@ -98,12 +101,27 @@ the minimal local shape is intentional duplication: the producer can evolve
 unrelated state, UI, and mutation streams without changing this consumer's
 contract.
 
+An output type must be exported so TypeScript can name the default pattern
+factory's return contract. That visibility requirement is not an invitation for
+external consumers to reuse the whole type as their input schema.
+
+`Writable<T>` and `Cell<T>` are the same cell type and runtime interface;
+choosing between those names does not grant or restrict authority. The
+meaningful consumer-side choice is branded versus plain: a branded result
+projection preserves a live cell binding, while a plain field projects its
+reactive value. Request the brand only when the relationship needs cell
+identity or the cell API. See
+[Reactivity and Write Access](../concepts/reactivity.md#results-mirror-the-rule-writable-in-a-result-type-grants-write-access)
+and [Writable](../concepts/types-and-schemas/writable.md).
+
 When a producer intentionally supports a stable role used by several
 independent consumers, export a shallow model for that role, such as a
 `MentionablePiece` or `SummarizablePiece`, rather than asking consumers to
 reuse its full input or output schema. Keep that model limited to the role's
 semantic core. A consumer with extra needs should usually extend its own local
-projection instead of widening the shared model for everyone.
+projection instead of widening the shared model for everyone. For a concrete
+example, see `MentionablePiece` in
+`packages/patterns/system/backlinks-index.tsx`.
 
 Reusing a shared type is still appropriate when it is itself the intended
 protocol: for example, a stream event, an enum, or a cohesive domain model
