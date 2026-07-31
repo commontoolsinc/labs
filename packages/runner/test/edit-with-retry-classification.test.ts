@@ -306,25 +306,35 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
     assert(!sync.error, sync.error?.message);
     const before = factory.aclCommits;
 
-    // Write INTO the ACL envelope rather than replacing it. The commit builder
-    // turns a keyed write into `op: "patch"`, and the server's ACL storage
-    // invariant requires a whole-document `set` — a deterministic ProtocolError
-    // about operation shape. Nothing about a re-run can make it well-formed.
+    // Replace the ACL with an ownerless one. This is the correct SHAPE (a
+    // whole-document write, so it passes the runner's write chokepoint) but
+    // the server refuses the VALUE: an ACL must retain a concrete OWNER. That
+    // is deterministic — no re-run makes the value well-formed — and it can
+    // only be decided server-side, which is what this test needs to observe.
+    //
+    // It deliberately does not provoke the ACL *shape* rule. A value-path
+    // write to the ACL document no longer reaches the server at all: the
+    // runner refuses it in-process (`noteSystemWrite`), which surfaces as
+    // StorageTransactionAborted — a retryable class — and so would not
+    // exercise the terminal path under test.
     const address: IMemorySpaceAddress = {
       space,
       id: `of:${space}` as URI,
       type: "application/json",
-      path: ["value", bob.did()],
+      path: [],
     };
     const result = await runtime.editWithRetry((tx) => {
-      tx.writeOrThrow(address, "READ" as unknown as FabricValue);
+      tx.writeOrThrow(
+        address,
+        { value: { [bob.did()]: "READ" } } as unknown as FabricValue,
+      );
     });
 
     assert(result.error, "the malformed ACL commit must be refused");
     // The name the server chose, not a flattened TransactionError.
     assertEquals(result.error.name, "ProtocolError");
     assert(
-      result.error.message.includes("ACL mutations"),
+      result.error.message.includes("concrete OWNER"),
       `unexpected message: ${result.error.message}`,
     );
     // Exactly one round-trip: the refusal is deterministic.
