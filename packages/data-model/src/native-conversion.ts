@@ -6,7 +6,7 @@ import {
 import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
 import {
   isArrayIndexPropertyName,
-  isArrayWithOnlyIndexProperties,
+  isInertArray,
 } from "@commonfabric/utils/arrays";
 
 import {
@@ -41,7 +41,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
 /**
  * Returns a shallow clone of the given array carrying nothing but its
  * enumerable index properties and `length`, that is, one which satisfies
- * `isArrayWithOnlyIndexProperties()`. Holes are preserved as holes, and
+ * `isInertArray()`. Holes are preserved as holes, and
  * elements are copied by reference without themselves being converted or
  * validated, this being a shallow operation.
  *
@@ -51,6 +51,11 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * Calling this is how such a caller says explicitly that it means to drop
  * them. Code with no such warrant should let the rejection happen ("death
  * before confusion").
+ *
+ * The given array's index properties must all be enumerable data properties:
+ * the copy reads elements through enumeration, which would execute an
+ * accessor-backed index (silently flattening it to its momentary answer)
+ * and would turn a non-enumerable data index into a hole.
  *
  * @param value The array to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
@@ -244,13 +249,15 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Array: {
-      // Arrays may only carry numeric index properties. A named property or a
-      // symbol-keyed one has no fabric representation, so reject it outright
-      // rather than silently dropping it ("death before confusion").
-      if (!isArrayWithOnlyIndexProperties(value)) {
+      // An array in this system is INERT: it may only carry numeric index
+      // properties, each a data property. A named or symbol-keyed property
+      // has no fabric representation, and an accessor-backed index is live
+      // code rather than inert data; reject any of them outright rather than
+      // silently dropping or flattening ("death before confusion").
+      if (!isInertArray(value)) {
         throw new Error(
-          "Not representable as a `FabricValue`: array with non-index " +
-            "properties",
+          "Not representable as a `FabricValue`: array that is not an " +
+            "inert array",
         );
       }
       // Delegate frozenness handling to `cloneHelper()`.
@@ -656,8 +663,9 @@ function isFabricCompatibleInternal(
       seen.add(value);
 
       if (Array.isArray(value)) {
-        // Check array structure (no non-index properties).
-        if (!isArrayWithOnlyIndexProperties(value)) {
+        // Check array structure (no non-index properties, no
+        // accessor-backed indices).
+        if (!isInertArray(value)) {
           seen.delete(value);
           return false;
         }

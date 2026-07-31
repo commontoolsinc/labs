@@ -80,7 +80,7 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
         includeSchema: true,
       })
     ).toThrow(
-      "Not representable as a `FabricValue`: array with non-index properties",
+      "Not representable as a `FabricValue`: array that is not an inert array",
     );
   });
 });

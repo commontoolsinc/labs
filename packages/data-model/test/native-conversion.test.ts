@@ -600,7 +600,19 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => shallowFabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for arrays with a getter-backed index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(() => shallowFabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
     });
@@ -1500,7 +1512,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1508,7 +1520,29 @@ describe("native-conversion", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
         expect(() => fabricFromNativeValue({ data: arr })).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for an array with a getter-backed index", () => {
+        // An accessor is live code, not a value: converting would silently
+        // flatten it to its momentary answer. Reject it loudly instead.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a nested array with a setter-only index", () => {
+        const arr = [1, 2];
+        Object.defineProperty(arr, 0, { set: () => {}, enumerable: true });
+        expect(() => fabricFromNativeValue({ data: arr })).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1518,7 +1552,7 @@ describe("native-conversion", () => {
         sparse[2] = 3;
         sparse.name = "test";
         expect(() => fabricFromNativeValue(sparse)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1529,7 +1563,7 @@ describe("native-conversion", () => {
         arr.foo = "bar";
         Object.freeze(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1537,7 +1571,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3];
         (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1571,7 +1605,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3];
         Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1584,7 +1618,7 @@ describe("native-conversion", () => {
         fake[0] = "a";
         fake.length = 1;
         expect(() => fabricFromNativeValue(fake)).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1592,7 +1626,7 @@ describe("native-conversion", () => {
         const arr = [1, 2];
         (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
         expect(() => fabricFromNativeValue({ data: arr })).toThrow(
-          "Not representable as a `FabricValue`: array with non-index properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
     });
