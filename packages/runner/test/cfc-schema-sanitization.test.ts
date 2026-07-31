@@ -313,6 +313,71 @@ describe("cfc schema sanitization", () => {
     }, ["ok"])).toBeUndefined();
   });
 
+  it("treats an optional property holding undefined as absent", () => {
+    // A handler that builds `{ author, ... }` from a variable that happens to
+    // be undefined writes the KEY, and the codec stores that presence
+    // faithfully. Validating it as a value then measures `undefined` against
+    // the property's declared type, which no JSON Schema type matches — so the
+    // same optional field passes when omitted and fails when written as
+    // undefined, though JS cannot tell the two apart on read.
+    //
+    // Measured consequence: `packages/patterns/topics/topic.tsx` pushes
+    // `{ author, ... }` from `addComment` whenever no `agentName` is supplied,
+    // and the resulting document REFUSES its own pattern's next update with
+    // `comments: 0: author: value does not match type object`. A refusal here
+    // is permanent — see `isStoredArgumentSchemaRefusal` in runner.ts: the same
+    // identity refuses identically, so the root never opens again.
+    const optionalObject = {
+      type: "object",
+      properties: {
+        author: { type: "object", properties: { name: { type: "string" } } },
+        body: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(optionalObject, { body: "old" }))
+      .toBeUndefined();
+    expect(
+      validateAgainstSchema(optionalObject, { author: undefined, body: "old" }),
+    )
+      .toBeUndefined();
+
+    // The same rule inside an array, which is where the topics document holds
+    // it: an element's optional field, present and undefined.
+    expect(validateAgainstSchema({
+      type: "array",
+      items: optionalObject,
+    }, [{ author: undefined, body: "old" }])).toBeUndefined();
+
+    // Loosening stops at OPTIONAL, and required properties are still measured.
+    // A required object holding undefined keeps failing on its type.
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: { author: { type: "object" } },
+      required: ["author"],
+    }, { author: undefined })).toBe("author: value does not match type object");
+
+    // Why required is measured rather than read as absent: `type: "undefined"`
+    // is a type this validator supports, so a REQUIRED property of that type
+    // holds undefined legitimately. Reading undefined as absence everywhere
+    // reports this as a missing property — caught by `runner.test.ts`'s
+    // "preserves explicit undefined while combining union defaults", which
+    // validates a defaults object built from exactly this schema shape.
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: { x: { type: "undefined" } },
+      required: ["x"],
+    }, { x: undefined })).toBeUndefined();
+
+    // An UNDECLARED key holding undefined is absent too — nothing undeclared
+    // can be required, so the carve-out above cannot apply. Without this a
+    // closed schema refuses an object that says nothing at the extra key.
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: { body: { type: "string" } },
+      additionalProperties: false,
+    }, { body: "old", extra: undefined })).toBeUndefined();
+  });
+
   it("strictly validates Common Fabric values for schema migrations", () => {
     expect(validateSchemaValue({ type: "undefined" }, undefined))
       .toBeUndefined();

@@ -509,6 +509,49 @@ const typeMatches = (
   }
 };
 
+/**
+ * Whether `key` is an OPTIONAL property holding `undefined` — which says
+ * nothing, and so is read as absent rather than as a value to measure.
+ *
+ * JavaScript cannot tell `{ a: undefined }` from `{}` on read, and a handler
+ * building an object literal out of a variable that happens to be undefined
+ * writes the key without meaning to say anything by it —
+ * `comments.push({ author, ... })` with no author in hand is the shape that
+ * made this matter. Measuring such a key asks whether `undefined` satisfies
+ * the property's declared type, which no ordinary type answers yes to, so one
+ * optional field would pass when omitted and fail when written as undefined.
+ *
+ * The cost of getting this wrong is not a spurious message. A stored argument
+ * that fails validation refuses its pattern's every future update, and refuses
+ * it identically each time — see `isStoredArgumentSchemaRefusal` in
+ * `../runner.ts`, which exists because a root pinned to a version whose schema
+ * cannot read its own document never opens again.
+ *
+ * REQUIRED properties are excluded, and that exclusion is load-bearing rather
+ * than cautious: `type: "undefined"` is a type this validator supports, so a
+ * required property of that type holds undefined legitimately and must still
+ * be measured to be accepted. A required property of any OTHER type holding
+ * undefined keeps failing on its type, which is the right answer by a
+ * different route.
+ */
+const isAbsentOptional = (
+  value: FabricPlainObject,
+  key: string,
+  requiredKeys: ReadonlySet<string>,
+): boolean =>
+  (value as Record<string, unknown>)[key] === undefined &&
+  !requiredKeys.has(key);
+
+/**
+ * The keys `value` says something at, for the checks that range over UNDECLARED
+ * keys. Nothing undeclared can be required, so {@link isAbsentOptional}'s
+ * carve-out cannot apply and plain undefined-is-absent holds.
+ */
+const definedKeys = (value: FabricPlainObject): string[] =>
+  Object.keys(value).filter((key) =>
+    (value as Record<string, unknown>)[key] !== undefined
+  );
+
 const schemaValueEqual = (left: unknown, right: unknown): boolean => {
   try {
     return valueEqual(left as FabricValue, right as FabricValue);
@@ -1366,13 +1409,22 @@ const validateAgainstSchemaInternal = (
     }
 
     if (isFabricPlainObjectValue(value)) {
-      for (const key of schema.required ?? []) {
+      const requiredKeys = new Set(schema.required ?? []);
+      // REQUIRED keeps asking only whether the key is there. A schema may
+      // declare `type: "undefined"`, and a required property of that type
+      // holds undefined legitimately — so whether undefined belongs at a key
+      // is the property schema's question, answered just below, not this
+      // loop's.
+      for (const key of requiredKeys) {
         if (!Object.hasOwn(value, key)) {
           return mismatch(`missing required property ${key}`);
         }
       }
       for (const [key, child] of Object.entries(schema.properties ?? {})) {
-        if (Object.hasOwn(value, key)) {
+        if (
+          Object.hasOwn(value, key) &&
+          !isAbsentOptional(value, key, requiredKeys)
+        ) {
           const failure = validateAgainstSchemaInternal(
             child,
             value[key],
@@ -1394,7 +1446,7 @@ const validateAgainstSchemaInternal = (
             new RegExp(pattern)
           )
           : [];
-        const extra = Object.keys(value).find((key) =>
+        const extra = definedKeys(value).find((key) =>
           !known.has(key) && !patterns.some((pattern) => pattern.test(key))
         );
         if (extra !== undefined) {
@@ -1407,7 +1459,7 @@ const validateAgainstSchemaInternal = (
             new RegExp(pattern)
           )
           : [];
-        for (const key of Object.keys(value)) {
+        for (const key of definedKeys(value)) {
           if (
             !known.has(key) && !patterns.some((pattern) => pattern.test(key))
           ) {
