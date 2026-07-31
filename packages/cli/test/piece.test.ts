@@ -24,6 +24,7 @@ import {
   listPieces,
   newPiece,
   PieceResultProjectionError,
+  PieceVerbReadError,
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
@@ -873,6 +874,9 @@ describe("cli piece parsing", () => {
       "runtime.idle",
       "manager.synced",
       "result.get",
+      // The read-path guard classifies the read path after the value read
+      // (verb contract WS-F), descending to the same key once more.
+      "result.key:value",
       `stop:${PIECE}`,
     ]);
   });
@@ -1003,6 +1007,135 @@ describe("cli piece parsing", () => {
         createController: () => controller as any,
       },
     )).resolves.toBeUndefined();
+  });
+
+  describe("read-path guard (verb contract WS-F)", () => {
+    /** Minimal cell double for the guard's classification walk: value
+     * access, key() descent, and asSchemaFromLinks identity — the same
+     * surface piece-verbs.test.ts doubles for listPieceCallables. */
+    function guardCell(value: unknown): {
+      get: () => unknown;
+      getRaw: () => unknown;
+      asSchemaFromLinks: () => unknown;
+      key: (...segments: (string | number)[]) => unknown;
+    } {
+      const self = {
+        get: () => value,
+        getRaw: () => value,
+        asSchemaFromLinks: () => self,
+        key: (...segments: (string | number)[]) => {
+          let child: unknown = value;
+          for (const segment of segments) {
+            child = typeof child === "object" && child !== null
+              ? (child as Record<string | number, unknown>)[segment]
+              : undefined;
+          }
+          return guardCell(child);
+        },
+      };
+      return self;
+    }
+
+    const readPath = (value: unknown, path: (string | number)[]): unknown =>
+      path.reduce(
+        (current: unknown, segment) =>
+          typeof current === "object" && current !== null
+            ? (current as Record<string | number, unknown>)[segment]
+            : undefined,
+        value,
+      );
+
+    const RESULT_VALUE = {
+      title: "Groceries",
+      addItem: { $stream: true },
+      nested: {
+        list: ["milk"],
+        removeItem: { $stream: true },
+      },
+      search: {
+        pattern: { argumentSchema: { type: "object" } },
+        extraParams: {},
+      },
+    };
+
+    const guardDeps = (piece: unknown) => ({
+      loadManager: () => Promise.resolve({} as never),
+      resolvePieceAddress: (_manager: unknown, id: string) =>
+        Promise.resolve(id),
+      createController: () => ({ get: () => Promise.resolve(piece) }) as never,
+    });
+
+    const guardPiece = (resultValue: unknown, pieceCell?: unknown) => ({
+      input: {
+        get: () => Promise.resolve(undefined),
+        getCell: () => Promise.resolve(guardCell(undefined)),
+      },
+      result: {
+        get: (path: (string | number)[]) =>
+          Promise.resolve(readPath(resultValue, path)),
+        getCell: () => Promise.resolve(guardCell(resultValue)),
+      },
+      ...(pieceCell ? { getCell: () => pieceCell } : {}),
+    });
+
+    const config = {
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+    };
+
+    it("refuses a path that lands on a verb, pointing at cf piece call", async () => {
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      const error = await getCellValue(config, ["addItem"], {}, deps)
+        .catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toBe(
+        `Path resolves to a verb; use 'cf piece call --piece ${PIECE} addItem' instead.`,
+      );
+
+      // The same guard covers a verb nested below the result root, and a
+      // tool-shaped verb — both are callable, so both redirect.
+      await expect(getCellValue(config, ["nested", "removeItem"], {}, deps))
+        .rejects.toThrow(PieceVerbReadError);
+      await expect(getCellValue(config, ["search"], {}, deps))
+        .rejects.toThrow(PieceVerbReadError);
+    });
+
+    it("refuses a verb only reachable through the forced-stream probe", async () => {
+      // Ordinary detection sees a plain object; only the forced stream cast
+      // on the piece cell — cf piece call's third resolution path — proves
+      // it is a handler. The guard must agree with the dispatcher.
+      const pieceCell = {
+        asSchema: () => ({
+          key: (name: string) => ({ isStream: () => name === "hiddenPing" }),
+        }),
+      };
+      const deps = guardDeps(
+        guardPiece({ hiddenPing: {}, count: 3 }, pieceCell),
+      );
+      await expect(getCellValue(config, ["hiddenPing"], {}, deps))
+        .rejects.toThrow(/use 'cf piece call/);
+      // A data sibling on the same piece still reads: the probe answers for
+      // the one name, not the whole piece.
+      await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
+    });
+
+    it("still reads plain data paths and a verb's parent object", async () => {
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      await expect(getCellValue(config, ["title"], {}, deps)).resolves.toBe(
+        "Groceries",
+      );
+      await expect(getCellValue(config, ["nested", "list"], {}, deps))
+        .resolves.toEqual(["milk"]);
+      // Only the path that lands ON the verb refuses: its parent object —
+      // named or the path-less full result — keeps reading, verbs included.
+      await expect(getCellValue(config, ["nested"], {}, deps)).resolves
+        .toEqual(RESULT_VALUE.nested);
+      await expect(getCellValue(config, [], {}, deps)).resolves.toEqual(
+        RESULT_VALUE,
+      );
+    });
   });
 
   it("rejects repository metadata when resetting the home pattern", async () => {

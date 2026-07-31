@@ -115,6 +115,20 @@ export interface GetCellValueOptions {
   transform?: PieceGetTransform;
 }
 
+/** A `cf piece get` path that lands ON a verb. Reading a verb returns the
+ * stream's serialization — never what the caller wanted — so the read refuses
+ * and redirects to the dispatcher instead, mirroring the llm-dialog read
+ * tool's "Path resolves to a handler; use invoke() instead." (verb contract
+ * WS-F, read-path guard). */
+export class PieceVerbReadError extends Error {
+  constructor(verb: string, piece: string) {
+    super(
+      `Path resolves to a verb; use 'cf piece call --piece ${piece} ${verb}' instead.`,
+    );
+    this.name = "PieceVerbReadError";
+  }
+}
+
 export class PieceResultProjectionError extends Error {
   constructor(path: readonly (string | number)[], stepped: boolean) {
     const location = path.length === 0 ? "<root>" : path.join("/");
@@ -1340,6 +1354,30 @@ async function tryResolvePieceCallableAt(
   };
 }
 
+/** The forced-stream probe: cast `name` on `cell` to a stream and ask the
+ * runtime whether it answers as a handler. This is the third resolution path
+ * of `cf piece call` (tryResolvePieceHandler) — a handler whose stored schema
+ * lost the stream marker still answers this cast — shared with the listing's
+ * fallback probe and the read-path guard so all three classify identically.
+ * Returns the proven stream cell, or null. */
+function probeForcedStreamCell(cell: any, name: string): any | null {
+  if (
+    typeof cell !== "object" || cell === null ||
+    typeof cell.asSchema !== "function"
+  ) {
+    return null;
+  }
+  const streamRoot = cell.asSchema({
+    type: "object",
+    properties: {
+      [name]: { asCell: ["stream"] },
+    },
+    required: [name],
+  });
+  const streamCell = streamRoot.key(name);
+  return isHandlerCell(streamCell) ? streamCell : null;
+}
+
 async function tryResolvePieceHandler(
   piece: any,
   manager: any,
@@ -1351,15 +1389,8 @@ async function tryResolvePieceHandler(
     return null;
   }
 
-  const streamRoot = pieceCell.asSchema({
-    type: "object",
-    properties: {
-      [callableName]: { asCell: ["stream"] },
-    },
-    required: [callableName],
-  });
-  const streamCell = streamRoot.key(callableName);
-  if (!isHandlerCell(streamCell)) {
+  const streamCell = probeForcedStreamCell(pieceCell, callableName);
+  if (!streamCell) {
     return null;
   }
 
@@ -1624,12 +1655,7 @@ export async function listPieceCallables(
     }
     for (const name of rejected) {
       if (listings.has(name)) continue;
-      const streamRoot = pieceCell.asSchema({
-        type: "object",
-        properties: { [name]: { asCell: ["stream"] } },
-        required: [name],
-      });
-      if (!isHandlerCell(streamRoot.key(name))) continue;
+      if (!probeForcedStreamCell(pieceCell, name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       const spec = callableCommandSpec(callableCell, "handler");
       listings.set(name, {
@@ -2173,6 +2199,52 @@ export function formatViewTree(view: unknown): string {
   return format(view, "", true);
 }
 
+/**
+ * True when a `cf piece get` path lands ON a verb: the same classification
+ * `cf piece call` resolves through — `detectCallableKind` on the link-derived
+ * cell (tryResolvePieceCallableAt), then the forced-stream probe
+ * (tryResolvePieceHandler) — applied at the read path's last segment, so the
+ * read guard and the dispatcher can never disagree about what is callable.
+ * A classification failure is not a verb: the guard must never break a plain
+ * data read.
+ */
+async function readPathLandsOnVerb(
+  piece: any,
+  prop: "input" | "result",
+  path: readonly (string | number)[],
+): Promise<boolean> {
+  const name = path.at(-1);
+  // Verbs are named properties; a path-less read is the parent-object read,
+  // which stays readable even when the object carries verbs.
+  if (typeof name !== "string") return false;
+  try {
+    const rootCell = await piece[prop].getCell();
+    const parentCell = path.length > 1
+      ? rootCell.key(...path.slice(0, -1))
+      : rootCell;
+    const callableCell = parentCell.key(name).asSchemaFromLinks?.();
+    if (
+      callableCell &&
+      detectCallableKind(
+        getCallableValue(parentCell.get?.(), name),
+        callableCell,
+      )
+    ) {
+      return true;
+    }
+    // Root-level result names dispatch through the piece cell's forced stream
+    // cast (result is the identity on the piece cell — see
+    // tryResolvePieceHandler); nested names and input-side names get the same
+    // probe on their own parent.
+    const probeTarget = prop === "result" && path.length === 1
+      ? piece.getCell?.() ?? parentCell
+      : parentCell;
+    return probeForcedStreamCell(probeTarget, name) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export async function getCellValue(
   config: PieceConfig,
   path: (string | number)[],
@@ -2229,6 +2301,12 @@ export async function getCellValue(
         }
         throw error;
       }
+      // Read-path guard (verb contract WS-F): the transform path returns
+      // early, so it needs the same verb refusal the plain read applies
+      // below — a verb read through a transform is the same mistake.
+      if (await readPathLandsOnVerb(piece, prop, path)) {
+        throw new PieceVerbReadError(String(path.at(-1)), resolvedConfig.piece);
+      }
       const sourceWasAbsent = typeof targetCell.getRaw === "function" &&
         targetCell.getRaw() === undefined;
       if (
@@ -2270,6 +2348,14 @@ export async function getCellValue(
       await resultProjectionFailedAtPath(piece, path)
     ) {
       throw new PieceResultProjectionError(path, shouldStep);
+    }
+
+    // Read-path guard (verb contract WS-F): a path that lands ON a verb would
+    // return the stream's serialization — never what a caller wants — so it
+    // refuses and redirects to `cf piece call`. Classified after the read so
+    // the piece's links and schema are materialized locally.
+    if (await readPathLandsOnVerb(piece, prop, path)) {
+      throw new PieceVerbReadError(String(path.at(-1)), resolvedConfig.piece);
     }
 
     return value;

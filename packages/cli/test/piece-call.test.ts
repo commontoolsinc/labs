@@ -9,6 +9,7 @@ import {
 import {
   executePieceCallable,
   PieceResultProjectionError,
+  PieceVerbReadError,
 } from "../lib/piece.ts";
 import {
   exitWithDataError,
@@ -1623,6 +1624,40 @@ describe("piece get data errors", () => {
     });
     expect(report?.message).toBe("--filter can only be applied to an array");
     expect(report?.hint).toBeUndefined();
+  });
+
+  it("refuses a path that lands on a verb with the call redirect and exit 1", () => {
+    const verbError = new PieceVerbReadError("addTopic", "fid1:piece-123");
+    expect(isPieceGetDataError(verbError)).toBe(true);
+    const report = pieceGetDataErrorReport(verbError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    // The message IS the redirect — mirroring the llm-dialog read tool's
+    // "Path resolves to a handler; use invoke() instead." — so no extra hint
+    // rides along (the --input tip would be a wrong remedy for a verb).
+    expect(report?.message).toBe(
+      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+    );
+    expect(report?.hint).toBeUndefined();
+
+    // Threaded through the shared data-error exit: stderr message, exit 1.
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError(report!, {
+        printError: (m) => printed.push(m),
+        printHint: () => {},
+        exit: (code: number): never => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        },
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual([
+      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+    ]);
+    expect(exited).toEqual([1]);
   });
 });
 

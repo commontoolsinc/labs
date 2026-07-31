@@ -642,12 +642,18 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   and Invocation is required to be authored open-world precisely so protocol
   fields can be added later. Cost is bounded by emitting links only for paths
   that have them, and only when asked.
-- **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
-  the stream's serialization rather than redirecting. The llm-dialog `read`
-  tool already rejects this case with the right message — "Path resolves to a
-  handler; use invoke() instead" — and the CLI read path
-  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
-  and it saves an agent a wasted turn.
+- ~~**Read-path guard:** `cf piece get` on a path that resolves to a verb
+  returns the stream's serialization rather than redirecting. The llm-dialog
+  `read` tool already rejects this case with the right message — "Path
+  resolves to a handler; use invoke() instead" — and the CLI read path
+  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check.
+  Cheap, and it saves an agent a wasted turn.~~ — **done**: `getCellValue`
+  classifies the read path's last segment with the same classification
+  `cf piece call` resolves through — ordinary detection plus the
+  forced-stream probe — and a path landing ON a verb (handler or tool)
+  refuses with "Path resolves to a verb; use 'cf piece call …' instead.",
+  reported as a `piece get` data error (one line on stderr, exit 1). Parent
+  objects and plain data paths read as before.
 - `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
