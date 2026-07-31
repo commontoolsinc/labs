@@ -60,7 +60,7 @@ Deno.test("executor sink release policy follows the exact source action", async 
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
     externalSinkDisposition: (sourceAction) =>
-      sourceAction === claimedAction ? "allow" : "suppress",
+      sourceAction === claimedAction ? "server-executor" : "suppress",
   });
 
   try {
@@ -93,6 +93,100 @@ Deno.test("executor sink release policy follows the exact source action", async 
     );
     assertEquals((await claimed.commit()).error, undefined);
     assertEquals(releases, 1);
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+});
+
+// Nothing pinned this before, and the failure mode is the silent one: two
+// consumers consult the gate directly BEFORE `enqueueSinkRequestPostCommitEffect`
+// re-consults it (`sqlite-builtins.ts:798`, `llm-dialog.ts:3272`), and both
+// document that they rely on the two answers agreeing. If the first consult
+// says "allow" and the second says "suppress", sqliteQuery has already written
+// its `{ pending: true, requestHash }` dedup marker on a side that then never
+// issues — every later run returns early on the matching hash, so the result
+// cell is stranded `pending` forever and the other side is wedged too. A
+// missing effect is worse than a duplicated one, so it is the direction the
+// memo has to hold.
+Deno.test("externalSinkDisposition is idempotent across a server-executor policy state change", async () => {
+  const signer = await Identity.fromPassphrase(
+    "executor sink disposition idempotence",
+  );
+  const storage = StorageManager.emulate({ as: signer });
+  const claimedAction = {};
+  // Shape of `executor-worker.ts:1572`: a LIVE predicate over the executor's
+  // claim table, re-evaluated on every consult.
+  let claimLive = true;
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+    externalSinkDisposition: (sourceAction) =>
+      sourceAction === claimedAction && claimLive
+        ? "server-executor"
+        : "suppress",
+  });
+
+  try {
+    const tx = runtime.edit();
+    tx.tx.sourceAction = claimedAction;
+    assertEquals(tx.externalSinkDisposition(), "allow");
+    // The claim is released between the two consults.
+    claimLive = false;
+    assertEquals(tx.externalSinkDisposition(), "allow");
+    // The memo is NOT on the public, forgeable transaction field.
+    assertEquals(tx.tx.executionEffectAuthority, undefined);
+    tx.abort();
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+});
+
+// F4: the server-executor memo must not be reachable from anything a pattern
+// or handler can write. `ExtendedStorageTransaction` exposes `public tx` and
+// `executionEffectAuthority` is a plain writable property on the public
+// interface, so if the memo lived there, untrusted code holding a Cell could
+// forge it and re-authorise its own egress past the claim stand-down. Same
+// threat model that made `#cfcState` / `#cfcEnforcementFloor` `#private`.
+Deno.test("server-executor authority cannot be forged through tx.executionEffectAuthority", async () => {
+  const signer = await Identity.fromPassphrase(
+    "client forges server executor authority",
+  );
+  const storage = StorageManager.emulate({ as: signer });
+  const sourceAction = {};
+  const claim: ExecutionClaim = {
+    branch: "",
+    space: signer.did(),
+    contextKey: "space",
+    pieceId: "space:of:forged-authority-piece",
+    actionId: "action:forged-authority",
+    actionKind: "effect",
+    implementationFingerprint: "impl:forged-authority",
+    runtimeFingerprint: "runtime:forged-authority",
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  storage.captureExecutionClaim = (action) =>
+    action === sourceAction ? claim : undefined;
+  // An ordinary client: declares nothing, so it is "claim-conditional".
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+    experimental: { serverPrimaryExecution: true },
+  });
+
+  try {
+    const tx = runtime.edit();
+    tx.tx.sourceAction = sourceAction;
+    // What handler code reaching `cell.tx` would try.
+    (tx.tx as { executionEffectAuthority?: string }).executionEffectAuthority =
+      "server-executor";
+    assertEquals(tx.externalSinkDisposition(), "suppress");
+    assertEquals(tx.tx.executionEffectAuthority, "server");
+    assertEquals(tx.tx.executionClaim, claim);
+    tx.abort();
   } finally {
     await runtime.dispose();
     await storage.close();

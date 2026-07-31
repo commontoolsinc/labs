@@ -1049,7 +1049,14 @@ export class Runtime {
     // mock is used as-is.
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
-    this.externalSinkDisposition = options.externalSinkDisposition ?? "allow";
+    // THE TERMINAL FLIP CHANGES THIS ONE DEFAULT TO "suppress". Until then
+    // "claim-conditional" is byte-identical to the old "allow" default: a
+    // runtime that declares nothing egresses unless it observes a server
+    // effect claim for the action. The value is named rather than "allow" so
+    // that a runtime declaring authority must say "server-executor", which no
+    // client preset can spell (see ExternalSinkDispositionPolicy).
+    this.externalSinkDisposition = options.externalSinkDisposition ??
+      "claim-conditional";
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));

@@ -68,8 +68,9 @@
  * |                            | localhost fallback); constructor default in the  |
  * |                            | local presets (patternTest/localDev/unitTest)    |
  * | fetch                      | real everywhere; patternTest delta (mock)        |
- * | externalSinkDisposition   | allow everywhere; productionServer delta for     |
- * |                            | executor shadow suppression                      |
+ * | externalSinkDisposition    | claim-conditional everywhere;                    |
+ * |                            | productionServer delta: the executor declares    |
+ * |                            | server-executor (its own egress authority)       |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
  * | navigateCallback           | delta (patternTest, remoteClient, browserWorker) |

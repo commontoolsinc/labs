@@ -1569,9 +1569,16 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       serverPrimaryExecution: true,
     },
     fetch: denyExternalBuiltinFetch,
+    // The ONE site in the repo that declares server-side egress authority.
+    // "server-executor" (not "allow") says WHY this runtime may egress: it
+    // holds the space's execution lease, so it is the claim holder rather
+    // than a claim observer and the client stand-down does not apply to it.
+    // The per-action liveness predicate stays local to this policy — when the
+    // claim mechanism is deleted it becomes a lease-liveness predicate, or
+    // `() => "server-executor"`, without moving the seam.
     externalSinkDisposition: (sourceAction) =>
       sourceAction !== undefined && hasAnyLiveClaim(sourceAction)
-        ? "allow"
+        ? "server-executor"
         : "suppress",
   }));
   // C1.9c: every scheduler-driven run of an action executes under its

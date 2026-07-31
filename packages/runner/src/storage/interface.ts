@@ -84,10 +84,34 @@ export type {
   URI,
 };
 export type ChangeGroup = unknown;
+/** The ANSWER the sink gate returns for one external-effect attempt. */
 export type ExternalSinkDisposition = "allow" | "suppress";
+/**
+ * What a runtime DECLARES about its authority to run external effects.
+ * - "suppress"        — this runtime never egresses.
+ * - "server-executor" — this runtime IS the server-side executor: it holds the
+ *                       space's execution lease and egresses on its OWN
+ *                       authority. It is the claim HOLDER, never a claim
+ *                       observer, so the claim-observer stand-down in
+ *                       `ExtendedStorageTransaction.externalSinkDisposition`
+ *                       does not apply to it.
+ * - "claim-conditional" — legacy client posture: egress unless a server claim
+ *                       for this action is observed. THIS IS THE VALUE THE
+ *                       TERMINAL FLIP RETIRES.
+ *
+ * Note `"allow"` is deliberately NOT in this vocabulary: it remains the
+ * gate's answer, but a runtime can no longer DECLARE it. That is what makes
+ * "a configured allow" — the value every client held by default, and which a
+ * claim-observing client must never be able to short-circuit on — structurally
+ * un-spellable rather than merely documented as dangerous.
+ */
 export type ExternalSinkDispositionPolicy =
-  | ExternalSinkDisposition
-  | ((sourceAction: object | undefined) => ExternalSinkDisposition);
+  | "suppress"
+  | "server-executor"
+  | "claim-conditional"
+  | ((
+    sourceAction: object | undefined,
+  ) => "suppress" | "server-executor" | "claim-conditional");
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
@@ -931,7 +955,16 @@ export interface IStorageTransaction {
   /** Frozen authority decision for an external-effect attempt. A client-owned
    * attempt and all of its async continuations remain upstream even if a claim
    * arrives mid-flight; a server-owned attempt carries the exact claim that
-   * made its sink passive. */
+   * made its sink passive.
+   *
+   * This is a CLIENT-side, claim-observing decision only, and it stays a
+   * two-value field on purpose. The server-side executor's "I egress on my own
+   * authority" memo is deliberately NOT here: this property is public and
+   * freely writable, and `ExtendedStorageTransaction` exposes `public tx`, so
+   * handler/pattern code reaching `cell.tx` could forge whatever value short-
+   * circuits the gate. That memo lives in a `#private` field on
+   * `ExtendedStorageTransaction` instead (same threat model that made
+   * `#cfcState` / `#cfcEnforcementFloor` ECMAScript-private). */
   executionEffectAuthority?: "client" | "server";
   executionClaim?: ExecutionClaim;
   /**
