@@ -444,3 +444,139 @@ describe("asCell scope cap, harder shapes", () => {
     expect(inner.get()).toEqual({ field: "secret" });
   });
 });
+
+describe("asCell scope cap, positional and compound", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  const scopedInner = (cause: string, scope: "space" | "user" | "session") => {
+    const inner = runtime.getCell(space, cause, innerSchema, tx, scope);
+    inner.set({ field: "secret" });
+    return inner;
+  };
+
+  it("caps a handle below a NON-ROOT ancestor link", () => {
+    // The rebase across a hop shifts recorded cap depths onto the target's
+    // path. With the ancestor link at the root (depth 0) the shift is 0 either
+    // way, so an off-by-depth error hides. Here the link sits at `wrap`
+    // (depth 1) and the cap at `wrap/handle` (depth 2), so a wrong shift files
+    // the cap under a depth the hop never asks about and the read leaks.
+    const inner = scopedInner("nonroot-inner", "session");
+    const mid = runtime.getCell(space, "nonroot-mid", undefined, tx);
+    mid.set({ handle: inner } as never);
+    const outer = runtime.getCell(space, "nonroot-outer", undefined, tx);
+    outer.set({ wrap: mid } as never);
+
+    const capped = outer.asSchema(
+      {
+        type: "object",
+        properties: {
+          wrap: {
+            type: "object",
+            properties: {
+              handle: {
+                ...innerSchema,
+                asCell: [{ kind: "cell", scope: "space" }],
+              },
+            },
+            required: ["handle"],
+          },
+        },
+        required: ["wrap"],
+      } as JSONSchema,
+    );
+    expect(capped.key("wrap", "handle", "field").get()).toBeUndefined();
+  });
+
+  it("enforces a cap wrapped in anyOf on every route", () => {
+    // `{anyOf: [<capped handle>, {type:"null"}]}` is a real shape here.
+    // Reading only the top level for an asCell entry made it a cap bypass.
+    const inner = scopedInner("anyof-inner", "session");
+    const outer = runtime.getCell(
+      space,
+      "anyof-outer",
+      {
+        type: "object",
+        properties: {
+          handle: {
+            anyOf: [
+              { ...innerSchema, asCell: [{ kind: "cell", scope: "space" }] },
+              { type: "null" },
+            ],
+          },
+        },
+        required: ["handle"],
+      } as JSONSchema,
+      tx,
+    );
+    outer.set({ handle: inner } as never);
+
+    expect(outer.key("handle", "field").get()).toBeUndefined();
+    const projected = outer.key("handle").get();
+    expect(
+      isCell(projected) ? (projected as { get(): unknown }).get() : projected,
+    ).toBeUndefined();
+  });
+
+  it("keeps caps positional: a narrow cap below does not block a wide hop", () => {
+    // Why scopeCaps records a DEPTH rather than collapsing to one cap.
+    // `myProfile` is capped at `user` and legitimately holds a user-scoped
+    // link; the `profile` inside it is capped at `space`. Each cap governs the
+    // hop at its OWN position. Collapsing to the narrowest (`space`) would
+    // block the user-scoped hop at `myProfile`, which is exactly the shape
+    // pattern-scope.test.ts builds.
+    const profile = scopedInner("pos-profile", "space");
+    const myProfile = runtime.getCell(
+      space,
+      "pos-myprofile",
+      undefined,
+      tx,
+      "user",
+    );
+    myProfile.set({ profile } as never);
+    const root = runtime.getCell(space, "pos-root", undefined, tx);
+    root.set({ myProfile } as never);
+
+    const capped = root.asSchema(
+      {
+        type: "object",
+        properties: {
+          myProfile: {
+            type: "object",
+            properties: {
+              profile: {
+                ...innerSchema,
+                asCell: [{ kind: "cell", scope: "space" }],
+              },
+            },
+            required: ["profile"],
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+        },
+        required: ["myProfile"],
+      } as JSONSchema,
+    );
+
+    // The user-scoped hop at `myProfile` is permitted by ITS cap...
+    const handle = capped.key("myProfile").get();
+    expect(isCell(handle)).toBe(true);
+    // ...and the space-scoped profile below it reads through.
+    expect(capped.key("myProfile", "profile", "field").get()).toBe("secret");
+  });
+});

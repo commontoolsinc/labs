@@ -1921,7 +1921,13 @@ export class CellImpl<T extends FabricValue>
     // continues past it (#5230). Costs nothing on the uncapped path.
     let scopeCaps = currentLink.scopeCaps;
     const recordCap = (depth: number, schema: JSONSchema | undefined) => {
-      const cap = ContextualFlowControl.getSchemaScopeCap(schema);
+      // getSchemaScopeCap is the long-standing path-resolution precedence;
+      // the compound lookup adds anyOf/oneOf-wrapped asCell caps it cannot
+      // see. Taking the narrower is additive: it can only tighten.
+      const cap = narrowerScopeCap(
+        ContextualFlowControl.getSchemaScopeCap(schema),
+        ContextualFlowControl.getAsCellFollowScopeCap(schema),
+      );
       if (cap === undefined) return;
       // A repeated key() over the same prefix re-derives the same depth, and
       // asSchema() can re-declare one with a DIFFERENT cap. Keep the narrower:

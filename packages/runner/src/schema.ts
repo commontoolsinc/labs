@@ -4,7 +4,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema } from "./builder/types.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
@@ -22,7 +22,7 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import {
@@ -140,6 +140,26 @@ const asCellCompoundCandidates = (
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
+};
+
+/**
+ * The link a handle gets when its target is narrower than the cap its schema
+ * declares: undefined-data in place, the same shape resolveLink hands back for
+ * a blocked follow. It is still a Cell -- so a `required` container is not
+ * voided -- it reads as undefined, and it is not writable, because a data URI
+ * is a read-only address.
+ */
+const blockedHandleLink = (
+  link: NormalizedFullLink,
+  cap: SchemaScope | undefined,
+): NormalizedFullLink => {
+  logger.warn(
+    `blocked narrower-scope asCell handle: a "${cap}"-scoped read cannot ` +
+      `hold a "${link.scope}"-scoped link, so the handle reads as undefined. ` +
+      `Declare the handle's asCell scope at least as narrow as the value it ` +
+      `points at.`,
+  );
+  return undefinedDataLink(link);
 };
 
 const asCellCompoundSchemaForValue = (
@@ -1091,30 +1111,6 @@ export function validateAndTransform(
       // it, so resolveLink's cap check never sees this hop. Apply it here too,
       // or reading THROUGH the handle escapes the cap the schema declared
       // (#5230).
-      // Only the asCell entry's own scope, not getSchemaScopeCap's
-      // `schema.scope` fallback — see asCellEntryScopeCap in traverse.ts.
-      const entryScope = ContextualFlowControl.getAsCellScope(
-        ContextualFlowControl.getAsCellValues(effectiveSchema).at(0),
-      );
-      const schemaScope = isSchemaScope(entryScope) ? entryScope : undefined;
-      if (!canFollowScopedLink(schemaScope, next.scope)) {
-        logger.warn(
-          `blocked narrower-scope asCell handle: a "${schemaScope}"-scoped ` +
-            `read cannot hold a "${next.scope}"-scoped link, so the handle ` +
-            `reads as undefined.`,
-        );
-        // Exactly the shape resolveLink produces for a blocked follow:
-        // undefined-data in the SOURCE's place, keeping the reader's own space
-        // and scope, and no dereference recorded for a hop we refused to take.
-        // Keeping `effectiveSchema` preserves the asCell marker, so the caller
-        // still gets a handle -- one that reads as undefined.
-        const blocked = {
-          ...undefinedDataLink(link),
-          schema: effectiveSchema!,
-        };
-        objectCreator.setBase(blocked, cfcLabelView);
-        return objectCreator.createObject(blocked, undefined);
-      }
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
         cfcLabelViewForDereference(
@@ -1376,15 +1372,25 @@ class TransformObjectCreator
         if (cellKind === undefined) {
           return undefined;
         }
-        // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // This is a read/materialization path: keep the link's own
         // storage-resolved scope. The asCell entry scope is honored as a
         // follow cap during link resolution, never copied onto the link here
         // (doing so would re-address the value to a different scoped instance).
+        //
+        // Minting a handle is the one place a link is NOT followed, so
+        // resolveLink's cap check never sees this hop -- and the holder reads
+        // through the handle later, which is exactly the follow the cap bounds
+        // (#5230). Every route that produces a handle lands here, including
+        // the compound anyOf/oneOf shape `getSchemaScopeCap` cannot see, so
+        // this is the one place the check belongs.
+        const followCap = ContextualFlowControl.getAsCellFollowScopeCap(schema);
+        const handleLink = canFollowScopedLink(followCap, link.scope)
+          ? link
+          : blockedHandleLink(link, followCap);
         return createCell(
           this.runtime,
           {
-            ...link,
+            ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
           getTransactionForChildCells(this.tx),

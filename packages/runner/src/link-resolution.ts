@@ -120,7 +120,14 @@ const schemaScopeForLinkAtDepth = (
   link: NormalizedFullLink,
   depth: number,
 ): SchemaScope | undefined => {
-  const leafCap = ContextualFlowControl.getSchemaScopeCap(link.schema);
+  // getSchemaScopeCap only reads the top level, so a cap wrapped in
+  // anyOf/oneOf is invisible to it. A mixed compound (`[<capped handle>,
+  // {type:"null"}]`) never mints a handle at all -- the link is simply
+  // followed -- so this is the only place that shape can be caught.
+  const leafCap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(link.schema),
+    ContextualFlowControl.getAsCellFollowScopeCap(link.schema),
+  );
   if (depth >= link.path.length) return leafCap;
   return narrowerScopeCap(
     link.scopeCaps?.find((cap) => cap.depth === depth)?.scope,
@@ -376,7 +383,10 @@ export function resolveLink(
       const carriedCaps = rebaseScopeCaps(
         link.scopeCaps,
         nextHop.depth,
-        nextHop.link.path.length - (link.path.length - nextHop.depth),
+        // A cap at old depth k lands at (target base length) + (k - depth).
+        // target base length = nextHop.link.path.length - (path.length - depth),
+        // so the shift reduces to target-path length minus our own.
+        nextHop.link.path.length - link.path.length,
       );
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
