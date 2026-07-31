@@ -190,10 +190,16 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `2e42bb62d` — `sqliteQuery` joins `SERVER_EXECUTABLE_BUILTIN_IDS`;
-`streamData` REFUSED with evidence (terminal-condition item 2 closed).
+**Last landed:** `e519ec83e` — toolshed's webhook egress routed through the
+executor (D12), and with it the arc's **first gate probe that can see egress**
+(terminal-condition item 4 closed).
 
-Earlier, most recent first: `cb59829f9` the stop-hook prompt clause;
+Earlier, most recent first: `64d9d76e5` §2.11, any process that writes to a
+stream cell is a pattern runtime; `f2bf77cd8` **D12** — background-piece-service
+is SUNSET by this arc, toolshed routes through the executor;
+`2e42bb62d` `sqliteQuery` joins `SERVER_EXECUTABLE_BUILTIN_IDS` and
+`streamData` is REFUSED with evidence (item 2 closed); `cb59829f9` the
+stop-hook prompt clause;
 `925f0c090` **the lane IS the write firewall's on-switch** — the one mechanism
 behind four failed deletion routes, and the most load-bearing finding of
 2026-07-30; `c874c591a` the unclaimed unserved-marker dirtiness carrier;
@@ -250,20 +256,18 @@ unblock each other:
    this actually covers: it turned on `wish`'s destination being FIXED
    (`patternUrl()`, our own API). It does not generalise to an
    author-supplied url. The eventual fix is to load from disk server-side.
-2. **A gate probe containing a pattern effect** — item 4, and it is the
-   prerequisite for the flip being *measurable* at all: the corrected gate and
-   the flip are disjoint surfaces, and today's probes contain no pattern
-   effects, so the gate cannot see egress.
-3. **toolshed and background-piece-service — RULED 2026-07-31, see D12 below.**
-   Both egress on the CLIENT default today, so the flip silences them.
-   `toolshed` routes through the executor NOW; `background-piece-service` is
-   **SUNSET** as part of this arc. Neither declares its own egress authority,
-   so the disposition param stays a one-caller act by outcome rather than by
-   preset surgery — **the §5.2 executor-only-preset idea is therefore MOOT
-   and should not be built.**
+2. ~~A gate probe containing a pattern effect~~ — **DONE `e519ec83e`.** Use it:
+   it is the only instrument that reads the corrected gate and an egress count
+   off the same run, so it is how the flip gets measured.
+3. **`background-piece-service` SUNSET (D12).** The remaining half of D12;
+   toolshed's is done. **Sunset must precede the flip** — see D12 for the
+   sequencing and for why it must NOT be given `"server-executor"` authority as
+   a stopgap.
 4. **THEN** the flip itself: `externalSinkDisposition`'s client default
    (`runtime.ts`, the `?? "claim-conditional"` line, marked in a comment) to
-   `"suppress"`.
+   `"suppress"`. **Toolshed is already flipped ahead of it** (`e519ec83e`), so
+   it doubles as an early acceptance sample: whatever the flip does globally,
+   it has already been done to one server runtime and measured.
 
 Also open, and neither is on the critical path: the claimed-arm unserved
 dirt-clear (§1's `claim-not-live` box records it — it becomes a live liveness
@@ -367,9 +371,19 @@ things do:
    the system-pattern load a special case needing no quota; the eventual fix is
    to load from disk server-side. **Sharpened by item 2's refusal:** that ruling
    turned on the destination being FIXED and does not generalise.
-4. **A gate probe containing a pattern effect.** The corrected gate and the
-   flip are DISJOINT surfaces — today's probes contain no pattern effects, so
-   the gate cannot see egress at all.
+4. ~~**A gate probe containing a pattern effect.**~~ **CLOSED `e519ec83e`** —
+   `packages/patterns/integration/server-execution-webhook-egress-gate.test.ts`.
+   The webhook topology WAS the missing instrument: a real pool, a real
+   executor Worker, a real pattern effect. Measured at close —
+   `executorBrokerEgress=[<downstream>] actingLanes=["space"] apiServerEgress=[]`,
+   with `candidateUnservedByCode={} actionFirewallRejects=0
+   settlementsCommitted=2 settlementsUnserved=0`. **Exactly one egress, on the
+   executor, none from the API server** — zero would be the silent-deletion
+   failure, two would be double dispatch, and the identity is host-derived from
+   the claim so it says WHO. It prints the corrected gate beside the egress
+   counts on purpose: this is the first place in the arc where both can be read
+   off ONE run, which is what makes it an instrument for the terminal condition
+   rather than only a regression test.
 5. **NEW, and not in the original four: the toolshed / background-piece-service
    population — RULED, see D12.** Three server runtimes that are not the
    executor egress on the CLIENT default today, so the flip silences them.
