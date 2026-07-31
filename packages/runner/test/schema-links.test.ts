@@ -10,6 +10,7 @@ import { createCell, isCell } from "../src/cell.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { areLinksSame } from "../src/link-utils.ts";
@@ -228,6 +229,77 @@ describe("Schema - Link Resolution", () => {
       expect(links[0].id).not.toBe(links[1].id);
       expect(links[1].id).not.toBe(links[2].id);
       expect(links[0].id).not.toBe(links[2].id);
+    });
+
+    it("stores annotated values back as links, with [toCell] stripped", () => {
+      // `.get()` results carry a non-enumerable `[toCell]` symbol -- on plain
+      // OBJECTS as well as arrays. Written back into storage, such a value
+      // must become a link to its source (the annotation is the way back),
+      // never reaching conversion with the symbol attached: conversion
+      // rejects non-inert objects loudly, so a leak here would throw.
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                value: { type: "number" },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const source = runtime.getCell(
+        space,
+        "annotated-write-back-source",
+        schema,
+        tx,
+      );
+      source.set({ items: [{ name: "Ada", value: 1 }] });
+
+      const item = source.key("items").key(0).get();
+      const items = source.key("items").get();
+      expect(typeof (item as any)[toCell]).toBe("function");
+      expect(typeof (items as any)[toCell]).toBe("function");
+
+      const dest = runtime.getCell<{ single: unknown; list: unknown }>(
+        space,
+        "annotated-write-back-dest",
+        undefined,
+        tx,
+      );
+      dest.set({ single: item, list: items });
+
+      // Both the annotated object and the annotated array land as links to
+      // their source locations...
+      const raw = dest.getRaw() as { single: unknown; list: unknown };
+      const singleLink = parseLink(raw.single, dest);
+      expect(singleLink?.path).toEqual(["items", "0"]);
+      const listLink = parseLink(raw.list, dest);
+      expect(listLink?.path).toEqual(["items"]);
+
+      // ...no symbol survives anywhere in the stored tree...
+      const assertNoSymbolKeys = (value: unknown): void => {
+        if (value === null || typeof value !== "object") return;
+        for (const key of Reflect.ownKeys(value)) {
+          expect(typeof key).toBe("string");
+          assertNoSymbolKeys(
+            (value as Record<string, unknown>)[key as string],
+          );
+        }
+      };
+      assertNoSymbolKeys(raw);
+
+      // ...and reads through the links yield the source values.
+      const view = dest.get() as {
+        single: { name: string };
+        list: { value: number }[];
+      };
+      expect(view.single.name).toBe("Ada");
+      expect(view.list[0].value).toBe(1);
     });
 
     it("should create URIs for plain objects not marked asCell", () => {
