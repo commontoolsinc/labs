@@ -108,4 +108,33 @@ interface SchemaRoot {
     expect(Object.keys(defs)).toEqual(["AddTopic"]);
     expect(JSON.stringify(schema)).not.toContain("TopicRef");
   });
+
+  it("leaves the event schema open — closed-world emission is blocked on the update gate (C5)", async () => {
+    const schema = await schemaFor(`
+interface SchemaRoot {
+  verb: Stream<{ title: string }>;
+}
+`);
+
+    const verb = asObjectSchema(
+      (asObjectSchema(schema).properties as Record<string, unknown>).verb,
+    );
+
+    // The verb contract's design rule 1 wants EVENT schemas closed-world
+    // (`additionalProperties: false` — an undeclared field is a rejection,
+    // never ignored). Emitting it is currently BLOCKED: the pattern-update
+    // gate judges a stream property under its enclosing role, and for a verb
+    // arriving through a piece's ARGUMENT schema the argument-role
+    // additionalProperties rule refuses the open→closed direction against
+    // every recorded baseline ("additional properties accepted previously
+    // would now be rejected" — measured on calendar/calendar.tsx,
+    // lunch-poll/poll-option-card.tsx, notes/note.tsx). Landing the emission
+    // needs that migration step first; the sequencing finding is recorded in
+    // docs/plans/pattern-verb-contract-implementation.md (WS-C and Risks).
+    // Until then this pin makes the open event side an explicit decision, not
+    // an omission — dispatch-side enforcement (runner, C5) already honors a
+    // schema that declares the closure by hand.
+    expect(Object.hasOwn(verb, "additionalProperties")).toBe(false);
+    expect(verb.type).toBe("object");
+  });
 });

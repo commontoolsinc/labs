@@ -379,6 +379,22 @@ named types still hoist, as the fixture shows. The ts-transformers behavior
 spec §12 uses the same single-`asCell` vocabulary. Any doc claiming `Reactive`
 emits `asCell: ["opaque"]` is wrong on this tree.
 
+### 6.5 Stream event schemas — deliberately open (C5)
+
+A stream property's schema object is the verb's **event** schema — what a
+caller sends, which `cf piece verbs` publishes and `piece call` validates
+payloads against. It carries no `additionalProperties` of its own — only
+what the event type itself demands (an index signature, a `Record` value
+type). The verb contract wants event schemas closed-world
+(`additionalProperties: false` — an undeclared field is a rejection, never
+ignored), but emitting that is blocked on a pattern-update-gate migration:
+the argument-role compatibility rule refuses the open→closed direction for
+verbs reachable through a piece's argument schema (plan
+`docs/plans/pattern-verb-contract-implementation.md`, WS-C and Risks). The
+open event side is pinned as a decision in `test/stream-result.test.ts`; a
+schema that declares the closure by hand is enforced at dispatch by the
+runner (C5).
+
 ## 7. `Default<T,V>` And `DeepDefault<V>`
 
 `Default` detection is two-axis: node references named `Default` (fast path on
