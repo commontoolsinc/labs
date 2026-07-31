@@ -190,16 +190,24 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `e32a46e26` — three claim-shaped lease fences DELETED
-(`claim-arity`, `claim-expired`, `claim-lease-generation`); `claim-not-live`
-kept for a measured cross-principal reason.
+**Last landed:** `2e42bb62d` — `sqliteQuery` joins `SERVER_EXECUTABLE_BUILTIN_IDS`;
+`streamData` REFUSED with evidence (terminal-condition item 2 closed).
 
-Earlier, most recent first: `ab948050b` the terminal-condition trial;
-`8de47f7e3` all of §2b, so every survivor has a claim-free carrier;
-`2663771ec` navigateTo's seam + rank-containment invariant; `3a48d6731`
-demand-closure roll-up makes child sub-patterns servable. **Keep this line
-current — it is the resume pointer, and it has rotted three times. Edit it by
-hand; a `sed` on this line broke the file once.**
+Earlier, most recent first: `cb59829f9` the stop-hook prompt clause;
+`925f0c090` **the lane IS the write firewall's on-switch** — the one mechanism
+behind four failed deletion routes, and the most load-bearing finding of
+2026-07-30; `c874c591a` the unclaimed unserved-marker dirtiness carrier;
+`b198544af` "the server earned `allow`" made expressible by DELETING `"allow"`
+from the policy vocabulary (terminal-condition item 1 closed); `e32a46e26`
+three claim-shaped lease fences deleted. **Keep this line current — it is the
+resume pointer, and it has rotted three times. Edit it by hand; a `sed` on this
+line broke the file once.**
+
+**WHAT 2026-07-30 ACTUALLY ESTABLISHED, in one line:** every landed change that
+day was a DELETION where the plan specified a build — remove `"allow"` from the
+vocabulary; carry dirtiness instead of authorising a lane; refuse `streamData`
+instead of forcing it in. Treat "the plan says build X" as weak evidence that
+X is needed.
 
 **ALL OF §2b IS LANDED (2026-07-29).** Every survivor of the survival test now
 has a claim-free carrier, and the lease holds the single-executor guarantee in
@@ -228,13 +236,44 @@ never populated the new required input, silently unguarding batched commits.
 **A superset argument over call sites is not enough when the new precondition
 has its own population path.**
 
-**Next up:** (1) delete the claim-shaped fences now that the lease carries
-them — `claim-arity` (subsumed by the new `lease-unbounded-commit`),
-`claim-expired`, `claim-lease-generation`, `claim-not-live`; **do NOT delete
-`lease-stale`, `leaseOwnerMatches` or `leaseGeneration`** — they are carriers,
-not arbitration. Then (2) the TERMINAL CONDITION in the box above: flip
-`externalSinkDisposition`'s client default to `suppress` and see whether
-anything breaks.
+**Next up, as of `2e42bb62d`.** The fence deletions are DONE except
+`claim-not-live`, which is measured-and-blocked (see its box below — do not
+try a fifth lane-string variant). **Do NOT delete `lease-stale`,
+`leaseOwnerMatches` or `leaseGeneration`** — they are carriers, not
+arbitration.
+
+Terminal-condition items 1 and 2 are CLOSED. Remaining, in the order they
+unblock each other:
+
+1. **`wish`'s egress bypasses the gate** (`wish.ts`) — item 3. Note the
+   `streamData` refusal in `2e42bb62d` sharpened what the owner's ruling on
+   this actually covers: it turned on `wish`'s destination being FIXED
+   (`patternUrl()`, our own API). It does not generalise to an
+   author-supplied url. The eventual fix is to load from disk server-side.
+2. **A gate probe containing a pattern effect** — item 4, and it is the
+   prerequisite for the flip being *measurable* at all: the corrected gate and
+   the flip are disjoint surfaces, and today's probes contain no pattern
+   effects, so the gate cannot see egress.
+3. **The toolshed / background-piece-service question — OWNER-GATED, and it is
+   a new prerequisite the four-item list never had.** `toolshed/runtime-options.ts`,
+   `background-piece-service/src/main.ts` and its `worker.ts` all use
+   `runtimePresets.productionServer` WITHOUT `externalSinkDisposition`, so they
+   egress on the CLIENT default today. **The flip silences three server-side
+   runtimes that are not the executor.** They run webhook deliveries and
+   background pieces. Decide: do they route through the executor (which D11
+   suggests), declare their own authority, or stay silent? That decision also
+   settles whether to move the param onto an executor-only preset so declaring
+   server authority is a reviewed one-caller act — today those three are one
+   line from re-authorising themselves, and a silenced deploy gives them the
+   motive.
+4. **THEN** the flip itself: `externalSinkDisposition`'s client default
+   (`runtime.ts`, the `?? "claim-conditional"` line, marked in a comment) to
+   `"suppress"`.
+
+Also open, and neither is on the critical path: the claimed-arm unserved
+dirt-clear (§1's `claim-not-live` box records it — it becomes a live liveness
+hole under blanket ownership), and `#31` decoupling the write firewall's
+on-switch from lane presence, which is what would unblock `claim-not-live`.
 
 **Deliberately stopped, not finished:** the `map` chase is closed as
 arbitration polish — one router residual from served, and that residual does
@@ -314,22 +353,32 @@ post-commit effect never ran, so the result cell stayed `pending`. **The
 arbitration machinery is NOT what stands between here and the end.** Four
 things do:
 
-1. **Make "the server earned `allow`" expressible.** `externalSinkDisposition`
-   (`storage/extended-storage-transaction.ts:366-372`) short-circuits only on
-   `configured === "suppress"`, so a configured `"allow"` falls through to the
-   same default the flip changes — flipping it kills the EXECUTOR's egress too
-   (measured: 1 → 0 releases at `executor-shadow-sink.test.ts:95`).
-   Prerequisite for the flip, not a detail.
-2. **Two R5 rows.** `streamData` and `sqliteQuery` are absent from
-   `SERVER_EXECUTABLE_BUILTIN_IDS`. Note `sqliteDatabase` joined the
-   COMPUTATION list, which is a different thing.
-3. **`wish`'s egress bypasses the gate entirely** (`wish.ts:1266`), so the flip
+1. ~~**Make "the server earned `allow`" expressible.**~~ **CLOSED `b198544af`.**
+   Not by adding a way to say `allow` — that was the trap, since short-
+   circuiting a configured `"allow"` bypasses the claim-observer stand-down and
+   every client held `"allow"` by default, i.e. double egress. `"allow"` LEFT
+   the policy vocabulary (`"suppress" | "server-executor" | "claim-conditional"`)
+   and survives only as the gate's ANSWER, so the trap is un-spellable rather
+   than documented. The flip's site is now `runtime.ts`'s
+   `?? "claim-conditional"`, marked in a comment.
+2. ~~**Two R5 rows.**~~ **CLOSED `2e42bb62d`.** `sqliteQuery` joined (its
+   server-side work was a READ the executor could already do — no broker was
+   ever missing). `streamData` REFUSED: unbrokered egress to an AUTHOR-SUPPLIED
+   url, plus a contract that is the exact negation of the broker's deliberate
+   bounded/buffered invariant. Serving it needs a streaming broker seam, not an
+   allowlist edit.
+3. **`wish`'s egress bypasses the gate entirely** (`wish.ts`), so the flip
    cannot make the categorical statement true even once it works. Owner ruled
    the system-pattern load a special case needing no quota; the eventual fix is
-   to load from disk server-side.
+   to load from disk server-side. **Sharpened by item 2's refusal:** that ruling
+   turned on the destination being FIXED and does not generalise.
 4. **A gate probe containing a pattern effect.** The corrected gate and the
    flip are DISJOINT surfaces — today's probes contain no pattern effects, so
    the gate cannot see egress at all.
+5. **NEW, and not in the original four: the toolshed / background-piece-service
+   population.** Three server runtimes that are not the executor egress on the
+   CLIENT default today, so the flip silences them. **Owner-gated** — see the
+   "Next up" list above.
 
 **`claim-not-live` is the last claim-shaped fence, and it is LOAD-BEARING.**
 Kept in `e32a46e26` after measurement: deleting it lets an unprivileged client
