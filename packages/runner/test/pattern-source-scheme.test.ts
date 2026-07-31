@@ -108,6 +108,20 @@ describe("normalizePatternSource", () => {
       .toBe("system:x.tsx");
   });
 
+  it("refuses a legacy locator that names another host", () => {
+    // Each of these has a local-looking pathname but an authority of its own,
+    // so rewriting it would move the piece onto this toolshed's copy.
+    for (
+      const source of [
+        "//elsewhere.test/api/patterns/x.tsx",
+        "/\\elsewhere.test/api/patterns/x.tsx",
+        "http://elsewhere.test/api/patterns/x.tsx",
+      ]
+    ) {
+      expect(normalizePatternSource(source, HOST)).toBe(source);
+    }
+  });
+
   it("refuses a legacy locator that does not address a file on the route", () => {
     // Climbing, an empty path, and a doubled separator each spell a ref that
     // cannot resolve, so the locator is left as authored instead.

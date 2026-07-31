@@ -158,6 +158,11 @@ function legacyPatternsRoutePath(
   let url: URL;
   if (source.startsWith("/")) {
     url = new URL(source, RESOLUTION_BASE);
+    // A leading `/` is not proof of a path: `//host/x` and `/\host/x` both
+    // introduce an authority, and their pathname alone looks like a local
+    // route. Re-pointing such a locator at this toolshed would change which
+    // host a piece follows, which is a change of source, not of spelling.
+    if (url.origin !== new URL(RESOLUTION_BASE).origin) return undefined;
   } else {
     if (host === undefined) return undefined;
     try {
