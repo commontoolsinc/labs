@@ -688,6 +688,20 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   and Invocation is required to be authored open-world precisely so protocol
   fields can be added later. Cost is bounded by emitting links only for paths
   that have them, and only when asked.
+
+  **Done (F2) for callable results:** `cf piece call --show-links` emits the
+  decided shape — a `links` field on the Invocation JSON, `{ "/path":
+  <link> }` with RFC 6901 pointer keys and the root `"/"` entry being the
+  receipt itself — with entries only where a path's backing document differs
+  from its enclosing one, resolved through the receipt cell's own link
+  traversal (`key()` steps plus `resolveAsCell`) after readback. Link values
+  reuse the CLI's existing cell-address shape (`resultRef`'s
+  `{ space, id, scope }`), plus a `path` when the link points below the
+  backing document's root. `resultRef` itself stays as-is, and
+  `--show-links --no-wait` is refused — the links ride the readback a
+  detached exit skips. The data-read surface (`cf piece get` /
+  `--include-ids`) is not part of that change and picks up the same
+  dictionary shape when it lands.
 - **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
   the stream's serialization rather than redirecting. The llm-dialog `read`
   tool already rejects this case with the right message — "Path resolves to a

@@ -1,4 +1,5 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { encodeJsonPointer } from "@commonfabric/runner";
 import {
   localRefTarget,
   relaxDefaultedRequired,
@@ -51,7 +52,14 @@ export interface CallableCellLike {
     scope?: CellScope;
     id?: string;
     space?: string;
+    path?: readonly (string | number)[];
   };
+  /** Resolve through stored links to the concrete backing cell (runner:
+   * Cell.resolveAsCell). `getAsNormalizedFullLink` alone reports the cell's
+   * own address — receipt id plus path — even where the stored value is a
+   * link into another document; resolving first is what tells the two
+   * apart. */
+  resolveAsCell?: () => CallableCellLike;
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
@@ -150,6 +158,22 @@ export interface CallableExecutionDeps {
    * and only the handler send path supports it (a tool runs to completion in
    * this process; detaching would abandon the run before its result exists). */
   detachAfterDispatch?: boolean;
+  /** `--show-links`: annotate the Invocation JSON with a `links` dictionary
+   * mapping result paths to their backing cell addresses (verb contract
+   * WS-F, F2). Provenance rides BESIDE the value, never inline — an inline
+   * marker cannot annotate a scalar, and a scalar can be its own doc — and
+   * entries appear only for paths whose backing differs from their enclosing
+   * document, so plain JSON inside one doc adds nothing. Rides the receipt
+   * readback, which is why it cannot combine with a detached dispatch. */
+  showLinks?: boolean;
+}
+
+/** A backing-cell address in an Invocation's `links` dictionary: the same
+ * serialized shape as `CallableResultRef` (the CLI's existing cell-address
+ * form), plus the path inside the backing document when the link points
+ * below its root. */
+export interface InvocationResultLink extends CallableResultRef {
+  path?: (string | number)[];
 }
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
@@ -167,6 +191,11 @@ export interface InvocationOutcome {
   /** True when this call collided on the create-only receipt: the handling
    * did not commit again, and `result` is the ORIGINAL outcome. */
   deduplicated?: boolean;
+  /** Under `--show-links` only: result paths mapped to their backing cell
+   * addresses, provenance beside the value. The root `"/"` entry is the
+   * receipt itself; other entries appear only where a path's backing
+   * document differs from its enclosing one. */
+  links?: Record<string, InvocationResultLink>;
 }
 
 /** Durable address of a tool's per-invocation result cell. The scope is part
@@ -465,6 +494,118 @@ export function callableCommandSpec(
   };
 }
 
+/** Normalize a receipt/backing link into the `links` dictionary's value
+ * shape. Absent scope on a normalized link means the space scope (the same
+ * rule `resultRef` applies); the path rides along only when the link points
+ * below the backing document's root. */
+function toInvocationResultLink(link: {
+  id: string;
+  space: string;
+  scope?: CellScope;
+  path?: readonly (string | number)[];
+}): InvocationResultLink {
+  return {
+    space: link.space,
+    id: link.id,
+    scope: link.scope ?? "space",
+    ...(link.path !== undefined && link.path.length > 0
+      ? { path: [...link.path] }
+      : {}),
+  };
+}
+
+/** Two normalized links address the same backing document iff id, space,
+ * and scope (absent = space) all agree; a differing path alone is just a
+ * position inside the same doc, which needs no link of its own. */
+function sameBackingDocument(
+  a: { id: string; space: string; scope?: CellScope },
+  b: { id: string; space: string; scope?: CellScope },
+): boolean {
+  return a.id === b.id && a.space === b.space &&
+    (a.scope ?? "space") === (b.scope ?? "space");
+}
+
+/**
+ * Walk a settled result's backing links into the `{ "/path": <link> }`
+ * dictionary `--show-links` emits (verb contract WS-F, F2).
+ *
+ * The root `"/"` entry is the receipt's own address. Below it, every value
+ * path is resolved through the receipt cell (`key()` steps plus
+ * `resolveAsCell`), and a path earns an entry exactly when its backing
+ * document differs from its enclosing one — a path inside the same plain
+ * JSON needs no link. Below an emitted entry the comparison rebases onto
+ * that entry's document, so a chain of references annotates each hop once.
+ * Keys are RFC 6901 JSON pointers (the runner's `encodeJsonPointer`, the
+ * same encoding the llm-dialog link strings use), so a property name
+ * containing `/` or `~` stays unambiguous.
+ *
+ * The walk covers the VALUE that was read back — finite, already-loaded
+ * JSON — not the graph, so it terminates without cycle tracking, and a
+ * receipt cell that cannot resolve links (no `resolveAsCell`) degrades to
+ * the root entry alone rather than guessing.
+ */
+export function collectInvocationResultLinks(
+  receiptLink: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
+  receiptCell: CallableCellLike | undefined,
+  value: unknown,
+): Record<string, InvocationResultLink> {
+  const links: Record<string, InvocationResultLink> = {
+    "/": toInvocationResultLink(receiptLink),
+  };
+  if (receiptCell === undefined) return links;
+
+  const walk = (
+    cell: CallableCellLike,
+    val: unknown,
+    pathSegments: string[],
+    base: { id: string; space: string; scope?: CellScope },
+  ): void => {
+    if (typeof val !== "object" || val === null) return;
+    const keys = Array.isArray(val)
+      ? val.map((_, index) => String(index))
+      : Object.keys(val);
+    for (const key of keys) {
+      const childValue = (val as Record<string, unknown>)[key];
+      let child: CallableCellLike;
+      try {
+        child = cell.key(key);
+      } catch {
+        continue; // Not addressable as a cell — nothing to annotate.
+      }
+      const resolved = child.resolveAsCell?.() ?? child;
+      const childLink = resolved.getAsNormalizedFullLink?.();
+      const segments = [...pathSegments, key];
+      if (
+        childLink?.id !== undefined && childLink.space !== undefined &&
+        !sameBackingDocument(
+          childLink as { id: string; space: string; scope?: CellScope },
+          base,
+        )
+      ) {
+        links[encodeJsonPointer(["", ...segments])] = toInvocationResultLink(
+          childLink as {
+            id: string;
+            space: string;
+            scope?: CellScope;
+            path?: readonly (string | number)[];
+          },
+        );
+        walk(
+          resolved,
+          childValue,
+          segments,
+          childLink as { id: string; space: string; scope?: CellScope },
+        );
+      } else {
+        walk(child, childValue, segments, base);
+      }
+    }
+  };
+
+  walk(receiptCell, value, [], receiptLink);
+  return links;
+}
+
 export async function executeResolvedCallable(
   resolved: CallableResolution,
   input: unknown,
@@ -552,6 +693,7 @@ export async function executeResolvedCallable(
       // outcome, no re-execution — so a retry settles as a success.
       deps.onPhase?.("readback");
       let result: unknown;
+      let links: Record<string, InvocationResultLink> | undefined;
       const link = tx?.handlingReceiptLink;
       const getCellFromLink = resolved.manager.runtime.getCellFromLink;
       if (link && typeof getCellFromLink === "function") {
@@ -566,6 +708,11 @@ export async function executeResolvedCallable(
         ) {
           result = value;
         }
+        if (deps.showLinks) {
+          // After readback, off the same receipt the result came from: the
+          // links annotate exactly the value the caller is holding.
+          links = collectInvocationResultLinks(link, receipt, result);
+        }
       }
 
       return {
@@ -574,6 +721,7 @@ export async function executeResolvedCallable(
           status: "settled",
           ...(deduplicated ? { deduplicated: true } : {}),
           ...(result !== undefined ? { result } : {}),
+          ...(links !== undefined ? { links } : {}),
         },
       };
     }
