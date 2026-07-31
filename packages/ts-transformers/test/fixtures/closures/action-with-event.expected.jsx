@@ -60,7 +60,11 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         update: {
             $ref: "#/$defs/MyEvent",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["update"],

@@ -74,10 +74,18 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         readA: {
-            asCell: ["stream", "opaque"]
+            asCell: ["stream", "opaque"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         },
         readB: {
-            asCell: ["stream", "opaque"]
+            asCell: ["stream", "opaque"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["readA", "readB"]

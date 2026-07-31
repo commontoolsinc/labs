@@ -1,0 +1,639 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "cfc-spec-gallery/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      },
+      "acceptInvite": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "acceptInvite"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "acknowledgeAlert": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "acknowledgeAlert"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "acknowledgeDisclosure": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "acknowledgeDisclosure"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "authorizeResearchSend": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedAuthorizeResearchSend",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedDirectCommandSurface"
+            ],
+            "trustedPattern": "TrustedDirectCommandSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/direct-command.tsx",
+              "moduleIdentity": "Gsqzx67QKgUcOimnMA2ya8Ip4mZ_Dj2CzHiafoExQog",
+              "path": [
+                "commitTrustedResearchSend"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "authorizeResearchSendCell": {
+        "type": "string"
+      },
+      "capturedCommand": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedCaptureDirectCommand",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedDirectCommandSurface"
+            ],
+            "trustedPattern": "TrustedDirectCommandSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/direct-command.tsx",
+              "moduleIdentity": "Gsqzx67QKgUcOimnMA2ya8Ip4mZ_Dj2CzHiafoExQog",
+              "path": [
+                "captureTrustedDirectCommand"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "capturedCommandCell": {
+        "type": "string"
+      },
+      "completedCount": {
+        "type": "number"
+      },
+      "confirmReceipt": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "confirmReceipt"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "escalateSupportCase": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "escalateSupportCase"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "finalizeChecklist": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "finalizeChecklist"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "forwardHotelNote": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedForwardNote",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedForwardSurface"
+            ],
+            "trustedPattern": "TrustedForwardSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/forward.tsx",
+              "moduleIdentity": "25M8GzBg2y7WsCDRX7gJ1YOQKRjLWnEMa2oZmwTUE5Q",
+              "path": [
+                "commitTrustedForward"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "forwardHotelNoteCell": {
+        "type": "string"
+      },
+      "forwardPreparedPreview": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPrepareForward",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedForwardSurface"
+            ],
+            "trustedPattern": "TrustedForwardSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/forward.tsx",
+              "moduleIdentity": "25M8GzBg2y7WsCDRX7gJ1YOQKRjLWnEMa2oZmwTUE5Q",
+              "path": [
+                "prepareTrustedForward"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "forwardPreparedPreviewCell": {
+        "type": "string"
+      },
+      "forwardRecipientInput": {
+        "type": "string"
+      },
+      "forwardRecipientInputCell": {
+        "type": "string"
+      },
+      "forwardSourceNote": {
+        "type": "string"
+      },
+      "forwardStage": {
+        "type": "string"
+      },
+      "hotelMembershipReturn": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "returnHotelMembership"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "hotelMembershipReturnCell": {
+        "type": "string"
+      },
+      "lastCompleted": {
+        "type": "string"
+      },
+      "prepareForwardHotelNote": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "prepareSafeLinkRelease": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "previewResearchBrief": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPrepareResearchBrief",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedDirectCommandSurface"
+            ],
+            "trustedPattern": "TrustedDirectCommandSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/direct-command.tsx",
+              "moduleIdentity": "Gsqzx67QKgUcOimnMA2ya8Ip4mZ_Dj2CzHiafoExQog",
+              "path": [
+                "prepareTrustedResearchBrief"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "releaseRedactedSummary": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "releaseRedactedSummary"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "releaseSafeLink": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedReleaseSafeLink",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSafeLinkSurface"
+            ],
+            "trustedPattern": "TrustedSafeLinkSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/safe-link.tsx",
+              "moduleIdentity": "RQExot6AFkGN773cFYaFMGrES2r7ongsz-nm1VcQnXc",
+              "path": [
+                "commitTrustedSafeLink"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "releaseSafeLinkCell": {
+        "type": "string"
+      },
+      "researchCommandInput": {
+        "type": "string"
+      },
+      "researchCommandInputCell": {
+        "type": "string"
+      },
+      "researchPreparedBrief": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPrepareResearchBrief",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedDirectCommandSurface"
+            ],
+            "trustedPattern": "TrustedDirectCommandSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/direct-command.tsx",
+              "moduleIdentity": "Gsqzx67QKgUcOimnMA2ya8Ip4mZ_Dj2CzHiafoExQog",
+              "path": [
+                "prepareTrustedResearchBrief"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "researchPreparedBriefCell": {
+        "type": "string"
+      },
+      "researchStage": {
+        "type": "string"
+      },
+      "runAcceptInvite": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runAcknowledgeAlert": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runAcknowledgeDisclosure": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runAuthorizeResearchSend": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runCaptureDirectCommand": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runConfirmReceipt": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runEscalateSupportCase": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runFinalizeChecklist": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runForwardHotelNote": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runHotelMembershipReturn": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runPreviewResearchBrief": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runReleaseRedactedSummary": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runReleaseSafeLink": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "runSelectSearchResult": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "safeLinkPrepared": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPrepareSafeLink",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSafeLinkSurface"
+            ],
+            "trustedPattern": "TrustedSafeLinkSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc/trusted-surfaces/safe-link.tsx",
+              "moduleIdentity": "RQExot6AFkGN773cFYaFMGrES2r7ongsz-nm1VcQnXc",
+              "path": [
+                "prepareTrustedSafeLink"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "safeLinkPreparedCell": {
+        "type": "string"
+      },
+      "safeLinkSource": {
+        "type": "string"
+      },
+      "safeLinkSourceCell": {
+        "type": "string"
+      },
+      "safeLinkStage": {
+        "type": "string"
+      },
+      "selectSearchResult": {
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-spec-gallery/main.tsx",
+              "moduleIdentity": "0in7Dha0sROsRV14cP1Ts6FG7ohR15gc99LuDRX1A1w",
+              "path": [
+                "selectSearchResult"
+              ]
+            }
+          }
+        },
+        "type": "string"
+      },
+      "selectSearchResultCell": {
+        "type": "string"
+      },
+      "setForwardRecipient": {
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "string"
+      },
+      "setResearchCommand": {
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "string"
+      },
+      "setSafeLinkSource": {
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "string"
+      },
+      "totalExamples": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "totalExamples",
+      "completedCount",
+      "lastCompleted",
+      "hotelMembershipReturn",
+      "forwardHotelNote",
+      "forwardSourceNote",
+      "forwardRecipientInput",
+      "forwardPreparedPreview",
+      "forwardStage",
+      "forwardRecipientInputCell",
+      "forwardPreparedPreviewCell",
+      "forwardHotelNoteCell",
+      "selectSearchResult",
+      "acknowledgeDisclosure",
+      "acknowledgeAlert",
+      "acceptInvite",
+      "releaseRedactedSummary",
+      "escalateSupportCase",
+      "previewResearchBrief",
+      "researchCommandInput",
+      "capturedCommand",
+      "researchPreparedBrief",
+      "researchStage",
+      "researchCommandInputCell",
+      "capturedCommandCell",
+      "researchPreparedBriefCell",
+      "authorizeResearchSendCell",
+      "finalizeChecklist",
+      "confirmReceipt",
+      "authorizeResearchSend",
+      "releaseSafeLink",
+      "safeLinkSource",
+      "safeLinkPrepared",
+      "safeLinkStage",
+      "safeLinkSourceCell",
+      "safeLinkPreparedCell",
+      "releaseSafeLinkCell",
+      "hotelMembershipReturnCell",
+      "selectSearchResultCell",
+      "runHotelMembershipReturn",
+      "setForwardRecipient",
+      "prepareForwardHotelNote",
+      "runForwardHotelNote",
+      "runSelectSearchResult",
+      "runAcknowledgeDisclosure",
+      "runAcknowledgeAlert",
+      "runAcceptInvite",
+      "runReleaseRedactedSummary",
+      "runEscalateSupportCase",
+      "setResearchCommand",
+      "runCaptureDirectCommand",
+      "runPreviewResearchBrief",
+      "runFinalizeChecklist",
+      "runConfirmReceipt",
+      "runAuthorizeResearchSend",
+      "setSafeLinkSource",
+      "prepareSafeLinkRelease",
+      "runReleaseSafeLink",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

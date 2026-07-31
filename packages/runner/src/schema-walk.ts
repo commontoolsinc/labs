@@ -19,12 +19,17 @@
  *   `dependentSchemas`, `contentSchema` (and `definitions`, the pre-2019 alias
  *   for `$defs`, which we never emit at all).
  *
+ * One emitted keyword also sits outside the default walk: `result`, a verb's
+ * declared-result schema (`NON_VALUE_SINGLE_SUBSCHEMA_KEYS`). It describes the
+ * receipt a handling writes elsewhere — never the value at this node — so
+ * value-semantics walkers must not act on it.
+ *
  * A structural walk that must be COMPLETE regardless of what we emit — notably
  * `$ref` discovery in `cfc/schema-refs.ts`, a fail-closed guard: a ref that
  * isn't found is a schema doc that doesn't replicate — passes `includeUnused`
  * to also visit the excluded keywords (see `UNUSED_SINGLE_SUBSCHEMA_KEYS` /
- * `UNUSED_RECORD_SUBSCHEMA_KEYS`). `definitions` stays out even then; use
- * `includeDefs` for `$defs` bodies.
+ * `UNUSED_RECORD_SUBSCHEMA_KEYS` / `NON_VALUE_SINGLE_SUBSCHEMA_KEYS`).
+ * `definitions` stays out even then; use `includeDefs` for `$defs` bodies.
  *
  * `$ref` resolution is opt-in per walk (see `SchemaWalkOptions.resolveRef`):
  * following a ref needs a definition scope, which is caller/runtime specific.
@@ -75,6 +80,20 @@ export const UNUSED_SINGLE_SUBSCHEMA_KEYS = [
   "contentSchema",
 ] as const;
 
+/**
+ * Single-subschema keywords whose subschema does NOT describe this node's
+ * value. `result` — a verb's declared result, emitted beside
+ * `asCell: ["stream"]` (verb contract C3) — describes the receipt a handling
+ * writes elsewhere, never the value stored at this node, so value-semantics
+ * walkers must not act on it. Complete structural walks still must see it: a
+ * `$ref` inside a declared result points at a `$defs` entry, and `$ref`
+ * discovery that missed it would let definition pruning strand the ref.
+ * Visited exactly when the never-emitted keywords are (`includeUnused`).
+ */
+export const NON_VALUE_SINGLE_SUBSCHEMA_KEYS = [
+  "result",
+] as const;
+
 /** Record-subschema keywords we never emit — walked only with `includeUnused`. */
 export const UNUSED_RECORD_SUBSCHEMA_KEYS = [
   "patternProperties",
@@ -87,16 +106,19 @@ export type SubschemaKeyword =
   | (typeof RECORD_SUBSCHEMA_KEYS)[number]
   | (typeof DEFS_KEYS)[number]
   | (typeof UNUSED_SINGLE_SUBSCHEMA_KEYS)[number]
+  | (typeof NON_VALUE_SINGLE_SUBSCHEMA_KEYS)[number]
   | (typeof UNUSED_RECORD_SUBSCHEMA_KEYS)[number];
 
 export interface SchemaWalkOptions {
   /** Also descend into `$defs` bodies. Default false. */
   readonly includeDefs?: boolean;
   /**
-   * Also visit subschemas under the keywords we never emit
-   * (`UNUSED_SINGLE_SUBSCHEMA_KEYS` / `UNUSED_RECORD_SUBSCHEMA_KEYS`). Default
-   * false. Set it for structural walks that must be complete regardless of what
-   * we emit — chiefly `$ref` discovery, where a missed ref is a fail-open bug.
+   * Also visit subschemas under the keywords the default walk skips: the ones
+   * we never emit (`UNUSED_SINGLE_SUBSCHEMA_KEYS` /
+   * `UNUSED_RECORD_SUBSCHEMA_KEYS`) and the emitted-but-non-value `result`
+   * keyword (`NON_VALUE_SINGLE_SUBSCHEMA_KEYS`). Default false. Set it for
+   * structural walks that must be complete regardless of value semantics —
+   * chiefly `$ref` discovery, where a missed ref is a fail-open bug.
    */
   readonly includeUnused?: boolean;
   /**
@@ -134,7 +156,8 @@ export type SubschemaVisitor = (
 
 type SingleKeyword =
   | (typeof SINGLE_SUBSCHEMA_KEYS)[number]
-  | (typeof UNUSED_SINGLE_SUBSCHEMA_KEYS)[number];
+  | (typeof UNUSED_SINGLE_SUBSCHEMA_KEYS)[number]
+  | (typeof NON_VALUE_SINGLE_SUBSCHEMA_KEYS)[number];
 type RecordKeyword =
   | (typeof RECORD_SUBSCHEMA_KEYS)[number]
   | (typeof UNUSED_RECORD_SUBSCHEMA_KEYS)[number]
@@ -145,7 +168,11 @@ const singleKeywordsFor = (
   opts: SchemaWalkOptions,
 ): readonly SingleKeyword[] =>
   opts.includeUnused
-    ? [...SINGLE_SUBSCHEMA_KEYS, ...UNUSED_SINGLE_SUBSCHEMA_KEYS]
+    ? [
+      ...SINGLE_SUBSCHEMA_KEYS,
+      ...UNUSED_SINGLE_SUBSCHEMA_KEYS,
+      ...NON_VALUE_SINGLE_SUBSCHEMA_KEYS,
+    ]
     : SINGLE_SUBSCHEMA_KEYS;
 
 /** The record-subschema keywords a walk visits under `opts`. */

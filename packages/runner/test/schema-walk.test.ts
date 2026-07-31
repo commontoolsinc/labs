@@ -396,6 +396,23 @@ describe("deliberately-excluded keywords", () => {
       expect(hasIfc(schema, { includeUnused: true })).toBe(true);
     }
   });
+
+  it("treats a verb's declared result as non-value: complete walks only", () => {
+    // `result` (verb contract C3) IS emitted, but describes the receipt a
+    // handling writes elsewhere — never this node's value — so the default
+    // (value-semantics) walk must skip it, while a complete structural walk
+    // must see it: a `$ref` inside a declared result points at a `$defs`
+    // entry, and ref discovery that missed it would let definition pruning
+    // strand the ref.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { title: { type: "string" } },
+      asCell: ["stream"],
+      result: { ifc: { integrity: ["y"] } },
+    };
+    expect(hasIfc(schema)).toBe(false);
+    expect(hasIfc(schema, { includeUnused: true })).toBe(true);
+  });
 });
 
 describe("resolveRef option", () => {

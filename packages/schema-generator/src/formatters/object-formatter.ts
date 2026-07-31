@@ -20,6 +20,7 @@ import {
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { streamResultSchema } from "../stream-result-schema.ts";
 import {
   attachDocTags,
   extractDocFromSymbolAndDecls,
@@ -39,12 +40,19 @@ const logger = getLogger("schema-generator.object", {
  * If R is Stream<T>, we should generate { asCell: ["stream"] } instead of skipping.
  * If R is Cell<T>, we should generate { asCell: ["cell"] } instead of skipping.
  *
+ * A stream-returning callable (`HandlerFactory<E, T, R>` returning
+ * `Stream<E, R>`) also carries the verb's declared result under the `result`
+ * dialect keyword, read from the same wrapper detection that emits the
+ * marker — the two travel together (see `stream-result-schema.ts`).
+ *
  * Returns the schema definition for the wrapper if detected, undefined otherwise.
  */
 function getWrapperSchemaFromCallable(
   type: ts.Type,
-  checker: ts.TypeChecker,
+  context: GenerationContext,
+  schemaGenerator: SchemaGenerator,
 ): MutableJSONSchemaObj | undefined {
+  const checker = context.typeChecker;
   const callSignatures = type.getCallSignatures();
   if (callSignatures.length === 0) return undefined;
 
@@ -54,7 +62,20 @@ function getWrapperSchemaFromCallable(
   // Check if the return type is a wrapper (Stream<T>, Cell<T>, or Reactive<...>)
   const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
   if (wrapperInfo?.kind === "Stream") {
-    return { asCell: ["stream"] };
+    const resultType = wrapperInfo.typeRef.typeArguments?.[1] ??
+      checker.getTypeArguments(wrapperInfo.typeRef)?.[1];
+    return {
+      asCell: ["stream"],
+      result: streamResultSchema(
+        resultType !== undefined &&
+          (resultType.flags & ts.TypeFlags.TypeParameter) !== 0
+          ? undefined
+          : resultType,
+        undefined,
+        context,
+        schemaGenerator,
+      ),
+    };
   }
   if (wrapperInfo?.kind === "Cell") {
     return { asCell: ["cell"] };
@@ -291,7 +312,8 @@ export class ObjectFormatter implements TypeFormatter {
         // should generate { asCell: ["stream"] } or { asCell: ["cell"] } instead of being skipped
         const wrapperSchema = getWrapperSchemaFromCallable(
           resolvedPropType,
-          checker,
+          context,
+          this.schemaGenerator,
         );
         if (wrapperSchema) {
           // This is a factory that returns a wrapper type (Stream or Cell)

@@ -1,0 +1,88 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Item": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "items"
+    ],
+    "type": "object"
+  },
+  "pattern": "gideon-tests/array-length-repro.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Item": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "items",
+      "addItem",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

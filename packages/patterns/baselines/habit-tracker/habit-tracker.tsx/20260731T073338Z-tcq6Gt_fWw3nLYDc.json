@@ -1,0 +1,214 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Habit": {
+        "properties": {
+          "color": {
+            "default": "#3b82f6",
+            "type": "string"
+          },
+          "icon": {
+            "default": "✓",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "icon",
+          "color"
+        ],
+        "type": "object"
+      },
+      "HabitLog": {
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "date": {
+            "type": "string"
+          },
+          "habitName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "habitName",
+          "date",
+          "completed"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "habits": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Habit"
+        },
+        "type": "array"
+      },
+      "logs": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HabitLog"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "habits",
+      "logs"
+    ],
+    "type": "object"
+  },
+  "pattern": "habit-tracker/habit-tracker.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Habit": {
+        "properties": {
+          "color": {
+            "default": "#3b82f6",
+            "type": "string"
+          },
+          "icon": {
+            "default": "✓",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "icon",
+          "color"
+        ],
+        "type": "object"
+      },
+      "HabitLog": {
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "date": {
+            "type": "string"
+          },
+          "habitName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "habitName",
+          "date",
+          "completed"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addHabit": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "icon": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "icon"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "deleteHabit": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "habit": {
+            "$ref": "#/$defs/Habit"
+          }
+        },
+        "required": [
+          "habit"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "habits": {
+        "items": {
+          "$ref": "#/$defs/Habit"
+        },
+        "type": "array"
+      },
+      "logs": {
+        "items": {
+          "$ref": "#/$defs/HabitLog"
+        },
+        "type": "array"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "todayDate": {
+        "type": "string"
+      },
+      "toggleHabit": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "habitName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "habitName"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "habits",
+      "logs",
+      "todayDate",
+      "summary",
+      "toggleHabit",
+      "addHabit",
+      "deleteHabit",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

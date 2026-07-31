@@ -18,6 +18,7 @@ import type {
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { streamResultSchema } from "../stream-result-schema.ts";
 import {
   detectWrapperViaNode,
   extractDefaultBrandPayloadValue,
@@ -454,13 +455,38 @@ export class CommonFabricFormatter implements TypeFormatter {
     );
 
     if (wrapperKind === "Stream") {
-      if (typeof innerSchema === "boolean") {
-        return this.applyWrapperSemantics(innerSchema, "Stream");
+      // A verb's declared result rides Stream's second type parameter. Resolve
+      // it exactly as the inner (event) type above: registry first, then the
+      // registered wrapper type's own arguments, then the checker. No written
+      // second argument and no registered one means a value-less verb.
+      const resultTypeNode = typeRefNode.typeArguments?.[1];
+      let resultType: ts.Type | undefined;
+      if (resultTypeNode !== undefined) {
+        try {
+          resultType = context.typeRegistry?.get(resultTypeNode) ??
+            registeredWrapperInfo?.typeRef.typeArguments?.[1] ??
+            context.typeChecker.getTypeFromTypeNode(resultTypeNode);
+        } catch {
+          resultType = context.typeChecker.getAnyType();
+        }
+      } else {
+        resultType = registeredWrapperInfo?.typeRef.typeArguments?.[1];
       }
-      return this.applyWrapperSemantics(
-        innerSchema as MutableJSONSchemaObj,
+      // Stream brands always yield an object from applyWrapperSemantics
+      // (boolean inner schemas become `{ asCell: ["stream"] }` /
+      // `{ asCell: ["stream"], not: true }`), and it returns a fresh object,
+      // so attaching the result keyword here mutates nothing shared.
+      const streamSchema = this.applyWrapperSemantics(
+        innerSchema,
         "Stream",
+      ) as MutableJSONSchemaObj;
+      streamSchema.result = streamResultSchema(
+        resultType,
+        resultTypeNode,
+        context,
+        this.schemaGenerator,
       );
+      return streamSchema;
     }
 
     if (wrapperKind === "Cell") {
@@ -637,13 +663,50 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {
-      if (typeof innerSchema === "boolean") {
-        return this.applyWrapperSemantics(innerSchema, "Stream");
+      // A verb's declared result rides Stream's second type parameter,
+      // guarded exactly like the inner (event) argument above: a node whose
+      // second argument is a generic type parameter is not used, and a
+      // synthetic node only assists when the resolved type needs it.
+      const resultTypeFromType = typeRef.typeArguments?.[1] ??
+        context.typeChecker.getTypeArguments(typeRef)?.[1];
+      let resultTypeNode: ts.TypeNode | undefined;
+      if (
+        typeRefNode && ts.isTypeReferenceNode(typeRefNode) &&
+        typeRefNode.typeArguments
+      ) {
+        const secondArg = typeRefNode.typeArguments[1];
+        if (secondArg) {
+          const argType = context.typeChecker.getTypeFromTypeNode(secondArg);
+          if ((argType.flags & ts.TypeFlags.TypeParameter) === 0) {
+            resultTypeNode = secondArg;
+          }
+        }
       }
-      return this.applyWrapperSemantics(
-        innerSchema as MutableJSONSchemaObj,
+      const resultIsGeneric = resultTypeFromType !== undefined &&
+        (resultTypeFromType.flags & ts.TypeFlags.TypeParameter) !== 0;
+      const resultNodeIsSynthetic = resultTypeNode !== undefined &&
+        resultTypeNode.pos === -1 && resultTypeNode.end === -1;
+      const shouldPassResultNode = resultTypeNode !== undefined &&
+        !resultIsGeneric &&
+        (!resultNodeIsSynthetic ||
+          (resultTypeFromType !== undefined &&
+            this.innerTypeNeedsNodeAssistance(
+              resultTypeFromType,
+              context.typeChecker,
+            )));
+      // Stream brands always yield a fresh object from applyWrapperSemantics,
+      // so attaching the result keyword here mutates nothing shared.
+      const streamSchema = this.applyWrapperSemantics(
+        innerSchema,
         "Stream",
+      ) as MutableJSONSchemaObj;
+      streamSchema.result = streamResultSchema(
+        resultIsGeneric ? undefined : resultTypeFromType,
+        shouldPassResultNode ? resultTypeNode : undefined,
+        context,
+        this.schemaGenerator,
       );
+      return streamSchema;
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics

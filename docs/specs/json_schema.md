@@ -31,6 +31,29 @@ The authoritative field inventory is the `JSONSchema` type in
   `asStream` field existed historically; it is no longer part of the type and
   is not emitted — a couple of runner utilities still tolerate it on stored
   data.)
+- **`result`**: the result a verb declares (`Stream<E, R>`'s `R`) — the
+  schema of the receipt a handling writes back to the caller. Emitted by the
+  schema generator on every schema carrying `asCell: ["stream"...]`, from the
+  same type check that emits the marker; the schema object it sits on stays
+  the EVENT schema a caller sends. A value-less verb (`Stream<E>`) carries
+  `{ "type": "object", "properties": {} }` — the `{}` receipt the runtime
+  actually writes, with `additionalProperties` left undefined so the verb can
+  later declare a result. The subschema describes a value written elsewhere,
+  never the value at this node, so value-semantics schema walks skip it while
+  complete structural walks (notably `$ref` discovery) include it — see
+  `NON_VALUE_SINGLE_SUBSCHEMA_KEYS` in the runner's `schema-walk.ts`. Pattern
+  updates treat the declared result like every other result contract: names
+  are permanent at every depth, and a side without the keyword is
+  unconstrained (`verbResultSubsetIssue`,
+  `packages/piece/src/schema-compatibility.ts`).
+
+  ```json
+  {
+    "$ref": "#/$defs/AddTopicEvent",
+    "asCell": ["stream"],
+    "result": { "$ref": "#/$defs/AddTopicResult" }
+  }
+  ```
 - **`scope`**: storage-partition selector emitted for `PerSpace<T>` /
   `PerUser<T>` / `PerSession<T>` wrappers.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))

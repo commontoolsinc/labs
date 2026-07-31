@@ -24,7 +24,13 @@ describe("Schema: void types", () => {
     const gen = createSchemaTransformerV2();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const trigger = result.properties?.trigger as Record<string, unknown>;
-    expect(trigger).toEqual({ asCell: ["stream", "opaque"] });
+    expect(trigger).toEqual({
+      asCell: ["stream", "opaque"],
+      // The value-less verb's declared-result schema (C3): the empty-object
+      // receipt, NOT the void sentinel — `{ asCell: ["opaque"] }` would be a
+      // wrapper claim about a result that does not exist.
+      result: { type: "object", properties: {} },
+    });
   });
 
   it("formats void interface properties as opaque", async () => {

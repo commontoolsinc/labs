@@ -61,15 +61,27 @@ export default pattern((state) => {
     properties: {
         onClick1: {
             type: "unknown",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         },
         onClick2: {
             type: "unknown",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         },
         onClick3: {
             type: "unknown",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["onClick1", "onClick2", "onClick3"]

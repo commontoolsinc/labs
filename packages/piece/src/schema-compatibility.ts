@@ -360,6 +360,14 @@ function schemaSubsetIssue(
       }
     }
 
+    const verbResultIssue = verbResultSubsetIssue(
+      source,
+      target,
+      path,
+      context,
+    );
+    if (verbResultIssue) return verbResultIssue;
+
     for (const key of COMPLEX_CONSTRAINT_KEYS) {
       const applicableTypes = COMPLEX_CONSTRAINT_TYPES[key];
       if (
@@ -411,8 +419,59 @@ function schemaSubsetIssue(
   }
 }
 
+/**
+ * A verb's declared result — the `result` dialect keyword the schema
+ * generator emits beside `asCell: ["stream"]` (C3) — is part of the public
+ * contract: every published name is permanent, at every depth, exactly as for
+ * every other result name.
+ *
+ * The declared result is produced by the verb and read by callers, so its
+ * variance does not flip with the role of the property carrying it: whether
+ * the verb sits in the piece's result schema or arrives through its argument
+ * schema, the CANDIDATE's declared result must stay within the PREVIOUS one.
+ * The recursion therefore always runs candidate → previous under the
+ * result-role rules, picking the candidate side from the enclosing role.
+ *
+ * A side without the keyword is unconstrained (`true`): adding the keyword is
+ * every pre-C3 deployment's upgrade path and passes, while dropping it once
+ * published erases the promised names and is refused.
+ */
+function verbResultSubsetIssue(
+  source: SchemaObject,
+  target: SchemaObject,
+  path: string,
+  context: CompatibilityContext,
+): string | undefined {
+  if (source.result === undefined && target.result === undefined) {
+    return undefined;
+  }
+  const [candidate, candidateRoot, previous, previousRoot] =
+    context.role === "argument"
+      ? [target.result, context.targetRoot, source.result, context.sourceRoot]
+      : [source.result, context.sourceRoot, target.result, context.targetRoot];
+  return schemaSubsetIssue(
+    candidate ?? true,
+    previous ?? true,
+    `${path}.result`,
+    {
+      ...context,
+      sourceRoot: candidateRoot,
+      targetRoot: previousRoot,
+      role: "result",
+    },
+  );
+}
+
 const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   ...ANNOTATION_KEYS,
+  // The semantic extensions and the verb-result keyword are metadata this
+  // checker compares by equality (or, for `result`, by its own role-aware
+  // recursion); none of them is an instance constraint that inserting a
+  // default below could break. Without them here, every schema carrying
+  // `asCell` — every verb property — turned off default-backed evolution for
+  // its whole subtree, making the permanence table's "required field with a
+  // default" allowance unreachable below any verb.
+  ...SEMANTIC_EXTENSION_KEYS,
   "$ref",
   "additionalProperties",
   "exclusiveMaximum",
@@ -430,6 +489,7 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   "pattern",
   "properties",
   "required",
+  "result",
   "type",
 ]);
 
@@ -1096,6 +1156,10 @@ function collectSchemaReferences(
       "items",
       "not",
       "propertyNames",
+      // A verb's declared result (C3): a `$ref` inside it points at a `$defs`
+      // entry whose content must resolve equally on both sides, exactly like
+      // a ref anywhere else in the schema.
+      "result",
       "then",
     ]
   ) {
@@ -1254,6 +1318,10 @@ function unknownKeywordIssue(
     "pattern",
     "properties",
     "required",
+    // Handled by verbResultSubsetIssue (role-aware recursion), never by
+    // byte-equality: exact comparison would refuse the legal evolutions the
+    // permanence rule allows (adding the keyword, adding optional fields).
+    "result",
     "type",
     "uniqueItems",
   ]);

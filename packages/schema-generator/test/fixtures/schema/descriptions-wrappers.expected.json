@@ -5,6 +5,10 @@
         "stream"
       ],
       "description": "Count as stream",
+      "result": {
+        "properties": {},
+        "type": "object"
+      },
       "type": "number"
     },
     "level": {

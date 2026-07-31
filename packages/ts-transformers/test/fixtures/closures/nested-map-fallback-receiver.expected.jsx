@@ -107,7 +107,11 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
                 }
             },
             required: ["name"],
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["p", "setAssign"]
@@ -140,7 +144,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                         }
                     },
                     required: ["name"],
-                    asCell: ["stream"]
+                    asCell: ["stream"],
+                    result: {
+                        type: "object",
+                        properties: {}
+                    }
                 }
             },
             required: ["setAssign"]
@@ -225,7 +233,11 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
                         }
                     },
                     required: ["name"],
-                    asCell: ["stream"]
+                    asCell: ["stream"],
+                    result: {
+                        type: "object",
+                        properties: {}
+                    }
                 }
             },
             required: ["people", "setAssign"]

@@ -58,7 +58,11 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["description"]
         },
         startEditing: {
-            asCell: ["stream", "opaque"]
+            asCell: ["stream", "opaque"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["card", "startEditing"]

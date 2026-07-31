@@ -1,0 +1,91 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Item": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "items"
+    ],
+    "type": "object"
+  },
+  "pattern": "gideon-tests/proxy-length-repro.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Item": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "addItem": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "filteredItems": {
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      },
+      "itemCount": {
+        "type": "number"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      },
+      "label": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "items",
+      "filteredItems",
+      "label",
+      "itemCount",
+      "addItem",
+      "$NAME"
+    ],
+    "type": "object"
+  }
+}

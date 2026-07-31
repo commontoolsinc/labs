@@ -1,0 +1,247 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "LunchProfile": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ParticipantProfileDirectory": {
+        "properties": {
+          "participants": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ParticipantProfileLink"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "participants"
+        ],
+        "type": "object"
+      },
+      "ParticipantProfileDirectoryValue": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ParticipantProfileDirectory"
+          },
+          {
+            "properties": {
+              "participants": {
+                "items": {
+                  "$ref": "#/$defs/ParticipantProfileLink"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "participants"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ParticipantProfileLink": {
+        "properties": {
+          "name": {
+            "description": "Immutable Lunch Poll name used by the current name-keyed vote schema.",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/$defs/LunchProfile",
+            "asCell": [
+              "cell"
+            ],
+            "description": "Live canonical profile cell; compare it by identity with `equals()`."
+          }
+        },
+        "required": [
+          "name",
+          "profile"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "avatar": {
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile.",
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "type": "object"
+      }
+    },
+    "description": "Inputs for the participant identity/admin controls.\n\nThe parent owns the durable user directory and viewer identity cells. This\npattern only owns local per-session UI state for the join draft and admin\ntakeover reveal.",
+    "properties": {
+      "adminName": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "Shared admin name cell.",
+        "type": "string"
+      },
+      "myName": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "Per-user current viewer name cell.",
+        "type": "string"
+      },
+      "participantProfiles": {
+        "$ref": "#/$defs/ParticipantProfileDirectoryValue",
+        "asCell": [
+          "cell"
+        ],
+        "description": "Object-wrapped directory of live canonical profile links."
+      },
+      "profile": {
+        "$ref": "#/$defs/LunchProfile",
+        "asCell": [
+          "cell"
+        ],
+        "description": "The viewer's resolved `#profile` cell, from the parent's top-level wish\n(or an injected cell in tests). Used only as the badge/`equals()` identity\n— never read for its name; the display name arrives as `profileName`.\nUndefined until it resolves (or when the viewer has no profile).",
+        "tags": [
+          "profile"
+        ]
+      },
+      "profileAvatar": {
+        "description": "The viewer's resolved avatar, from the parent's `#profileAvatar` wish.",
+        "tags": [
+          "profileavatar"
+        ],
+        "type": "string"
+      },
+      "profileName": {
+        "description": "The viewer's resolved display name, from the parent's top-level\n`#profileName` wish (or injected in tests). \"\" until it resolves; the join\ncard gates on this being non-empty and snapshots it into the roster.",
+        "tags": [
+          "profilename"
+        ],
+        "type": "string"
+      },
+      "profileSetupUI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "The `#profile` wish's built-in create/pick surface (`profileWish[UI]`),\nrendered by the parent's top-level wish and passed down so the card shows\nit in the no-profile state. Omitted in tests without a wish environment.",
+        "tags": [
+          "profile"
+        ]
+      },
+      "users": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "Shared roster of participants who have joined.",
+        "items": {
+          "$ref": "#/$defs/User"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "users",
+      "myName",
+      "adminName",
+      "participantProfiles",
+      "profileName",
+      "profileAvatar"
+    ],
+    "type": "object"
+  },
+  "pattern": "lunch-poll/participant-identity-card.tsx",
+  "resultSchema": {
+    "$defs": {
+      "ClaimHostEvent": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "JoinEvent": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "description": "Outputs for the participant identity/admin controls.\n\nInstantiate this sub-pattern by function call when the parent needs `me`,\n`isJoined`, `isAdmin`, or the bound streams. The `[UI]` value may then be\nembedded in the parent's layout.",
+    "properties": {
+      "$NAME": {
+        "description": "Human-readable pattern name.",
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "Static VNode rendering the join form and admin controls."
+      },
+      "claimHost": {
+        "$ref": "#/$defs/ClaimHostEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Bound stream that transfers admin ownership to the current viewer.",
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "isAdmin": {
+        "description": "Whether the current viewer currently owns admin actions.",
+        "type": "boolean"
+      },
+      "isJoined": {
+        "description": "Whether the current viewer has joined the participant roster.",
+        "type": "boolean"
+      },
+      "joinAs": {
+        "$ref": "#/$defs/JoinEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Bound stream that joins the current viewer and claims admin if first.",
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "me": {
+        "description": "Trimmed current viewer name resolved once for downstream sub-patterns.",
+        "type": "string"
+      },
+      "profileName": {
+        "description": "Current canonical profile display name, or empty for a guest/no profile.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "me",
+      "isJoined",
+      "isAdmin",
+      "profileName",
+      "joinAs",
+      "claimHost",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

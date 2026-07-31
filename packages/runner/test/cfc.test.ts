@@ -482,6 +482,9 @@ describe("CFC schema reference discovery", () => {
       "dependentSchemas",
       "properties",
       "patternProperties",
+      // A verb's declared result (C3): emitted but non-value — ref discovery
+      // must still see it, or definition pruning would strand its target.
+      "result",
     ];
     const schema: JSONSchema = {
       not: ref("not"),
@@ -500,6 +503,7 @@ describe("CFC schema reference discovery", () => {
       dependentSchemas: { value: ref("dependentSchemas") },
       properties: { value: ref("properties") },
       patternProperties: { ".*": ref("patternProperties") },
+      result: ref("result"),
       $defs: { Dormant: ref("dormant") },
     };
     const refs = new Set<string>();
@@ -509,6 +513,31 @@ describe("CFC schema reference discovery", () => {
     expect([...refs].toSorted()).toEqual(
       names.map((name) => `urn:${name}`).toSorted(),
     );
+  });
+
+  it("keeps a $defs entry alive when only a declared result references it", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        addTopic: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          asCell: ["stream"],
+          result: { $ref: "#/$defs/TopicRef" },
+        },
+      },
+      $defs: {
+        TopicRef: { type: "object", properties: { fid: { type: "string" } } },
+        Unreferenced: { type: "number" },
+      },
+    };
+
+    expect(selectReferencedCfcSchemaDefs(schema)).toEqual({
+      TopicRef: {
+        type: "object",
+        properties: { fid: { type: "string" } },
+      },
+    });
   });
 
   it("selects no definitions for boolean schemas or unresolved local refs", () => {

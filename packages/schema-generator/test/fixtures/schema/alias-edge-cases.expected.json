@@ -5,12 +5,20 @@
         "stream",
         "cell"
       ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      },
       "type": "number"
     },
     "deepStream": {
       "asCell": [
         "stream"
       ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      },
       "type": "number"
     },
     "indirectArray": {
@@ -36,6 +44,10 @@
         "stream",
         "cell"
       ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      },
       "type": "string"
     },
     "userStore": {

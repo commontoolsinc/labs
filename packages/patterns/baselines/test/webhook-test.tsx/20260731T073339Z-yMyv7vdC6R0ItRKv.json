@@ -1,0 +1,133 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "WebhookConfig": {
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "secret"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "webhookConfig": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WebhookConfig"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "asCell": [
+          "cell"
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "webhookConfig"
+    ],
+    "type": "object"
+  },
+  "pattern": "test/webhook-test.tsx",
+  "resultSchema": {
+    "$defs": {
+      "JSONArray": {
+        "items": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "type": "array"
+      },
+      "JSONObject": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "JSONValue": {
+        "anyOf": [
+          {
+            "type": [
+              "null",
+              "number",
+              "string"
+            ]
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/JSONArray"
+          },
+          {
+            "$ref": "#/$defs/JSONObject"
+          }
+        ]
+      },
+      "WebhookConfig": {
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "secret"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "lastEvent": {
+        "$ref": "#/$defs/JSONValue"
+      },
+      "webhookConfig": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WebhookConfig"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "webhookInbox": {
+        "$ref": "#/$defs/JSONValue",
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    "required": [
+      "webhookInbox",
+      "webhookConfig",
+      "lastEvent",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

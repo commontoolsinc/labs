@@ -78,7 +78,11 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
                 }
             },
             required: ["fileId", "content"],
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["fileId", "content", "savedContent", "onSaveFile"]
@@ -128,7 +132,11 @@ export default pattern((__cf_pattern_input) => {
                 }
             },
             required: ["fileId", "content"],
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["fileId", "content", "savedContent", "onSaveFile"]
@@ -136,7 +144,11 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         trigger: {
-            asCell: ["stream", "opaque"]
+            asCell: ["stream", "opaque"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["trigger"]

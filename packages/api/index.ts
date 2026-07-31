@@ -1870,6 +1870,15 @@ export type JSONSchemaObj = {
   readonly tags?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
+  // The result a verb declares (`Stream<E, R>`'s `R`): the schema of the
+  // receipt a handling writes back to the caller. Emitted only beside
+  // `asCell: ["stream"]` — the schema object itself stays the EVENT schema the
+  // caller sends, and this keyword rides next to it. A value-less verb
+  // (`Stream<E>`) carries `{ type: "object", properties: {} }`, the `{}`
+  // receipt the runtime actually writes. This subschema describes a value
+  // written elsewhere, never the value at this node, so value-semantics schema
+  // walks skip it (see `schema-walk.ts` in the runner).
+  readonly result?: JSONSchema;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
     readonly confidentiality?: readonly JSONValue[];

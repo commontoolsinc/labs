@@ -301,10 +301,39 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   spec (§5.8). Lowering itself needed nothing: the return was already
   preserved verbatim (pinned by C1's fixture) and the runtime already
   consumes it.
-- **schema-generator:** emit a result schema for stream/handler properties so
-  it reaches the piece's **durable** schema — the dependency verb discovery
-  named; mapping spec update in
-  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).
+- ~~**schema-generator:** emit a result schema for stream/handler properties
+  so it reaches the piece's **durable** schema — the dependency verb
+  discovery named; mapping spec update in
+  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).~~
+  — **done (C3)**: the declared result attaches as a new dialect keyword,
+  `result`, on the stream property's schema object, sibling to
+  `asCell: ["stream"]` — the event schema stays exactly where every consumer
+  already reads it (`cf piece verbs`, `piece call` payload validation, the
+  D5 gate), and the extension mechanism is the one `asCell` already uses.
+  Emitted from the same wrapper detection as the marker (both Stream
+  branches in `common-fabric-formatter.ts` plus the stream-returning-callable
+  path in `object-formatter.ts`, shared logic in
+  `schema-generator/src/stream-result-schema.ts`), so marker and result
+  travel together by construction; C1's byte-identical pin
+  (`stream-result.test.ts`) was rewritten to pin the new shapes. Mapping
+  spec §6.5 and `docs/specs/json_schema.md` define the keyword. **The compat
+  checker needed extending**: unmodified, it byte-compared the unknown
+  keyword — rejecting the add-the-keyword direction that is every existing
+  deployment's upgrade path, and refusing legal optional-field evolution.
+  `verbResultSubsetIssue` (`packages/piece/src/schema-compatibility.ts`) now
+  recurses into the keyword with result-role permanence in the candidate →
+  previous direction regardless of which schema carries the verb (a declared
+  result is produced by the verb and read by callers, so its variance does
+  not flip with the property's role); a side without the keyword is
+  unconstrained, so adding it passes and dropping it once published is
+  refused. `asCell`/`result` joined the default-stability whitelist so the
+  table's "required field with a default" allowance is reachable below a
+  verb, ref discovery (`schema-walk.ts`, new non-value tier) sees `$ref`s
+  inside results so `$defs` pruning cannot strand them, and
+  `validateSchemaDefinition` preflights the subtree. Pinned by
+  `packages/piece/test/verb-result-compatibility.test.ts`; the fleet proof
+  is `deno task pattern-compat` green with every authored pattern now
+  emitting result keywords.
   Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event

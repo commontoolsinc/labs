@@ -999,6 +999,10 @@ const validateSchemaDefinitionInternal = (
         "items",
         "not",
         "propertyNames",
+        // A verb's declared result (C3): a subschema like any other — the
+        // compatibility checker recurses into it, so preflight must prove it
+        // well-formed and its `$ref`s resolvable like every other subtree.
+        "result",
         "then",
       ] as const
     ) {

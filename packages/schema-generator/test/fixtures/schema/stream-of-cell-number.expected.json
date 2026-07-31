@@ -5,6 +5,10 @@
         "stream",
         "cell"
       ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      },
       "type": "number"
     }
   },

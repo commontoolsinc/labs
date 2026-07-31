@@ -221,7 +221,11 @@ const __cfHandler_3 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
                 }
             },
             required: ["name"],
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["item", "handleNavigateInto"]
@@ -242,7 +246,11 @@ const __cfHandler_4 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
                 }
             },
             required: ["item"],
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["item", "handleOpenFile"],
@@ -319,7 +327,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                         }
                     },
                     required: ["name"],
-                    asCell: ["stream"]
+                    asCell: ["stream"],
+                    result: {
+                        type: "object",
+                        properties: {}
+                    }
                 },
                 handleOpenFile: {
                     type: "object",
@@ -329,7 +341,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                         }
                     },
                     required: ["item"],
-                    asCell: ["stream"]
+                    asCell: ["stream"],
+                    result: {
+                        type: "object",
+                        properties: {}
+                    }
                 }
             },
             required: ["handleNavigateInto", "handleOpenFile"]

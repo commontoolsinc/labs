@@ -1,0 +1,50 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "counter": {
+        "default": 0,
+        "scope": "space",
+        "type": "number"
+      },
+      "name": {
+        "default": "",
+        "scope": "space",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "scope-bug-computed-vnode-blank/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "counter": {
+        "type": "number"
+      },
+      "tick": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {},
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "counter",
+      "tick",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -164,7 +164,11 @@ const actionPattern = pattern((input: Writable<{
     required: ["foo", "bar"],
     asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, {
-    asCell: ["stream", "opaque"]
+    asCell: ["stream", "opaque"],
+    result: {
+        type: "object",
+        properties: {}
+    }
 } as const satisfies __cfHelpers.JSONSchema);
 export default __cfHelpers.__cf_data({
     liftOptional,

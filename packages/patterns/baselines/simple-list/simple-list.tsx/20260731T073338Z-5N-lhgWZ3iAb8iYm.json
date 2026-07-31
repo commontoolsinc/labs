@@ -1,0 +1,170 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "SimpleListItem": {
+        "properties": {
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "indented": {
+            "default": false,
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "indented",
+          "done"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SimpleListItem"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "simple-list/simple-list.tsx",
+  "resultSchema": {
+    "$defs": {
+      "SimpleListItem": {
+        "properties": {
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "indented": {
+            "default": false,
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "indented",
+          "done"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "deleteItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "index": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/SimpleListItem"
+        },
+        "type": "array"
+      },
+      "setIndent": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "indented": {
+            "type": "boolean"
+          },
+          "index": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "index",
+          "indented"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "toggleIndent": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "index": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "items",
+      "summary",
+      "toggleIndent",
+      "setIndent",
+      "deleteItem",
+      "addItem",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

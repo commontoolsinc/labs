@@ -22,6 +22,10 @@
       "asCell": [
         "stream"
       ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      },
       "type": "number"
     },
     "writeonlyValue": {

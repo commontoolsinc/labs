@@ -156,7 +156,7 @@ by any repo test.
 | Dictionary with both string and number index | treated as object map, not array | `type-utils.ts` | untested directly |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts`; node path `schema-generator.ts` (no JSDoc) | descriptions-index* fixtures |
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
-| Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required` | skip: `type-utils.ts`, `object-formatter.ts`; exception: `object-formatter.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures |
+| Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required`. The stream kind additionally carries the verb's declared result under the `result` keyword (§6.5), read from the same wrapper detection | skip: `type-utils.ts`, `object-formatter.ts`; exception: `object-formatter.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept; result: `getWrapperSchemaFromCallable` → `stream-result-schema.ts`) | pattern-with-types fixtures; `test/stream-result.test.ts` |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts` | date-types fixture, native-type tests |
@@ -312,7 +312,9 @@ Nesting prepends: `Stream<Cell<number>>` → `{ type: "number", asCell:
 ["stream", "cell"] }` (fixture `stream-of-cell-number`); `Stream<void>` →
 `{ asCell: ["stream", "opaque"] }` (fixture `reactive-stream`, via `void` →
 opaque). Boolean inner schemas: `true` → `{ asCell: [brand] }`; `false` →
-`{ asCell: [brand], not: true }`.
+`{ asCell: [brand], not: true }`. Stream schemas additionally carry the
+verb's declared result under the `result` keyword — §6.5; the examples here
+show only the marker axis.
 
 Entry shapes (`packages/api/index.ts`): `AsCellEntry = CellKind |
 { kind: CellKind; scope?: SchemaScope }`, `CellKind` being the seven brand
@@ -378,6 +380,42 @@ the identity alias to the inner type object itself (no aliasSymbol), so inner
 named types still hoist, as the fixture shows. The ts-transformers behavior
 spec §12 uses the same single-`asCell` vocabulary. Any doc claiming `Reactive`
 emits `asCell: ["opaque"]` is wrong on this tree.
+
+### 6.5 The verb-result keyword — `result` on stream schemas
+
+Every schema that carries `asCell: ["stream"...]` also carries the verb's
+declared result under the `result` keyword (verb contract WS-C, C3). The
+stream property's schema object itself stays the **event** schema — what a
+caller sends, which `cf piece verbs` publishes and `piece call` validates
+payloads against — and the result rides beside it:
+
+- `Stream<E, R>` with non-void `R` →
+  `{ <event schema>, asCell: ["stream"], result: <R's schema> }`. `R` goes
+  through the ordinary type→schema machinery (named types hoist to `$defs`,
+  so the common shape is `result: { $ref: "#/$defs/<R>" }`) and is **left
+  open** — no `additionalProperties` at any level beyond what the type itself
+  demands.
+- `Stream<E>` / `Stream<E, void>` (a value-less verb) →
+  `result: { type: "object", properties: {} }` — the `{}` receipt the runtime
+  actually writes, **not** the generic `void` sentinel: `void` lowers to
+  `{ asCell: ["opaque"] }`, a *wrapper* claim that would hand readback a cell
+  to resolve. `additionalProperties` stays undefined (the compatibility
+  checker reads `additionalProperties ?? true`), so a verb is never frozen as
+  value-less forever.
+
+The result rides the **same** type check that emits the marker — the
+node-driven and type-driven Stream branches in `common-fabric-formatter.ts`
+and the stream-returning-callable exception in `object-formatter.ts` (§4),
+all through `src/stream-result-schema.ts`. A property is either recognized as
+a stream and gets both keys, or is skipped entirely; there is no state where
+the marker lands and the result schema does not. The second type argument is
+resolved with the same guards as the first (registry first, type-parameter
+nodes not used, synthetic nodes only when the resolved type needs help); an
+unresolvable/generic result slot degrades to the value-less shape, matching
+`Stream`'s `R = void` default. Aliases carrying the result
+(`type MyVerb = Stream<E, R>`) survive via `extractWrapperTypeReference`'s
+full `typeArguments`. Pinned by `test/stream-result.test.ts`; the keyword's
+dialect definition lives in `docs/specs/json_schema.md`.
 
 ## 7. `Default<T,V>` And `DeepDefault<V>`
 
@@ -799,6 +837,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 | Brand values / kind↔brand maps (§6.2) | `CellBrand` / `wrapperKindToBrand` (`src/typescript/cell-brand.ts`) | capability-wrapper-types tests |
 | Capability-kind subset (§6.3) | `CELL_CAPABILITY_KIND_MAP` (`src/formatters/common-fabric-formatter.ts`) | exhaustive over `CellWrapperKind` |
 | `asCell` entry shape (§6.2, §10) | `AsCellEntry` / `CellKind` / `SchemaScope` (`packages/api/index.ts`) | — |
+| `result` keyword (§6.5) | `JSONSchemaObj.result` (`packages/api/index.ts`); dialect definition in `docs/specs/json_schema.md` | — |
 | Scope wrapper map (§10) | `SCOPE_WRAPPER_SCOPES` (`src/formatters/common-fabric-formatter.ts`) | scoped-wrappers fixture |
 | CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts`) | — |
 | CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts`) | cfc-authoring tests |

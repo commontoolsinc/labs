@@ -1,0 +1,872 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "AddCommentEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "AddLinkEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "SetBodyEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicAuthor": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TopicComment": {
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/TopicAuthor",
+            "description": "Snapshot taken at write time (profile enrichment comes later; never gate\nauthorship on a profile wish — CT-1879). Comments carry no minted id:\narray elements have stable entity identity; future editing addresses\nelements by reference (`equals()`), not by a synthetic key."
+          },
+          "authorName": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "sentAt": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorName",
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
+      "TopicLink": {
+        "properties": {
+          "addedAt": {
+            "type": "number"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "default": "web"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopicLinkKind": {
+        "enum": [
+          "pr",
+          "topic",
+          "session",
+          "web"
+        ]
+      },
+      "TopicReference": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "Like the other derived display fields, a cold retained sibling may not\nhave produced this path yet. Its persisted title remains authoritative.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ],
+            "result": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ],
+            "result": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "description": "Cold mixed-version references can expose an unresolved computed path as\nexplicit undefined. Shape it to zero until the sibling starts.",
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            },
+            "description": "Mixed-version list projections can resolve an older sibling's absent\npath as undefined. Fabric shapes that absence to this inert legacy\nsentinel at the list boundary; newly computed non-empty authorship remains\na structured TopicAuthor."
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "description": "Max of creation, comments, body saves, and link additions.",
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ],
+            "result": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "comments",
+          "links",
+          "createdAt",
+          "createdByName",
+          "commentCount",
+          "lastActivityAt",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "body": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "The topic's living document: durable conclusions get folded up into the\nbody; the comment thread below holds the deliberation.",
+        "type": "string"
+      },
+      "bodyUpdatedAt": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 0,
+        "type": "number"
+      },
+      "bodyUpdatedBy": {
+        "$ref": "#/$defs/TopicAuthor",
+        "asCell": [
+          "cell"
+        ],
+        "default": {
+          "kind": "person",
+          "name": ""
+        }
+      },
+      "comments": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TopicComment"
+        },
+        "type": "array"
+      },
+      "createdAt": {
+        "default": 0,
+        "type": "number"
+      },
+      "createdBy": {
+        "$ref": "#/$defs/TopicAuthor"
+      },
+      "createdByName": {
+        "default": "",
+        "type": "string"
+      },
+      "links": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TopicLink"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The board's own topics list — the sibling set for this topic's derived\ncrossrefs and the mention universe for authoring. A reference to the\ntracker's array, wired at creation like `myName` (and backfillable as a\none-time link-bind on pieces created before it existed). Absent, the\ndetail page simply derives no connections.",
+        "items": {
+          "$ref": "#/$defs/TopicReference"
+        },
+        "type": "array"
+      },
+      "myName": {
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "title": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "topics/topic.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AddCommentEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "AddLinkEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "SetBodyEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicAuthor": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TopicComment": {
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/TopicAuthor",
+            "description": "Snapshot taken at write time (profile enrichment comes later; never gate\nauthorship on a profile wish — CT-1879). Comments carry no minted id:\narray elements have stable entity identity; future editing addresses\nelements by reference (`equals()`), not by a synthetic key."
+          },
+          "authorName": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "sentAt": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorName",
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
+      "TopicLink": {
+        "properties": {
+          "addedAt": {
+            "type": "number"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "default": "web"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopicLinkKind": {
+        "enum": [
+          "pr",
+          "topic",
+          "session",
+          "web"
+        ]
+      },
+      "TopicReference": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "Like the other derived display fields, a cold retained sibling may not\nhave produced this path yet. Its persisted title remains authoritative.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ],
+            "result": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ],
+            "result": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "description": "Cold mixed-version references can expose an unresolved computed path as\nexplicit undefined. Shape it to zero until the sibling starts.",
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            },
+            "description": "Mixed-version list projections can resolve an older sibling's absent\npath as undefined. Fabric shapes that absence to this inert legacy\nsentinel at the list boundary; newly computed non-empty authorship remains\na structured TopicAuthor."
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "description": "Max of creation, comments, body saves, and link additions.",
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ],
+            "result": {
+              "properties": {},
+              "type": "object"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "comments",
+          "links",
+          "createdAt",
+          "createdByName",
+          "commentCount",
+          "lastActivityAt",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME"
+        ],
+        "type": "object"
+      }
+    },
+    "description": "The complete result available when a Topic is instantiated directly.",
+    "properties": {
+      "$NAME": {
+        "default": "",
+        "description": "Like the other derived display fields, a cold retained sibling may not\nhave produced this path yet. Its persisted title remains authoritative.",
+        "type": [
+          "string",
+          "undefined"
+        ]
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addComment": {
+        "$ref": "#/$defs/AddCommentEvent",
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "addLink": {
+        "$ref": "#/$defs/AddLinkEvent",
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "body": {
+        "type": "string"
+      },
+      "bodyDraft": {
+        "type": "string"
+      },
+      "bodyUpdatedAt": {
+        "type": [
+          "number",
+          "undefined"
+        ]
+      },
+      "bodyUpdatedBy": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "$ref": "#/$defs/TopicAuthor"
+          }
+        ]
+      },
+      "cancelEditBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "commentCount": {
+        "default": 0,
+        "description": "Cold mixed-version references can expose an unresolved computed path as\nexplicit undefined. Shape it to zero until the sibling starts.",
+        "type": [
+          "number",
+          "undefined"
+        ]
+      },
+      "commentDraft": {
+        "description": "Session-local composer/edit state. These controls belong to a direct Topic\ninstance, not the shared TopicPiece projection used by the tracker's list.",
+        "type": "string"
+      },
+      "comments": {
+        "items": {
+          "$ref": "#/$defs/TopicComment"
+        },
+        "type": "array"
+      },
+      "createdAt": {
+        "type": "number"
+      },
+      "createdBy": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          {
+            "type": "undefined"
+          }
+        ],
+        "default": {
+          "kind": "person",
+          "name": ""
+        },
+        "description": "Mixed-version list projections can resolve an older sibling's absent\npath as undefined. Fabric shapes that absence to this inert legacy\nsentinel at the list boundary; newly computed non-empty authorship remains\na structured TopicAuthor."
+      },
+      "createdByName": {
+        "type": "string"
+      },
+      "crossrefs": {
+        "anyOf": [
+          {
+            "properties": {
+              "referencedBy": {
+                "items": {
+                  "$ref": "#/$defs/TopicReference"
+                },
+                "type": "array"
+              },
+              "refsOut": {
+                "items": {
+                  "$ref": "#/$defs/TopicReference"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "refsOut",
+              "referencedBy"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "undefined"
+          }
+        ],
+        "default": {
+          "referencedBy": [],
+          "refsOut": []
+        },
+        "description": "This topic's own place in the board's prose graph, derived read-side\nfrom `mentionable` (the sibling pieces it links, resolved from the\nboard's own list). Both sets stay empty until `mentionable` is wired.\nOptional (2026-07-21 deploy): pieces healed before their `mentionable`\nlink exists carry a session-scoped crossrefs indirection that resolves\nundefined outside the minting session; the list projection must accept\nthat rather than fail argument validation."
+      },
+      "editingBody": {
+        "scope": "session",
+        "type": "boolean"
+      },
+      "lastActivityAt": {
+        "default": 0,
+        "description": "Max of creation, comments, body saves, and link additions.",
+        "type": [
+          "number",
+          "undefined"
+        ]
+      },
+      "linkKindDraft": {
+        "$ref": "#/$defs/TopicLinkKind"
+      },
+      "linkLabelDraft": {
+        "type": "string"
+      },
+      "linkUrlDraft": {
+        "type": "string"
+      },
+      "links": {
+        "items": {
+          "$ref": "#/$defs/TopicLink"
+        },
+        "type": "array"
+      },
+      "saveBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "setBody": {
+        "$ref": "#/$defs/SetBodyEvent",
+        "asCell": [
+          "stream"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "startEditBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "submitComment": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "UI affordances as streams: composer submit, body edit lifecycle.",
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "submitLink": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "result": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "title": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "commentDraft",
+      "bodyDraft",
+      "editingBody",
+      "linkUrlDraft",
+      "linkLabelDraft",
+      "linkKindDraft",
+      "submitComment",
+      "startEditBody",
+      "saveBody",
+      "cancelEditBody",
+      "submitLink",
+      "$UI",
+      "title",
+      "body",
+      "comments",
+      "links",
+      "createdAt",
+      "createdByName",
+      "commentCount",
+      "lastActivityAt",
+      "addComment",
+      "addLink",
+      "setBody",
+      "$NAME"
+    ],
+    "type": "object"
+  }
+}

@@ -6,7 +6,11 @@
           "asCell": [
             "stream",
             "opaque"
-          ]
+          ],
+          "result": {
+            "properties": {},
+            "type": "object"
+          }
         },
         "error": {
           "type": "unknown"

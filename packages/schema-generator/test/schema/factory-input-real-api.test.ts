@@ -181,6 +181,9 @@ describe("Schema: real API FactoryInput", () => {
     const llmState = defs.LLMState as { properties?: Record<string, unknown> };
     expect(llmState.properties?.cancelGeneration).toEqual({
       asCell: ["stream", "opaque"],
+      // Every recognized stream carries its declared-result schema (C3);
+      // Stream<void> declares none, so it gets the empty-object receipt.
+      result: { type: "object", properties: {} },
     });
   });
 });

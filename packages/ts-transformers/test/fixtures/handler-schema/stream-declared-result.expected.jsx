@@ -94,15 +94,37 @@ export default pattern(() => {
     properties: {
         addTopic: {
             $ref: "#/$defs/AddTopic",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                $ref: "#/$defs/AddTopicResult"
+            }
         },
         touch: {
             $ref: "#/$defs/AddTopic",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["addTopic", "touch"],
     $defs: {
+        AddTopicResult: {
+            type: "object",
+            properties: {
+                topic: {
+                    type: "object",
+                    properties: {
+                        fid: {
+                            type: "string"
+                        }
+                    },
+                    required: ["fid"]
+                }
+            },
+            required: ["topic"]
+        },
         AddTopic: {
             type: "object",
             properties: {

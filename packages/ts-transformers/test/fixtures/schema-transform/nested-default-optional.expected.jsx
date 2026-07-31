@@ -131,7 +131,11 @@ export default pattern((__cf_pattern_input) => {
         },
         increment: {
             type: "unknown",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            result: {
+                type: "object",
+                properties: {}
+            }
         }
     },
     required: ["state", "increment"],

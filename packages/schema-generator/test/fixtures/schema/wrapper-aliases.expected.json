@@ -36,7 +36,11 @@
       "$ref": "#/$defs/AnonymousType_1",
       "asCell": [
         "stream"
-      ]
+      ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      }
     },
     "directCell": {
       "$ref": "#/$defs/AnonymousType_1",
@@ -52,7 +56,11 @@
       "$ref": "#/$defs/AnonymousType_1",
       "asCell": [
         "stream"
-      ]
+      ],
+      "result": {
+        "properties": {},
+        "type": "object"
+      }
     }
   },
   "required": [
