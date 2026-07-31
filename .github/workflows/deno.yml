@@ -582,6 +582,12 @@ jobs:
             toolshed_port: 8002
             install_fuse_deps: false
             timeout_minutes: 10
+          - suite_name: acl
+            script: acl.sh
+            section: ""
+            toolshed_port: 8004
+            install_fuse_deps: false
+            timeout_minutes: 10
           - suite_name: fuse
             script: fuse-exec.sh
             section: ""
@@ -647,6 +653,16 @@ jobs:
         run: |
           mkdir -p ../../test-results
           : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
+          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+
+      # Space ACL grant/revoke against a real server. Needs the toolshed's
+      # default MEMORY_ACL_MODE=enforce, so it deliberately sets no override.
+      - name: 🧪 Run CLI ACL integration suite
+        if: ${{ matrix.suite_name == 'acl' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+        run: |
           API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
 
       # Deno-based integration tests against the same toolshed. Type checking
