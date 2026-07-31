@@ -132,6 +132,8 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
 | Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
 | Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
+| Project fields     | `deno task cf piece get --piece ID items --schema id,title ...`                                      |
 | Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
 | Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
@@ -224,6 +226,17 @@ echo '{"name": "John"}' | deno task cf piece set ... user
 
 `piece get` and `wish` always print JSON. Both accept a redundant `--json` so
 callers can request the format explicitly.
+
+`piece get --filter` accepts a jq-inspired boolean predicate over array items:
+paths, JSON literals, comparisons, `and`/`or`/`not`, and parentheses. It is not
+general jq and rejects non-array inputs. `--schema` projects output from a
+comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
+fields apply per item for arrays, while JSON Schema describes the whole output.
+The two flags compose as filter-then-project. Both run through runtime
+filter/map/lift nodes, so CFC behavior is the same as a computed pattern
+expression. Source schema metadata is authoritative; projection schemas cannot
+supply `ifc`, `asCell`, `scope`, or `default`. See `packages/cli/README.md` for
+the exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

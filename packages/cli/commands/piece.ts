@@ -44,6 +44,11 @@ import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+import {
+  parsePieceGetFilter,
+  parsePieceGetProjection,
+  PieceGetTransformError,
+} from "../lib/piece-get-transform.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -157,13 +162,14 @@ export function localPatternEntry(
 
 /**
  * A `piece get` failure caused by a data condition rather than bad arguments:
- * a path that doesn't resolve, or a result schema that can't project the
- * stored data (PieceResultProjectionError). Reported as a plain error on
- * stderr with exit 1, never as a Cliffy ValidationError (which would dump the
- * usage screen and read as an arg-parse failure).
+ * a path that doesn't resolve, a result schema that can't project stored data,
+ * or a filter/projection that doesn't fit the selected value. Reported as a
+ * plain error on stderr with exit 1, never as a Cliffy ValidationError (which
+ * would dump the usage screen and read as an arg-parse failure).
  */
 export function isPieceGetDataError(error: unknown): error is Error {
   return error instanceof PieceResultProjectionError ||
+    error instanceof PieceGetTransformError ||
     (error instanceof Error &&
       error.message.startsWith("Cannot access path"));
 }
@@ -172,16 +178,20 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * Build the stderr report for a `piece get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
- * already carries its own `--step` guidance, and an input-mode read has
- * nothing more to suggest — only a result-mode unresolved path gets the
- * `--input` tip.
+ * already carries its own `--step` guidance, transform errors stand alone,
+ * and an input-mode read has nothing more to suggest — only a result-mode
+ * unresolved path gets the `--input` tip.
  */
 export function pieceGetDataErrorReport(
   error: unknown,
   opts: { input?: boolean; piece?: string },
 ): { message: string; hint?: string } | null {
   if (!isPieceGetDataError(error)) return null;
-  if (error instanceof PieceResultProjectionError || opts.input) {
+  if (
+    error instanceof PieceResultProjectionError ||
+    error instanceof PieceGetTransformError ||
+    opts.input
+  ) {
     return { message: error.message };
   }
   return {
@@ -1073,6 +1083,18 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} --step`),
     `Start, recompute, and get the result in one CLI session.`,
   )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --filter '.status == "open"'`,
+    ),
+    "Return only matching items from an array.",
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --schema id,title`,
+    ),
+    "Project each returned item to selected fields.",
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
@@ -1083,6 +1105,14 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with comma-separated fields, inline JSON Schema, or @file",
+  )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
@@ -1092,9 +1122,18 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
+      const filter = options.filter === undefined
+        ? undefined
+        : parsePieceGetFilter(options.filter);
+      const projection = options.schema === undefined
+        ? undefined
+        : await parsePieceGetProjection(options.schema);
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
         step: options.step,
+        ...(filter !== undefined || projection !== undefined
+          ? { transform: { filter, projection } }
+          : {}),
       });
       render(value, { json: true });
     } catch (error) {

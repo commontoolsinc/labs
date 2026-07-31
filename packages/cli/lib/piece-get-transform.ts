@@ -1,0 +1,1247 @@
+import type { Cell } from "@commonfabric/api";
+import {
+  ContextualFlowControl,
+  createBuilder,
+  deepEqual,
+  type JSONSchema,
+  type MemorySpace,
+  type Runtime,
+} from "@commonfabric/runner";
+import { isRecord } from "@commonfabric/utils/types";
+import { runtimeErrorLog } from "./callable.ts";
+
+type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
+
+export type PieceGetPredicate =
+  | { kind: "literal"; value: string | number | boolean | null }
+  | { kind: "path"; path: Array<string | number> }
+  | { kind: "not"; value: PieceGetPredicate }
+  | {
+    kind: "boolean";
+    operator: "and" | "or";
+    left: PieceGetPredicate;
+    right: PieceGetPredicate;
+  }
+  | {
+    kind: "comparison";
+    operator: PredicateComparisonOperator;
+    left: PieceGetPredicate;
+    right: PieceGetPredicate;
+  };
+
+export interface ParsedPieceGetFilter {
+  source: string;
+  predicate: PieceGetPredicate;
+  paths: Array<Array<string | number>>;
+}
+
+export interface PieceGetProjection {
+  source: string;
+  schema: JSONSchema;
+  kind: "concise" | "json";
+}
+
+export interface PieceGetTransform {
+  filter?: ParsedPieceGetFilter;
+  projection?: PieceGetProjection;
+}
+
+export class PieceGetTransformError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "PieceGetTransformError";
+  }
+}
+
+type TokenKind =
+  | "dot"
+  | "left-bracket"
+  | "right-bracket"
+  | "left-paren"
+  | "right-paren"
+  | "operator"
+  | "identifier"
+  | "string"
+  | "number"
+  | "eof";
+
+interface Token {
+  kind: TokenKind;
+  value?: string | number;
+  position: number;
+}
+
+function expressionError(source: string, position: number, message: string) {
+  return new PieceGetTransformError(
+    `Invalid --filter predicate at column ${position + 1}: ${message}\n` +
+      `  ${source}`,
+  );
+}
+
+function tokenizePredicate(source: string): Token[] {
+  const result: Token[] = [];
+  let position = 0;
+
+  while (position < source.length) {
+    const char = source[position];
+    if (/\s/.test(char)) {
+      position++;
+      continue;
+    }
+    const punctuation: Partial<Record<string, TokenKind>> = {
+      ".": "dot",
+      "[": "left-bracket",
+      "]": "right-bracket",
+      "(": "left-paren",
+      ")": "right-paren",
+    };
+    const punctuationKind = punctuation[char];
+    if (punctuationKind !== undefined) {
+      result.push({ kind: punctuationKind, position });
+      position++;
+      continue;
+    }
+
+    const operator = source.slice(position).match(/^(==|!=|<=|>=|<|>)/)?.[0];
+    if (operator !== undefined) {
+      result.push({ kind: "operator", value: operator, position });
+      position += operator.length;
+      continue;
+    }
+
+    if (char === '"') {
+      let end = position + 1;
+      let escaped = false;
+      for (; end < source.length; end++) {
+        const candidate = source[end];
+        if (!escaped && candidate === '"') break;
+        if (!escaped && candidate === "\\") {
+          escaped = true;
+        } else {
+          escaped = false;
+        }
+      }
+      if (end >= source.length) {
+        throw expressionError(source, position, "unterminated string literal");
+      }
+      const literal = source.slice(position, end + 1);
+      let value: string;
+      try {
+        value = JSON.parse(literal);
+      } catch {
+        throw expressionError(source, position, "invalid string literal");
+      }
+      result.push({ kind: "string", value, position });
+      position = end + 1;
+      continue;
+    }
+
+    const number = source.slice(position).match(
+      /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/,
+    )?.[0];
+    if (number !== undefined) {
+      result.push({ kind: "number", value: Number(number), position });
+      position += number.length;
+      continue;
+    }
+
+    const identifier = source.slice(position).match(
+      /^[A-Za-z_$][A-Za-z0-9_$-]*/,
+    )?.[0];
+    if (identifier !== undefined) {
+      result.push({ kind: "identifier", value: identifier, position });
+      position += identifier.length;
+      continue;
+    }
+
+    throw expressionError(
+      source,
+      position,
+      `unexpected character ${JSON.stringify(char)}`,
+    );
+  }
+
+  result.push({ kind: "eof", position: source.length });
+  return result;
+}
+
+class PredicateParser {
+  #index = 0;
+
+  constructor(
+    private readonly source: string,
+    private readonly tokens: Token[],
+  ) {}
+
+  parse(): PieceGetPredicate {
+    const result = this.#parseOr();
+    const trailing = this.#peek();
+    if (trailing.kind !== "eof") {
+      throw expressionError(
+        this.source,
+        trailing.position,
+        "unexpected trailing input",
+      );
+    }
+    return result;
+  }
+
+  #peek(): Token {
+    return this.tokens[this.#index];
+  }
+
+  #take(): Token {
+    return this.tokens[this.#index++];
+  }
+
+  #takeKind(kind: TokenKind, message: string): Token {
+    const token = this.#peek();
+    if (token.kind !== kind) {
+      throw expressionError(this.source, token.position, message);
+    }
+    return this.#take();
+  }
+
+  #takeKeyword(keyword: string): boolean {
+    const token = this.#peek();
+    if (token.kind === "identifier" && token.value === keyword) {
+      this.#take();
+      return true;
+    }
+    return false;
+  }
+
+  #parseOr(): PieceGetPredicate {
+    let left = this.#parseAnd();
+    while (this.#takeKeyword("or")) {
+      left = {
+        kind: "boolean",
+        operator: "or",
+        left,
+        right: this.#parseAnd(),
+      };
+    }
+    return left;
+  }
+
+  #parseAnd(): PieceGetPredicate {
+    let left = this.#parseComparison();
+    while (this.#takeKeyword("and")) {
+      left = {
+        kind: "boolean",
+        operator: "and",
+        left,
+        right: this.#parseComparison(),
+      };
+    }
+    return left;
+  }
+
+  #parseComparison(): PieceGetPredicate {
+    const left = this.#parseUnary();
+    const token = this.#peek();
+    if (token.kind !== "operator") return left;
+    this.#take();
+    return {
+      kind: "comparison",
+      operator: token.value as PredicateComparisonOperator,
+      left,
+      right: this.#parseUnary(),
+    };
+  }
+
+  #parseUnary(): PieceGetPredicate {
+    if (this.#takeKeyword("not")) {
+      return { kind: "not", value: this.#parseUnary() };
+    }
+    return this.#parsePrimary();
+  }
+
+  #parsePrimary(): PieceGetPredicate {
+    const token = this.#peek();
+    if (token.kind === "left-paren") {
+      this.#take();
+      const result = this.#parseOr();
+      this.#takeKind("right-paren", 'expected ")"');
+      return result;
+    }
+    if (token.kind === "dot") return this.#parsePath();
+    if (token.kind === "string" || token.kind === "number") {
+      this.#take();
+      return {
+        kind: "literal",
+        value: token.value as string | number,
+      };
+    }
+    if (token.kind === "identifier") {
+      const literal = token.value === "true"
+        ? true
+        : token.value === "false"
+        ? false
+        : token.value === "null"
+        ? null
+        : undefined;
+      if (literal !== undefined || token.value === "null") {
+        this.#take();
+        return { kind: "literal", value: literal ?? null };
+      }
+    }
+    throw expressionError(
+      this.source,
+      token.position,
+      "expected a path, literal, or parenthesized expression",
+    );
+  }
+
+  #parsePath(): PieceGetPredicate {
+    this.#take();
+    const path: Array<string | number> = [];
+    const first = this.#peek();
+    if (first.kind === "identifier") {
+      path.push(String(this.#take().value));
+    }
+
+    while (true) {
+      const token = this.#peek();
+      if (token.kind === "dot") {
+        this.#take();
+        path.push(
+          String(
+            this.#takeKind(
+              "identifier",
+              "expected a property name after dot",
+            ).value,
+          ),
+        );
+        continue;
+      }
+      if (token.kind === "left-bracket") {
+        this.#take();
+        const segment = this.#peek();
+        if (segment.kind !== "string" && segment.kind !== "number") {
+          throw expressionError(
+            this.source,
+            segment.position,
+            "expected a string or number inside brackets",
+          );
+        }
+        this.#take();
+        path.push(segment.value as string | number);
+        this.#takeKind("right-bracket", 'expected "]"');
+        continue;
+      }
+      break;
+    }
+    return { kind: "path", path };
+  }
+}
+
+function collectPredicatePaths(
+  predicate: PieceGetPredicate,
+  result: Array<Array<string | number>>,
+): void {
+  switch (predicate.kind) {
+    case "path":
+      result.push(predicate.path);
+      break;
+    case "not":
+      collectPredicatePaths(predicate.value, result);
+      break;
+    case "boolean":
+    case "comparison":
+      collectPredicatePaths(predicate.left, result);
+      collectPredicatePaths(predicate.right, result);
+      break;
+    case "literal":
+      break;
+  }
+}
+
+export function parsePieceGetFilter(source: string): ParsedPieceGetFilter {
+  if (source.trim().length === 0) {
+    throw new PieceGetTransformError("--filter predicate must not be empty");
+  }
+  const predicate = new PredicateParser(
+    source,
+    tokenizePredicate(source),
+  ).parse();
+  const paths: Array<Array<string | number>> = [];
+  collectPredicatePaths(predicate, paths);
+  return { source, predicate, paths };
+}
+
+function valueAtPredicatePath(
+  value: unknown,
+  path: Array<string | number>,
+): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (current === null || current === undefined) return null;
+    if (Array.isArray(current) && typeof segment === "number") {
+      const index = segment < 0 ? current.length + segment : segment;
+      current = index >= 0 && index < current.length ? current[index] : null;
+      continue;
+    }
+    if (
+      typeof current === "object" && !Array.isArray(current) &&
+      typeof segment === "string"
+    ) {
+      current = Object.hasOwn(current, segment)
+        ? (current as Record<string, unknown>)[segment]
+        : null;
+      continue;
+    }
+    return null;
+  }
+  return current;
+}
+
+function requireBoolean(value: unknown, context: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new PieceGetTransformError(
+      `--filter ${context} must evaluate to a boolean, got ${
+        value === null ? "null" : typeof value
+      }`,
+    );
+  }
+  return value;
+}
+
+function comparePredicateValues(
+  operator: PredicateComparisonOperator,
+  left: unknown,
+  right: unknown,
+): boolean {
+  if (operator === "==") return deepEqual(left, right);
+  if (operator === "!=") return !deepEqual(left, right);
+  if (
+    (typeof left !== "number" || typeof right !== "number") &&
+    (typeof left !== "string" || typeof right !== "string")
+  ) {
+    throw new PieceGetTransformError(
+      `--filter ${operator} requires two numbers or two strings`,
+    );
+  }
+  switch (operator) {
+    case "<":
+      return left < right;
+    case "<=":
+      return left <= right;
+    case ">":
+      return left > right;
+    case ">=":
+      return left >= right;
+  }
+}
+
+export function evaluatePieceGetPredicate(
+  predicate: PieceGetPredicate,
+  value: unknown,
+): boolean {
+  const evaluate = (node: PieceGetPredicate): unknown => {
+    switch (node.kind) {
+      case "literal":
+        return node.value;
+      case "path":
+        return valueAtPredicatePath(value, node.path);
+      case "not":
+        return !requireBoolean(evaluate(node.value), '"not" operand');
+      case "boolean": {
+        const left = requireBoolean(
+          evaluate(node.left),
+          `"${node.operator}" left operand`,
+        );
+        if (node.operator === "and") {
+          return left &&
+            requireBoolean(evaluate(node.right), '"and" right operand');
+        }
+        return left ||
+          requireBoolean(evaluate(node.right), '"or" right operand');
+      }
+      case "comparison":
+        return comparePredicateValues(
+          node.operator,
+          evaluate(node.left),
+          evaluate(node.right),
+        );
+    }
+  };
+  return requireBoolean(evaluate(predicate), "predicate");
+}
+
+const FORBIDDEN_PROJECTION_KEYS = new Set([
+  "asCell",
+  "default",
+  "ifc",
+  "scope",
+]);
+const UNSUPPORTED_PROJECTION_KEYS = new Set([
+  "$ref",
+  "$defs",
+  "definitions",
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "not",
+  "if",
+  "then",
+  "else",
+  "dependentSchemas",
+  "contains",
+  "patternProperties",
+  "prefixItems",
+  "propertyNames",
+  "contentSchema",
+]);
+
+function normalizeProjectionSchema(
+  schema: unknown,
+  path = "<root>",
+): JSONSchema {
+  if (schema === true) return true;
+  if (schema === false) {
+    throw new PieceGetTransformError(
+      `Invalid --schema at ${path}: false cannot project a value`,
+    );
+  }
+  if (!isRecord(schema)) {
+    throw new PieceGetTransformError(
+      `Invalid --schema at ${path}: expected a JSON Schema object`,
+    );
+  }
+  for (const key of Object.keys(schema)) {
+    if (FORBIDDEN_PROJECTION_KEYS.has(key)) {
+      throw new PieceGetTransformError(
+        `Invalid --schema at ${path}: "${key}" is controlled by the source ` +
+          "schema and cannot be supplied by a projection",
+      );
+    }
+    if (UNSUPPORTED_PROJECTION_KEYS.has(key)) {
+      throw new PieceGetTransformError(
+        `Invalid --schema at ${path}: "${key}" is not supported by projection schemas`,
+      );
+    }
+  }
+
+  const result: Record<string, unknown> = { ...schema };
+  if (schema.properties !== undefined) {
+    if (!isRecord(schema.properties)) {
+      throw new PieceGetTransformError(
+        `Invalid --schema at ${path}: "properties" must be an object`,
+      );
+    }
+    result.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([key, child]) => [
+        key,
+        normalizeProjectionSchema(child, `${path}.${key}`),
+      ]),
+    );
+    if (schema.additionalProperties === undefined) {
+      result.additionalProperties = false;
+    }
+  }
+  if (
+    schema.additionalProperties !== undefined &&
+    typeof schema.additionalProperties !== "boolean"
+  ) {
+    result.additionalProperties = normalizeProjectionSchema(
+      schema.additionalProperties,
+      `${path}.*`,
+    );
+  }
+  if (schema.items !== undefined) {
+    result.items = normalizeProjectionSchema(schema.items, `${path}[]`);
+  }
+  return result as JSONSchema;
+}
+
+function conciseProjectionSchema(source: string): JSONSchema {
+  const paths = source.split(",").map((part) => part.trim());
+  if (paths.some((path) => path.length === 0)) {
+    throw new PieceGetTransformError(
+      "Invalid --schema concise projection: expected comma-separated field paths",
+    );
+  }
+  const root: Record<string, unknown> = {};
+  for (const path of paths) {
+    const segments = path.split(".");
+    if (
+      segments.some((segment) => !/^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(segment))
+    ) {
+      throw new PieceGetTransformError(
+        `Invalid --schema field path ${JSON.stringify(path)}`,
+      );
+    }
+    let node = root;
+    for (let index = 0; index < segments.length; index++) {
+      const segment = segments[index];
+      if (index === segments.length - 1) {
+        node[segment] = true;
+        continue;
+      }
+      const existing = node[segment];
+      if (existing === true) continue;
+      if (!isRecord(existing)) {
+        node[segment] = {};
+      }
+      node = node[segment] as Record<string, unknown>;
+    }
+  }
+
+  const toSchema = (node: Record<string, unknown>): JSONSchema => ({
+    type: "object",
+    properties: Object.fromEntries(
+      Object.entries(node).map(([key, value]) => [
+        key,
+        value === true ? true : toSchema(value as Record<string, unknown>),
+      ]),
+    ),
+    additionalProperties: false,
+  });
+  return toSchema(root);
+}
+
+export interface ProjectionParseDependencies {
+  readTextFile?: (path: string) => Promise<string>;
+}
+
+export async function parsePieceGetProjection(
+  source: string,
+  deps: ProjectionParseDependencies = {},
+): Promise<PieceGetProjection> {
+  const trimmed = source.trim();
+  if (trimmed.length === 0) {
+    throw new PieceGetTransformError("--schema must not be empty");
+  }
+
+  if (trimmed.startsWith("@")) {
+    const path = trimmed.slice(1);
+    if (path.length === 0) {
+      throw new PieceGetTransformError(
+        "--schema @file requires a file path",
+      );
+    }
+    let contents: string;
+    try {
+      contents = await (deps.readTextFile ?? Deno.readTextFile)(path);
+    } catch (error) {
+      throw new PieceGetTransformError(
+        `Could not read --schema file "${path}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contents);
+    } catch (error) {
+      throw new PieceGetTransformError(
+        `Invalid JSON in --schema file "${path}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    return {
+      source,
+      schema: normalizeProjectionSchema(parsed),
+      kind: "json",
+    };
+  }
+
+  if (trimmed.startsWith("{") || trimmed === "true" || trimmed === "false") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (error) {
+      throw new PieceGetTransformError(
+        `Invalid JSON passed to --schema: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    return {
+      source,
+      schema: normalizeProjectionSchema(parsed),
+      kind: "json",
+    };
+  }
+
+  return {
+    source,
+    schema: conciseProjectionSchema(trimmed),
+    kind: "concise",
+  };
+}
+
+function schemaTypes(schema: JSONSchema | undefined): string[] {
+  if (!isRecord(schema)) return [];
+  return Array.isArray(schema.type)
+    ? schema.type.filter((value): value is string => typeof value === "string")
+    : typeof schema.type === "string"
+    ? [schema.type]
+    : [];
+}
+
+function schemaIsArray(schema: JSONSchema | undefined): boolean {
+  return schemaTypes(schema).includes("array");
+}
+
+function schemaAtArrayItem(
+  cfc: ContextualFlowControl,
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (schema === undefined) return undefined;
+  const item = cfc.schemaAtPath(schema, ["0"]);
+  return item === false ? undefined : item;
+}
+
+function dereferencedElementSchema(
+  schema: JSONSchema | undefined,
+): JSONSchema {
+  if (!isRecord(schema) || schema.asCell === undefined) {
+    return schema ?? true;
+  }
+  const { asCell: _asCell, ...dereferenced } = schema;
+  return Object.keys(dereferenced).length === 0 ? true : dereferenced;
+}
+
+function filteredOutputSchema(
+  sourceSchema: JSONSchema | undefined,
+  sourceItemSchema: JSONSchema | undefined,
+): JSONSchema {
+  if (!isRecord(sourceSchema)) {
+    return { type: "array", items: true };
+  }
+  const { items: _items, prefixItems: _prefixItems, ...metadata } =
+    sourceSchema;
+  return {
+    ...metadata,
+    type: "array",
+    items: dereferencedElementSchema(sourceItemSchema),
+  };
+}
+
+function projectionMask(schema: JSONSchema): JSONSchema {
+  if (schema === true) return true;
+  if (!isRecord(schema)) return true;
+  if (schema.additionalProperties === true) return true;
+  if (schema.type === "array" || schema.items !== undefined) {
+    return {
+      type: "array",
+      items: schema.items === undefined ? true : projectionMask(schema.items),
+    };
+  }
+  if (schema.type === "object" || schema.properties !== undefined) {
+    return {
+      type: "object",
+      properties: Object.fromEntries(
+        Object.entries(schema.properties ?? {}).map(([key, child]) => [
+          key,
+          projectionMask(child),
+        ]),
+      ),
+      additionalProperties: false,
+    };
+  }
+  return true;
+}
+
+function maskFromPaths(paths: Array<Array<string | number>>): JSONSchema {
+  if (paths.some((path) => path.length === 0)) return true;
+  const build = (
+    remaining: Array<Array<string | number>>,
+  ): JSONSchema => {
+    if (remaining.some((path) => path.length === 0)) return true;
+    const strings = new Map<string, Array<Array<string | number>>>();
+    const numbers = new Map<number, Array<Array<string | number>>>();
+    for (const path of remaining) {
+      const [head, ...tail] = path;
+      const target = typeof head === "number" ? numbers : strings;
+      const key = head as never;
+      const entries = target.get(key) ?? [];
+      entries.push(tail);
+      target.set(key, entries);
+    }
+    if (strings.size > 0 && numbers.size > 0) return true;
+    if (numbers.size > 0) {
+      const max = Math.max(...numbers.keys());
+      if (max < 0 || max > 100) return true;
+      const prefixItems = Array.from(
+        { length: max + 1 },
+        (_, index) => {
+          const children = numbers.get(index);
+          return children === undefined ? true : build(children);
+        },
+      );
+      return { type: "array", prefixItems };
+    }
+    return {
+      type: "object",
+      properties: Object.fromEntries(
+        [...strings].map(([key, children]) => [key, build(children)]),
+      ),
+      additionalProperties: false,
+    };
+  };
+  return paths.length === 0 ? true : build(paths);
+}
+
+function mergeMasks(left: JSONSchema, right: JSONSchema): JSONSchema {
+  if (left === true || right === true) return true;
+  if (!isRecord(left) || !isRecord(right)) return true;
+  if (
+    (left.type === "array" || left.items !== undefined) &&
+    (right.type === "array" || right.items !== undefined)
+  ) {
+    return {
+      type: "array",
+      items: mergeMasks(left.items ?? true, right.items ?? true),
+    };
+  }
+  if (
+    (left.type === "object" || left.properties !== undefined) &&
+    (right.type === "object" || right.properties !== undefined)
+  ) {
+    const properties: Record<string, JSONSchema> = {};
+    for (
+      const key of new Set([
+        ...Object.keys(left.properties ?? {}),
+        ...Object.keys(right.properties ?? {}),
+      ])
+    ) {
+      const leftChild = left.properties?.[key];
+      const rightChild = right.properties?.[key];
+      properties[key] = leftChild === undefined
+        ? rightChild!
+        : rightChild === undefined
+        ? leftChild
+        : mergeMasks(leftChild, rightChild);
+    }
+    return { type: "object", properties, additionalProperties: false };
+  }
+  return true;
+}
+
+function selectSourceSchema(
+  cfc: ContextualFlowControl,
+  source: JSONSchema | undefined,
+  mask: JSONSchema,
+): JSONSchema {
+  if (source === undefined || source === true) return mask;
+  if (source === false || mask === true || !isRecord(mask)) {
+    return source;
+  }
+  if (!isRecord(source)) return source;
+  if (
+    source.$ref !== undefined || source.anyOf !== undefined ||
+    source.oneOf !== undefined || source.allOf !== undefined
+  ) {
+    return source;
+  }
+
+  if (mask.type === "array" || mask.items !== undefined) {
+    if (!schemaIsArray(source)) return source;
+    const sourceItem = schemaAtArrayItem(cfc, source);
+    const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
+    return {
+      ...metadata,
+      type: "array",
+      items: selectSourceSchema(cfc, sourceItem, mask.items ?? true),
+    };
+  }
+
+  if (mask.type === "object" || mask.properties !== undefined) {
+    if (
+      !schemaTypes(source).includes("object") &&
+      source.properties === undefined
+    ) {
+      return source;
+    }
+    const {
+      properties: _properties,
+      required,
+      additionalProperties: _additionalProperties,
+      patternProperties: _patternProperties,
+      ...metadata
+    } = source;
+    const requested = mask.properties ?? {};
+    const properties: Record<string, JSONSchema> = {};
+    for (const [key, childMask] of Object.entries(requested)) {
+      const child = cfc.schemaAtPath(source, [key]);
+      properties[key] = selectSourceSchema(
+        cfc,
+        child === false ? undefined : child,
+        childMask,
+      );
+    }
+    const selectedRequired = required?.filter((key) => key in properties);
+    return {
+      ...metadata,
+      type: "object",
+      properties,
+      ...(selectedRequired?.length ? { required: selectedRequired } : {}),
+      additionalProperties: false,
+    };
+  }
+  return source;
+}
+
+function projectValue(
+  value: unknown,
+  schema: JSONSchema,
+  path = "<root>",
+): unknown {
+  if (schema === true) return value;
+  if (!isRecord(schema)) {
+    throw new PieceGetTransformError(
+      `Cannot project ${path}: unsupported schema`,
+    );
+  }
+  if (schema.type === "array" || schema.items !== undefined) {
+    if (!Array.isArray(value)) {
+      throw new PieceGetTransformError(
+        `Cannot apply --schema at ${path}: expected an array`,
+      );
+    }
+    const itemSchema = schema.items ?? true;
+    return value.map((item, index) =>
+      projectValue(item, itemSchema, `${path}[${index}]`)
+    );
+  }
+  if (schema.type === "object" || schema.properties !== undefined) {
+    if (!isRecord(value)) {
+      throw new PieceGetTransformError(
+        `Cannot apply --schema at ${path}: expected an object`,
+      );
+    }
+    const result: Record<string, unknown> = {};
+    const properties = schema.properties ?? {};
+    for (const [key, childSchema] of Object.entries(properties)) {
+      if (Object.hasOwn(value, key)) {
+        result[key] = projectValue(value[key], childSchema, `${path}.${key}`);
+      } else if (schema.required?.includes(key)) {
+        throw new PieceGetTransformError(
+          `Cannot apply --schema at ${path}: required property "${key}" is missing`,
+        );
+      }
+    }
+    if (
+      schema.additionalProperties === true ||
+      isRecord(schema.additionalProperties)
+    ) {
+      for (const [key, child] of Object.entries(value)) {
+        if (key in properties) continue;
+        if (schema.additionalProperties === true) {
+          result[key] = child;
+        } else {
+          result[key] = projectValue(
+            child,
+            schema.additionalProperties,
+            `${path}.${key}`,
+          );
+        }
+      }
+    }
+    return result;
+  }
+  return value;
+}
+
+interface ResolvedProjection {
+  outputSchema: JSONSchema;
+  projectsArrayItems: boolean;
+  itemSchema?: JSONSchema;
+}
+
+function resolveProjection(
+  projection: PieceGetProjection | undefined,
+  sourceIsArray: boolean,
+  hasFilter: boolean,
+): ResolvedProjection | undefined {
+  if (projection === undefined) return undefined;
+  if (projection.kind === "concise") {
+    const projectsArrayItems = hasFilter || sourceIsArray;
+    return projectsArrayItems
+      ? {
+        outputSchema: { type: "array", items: projection.schema },
+        projectsArrayItems: true,
+        itemSchema: projection.schema,
+      }
+      : {
+        outputSchema: projection.schema,
+        projectsArrayItems: false,
+      };
+  }
+  if (hasFilter && !schemaIsArray(projection.schema)) {
+    throw new PieceGetTransformError(
+      "When --filter is used, a JSON --schema must describe the returned " +
+        'array (for example {"type":"array","items":{...}}).',
+    );
+  }
+  const projectsArrayItems = schemaIsArray(projection.schema);
+  return {
+    outputSchema: projection.schema,
+    projectsArrayItems,
+    ...(projectsArrayItems
+      ? {
+        itemSchema: isRecord(projection.schema)
+          ? projection.schema.items ?? true
+          : true,
+      }
+      : {}),
+  };
+}
+
+export interface DerivePieceGetDependencies {
+  onResultCell?: (cell: Cell<unknown>) => void;
+}
+
+/**
+ * Apply a piece-get filter/projection through an actual runtime pattern graph.
+ *
+ * The filter uses the runner's list builtin, so predicate observations taint
+ * collection membership exactly as they do in authored patterns. Array
+ * projection uses the map builtin for pointwise labels. Object/scalar
+ * projection uses a lift. Caller schemas are structural only; authoritative
+ * CFC metadata comes from the selected source cell's schema and dynamic label
+ * view.
+ */
+export async function derivePieceGetValue(
+  runtime: Runtime,
+  space: MemorySpace,
+  sourceCell: Cell<unknown>,
+  transform: PieceGetTransform,
+  deps: DerivePieceGetDependencies = {},
+): Promise<unknown> {
+  if (transform.filter === undefined && transform.projection === undefined) {
+    return await sourceCell.pull();
+  }
+
+  const cfc = new ContextualFlowControl();
+  const sourceValue = await sourceCell.pull();
+  const sourceSchema = sourceCell.schema;
+  if (transform.filter !== undefined && !Array.isArray(sourceValue)) {
+    throw new PieceGetTransformError(
+      "--filter can only be applied to an array",
+    );
+  }
+  const projection = resolveProjection(
+    transform.projection,
+    Array.isArray(sourceValue),
+    transform.filter !== undefined,
+  );
+  const sourceItemSchema = schemaAtArrayItem(cfc, sourceSchema);
+  const predicateItemMask = transform.filter === undefined
+    ? undefined
+    : maskFromPaths(transform.filter.paths);
+  const projectionMaskSchema = projection === undefined
+    ? undefined
+    : projectionMask(projection.outputSchema);
+  const projectionItemMask = projection?.projectsArrayItems
+    ? projectionMask(projection.itemSchema ?? true)
+    : undefined;
+
+  let sourceMask: JSONSchema = true;
+  if (transform.filter !== undefined && projection === undefined) {
+    // Filtering returns original elements. Keep their complete source schema
+    // on the links that survive, while the predicate pattern below narrows the
+    // actual predicate reads.
+    sourceMask = true;
+  } else if (transform.filter !== undefined) {
+    sourceMask = {
+      type: "array",
+      items: mergeMasks(
+        predicateItemMask ?? true,
+        projectionItemMask ?? true,
+      ),
+    };
+  } else if (projectionMaskSchema !== undefined) {
+    sourceMask = projectionMaskSchema;
+  }
+  const sourceReadSchema = selectSourceSchema(cfc, sourceSchema, sourceMask);
+
+  const { commonfabric } = createBuilder({
+    unsafeHostTrust: runtime.createUnsafeHostTrust({
+      reason: "cf piece get filter/schema computed projection",
+    }),
+  });
+  const { lift, pattern } = commonfabric;
+  const paramsSchema: JSONSchema = {
+    type: "object",
+    additionalProperties: true,
+  };
+
+  let predicatePattern: ReturnType<typeof pattern> | undefined;
+  if (transform.filter !== undefined) {
+    const elementSchema = selectSourceSchema(
+      cfc,
+      sourceItemSchema,
+      predicateItemMask ?? true,
+    );
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        element: dereferencedElementSchema(elementSchema),
+        params: paramsSchema,
+      },
+      required: ["element", "params"],
+      additionalProperties: false,
+    };
+    const predicateModule = lift(
+      ({ element, params }: {
+        element: unknown;
+        params: { predicate: PieceGetPredicate };
+      }) => evaluatePieceGetPredicate(params.predicate, element),
+      argumentSchema,
+      { type: "boolean" },
+    );
+    predicatePattern = pattern(
+      ({ element, params }: any) => predicateModule({ element, params }),
+      argumentSchema,
+      { type: "boolean" },
+    );
+  }
+
+  let itemProjectionPattern: ReturnType<typeof pattern> | undefined;
+  if (projection?.projectsArrayItems) {
+    const itemSchema = projection.itemSchema ?? true;
+    const elementSchema = selectSourceSchema(
+      cfc,
+      sourceItemSchema,
+      projectionItemMask ?? true,
+    );
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        element: dereferencedElementSchema(elementSchema),
+        params: paramsSchema,
+      },
+      required: ["element", "params"],
+      additionalProperties: false,
+    };
+    const projectionModule = lift(
+      ({ element, params }: {
+        element: unknown;
+        params: { schema: JSONSchema };
+      }) => projectValue(element, params.schema),
+      argumentSchema,
+      itemSchema,
+    );
+    itemProjectionPattern = pattern(
+      ({ element, params }: any) => projectionModule({ element, params }),
+      argumentSchema,
+      itemSchema,
+    );
+  }
+
+  const directProjectionArgumentSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      value: sourceReadSchema,
+      params: paramsSchema,
+    },
+    required: ["value", "params"],
+    additionalProperties: false,
+  };
+  const directProjectionModule = projection !== undefined &&
+      !projection.projectsArrayItems
+    ? lift(
+      ({ value, params }: {
+        value: unknown;
+        params: { schema: JSONSchema };
+      }) => projectValue(value, params.schema),
+      directProjectionArgumentSchema,
+      projection.outputSchema,
+    )
+    : undefined;
+
+  const outputSchema: JSONSchema = projection?.outputSchema ??
+    (transform.filter !== undefined
+      ? filteredOutputSchema(sourceSchema, sourceItemSchema)
+      : sourceSchema ?? true);
+  const mainArgumentSchema: JSONSchema = {
+    type: "object",
+    properties: { value: sourceReadSchema },
+    required: ["value"],
+    additionalProperties: false,
+  };
+  const mainResultSchema: JSONSchema = {
+    type: "object",
+    properties: { value: outputSchema },
+    required: ["value"],
+    additionalProperties: false,
+  };
+  const mainPattern = pattern(
+    ({ value }: any) => {
+      let result: any = value;
+      if (predicatePattern !== undefined) {
+        result = result.filterWithPattern(predicatePattern as any, {
+          predicate: transform.filter!.predicate,
+        });
+      }
+      if (itemProjectionPattern !== undefined) {
+        result = result.mapWithPattern(itemProjectionPattern as any, {
+          schema: projection!.itemSchema ?? true,
+        });
+      } else if (directProjectionModule !== undefined) {
+        result = directProjectionModule({
+          value: result,
+          params: { schema: projection!.outputSchema },
+        });
+      }
+      return { value: result };
+    },
+    mainArgumentSchema,
+    mainResultSchema,
+  );
+
+  const tx = runtime.edit();
+  const resultCell = runtime.getCell(
+    space,
+    {
+      pieceGetTransform: {
+        source: sourceCell.getAsNormalizedFullLink(),
+        filter: transform.filter?.source,
+        schema: transform.projection?.source,
+      },
+    },
+    mainResultSchema,
+    tx,
+    "session",
+  );
+  const errors = runtimeErrorLog(runtime);
+  const errorCountBefore = errors.length;
+  const result = runtime.run(
+    tx,
+    mainPattern,
+    { value: sourceCell },
+    resultCell,
+  );
+  try {
+    runtime.prepareTxForCommit(tx);
+    const committed = await tx.commit();
+    if (committed.error !== undefined) {
+      throw new PieceGetTransformError(
+        `Could not apply piece get transform: ${committed.error}`,
+      );
+    }
+    await result.pull();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+    await runtime.idle();
+    const recorded = errors.slice(errorCountBefore).at(-1);
+    if (recorded !== undefined) {
+      throw new PieceGetTransformError(
+        `Could not apply piece get transform: ${recorded.message}`,
+      );
+    }
+    deps.onResultCell?.(result as Cell<unknown>);
+    return result.key("value").get();
+  } finally {
+    runtime.runner.stop(resultCell);
+  }
+}

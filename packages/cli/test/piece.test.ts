@@ -48,6 +48,7 @@ import {
   piece,
   setPieceSourceFromCommand,
 } from "../commands/piece.ts";
+import { parsePieceGetFilter } from "../lib/piece-get-transform.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -545,11 +546,58 @@ describe("cli piece parsing", () => {
     );
   });
 
-  it("offers a one-session step option for piece result reads", () => {
+  it("offers computed transforms for piece reads", () => {
     const getFlags = piece.getCommand("get")!.getOptions().flatMap((option) =>
       option.flags
     );
     expect(getFlags).toContain("--step");
+    expect(getFlags).toContain("--filter");
+    expect(getFlags).toContain("--schema");
+  });
+
+  it("applies get transforms to the selected path cell", async () => {
+    const targetCell = { marker: "selected-path-cell" };
+    const rootCell = {
+      key: (...path: Array<string | number>) => {
+        expect(path).toEqual(["items"]);
+        return targetCell;
+      },
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.resolve([{ id: 1 }, { id: 2 }]),
+            getCell: () => Promise.resolve(rootCell),
+          },
+        }),
+    };
+    const manager = {
+      runtime: { marker: "runtime" },
+      getSpace: () => "did:key:test-space",
+    };
+    const filter = parsePieceGetFilter(".id == 2");
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["items"],
+      { transform: { filter } },
+      {
+        loadManager: () => Promise.resolve(manager as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+        derivePieceGetValue: (runtime, space, source, transform) => {
+          expect(runtime).toBe(manager.runtime as any);
+          expect(space).toBe("did:key:test-space");
+          expect(source).toBe(targetCell as any);
+          expect(transform.filter).toBe(filter);
+          return Promise.resolve([{ id: 2 }]);
+        },
+      },
+    );
+
+    expect(value).toEqual([{ id: 2 }]);
   });
 
   it("steps, reads, syncs, and stops in one get operation", async () => {
