@@ -596,6 +596,21 @@ export function normalizeAndDiff(
         () =>
           `[SEEN_PROMOTE] Promoting inline-aliased array element at path=${pathStr}`,
       );
+      // The promoted document's content must not link back through the
+      // inline location that is about to be repointed: descendants of the
+      // shared object were registered UNDER that location, and a document
+      // whose content links into `/first/...` while `/first` links to the
+      // document is a read-time cycle. Drop those entries so the content
+      // recursion re-derives them under the document root.
+      for (const [registeredKey, registered] of state.seen) {
+        if (
+          registered.id === seenLink.id &&
+          registered.path.length > seenLink.path.length &&
+          seenLink.path.every((seg, i) => registered.path[i] === seg)
+        ) {
+          state.seen.delete(registeredKey);
+        }
+      }
       // Anchoring re-registers the object in `state.seen` under the new
       // document's root, so later occurrences (and the content recursion's
       // own cycle hits) link there.

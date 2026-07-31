@@ -1357,6 +1357,39 @@ describe("data-updating", () => {
       expect(view.list[0]).toEqual({ name: "Ada" });
     });
 
+    it("promotes a shared object with nested content without creating a cycle", () => {
+      // Promotion repoints the earlier inline location at the promoted
+      // document -- so the document's own content must not link back through
+      // that inline location. Descendants of the promoted object registered
+      // under the inline path have to be re-derived under the document root,
+      // or the read of the promoted content chases its own tail ("Link cycle
+      // detected").
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "nested promotion no cycle",
+        undefined,
+        tx,
+      );
+      const shared = { name: "Ada", meta: { role: "pioneer" } };
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        { first: shared, list: [shared] },
+        "nested promotion no cycle",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      const view = testCell.get() as {
+        first: { name: string; meta: { role: string } };
+        list: { name: string; meta: { role: string } }[];
+      };
+      expect(view.first.meta.role).toBe("pioneer");
+      expect(view.list[0].name).toBe("Ada");
+      expect(view.list[0].meta.role).toBe("pioneer");
+    });
+
     it("keeps an array occurrence alive after its inline alias is removed", () => {
       // The lifetime consequence of promotion: rewriting the container
       // without the inline property must leave the array element intact,
@@ -1513,9 +1546,14 @@ describe("data-updating", () => {
           tx,
         );
         // Deep-frozen seed: the stored tree keeps reference identity through
-        // raw reads, so `inner` below IS the stored interior object.
-        const innerSeed = Object.freeze({ name: "Ada" });
-        cell.setRaw(Object.freeze([Object.freeze({ inner: innerSeed })]));
+        // raw reads, so `inner` below IS the stored interior object. Frozen
+        // as statements so the binding keeps its mutable type for `setRaw`.
+        const innerSeed = { name: "Ada" };
+        const seed = [{ inner: innerSeed }];
+        Object.freeze(innerSeed);
+        Object.freeze(seed[0]);
+        Object.freeze(seed);
+        cell.setRaw(seed);
         const stored = cell.getRaw() as { inner: { name: string } }[];
         const inner = stored[0].inner;
         expect(inner).toBe(innerSeed);
@@ -1530,6 +1568,52 @@ describe("data-updating", () => {
           undefined,
         );
         expect(raw[0]).toEqual({ inner: { name: "Ada" } });
+        // The pushed element anchored as its own fresh document.
+        const tailLink = parseLink(raw[1], cell);
+        expect(tailLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(tailLink!, undefined, tx);
+        expect(doc.get()).toEqual({ name: "Ada" });
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("pushing a reference into an untouched NESTED-array prefix leaves it alone", () => {
+      // Same principle one level deeper: an untouched prefix element that is
+      // itself an array descends (arrays are never anchored), but its object
+      // elements hit the identity no-op before being registered -- so a
+      // pushed reference to one of them anchors fresh rather than promoting
+      // and repointing inside the untouched nested array.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "untouched nested-array prefix",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<{ name: string }[][]>(
+          space,
+          "untouched nested-array prefix",
+          undefined,
+          tx,
+        );
+        const innerSeed = { name: "Ada" };
+        const nested = [innerSeed];
+        const seed = [nested];
+        Object.freeze(innerSeed);
+        Object.freeze(nested);
+        Object.freeze(seed);
+        cell.setRaw(seed);
+        const stored = cell.getRaw() as { name: string }[][];
+        const innerObject = stored[0][0];
+        expect(innerObject).toBe(innerSeed);
+
+        cell.push(innerObject as unknown as { name: string }[]);
+
+        const raw = cell.getRaw() as unknown[];
+        // The nested-array prefix is byte-for-byte untouched.
+        expect(parseLink(raw[0])).toBe(undefined);
+        expect(parseLink((raw[0] as unknown[])[0])).toBe(undefined);
+        expect(raw[0]).toEqual([{ name: "Ada" }]);
         // The pushed element anchored as its own fresh document.
         const tailLink = parseLink(raw[1], cell);
         expect(tailLink?.id).not.toBe(undefined);
