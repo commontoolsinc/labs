@@ -366,21 +366,6 @@ describe("arrays", () => {
         });
         expect(isInertArray(new Proxy(arr, {}))).toBe(false);
       });
-
-      it("rejects a proxy whose descriptor trap disavows a reported key", () => {
-        // A spec-legal proxy may report a key from `ownKeys` and yet answer
-        // `undefined` for that key's descriptor. Such an inconsistent object
-        // is not an inert array, rather than being an error to ask about.
-        const proxy = new Proxy([1, 2, 3], {
-          getOwnPropertyDescriptor(target, key) {
-            if (key === "1") {
-              return undefined;
-            }
-            return Object.getOwnPropertyDescriptor(target, key);
-          },
-        });
-        expect(isInertArray(proxy)).toBe(false);
-      });
     });
 
     describe("returns `false` for accessor-backed indices", () => {

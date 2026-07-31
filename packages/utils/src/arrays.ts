@@ -157,13 +157,14 @@ export function isInertArray(array: unknown): boolean {
 
   // Every index (each key before `length`, given the check above) must also
   // hold a data property; an accessor answers `get` / `set` in its descriptor
-  // and has no `value`. (`length` itself is always a data property.) A
-  // missing descriptor is possible only from a proxy whose
-  // `getOwnPropertyDescriptor` trap disavows a key its own `ownKeys` trap
-  // reported; such an inconsistent object is not an inert array.
+  // and has no `value`. (`length` itself is always a data property.) The
+  // non-null assertion trusts the object to answer a descriptor for a key it
+  // itself reported; a proxy that disavows one is buggy (this is a
+  // best-effort system with regards to proxies), and the resulting
+  // `TypeError` is its to own.
   for (let i = 0; i < keys.length - 1; i++) {
-    const descriptor = Object.getOwnPropertyDescriptor(array, keys[i]!);
-    if ((descriptor === undefined) || !("value" in descriptor)) {
+    const descriptor = Object.getOwnPropertyDescriptor(array, keys[i]!)!;
+    if (!("value" in descriptor)) {
       return false;
     }
   }
