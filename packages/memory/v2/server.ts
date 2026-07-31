@@ -639,7 +639,7 @@ class Connection {
         this.send(response);
         return;
       }
-      case "transact":
+      case "transact": {
         if (
           !this.requireSession(
             parsed.requestId,
@@ -649,8 +649,30 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.transact(parsed));
+        const response = await this.server.transact(parsed);
+        // CT-1927 (flag-gated): deliver the space's pending novelty BEFORE
+        // the verdict, so the verdict is preceded on this socket by every
+        // relevant frame — including the frame carrying this commit's own
+        // outcome and its `caughtUpLocalSeq` marker (accepts mark their
+        // writes dirty and stage the obligation in `transact`; rejections
+        // stage theirs in `stageConflictRefreshDirtyIds`). `flushSessions`
+        // serializes on the global refresh chain, so this cannot race a
+        // concurrent pass. A flush failure must not eat the verdict: the
+        // commit's fate is already durable, and the batched refresh remains
+        // scheduled as the recovery path.
+        if (this.server.options.flushBeforeVerdict === true) {
+          try {
+            await this.server.flushSessions([parsed.space]);
+          } catch (error) {
+            console.warn(
+              "memory v2: pre-verdict flush failed; verdict proceeds, batched refresh recovers",
+              error,
+            );
+          }
+        }
+        this.send(response);
         return;
+      }
       case "graph.query":
         if (
           !this.requireSession(
@@ -932,6 +954,19 @@ export class Server {
       sessions?: SessionRegistry;
       store?: URL;
       subscriptionRefreshDelayMs?: number;
+      /**
+       * CT-1927 (experimental, default off; catalogued in
+       * docs/development/EXPERIMENTAL_OPTIONS.md): deliver relevant sync
+       * state to the committing session's space BEFORE sending any transact
+       * verdict, implementing 04-protocol.md §4.11.2 and extending it to
+       * accepts. Restores the cross-channel ordering guarantee (a verdict at
+       * seq N is preceded on the socket by every relevant frame < N) and
+       * stamps `caughtUpLocalSeq` on the frame that actually carries the
+       * outcome, enabling client-side frame-time overlay retirement. Off,
+       * behavior is byte-identical to today (inline verdicts, batched
+       * fan-out).
+       */
+      flushBeforeVerdict?: boolean;
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -2179,6 +2214,26 @@ export class Server {
               seq: commit.seq,
             },
           );
+          if (this.options.flushBeforeVerdict === true) {
+            // CT-1927: stamp the accept's catch-up obligation BEFORE the
+            // pre-verdict flush, so the frame that precedes the verdict
+            // carries `caughtUpLocalSeq >= this localSeq` — the marker
+            // client-side frame-time overlay retirement keys on. The
+            // stamping contract: the frame reflects every decided outcome
+            // ≤ W for the docs it COVERS. The session's own accepted writes
+            // are echo-suppressed by dirty-origin tracking (the verdict
+            // itself carries their truth — CT-1926's post-apply document),
+            // so accepted overlays settle at verdict time as today;
+            // REJECTED commits' docs are staged origin-less
+            // (stageConflictRefreshDirtyIds), so repair frames DO cover
+            // them and their overlays can retire at frame time — closing
+            // the phantom window. Foreign novelty is what this flush
+            // exists to front-run.
+            session.pendingCaughtUpLocalSeq = Math.max(
+              session.pendingCaughtUpLocalSeq,
+              message.commit.localSeq,
+            );
+          }
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
             "entity.count",
