@@ -396,15 +396,8 @@ function valueAtPredicatePath(
   return current;
 }
 
-function requireBoolean(value: unknown, context: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new PieceGetTransformError(
-      `--filter ${context} must evaluate to a boolean, got ${
-        value === null ? "null" : typeof value
-      }`,
-    );
-  }
-  return value;
+function predicateTruthiness(value: unknown): boolean {
+  return value !== false && value !== null;
 }
 
 function comparePredicateValues(
@@ -445,18 +438,13 @@ export function evaluatePieceGetPredicate(
       case "path":
         return valueAtPredicatePath(value, node.path);
       case "not":
-        return !requireBoolean(evaluate(node.value), '"not" operand');
+        return !predicateTruthiness(evaluate(node.value));
       case "boolean": {
-        const left = requireBoolean(
-          evaluate(node.left),
-          `"${node.operator}" left operand`,
-        );
+        const left = predicateTruthiness(evaluate(node.left));
         if (node.operator === "and") {
-          return left &&
-            requireBoolean(evaluate(node.right), '"and" right operand');
+          return left && predicateTruthiness(evaluate(node.right));
         }
-        return left ||
-          requireBoolean(evaluate(node.right), '"or" right operand');
+        return left || predicateTruthiness(evaluate(node.right));
       }
       case "comparison":
         return comparePredicateValues(
@@ -466,7 +454,7 @@ export function evaluatePieceGetPredicate(
         );
     }
   };
-  return requireBoolean(evaluate(predicate), "predicate");
+  return predicateTruthiness(evaluate(predicate));
 }
 
 const FORBIDDEN_PROJECTION_KEYS = new Set([
@@ -504,7 +492,7 @@ function normalizeProjectionSchema(
       `Invalid --schema at ${path}: false cannot project a value`,
     );
   }
-  if (!isRecord(schema)) {
+  if (!isRecord(schema) || Array.isArray(schema)) {
     throw new PieceGetTransformError(
       `Invalid --schema at ${path}: expected a JSON Schema object`,
     );
@@ -525,7 +513,7 @@ function normalizeProjectionSchema(
 
   const result: Record<string, unknown> = { ...schema };
   if (schema.properties !== undefined) {
-    if (!isRecord(schema.properties)) {
+    if (!isRecord(schema.properties) || Array.isArray(schema.properties)) {
       throw new PieceGetTransformError(
         `Invalid --schema at ${path}: "properties" must be an object`,
       );
@@ -539,6 +527,11 @@ function normalizeProjectionSchema(
     if (schema.additionalProperties === undefined) {
       result.additionalProperties = false;
     }
+  } else if (
+    schemaTypes(schema as JSONSchema).includes("object") &&
+    schema.additionalProperties === undefined
+  ) {
+    result.additionalProperties = true;
   }
   if (
     schema.additionalProperties !== undefined &&
@@ -580,7 +573,7 @@ function conciseProjectionSchema(source: string): JSONSchema {
         continue;
       }
       const existing = node[segment];
-      if (existing === true) continue;
+      if (existing === true) break;
       if (!isRecord(existing)) {
         node[segment] = {};
       }
@@ -724,21 +717,42 @@ function filteredOutputSchema(
   };
 }
 
-function projectionMask(schema: JSONSchema): JSONSchema {
+type ObjectProjectionMask = {
+  type: "object";
+  properties: Record<string, ProjectionMask>;
+  additionalProperties: false;
+};
+type ProjectionMask =
+  | true
+  | { type: "array"; items: ProjectionMask }
+  | ObjectProjectionMask;
+type PredicateMask = true | ObjectProjectionMask;
+
+function projectionMask(schema: JSONSchema): ProjectionMask {
   if (schema === true) return true;
-  if (!isRecord(schema)) return true;
-  if (schema.additionalProperties === true) return true;
-  if (schema.type === "array" || schema.items !== undefined) {
+  // `normalizeProjectionSchema()` rejects false schemas before this point.
+  const objectSchema = schema as Exclude<JSONSchema, boolean>;
+  if (
+    objectSchema.additionalProperties === true ||
+    isRecord(objectSchema.additionalProperties)
+  ) {
+    return true;
+  }
+  if (objectSchema.type === "array" || objectSchema.items !== undefined) {
     return {
       type: "array",
-      items: schema.items === undefined ? true : projectionMask(schema.items),
+      items: objectSchema.items === undefined
+        ? true
+        : projectionMask(objectSchema.items),
     };
   }
-  if (schema.type === "object" || schema.properties !== undefined) {
+  if (
+    objectSchema.type === "object" || objectSchema.properties !== undefined
+  ) {
     return {
       type: "object",
       properties: Object.fromEntries(
-        Object.entries(schema.properties ?? {}).map(([key, child]) => [
+        Object.entries(objectSchema.properties ?? {}).map(([key, child]) => [
           key,
           projectionMask(child),
         ]),
@@ -749,34 +763,22 @@ function projectionMask(schema: JSONSchema): JSONSchema {
   return true;
 }
 
-function maskFromPaths(paths: Array<Array<string | number>>): JSONSchema {
+function maskFromPaths(
+  paths: Array<Array<string | number>>,
+): PredicateMask {
   if (paths.some((path) => path.length === 0)) return true;
   const build = (
     remaining: Array<Array<string | number>>,
-  ): JSONSchema => {
+  ): PredicateMask => {
     if (remaining.some((path) => path.length === 0)) return true;
+    if (remaining.some(([head]) => typeof head === "number")) return true;
     const strings = new Map<string, Array<Array<string | number>>>();
-    const numbers = new Map<number, Array<Array<string | number>>>();
     for (const path of remaining) {
       const [head, ...tail] = path;
-      const target = typeof head === "number" ? numbers : strings;
-      const key = head as never;
-      const entries = target.get(key) ?? [];
+      const key = head as string;
+      const entries = strings.get(key) ?? [];
       entries.push(tail);
-      target.set(key, entries);
-    }
-    if (strings.size > 0 && numbers.size > 0) return true;
-    if (numbers.size > 0) {
-      const max = Math.max(...numbers.keys());
-      if (max < 0 || max > 100) return true;
-      const prefixItems = Array.from(
-        { length: max + 1 },
-        (_, index) => {
-          const children = numbers.get(index);
-          return children === undefined ? true : build(children);
-        },
-      );
-      return { type: "array", prefixItems };
+      strings.set(key, entries);
     }
     return {
       type: "object",
@@ -789,52 +791,39 @@ function maskFromPaths(paths: Array<Array<string | number>>): JSONSchema {
   return paths.length === 0 ? true : build(paths);
 }
 
-function mergeMasks(left: JSONSchema, right: JSONSchema): JSONSchema {
+function mergeMasks(
+  left: PredicateMask,
+  right: ProjectionMask,
+): ProjectionMask {
   if (left === true || right === true) return true;
-  if (!isRecord(left) || !isRecord(right)) return true;
-  if (
-    (left.type === "array" || left.items !== undefined) &&
-    (right.type === "array" || right.items !== undefined)
+  if (right.type !== "object") return true;
+  const properties: Record<string, ProjectionMask> = {};
+  for (
+    const key of new Set([
+      ...Object.keys(left.properties),
+      ...Object.keys(right.properties),
+    ])
   ) {
-    return {
-      type: "array",
-      items: mergeMasks(left.items ?? true, right.items ?? true),
-    };
+    const leftChild = left.properties[key];
+    const rightChild = right.properties[key];
+    properties[key] = leftChild === undefined
+      ? rightChild!
+      : rightChild === undefined
+      ? leftChild
+      : mergeMasks(leftChild as PredicateMask, rightChild);
   }
-  if (
-    (left.type === "object" || left.properties !== undefined) &&
-    (right.type === "object" || right.properties !== undefined)
-  ) {
-    const properties: Record<string, JSONSchema> = {};
-    for (
-      const key of new Set([
-        ...Object.keys(left.properties ?? {}),
-        ...Object.keys(right.properties ?? {}),
-      ])
-    ) {
-      const leftChild = left.properties?.[key];
-      const rightChild = right.properties?.[key];
-      properties[key] = leftChild === undefined
-        ? rightChild!
-        : rightChild === undefined
-        ? leftChild
-        : mergeMasks(leftChild, rightChild);
-    }
-    return { type: "object", properties, additionalProperties: false };
-  }
-  return true;
+  return { type: "object", properties, additionalProperties: false };
 }
 
 function selectSourceSchema(
   cfc: ContextualFlowControl,
   source: JSONSchema | undefined,
-  mask: JSONSchema,
+  mask: ProjectionMask,
 ): JSONSchema {
   if (source === undefined || source === true) return mask;
   if (source === false || mask === true || !isRecord(mask)) {
     return source;
   }
-  if (!isRecord(source)) return source;
   if (
     source.$ref !== undefined || source.anyOf !== undefined ||
     source.oneOf !== undefined || source.allOf !== undefined
@@ -842,112 +831,47 @@ function selectSourceSchema(
     return source;
   }
 
-  if (mask.type === "array" || mask.items !== undefined) {
+  if (mask.type === "array") {
     if (!schemaIsArray(source)) return source;
     const sourceItem = schemaAtArrayItem(cfc, source);
     const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
     return {
       ...metadata,
       type: "array",
-      items: selectSourceSchema(cfc, sourceItem, mask.items ?? true),
+      items: selectSourceSchema(cfc, sourceItem, mask.items),
     };
   }
 
-  if (mask.type === "object" || mask.properties !== undefined) {
-    if (
-      !schemaTypes(source).includes("object") &&
-      source.properties === undefined
-    ) {
-      return source;
-    }
-    const {
-      properties: _properties,
-      required,
-      additionalProperties: _additionalProperties,
-      patternProperties: _patternProperties,
-      ...metadata
-    } = source;
-    const requested = mask.properties ?? {};
-    const properties: Record<string, JSONSchema> = {};
-    for (const [key, childMask] of Object.entries(requested)) {
-      const child = cfc.schemaAtPath(source, [key]);
-      properties[key] = selectSourceSchema(
-        cfc,
-        child === false ? undefined : child,
-        childMask,
-      );
-    }
-    const selectedRequired = required?.filter((key) => key in properties);
-    return {
-      ...metadata,
-      type: "object",
-      properties,
-      ...(selectedRequired?.length ? { required: selectedRequired } : {}),
-      additionalProperties: false,
-    };
+  if (
+    !schemaTypes(source).includes("object") &&
+    source.properties === undefined
+  ) {
+    return source;
   }
-  return source;
-}
-
-function projectValue(
-  value: unknown,
-  schema: JSONSchema,
-  path = "<root>",
-): unknown {
-  if (schema === true) return value;
-  if (!isRecord(schema)) {
-    throw new PieceGetTransformError(
-      `Cannot project ${path}: unsupported schema`,
+  const {
+    properties: _properties,
+    required,
+    additionalProperties: _additionalProperties,
+    patternProperties: _patternProperties,
+    ...metadata
+  } = source;
+  const properties: Record<string, JSONSchema> = {};
+  for (const [key, childMask] of Object.entries(mask.properties)) {
+    const child = cfc.schemaAtPath(source, [key]);
+    properties[key] = selectSourceSchema(
+      cfc,
+      child === false ? undefined : child,
+      childMask,
     );
   }
-  if (schema.type === "array" || schema.items !== undefined) {
-    if (!Array.isArray(value)) {
-      throw new PieceGetTransformError(
-        `Cannot apply --schema at ${path}: expected an array`,
-      );
-    }
-    const itemSchema = schema.items ?? true;
-    return value.map((item, index) =>
-      projectValue(item, itemSchema, `${path}[${index}]`)
-    );
-  }
-  if (schema.type === "object" || schema.properties !== undefined) {
-    if (!isRecord(value)) {
-      throw new PieceGetTransformError(
-        `Cannot apply --schema at ${path}: expected an object`,
-      );
-    }
-    const result: Record<string, unknown> = {};
-    const properties = schema.properties ?? {};
-    for (const [key, childSchema] of Object.entries(properties)) {
-      if (Object.hasOwn(value, key)) {
-        result[key] = projectValue(value[key], childSchema, `${path}.${key}`);
-      } else if (schema.required?.includes(key)) {
-        throw new PieceGetTransformError(
-          `Cannot apply --schema at ${path}: required property "${key}" is missing`,
-        );
-      }
-    }
-    if (
-      schema.additionalProperties === true ||
-      isRecord(schema.additionalProperties)
-    ) {
-      for (const [key, child] of Object.entries(value)) {
-        if (key in properties) continue;
-        if (schema.additionalProperties === true) {
-          result[key] = child;
-        } else {
-          result[key] = projectValue(
-            child,
-            schema.additionalProperties,
-            `${path}.${key}`,
-          );
-        }
-      }
-    }
-    return result;
-  }
-  return value;
+  const selectedRequired = required?.filter((key) => key in properties);
+  return {
+    ...metadata,
+    type: "object",
+    properties,
+    ...(selectedRequired?.length ? { required: selectedRequired } : {}),
+    additionalProperties: false,
+  };
 }
 
 interface ResolvedProjection {
@@ -959,11 +883,10 @@ interface ResolvedProjection {
 function resolveProjection(
   projection: PieceGetProjection | undefined,
   sourceIsArray: boolean,
-  hasFilter: boolean,
 ): ResolvedProjection | undefined {
   if (projection === undefined) return undefined;
   if (projection.kind === "concise") {
-    const projectsArrayItems = hasFilter || sourceIsArray;
+    const projectsArrayItems = sourceIsArray;
     return projectsArrayItems
       ? {
         outputSchema: { type: "array", items: projection.schema },
@@ -975,21 +898,25 @@ function resolveProjection(
         projectsArrayItems: false,
       };
   }
-  if (hasFilter && !schemaIsArray(projection.schema)) {
+  const projectsArrayItems = schemaIsArray(projection.schema);
+  if (
+    projection.schema !== true &&
+    sourceIsArray !== projectsArrayItems
+  ) {
     throw new PieceGetTransformError(
-      "When --filter is used, a JSON --schema must describe the returned " +
-        'array (for example {"type":"array","items":{...}}).',
+      sourceIsArray
+        ? "A JSON --schema for an array value must describe the returned " +
+          'array (for example {"type":"array","items":{...}}).'
+        : "An array-rooted JSON --schema can only be applied to an array value.",
     );
   }
-  const projectsArrayItems = schemaIsArray(projection.schema);
   return {
     outputSchema: projection.schema,
     projectsArrayItems,
     ...(projectsArrayItems
       ? {
-        itemSchema: isRecord(projection.schema)
-          ? projection.schema.items ?? true
-          : true,
+        itemSchema: (projection.schema as Exclude<JSONSchema, boolean>).items ??
+          true,
       }
       : {}),
   };
@@ -1005,9 +932,10 @@ export interface DerivePieceGetDependencies {
  * The filter uses the runner's list builtin, so predicate observations taint
  * collection membership exactly as they do in authored patterns. Array
  * projection uses the map builtin for pointwise labels. Object/scalar
- * projection uses a lift. Caller schemas are structural only; authoritative
- * CFC metadata comes from the selected source cell's schema and dynamic label
- * view.
+ * projection uses a lift. Projection nodes are identities over runtime
+ * `asSchema` reads: the source-derived read schema performs the structural
+ * projection while preserving authoritative source CFC metadata. Caller
+ * schemas describe output shape only and cannot replace source metadata.
  */
 export async function derivePieceGetValue(
   runtime: Runtime,
@@ -1031,7 +959,6 @@ export async function derivePieceGetValue(
   const projection = resolveProjection(
     transform.projection,
     Array.isArray(sourceValue),
-    transform.filter !== undefined,
   );
   const sourceItemSchema = schemaAtArrayItem(cfc, sourceSchema);
   const predicateItemMask = transform.filter === undefined
@@ -1041,10 +968,10 @@ export async function derivePieceGetValue(
     ? undefined
     : projectionMask(projection.outputSchema);
   const projectionItemMask = projection?.projectsArrayItems
-    ? projectionMask(projection.itemSchema ?? true)
+    ? projectionMask(projection.itemSchema!)
     : undefined;
 
-  let sourceMask: JSONSchema = true;
+  let sourceMask: ProjectionMask = true;
   if (transform.filter !== undefined && projection === undefined) {
     // Filtering returns original elements. Keep their complete source schema
     // on the links that survive, while the predicate pattern below narrows the
@@ -1054,8 +981,8 @@ export async function derivePieceGetValue(
     sourceMask = {
       type: "array",
       items: mergeMasks(
-        predicateItemMask ?? true,
-        projectionItemMask ?? true,
+        predicateItemMask!,
+        projectionItemMask!,
       ),
     };
   } else if (projectionMaskSchema !== undefined) {
@@ -1079,7 +1006,7 @@ export async function derivePieceGetValue(
     const elementSchema = selectSourceSchema(
       cfc,
       sourceItemSchema,
-      predicateItemMask ?? true,
+      predicateItemMask!,
     );
     const argumentSchema: JSONSchema = {
       type: "object",
@@ -1107,31 +1034,27 @@ export async function derivePieceGetValue(
 
   let itemProjectionPattern: ReturnType<typeof pattern> | undefined;
   if (projection?.projectsArrayItems) {
-    const itemSchema = projection.itemSchema ?? true;
+    const itemSchema = projection.itemSchema!;
     const elementSchema = selectSourceSchema(
       cfc,
       sourceItemSchema,
-      projectionItemMask ?? true,
+      projectionItemMask!,
     );
     const argumentSchema: JSONSchema = {
       type: "object",
       properties: {
         element: dereferencedElementSchema(elementSchema),
-        params: paramsSchema,
       },
-      required: ["element", "params"],
+      required: ["element"],
       additionalProperties: false,
     };
     const projectionModule = lift(
-      ({ element, params }: {
-        element: unknown;
-        params: { schema: JSONSchema };
-      }) => projectValue(element, params.schema),
+      ({ element }: { element: unknown }) => element,
       argumentSchema,
       itemSchema,
     );
     itemProjectionPattern = pattern(
-      ({ element, params }: any) => projectionModule({ element, params }),
+      ({ element }: any) => projectionModule({ element }),
       argumentSchema,
       itemSchema,
     );
@@ -1141,27 +1064,21 @@ export async function derivePieceGetValue(
     type: "object",
     properties: {
       value: sourceReadSchema,
-      params: paramsSchema,
     },
-    required: ["value", "params"],
+    required: ["value"],
     additionalProperties: false,
   };
   const directProjectionModule = projection !== undefined &&
       !projection.projectsArrayItems
     ? lift(
-      ({ value, params }: {
-        value: unknown;
-        params: { schema: JSONSchema };
-      }) => projectValue(value, params.schema),
+      ({ value }: { value: unknown }) => value,
       directProjectionArgumentSchema,
       projection.outputSchema,
     )
     : undefined;
 
   const outputSchema: JSONSchema = projection?.outputSchema ??
-    (transform.filter !== undefined
-      ? filteredOutputSchema(sourceSchema, sourceItemSchema)
-      : sourceSchema ?? true);
+    filteredOutputSchema(sourceSchema, sourceItemSchema);
   const mainArgumentSchema: JSONSchema = {
     type: "object",
     properties: { value: sourceReadSchema },
@@ -1183,14 +1100,9 @@ export async function derivePieceGetValue(
         });
       }
       if (itemProjectionPattern !== undefined) {
-        result = result.mapWithPattern(itemProjectionPattern as any, {
-          schema: projection!.itemSchema ?? true,
-        });
+        result = result.mapWithPattern(itemProjectionPattern as any, {});
       } else if (directProjectionModule !== undefined) {
-        result = directProjectionModule({
-          value: result,
-          params: { schema: projection!.outputSchema },
-        });
+        result = directProjectionModule({ value: result });
       }
       return { value: result };
     },
@@ -1217,7 +1129,7 @@ export async function derivePieceGetValue(
   const result = runtime.run(
     tx,
     mainPattern,
-    { value: sourceCell },
+    { value: sourceCell.asSchema(sourceReadSchema) },
     resultCell,
   );
   try {

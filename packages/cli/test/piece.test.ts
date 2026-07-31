@@ -43,12 +43,16 @@ import {
   localPatternEntry,
   normalizeApiUrl,
   parseLink,
+  parsePieceGetTransformOptions,
   parsePieceOptions,
   parseSpaceOptions,
   piece,
   setPieceSourceFromCommand,
 } from "../commands/piece.ts";
-import { parsePieceGetFilter } from "../lib/piece-get-transform.ts";
+import {
+  parsePieceGetFilter,
+  PieceGetTransformError,
+} from "../lib/piece-get-transform.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -555,6 +559,42 @@ describe("cli piece parsing", () => {
     expect(getFlags).toContain("--schema");
   });
 
+  it("parses piece get transform options", async () => {
+    expect(await parsePieceGetTransformOptions({})).toBeUndefined();
+
+    const filterOnly = await parsePieceGetTransformOptions({
+      filter: ".active",
+    });
+    expect(filterOnly?.filter?.source).toBe(".active");
+    expect(filterOnly?.projection).toBeUndefined();
+
+    const schemaOnly = await parsePieceGetTransformOptions({
+      schema: "id,name",
+    });
+    expect(schemaOnly?.filter).toBeUndefined();
+    expect(schemaOnly?.projection?.source).toBe("id,name");
+
+    const both = await parsePieceGetTransformOptions({
+      filter: ".active",
+      schema: "id",
+    });
+    expect(both?.filter?.source).toBe(".active");
+    expect(both?.projection?.source).toBe("id");
+  });
+
+  it("passes parsed transforms through the piece get command action", async () => {
+    const { code, stderr } = await cf(
+      "piece get " +
+        "--identity ./definitely-missing-piece-get-review.key " +
+        "--api-url https://cf.dev --space common-knowledge " +
+        `--piece ${PIECE} --filter .active --schema id`,
+    );
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain(
+      "definitely-missing-piece-get-review.key",
+    );
+  });
+
   it("applies get transforms to the selected path cell", async () => {
     const targetCell = { marker: "selected-path-cell" };
     const rootCell = {
@@ -568,7 +608,9 @@ describe("cli piece parsing", () => {
         Promise.resolve({
           input: { get: () => Promise.resolve(undefined) },
           result: {
-            get: () => Promise.resolve([{ id: 1 }, { id: 2 }]),
+            get: () => {
+              throw new Error("transform reads must not materialize result");
+            },
             getCell: () => Promise.resolve(rootCell),
           },
         }),
@@ -598,6 +640,90 @@ describe("cli piece parsing", () => {
     );
 
     expect(value).toEqual([{ id: 2 }]);
+  });
+
+  it("preserves transform errors that are not result projection failures", async () => {
+    const transformError = new PieceGetTransformError("invalid transform");
+    const targetCell = {};
+    const rootCell = { key: () => targetCell };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      { transform: { filter: parsePieceGetFilter(".active") } },
+      {
+        loadManager: () =>
+          Promise.resolve({
+            runtime: {},
+            getSpace: () => "did:key:test-space",
+          } as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+        derivePieceGetValue: () => Promise.reject(transformError),
+      },
+    )).rejects.toBe(transformError);
+  });
+
+  it("reports projection failures encountered during transformed reads", async () => {
+    const targetCell = {
+      schema: { type: "number" },
+      getRaw: () => ({ "/": "missing-session-count" }),
+    };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      },
+      key: () => targetCell,
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+    };
+    const deps = {
+      loadManager: () =>
+        Promise.resolve({
+          runtime: {},
+          getSpace: () => "did:key:test-space",
+        } as any),
+      resolvePieceAddress: (_manager: any, id: string) => Promise.resolve(id),
+      createController: () => controller as any,
+    };
+    const options = {
+      transform: { filter: parsePieceGetFilter(".active") },
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () =>
+          Promise.reject(
+            new Error('Cannot access path "count" - property not found'),
+          ),
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
   });
 
   it("steps, reads, syncs, and stops in one get operation", async () => {

@@ -131,8 +131,8 @@ cf piece get --piece ID items \
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
 `.tags[-1]`), JSON literals, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`,
-`not`, and parentheses. The predicate must produce a boolean. Filtering happens
-before schema projection.
+`not`, and parentheses. Like jq, only `false` and `null` are falsey, so a
+missing path simply does not match. Filtering happens before schema projection.
 
 `--schema` accepts one of three forms:
 

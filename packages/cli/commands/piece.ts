@@ -47,6 +47,7 @@ import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
   parsePieceGetFilter,
   parsePieceGetProjection,
+  type PieceGetTransform,
   PieceGetTransformError,
 } from "../lib/piece-get-transform.ts";
 
@@ -73,6 +74,21 @@ export function normalizeApiUrl(apiUrl: string): string {
   normalized.hash = "";
   const href = normalized.toString();
   return basePath ? href : href.slice(0, -1);
+}
+
+export async function parsePieceGetTransformOptions(options: {
+  filter?: string;
+  schema?: string;
+}): Promise<PieceGetTransform | undefined> {
+  const filter = options.filter === undefined
+    ? undefined
+    : parsePieceGetFilter(options.filter);
+  const projection = options.schema === undefined
+    ? undefined
+    : await parsePieceGetProjection(options.schema);
+  return filter === undefined && projection === undefined
+    ? undefined
+    : { filter, projection };
 }
 
 function summarizeForDisplay(value: unknown): unknown {
@@ -1122,18 +1138,11 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
-      const filter = options.filter === undefined
-        ? undefined
-        : parsePieceGetFilter(options.filter);
-      const projection = options.schema === undefined
-        ? undefined
-        : await parsePieceGetProjection(options.schema);
+      const transform = await parsePieceGetTransformOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
         step: options.step,
-        ...(filter !== undefined || projection !== undefined
-          ? { transform: { filter, projection } }
-          : {}),
+        ...(transform === undefined ? {} : { transform }),
       });
       render(value, { json: true });
     } catch (error) {

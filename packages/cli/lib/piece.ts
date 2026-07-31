@@ -2206,9 +2206,39 @@ export async function getCellValue(
       await manager.synced();
     }
 
+    const prop = options.input ? "input" : "result";
+    if (options.transform !== undefined) {
+      const rootCell = await piece[prop].getCell();
+      const targetCell = rootCell.key(...path);
+      let transformed: unknown;
+      try {
+        transformed = await (deps.derivePieceGetValue ?? derivePieceGetValue)(
+          manager.runtime,
+          manager.getSpace(),
+          targetCell,
+          options.transform,
+        );
+      } catch (error) {
+        if (
+          !options.input && error instanceof Error &&
+          error.message.startsWith("Cannot access path") &&
+          await resultProjectionFailedAtPath(piece, path)
+        ) {
+          throw new PieceResultProjectionError(path, shouldStep);
+        }
+        throw error;
+      }
+      if (
+        !options.input && transformed === undefined &&
+        await resultProjectionFailedAtPath(piece, path)
+      ) {
+        throw new PieceResultProjectionError(path, shouldStep);
+      }
+      return transformed;
+    }
+
     let value: unknown;
     try {
-      const prop = options.input ? "input" : "result";
       value = await timeCliPhase(
         `getCellValue.${prop}.get`,
         () => piece[prop].get(path),
@@ -2229,18 +2259,6 @@ export async function getCellValue(
       await resultProjectionFailedAtPath(piece, path)
     ) {
       throw new PieceResultProjectionError(path, shouldStep);
-    }
-
-    if (options.transform !== undefined) {
-      const prop = options.input ? "input" : "result";
-      const rootCell = await piece[prop].getCell();
-      const targetCell = rootCell.key(...path);
-      return await (deps.derivePieceGetValue ?? derivePieceGetValue)(
-        manager.runtime,
-        manager.getSpace(),
-        targetCell,
-        options.transform,
-      );
     }
 
     return value;

@@ -21,12 +21,17 @@ describe("cf piece get transforms", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
+    const runtimeErrors: Array<{ message: string }> = [];
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "observe",
       cfcFlowLabels: "persist",
+      errorHandlers: [
+        (error) => runtimeErrors.push({ message: error.message }),
+      ],
     });
+    (runtime as any)[Symbol.for("cf.cli.runtimeErrorLog")] = runtimeErrors;
   });
 
   afterEach(async () => {
@@ -65,10 +70,112 @@ describe("cf piece get transforms", () => {
     })).toBe(true);
   });
 
-  it("rejects non-boolean predicates", () => {
-    const parsed = parsePieceGetFilter(".name");
-    expect(() => evaluatePieceGetPredicate(parsed.predicate, { name: "Ada" }))
-      .toThrow(PieceGetTransformError);
+  it("uses jq truthiness for predicate values and missing paths", () => {
+    const value = {
+      name: "Ada",
+      zero: 0,
+      empty: "",
+      disabled: false,
+      nil: null,
+    };
+    for (
+      const source of [
+        ".name",
+        ".zero",
+        ".empty",
+        "not .missing",
+        "false or true",
+        ".disabled == false",
+      ]
+    ) {
+      expect(evaluatePieceGetPredicate(
+        parsePieceGetFilter(source).predicate,
+        value,
+      )).toBe(true);
+    }
+    for (const source of [".disabled", ".nil", ".missing"]) {
+      expect(evaluatePieceGetPredicate(
+        parsePieceGetFilter(source).predicate,
+        value,
+      )).toBe(false);
+    }
+  });
+
+  it("returns null for missing, incompatible, and out-of-range paths", () => {
+    const value = {
+      nil: null,
+      name: "Ada",
+      tags: ["first"],
+    };
+    for (
+      const source of [
+        ".nil.child",
+        ".name.child",
+        ".tags.name",
+        ".tags[3]",
+        ".tags[-3]",
+      ]
+    ) {
+      expect(evaluatePieceGetPredicate(
+        parsePieceGetFilter(source).predicate,
+        value,
+      )).toBe(false);
+    }
+    expect(evaluatePieceGetPredicate(
+      parsePieceGetFilter(".tags[0]").predicate,
+      value,
+    )).toBe(true);
+  });
+
+  it("compares strings, numbers, and structured equality", () => {
+    const value = {
+      score: 10,
+      name: "Grace",
+      tags: ["a", "b"],
+    };
+    for (
+      const source of [
+        ".score < 11",
+        ".score <= 10",
+        ".score > 9",
+        ".score >= 10",
+        '.name < "H"',
+        '.tags == .["tags"]',
+        ".tags != null",
+      ]
+    ) {
+      expect(evaluatePieceGetPredicate(
+        parsePieceGetFilter(source).predicate,
+        value,
+      )).toBe(true);
+    }
+    expect(() =>
+      evaluatePieceGetPredicate(
+        parsePieceGetFilter(".score > true").predicate,
+        value,
+      )
+    ).toThrow("--filter > requires two numbers or two strings");
+  });
+
+  it("reports invalid predicate syntax", () => {
+    for (
+      const source of [
+        "",
+        "#",
+        '"unterminated',
+        '"\\x"',
+        "(",
+        ".name)",
+        ".name.",
+        ".name[true]",
+        '.name["key"',
+        "unknown",
+      ]
+    ) {
+      expect(() => parsePieceGetFilter(source)).toThrow(
+        PieceGetTransformError,
+      );
+    }
   });
 
   it("parses concise, inline, and file projection schemas", async () => {
@@ -111,15 +218,116 @@ describe("cf piece get transforms", () => {
         additionalProperties: false,
       },
     });
+
+    const path = await Deno.makeTempFile({ suffix: ".json" });
+    try {
+      await Deno.writeTextFile(path, '{"type":"object"}');
+      expect((await parsePieceGetProjection(`@${path}`)).schema).toEqual({
+        type: "object",
+        additionalProperties: true,
+      });
+    } finally {
+      await Deno.remove(path);
+    }
+  });
+
+  it("collapses overlapping concise paths without exposing siblings", async () => {
+    for (const source of ["author,author.name", "author.name,author"]) {
+      expect((await parsePieceGetProjection(source)).schema).toEqual({
+        type: "object",
+        properties: { author: true },
+        additionalProperties: false,
+      });
+    }
+  });
+
+  it("validates projection schema roots and nested schema objects", async () => {
+    await expect(parsePieceGetProjection("")).rejects.toThrow(
+      "--schema must not be empty",
+    );
+    await expect(parsePieceGetProjection("@")).rejects.toThrow(
+      "--schema @file requires a file path",
+    );
+    await expect(parsePieceGetProjection("@missing.json", {
+      readTextFile: () => Promise.reject(new Error("gone")),
+    })).rejects.toThrow('Could not read --schema file "missing.json": gone');
+    await expect(parsePieceGetProjection("@bad.json", {
+      readTextFile: () => Promise.resolve("{"),
+    })).rejects.toThrow('Invalid JSON in --schema file "bad.json"');
+    await expect(parsePieceGetProjection("@array.json", {
+      readTextFile: () => Promise.resolve("[]"),
+    })).rejects.toThrow("expected a JSON Schema object");
+    await expect(parsePieceGetProjection("{")).rejects.toThrow(
+      "Invalid JSON passed to --schema",
+    );
+    await expect(parsePieceGetProjection("false")).rejects.toThrow(
+      "false cannot project a value",
+    );
+    await expect(parsePieceGetProjection(
+      '{"type":"object","properties":[]}',
+    )).rejects.toThrow('"properties" must be an object');
+    await expect(parsePieceGetProjection("a,,b")).rejects.toThrow(
+      "expected comma-separated field paths",
+    );
+    await expect(parsePieceGetProjection("a.0")).rejects.toThrow(
+      "Invalid --schema field path",
+    );
+  });
+
+  it("normalizes identity and additional-property projection schemas", async () => {
+    expect((await parsePieceGetProjection('{"type":"object"}')).schema)
+      .toEqual({
+        type: "object",
+        additionalProperties: true,
+      });
+    expect(
+      (await parsePieceGetProjection(
+        '{"type":"object","additionalProperties":{"type":"string"}}',
+      )).schema,
+    ).toEqual({
+      type: "object",
+      additionalProperties: { type: "string" },
+    });
+    expect((await parsePieceGetProjection("true")).schema).toBe(true);
   });
 
   it("does not let caller projection schemas forge CFC metadata", async () => {
-    await expect(parsePieceGetProjection(
-      '{"type":"string","ifc":{"confidentiality":["fake"]}}',
-    )).rejects.toThrow(PieceGetTransformError);
-    await expect(parsePieceGetProjection(
-      '{"type":"object","properties":{"secret":{"asCell":["cell"]}}}',
-    )).rejects.toThrow(PieceGetTransformError);
+    for (const key of ["asCell", "default", "ifc", "scope"]) {
+      await expect(parsePieceGetProjection(JSON.stringify({
+        type: "object",
+        properties: {
+          secret: { type: "string", [key]: key === "asCell" ? ["cell"] : {} },
+        },
+      }))).rejects.toThrow(PieceGetTransformError);
+    }
+  });
+
+  it("rejects unsupported projection composition keywords", async () => {
+    for (
+      const key of [
+        "$ref",
+        "$defs",
+        "definitions",
+        "allOf",
+        "anyOf",
+        "oneOf",
+        "not",
+        "if",
+        "then",
+        "else",
+        "dependentSchemas",
+        "contains",
+        "patternProperties",
+        "prefixItems",
+        "propertyNames",
+        "contentSchema",
+      ]
+    ) {
+      await expect(parsePieceGetProjection(JSON.stringify({
+        type: "object",
+        [key]: {},
+      }))).rejects.toThrow(`"${key}" is not supported`);
+    }
   });
 
   it("filters and projects arrays through the runtime pattern graph", async () => {
@@ -158,6 +366,264 @@ describe("cf piece get transforms", () => {
     ]);
   });
 
+  it("does not leak nested siblings from overlapping concise paths", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "overlap-projection-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            author: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                privateEmail: { type: "string" },
+              },
+            },
+            ignored: { type: "string" },
+          },
+        },
+      },
+      tx,
+    );
+    source.set([{
+      author: { name: "Ada", privateEmail: "ada@example.com" },
+      ignored: "hidden",
+    }]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const result = await derivePieceGetValue(runtime, space, source, {
+      projection: await parsePieceGetProjection(
+        "author.name,author.name.first",
+      ),
+    });
+
+    expect(result).toEqual([{ author: { name: "Ada" } }]);
+  });
+
+  it("supports direct projection and identity object schemas", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "object-projection-source",
+      {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          title: { type: "string" },
+        },
+        required: ["id", "title"],
+      },
+      tx,
+    );
+    source.set({ id: 1, title: "Visible" });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("id"),
+      }),
+    ).toEqual({ id: 1 });
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("missing"),
+      }),
+    ).toEqual({});
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection('{"type":"object"}'),
+      }),
+    ).toEqual({ id: 1, title: "Visible" });
+    expect(await derivePieceGetValue(runtime, space, source, {})).toEqual({
+      id: 1,
+      title: "Visible",
+    });
+  });
+
+  it("handles schema-less filters and identity projection schemas", async () => {
+    const tx = runtime.edit();
+    const schemaLess = runtime.getCell(
+      space,
+      "schema-less-filter-source",
+      undefined,
+      tx,
+    );
+    schemaLess.set([1, 2]);
+    const nestedArrays = runtime.getCell(
+      space,
+      "nested-array-filter-source",
+      {
+        type: "array",
+        items: { type: "array", items: { type: "number" } },
+      },
+      tx,
+    );
+    nestedArrays.set([[1], []]);
+    const scalar = runtime.getCell(
+      space,
+      "scalar-projection-source",
+      { type: "string" },
+      tx,
+    );
+    scalar.set("visible");
+    const permissiveArray = runtime.getCell(
+      space,
+      "permissive-array-projection-source",
+      {},
+      tx,
+    );
+    permissiveArray.set([{ id: 1, hidden: true }]);
+    const composedObject = runtime.getCell(
+      space,
+      "composed-object-projection-source",
+      {
+        anyOf: [{
+          type: "object",
+          properties: { id: { type: "number" } },
+        }],
+      },
+      tx,
+    );
+    composedObject.set({ id: 2 });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, schemaLess, {
+        filter: parsePieceGetFilter("true"),
+      }),
+    ).toEqual([1, 2]);
+    expect(
+      await derivePieceGetValue(runtime, space, schemaLess, {
+        filter: parsePieceGetFilter("."),
+      }),
+    ).toEqual([1, 2]);
+    expect(
+      await derivePieceGetValue(runtime, space, nestedArrays, {
+        filter: parsePieceGetFilter(".[0]"),
+      }),
+    ).toEqual([[1]]);
+    expect(
+      await derivePieceGetValue(runtime, space, nestedArrays, {
+        filter: parsePieceGetFilter(".length"),
+        projection: await parsePieceGetProjection(
+          '{"type":"array","items":{"type":"array","items":true}}',
+        ),
+      }),
+    ).toEqual([]);
+    expect(
+      await derivePieceGetValue(runtime, space, schemaLess, {
+        projection: await parsePieceGetProjection("true"),
+      }),
+    ).toEqual([1, 2]);
+    expect(
+      await derivePieceGetValue(runtime, space, schemaLess, {
+        projection: await parsePieceGetProjection('{"type":"array"}'),
+      }),
+    ).toEqual([1, 2]);
+    expect(
+      await derivePieceGetValue(runtime, space, schemaLess, {
+        projection: await parsePieceGetProjection(
+          '{"type":["array","null"],"items":true}',
+        ),
+      }),
+    ).toEqual([1, 2]);
+    expect(
+      await derivePieceGetValue(runtime, space, scalar, {
+        projection: await parsePieceGetProjection('{"type":"string"}'),
+      }),
+    ).toBe("visible");
+    expect(
+      await derivePieceGetValue(runtime, space, permissiveArray, {
+        projection: await parsePieceGetProjection("id"),
+      }),
+    ).toEqual([{ id: 1 }]);
+    expect(
+      await derivePieceGetValue(runtime, space, composedObject, {
+        projection: await parsePieceGetProjection("id"),
+      }),
+    ).toEqual({ id: 2 });
+  });
+
+  it("supports an explicitly closed object projection", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "closed-object-projection-source",
+      {
+        type: "object",
+        properties: { hidden: { type: "string" } },
+      },
+      tx,
+    );
+    source.set({ hidden: "not returned" });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection(
+          '{"type":"object","additionalProperties":false}',
+        ),
+      }),
+    ).toEqual({});
+  });
+
+  it("rejects JSON projection roots that mismatch the selected value", async () => {
+    const tx = runtime.edit();
+    const arraySource = runtime.getCell(
+      space,
+      "array-schema-mismatch-source",
+      { type: "array", items: { type: "object" } },
+      tx,
+    );
+    arraySource.set([{ id: 1 }]);
+    const objectSource = runtime.getCell(
+      space,
+      "object-schema-mismatch-source",
+      { type: "object" },
+      tx,
+    );
+    objectSource.set({ id: 1 });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    await expect(derivePieceGetValue(runtime, space, arraySource, {
+      projection: await parsePieceGetProjection('{"type":"object"}'),
+    })).rejects.toThrow("must describe the returned array");
+    await expect(derivePieceGetValue(runtime, space, objectSource, {
+      projection: await parsePieceGetProjection(
+        '{"type":"array","items":true}',
+      ),
+    })).rejects.toThrow(
+      "can only be applied to an array value",
+    );
+  });
+
+  it("treats a missing filter path as a non-match", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "missing-filter-path-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { id: { type: "number" } },
+        },
+      },
+      tx,
+    );
+    source.set([{ id: 1 }, { id: 2 }]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        filter: parsePieceGetFilter(".missing"),
+      }),
+    ).toEqual([]);
+  });
+
   it("rejects --filter for non-array sources", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(
@@ -172,6 +638,60 @@ describe("cf piece get transforms", () => {
     await expect(derivePieceGetValue(runtime, space, source, {
       filter: parsePieceGetFilter(".id == 1"),
     })).rejects.toThrow("--filter can only be applied to an array");
+  });
+
+  it("reports runtime predicate failures as transform errors", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "predicate-runtime-error-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { score: { type: "boolean" } },
+        },
+      },
+      tx,
+    );
+    source.set([{ score: true }]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    await expect(derivePieceGetValue(runtime, space, source, {
+      filter: parsePieceGetFilter(".score > 1"),
+    })).rejects.toThrow("Could not apply piece get transform");
+  });
+
+  it("reports transform transaction commit failures", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-commit-error-source",
+      {
+        type: "object",
+        properties: { id: { type: "number" } },
+      },
+      setup,
+    );
+    source.set({ id: 1 });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const originalEdit = runtime.edit.bind(runtime);
+    (runtime as any).edit = () => {
+      const tx = originalEdit();
+      (tx as any).commit = () =>
+        Promise.resolve({ error: "forced commit failure" });
+      return tx;
+    };
+    try {
+      await expect(derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("id"),
+      })).rejects.toThrow(
+        "Could not apply piece get transform: forced commit failure",
+      );
+    } finally {
+      (runtime as any).edit = originalEdit;
+    }
   });
 
   it("carries predicate labels on filtered membership like a pattern", async () => {
