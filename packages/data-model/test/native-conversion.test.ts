@@ -600,7 +600,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => shallowFabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
     });
@@ -721,7 +721,7 @@ describe("native-conversion", () => {
           }
         }
         expect(() => shallowFabricFromNativeValue(new BadToJSON())).toThrow(
-          "`toJSON()` on object returned something other than a fabric value",
+          "`toJSON()` on object returned something other than a `FabricValue`",
         );
       });
 
@@ -733,7 +733,7 @@ describe("native-conversion", () => {
         }
         expect(() => shallowFabricFromNativeValue(new ReturnsFunction()))
           .toThrow(
-            "`toJSON()` on object returned something other than a fabric value",
+            "`toJSON()` on object returned something other than a `FabricValue`",
           );
       });
 
@@ -745,14 +745,14 @@ describe("native-conversion", () => {
         }
         expect(() => shallowFabricFromNativeValue(new ReturnsInstance()))
           .toThrow(
-            "`toJSON()` on object returned something other than a fabric value",
+            "`toJSON()` on object returned something other than a `FabricValue`",
           );
       });
 
       it("throws if a function's `toJSON()` returns a non-fabric value", () => {
         const fn = Object.assign(() => 1, { toJSON: () => new Map() });
         expect(() => shallowFabricFromNativeValue(fn)).toThrow(
-          "`toJSON()` on function returned something other than a fabric value",
+          "`toJSON()` on function returned something other than a `FabricValue`",
         );
       });
 
@@ -770,7 +770,7 @@ describe("native-conversion", () => {
         const date = new Date(0) as Date & { extra?: number };
         date.extra = 1;
         expect(() => shallowFabricFromNativeValue(date)).toThrow(
-          "Cannot store Date with extra enumerable properties",
+          "Not representable as a `FabricValue`: Date with extra enumerable properties",
         );
       });
 
@@ -782,7 +782,7 @@ describe("native-conversion", () => {
     describe("throws for non-convertible values", () => {
       it("throws for functions without `toJSON()`", () => {
         expect(() => shallowFabricFromNativeValue(() => {})).toThrow(
-          "Cannot store function per se",
+          "Not representable as a `FabricValue`: function per se",
         );
       });
 
@@ -822,7 +822,7 @@ describe("native-conversion", () => {
 
       it("throws on a unique symbol", () => {
         expect(() => shallowFabricFromNativeValue(Symbol("nope"))).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
     });
@@ -1183,7 +1183,7 @@ describe("native-conversion", () => {
         const obj: any = { a: 1 };
         obj.self = obj;
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1191,7 +1191,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, 2];
         arr.push(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1201,7 +1201,7 @@ describe("native-conversion", () => {
         a.b = b;
         b.a = a;
         expect(() => fabricFromNativeValue(a)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1210,7 +1210,7 @@ describe("native-conversion", () => {
         arr[0] = 1;
         arr[2] = arr; // sparse array with circular reference at index 2
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1218,7 +1218,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, undefined, null];
         arr[3] = arr; // array with undefined element + circular reference
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
     });
@@ -1226,13 +1226,15 @@ describe("native-conversion", () => {
     describe("throws for non-fabric nested values", () => {
       it("throws for nested unique symbol", () => {
         expect(() => fabricFromNativeValue({ val: Symbol("test") })).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
 
       it("throws for deeply nested non-fabric value", () => {
         expect(() => fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } }))
-          .toThrow("Cannot store unique (uninterned) symbol");
+          .toThrow(
+            "Not representable as a `FabricValue`: unique (uninterned) symbol",
+          );
       });
 
       it("accepts nested `bigint`", () => {
@@ -1396,12 +1398,12 @@ describe("native-conversion", () => {
     describe("handles nested functions", () => {
       it("throws for a function property in an object", () => {
         expect(() => fabricFromNativeValue({ a: 1, fn: () => {}, b: 2 }))
-          .toThrow("Cannot store function per se");
+          .toThrow("Not representable as a `FabricValue`: function per se");
       });
 
       it("throws for a function element in an array", () => {
         expect(() => fabricFromNativeValue([1, () => {}, 3]))
-          .toThrow("Cannot store function per se");
+          .toThrow("Not representable as a `FabricValue`: function per se");
       });
 
       it("converts a nested function with `toJSON()` via its `toJSON()` method", () => {
@@ -1424,7 +1426,7 @@ describe("native-conversion", () => {
     describe("throws for top-level function", () => {
       it("throws when a bare function is passed (not nested)", () => {
         expect(() => fabricFromNativeValue(() => {})).toThrow(
-          "Cannot store function per se",
+          "Not representable as a `FabricValue`: function per se",
         );
       });
     });
@@ -1498,7 +1500,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1506,7 +1508,7 @@ describe("native-conversion", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
         expect(() => fabricFromNativeValue({ data: arr })).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1516,7 +1518,7 @@ describe("native-conversion", () => {
         sparse[2] = 3;
         sparse.name = "test";
         expect(() => fabricFromNativeValue(sparse)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1527,7 +1529,7 @@ describe("native-conversion", () => {
         arr.foo = "bar";
         Object.freeze(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1535,7 +1537,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3];
         (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1545,7 +1547,7 @@ describe("native-conversion", () => {
         const obj = { a: 1 } as Record<string | symbol, unknown>;
         obj[Symbol("s")] = 2;
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Cannot store object that is not an inert plain object",
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
         );
       });
 
@@ -1553,7 +1555,7 @@ describe("native-conversion", () => {
         const obj = { a: 1 };
         Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Cannot store object that is not an inert plain object",
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
         );
       });
 
@@ -1561,7 +1563,7 @@ describe("native-conversion", () => {
         const inner = { a: 1 } as Record<string | symbol, unknown>;
         inner[Symbol("s")] = 2;
         expect(() => fabricFromNativeValue([inner])).toThrow(
-          "Cannot store object that is not an inert plain object",
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
         );
       });
 
@@ -1569,7 +1571,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3];
         Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1582,7 +1584,7 @@ describe("native-conversion", () => {
         fake[0] = "a";
         fake.length = 1;
         expect(() => fabricFromNativeValue(fake)).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
 
@@ -1590,7 +1592,7 @@ describe("native-conversion", () => {
         const arr = [1, 2];
         (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
         expect(() => fabricFromNativeValue({ data: arr })).toThrow(
-          "Cannot store array with non-index properties",
+          "Not representable as a `FabricValue`: array with non-index properties",
         );
       });
     });
@@ -1659,7 +1661,7 @@ describe("native-conversion", () => {
 
       it("throws on a nested unique symbol", () => {
         expect(() => fabricFromNativeValue({ k: Symbol("nope") })).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
 
@@ -1676,7 +1678,7 @@ describe("native-conversion", () => {
         // (`isDeepFrozenFabricValue`) must not admit it and short-circuit the
         // validation that `freeze=false` performs (see below).
         expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
     });

@@ -1513,7 +1513,7 @@ describe(
         tx,
       );
       expect(() => c.set({ value: Symbol("nope") })).toThrow(
-        "Cannot store unique (uninterned) symbol",
+        "Not representable as a `FabricValue`: unique (uninterned) symbol",
       );
     });
   },

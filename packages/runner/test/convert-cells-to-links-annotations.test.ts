@@ -79,6 +79,8 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
         doNotConvertCellResults: true,
         includeSchema: true,
       })
-    ).toThrow("Cannot store array with non-index properties");
+    ).toThrow(
+      "Not representable as a `FabricValue`: array with non-index properties",
+    );
   });
 });

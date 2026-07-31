@@ -347,7 +347,8 @@ export function moduleToJSON(module: Module) {
   // Destructure-and-drop the runtime-only methods that handler modules
   // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
   // They are not part of the serialized contract; left in, they would surface
-  // as `Cannot store function per se`, so they are destructured out here.
+  // as a "not representable as a `FabricValue`: function per se" rejection, so
+  // they are destructured out here.
   const {
     implementation: _implementation,
     toJSON: _toJSON,

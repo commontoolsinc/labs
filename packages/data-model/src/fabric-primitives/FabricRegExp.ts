@@ -196,7 +196,8 @@ export class FabricRegExp extends BaseFabricPrimitive
 function rejectExtraRegExpProperties(regex: RegExp): void {
   if (Object.keys(regex).length > 0) {
     throw new Error(
-      "Cannot store RegExp with extra enumerable properties",
+      "Not representable as a `FabricValue`: RegExp with extra enumerable " +
+        "properties",
     );
   }
 }
