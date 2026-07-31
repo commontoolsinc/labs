@@ -390,6 +390,72 @@ commit into that principal's instance. **Its own slice; do not fold it in.**
 > (`server-execution-measurement.ts`, `server-primary-rollout-profile.test.ts`,
 > `server-execution-lunch-poll-placement-gate.test.ts`).
 
+**THE ASSERTED-LANE LEG IS A SEQUENCING PROBLEM, NOT A CARRIER PROBLEM —
+measured 2026-07-30, adjacent pair.** The whole forgery hole is ONE line,
+`engine.ts` `admitExecutionCommitLanes`: `options.actingContext ?? assertedLane`.
+The first operand is host-validated (`#actingReadScopeContext` requires a
+lease-bound executor session AND a live lane grant); the second is read
+unvalidated straight off the wire. Deleting the fallback does not need a new
+authorization check at all — it makes the leak **structurally unreachable**,
+because `scopePrincipal = actingPrincipal ?? principal` then sends a forged
+write to the FORGER'S OWN instance. Measured on the pinned probe: control
+lands `{"value":7}` at bob, hypothesis arm lands it at alice. A deletion, which
+the survival test favours over a re-carry.
+
+**But the fallback population is NOT empty, and that is the whole cost.**
+Instrumented at the server seam over the full runner suite: **114/114** uses
+are `lane=space`, because `commitActingContext` (`runner/src/storage/v2.ts`)
+deliberately sends nothing for the space lane ("stay byte-identical"). So the
+space-rank executor's lane reaches the engine ONLY through the unvalidated
+path. Deleting the fallback first costs **83 memory failures and 16 runner
+failures** — every one a `lease-unbounded-commit` or `commit-rejected:*`
+refusal, i.e. the exact arm the operational target drives to zero. **Nothing
+fails open in the runner arm; every failure is a refusal.** The deletion is
+right in direction and wrong in sequencing.
+
+**Sequence, and do not reorder it:** (1) make the client always send the acting
+context including `"space"` — a one-line change at `runner/src/storage/v2.ts`,
+and `#actingReadScopeContext` already returns the base scope for `"space"`
+without requiring a binding, so no server change; (2) THEN delete the
+`assertedLane` fallback, whose population is now empty; (3) site 1's
+`claim-not-live` is then dead for the wire — an unbound client resolves
+`lane: undefined` and returns before the loop, and a bound executor's missing
+assertion is already a `ProtocolError` upstream.
+
+**§2.1's "the executor sends nothing for the space lane" is load-bearing in a
+way that file cannot show.** It reads as byte-identity preservation; it is also
+what makes the entire space-rank executor population depend on the fallback for
+its FIREWALL. That coupling is invisible from either file alone, and it is what
+turned a "transitional fallback" into a live dependency.
+
+**TWO FAIL-OPENS SURVIVE THE DELETION, and neither is new — `claim-not-live` is
+simply the only thing standing in front of them today.** Both need their own
+answer; neither was solved by the authorization rule either.
+
+- **The forged `"space"` assertion.** Site 1 returns early for `"space"`, so
+  only site 2's `claim-not-live` fences it. **Measured over the real wire** with
+  both throws removed: the commit APPLIES. No cross-principal escalation (the
+  write is space-scoped, where the client already holds WRITE) and provenance is
+  still not minted, so the pinned test's titular property survives. What is lost
+  is the REFUSAL — and with it the guarantee that a scheduler observation
+  claiming to be a served action run came from the executor.
+- **The foreign-session-id lane, `session:<self>:<sid>` where `<sid>` is a
+  session the committer does not own.** Nothing at the engine validates the
+  session-id segment against the committing session: session-id binding is
+  checked at server grant-open and on the read path, and **there is no
+  commit-path equivalent.** This is CA8's cross-session confidentiality trap.
+  Hypothesis B closes it for the wire (no lane resolves from an assertion, and
+  `actingContext` demands a lease-bound session with a live grant) — but it
+  stays open for any path that supplies `actingContext` directly.
+
+**One green pin the ORIGINAL authorization rule would have broken**, worth
+knowing if anyone revives it: `v2-execution-acting-context-test.ts` "an acting
+context resolves the commit's scope with no claim at all" commits at another
+principal's lane with no lease and no claims, and its comment calls it "slice
+1's load-bearing new capability … the shape that has to survive when claims are
+deleted outright." It is an in-process `Engine.applyCommit` affordance, not
+reachable over the wire. Hypothesis B leaves it untouched; the rule rejected it.
+
 **Other open items:**
 
 - **Cross-space reads must be supported** (owner). Not yet exercised by any
