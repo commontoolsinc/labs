@@ -280,7 +280,11 @@ export interface Output {
    * Refresh the OAuth token. Call this from other pieces when the token expires.
    */
   refreshToken: Stream<Record<string, never>>;
-  /** Background updater for proactive token refresh via background-piece-service */
+  /**
+   * Proactive token refresh. Nothing polls this on a schedule today (the
+   * service that used to has been retired); it fires when something sends
+   * to it.
+   */
   bgUpdater: Stream<Record<string, never>>;
 }
 

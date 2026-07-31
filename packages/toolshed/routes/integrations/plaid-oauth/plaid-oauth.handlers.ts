@@ -15,7 +15,7 @@ import {
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
-import { setBGPiece } from "@commonfabric/background-piece";
+import { setBGPiece } from "../bg-registry.ts";
 import {
   type NormalizedLink,
   parseLink,

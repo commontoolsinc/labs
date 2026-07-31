@@ -163,6 +163,13 @@ into the existing `transact` commit**.
 
 ```ts
 // Shown at module scope.
+// Mirrors `SchedulerExecutionContextKey` in the runner; aliased locally
+// because `check-docs` only resolves the `commonfabric` surface.
+type SchedulerExecutionContextKey =
+  | "space"
+  | `user:${string}`
+  | `session:${string}:${string}`;
+
 interface SqliteQueryRequest {
   type: "sqlite.query";
   requestId: string;

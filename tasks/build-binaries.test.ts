@@ -173,14 +173,6 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
       ),
     );
     assertEquals(
-      config.bgPieceServiceEntryPath(),
-      join(root, "packages", "background-piece-service", "src", "main.ts"),
-    );
-    assertEquals(
-      config.bgPieceServiceWorkerPath(),
-      join(root, "packages", "background-piece-service", "src", "worker.ts"),
-    );
-    assertEquals(
       config.toolshedEnvPath(),
       join(root, "packages", "toolshed", "COMPILED"),
     );

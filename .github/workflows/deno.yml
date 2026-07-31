@@ -12,11 +12,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Define the list of binaries we're building
-# This makes it easy to add more binaries in the future
-env:
-  BINARIES: "toolshed bg-piece-service cf"
-
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
 # "Step phase markers" table in docs/development/CI_PERFORMANCE.md for the
@@ -235,7 +230,6 @@ jobs:
           name: common-binaries
           path: |
             ./dist/toolshed
-            ./dist/bg-piece-service
             ./dist/cf
 
   generated-patterns-integration-test:
@@ -951,20 +945,6 @@ jobs:
           cp ./dist/toolshed ./signed/
           cp ./dist/toolshed.sig ./signed/
 
-          # Process bg-piece-service binary
-          echo "Processing binary: bg-piece-service"
-          sha256sum ./dist/bg-piece-service > ./dist/bg-piece-service.hash.txt
-          BG_PIECE_SERVICE_HASH=$(cat ./dist/bg-piece-service.hash.txt | awk '{print $1}')
-          echo "bg-piece-service hash: $BG_PIECE_SERVICE_HASH"
-          echo "bg_piece_service_hash=$BG_PIECE_SERVICE_HASH" >> $GITHUB_OUTPUT
-
-          # Sign the bg-piece-service binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-piece-service.sig ./dist/bg-piece-service
-
-          # Copy to signed directory
-          cp ./dist/bg-piece-service ./signed/
-          cp ./dist/bg-piece-service.sig ./signed/
-
           # Process cf binary
           echo "Processing binary: cf"
           sha256sum ./dist/cf > ./dist/cf.hash.txt
@@ -996,13 +976,6 @@ jobs:
           subject-name: ./dist/toolshed
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
-      - name: 📝 Generate attestation for bg-piece-service binary
-        id: attest_bg_piece_service
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-name: ./dist/bg-piece-service
-          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_piece_service_hash }}
-
       - name: 📝 Generate attestation for cf binary
         id: attest_cf
         uses: actions/attest-build-provenance@v1
@@ -1024,7 +997,6 @@ jobs:
           if-no-files-found: error
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
-            ${{ steps.attest_bg_piece_service.outputs.bundle-path }}
             ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
@@ -1051,17 +1023,6 @@ jobs:
             echo -e "\033[32m✓ toolshed attestation verified successfully\033[0m"
           else
             echo -e "\033[31m✗ toolshed attestation verification failed\033[0m"
-            exit 1
-          fi
-
-          # Verify bg-piece-service binary attestation
-          echo "::group::bg-piece-service attestation details"
-          gh attestation verify ./dist/bg-piece-service -R ${{ github.repository }} --format json | jq
-          echo "::endgroup::"
-          if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ bg-piece-service attestation verified successfully\033[0m"
-          else
-            echo -e "\033[31m✗ bg-piece-service attestation verification failed\033[0m"
             exit 1
           fi
 

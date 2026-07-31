@@ -55,9 +55,8 @@ export function getTracerProvider() {
 
 /**
  * Flush and shut down the tracer provider so buffered spans aren't dropped when
- * the process exits. No-op if telemetry was never initialized. Mirrors the
- * bg-piece-service shutdown so toolshed doesn't lose its last span batch on
- * deploy/restart.
+ * the process exits. No-op if telemetry was never initialized, so toolshed
+ * doesn't lose its last span batch on deploy/restart.
  */
 export async function shutdownOpenTelemetry(): Promise<void> {
   // End any in-flight runtime-bridge spans (e.g. an open storage.push) so

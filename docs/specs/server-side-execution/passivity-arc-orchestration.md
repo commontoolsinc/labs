@@ -626,6 +626,7 @@ population that has never named a lane.
 **AND THE RESTRICTION FAILS OPEN OVER THE WIRE — measured, route closed.**
 
 ```ts
+// Shown for illustration only.
 // TRIED AND REVERTED. Do not re-propose without reading the paragraph below.
 const lane = options.actingContext ??
   (assertedLane === "space" ? "space" : undefined);

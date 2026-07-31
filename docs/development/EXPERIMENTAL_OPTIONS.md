@@ -76,9 +76,9 @@ flags in this category default off unless their section says otherwise.
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
-and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
-the background piece service all go through that one mapping, so their wirings
-cannot drift; the shell reads the same variables from its build-time defines.
+and read by `experimentalOptionsFromEnv(envReader)`. The toolshed and the CLI
+both go through that one mapping, so their wirings cannot drift; the shell
+reads the same variables from its build-time defines.
 Eight flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `serverPrimaryExecution`, `serverPrimaryExecutionDocSetWatch`,
 `serverPrimaryExecutionContextLatticeClaims`, `eagerSourceAnnotation`,
@@ -739,8 +739,8 @@ propagate](#how-flags-propagate).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for non-home roots. Server-side processes (toolshed, CLI,
-  background piece service) leave it off unless the env var is set. End state:
+  builds) run it on for non-home roots. Server-side processes (toolshed, CLI)
+  leave it off unless the env var is set. End state:
   graduate to always-on for system roots once golden-replay coverage has soaked
   and the home audit lands, then delete both auto-update flags.
 - **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
@@ -1373,8 +1373,8 @@ Server Process (Deno)
   +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
 
-The background piece service and the CLI use the same mapping and the same
-presets, so the three server-side wirings agree on how a value parses.
+The CLI uses the same mapping and the same presets, so both server-side
+wirings agree on how a value parses.
 
 ### Browser-side (build-time injection)
 
@@ -1403,12 +1403,6 @@ browser-side flag requires rebuilding the shell. Server-side flags take effect
 on restart without a rebuild. The browser is also the one place a CFC dial is
 host-controlled at construction: the `browserWorker` preset takes
 `cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
-
-### Background piece service
-
-The background piece service reads the same environment variables and builds its
-runtimes (the main process and each worker) through the `productionServer`
-preset, so set the same `EXPERIMENTAL_*` variables when starting it.
 
 ## Enabling flags locally
 

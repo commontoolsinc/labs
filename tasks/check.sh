@@ -41,7 +41,6 @@ FILES_TO_CHECK=()
 # Directory paths (no glob expansion needed)
 DIRS=(
   "packages/api"
-  "packages/background-piece-service"
   "packages/piece"
   "packages/cli/test"
   "packages/cli/commands"

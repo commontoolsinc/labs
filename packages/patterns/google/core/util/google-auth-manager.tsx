@@ -25,8 +25,9 @@
  * Use authIsReady(availability) for shared boolean readiness checks.
  * Keep the writable auth cell selection next to the code that uses it.
  *
- * Token refresh: Tokens auto-refresh via background-piece-service (when registered).
- * For fallback, a "Refresh Session" button is shown in the expired UI.
+ * Token refresh: the `bgUpdater` stream refreshes proactively, but nothing
+ * polls it on a schedule today, so the "Refresh Session" button shown in the
+ * expired UI is the effective refresh path.
  */
 
 import { action, navigateTo, pattern, UI, Writable } from "commonfabric";

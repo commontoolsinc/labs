@@ -103,19 +103,6 @@ export class BuildConfig {
     );
   }
 
-  bgPieceServiceEntryPath() {
-    return this.path("packages", "background-piece-service", "src", "main.ts");
-  }
-
-  bgPieceServiceWorkerPath() {
-    return this.path(
-      "packages",
-      "background-piece-service",
-      "src",
-      "worker.ts",
-    );
-  }
-
   toolshedEnvPath() {
     return this.path("packages", "toolshed", "COMPILED");
   }
@@ -166,7 +153,6 @@ async function build(config: BuildConfig): Promise<void> {
     if (!config.cliOnly) await buildShell(config);
     await prepareWorkspace(config);
     if (!config.cliOnly) await buildToolshed(config);
-    if (!config.cliOnly) await buildBgPieceService(config);
     await buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
@@ -266,36 +252,6 @@ export function toolshedCompileArgs(config: BuildConfig): string[] {
     ...config.toolshedFlags,
     config.toolshedEntryPath(),
   ];
-}
-
-async function buildBgPieceService(config: BuildConfig): Promise<void> {
-  console.log("Building background piece service binary...");
-  const { success } = await new Deno.Command(Deno.execPath(), {
-    args: [
-      ...lockedCompileArgs(config),
-      // Run `--no-check` here, as the `--include`'d
-      // `es2023.d.ts` file will attempt to be checked
-      // as a non-static asset. Checking should be done
-      // prior to building.
-      "--no-check",
-      "--output",
-      config.distPath("bg-piece-service"),
-      "--include",
-      config.bgPieceServiceWorkerPath(),
-      "--include",
-      config.staticAssetsPath(),
-      "-A", // All permissions
-      "--unstable-worker-options", // Required by bg-piece-service
-      config.bgPieceServiceEntryPath(),
-    ],
-    cwd: config.root,
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output();
-  if (!success) {
-    throw new Error("Failed to build background piece service binary");
-  }
-  console.log("Background piece service binary built successfully");
 }
 
 async function buildCli(config: BuildConfig): Promise<void> {
