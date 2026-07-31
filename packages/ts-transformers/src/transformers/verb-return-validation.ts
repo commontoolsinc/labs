@@ -36,6 +36,7 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { detectCallKind } from "../ast/call-kind.ts";
+import { visitEachChildWithJsx } from "../ast/utils.ts";
 
 type VerbBuilderName = "action" | "handler";
 
@@ -65,7 +66,9 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
           this.validateVoidDeclaredBody(node, callKind.builderName, context);
         }
       }
-      return ts.visitEachChild(node, visit, context.tsContext);
+      // JSX-aware: the stock visitor skips `JsxExpression.expression`, which
+      // would silently exempt verbs authored inline in JSX attributes.
+      return visitEachChildWithJsx(node, visit, context.tsContext);
     };
 
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;

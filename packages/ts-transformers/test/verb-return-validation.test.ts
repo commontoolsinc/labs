@@ -205,6 +205,35 @@ Deno.test("an any-assertion opts the return out (fail-open)", async () => {
   assertEquals(errors.length, 0);
 });
 
+Deno.test("verbs authored inline in JSX attributes are judged too", async () => {
+  // The stock ts.visitEachChild skips JsxExpression.expression (the repo's
+  // documented visitor trap); the JSX-aware visitor keeps the guard honest
+  // for verbs written directly in attributes.
+  const source = `
+    import { action, cell, pattern } from "commonfabric";
+    export default pattern(() => {
+      const selected = cell("");
+      return {
+        ui: (
+          <button
+            type="button"
+            onClick={action((id: string) => {
+              return { picked: id };
+            })}
+          >
+            Pick
+          </button>
+        ),
+        selected,
+      };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: COMMONFABRIC_TYPES,
+  });
+  assertEquals(undeclaredReturnErrors(diagnostics).length, 1);
+});
+
 Deno.test("a handler declaring its result is legal", async () => {
   const errors = await errorsIn(`
     const verb = handler<string, { note: string }, { picked: string }>(
