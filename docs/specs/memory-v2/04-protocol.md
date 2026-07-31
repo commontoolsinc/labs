@@ -201,6 +201,11 @@ interface SessionOpenResult {
   sessionId: SessionId;
   sessionToken: string;
   serverSeq: number;
+  // Highest of the session's own localSeqs whose verdicts are decided and
+  // reflected in delivered/served state (SESSION localSeq space, not server
+  // seqs). Lets a resuming client re-anchor its catch-up point without
+  // waiting for a frame. See section 4.11.2 for the stamping contract.
+  caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: {
@@ -347,6 +352,14 @@ interface SessionSync {
   type: "sync";
   fromSeq: number;
   toSeq: number;
+  // Outcome marker (SESSION localSeq space): every verdict of the receiving
+  // session's commits through this localSeq is decided, and this frame
+  // reflects those outcomes for the docs it covers. Stamped on the frame
+  // that carries the outcome (section 4.11.2); releases the client's
+  // read-repair gate and keys frame-time overlay retirement, which is
+  // scoped to the frame's covered docs precisely because a bare marker on
+  // an empty frame covers nothing.
+  caughtUpLocalSeq?: number;
   upserts: Array<{
     branch: BranchId;
     id: EntityId;

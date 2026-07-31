@@ -2208,6 +2208,24 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
+          // Mark dirty IMMEDIATELY after the durable apply, before the first
+          // await (CT-1927 review, B3): during the scheduler side-effect
+          // await below, a concurrent connection's commit runs its own
+          // pre-verdict flush, and that flush must see this durable write's
+          // dirty ids — otherwise its verdict outruns earlier watched
+          // novelty, the exact ordering this feature exists to eliminate.
+          this.markSpaceDirty(
+            message.space,
+            message.commit.operations
+              .filter((operation) => operation.op !== "sqlite")
+              .map((operation) =>
+                toDirtyKey(operation.id, declaredScope(operation.scope))
+              ),
+            {
+              sessionId: message.sessionId,
+              seq: commit.seq,
+            },
+          );
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
@@ -2227,18 +2245,6 @@ export class Server {
             previousReadSpaces,
             session,
           );
-          this.markSpaceDirty(
-            message.space,
-            message.commit.operations
-              .filter((operation) => operation.op !== "sqlite")
-              .map((operation) =>
-                toDirtyKey(operation.id, declaredScope(operation.scope))
-              ),
-            {
-              sessionId: message.sessionId,
-              seq: commit.seq,
-            },
-          );
           if (this.options.flushBeforeVerdict !== false) {
             // CT-1927: stamp the accept's catch-up obligation BEFORE the
             // pre-verdict flush, so the frame that precedes the verdict
@@ -2252,8 +2258,11 @@ export class Server {
             // REJECTED commits' docs are staged origin-less
             // (stageConflictRefreshDirtyIds), so repair frames DO cover
             // them and their overlays can retire at frame time — closing
-            // the phantom window. Foreign novelty is what this flush
-            // exists to front-run.
+            // the phantom window. (Coverage is staged, not guaranteed:
+            // sameSnapshot elides a doc whose durable value the session
+            // cache already holds, in which case the overlay retires at the
+            // verdict as always.) Foreign novelty is what this flush exists
+            // to front-run.
             session.pendingCaughtUpLocalSeq = Math.max(
               session.pendingCaughtUpLocalSeq,
               message.commit.localSeq,
@@ -3283,8 +3292,21 @@ export class Server {
         this.#dirtyOriginsBySpace.set(space, origins);
       }
       for (const id of dirtyIds) {
+        const alreadyDirty = ids.has(id);
         ids.add(id);
         if (origin === undefined) {
+          origins?.delete(id);
+        } else if (
+          alreadyDirty &&
+          origins?.get(id)?.sessionId !== origin.sessionId
+        ) {
+          // Mixed provenance (CT-1927): the doc already carries UNDELIVERED
+          // novelty from a different origin (a foreign write, or an
+          // unattributed staging). Overwriting the origin would let the new
+          // writer's echo suppression hide that foreign novelty from the
+          // writer itself while its sync cursor still advances past it.
+          // Clear the origin instead: mixed docs fan out authoritatively to
+          // every session, the writer included.
           origins?.delete(id);
         } else {
           origins?.set(id, origin);
@@ -3369,7 +3391,14 @@ export class Server {
         this.#lastRefreshDurationMs * 2,
       ),
     );
-    await this.flushSessions();
+    try {
+      await this.flushSessions();
+    } catch (error) {
+      // The failed batch was requeued and rescheduled by refreshLoop; a
+      // timer-driven pass has no caller to surface to, so log rather than
+      // leak an unhandled rejection.
+      console.warn("memory v2: scheduled refresh failed; requeued", error);
+    }
   }
 
   private async waitForConnectionQueuesToDrain(
@@ -3447,22 +3476,57 @@ export class Server {
         // context manager propagates the active context into timer callbacks,
         // so without it this span could parent under whichever memory.transact
         // happened to schedule the refresh.
-        await tracer.startActiveSpan(
-          "memory.fanout",
-          { root: true },
-          async (span) => {
-            span.setAttribute("space.did", space);
-            span.setAttribute("subscriber.count", this.#connections.size);
-            span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
-            try {
-              for (const connection of this.#connections.values()) {
-                await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+        try {
+          await tracer.startActiveSpan(
+            "memory.fanout",
+            { root: true },
+            async (span) => {
+              span.setAttribute("space.did", space);
+              span.setAttribute("subscriber.count", this.#connections.size);
+              span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
+              try {
+                for (const connection of this.#connections.values()) {
+                  await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+                }
+              } finally {
+                span.end();
               }
-            } finally {
-              span.end();
+            },
+          );
+        } catch (error) {
+          // Requeue the consumed batch (CT-1927): the dirty state was taken
+          // before fan-out, so a failure here would otherwise orphan it —
+          // no later refresh fires unless another write happens, and the
+          // pre-verdict flush's "batched refresh recovers" contract would
+          // be false. Merge UNDER anything that accrued meanwhile (newer
+          // provenance wins), reschedule, and rethrow so callers see the
+          // failure.
+          this.#dirtySpaces.add(space);
+          if (dirtyIds !== undefined) {
+            let current = this.#dirtyDocsBySpace.get(space);
+            if (current === undefined) {
+              current = new Set();
+              this.#dirtyDocsBySpace.set(space, current);
             }
-          },
-        );
+            let currentOrigins = this.#dirtyOriginsBySpace.get(space);
+            for (const id of dirtyIds) {
+              if (current.has(id)) {
+                continue;
+              }
+              current.add(id);
+              const origin = dirtyOrigins?.get(id);
+              if (origin !== undefined) {
+                if (currentOrigins === undefined) {
+                  currentOrigins = new Map();
+                  this.#dirtyOriginsBySpace.set(space, currentOrigins);
+                }
+                currentOrigins.set(id, origin);
+              }
+            }
+          }
+          this.scheduleRefresh();
+          throw error;
+        }
       }
 
       if (initial !== undefined) {

@@ -489,8 +489,9 @@ The required ordering invariant is:
 2. Recompute the affected watch unions against that latest state.
 3. Emit sync only after the recomputation is complete.
 
-If a transaction fails with `ConflictError` while such a refresh is pending, the
-server MUST flush the affected watch unions before returning the conflict.
+While such a refresh is pending, the server MUST flush the affected watch
+unions before returning ANY transact verdict for the space — a `ConflictError`
+or an accept (04-protocol.md section 4.11.2, extended by CT-1927).
 
 ### 5.4.6 Session Watch State
 

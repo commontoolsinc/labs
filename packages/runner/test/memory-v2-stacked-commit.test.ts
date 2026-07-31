@@ -2302,13 +2302,10 @@ Deno.test("memory v2 stacked commits: rejection round trip — frame-retire, ver
       readyToRetry?: () => Promise<void>;
     }).readyToRetry;
     assertExists(readyToRetry);
-    const raced = await Promise.race([
-      readyToRetry().then(() => "ready" as const),
-      new Promise<"timeout">((resolve) =>
-        setTimeout(() => resolve("timeout"), 500)
-      ),
-    ]);
-    assertEquals(raced, "ready");
+    // Event-driven: the marker already satisfied the gate, so this resolves
+    // without any further delivery (a hang fails the test's own timeout —
+    // no fabricated 500ms race needed).
+    await readyToRetry();
 
     // The regeneration: rebuild against the repaired confirmed base. The
     // fresh commit gets a fresh localSeq (outside the old marker's reach)

@@ -210,7 +210,10 @@ Deno.test("memory v2 server: flush-before-verdict delivers read repair ahead of 
 
   // FIRST the repair (the winning doc:b), stamped with the rejected commit's
   // marker — §4.11.2's MUST, no longer compensated by a client-side gate
-  // waiting on a 30s timeout.
+  // waiting on a 30s timeout. (Coverage of a rejected doc is staged, not
+  // guaranteed: had the session cache already held the winning value,
+  // sameSnapshot would elide the upsert and the overlay would retire at the
+  // verdict instead.)
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(sync.caughtUpLocalSeq, 1);
@@ -310,4 +313,213 @@ Deno.test("memory v2 server: flag off keeps verdict-first delivery (the catalogu
     sync.upserts.map((upsert) => upsert.id),
     ["of:doc:b"],
   );
+});
+
+Deno.test("memory v2 server: a failed fan-out requeues the batch and the scheduled refresh recovers", async () => {
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://flush-before-verdict-requeue",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Fail INSIDE the fan-out — after refreshLoop has consumed the dirty
+  // state — unlike a stubbed flushSessions, which never consumes it.
+  const original = server.syncSessionForConnection.bind(server);
+  let calls = 0;
+  (server as unknown as {
+    syncSessionForConnection: typeof original;
+  }).syncSessionForConnection = (...args) => {
+    calls += 1;
+    if (calls === 1) {
+      return Promise.reject(new Error("synthetic fan-out failure"));
+    }
+    return original(...args);
+  };
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-a",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  // The verdict survives the failure.
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
+
+  // Recovery: the consumed batch was REQUEUED, so the next pass delivers
+  // the parked foreign novelty and the outcome marker — "batched refresh
+  // recovers" is a kept promise, not a hope.
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(
+    sync.upserts.map((upsert) => upsert.id),
+    ["of:doc:b"],
+  );
+});
+
+Deno.test("memory v2 server: same-doc foreign novelty is not echo-suppressed by the writer's own commit", async () => {
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://flush-before-verdict-mixed-origin",
+  });
+  const { space, committer, committerMessages, committerSessionId } = context;
+
+  // The committer patches doc:b ITSELF — the doc already carrying parked
+  // foreign novelty. Mixed provenance must clear the echo-suppression
+  // origin: suppressing would hide the foreign write from the writer while
+  // its sync cursor advances past it (unrecoverable staleness for a client
+  // without CT-1926 values).
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-b",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "patch",
+        id: "of:doc:b",
+        patches: [{ op: "add", path: "/value/mine", value: true }],
+      }],
+    },
+  }));
+
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(
+    sync.upserts.map((upsert) => ({
+      id: upsert.id,
+      seq: upsert.seq,
+      doc: upsert.doc,
+    })),
+    [{
+      id: "of:doc:b",
+      seq: 2,
+      doc: { value: { from: "writer", mine: true } },
+    }],
+  );
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
+});
+
+Deno.test("memory v2 server: a durable write is visible to a concurrent commit's flush while its side effects await", async () => {
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://flush-before-verdict-durable-visibility",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Second session, gated in its post-commit side effects AFTER the durable
+  // apply. Installed after setup so the fixture's writeDocument is not
+  // gated.
+  const secondMessages: ServerMessage[] = [];
+  const second = server.connect((message) => secondMessages.push(message));
+  await second.receive(encodeMemoryBoundary(HELLO));
+  const secondSessionOpen = expectHelloOk(secondMessages);
+  await second.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "second-open",
+    space,
+    session: {},
+    invocation: authInvocation(secondSessionOpen),
+  }));
+  const secondSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(secondMessages))
+      .ok!.sessionId;
+
+  const gate = Promise.withResolvers<void>();
+  const reached = Promise.withResolvers<void>();
+  const serverInternals = server as unknown as {
+    runPostCommitSchedulerSideEffects: (
+      ...args: unknown[]
+    ) => Promise<void>;
+  };
+  const originalSideEffects = serverInternals.runPostCommitSchedulerSideEffects
+    .bind(server);
+  let gated = false;
+  serverInternals.runPostCommitSchedulerSideEffects = async (...args) => {
+    if (!gated) {
+      gated = true;
+      reached.resolve();
+      await gate.promise;
+    }
+    return await originalSideEffects(...args);
+  };
+
+  // The second session's write to WATCHED doc:a becomes durable, then parks
+  // in its side-effect await — its verdict has not been sent.
+  const secondCommit = second.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "second-a",
+    space,
+    sessionId: secondSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "second" } },
+      }],
+    },
+  }));
+  await reached.promise;
+
+  // The committer's concurrent commit must see the durable doc:a in its
+  // pre-verdict flush: dirty-marking happens before the first await, so a
+  // later verdict can never outrun earlier durable watched novelty.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-c",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:c",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(
+    sync.upserts.map((upsert) => ({ id: upsert.id, seq: upsert.seq }))
+      .toSorted((left, right) => left.id < right.id ? -1 : 1),
+    [
+      { id: "of:doc:a", seq: 2 },
+      { id: "of:doc:b", seq: 1 },
+    ],
+  );
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 3);
+
+  gate.resolve();
+  await secondCommit;
 });

@@ -235,8 +235,10 @@ Practical guidance:
 - keep the client watch view incrementally ordered instead of rebuilding and
   sorting the full entity set on every emit
 
-Before returning a `ConflictError`, flush any already-committed relevant sync so
-the client can retry on fresh watched state.
+Before returning ANY transact verdict — `ConflictError` or an accept — flush
+any already-committed relevant sync so the client acts on fresh watched state
+(04-protocol.md section 4.11.2; shipped default-on as `flushBeforeVerdict`,
+CT-1927).
 
 ## 11. Query / Traversal Reuse
 
