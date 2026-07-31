@@ -1738,8 +1738,7 @@ export type HandlerFactory<E, T, R = void> =
 // JSON types
 
 /**
- * Pure deeply-immutable JSON value, with the addition of a sidecar of
- * annotations keyed by unique symbols.
+ * Pure deeply-immutable JSON value.
  */
 export type JSONValue =
   | null

@@ -14,7 +14,7 @@ import {
 // array; the `id` field here is ordinary application data. See
 // docs/common/PATTERNS.md for simpler examples using bidirectional binding.
 interface Item {
-  id: number;
+  id?: number;
   title: string;
 }
 
