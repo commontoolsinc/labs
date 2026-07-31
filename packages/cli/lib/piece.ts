@@ -4,7 +4,6 @@ import { caseFold } from "unicode-case-folding";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
-  cellAtPath,
   entityIdFrom,
   experimentalOptionsFromEnv,
   formatFabricRef,
@@ -2194,7 +2193,7 @@ export async function getCellValue(
       await piece.getCell().pull();
       const rootCell =
         await (options.input ? piece.input.getCell() : piece.result.getCell());
-      const targetCell = cellAtPath(rootCell, path);
+      const targetCell = rootCell.key(...path);
       await targetCell.pull();
       await manager.synced();
       await manager.runtime.idle();
