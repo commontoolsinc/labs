@@ -8,6 +8,7 @@ import {
   describeError,
   isClean,
   parseVintagePath,
+  patternKeyFromMain,
   PINNED,
   relativeToRepo,
   reportFailures,
@@ -25,7 +26,7 @@ import {
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
-  schemaWithUnknownsRelaxed,
+  schemaRelaxedForComparison,
   strandedKeys,
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -38,16 +39,25 @@ import {
 const ID_A = "bafyaaaa";
 const ID_B = "bafybbbb";
 
+/**
+ * Just the keys. Most comparison cases below are about WHICH keys are findings;
+ * how each one GRADES is its own describe block at the end of that section.
+ */
+const findingKeys = (
+  before: Record<string, unknown>,
+  after: unknown,
+): string[] => strandedKeys(before, after).map((finding) => finding.key);
+
 describe("vintage paths", () => {
   it("round-trips a path it built itself", () => {
     const stamp = stampFor(new Date("2026-07-29T16:33:28.000Z"));
-    const path = `${vintageDir("system/home.tsx", PINNED)}/${
+    const path = `${vintageDir("system/home.test.tsx", PINNED)}/${
       vintageFileName(stamp, ID_A)
     }`;
     const parsed = parseVintagePath(path);
 
     expect(parsed).toEqual({
-      patternKey: "system/home.tsx",
+      testKey: "system/home.test.tsx",
       tier: PINNED,
       stamp,
       identity: ID_A,
@@ -63,7 +73,7 @@ describe("vintage paths", () => {
     const stamp = stampFor(new Date("2026-07-29T16:33:28.000Z"));
     expect(stamp).toContain("-");
     const parsed = parseVintagePath(
-      `${vintageDir("system/home.tsx", PINNED)}/${
+      `${vintageDir("system/home.test.tsx", PINNED)}/${
         vintageFileName(stamp, ID_A)
       }`,
     );
@@ -82,7 +92,7 @@ describe("vintage paths", () => {
     const stamp = stampFor(new Date("2026-07-29T16:40:22.484Z"));
     const dashed = "xaLUAd13811rdYUEzKt7vaXYy-P8PAkhRcvqRshiNW4";
     const parsed = parseVintagePath(
-      `${vintageDir("system/home.tsx", PINNED)}/${
+      `${vintageDir("system/home.test.tsx", PINNED)}/${
         vintageFileName(stamp, dashed)
       }`,
     );
@@ -108,12 +118,12 @@ describe("vintage paths", () => {
   });
 
   it("keeps a pattern key with directories intact", () => {
-    const path = `${vintageDir("google/core/imported-calendar.tsx", AUTO)}/${
-      vintageFileName("2026-01-01T00-00-00.000Z", ID_A)
-    }`;
+    const path = `${
+      vintageDir("google/core/imported-calendar.test.tsx", AUTO)
+    }/${vintageFileName("2026-01-01T00-00-00.000Z", ID_A)}`;
     const parsed = parseVintagePath(path);
 
-    expect(parsed?.patternKey).toBe("google/core/imported-calendar.tsx");
+    expect(parsed?.testKey).toBe("google/core/imported-calendar.test.tsx");
     expect(parsed?.tier).toBe(AUTO);
   });
 
@@ -122,11 +132,11 @@ describe("vintage paths", () => {
     // walk a directory holding a README without the gate dying on it.
     for (
       const path of [
-        `${VINTAGES_DIR}/system/home.tsx/pinned/README.md`,
-        `${VINTAGES_DIR}/system/home.tsx/pinned/no-identity.sqlite`,
+        `${VINTAGES_DIR}/system/home.test.tsx/pinned/README.md`,
+        `${VINTAGES_DIR}/system/home.test.tsx/pinned/no-identity.sqlite`,
         `${VINTAGES_DIR}/loose.sqlite`,
         "packages/patterns/system/home.tsx",
-        `${VINTAGES_DIR}/system/home.tsx/pinned/-${ID_A}.sqlite`,
+        `${VINTAGES_DIR}/system/home.test.tsx/pinned/-${ID_A}.sqlite`,
       ]
     ) {
       expect(parseVintagePath(path), `should decline: ${path}`).toBeUndefined();
@@ -138,7 +148,7 @@ describe("vintage paths", () => {
     // each is a raw `.sqlite` under a `.sqlite.spaces/` directory. Enumerating
     // one as a vintage in its own right would replay another space's store
     // against a pattern key it never belonged to.
-    const fixture = `${vintageDir("system/home.tsx", PINNED)}/${
+    const fixture = `${vintageDir("system/home.test.tsx", PINNED)}/${
       vintageFileName("2026-01-01T00-00-00.000Z", ID_A)
     }`;
     const companions = vintageCompanionDir(fixture);
@@ -174,12 +184,12 @@ describe("vintage paths", () => {
 });
 
 describe("coverage", () => {
-  const pinned = (patternKey: string, identity: string) => ({
-    patternKey,
+  const pinned = (testKey: string, identity: string) => ({
+    testKey,
     tier: PINNED,
     stamp: "2026-07-29T00-00-00.000Z",
     identity,
-    path: `${vintageDir(patternKey, PINNED)}/x`,
+    path: `${vintageDir(testKey, PINNED)}/x`,
   });
 
   it("counts only PINNED vintages as coverage", () => {
@@ -189,7 +199,7 @@ describe("coverage", () => {
     const covered = coveredPatternKeys([
       pinned("system/home.tsx", ID_A),
       {
-        patternKey: "system/journal.tsx",
+        testKey: "system/journal.tsx",
         tier: AUTO,
         stamp: "2026-07-29T00-00-00.000Z",
         identity: ID_B,
@@ -201,9 +211,12 @@ describe("coverage", () => {
   });
 
   it("reports a required pattern with no vintage", () => {
+    // Coverage is what the replay actually REPLAYED, not what the fixture tree
+    // looks like: a fixture is named after the test that made it and covers
+    // several patterns, so a directory name is no longer the evidence.
     const uncovered = uncoveredRequiredPatterns(
       ["system/home.tsx", "system/default-app.tsx"],
-      [pinned("system/home.tsx", ID_A)],
+      new Set(["system/home.tsx"]),
     );
 
     expect(uncovered).toEqual(["system/default-app.tsx"]);
@@ -213,9 +226,10 @@ describe("coverage", () => {
     // A vintage that EXISTS is always replayed; this list only governs what is
     // REQUIRED. Requiring everything under system/ would wedge the gate on the
     // files there that are not patterns at all.
-    expect(uncoveredRequiredPatterns(["system/home.tsx"], [
-      pinned("system/home.tsx", ID_A),
-    ])).toEqual([]);
+    expect(uncoveredRequiredPatterns(
+      ["system/home.tsx"],
+      new Set(["system/home.tsx"]),
+    )).toEqual([]);
   });
 
   it("derives the required set from the runtime's own URL constants", () => {
@@ -244,9 +258,11 @@ describe("coverage", () => {
   });
 
   it("treats several vintages of one pattern as one covered pattern", () => {
+    // One pattern replayed by two different fixtures is still one covered
+    // pattern — the union is what counts.
     const uncovered = uncoveredRequiredPatterns(
       ["system/home.tsx"],
-      [pinned("system/home.tsx", ID_A), pinned("system/home.tsx", ID_B)],
+      new Set(["system/home.tsx", "system/home.tsx"]),
     );
 
     expect(uncovered).toEqual([]);
@@ -257,7 +273,7 @@ describe("collectVintages", () => {
   it("finds fixtures at any depth and ignores non-fixtures", async () => {
     const root = await Deno.makeTempDir({ prefix: "vintage-collect-" });
     try {
-      const dir = `${root}/system/home.tsx/pinned`;
+      const dir = `${root}/system/home.test.tsx/pinned`;
       await Deno.mkdir(dir, { recursive: true });
       await Deno.writeTextFile(
         `${dir}/2026-07-29T16-33-28.000Z-${ID_A}.sqlite`,
@@ -267,11 +283,11 @@ describe("collectVintages", () => {
 
       const found = await collectVintages(root);
       expect(found.map((v) => ({
-        patternKey: v.patternKey,
+        testKey: v.testKey,
         tier: v.tier,
         identity: v.identity,
       }))).toEqual([
-        { patternKey: "system/home.tsx", tier: PINNED, identity: ID_A },
+        { testKey: "system/home.test.tsx", tier: PINNED, identity: ID_A },
       ]);
     } finally {
       await Deno.remove(root, { recursive: true }).catch(() => {});
@@ -287,8 +303,8 @@ describe("collectVintages", () => {
 
 describe("reporting", () => {
   const failure = {
-    patternKey: "system/home.tsx",
-    path: `${VINTAGES_DIR}/system/home.tsx/pinned/x.sqlite`,
+    testKey: "system/home.test.tsx",
+    path: `${VINTAGES_DIR}/system/home.test.tsx/pinned/x.sqlite`,
     detail: "materializing today's source over this vintage was REFUSED",
   };
 
@@ -311,7 +327,9 @@ describe("reporting", () => {
   it("names the pattern, the fixture, and the rejection for each failure", () => {
     const report = reportFailures([failure]);
 
-    expect(report).toContain("system/home.tsx");
+    // The fixture is named after the TEST that produced it, so that is what a
+    // failure line points at — the manifest says which patterns it covers.
+    expect(report).toContain("system/home.test.tsx");
     expect(report).toContain(failure.path);
     expect(report).toContain("REFUSED");
     // The stakes, because a red gate on a test fixture reads as ignorable and
@@ -322,7 +340,7 @@ describe("reporting", () => {
   it("reports every failure, not just the first", () => {
     const report = reportFailures([
       failure,
-      { ...failure, patternKey: "system/default-app.tsx" },
+      { ...failure, testKey: "system/default-app.tsx" },
     ]);
 
     expect(report).toContain("2 vintage(s)");
@@ -463,7 +481,7 @@ describe("stranded-state comparison", () => {
   it("reports a key whose value the update stopped preserving", () => {
     // The class the gate exists for. A moved storage key leaves the contract
     // untouched and the data unreachable, so the value is the only witness.
-    expect(strandedKeys(
+    expect(findingKeys(
       { journal: [{ event: "created" }], items: ["a"] },
       { journal: [], items: ["a"] },
     )).toEqual(["journal"]);
@@ -472,30 +490,30 @@ describe("stranded-state comparison", () => {
   it("does not report a key the update ADDED", () => {
     // Adding a field is what `Default<>` is for. Only keys present BEFORE are
     // compared; treating a new key as loss would fail every additive change.
-    expect(strandedKeys({ items: ["a"] }, { items: ["a"], favorites: [] }))
+    expect(findingKeys({ items: ["a"] }, { items: ["a"], favorites: [] }))
       .toEqual([]);
   });
 
   it("reports a key that disappeared entirely", () => {
-    expect(strandedKeys({ items: ["a"] }, {})).toEqual(["items"]);
+    expect(findingKeys({ items: ["a"] }, {})).toEqual(["items"]);
   });
 
   it("treats a missing after-state as everything stranded", () => {
     // A materialize that produced no readable root lost all of it; saying
     // "nothing changed" there would be the quietest possible false green.
-    expect(strandedKeys({ a: 1, b: 2 }, undefined)).toEqual(["a", "b"]);
+    expect(findingKeys({ a: 1, b: 2 }, undefined)).toEqual(["a", "b"]);
   });
 
   it("compares by value, not identity", () => {
-    expect(strandedKeys({ a: [1, 2] }, { a: [1, 2] })).toEqual([]);
-    expect(strandedKeys({ a: [1, 2] }, { a: [2, 1] })).toEqual(["a"]);
+    expect(findingKeys({ a: [1, 2] }, { a: [1, 2] })).toEqual([]);
+    expect(findingKeys({ a: [1, 2] }, { a: [2, 1] })).toEqual(["a"]);
   });
 
   it("does not treat an empty before-state as a finding", () => {
     // A vintage whose root held nothing has nothing to strand. The "did it
     // restore" control is what catches an empty fixture; this must not
     // double-report it as data loss.
-    expect(strandedKeys({}, { items: ["a"] })).toEqual([]);
+    expect(findingKeys({}, { items: ["a"] })).toEqual([]);
   });
 
   it("does not compare the RENDERINGS", () => {
@@ -504,7 +522,7 @@ describe("stranded-state comparison", () => {
     // committed `default-app.tsx` fixture, a COMMENT-only edit to
     // `piece-grid.tsx` reports `$UI` as stranded. Comparing them says nothing
     // about data and reds every pattern edit.
-    expect(strandedKeys(
+    expect(findingKeys(
       { $UI: { children: [null] }, $TILE_UI: { a: 1 }, $CHIP_UI: 1, items: [] },
       { $UI: { children: [[]] }, $TILE_UI: { a: 2 }, $CHIP_UI: 2, items: [] },
     )).toEqual([]);
@@ -524,9 +542,9 @@ describe("stranded-state comparison", () => {
       props: {},
       children: [{ type: "vnode", name: "td", props: {}, children: [label] }],
     });
-    expect(strandedKeys(row("🗑️"), row("✕"))).toEqual([]);
+    expect(findingKeys(row("🗑️"), row("✕"))).toEqual([]);
     // ...and nested inside state, where the name list cannot reach it either.
-    expect(strandedKeys(
+    expect(findingKeys(
       { items: [{ label: "a", view: row("🗑️") }] },
       { items: [{ label: "a", view: row("✕") }] },
     )).toEqual([]);
@@ -536,9 +554,9 @@ describe("stranded-state comparison", () => {
     // The reduction is not a blanket skip of anything vnode-shaped: it says
     // "two renderings are the same artifact", not "this key is exempt".
     const view = { type: "vnode", name: "tr", props: {}, children: [] };
-    expect(strandedKeys({ preview: view }, { preview: ["a"] }))
+    expect(findingKeys({ preview: view }, { preview: ["a"] }))
       .toEqual(["preview"]);
-    expect(strandedKeys({ preview: ["a"] }, { preview: view }))
+    expect(findingKeys({ preview: ["a"] }, { preview: view }))
       .toEqual(["preview"]);
   });
 
@@ -546,7 +564,7 @@ describe("stranded-state comparison", () => {
     // The exclusion is the renderings, NOT derived values in general: `$NAME`
     // stayed equal across both measured UI-only edits, and it is a cheap tell
     // that the data behind it went missing.
-    expect(strandedKeys({ $NAME: "Home (2)" }, { $NAME: "Home (0)" }))
+    expect(findingKeys({ $NAME: "Home (2)" }, { $NAME: "Home (0)" }))
       .toEqual(["$NAME"]);
   });
 
@@ -559,8 +577,69 @@ describe("stranded-state comparison", () => {
     const held = new FabricBytes(new Uint8Array([1, 2, 3]));
     const identical = new FabricBytes(new Uint8Array([1, 2, 3]));
     const different = new FabricBytes(new Uint8Array([9, 9, 9]));
-    expect(strandedKeys({ blob: held }, { blob: identical })).toEqual([]);
-    expect(strandedKeys({ blob: held }, { blob: different })).toEqual(["blob"]);
+    expect(findingKeys({ blob: held }, { blob: identical })).toEqual([]);
+    expect(findingKeys({ blob: held }, { blob: different })).toEqual(["blob"]);
+  });
+
+  it("grades a value that went EMPTY as lost, and one that merely changed as not", () => {
+    // The grading the gate keys its verdict on: `lost` fails, a bare change
+    // only warns. All three of these are real measurements from the committed
+    // fixtures, and none of them is data going missing — each is the new
+    // version resolving something the old one had left unresolved, because a
+    // replay recomputes as well as reads.
+    const changed = [
+      // `topic.tsx` backfilling from its own `createdByName` shadow.
+      [{ createdBy: { kind: "person", name: "" } }, {
+        createdBy: { kind: "person", name: "t" },
+      }],
+      [{ $NAME: "Topics (2)" }, { $NAME: "Topics (3)" }],
+      [{ artSyncState: "" }, { artSyncState: "generated" }],
+    ] as const;
+    for (const [before, after] of changed) {
+      const findings = strandedKeys(before, after);
+      expect(findings.length, `${JSON.stringify(before)}`).toBe(1);
+      expect(findings[0].lost, `${JSON.stringify(before)} should only warn`)
+        .toBe(false);
+    }
+
+    // ...and the shape that still stops the gate: something became nothing.
+    for (
+      const [before, after] of [
+        [{ journal: [{ event: "created" }] }, { journal: [] }],
+        [{ items: ["a"] }, {}],
+        [{ title: "captured" }, { title: "" }],
+        [{ count: 7 }, { count: 0 }],
+        [{ enabled: true }, { enabled: false }],
+        [{ child: { note: "captured" } }, { child: {} }],
+      ] as const
+    ) {
+      const findings = strandedKeys(before, after);
+      expect(findings.length, `${JSON.stringify(before)}`).toBe(1);
+      expect(findings[0].lost, `${JSON.stringify(before)} should FAIL`)
+        .toBe(true);
+    }
+  });
+
+  it("does not call a value lost when it was already empty", () => {
+    // Nothing to lose. An empty-to-different transition is the ordinary
+    // additive case a replay produces constantly, and grading it as loss would
+    // fail the gate on every field a new version starts filling in.
+    const findings = strandedKeys({ note: "" }, { note: "written" });
+    expect(findings.map((finding) => finding.lost)).toEqual([false]);
+  });
+
+  it("does not call a reduction empty — a cell names a document", () => {
+    // `{"[cell]": {...}}` is an identity, not a container, so an
+    // empty-LOOKING one is a cell that exists and points somewhere. Reading it
+    // as empty would grade every cell-valued key that moved as merely changed,
+    // which is exactly backwards: a moved document is the class the gate is
+    // for.
+    const cell = (id: string) => ({ "[cell]": { space: "s", id, path: [] } });
+    const findings = strandedKeys({ ref: cell("a") }, { ref: cell("b") });
+    expect(findings.map((finding) => finding.key)).toEqual(["ref"]);
+    expect(findings[0].lost).toBe(false);
+    // ...but a cell-valued key that became nothing IS lost.
+    expect(strandedKeys({ ref: cell("a") }, {})[0].lost).toBe(true);
   });
 
   it("survives a value that points back at itself", () => {
@@ -572,7 +651,7 @@ describe("stranded-state comparison", () => {
     before.self = before;
     const after: Record<string, unknown> = { items: ["a"] };
     after.self = after;
-    expect(strandedKeys(before, after)).toEqual([]);
+    expect(findingKeys(before, after)).toEqual([]);
   });
 });
 
@@ -582,30 +661,30 @@ describe("stranded-state comparison is a SUBSET check", () => {
     // additions are not only top-level: a nested pattern gaining a defaulted
     // field turns {note, owner} into {note, owner, addedLater: []} several
     // levels down. Comparing for equality reds a perfectly compatible change.
-    expect(strandedKeys(
+    expect(findingKeys(
       { child: { note: "captured", owner: "v" } },
       { child: { owner: "v", note: "captured", addedLater: [] } },
     )).toEqual([]);
   });
 
   it("still reports a nested value that CHANGED", () => {
-    expect(strandedKeys(
+    expect(findingKeys(
       { child: { note: "captured" } },
       { child: { note: "different" } },
     )).toEqual(["child"]);
   });
 
   it("still reports a nested key that DISAPPEARED", () => {
-    expect(strandedKeys({ child: { note: "captured" } }, { child: {} }))
+    expect(findingKeys({ child: { note: "captured" } }, { child: {} }))
       .toEqual(["child"]);
   });
 
   it("allows an array to grow but not to lose or reorder", () => {
     // Appending is an addition. Truncating loses data, and reordering moves an
     // element out from under a reader that knew its index.
-    expect(strandedKeys({ xs: [1, 2] }, { xs: [1, 2, 3] })).toEqual([]);
-    expect(strandedKeys({ xs: [1, 2] }, { xs: [1] })).toEqual(["xs"]);
-    expect(strandedKeys({ xs: [1, 2] }, { xs: [2, 1] })).toEqual(["xs"]);
+    expect(findingKeys({ xs: [1, 2] }, { xs: [1, 2, 3] })).toEqual([]);
+    expect(findingKeys({ xs: [1, 2] }, { xs: [1] })).toEqual(["xs"]);
+    expect(findingKeys({ xs: [1, 2] }, { xs: [2, 1] })).toEqual(["xs"]);
   });
 
   it("does NOT subset a reduction — a cell is an identity, not a shape", () => {
@@ -617,10 +696,10 @@ describe("stranded-state comparison is a SUBSET check", () => {
     const at = (path: string[]) => ({
       "[cell]": { space: "did:key:zA", id: "of:fid1:one", path },
     });
-    expect(strandedKeys({ touch: at([]) }, { touch: at([]) })).toEqual([]);
-    expect(strandedKeys({ touch: at([]) }, { touch: at(["value"]) }))
+    expect(findingKeys({ touch: at([]) }, { touch: at([]) })).toEqual([]);
+    expect(findingKeys({ touch: at([]) }, { touch: at(["value"]) }))
       .toEqual(["touch"]);
-    expect(strandedKeys({ touch: at(["a"]) }, { touch: at(["b"]) }))
+    expect(findingKeys({ touch: at(["a"]) }, { touch: at(["b"]) }))
       .toEqual(["touch"]);
   });
 
@@ -632,10 +711,10 @@ describe("stranded-state comparison is a SUBSET check", () => {
     // profile being created. An update that starts filling one in — a
     // `Default<>` added to a field already declared — added data rather than
     // stranding it.
-    expect(strandedKeys({ defaultProfile: undefined }, { defaultProfile: "v" }))
+    expect(findingKeys({ defaultProfile: undefined }, { defaultProfile: "v" }))
       .toEqual([]);
     // The other direction is still loss: something was there, and is not now.
-    expect(strandedKeys({ defaultProfile: "v" }, { defaultProfile: undefined }))
+    expect(findingKeys({ defaultProfile: "v" }, { defaultProfile: undefined }))
       .toEqual(["defaultProfile"]);
   });
 });
@@ -645,14 +724,14 @@ describe("stranded-state comparison is a SUBSET check", () => {
  * blind: a value the schema does not resolve arrives here as `undefined`, which
  * the rule above then reads as "held nothing".
  */
-describe("relaxing the stored schema's `unknown` positions", () => {
+describe("relaxing the stored schema for reading", () => {
   it("drops an `unknown` type wherever it sits", () => {
     // Both spellings, because a pattern reaches them differently: a DECLARED
     // `unknown` field lowers to the first, and an index signature
     // (`[key: string]: unknown`, which `system/default-app.tsx` declares) to
     // the second. Measured on the committed `default-app.tsx` fixture, the
     // second is what hid `recentPieces`, `summaryIndex` and `trackRecent`.
-    expect(schemaWithUnknownsRelaxed({
+    expect(schemaRelaxedForComparison({
       type: "object",
       properties: { note: { type: "unknown" } },
       additionalProperties: { type: "unknown" },
@@ -664,10 +743,10 @@ describe("relaxing the stored schema's `unknown` positions", () => {
   });
 
   it("drops a union that INCLUDES `unknown`, which constrains nothing", () => {
-    expect(schemaWithUnknownsRelaxed({ type: ["string", "unknown"] }))
+    expect(schemaRelaxedForComparison({ type: ["string", "unknown"] }))
       .toEqual({});
     // ...and leaves a union that does not.
-    expect(schemaWithUnknownsRelaxed({ type: ["string", "null"] }))
+    expect(schemaRelaxedForComparison({ type: ["string", "null"] }))
       .toEqual({ type: ["string", "null"] });
   });
 
@@ -677,7 +756,7 @@ describe("relaxing the stored schema's `unknown` positions", () => {
     // comes back as its VALUE instead of the document it points at — and a
     // field that moved to a different doc is the class this comparison exists
     // for.
-    expect(schemaWithUnknownsRelaxed({
+    expect(schemaRelaxedForComparison({
       asCell: ["stream"],
       type: "unknown",
       ifc: { classification: ["secret"] },
@@ -685,7 +764,7 @@ describe("relaxing the stored schema's `unknown` positions", () => {
   });
 
   it("relaxes inside `$defs`, which is where a `$ref` lands", () => {
-    expect(schemaWithUnknownsRelaxed({
+    expect(schemaRelaxedForComparison({
       $ref: "#/$defs/Row",
       $defs: {
         Row: { type: "object", properties: { v: { type: "unknown" } } },
@@ -700,26 +779,100 @@ describe("relaxing the stored schema's `unknown` positions", () => {
     // The keyword and a property name are the same string. Dropping on the key
     // alone would delete the property, which is a schema the document no longer
     // matches rather than a relaxed one.
-    expect(schemaWithUnknownsRelaxed({
+    expect(schemaRelaxedForComparison({
       type: "object",
       properties: { type: { type: "unknown" } },
-      required: ["type"],
     })).toEqual({
       type: "object",
       properties: { type: {} },
-      required: ["type"],
     });
   });
 
-  it("leaves a schema with no `unknown` in it alone", () => {
+  it("drops `required` at every depth", () => {
+    // A schema-driven read answers `undefined` for the WHOLE object when a
+    // required property does not resolve. Patterns mark session-local drafts
+    // required — `topic.tsx` requires `bodyDraft`, `editingBody` and three
+    // more — and those are links to per-session cells a fresh replay runtime
+    // holds nothing for. Enforcing it hid all 28 keys of real state behind one
+    // absent draft, which is the opposite of what a comparison wants: it turns
+    // the moved key the gate is hunting into an unreadable root.
+    expect(schemaRelaxedForComparison({
+      type: "object",
+      properties: {
+        row: {
+          type: "object",
+          properties: { v: { type: "string" } },
+          required: ["v"],
+        },
+      },
+      required: ["row"],
+    })).toEqual({
+      type: "object",
+      properties: {
+        row: { type: "object", properties: { v: { type: "string" } } },
+      },
+    });
+  });
+
+  it("keeps a property that is NAMED `required`", () => {
+    // Same collision as `type`: the keyword's value is an ARRAY of names, a
+    // property of that name holds a schema object. Matching on the key alone
+    // would delete the property.
+    expect(schemaRelaxedForComparison({
+      type: "object",
+      properties: { required: { type: "boolean" } },
+      required: ["required"],
+    })).toEqual({
+      type: "object",
+      properties: { required: { type: "boolean" } },
+    });
+  });
+
+  it("leaves a schema with neither `unknown` nor `required` alone", () => {
     const schema = {
       type: "object",
       properties: { items: { type: "array", items: { type: "string" } } },
-      required: ["items"],
     };
-    expect(schemaWithUnknownsRelaxed(schema)).toEqual(schema);
+    expect(schemaRelaxedForComparison(schema)).toEqual(schema);
     // Booleans are schemas too, and neither is an object to walk.
-    expect(schemaWithUnknownsRelaxed(true)).toBe(true);
-    expect(schemaWithUnknownsRelaxed(false)).toBe(false);
+    expect(schemaRelaxedForComparison(true)).toBe(true);
+    expect(schemaRelaxedForComparison(false)).toBe(false);
+  });
+});
+
+describe("a recorded `main` maps back to a pattern key", () => {
+  it("takes a repo path", () => {
+    expect(
+      patternKeyFromMain(
+        "/packages/patterns/system/home.tsx",
+        "/packages/patterns/",
+      ),
+    )
+      .toBe("system/home.tsx");
+  });
+
+  it("takes the ROUTE the toolshed serves a pattern at", () => {
+    // Not hypothetical: `lunch-poll/main.tsx` loads `profile-create` by URL, so
+    // its manifest records `/api/patterns/...`. Resolved against the repo root
+    // that is `<repo>/api/patterns/...`, which does not exist — the replay
+    // reported a pattern sitting right there as unresolvable.
+    expect(
+      patternKeyFromMain(
+        "/api/patterns/system/profile-create.tsx",
+        "/packages/patterns/",
+      ),
+    )
+      .toBe("system/profile-create.tsx");
+  });
+
+  it("declines anything that is neither", () => {
+    expect(patternKeyFromMain(undefined, "/packages/patterns/"))
+      .toBeUndefined();
+    expect(patternKeyFromMain("cfc.ts", "/packages/patterns/")).toBeUndefined();
+    // A path merely CONTAINING the marker is not a served route: the mount is
+    // what makes it one, so the prefix has to be there.
+    expect(
+      patternKeyFromMain("/elsewhere/patterns/x.tsx", "/packages/patterns/"),
+    ).toBeUndefined();
   });
 });

@@ -17,11 +17,11 @@ import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
   collectVintages,
   describeError,
+  patternKeyFromMain,
   PINNED,
   relativeToRepo,
   type ReplayFailure,
   stampFor,
-  uncoveredRequiredPatterns,
   vintageFileName,
   type VintageRef,
 } from "./pattern-vintage-lib.ts";
@@ -30,6 +30,7 @@ import {
   materializeOnCell,
   openFileBackedRuntime,
   readStateUnder,
+  readStoredResultSchema,
   readVintageManifest,
   readVintageState,
   strandedKeys,
@@ -73,9 +74,14 @@ async function withRuntime<T>(
   }
 }
 
-function resolver(roots: GateRoots, patternKey: string) {
+/** Where a recorded `main` says a repo pattern lives, for THESE roots. */
+function patternsPrefix(roots: GateRoots): string {
+  return `${roots.patternsRoot.slice(roots.repoRoot.length)}/`;
+}
+
+function resolver(roots: GateRoots, key: string) {
   return new FileSystemProgramResolver(
-    `${roots.patternsRoot}/${patternKey}`,
+    `${roots.patternsRoot}/${key}`,
     roots.repoRoot,
   );
 }
@@ -146,6 +152,23 @@ export interface ReplayReport {
   updated: number;
   /** Keys an applied update stopped being able to read back. */
   stranded: number;
+  /**
+   * Targets recorded under a SERVED route rather than a repo path.
+   *
+   * Their identity is not reproducible from the repo, so they are not
+   * identity-compared. Counted so a fixture that is mostly served routes cannot
+   * read as thorough coverage.
+   */
+  servedRoute: number;
+  /**
+   * Pattern keys this fixture actually replayed a target for.
+   *
+   * Coverage is judged from THIS, not from the fixture tree's shape. A fixture
+   * is named after the TEST that produced it and routinely covers several
+   * patterns, so "a directory exists for X" stopped being the same question as
+   * "X was replayed" — and the second is the one that matters.
+   */
+  covered: Set<string>;
   failures: ReplayFailure[];
 }
 
@@ -162,7 +185,7 @@ export async function replayVintage(
   vintage: VintageRef,
 ): Promise<ReplayReport> {
   const where = {
-    patternKey: vintage.patternKey,
+    testKey: vintage.testKey,
     path: relativeToRepo(vintage.path, roots.repoRoot),
   };
   const fail = (detail: string): ReplayReport => ({
@@ -172,6 +195,8 @@ export async function replayVintage(
     changed: 0,
     updated: 0,
     stranded: 0,
+    servedRoute: 0,
+    covered: new Set<string>(),
     failures: [{ ...where, detail }],
   });
   // Stated once, because every "this fixture is not usable" message needs it and
@@ -187,7 +212,7 @@ export async function replayVintage(
     `Delete ${vintage.path} and ${
       vintageCompanionDir(vintage.path)
     }/ deliberately, then \`deno task pattern-vintage --update ` +
-    `${vintage.patternKey}\``;
+    `${vintage.testKey}\``;
 
   return await withRuntime(roots, vintage.path, async (runtimeVintage) => {
     // The control, before anything is applied. A fixture that did not restore
@@ -232,8 +257,15 @@ export async function replayVintage(
     // Computed BEFORE the zero-target check below, which would otherwise return
     // while claiming a reason it had not looked at: an unmappable entry is not a
     // test pattern, and its per-entry diagnosis is the actionable half.
+    // Keyless excluded on the SAME terms as the capture's guard. A keyless
+    // pattern is session-only by construction and can never be an update
+    // target, so "recorded but NOT validated" is the wrong verdict for one —
+    // there is nothing to validate. The two checks have to agree, or a capture
+    // the gate accepts is a replay it refuses.
     const unmappable = manifest.entries.filter(
-      (e) => e.main === undefined || !e.main.startsWith("/"),
+      (e) =>
+        !e.identity.startsWith("keyless:") &&
+        (e.main === undefined || !e.main.startsWith("/")),
     );
     // Zero targets is a FIXTURE-level failure, not a quiet contribution of
     // nothing to the run's total. `isClean` floors the SUM of targets, which one
@@ -284,6 +316,12 @@ export async function replayVintage(
       changed: 0,
       updated: 0,
       stranded: 0,
+      servedRoute: 0,
+      covered: new Set(
+        targets
+          .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
+          .filter((key): key is string => key !== undefined),
+      ),
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -357,7 +395,19 @@ export async function replayVintage(
       // Already reported above. Materializing it anyway would apply today's
       // source to an empty cell and count the result as a clean update.
       if (missing.has(entry)) continue;
-      const source = `${roots.repoRoot}${entry.main}`;
+      // A recorded `main` is either a repo path or the ROUTE the toolshed
+      // serves the pattern at; both name a file under `packages/patterns/`.
+      const key = patternKeyFromMain(entry.main, patternsPrefix(roots));
+      if (key === undefined) {
+        report.failures.push({
+          ...where,
+          detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
+            `names "${entry.main}", which is neither a repo path nor a served ` +
+            `pattern route, so today's source for it cannot be found`,
+        });
+        continue;
+      }
+      const source = `${roots.patternsRoot}/${key}`;
       let program;
       try {
         program = await runtimeVintage.runtime.harness.resolve(
@@ -399,6 +449,17 @@ export async function replayVintage(
           ...where,
           detail: `${entry.main} no longer compiles: ${describeError(error)}`,
         });
+        continue;
+      }
+      // A pattern loaded BY URL compiles to a different identity than the same
+      // file compiled locally — measured, `system/profile-create.tsx` records
+      // `T-01iegivM23Be` when served and `B_VWt7zYJWHbCS` from the repo. So an
+      // identity comparison would call it changed on every run forever, and
+      // "changed" would stop meaning anything for it. Counted and reported
+      // rather than silently skipped: the pattern is still covered wherever a
+      // fixture imports it locally.
+      if (entry.main !== undefined && entry.main.startsWith("/api/")) {
+        report.servedRoute++;
         continue;
       }
       const today = runtimeVintage.runtime.patternManager
@@ -467,44 +528,71 @@ export async function replayVintage(
       // the ROOT rather than about its value, and belongs to the presence
       // control that runs before any of this, not to the comparison.
       if (before === undefined) {
+        // Say WHICH of the two happened. They have different causes and
+        // different fixes, and one message for both sent a reader looking for
+        // a missing schema when the schema was present, readable, and the read
+        // THROUGH it was what came back empty — see `schemaRelaxedForComparison`
+        // for the collapse that produced.
+        const storedSchema = await readStoredResultSchema(
+          runtimeVintage,
+          entry.space,
+          entry.cellId,
+        );
         report.failures.push({
           ...where,
           detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
-            `carries a setup marker but no readable stored schema, so ` +
+            (storedSchema === undefined
+              ? `carries a setup marker but no readable stored schema, so `
+              : `stores a result schema that reads back nothing, so `) +
             `applying ${entry.main} over it could not be checked for stranded ` +
             `state`,
         });
         continue;
       }
+      // Re-read rather than reuse `outcome.value`, and through the SAME
+      // helper the before state came from. `outcome.value` is the root under
+      // the candidate's compiled schema verbatim, and that schema stops at
+      // its `unknown` positions exactly as the stored one does — so every key
+      // the before side newly resolves would come back `undefined` here and
+      // report as stranded. The two sides have to be read the same way or the
+      // comparison measures the reading. `outcome.resultSchema` is handed
+      // back for precisely this: the schema of the pattern that was actually
+      // materialized, rather than a second compile trusted to agree.
+      const after = await readStateUnder(
+        runtimeVintage,
+        entry.space,
+        entry.cellId,
+        outcome.resultSchema,
+      );
       {
-        // Re-read rather than reuse `outcome.value`, and through the SAME
-        // helper the before state came from. `outcome.value` is the root under
-        // the candidate's compiled schema verbatim, and that schema stops at
-        // its `unknown` positions exactly as the stored one does — so every key
-        // the before side newly resolves would come back `undefined` here and
-        // report as stranded. The two sides have to be read the same way or the
-        // comparison measures the reading. `outcome.resultSchema` is handed
-        // back for precisely this: the schema of the pattern that was actually
-        // materialized, rather than a second compile trusted to agree.
-        const after = await readStateUnder(
-          runtimeVintage,
-          entry.space,
-          entry.cellId,
-          outcome.resultSchema,
-        );
-        const stranded = strandedKeys(before, after);
-        if (stranded.length > 0) {
-          report.stranded += stranded.length;
+        const findings = strandedKeys(before, after);
+        const describe = (finding: typeof findings[number]) =>
+          `${finding.key} (was ${snippet(finding.before)}, now ${
+            snippet(finding.after)
+          })`;
+        // A value that merely CHANGED is reported and not failed on. A replay
+        // recomputes as well as reads, and a derived value the vintage never
+        // pulled on legitimately resolves to something better this time — see
+        // `StateFinding`. Warned rather than dropped, because the noise is
+        // what tells us whether the grading is right.
+        const changed = findings.filter((finding) => !finding.lost);
+        if (changed.length > 0) {
+          console.warn(
+            `  ! ${where.testKey}: updating ${entry.main} (${entry.symbol}) ` +
+              `changed state the vintage held: ${
+                changed.map(describe).join("; ")
+              }`,
+          );
+        }
+        const lost = findings.filter((finding) => finding.lost);
+        if (lost.length > 0) {
+          report.stranded += lost.length;
           report.failures.push({
             ...where,
             detail:
               `updating ${entry.main} (${entry.symbol}) APPLIED CLEANLY ` +
               `but stranded state the vintage held: ${
-                stranded.map((key) =>
-                  `${key} (was ${snippet(before[key])}, now ${
-                    snippet(after?.[key])
-                  })`
-                ).join("; ")
+                lost.map(describe).join("; ")
               }`,
           });
           continue;
@@ -516,7 +604,15 @@ export async function replayVintage(
       // promises both, so both are checked. Per TARGET, not once per fixture:
       // `vintageRootHasState` above is a pre-check on the well-known capture
       // root, which says nothing about the nested cell each entry names.
-      if (!isPresentRootValue(outcome.value)) {
+      //
+      // Asked of the RELAXED re-read, for the same reason the comparison is:
+      // `outcome.value` is the candidate's schema applied verbatim, so a
+      // required property that does not resolve — a session-local draft, in
+      // every measured case — collapses the whole root to `undefined` and this
+      // reports state as GONE that the very next line can still read. Two ways
+      // of asking "does the root read" is how the two ends of one run come to
+      // disagree, which is what `isPresentRootValue` exists to prevent.
+      if (!isPresentRootValue(after)) {
         report.failures.push({
           ...where,
           detail: `updating ${entry.main} (${entry.symbol}) was not refused, ` +
@@ -550,10 +646,14 @@ export async function replayAll(
     changed: number;
     updated: number;
     stranded: number;
+    servedRoute: number;
+    covered: Set<string>;
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
+  const covered = new Set<string>();
+  let servedRoute = 0;
   let candidates = 0,
     targets = 0,
     changed = 0,
@@ -569,6 +669,8 @@ export async function replayAll(
     changed += report.changed;
     updated += report.updated;
     stranded += report.stranded;
+    servedRoute += report.servedRoute;
+    for (const key of report.covered) covered.add(key);
     failures.push(...report.failures);
   }
   return {
@@ -580,18 +682,32 @@ export async function replayAll(
     changed,
     updated,
     stranded,
+    servedRoute,
+    covered,
     failures,
   };
 }
 
-/** The pattern-test file that populates a vintage for `patternKey`. */
-export function testPathFor(roots: GateRoots, patternKey: string): string {
-  return `${roots.patternsRoot}/${patternKey.replace(/\.tsx?$/, "")}.test.tsx`;
+/** Absolute path of the test file a fixture key names. */
+export function testPathFor(roots: GateRoots, testKey: string): string {
+  return `${roots.patternsRoot}/${testKey}`;
 }
 
 /**
- * Capture a vintage for `patternKey` by running its OWN tests against a
- * file-backed store, then snapshotting.
+ * Capture a vintage by running a TEST against a file-backed store, then
+ * snapshotting.
+ *
+ * Keyed by the TEST, not by a pattern. The earlier shape went the other way —
+ * take a pattern key and derive `<pattern>.test.tsx` — which only works where a
+ * test is named after the single pattern it drives. Measured, that holds for 91
+ * of 120 tests in `packages/patterns` and not for the interesting ones:
+ * `topics/main.tsx` is tested by `topics/topics.test.tsx`, and
+ * `lunch-poll/multi-user.test.tsx` drives several patterns and is named after
+ * none of them.
+ *
+ * Running the test and recording what it instantiates needs no naming
+ * convention at all, and covers every pattern the test touches rather than the
+ * one whose name matched.
  *
  * The tests are what put DATA in the fixture. A vintage captured straight off
  * setup holds a freshly materialized root and nothing else, so no change can
@@ -607,10 +723,10 @@ export function testPathFor(roots: GateRoots, patternKey: string): string {
  */
 export async function captureVintage(
   roots: GateRoots,
-  patternKey: string,
+  testKey: string,
   now: Date,
 ): Promise<string> {
-  const testPath = testPathFor(roots, patternKey);
+  const testPath = testPathFor(roots, testKey);
   const dir = await Deno.makeTempDir({ prefix: "pattern-vintage-capture-" });
   const vintage = await openFileBackedRuntime(roots.signer, dir);
   try {
@@ -643,7 +759,7 @@ export async function captureVintage(
     const failed = result.results.filter((r) => !r.passed && !r.skipped);
     if (result.error !== undefined || failed.length > 0) {
       throw new Error(
-        `cannot capture ${patternKey}: its own tests did not pass, so the ` +
+        `cannot capture ${testKey}: its own tests did not pass, so the ` +
           `fixture would record a state the pattern never reaches: ${
             result.error ??
               failed.map((r) => `${r.name}: ${r.error}`).join("; ")
@@ -652,15 +768,18 @@ export async function captureVintage(
     }
     if (result.results.length === 0) {
       throw new Error(
-        `cannot capture ${patternKey}: ${testPath} ran no assertions, so the ` +
+        `cannot capture ${testKey}: ${testPath} ran no assertions, so the ` +
           `fixture would hold no test-written state`,
       );
     }
-    // The pattern's own identity, read off the compiled artifact rather than
-    // guessed — provenance for which version wrote the state, and the name the
-    // fixture carries.
+    // The identity that names the fixture is the TEST's, because the test is
+    // what was run. That is provenance for the capture as a whole; which
+    // PATTERNS it covers is the manifest's job, and a fixture routinely covers
+    // several. Deriving the name from one of them would have to pick a
+    // privileged one, and there is no principled choice — a test that drives
+    // two patterns equally has no primary.
     const program = await vintage.runtime.harness.resolve(
-      resolver(roots, patternKey),
+      resolver(roots, testKey),
     );
     const pattern = await vintage.runtime.patternManager.compilePattern(
       program as never,
@@ -669,7 +788,7 @@ export async function captureVintage(
     const ref = vintage.runtime.patternManager.getArtifactEntryRef(pattern);
     if (ref === undefined) {
       throw new Error(
-        `cannot capture ${patternKey}: compiled pattern has no identity`,
+        `cannot capture ${testKey}: compiled test has no identity`,
       );
     }
 
@@ -682,12 +801,20 @@ export async function captureVintage(
     // waiting for the replay to fail on it. The replay does fail closed, but it
     // would do so on whoever's PR next ran the gate; catching it here blames the
     // capture that created it, when the cause is still in hand.
+    // Keyless instantiations are excluded, not counted as unaddressable. A
+    // keyless pattern has no content identity and so no durable pointer — it is
+    // session-only by construction and can never be an update target, which is
+    // exactly why `isUpgradeTarget` already rejects it. Refusing a whole
+    // capture because one appeared would block any test that builds a pattern
+    // in hand; `topics/topics.test.tsx` has six.
     const unaddressable = entries.filter(
-      (e) => e.main === undefined || !e.main.startsWith("/"),
+      (e) =>
+        !e.identity.startsWith("keyless:") &&
+        (e.main === undefined || !e.main.startsWith("/")),
     );
     if (unaddressable.length > 0) {
       throw new Error(
-        `cannot capture ${patternKey}: ${unaddressable.length} of ` +
+        `cannot capture ${testKey}: ${unaddressable.length} of ` +
           `${entries.length} instantiation(s) cannot be mapped to a file (${
             unaddressable.map((e) => `${e.identity}#${e.symbol}`).join(", ")
           }), so the fixture would record roots the replay cannot map to a file`,
@@ -695,13 +822,13 @@ export async function captureVintage(
     }
     if (!entries.some(isUpgradeTarget)) {
       throw new Error(
-        `cannot capture ${patternKey}: the run instantiated no upgradable ` +
+        `cannot capture ${testKey}: the run instantiated no upgradable ` +
           `pattern (${entries.length} instantiation(s), all test patterns), ` +
           `so the fixture would have nothing to replay`,
       );
     }
     await writeVintageManifest(vintage, entries);
-    const outDir = `${roots.vintagesRoot}/${patternKey}/${PINNED}`;
+    const outDir = `${roots.vintagesRoot}/${testKey}/${PINNED}`;
     await Deno.mkdir(outDir, { recursive: true });
     const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
     // Never write over an existing fixture. `captureMissing` already skips a
@@ -717,7 +844,7 @@ export async function captureVintage(
     // diagnosis, and what gets validated comes from the manifest.
     if (await exists(path)) {
       throw new Error(
-        `cannot capture ${patternKey}: ${path} already exists, and a capture ` +
+        `cannot capture ${testKey}: ${path} already exists, and a capture ` +
           `never overwrites a pinned vintage — delete it deliberately first`,
       );
     }
@@ -744,14 +871,19 @@ export async function captureVintage(
 /** Capture a vintage for every required pattern that has none. */
 export async function captureMissing(
   roots: GateRoots,
-  requiredKeys: readonly string[],
+  testKeys: readonly string[],
   now: Date,
 ): Promise<{ captured: string[]; problems: string[] }> {
-  const existing = await collectVintages(roots.vintagesRoot);
-  const missing = uncoveredRequiredPatterns(requiredKeys, existing);
+  const existing = new Set(
+    (await collectVintages(roots.vintagesRoot)).map((v) => v.testKey),
+  );
   const captured: string[] = [];
   const problems: string[] = [];
-  for (const key of missing) {
+  for (const key of testKeys) {
+    // `--update` can only ADD: a key already pinned is skipped whichever way it
+    // was asked for. Replacing a vintage could replace the very one that would
+    // have caught a break.
+    if (existing.has(key)) continue;
     try {
       captured.push(await captureVintage(roots, key, now));
     } catch (error) {

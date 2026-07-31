@@ -91,6 +91,21 @@ import {
   replayAll,
 } from "./pattern-vintage-run.ts";
 
+/**
+ * The tests whose fixtures CI seeds by default.
+ *
+ * Test keys, because a fixture is produced by running a test. The required
+ * PATTERNS are still derived from the runtime's own URL constants — this list
+ * only says which tests are known to cover them, which is not derivable: a test
+ * need not be named after what it drives.
+ */
+const REQUIRED_TEST_KEYS = [
+  "system/home.test.tsx",
+  "system/default-app.test.tsx",
+  "topics/topics.test.tsx",
+  "lunch-poll/main.test.tsx",
+];
+
 const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
   /\/$/,
   "",
@@ -133,8 +148,10 @@ async function main() {
     // Keys named on the command line pin a pattern nobody auto-updates — the
     // deliberate act the layout allows for. With none named, the required set
     // is what gets seeded.
+    // Keys name TEST files now, not patterns — a fixture is produced by
+    // running a test, and covers whatever that test instantiates.
     const named = Deno.args.filter((arg) => !arg.startsWith("--"));
-    const wanted = named.length > 0 ? named : required;
+    const wanted = named.length > 0 ? named : REQUIRED_TEST_KEYS;
     const { captured, problems } = await captureMissing(
       roots,
       wanted,
@@ -162,7 +179,7 @@ async function main() {
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
-  const uncovered = uncoveredRequiredPatterns(required, replay.vintages);
+  const uncovered = uncoveredRequiredPatterns(required, replay.covered);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
   if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);

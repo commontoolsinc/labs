@@ -83,7 +83,7 @@ export const VINTAGE_SUFFIX = ".sqlite";
 
 export interface VintageRef {
   /** Pattern path relative to `packages/patterns/`, e.g. `system/home.tsx`. */
-  patternKey: string;
+  testKey: string;
   /** `pinned` or `auto`. */
   tier: string;
   /** Capture timestamp, ISO-8601 with `:` replaced (filenames). */
@@ -94,9 +94,9 @@ export interface VintageRef {
   path: string;
 }
 
-/** The directory holding one pattern's fixtures of a given tier. */
-export function vintageDir(patternKey: string, tier: string): string {
-  return `${VINTAGES_DIR}/${patternKey}/${tier}`;
+/** The directory holding one TEST's fixtures of a given tier. */
+export function vintageDir(testKey: string, tier: string): string {
+  return `${VINTAGES_DIR}/${testKey}/${tier}`;
 }
 
 /**
@@ -159,8 +159,8 @@ export function parseVintagePath(
   const tierCut = dir.lastIndexOf("/");
   if (tierCut === -1) return undefined;
   const tier = dir.slice(tierCut + 1);
-  const patternKey = dir.slice(0, tierCut);
-  if (patternKey.length === 0 || tier.length === 0) return undefined;
+  const testKey = dir.slice(0, tierCut);
+  if (testKey.length === 0 || tier.length === 0) return undefined;
 
   const base = fileName.slice(0, -VINTAGE_SUFFIX.length);
   // Anchor on the STAMP, which has a fixed shape, and take everything after it
@@ -178,7 +178,7 @@ export function parseVintagePath(
   if (parsed === null) return undefined;
   const [, stamp, identity] = parsed;
 
-  return { patternKey, tier, stamp, identity, path };
+  return { testKey, tier, stamp, identity, path };
 }
 
 /** Every fixture under `root`, sorted by path so runs are reproducible. */
@@ -219,7 +219,7 @@ export function coveredPatternKeys(
 ): Set<string> {
   const covered = new Set<string>();
   for (const vintage of vintages) {
-    if (vintage.tier === PINNED) covered.add(vintage.patternKey);
+    if (vintage.tier === PINNED) covered.add(vintage.testKey);
   }
   return covered;
 }
@@ -242,6 +242,41 @@ export function coveredPatternKeys(
  * replayed; it is only being REQUIRED that this list governs.
  */
 const PATTERN_ROUTE_MARKER = "/patterns/";
+
+/**
+ * A recorded `main` as a path under `packages/patterns/`, or `undefined`.
+ *
+ * Two spellings reach a manifest and only one is a repo path. A pattern
+ * imported locally records `/packages/patterns/x.tsx`; one loaded BY URL — as
+ * `lunch-poll/main.tsx` does for `profile-create` — records the route the
+ * toolshed serves it at, `/api/patterns/system/profile-create.tsx`. Resolving
+ * the second against the repo root looks for `<repo>/api/patterns/...`, which
+ * does not exist, and the replay reports a pattern that is right there as
+ * unresolvable.
+ *
+ * The route prefix is the same `/patterns/` marker `requiredPatternKeys` keys
+ * on, for the same reason: it is where `PatternsServer` mounts the directory.
+ *
+ * `patternsPrefix` is a parameter rather than a constant so the gate stays
+ * exercisable against a temp tree — the suite's fixtures record
+ * `/patterns/x.tsx`, the repo's record `/packages/patterns/x.tsx`, and a
+ * hardcoded prefix would quietly make every synthetic fixture unmappable.
+ */
+export function patternKeyFromMain(
+  main: string | undefined,
+  patternsPrefix: string,
+): string | undefined {
+  if (main === undefined) return undefined;
+  if (main.startsWith(patternsPrefix)) return main.slice(patternsPrefix.length);
+  const route = "/patterns/";
+  const at = main.indexOf(route);
+  // Only a ROUTE, not any path containing the marker: a served pattern's path
+  // begins at the mount, so anything before it is the mount prefix itself.
+  if (at !== -1 && main.startsWith("/api")) {
+    return main.slice(at + route.length);
+  }
+  return undefined;
+}
 
 export function requiredPatternKeys(
   systemPatternUrls: readonly string[],
@@ -270,18 +305,25 @@ export function unmappedPatternUrls(
   return systemPatternUrls.filter((url) => !url.includes(PATTERN_ROUTE_MARKER));
 }
 
-/** Required patterns with no pinned vintage. */
+/**
+ * Required patterns that no fixture actually replayed.
+ *
+ * Judged from what the replay COVERED, not from the fixture tree's shape. A
+ * fixture is named after the test that produced it and routinely covers several
+ * patterns, so "a directory exists for X" and "X was replayed" are different
+ * questions — and only the second is evidence.
+ */
 export function uncoveredRequiredPatterns(
   requiredKeys: readonly string[],
-  vintages: readonly VintageRef[],
+  covered: ReadonlySet<string>,
 ): string[] {
-  const covered = coveredPatternKeys(vintages);
   return requiredKeys.filter((key) => !covered.has(key)).sort();
 }
 
 /** A vintage that could not be replayed under today's source. */
 export interface ReplayFailure {
-  patternKey: string;
+  /** The TEST whose fixture this failure came from. */
+  testKey: string;
   /** Repo-relative fixture path. */
   path: string;
   detail: string;
@@ -323,8 +365,8 @@ export function reportFailures(failures: readonly ReplayFailure[]): string {
   return [
     `${failures.length} vintage(s) could not be replayed:`,
     "",
-    ...failures.flatMap(({ patternKey, path, detail }) => [
-      `  ${patternKey}`,
+    ...failures.flatMap(({ testKey, path, detail }) => [
+      `  ${testKey}`,
       `    ${path}`,
       `    ${detail}`,
     ]),
