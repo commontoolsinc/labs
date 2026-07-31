@@ -58,6 +58,22 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
+// CT-1927: with flushBeforeVerdict defaulting on, transact verdicts are
+// preceded by session sync effects (including marker-only empty frames for
+// watch-less sessions). Tests whose subject is not verdict ordering shift
+// past them here; the ordering itself is pinned by
+// v2-flush-before-verdict-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+  }
+};
+
 const assertEffect = (
   message: ServerMessage,
 ): SessionEffectMessage & { effect: SessionSync } => {
@@ -65,10 +81,15 @@ const assertEffect = (
   return message as SessionEffectMessage & { effect: SessionSync };
 };
 
-const createServer = (store: string, refreshDelayMs = 0) =>
+const createServer = (
+  store: string,
+  refreshDelayMs = 0,
+  options: { flushBeforeVerdict?: boolean } = {},
+) =>
   new Server({
     store: new URL(store),
     subscriptionRefreshDelayMs: refreshDelayMs,
+    ...options,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
         ?.principal;
@@ -218,7 +239,7 @@ Deno.test("memory v2 server rejects unknown entity identifier sessions before di
       }]
     ) {
       await connection.receive(encodeMemoryBoundary(request));
-      const response = assertResponse<unknown>(shiftMessage(messages));
+      const response = nextResponse<unknown>(messages);
       assertEquals(response.requestId, request.requestId);
       assertEquals(response.error?.name, "SessionError");
     }
@@ -485,12 +506,10 @@ Deno.test("memory v2 server consumes a challenged session open", async () => {
         challenge: challenge.value,
       },
     }));
-    const opened = assertResponse<{
+    const opened = nextResponse<{
       sessionId: string;
       sessionOpen?: { challenge?: { value: string; expiresAt: number } };
-    }>(
-      shiftMessage(messages),
-    );
+    }>(messages);
     assertEquals(opened.requestId, "open-1");
     assertExists(opened.ok?.sessionId);
     const nextChallenge = opened.ok?.sessionOpen?.challenge;
@@ -743,12 +762,12 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
       session: { sessionId: "session:fixed" },
       invocation: authInvocation(sessionOpen),
     }));
-    const openedOne = assertResponse<{
+    const openedOne = nextResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
       sessionOpen: SessionOpenAuthMetadata;
-    }>(shiftMessage(messages));
+    }>(messages);
     assertEquals(openedOne.requestId, "open-1");
     assertEquals(openedOne.ok?.sessionId, "session:fixed");
     assertEquals(openedOne.ok?.serverSeq, 0);
@@ -763,11 +782,11 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
       session: { sessionId: "session:fixed" },
       invocation: authInvocation(sessionOpen),
     }));
-    const openedTwo = assertResponse<{
+    const openedTwo = nextResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
-    }>(shiftMessage(messages));
+    }>(messages);
     assertEquals(openedTwo.requestId, "open-2");
     assertEquals(openedTwo.ok?.sessionId, "session:fixed");
     assertEquals(openedTwo.ok?.serverSeq, 0);
@@ -911,11 +930,11 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
       invocation: authInvocation(firstSessionOpen),
       authorization: { principal: "did:key:z6Mk-alice" },
     }));
-    const opened = assertResponse<{
+    const opened = nextResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
-    }>(shiftMessage(firstMessages));
+    }>(firstMessages);
     assertEquals(opened.requestId, "open-1");
     assertEquals(opened.ok?.sessionId, "session:fixed");
     assertEquals(opened.ok?.serverSeq, 0);
@@ -968,9 +987,7 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
       session: { sessionId: "session:fixed" },
       invocation: authInvocation(firstSessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(firstMessages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(firstMessages);
     const sessionId = opened.ok!.sessionId;
 
     await secondConnection.receive(encodeMemoryBoundary(HELLO));
@@ -1093,12 +1110,12 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
       session: { sessionId: "session:fixed" },
       invocation: authInvocation(firstSessionOpen),
     }));
-    const openedFirst = assertResponse<{
+    const openedFirst = nextResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
       sessionOpen: SessionOpenAuthMetadata;
-    }>(shiftMessage(firstMessages));
+    }>(firstMessages);
     const initialToken = openedFirst.ok?.sessionToken;
     assertEquals(openedFirst.ok?.sessionId, "session:fixed");
     assertEquals(openedFirst.ok?.serverSeq, 0);
@@ -1124,12 +1141,12 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
       reason: "taken-over",
     });
 
-    const openedSecond = assertResponse<{
+    const openedSecond = nextResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
       resumed?: boolean;
-    }>(shiftMessage(secondMessages));
+    }>(secondMessages);
     assertEquals(openedSecond.ok?.sessionId, "session:fixed");
     assertEquals(openedSecond.ok?.serverSeq, 0);
     assertEquals(openedSecond.ok?.resumed, true);
@@ -1275,8 +1292,8 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string; serverSeq: number }>(
-      shiftMessage(messages),
+    const opened = nextResponse<{ sessionId: string; serverSeq: number }>(
+      messages,
     );
     const sessionId = opened.ok!.sessionId;
 
@@ -1300,7 +1317,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
       },
     }));
 
-    const committed = assertResponse<any>(shiftMessage(messages));
+    const committed = nextResponse<any>(messages);
     assertEquals(committed.requestId, "tx-1");
     assertEquals(committed.ok?.seq, 1);
     assertEquals(committed.ok?.revisions, [{
@@ -1334,7 +1351,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
       },
     }));
 
-    const query = assertResponse<GraphQueryResult>(shiftMessage(messages));
+    const query = nextResponse<GraphQueryResult>(messages);
     assertEquals(query.requestId, "query-1");
     assertEquals(query.ok, {
       serverSeq: 1,
@@ -1371,9 +1388,7 @@ Deno.test("memory v2 server rejects legacy live graph.query subscriptions", asyn
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "graph.query",
@@ -1429,9 +1444,8 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(writerMessages),
-    ).ok!.sessionId;
+    const writerSessionId =
+      nextResponse<{ sessionId: string }>(writerMessages).ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -1440,9 +1454,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await writer.receive(encodeMemoryBoundary({
@@ -1461,7 +1473,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "seed",
     );
 
@@ -1484,7 +1496,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
         },
       }],
     }));
-    const watch = assertResponse<any>(shiftMessage(messages));
+    const watch = nextResponse<any>(messages);
     assertEquals(
       watch.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       fixture.initialReachableIds,
@@ -1506,12 +1518,8 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
         }],
       },
     }));
-    assertEquals(
-      assertResponse<any>(shiftMessage(messages)).requestId,
-      "expand",
-    );
-
-    await tick();
+    // CT-1927 default-on ordering: the watch-expansion effect precedes the
+    // verdict on the socket.
     const effect = assertEffect(shiftMessage(messages));
     const expectedUpdatedIds = [
       ...fixture.expandedReachableIds.filter((id) =>
@@ -1523,6 +1531,10 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
       expectedUpdatedIds,
     );
     assertEquals(effect.effect.removes, []);
+    assertEquals(
+      nextResponse<any>(messages).requestId,
+      "expand",
+    );
   } finally {
     await server.close();
   }
@@ -1562,9 +1574,8 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(writerMessages),
-    ).ok!.sessionId;
+    const writerSessionId =
+      nextResponse<{ sessionId: string }>(writerMessages).ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -1573,9 +1584,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await writer.receive(encodeMemoryBoundary({
@@ -1594,7 +1603,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "seed",
     );
 
@@ -1617,7 +1626,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
         },
       }],
     }));
-    const watch = assertResponse<any>(shiftMessage(messages));
+    const watch = nextResponse<any>(messages);
     assertEquals(
       watch.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       fixture.expandedReachableIds,
@@ -1640,7 +1649,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "shrink",
     );
 
@@ -1680,9 +1689,7 @@ Deno.test("memory v2 server does not send watch effects after a connection close
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    sessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    ).ok!.sessionId;
+    sessionId = nextResponse<{ sessionId: string }>(messages).ok!.sessionId;
 
     server.syncSessionForConnection = async (...args) => {
       await waitForRefresh;
@@ -1735,9 +1742,8 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(writerMessages),
-    ).ok!.sessionId;
+    const writerSessionId =
+      nextResponse<{ sessionId: string }>(writerMessages).ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -1746,9 +1752,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await writer.receive(encodeMemoryBoundary({
@@ -1771,7 +1775,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "seed",
     );
 
@@ -1807,7 +1811,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       }],
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(messages)).requestId,
+      nextResponse<any>(messages).requestId,
       "watch-1",
     );
 
@@ -1827,7 +1831,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "update",
     );
 
@@ -1857,9 +1861,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -1881,7 +1883,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+    assertEquals(nextResponse<any>(messages).requestId, "seed");
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
@@ -1902,7 +1904,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
         },
       }],
     }));
-    const first = assertResponse<any>(shiftMessage(messages));
+    const first = nextResponse<any>(messages);
     assertEquals(
       first.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       [
@@ -1929,7 +1931,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
         },
       }],
     }));
-    const second = assertResponse<any>(shiftMessage(messages));
+    const second = nextResponse<any>(messages);
     assertEquals(
       second.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       [
@@ -1959,9 +1961,7 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -1979,7 +1979,7 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+    assertEquals(nextResponse<any>(messages).requestId, "seed");
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
@@ -2000,7 +2000,7 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
         },
       }],
     }));
-    const watch = assertResponse<any>(shiftMessage(messages));
+    const watch = nextResponse<any>(messages);
     assertEquals(
       watch.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       ["of:doc:1"],
@@ -2028,9 +2028,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -2052,7 +2050,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+    assertEquals(nextResponse<any>(messages).requestId, "seed");
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
@@ -2074,7 +2072,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
       }],
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(messages)).ok?.sync.upserts.map((
+      nextResponse<any>(messages).ok?.sync.upserts.map((
         entry: { id: string },
       ) => entry.id),
       ["of:doc:1"],
@@ -2134,7 +2132,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
         },
       }],
     }));
-    const unchanged = assertResponse<any>(shiftMessage(messages));
+    const unchanged = nextResponse<any>(messages);
     assertEquals(unchanged.ok?.sync.upserts, []);
     assertEquals(unchanged.ok?.sync.removes, []);
 
@@ -2157,7 +2155,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
         },
       }],
     }));
-    const reorderedEquivalent = assertResponse<any>(shiftMessage(messages));
+    const reorderedEquivalent = nextResponse<any>(messages);
     assertEquals(reorderedEquivalent.ok?.sync.upserts, []);
     assertEquals(reorderedEquivalent.ok?.sync.removes, []);
 
@@ -2206,7 +2204,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(messages)).requestId,
+      nextResponse<any>(messages).requestId,
       "update-doc-2",
     );
 
@@ -2234,9 +2232,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -2258,7 +2254,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+    assertEquals(nextResponse<any>(messages).requestId, "seed");
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
@@ -2280,7 +2276,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       }],
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(messages)).ok?.sync.upserts.map((
+      nextResponse<any>(messages).ok?.sync.upserts.map((
         entry: { id: string },
       ) => entry.id),
       ["of:doc:1"],
@@ -2314,7 +2310,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
         },
       }],
     } as any));
-    const failed = assertResponse<any>(shiftMessage(messages));
+    const failed = nextResponse<any>(messages);
     assertEquals(failed.requestId, "watch-2");
     assertEquals(failed.error?.name, "QueryError");
 
@@ -2334,7 +2330,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(messages)).requestId,
+      nextResponse<any>(messages).requestId,
       "update-doc-2",
     );
 
@@ -2362,9 +2358,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -2386,7 +2380,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+    assertEquals(nextResponse<any>(messages).requestId, "seed");
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
@@ -2407,7 +2401,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
         },
       }],
     }));
-    const first = assertResponse<any>(shiftMessage(messages));
+    const first = nextResponse<any>(messages);
     assertEquals(
       first.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       [
@@ -2435,7 +2429,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
         },
       }],
     }));
-    const second = assertResponse<any>(shiftMessage(messages));
+    const second = nextResponse<any>(messages);
     assertEquals(
       second.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
       [
@@ -2474,9 +2468,8 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(writerMessages),
-    ).ok!.sessionId;
+    const writerSessionId =
+      nextResponse<{ sessionId: string }>(writerMessages).ok!.sessionId;
 
     await observer.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -2485,9 +2478,8 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
       session: {},
       invocation: authInvocation(observerSessionOpen),
     }));
-    const observerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(observerMessages),
-    ).ok!.sessionId;
+    const observerSessionId =
+      nextResponse<{ sessionId: string }>(observerMessages).ok!.sessionId;
 
     for (
       const [connection, sessionId, requestId, messages] of [
@@ -2532,7 +2524,7 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
         }],
       },
     }));
-    const committed = assertResponse<any>(shiftMessage(writerMessages));
+    const committed = nextResponse<any>(writerMessages);
     assertEquals(committed.requestId, "writer-tx");
     assertEquals(committed.ok?.seq, 1);
 
@@ -2557,7 +2549,11 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
 });
 
 Deno.test("memory v2 server returns conflicts before deferred caught-up session sync", async () => {
-  const server = createServer("memory://memory-v2-server-conflict-flush", 20);
+  // Pins the OPT-OUT (rollback) path's historical verdict-first contract;
+  // default-on ordering is pinned by v2-flush-before-verdict-test.ts.
+  const server = createServer("memory://memory-v2-server-conflict-flush", 20, {
+    flushBeforeVerdict: false,
+  });
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-conflict-flush";
@@ -2573,9 +2569,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -2597,7 +2591,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         },
       }],
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).ok?.sync.upserts, [
+    assertEquals(nextResponse<any>(messages).ok?.sync.upserts, [
       {
         branch: "",
         id: "of:doc:1",
@@ -2623,7 +2617,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       },
     }));
     assertEquals(
-      assertResponse<unknown>(shiftMessage(messages)).requestId,
+      nextResponse<unknown>(messages).requestId,
       "tx-1",
     );
 
@@ -2642,7 +2636,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
+    assertEquals(nextResponse<any>(messages).requestId, "tx-2");
     assertEquals(messages.length, 0);
 
     await connection.receive(encodeMemoryBoundary({
@@ -2668,7 +2662,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       },
     }));
 
-    const rejected = assertResponse<unknown>(shiftMessage(messages));
+    const rejected = nextResponse<unknown>(messages);
     assertEquals(rejected.requestId, "tx-3");
     assertEquals(rejected.error, {
       name: "ConflictError",
@@ -2698,9 +2692,12 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
 });
 
 Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", async () => {
+  // Pins the OPT-OUT (rollback) path's historical verdict-first contract;
+  // default-on ordering is pinned by v2-flush-before-verdict-test.ts.
   const server = createServer(
     "memory://memory-v2-server-empty-caught-up-from-seq",
     20,
+    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -2717,9 +2714,7 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -2737,7 +2732,7 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+    assertEquals(nextResponse<any>(messages).requestId, "tx-1");
 
     await connection.receive(encodeMemoryBoundary({
       type: "transact",
@@ -2761,7 +2756,7 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
         }],
       },
     }));
-    const rejected = assertResponse<any>(shiftMessage(messages));
+    const rejected = nextResponse<any>(messages);
     assertEquals(rejected.requestId, "tx-2");
     assertEquals(rejected.error?.name, "ConflictError");
 
@@ -2783,9 +2778,12 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
 });
 
 Deno.test("memory v2 server processes back-to-back websocket messages in receive order before returning conflicts", async () => {
+  // Pins the OPT-OUT (rollback) path's historical verdict-first contract;
+  // default-on ordering is pinned by v2-flush-before-verdict-test.ts.
   const server = createServer(
     "memory://memory-v2-server-conflict-receive-order",
     20,
+    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -2815,9 +2813,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -2856,7 +2852,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+    assertEquals(nextResponse<any>(messages).requestId, "tx-1");
 
     const tx2 = connection.receive(encodeMemoryBoundary({
       type: "transact",
@@ -2901,9 +2897,9 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     releaseTx2.resolve();
     await Promise.all([tx2, tx3]);
 
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
+    assertEquals(nextResponse<any>(messages).requestId, "tx-2");
 
-    const rejected = assertResponse<any>(shiftMessage(messages));
+    const rejected = nextResponse<any>(messages);
     assertEquals(rejected.requestId, "tx-3");
     assertEquals(rejected.error, {
       name: "ConflictError",
@@ -2934,9 +2930,13 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
 
 Deno.test("memory v2 server waits for queued receives before rerunning scheduled watch refresh", async () => {
   const time = new FakeTime();
+  // Pins the TIMER pipeline's drain-wait choreography; the pre-verdict
+  // flush reorders the scripted calls. Opt out — default-on ordering is
+  // pinned by v2-flush-before-verdict-test.ts.
   const server = createServer(
     "memory://memory-v2-server-refresh-after-queue-drain",
     1,
+    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const writerMessages: ServerMessage[] = [];
@@ -2986,9 +2986,8 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(writerMessages),
-    ).ok!.sessionId;
+    const writerSessionId =
+      nextResponse<{ sessionId: string }>(writerMessages).ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -2997,9 +2996,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -3054,7 +3051,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "tx-1",
     );
 
@@ -3077,7 +3074,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "tx-2",
     );
 
@@ -3119,7 +3116,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     await time.tickAsync(0);
 
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "tx-3",
     );
     const secondEffect = assertEffect(shiftMessage(messages));
@@ -3150,9 +3147,14 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
 
 Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", async () => {
   const time = new FakeTime();
+  // Pins the TIMER pipeline's deferral choreography (its gated sync stub
+  // scripts the batched pass); the pre-verdict flush would consume the
+  // gated call first. Opt out — default-on ordering is pinned by
+  // v2-flush-before-verdict-test.ts.
   const server = createServer(
     "memory://memory-v2-server-refresh-max-deferral",
     1,
+    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const writerMessages: ServerMessage[] = [];
@@ -3202,9 +3204,8 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerSessionId = assertResponse<{ sessionId: string }>(
-      shiftMessage(writerMessages),
-    ).ok!.sessionId;
+    const writerSessionId =
+      nextResponse<{ sessionId: string }>(writerMessages).ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -3213,9 +3214,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = assertResponse<{ sessionId: string }>(
-      shiftMessage(messages),
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryBoundary({
@@ -3270,7 +3269,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "tx-1",
     );
 
@@ -3293,7 +3292,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       },
     }));
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "tx-2",
     );
 
@@ -3352,7 +3351,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     releaseTx3.resolve();
     await tx3;
     assertEquals(
-      assertResponse<any>(shiftMessage(writerMessages)).requestId,
+      nextResponse<any>(writerMessages).requestId,
       "tx-3",
     );
   } finally {

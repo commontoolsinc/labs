@@ -132,6 +132,22 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
+// CT-1927: with flushBeforeVerdict defaulting on, transact verdicts are
+// preceded by session sync effects (including marker-only empty frames for
+// watch-less sessions). Tests whose subject is not verdict ordering shift
+// past them here; the ordering itself is pinned by
+// v2-flush-before-verdict-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+  }
+};
+
 const expectHelloOk = (messages: ServerMessage[]): SessionOpenAuthMetadata => {
   const hello = shiftMessage(messages) as HelloOkMessage;
   assertEquals(hello.type, "hello.ok");
@@ -820,9 +836,7 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
         session: {},
         invocation: authInvocation(sessionOpen),
       }));
-      const opened = assertResponse<SessionOpenResult>(
-        shiftMessage(messages),
-      );
+      const opened = nextResponse<SessionOpenResult>(messages);
       assertExists(opened.ok);
 
       const upsert = repeatedSchemaSync(1).upserts[0];
@@ -841,7 +855,9 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
           }],
         },
       }));
-      shiftMessage(messages);
+      // Consume the transact verdict (and, CT-1927 default-on, the
+      // marker-only frame preceding it).
+      nextResponse(messages);
 
       await connection.receive(encodeMemoryBoundary({
         type: "session.watch.add",
@@ -863,7 +879,7 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
         }],
       }));
 
-      const watched = assertResponse<WatchAddResult>(shiftMessage(messages));
+      const watched = nextResponse<WatchAddResult>(messages);
       assertExists(watched.ok);
       return (watched.ok.sync as SchemaTableSessionSync).schemaTable;
     } finally {

@@ -31,6 +31,22 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
+// CT-1927: with flushBeforeVerdict defaulting on, transact verdicts are
+// preceded by session sync effects (including marker-only empty frames for
+// watch-less sessions). Tests whose subject is not verdict ordering shift
+// past them here; the ordering itself is pinned by
+// v2-flush-before-verdict-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+  }
+};
+
 const assertEffect = (message: ServerMessage): SessionEffectMessage => {
   assertEquals(message.type, "session/effect");
   return message as SessionEffectMessage;
@@ -74,8 +90,8 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerOpen = assertResponse<{ sessionId: string; serverSeq: number }>(
-      shiftMessage(writerMessages),
+    const writerOpen = nextResponse<{ sessionId: string; serverSeq: number }>(
+      writerMessages,
     );
 
     await watcher.receive(encodeMemoryBoundary({
@@ -85,10 +101,10 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       session: {},
       invocation: authInvocation(watcherSessionOpen),
     }));
-    const watcherOpen = assertResponse<{
+    const watcherOpen = nextResponse<{
       sessionId: string;
       serverSeq: number;
-    }>(shiftMessage(watcherMessages));
+    }>(watcherMessages);
 
     const writerSessionId = writerOpen.ok!.sessionId;
     const watcherSessionId = watcherOpen.ok!.sessionId;
@@ -112,7 +128,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
         }],
       },
     }));
-    assertEquals(assertResponse(shiftMessage(writerMessages)).ok, {
+    assertEquals(nextResponse(writerMessages).ok, {
       seq: 1,
       branch: "",
       revisions: [{
@@ -201,7 +217,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       },
     }));
     assertEquals(
-      (assertResponse(shiftMessage(writerMessages)).ok as any)?.seq,
+      (nextResponse(writerMessages).ok as any)?.seq,
       2,
     );
 

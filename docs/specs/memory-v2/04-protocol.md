@@ -978,16 +978,15 @@ For live sync:
   post-apply `document` on patch revisions, §4.3.1). REJECTED commits' docs
   are staged origin-less, so repair frames DO cover them.
 
-Implementation status: the verdict-ordering MUST shipped flag-gated
+Implementation status: the verdict-ordering MUST ships ON BY DEFAULT
 (`flushBeforeVerdict` on the server, catalogued in
-`docs/development/EXPERIMENTAL_OPTIONS.md`; default off pending the
-contention-throughput measurement — CT-1927). With the flag off, the
-implementation retains the historical deviation: verdicts return inline while
-the flush rides the batched fan-out timer, compensated by the client-side
-read-repair gate (`finalizeRejection` holds drop/revert until
-`caughtUpLocalSeq` reaches the rejected commit's evaluation point, with a
-30-second timeout backstop). The gate remains in place with the flag on,
-demoted to belt-and-suspenders.
+`docs/development/EXPERIMENTAL_OPTIONS.md`; `false` is the rollback hatch —
+CT-1927). With the flag off, the implementation reverts to the historical
+deviation: verdicts return inline while the flush rides the batched fan-out
+timer, compensated by the client-side read-repair gate (`finalizeRejection`
+holds drop/revert until `caughtUpLocalSeq` reaches the rejected commit's
+evaluation point, with a 30-second timeout backstop). The gate remains in
+place with the flag on, demoted to belt-and-suspenders.
 
 ## 4.12 Mapping from Current Implementation
 

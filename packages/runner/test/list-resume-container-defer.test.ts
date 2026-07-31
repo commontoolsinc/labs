@@ -431,6 +431,12 @@ describe("list builtin resume container defer", () => {
     heldDeliveries = [];
     withheldDocIds.clear();
     server = new MemoryV2Server.Server({
+      // Pins client recovery/conflict machinery whose fixture is controlled
+      // staleness or the legacy verdict-first choreography; the CT-1927
+      // default-on ordering repairs staleness before verdicts, destroying the
+      // premise. Opt out — the legacy path stays load-bearing for old servers
+      // and the rollback hatch. Default-on ordering: v2-flush-before-verdict-test.ts.
+      flushBeforeVerdict: false,
       authorizeSessionOpen(message) {
         const principal = (message.authorization as { principal?: unknown })
           ?.principal;

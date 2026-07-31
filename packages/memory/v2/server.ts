@@ -521,11 +521,33 @@ class Connection {
       this.#receiving = current.then(() => undefined, () => undefined);
       return await current;
     } finally {
-      this.#pendingReceives = Math.max(0, this.#pendingReceives - 1);
-      if (this.#pendingReceives === 0) {
-        this.#receiveIdle?.resolve();
-        this.#receiveIdle = null;
-      }
+      this.releasePendingReceive();
+    }
+  }
+
+  private releasePendingReceive(): void {
+    this.#pendingReceives = Math.max(0, this.#pendingReceives - 1);
+    if (this.#pendingReceives === 0) {
+      this.#receiveIdle?.resolve();
+      this.#receiveIdle = null;
+    }
+  }
+
+  /**
+   * Runs `work` with this receive UNCOUNTED as inbound pressure (CT-1927).
+   * The pre-verdict flush awaits the refresh pipeline, and an in-flight
+   * timer pass's `waitForConnectionQueuesToDrain` counts pending receives —
+   * including the very transact that is awaiting the flush. Left counted,
+   * the two wait for each other until the drain deadline (a latency cliff
+   * in real time; a deadlock under a fake clock). A receive that is blocked
+   * ON fan-out is not pressure the fan-out should yield to.
+   */
+  private async withReceiveUncounted<T>(work: () => Promise<T>): Promise<T> {
+    this.releasePendingReceive();
+    try {
+      return await work();
+    } finally {
+      this.#pendingReceives += 1;
     }
   }
 
@@ -660,9 +682,11 @@ class Connection {
         // concurrent pass. A flush failure must not eat the verdict: the
         // commit's fate is already durable, and the batched refresh remains
         // scheduled as the recovery path.
-        if (this.server.options.flushBeforeVerdict === true) {
+        if (this.server.options.flushBeforeVerdict !== false) {
           try {
-            await this.server.flushSessions([parsed.space]);
+            await this.withReceiveUncounted(() =>
+              this.server.flushSessions([parsed.space])
+            );
           } catch (error) {
             console.warn(
               "memory v2: pre-verdict flush failed; verdict proceeds, batched refresh recovers",
@@ -955,16 +979,17 @@ export class Server {
       store?: URL;
       subscriptionRefreshDelayMs?: number;
       /**
-       * CT-1927 (experimental, default off; catalogued in
+       * CT-1927 (default ON; catalogued in
        * docs/development/EXPERIMENTAL_OPTIONS.md): deliver relevant sync
        * state to the committing session's space BEFORE sending any transact
        * verdict, implementing 04-protocol.md §4.11.2 and extending it to
        * accepts. Restores the cross-channel ordering guarantee (a verdict at
        * seq N is preceded on the socket by every relevant frame < N) and
        * stamps `caughtUpLocalSeq` on the frame that actually carries the
-       * outcome, enabling client-side frame-time overlay retirement. Off,
-       * behavior is byte-identical to today (inline verdicts, batched
-       * fan-out).
+       * outcome, enabling client-side frame-time overlay retirement. Set
+       * `false` to opt out (the rollback hatch): behavior then reverts to
+       * the historical deviation — inline verdicts, batched fan-out, the
+       * client read-repair gate compensating.
        */
       flushBeforeVerdict?: boolean;
       authorizeSessionOpen: (
@@ -2214,7 +2239,7 @@ export class Server {
               seq: commit.seq,
             },
           );
-          if (this.options.flushBeforeVerdict === true) {
+          if (this.options.flushBeforeVerdict !== false) {
             // CT-1927: stamp the accept's catch-up obligation BEFORE the
             // pre-verdict flush, so the frame that precedes the verdict
             // carries `caughtUpLocalSeq >= this localSeq` — the marker

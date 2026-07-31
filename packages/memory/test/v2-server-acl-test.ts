@@ -42,6 +42,22 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
+// CT-1927: with flushBeforeVerdict defaulting on, transact verdicts are
+// preceded by session sync effects (including marker-only empty frames for
+// watch-less sessions). Tests whose subject is not verdict ordering shift
+// past them here; the ordering itself is pinned by
+// v2-flush-before-verdict-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+  }
+};
+
 /** Server whose session principal is taken (untested-crypto, test-only) from
  *  `invocation.iss`, mirroring the toolshed hook's result. */
 const createAclServer = (
@@ -100,9 +116,7 @@ const openSession = async (
       challenge: sessionOpen.challenge.value,
     },
   }));
-  return assertResponse<SessionOpenResult>(
-    shiftMessage(messages),
-  );
+  return nextResponse<SessionOpenResult>(messages);
 };
 
 const transactOperation = async (
@@ -125,7 +139,7 @@ const transactOperation = async (
       operations: [operation as unknown as Operation],
     },
   }));
-  return assertResponse<{ seq: number }>(shiftMessage(messages));
+  return nextResponse<{ seq: number }>(messages);
 };
 
 const transactSet = async (
@@ -158,7 +172,7 @@ const graphQuery = async (
     sessionId,
     query: { roots: [{ id, selector: { path: [], schema: false } }] },
   }));
-  return assertResponse<GraphQueryResult>(shiftMessage(messages));
+  return nextResponse<GraphQueryResult>(messages);
 };
 
 /** Initialize a fresh space through the space identity, then transfer OWNER

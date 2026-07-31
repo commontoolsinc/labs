@@ -43,7 +43,7 @@ was last checked against the code.
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
-| [`flushBeforeVerdict`](#flushbeforeverdict) | `Server` constructor option (`packages/memory/v2/server.ts`) | `false` | Robin McCollum (CT-1927) | become the default (making §4.11.2's verdict-ordering MUST unconditional), then retire the client read-repair gate to belt-and-suspenders | implemented, off by default, awaiting contention-throughput measurement |
+| [`flushBeforeVerdict`](#flushbeforeverdict) | `Server` constructor option (`packages/memory/v2/server.ts`) | `true` | Robin McCollum (CT-1927) | delete the opt-out once the ordering has soaked, making §4.11.2's verdict-ordering MUST unconditional; then retire the client read-repair gate to belt-and-suspenders | implemented, ON by default; `false` is the rollback hatch |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
@@ -625,18 +625,26 @@ the per-epic implementation notes).
   carries their truth via the CT-1926 post-apply document). v1 reuses the
   serialized whole-space `flushSessions` pipeline; single-session targeting is
   the follow-up optimization if measurement demands it.
-- **Current default and planned end state.** Off by default. Flag-off behavior
-  is byte-identical to the historical deviation (inline verdicts, batched
-  fan-out, client read-repair gate compensating). End state: on by default,
-  §4.11.2's MUST unconditional, the client gate demoted to belt-and-suspenders.
-- **Status on 2026-07-30.** Implemented and pinned by
+- **Current default and planned end state.** ON by default (2026-07-31).
+  Setting `false` is the rollback hatch: behavior reverts to the historical
+  deviation (inline verdicts, batched fan-out, client read-repair gate
+  compensating), byte-identical to the pre-CT-1927 wire. End state: delete
+  the opt-out once the ordering has soaked, then demote the client gate to
+  belt-and-suspenders.
+- **Status on 2026-07-31.** Implemented, on by default, pinned by
   `packages/memory/test/v2-flush-before-verdict-test.ts` (accept ordering,
-  rejection read-repair ordering, flag-off control). The gate is a
-  contention-THROUGHPUT measurement (per-commit flush loses the batching
-  amortization); the latency objection is void per the milestone reframing.
-- **Path to removal.** Graduate to default-on after the throughput
-  measurement; the option then documents the ordering contract until the
-  flag-off path is deleted.
+  rejection read-repair ordering, flush-failure never eats a verdict,
+  flag-off control); a handful of timer-pipeline choreography tests pin the
+  opt-out path explicitly. Watch throughput under write contention in the
+  wild (per-commit flush loses the batching amortization; the empty-set
+  fast path covers the common case) — the latency objection is void per the
+  milestone reframing. The pre-verdict flush uncounts its own receive from
+  the drain-wait (`withReceiveUncounted`): a receive blocked ON fan-out is
+  not pressure the fan-out should yield to (left counted, the two wait for
+  each other until the drain deadline — a latency cliff in real time, a
+  deadlock under a fake clock).
+- **Path to removal.** Delete the opt-out (and the flag) once soaked; the
+  §4.11.2 contract then documents the behavior unconditionally.
 
 ### `syncSchemaTableV2`
 
