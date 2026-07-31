@@ -9,6 +9,9 @@ import {
   normalizeAndDiff,
   schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { createRef } from "../src/create-ref.ts";
+import { toURI } from "../src/uri-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
@@ -1209,6 +1212,529 @@ describe("data-updating", () => {
     // Verify neither source nor destination cells were modified
     expect(sourceCell.get()).toEqual({ value: 99 });
     expect(destinationCell.get()).toEqual({ value: 42 });
+  });
+
+  describe("array-element anchoring in normalizeAndDiff", () => {
+    it("stores array-element objects inline when no anchor id source is supplied", () => {
+      // `diffAndUpdate` without an anchor id source is the frameless write:
+      // objects in arrays stay inline rather than becoming documents.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "no anchor source stores inline",
+        undefined,
+        tx,
+      );
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ name: "Ada" }],
+        "no anchor source stores inline",
+      );
+
+      const raw = testCell.getRaw() as unknown[];
+      expect(parseLink(raw[0])).toBe(undefined);
+      expect(raw[0]).toEqual({ name: "Ada" });
+    });
+
+    it("draws anchor ids pre-order: containing element before nested children", () => {
+      // The id source is consumed for an anchored element BEFORE the
+      // recursion into its content, so an element containing its own
+      // objects-in-arrays draws a lower seed than they do. This pins the
+      // sequence deliberately: the annotation scheme this replaced drew
+      // post-order (children first), and nothing else pins either order --
+      // a change here silently re-derives every nested anchored id.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "pre-order anchor ids",
+        undefined,
+        tx,
+      );
+      const seeds: string[] = [];
+      let n = 0;
+      const context = "pre-order anchor ids";
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ kids: [{ x: 1 }], tag: "outer" }],
+        context,
+        undefined,
+        () => {
+          const seed = `seed-${n++}`;
+          seeds.push(seed);
+          return seed;
+        },
+      );
+      expect(seeds.length).toBe(2);
+
+      const rootLink = testCell.getAsNormalizedFullLink();
+      const outerId = toURI(createRef({ id: "seed-0" }, {
+        parent: { id: rootLink.id, space: rootLink.space },
+        path: ["0"],
+        context,
+      }));
+      const raw = testCell.getRaw() as unknown[];
+      const outerLink = parseLink(raw[0], testCell);
+      expect(outerLink?.id).toBe(outerId);
+
+      const innerId = toURI(createRef({ id: "seed-1" }, {
+        parent: { id: outerId, space: rootLink.space },
+        path: ["kids", "0"],
+        context,
+      }));
+      const outerDoc = runtime.getCellFromLink(outerLink!, undefined, tx);
+      const outerRaw = outerDoc.getRaw() as { kids: unknown[] };
+      expect(parseLink(outerRaw.kids[0], outerDoc)?.id).toBe(innerId);
+    });
+
+    it("converges repeated references on one document", () => {
+      // The same object in two array slots is one entity: both slots link to
+      // a single document and the id source is consumed once. (The
+      // annotation scheme stamped a fresh copy per occurrence and stored two
+      // documents; preserving the written graph's aliasing is deliberate.)
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "shared reference converges",
+        undefined,
+        tx,
+      );
+      const shared = { name: "Ada" };
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [shared, shared],
+        "shared reference converges",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      expect(draws).toBe(1);
+      const raw = testCell.getRaw() as unknown[];
+      const first = parseLink(raw[0], testCell);
+      const second = parseLink(raw[1], testCell);
+      expect(first?.id).not.toBe(undefined);
+      expect(second?.id).toBe(first?.id);
+    });
+
+    it("promotes an inline-then-array shared object into one document", () => {
+      // When the same object appears first as an inline property and then in
+      // an array, the array occurrence must not become a link into the
+      // document's mutable interior (removing the inline property would
+      // leave it dangling). Instead the object is promoted into an entity
+      // document of its own -- one id drawn -- and BOTH occurrences link to
+      // it, so the written graph's aliasing is preserved on a stable target.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "inline alias promotes",
+        undefined,
+        tx,
+      );
+      const shared = { name: "Ada" };
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        { first: shared, list: [shared] },
+        "inline alias promotes",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      expect(draws).toBe(1);
+      const raw = testCell.getRaw() as { first: unknown; list: unknown[] };
+      const firstLink = parseLink(raw.first, testCell);
+      const elementLink = parseLink(raw.list[0], testCell);
+      expect(elementLink?.id).not.toBe(undefined);
+      expect(elementLink?.path).toEqual([]);
+      expect(firstLink?.id).toBe(elementLink?.id);
+      const view = testCell.get() as {
+        first: { name: string };
+        list: { name: string }[];
+      };
+      expect(view.first).toEqual({ name: "Ada" });
+      expect(view.list[0]).toEqual({ name: "Ada" });
+    });
+
+    it("promotes a shared object with nested content without creating a cycle", () => {
+      // Promotion repoints the earlier inline location at the promoted
+      // document -- so the document's own content must not link back through
+      // that inline location. Descendants of the promoted object registered
+      // under the inline path have to be re-derived under the document root,
+      // or the read of the promoted content chases its own tail ("Link cycle
+      // detected").
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "nested promotion no cycle",
+        undefined,
+        tx,
+      );
+      const shared = { name: "Ada", meta: { role: "pioneer" } };
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        { first: shared, list: [shared] },
+        "nested promotion no cycle",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      const view = testCell.get() as {
+        first: { name: string; meta: { role: string } };
+        list: { name: string; meta: { role: string } }[];
+      };
+      expect(view.first.meta.role).toBe("pioneer");
+      expect(view.list[0].name).toBe("Ada");
+      expect(view.list[0].meta.role).toBe("pioneer");
+    });
+
+    it("keeps an array occurrence alive after its inline alias is removed", () => {
+      // The lifetime consequence of promotion: rewriting the container
+      // without the inline property must leave the array element intact,
+      // since it points at the shared document rather than at the removed
+      // inline location.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "inline alias lifetime",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<{
+          first?: { name: string };
+          list: { name: string }[];
+          // deno-lint-ignore no-explicit-any
+        }>(space, "inline alias lifetime", undefined, tx) as any;
+        const shared = { name: "Ada" };
+
+        cell.set({ first: shared, list: [shared] });
+        expect(cell.get().list[0]).toEqual({ name: "Ada" });
+
+        const raw = cell.getRaw() as { list: unknown[] };
+        cell.set({ list: raw.list });
+        expect(cell.get().first).toBe(undefined);
+        expect(cell.get().list[0]).toEqual({ name: "Ada" });
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("normalizes addUnique candidates before stored-value comparison", () => {
+      // The dedup comparison must see the candidate in its fabric form: a
+      // repeated native `Date` matches the stored `FabricEpochNsec` and
+      // no-ops rather than throwing (or duplicating). The normalization is
+      // comparison-only -- an ACCEPTED candidate writes the original value.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique normalization",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<unknown[]>(
+          space,
+          "addUnique normalization",
+          undefined,
+          tx,
+        );
+        cell.set([new Date(1234)]);
+        cell.addUnique(new Date(1234));
+        expect((cell.getRaw() as unknown[]).length).toBe(1);
+
+        // A toJSON-backed candidate likewise matches its normalized form.
+        cell.set(["hello"]);
+        cell.addUnique({ toJSON: () => "hello" });
+        expect((cell.getRaw() as unknown[]).length).toBe(1);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("persists an array element's self-reference as a self-link", () => {
+      // An anchored element that references itself stores the cycle as a
+      // link back to its own document root.
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "self reference self-link",
+        undefined,
+        tx,
+      );
+      const loop: { tag: string; self?: unknown } = { tag: "loop" };
+      loop.self = loop;
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [loop],
+        "self reference self-link",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+      expect(draws).toBe(1);
+      const raw = testCell.getRaw() as unknown[];
+      const elementLink = parseLink(raw[0], testCell);
+      expect(elementLink?.id).not.toBe(undefined);
+      const doc = runtime.getCellFromLink(elementLink!, undefined, tx);
+      const docRaw = doc.getRaw() as { tag: string; self: unknown };
+      expect(docRaw.tag).toBe("loop");
+      const selfLink = parseLink(docRaw.self, doc);
+      expect(selfLink?.id).toBe(elementLink?.id);
+      expect(selfLink?.path).toEqual([]);
+    });
+
+    it("anchors an element whose nested Cell awaits normalization", () => {
+      // A written element is only SHALLOWLY normalized when anchoring
+      // eligibility is decided; its nested contents (Cells here) convert
+      // during the recursion that follows. The untouched-prefix check must
+      // therefore never inspect the element's contents -- an equal-shaped
+      // fresh element carrying a Cell must anchor and normalize, not trip a
+      // premature deep comparison against the stored value.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "nested cell awaits normalization",
+        reactives: new Set(),
+      });
+      try {
+        const target = runtime.getCell<{ hello: string }>(
+          space,
+          "nested cell normalization target",
+          undefined,
+          tx,
+        );
+        target.set({ hello: "world" });
+
+        const list = runtime.getCell<{ ref: unknown }[]>(
+          space,
+          "nested cell awaits normalization list",
+          undefined,
+          tx,
+        );
+        // Stored prefix shaped like the incoming write, inline.
+        list.setRaw([{ ref: null }]);
+
+        list.set([{ ref: target }]);
+
+        const raw = list.getRaw() as unknown[];
+        const elementLink = parseLink(raw[0], list);
+        expect(elementLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(elementLink!, undefined, tx);
+        const docRaw = doc.getRaw() as { ref: unknown };
+        const refLink = parseLink(docRaw.ref, doc);
+        expect(refLink?.id).toBe(target.getAsNormalizedFullLink().id);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("pushing a reference to an untouched prefix's interior leaves the prefix alone", () => {
+      // An untouched prefix element must not be descended: registering its
+      // interior objects in the walk's seen map would let a pushed reference
+      // to one of them alias -- and repoint -- content INSIDE the untouched
+      // prefix, a write below the tail that the mergeable ops forbid. The
+      // pushed reference anchors as a fresh document instead.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "untouched prefix interior",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<{ inner: { name: string } }[]>(
+          space,
+          "untouched prefix interior",
+          undefined,
+          tx,
+        );
+        // Deep-frozen seed: the stored tree keeps reference identity through
+        // raw reads, so `inner` below IS the stored interior object. Frozen
+        // as statements so the binding keeps its mutable type for `setRaw`.
+        const innerSeed = { name: "Ada" };
+        const seed = [{ inner: innerSeed }];
+        Object.freeze(innerSeed);
+        Object.freeze(seed[0]);
+        Object.freeze(seed);
+        cell.setRaw(seed);
+        const stored = cell.getRaw() as { inner: { name: string } }[];
+        const inner = stored[0].inner;
+        expect(inner).toBe(innerSeed);
+
+        cell.push(inner as unknown as { inner: { name: string } });
+
+        const raw = cell.getRaw() as { inner: unknown }[];
+        // The prefix element is byte-for-byte untouched: still inline, its
+        // interior still an inline object, not a link.
+        expect(parseLink(raw[0])).toBe(undefined);
+        expect(parseLink((raw[0] as { inner: unknown }).inner)).toBe(
+          undefined,
+        );
+        expect(raw[0]).toEqual({ inner: { name: "Ada" } });
+        // The pushed element anchored as its own fresh document.
+        const tailLink = parseLink(raw[1], cell);
+        expect(tailLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(tailLink!, undefined, tx);
+        expect(doc.get()).toEqual({ name: "Ada" });
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("pushing a reference into an untouched NESTED-array prefix leaves it alone", () => {
+      // Same principle one level deeper: an untouched prefix element that is
+      // itself an array descends (arrays are never anchored), but its object
+      // elements hit the identity no-op before being registered -- so a
+      // pushed reference to one of them anchors fresh rather than promoting
+      // and repointing inside the untouched nested array.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "untouched nested-array prefix",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<{ name: string }[][]>(
+          space,
+          "untouched nested-array prefix",
+          undefined,
+          tx,
+        );
+        const innerSeed = { name: "Ada" };
+        const nested = [innerSeed];
+        const seed = [nested];
+        Object.freeze(innerSeed);
+        Object.freeze(nested);
+        Object.freeze(seed);
+        cell.setRaw(seed);
+        const stored = cell.getRaw() as { name: string }[][];
+        const innerObject = stored[0][0];
+        expect(innerObject).toBe(innerSeed);
+
+        cell.push(innerObject as unknown as { name: string }[]);
+
+        const raw = cell.getRaw() as unknown[];
+        // The nested-array prefix is byte-for-byte untouched.
+        expect(parseLink(raw[0])).toBe(undefined);
+        expect(parseLink((raw[0] as unknown[])[0])).toBe(undefined);
+        expect(raw[0]).toEqual([{ name: "Ada" }]);
+        // The pushed element anchored as its own fresh document.
+        const tailLink = parseLink(raw[1], cell);
+        expect(tailLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(tailLink!, undefined, tx);
+        expect(doc.get()).toEqual({ name: "Ada" });
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("framed addUnique accepts a new self-referential candidate", () => {
+      // A cyclic candidate can never equal a stored element -- stored fabric
+      // values are acyclic (cycles persist as links) -- so the dedup must
+      // treat it as new without attempting the strict normalization that a
+      // cycle would break, and the write path then anchors it with the cycle
+      // as a self-link.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique cyclic candidate",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<unknown[]>(
+          space,
+          "addUnique cyclic candidate",
+          undefined,
+          tx,
+        );
+        cell.set([]);
+        const loop: { tag: string; self?: unknown } = { tag: "loop" };
+        loop.self = loop;
+        cell.addUnique(loop);
+
+        const raw = cell.getRaw() as unknown[];
+        expect(raw.length).toBe(1);
+        const elementLink = parseLink(raw[0], cell);
+        expect(elementLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(elementLink!, undefined, tx);
+        const docRaw = doc.getRaw() as { tag: string; self: unknown };
+        expect(docRaw.tag).toBe("loop");
+        expect(parseLink(docRaw.self, doc)?.id).toBe(elementLink?.id);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("draws no anchor id for an addUnique candidate rejected as duplicate", () => {
+      // A candidate `addUnique` rejects never reaches the write, so it draws
+      // no id. (The annotation scheme anchored all candidates before
+      // filtering, so a rejected duplicate still consumed one.)
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique duplicate draws nothing",
+        reactives: new Set(),
+      });
+      try {
+        const c = runtime.getCell<{ v: number }[]>(
+          space,
+          "addUnique duplicate draws nothing",
+          undefined,
+          tx,
+        );
+        // Seed an INLINE element via a raw write, so a plain candidate can
+        // match it by content.
+        c.setRaw([{ v: 1 }]);
+        c.addUnique({ v: 1 });
+        expect(frame.generatedIdCounter).toBe(0);
+        expect((c.getRaw() as unknown[]).length).toBe(1);
+
+        // An accepted candidate draws exactly one id, and the existing
+        // inline element passes through UNTOUCHED -- not anchored, not
+        // rewritten. That restraint is load-bearing: addUnique's array read
+        // is excluded from the commit's conflict set (mergeable op), which
+        // is only safe while the op emits no writes below the tail.
+        c.addUnique({ v: 2 });
+        const raw = c.getRaw() as unknown[];
+        expect(raw.length).toBe(2);
+        expect(frame.generatedIdCounter).toBe(1);
+        expect(parseLink(raw[0])).toBe(undefined);
+        expect(raw[0]).toEqual({ v: 1 });
+        expect(parseLink(raw[1], c)?.id).not.toBe(undefined);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("anchors an object written over an array element's write redirect", () => {
+      // The element slot's current value is a write redirect. Writing a plain
+      // object there under a frame must still anchor it into a document of
+      // its own -- eligibility comes from the written tree's structure and
+      // has to survive the alias-following re-entry -- with the redirect
+      // target ending up as a link to that document.
+      const targetCell = runtime.getCell<unknown>(
+        space,
+        "redirect anchor target",
+        undefined,
+        tx,
+      );
+      targetCell.set(undefined);
+      const arrayCell = runtime.getCell<unknown[]>(
+        space,
+        "redirect anchor array",
+        undefined,
+        tx,
+      );
+      arrayCell.setRaw([targetCell.getAsWriteRedirectLink()]);
+
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "redirect anchor context",
+        reactives: new Set(),
+      });
+      arrayCell.set([{ name: "Ada" }]);
+      popFrame(frame);
+
+      // The redirect target holds a link to the anchored document, and the
+      // content reads back through the array.
+      const targetRaw = targetCell.getRaw();
+      expect(parseLink(targetRaw, targetCell)?.id).not.toBe(undefined);
+      expect((arrayCell.get() as { name: string }[])[0].name).toBe("Ada");
+    });
   });
 
   describe("sparse array handling in normalizeAndDiff", () => {

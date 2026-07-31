@@ -572,7 +572,7 @@ export function sqliteDatabase(
       // that resolves fully (the creator, at least) writes the inline form.
       if (prior === undefined || dbTablesResolved(tables)) {
         // RAW write, not `.set()`: this first action run can execute inside
-        // the pattern's builder frame, where `set` [ID]-anchors every object
+        // the pattern's builder frame, where `set` anchors every object
         // in an array — splitting a rule's term list into per-element entity
         // docs (the very shape the materialization above exists to avoid).
         // The raw write stores the subtree verbatim; `onlyIfDifferent` keeps

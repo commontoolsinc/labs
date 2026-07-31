@@ -8,15 +8,10 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { FabricValue } from "@commonfabric/api";
-import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import {
-  type Frame,
-  ID,
-  JSONSchema,
-  type Pattern,
-} from "../src/builder/types.ts";
+import { ID, JSONSchema, type Pattern } from "../src/builder/types.ts";
 import {
   getMetaLink,
   isPrimitiveCellLink,
@@ -286,84 +281,6 @@ describe("Cell", () => {
     await localTx.commit();
     await rt.dispose();
     await sm.close();
-  });
-
-  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (unfrozen input)", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    const interests = ["coding", "reading"];
-    const value = {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable: { nested: true },
-    };
-
-    const result = recursivelyAddIDIfNeeded(value, frame);
-
-    // The "preserve identity when nothing to do" optimization doesn't
-    // apply for unfrozen inputs; the function returns a structurally
-    // equivalent, deep-frozen tree (top-level included).
-    expect(result).not.toBe(value);
-    expect(result).toEqual(value);
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.interests)).toBe(true);
-    expect(Object.isFrozen(result.stable)).toBe(true);
-  });
-
-  it("preserves identity when input is already deep-frozen", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    // Deep-freeze before passing in. An already-frozen
-    // plain Object/Array is a valid `FabricValue` and shallow fabric
-    // conversion returns it as-is, so reference identity survives all
-    // the way out.
-    const interests = Object.freeze(["coding", "reading"]);
-    const stable = Object.freeze({ nested: true });
-    const value = Object.freeze({
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable,
-    });
-
-    const result = recursivelyAddIDIfNeeded(value, frame);
-
-    expect(result).toBe(value);
-    expect(result.interests).toBe(interests);
-    expect(result.stable).toBe(stable);
-  });
-
-  it("adds generated IDs to objects in arrays regardless of clone depth", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    const stable = { nested: true };
-    const value = {
-      stable,
-      list: [{ name: "Ada" }, "plain"],
-    };
-
-    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
-
-    // Shallow fabric conversion clones at each level, so no
-    // sub-branch is reference-preserved. The core invariants that
-    // remain: ID assignment for objects-in-arrays still fires, and
-    // primitive list elements still pass through unchanged. The
-    // returned tree is deep-frozen as a whole (top-level + sub-trees).
-    expect(result).not.toBe(value);
-    expect(result.stable).not.toBe(stable);
-    expect(result.stable).toEqual(stable);
-    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
-    expect(result.list[1]).toBe("plain");
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.list)).toBe(true);
-    expect(Object.isFrozen(result.list[0])).toBe(true);
   });
 
   it("should preserve holes and add IDs to objects in sparse arrays", () => {

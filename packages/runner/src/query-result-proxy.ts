@@ -8,7 +8,7 @@ import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
+import { type Cell, createCell, frameAnchorIds } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import {
   type IExtendedStorageTransaction,
@@ -143,10 +143,10 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * `unshift`, etc.) route through the same write-boundary normalization
  * as `Cell.set()` / `Cell.push()`.
  *
- * **Frozenness contract:** Values handed to the write-side array mutators flow
- * through `recursivelyAddIDIfNeeded()` and so plain unfrozen Object/Array
- * inputs get shallowly frozen at each visited level; already-deep- frozen valid
- * `FabricValue` inputs are accepted identity-preservingly.
+ * **Frozenness contract:** Values handed to the write-side array mutators are
+ * normalized (and frozen) level by level inside the write's diff; the caller's
+ * input objects are never mutated, and already-deep-frozen valid `FabricValue`
+ * inputs are accepted identity-preservingly.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
@@ -425,20 +425,26 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            // Turn any newly added elements into cells by adding [ID] symbols.
-            // This ensures objects get stored as separate entity documents
-            // rather than inline data, which is critical for persistence.
+            // The anchor id source turns any newly added objects into entity
+            // documents of their own rather than inline data, which is
+            // critical for persistence.
             const frame = getTopFrame();
 
-            const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
-
             // And if there was a change at all, update the cell.
-            diffAndUpdate(runtime, tx, link, processedCopy, {
-              parent: { id: link.id, space: link.space },
-              method: prop,
-              call: new Error().stack,
-              context: frame?.cause ?? "unknown",
-            });
+            diffAndUpdate(
+              runtime,
+              tx,
+              link,
+              copy,
+              {
+                parent: { id: link.id, space: link.space },
+                method: prop,
+                call: new Error().stack,
+                context: frame?.cause ?? "unknown",
+              },
+              undefined,
+              frameAnchorIds(frame),
+            );
 
             // A tail append records its intent so the commit emits a
             // tail-relative, mergeable operation rather than a position diffed

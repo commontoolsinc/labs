@@ -1,15 +1,12 @@
 import {
   type Immutable,
   isFunction,
-  isObject,
   isPlainContainer,
-  isPlainObject,
   isRecord,
-  type Mutable,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
-  FabricInstance,
+  fabricFromNativeValue,
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
@@ -18,7 +15,6 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
   type EntityRef,
   entityRefFromString,
@@ -56,8 +52,6 @@ import {
   type Frame,
   type HKT,
   type ICell,
-  ID,
-  type IDFields,
   isStreamValue,
   type IsThisObject,
   type IStreamable,
@@ -1265,7 +1259,7 @@ export class CellImpl<T extends FabricValue>
     //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
     //    revision (optimistic-concurrency mutex) and one retries.
     // A LEAF write, not a whole-value set of `{...handle, rev}`: exec runs
-    // inside a handler frame, where a whole-value `.set()` [ID]-anchors every
+    // inside a handler frame, where a whole-value `.set()` anchors every
     // object-in-array and would split the handle's inline rule term lists
     // back into per-element linked docs — the split sqliteDatabase stores the
     // handle raw specifically to avoid (a second runtime can't load those).
@@ -1356,8 +1350,6 @@ export class CellImpl<T extends FabricValue>
       // retry on conflict.
       if (!this.synced) this.sync();
 
-      // Looks for arrays and makes sure each object gets its own doc.
-      const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
       recordRelevantSchemaWritePolicyInput(
         this.tx,
         resolvedToValueLink,
@@ -1372,12 +1364,16 @@ export class CellImpl<T extends FabricValue>
       );
 
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
+      // The anchor id source makes sure each object in an array gets its own
+      // doc; without a frame there is none, and such objects store inline.
       diffAndUpdate(
         this.runtime,
         this.tx,
         writeLink,
-        transformedValue,
+        newValue,
         this._frame?.cause,
+        undefined,
+        frameAnchorIds(this._frame),
       );
 
       // A whole-value set reshapes what a mergeable op intent (an earlier push /
@@ -1555,8 +1551,8 @@ export class CellImpl<T extends FabricValue>
     }
 
     // If there is no array yet, create it first. We have to do this as a
-    // separate operation, so that in the next steps [ID] is properly anchored
-    // in the array.
+    // separate operation, so that in the next steps each object element is
+    // properly anchored in the array.
     if (array === undefined) {
       diffAndUpdate(
         this.runtime,
@@ -1584,12 +1580,16 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
+    // The anchor id source makes sure each pushed object gets its own doc;
+    // without a frame there is none, and such objects store inline.
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
-      recursivelyAddIDIfNeeded(combined, this._frame),
+      combined,
       cause,
+      undefined,
+      frameAnchorIds(this._frame),
     );
 
     // Record the append intent so the commit emits a tail-relative, mergeable
@@ -1642,22 +1642,27 @@ export class CellImpl<T extends FabricValue>
         : [];
     }
 
-    // Anchor ids on the new values, then keep only those not already present
-    // (by stored-value equality, matching the server's add-unique dedup). The
-    // server re-dedups against durable state, catching elements the local
-    // replica had not loaded.
-    const anchored = recursivelyAddIDIfNeeded(
-      value as FabricValue[],
-      this._frame,
-    );
+    // Keep only the values not already present (by stored-value equality,
+    // matching the server's add-unique dedup). The server re-dedups against
+    // durable state, catching elements the local replica had not loaded.
+    const candidates = value as FabricValue[];
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by content, mirroring the server's keyless dedup.
-    const alreadyPresent = (candidate: FabricValue) =>
-      existing.some((element) =>
-        isCell(candidate)
-          ? areLinksSame(
+    // by content, mirroring the server's keyless dedup. Under a frame, the
+    // content comparison runs against a fabric-normalized COPY of the candidate
+    // (a native `Date` must match its stored `FabricEpochNsec` form); the
+    // original candidate -- not the copy -- is what an accepted add writes, so
+    // no identity the write path relies on is disturbed. A frameless
+    // `addUnique` compares the raw candidate: the write boundary that would
+    // normalize it runs only under a frame, and a raw comparison also tolerates
+    // annotation-carrying values (e.g. `get()` results) that the strict
+    // conversion rejects.
+    const normalizeForComparison = this._frame !== undefined;
+    const alreadyPresent = (candidate: FabricValue) => {
+      if (isCell(candidate)) {
+        return existing.some((element) =>
+          areLinksSame(
             element,
             candidate,
             this as unknown as Cell<any>,
@@ -1665,18 +1670,38 @@ export class CellImpl<T extends FabricValue>
             this.tx!,
             this.runtime,
           )
-          : valueEqual(element, candidate)
-      );
-    const toAdd = anchored.filter((candidate) => !alreadyPresent(candidate));
+        );
+      }
+      // A cyclic candidate can never equal a stored element -- stored fabric
+      // values are acyclic (cycles persist as links) -- so it is new by
+      // definition, and must skip the strict normalization a cycle would
+      // break; the write path anchors it with the cycle as a self-link.
+      if (containsCycle(candidate)) {
+        return false;
+      }
+      // Link-carrying candidates (query-result proxies, raw sigil links)
+      // compare as themselves -- the write boundary passes them through
+      // unconverted, and the strict conversion would reject their
+      // non-string-keyed internals.
+      const comparable = normalizeForComparison && !isCellLink(candidate)
+        ? fabricFromNativeValue(candidate) as FabricValue
+        : candidate;
+      return existing.some((element) => valueEqual(element, comparable));
+    };
+    const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
     if (toAdd.length === 0) {
       return;
     }
+    // The anchor id source makes sure each added object gets its own doc;
+    // without a frame there is none, and such objects store inline.
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
       [...existing, ...toAdd],
       cause,
+      undefined,
+      frameAnchorIds(this._frame),
     );
     this.tx.recordMergeableOp?.(resolvedLink, {
       op: "add-unique",
@@ -2954,6 +2979,33 @@ function maybeConvertArrayPathToDataURILink(
  * @param value - The value to validate
  * @throws Error if value contains cells or has circular references
  */
+/**
+ * Whether `value` contains a reference cycle through plain containers.
+ * Cells, links, and other non-plain objects are treated as leaves -- a cycle
+ * through those resolves at read time and is not a structural cycle of the
+ * value itself.
+ */
+function containsCycle(value: unknown): boolean {
+  const ancestors = new Set<object>();
+  const walk = (node: unknown): boolean => {
+    if (
+      node === null || typeof node !== "object" || isCell(node) ||
+      isCellLink(node) || node instanceof FabricSpecialObject
+    ) {
+      return false;
+    }
+    if (ancestors.has(node)) return true;
+    ancestors.add(node);
+    const values = Array.isArray(node) ? node : Object.values(node);
+    for (const child of values) {
+      if (walk(child)) return true;
+    }
+    ancestors.delete(node);
+    return false;
+  };
+  return walk(value);
+}
+
 function validateStaticData(value: unknown): void {
   // Track ancestors in current path (for cycle detection)
   // Shared references are fine - only cycles back to ancestors are errors
@@ -3021,197 +3073,14 @@ function validateStaticData(value: unknown): void {
 }
 
 /**
- * Recursively adds IDs elements in arrays, unless they are already a link.
- *
- * This ensures that mutable arrays only consist of links to documents, at least
- * when written to only via .set, .update and .push above.
- *
- * **Frozenness contract:** This function sits at the write boundary into
- * runner/memory storage. The returned tree is always a valid deep-frozen
- * `FabricValue`: the shallow fabric conversion freezes the sub-trees it visits,
- * and the function freezes the freshly-built top-level container before
- * returning. If the input is already a deep-frozen valid `FabricValue`, the
- * shallow conversion returns it as-is and reference identity is preserved
- * end-to-end.
- *
- * TODO(seefeld): When an array has default entries and is rewritten as [...old,
- * new], this will still break, because the previous entries will point back to
- * the array itself instead of being new entries.
- *
- * @param value - The value to add IDs to.
- * @returns The value with IDs added.
+ * The per-frame id source for anchoring plain array-element objects into
+ * entity documents during a write (`DiffWalkState.nextAnchorId`). Without a
+ * frame there is no source, and such objects store inline.
  */
-export function recursivelyAddIDIfNeeded<T>(
-  value: T,
+export function frameAnchorIds(
   frame: Frame | undefined,
-  seen: Map<unknown, unknown> = new Map(),
-): T {
-  // Can't add IDs without frame.
-  if (!frame) return value;
-
-  // Already seen, return previously annotated result. Check this before
-  // shallowFabricFromNativeValue() to handle circular references properly.
-  if (seen.has(value)) return seen.get(value) as T;
-
-  // Cell links pass through unchanged.
-  if (isCellLink(value)) {
-    return value;
-  }
-
-  // `FabricInstance`s are opaque with respect to plain-object-like property
-  // access; they have class-defined identity. Iterating their own-enumerable
-  // properties via the generic walker would descend into wrapper internals
-  // meaninglessly. Instead, walk the observable internal structure via the
-  // class's `[CODEC]` `encode()` (the same mechanism the serialization system
-  // uses) for side effects only — tracking shared references in `seen` and
-  // populating `frame.generatedIdCounter` for any objects-in-arrays nested
-  // inside — then return the original instance unchanged.
-  if (value instanceof FabricInstance) {
-    seen.set(value, value);
-
-    const state = codecOf(value).encode(value);
-    if (isRecord(state) || Array.isArray(state)) {
-      recursivelyAddIDIfNeeded(state, frame, seen);
-    }
-    return value;
-  }
-
-  // A plain object may still be carrying an `[ID]` directive here -- either
-  // author-supplied or added by the array walk below -- and it is an
-  // instruction for `diffAndUpdate()`, not content, so the conversion
-  // functions rightly refuse to store an object bearing one. Such an object is
-  // walked directly instead; the walk rebuilds it either way, and the directive
-  // survives to the consumer that strips it.
-  // Known gap, deliberately left: the bypass is unconditional, so an object
-  // carrying the directive AND some other symbol or non-enumerable key keeps
-  // its other key out of the key check too, and the record walk below then
-  // drops it silently (it rebuilds from `Object.entries()` and copies back
-  // only `ID`). That drop predates the key check rather than being introduced
-  // by this bypass, and it goes away with the directive itself. Should it
-  // outlive this comment, close it by requiring everything other than the
-  // directive to satisfy `isPlainObjectWithOnlyEnumerableStringKeys()`.
-  const carriesIdDirective = isPlainObject(value) &&
-    (ID in (value as object));
-
-  // Convert value to fabric form. This handles:
-  // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
-  //   symbols)
-  // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
-  // - Objects/arrays with toJSON() methods
-  // - Sparse arrays (holes preserved)
-  const converted = carriesIdDirective
-    ? value
-    : shallowFabricFromNativeValue(value);
-
-  // A `FabricSpecialObject` returned by the conversion step (e.g. `FabricError`
-  // wrapping a native `Error`, or `FabricEpochNsec` wrapping a native `Date`).
-  // These are atomic fabric values and must be returned unchanged rather than
-  // walked as records (their state is private, so the record branch below would
-  // flatten them to `{}`). Only `FabricInstance`s carry nested `FabricValue`s
-  // that need `[ID]` assignment via the codec's `encode()`; `FabricPrimitive`s
-  // are leaves.
-  if (converted instanceof FabricSpecialObject) {
-    seen.set(value, converted);
-
-    if (converted instanceof FabricInstance) {
-      const state = codecOf(converted).encode(converted);
-      if (isRecord(state) || Array.isArray(state)) {
-        recursivelyAddIDIfNeeded(state, frame, seen);
-      }
-    }
-    return converted as T;
-  }
-
-  // Primitives need no further processing. Cache the conversion when it
-  // produced a different value (e.g. an object whose `toJSON()` returns a
-  // primitive) so callers see consistent results.
-  if (!isRecord(converted)) {
-    if (converted !== value) seen.set(value, converted);
-    return converted as T;
-  }
-
-  // From here `converted` is an array or record. The result container is
-  // pre-registered in `seen` against the original `value` BEFORE descending
-  // into entries, so circular back-references to `value` resolve correctly.
-  // Without this, a cycle would re-enter `shallowFabricFromNativeValue(value)`
-  // on every pass and recurse forever.
-  const convertedDiffers = converted !== value;
-
-  if (Array.isArray(converted)) {
-    // Typed as `any[]` (not `unknown[]`) to preserve the original code's
-    // looser inference inside the iteration body, where `{...v}` and
-    // `ID in v` operate post-narrowing without explicit casts.
-    const sourceArray = converted as any[];
-    const result = new Array<unknown>(sourceArray.length);
-    let changed = convertedDiffers;
-
-    seen.set(value, result);
-    if (convertedDiffers) seen.set(converted, result);
-
-    sourceArray.forEach((el, i) => {
-      const v = recursivelyAddIDIfNeeded(el, frame, seen);
-      // For objects on arrays only: Add ID if not already present. A
-      // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
-      // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
-      // a `FabricEpochNsec` to `{[ID]: …}`), so it must be left intact.
-      if (
-        isObject(v) && !isCellLink(v) && !(ID in v) &&
-        !(v instanceof FabricSpecialObject)
-      ) {
-        changed = true;
-        const withId = { [ID]: frame.generatedIdCounter++, ...v };
-        // The ID-wrapped object is a freshly-built container that must also be
-        // deep-frozen.
-        Object.freeze(withId);
-        result[i] = withId;
-      } else {
-        if (!Object.is(v, el)) {
-          changed = true;
-        }
-        result[i] = v;
-      }
-    });
-
-    if (!changed) {
-      seen.set(value, value);
-      return value;
-    }
-
-    // The value enters a write-boundary that expects deep-frozen `FabricValue`
-    // trees. Children are already frozen by `shallowFabricFromNativeValue()`
-    // above; freeze the freshly-built top-level container so the returned tree
-    // is deep-frozen as a whole.
-    return Object.freeze(result) as T;
-  } else {
-    const sourceRecord = converted as Record<string, unknown>;
-    const result: Record<string, unknown> & Mutable<IDFields> = {};
-    let changed = convertedDiffers;
-
-    seen.set(value, result);
-    if (convertedDiffers) seen.set(converted, result);
-
-    Object.entries(sourceRecord).forEach(([key, v]) => {
-      const next = recursivelyAddIDIfNeeded(v, frame, seen);
-      if (!Object.is(next, v)) {
-        changed = true;
-      }
-      result[key] = next;
-    });
-
-    // Copy the `ID` directive from the original value. Symbols are not
-    // enumerable via `Object.entries()` and are not preserved by the
-    // shallow fabric conversion.
-    if (isRecord(value) && ID in value) {
-      result[ID] = (value as IDFields)[ID];
-    }
-
-    if (!changed) {
-      seen.set(value, value);
-      return value;
-    }
-
-    return Object.freeze(result) as T;
-  }
+): (() => number) | undefined {
+  return frame === undefined ? undefined : () => frame.generatedIdCounter++;
 }
 
 /**
@@ -3472,7 +3341,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
       // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
       // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
-      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
+      // (whose diff normalizes at the write boundary). The raw value flows into
       // `setInitialValue()` and into the schema `default` via
       // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
       // there -- so a `Cell.of(new Date())` throws under the strict codec.

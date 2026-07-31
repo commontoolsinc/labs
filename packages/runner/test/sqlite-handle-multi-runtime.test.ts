@@ -1,7 +1,7 @@
 // Multi-runtime stability of the SqliteDb handle (CFC Phase 3 rule-bearing
 // dbs). A rowLabel rule's term LIST (`all(a, b, …)` — an array of objects)
 // used to split into per-element entity docs when the handle value was stored
-// (Cell.set assigns [ID] to every object-in-array). Those term docs are not
+// (Cell.set anchors every object-in-array). Those term docs are not
 // reachable through any schema-driven sync, so a SECOND runtime deep-resolved
 // the links to `null` and `sqliteQuery` hashed `allOf: [null]` while the
 // creator runtime hashed the resolved AST — two request hashes fighting over
@@ -266,7 +266,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     expect(collectSigilLinks(raw)).toEqual([]);
 
     // db.exec's rev bump must keep it self-contained too: it writes from a
-    // handler frame, where a whole-value set would [ID]-split the term list
+    // handler frame, where a whole-value set would entity-split the term list
     // right back into linked docs. Only the `rev` leaf may change.
     await seedDbFile(runtimeA, resultCell);
     await runtimeA.idle();
