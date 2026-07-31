@@ -552,6 +552,13 @@ describe("cli piece parsing", () => {
     expect(getFlags).toContain("--step");
   });
 
+  it("offers per-phase timing output for piece call", () => {
+    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(callFlags).toContain("--verbose");
+  });
+
   it("steps, reads, syncs, and stops in one get operation", async () => {
     const order: string[] = [];
     const controller = {
