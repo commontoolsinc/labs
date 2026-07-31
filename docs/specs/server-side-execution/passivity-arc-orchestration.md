@@ -413,14 +413,69 @@ refusal, i.e. the exact arm the operational target drives to zero. **Nothing
 fails open in the runner arm; every failure is a refusal.** The deletion is
 right in direction and wrong in sequencing.
 
-**Sequence, and do not reorder it:** (1) make the client always send the acting
-context including `"space"` — a one-line change at `runner/src/storage/v2.ts`,
-and `#actingReadScopeContext` already returns the base scope for `"space"`
-without requiring a binding, so no server change; (2) THEN delete the
-`assertedLane` fallback, whose population is now empty; (3) site 1's
-`claim-not-live` is then dead for the wire — an unbound client resolves
-`lane: undefined` and returns before the loop, and a bound executor's missing
-assertion is already a `ProtocolError` upstream.
+**THAT SEQUENCE IS DEAD. DO NOT RETRY IT — both variants livelock the runner
+suite, measured 2026-07-30.** The plan was: make the client name the space lane,
+then delete the fallback. Two attempts:
+
+| variant | memory | runner | failure shape |
+| --- | --- | --- | --- |
+| broad — `?? "space"` on every commit | — | hangs | refused-and-retried |
+| narrow — executor replica only (`#shadowWrites` / `#actionTransactionRouter`) | 845/0 unchanged; egress e2e 2/2 | never completes (killed at 25 min) | **accepted-and-no-op forever** |
+
+**The two failures are different, and the narrow one is the informative one.**
+The broad variant named a lane for the entire ordinary-client population,
+turning the write firewall on for a population that has never been subject to
+it — `firewalledActionRun` requires only `actingLane !== undefined`. **That is
+itself a fact worth holding: the write firewall has NEVER run on the space
+lane, for the executor or anyone.** `#localSeqLanes` never stores `"space"`
+(every write site guards `if (lane !== "space")`), so at `commitActingContext`
+"the executor ran at space rank" and "an ordinary client commit with no lane"
+are the SAME ABSENCE and cannot be told apart there.
+
+The narrow variant is not a firewall problem at all. Across 324,910 lines of
+the livelock region there is not one `ExecutionActionFirewallError`,
+`ExecutionLeaseFenceError`, `ProtocolError`, `lease-unbounded-commit`, any
+`claim-*`/`lane-*` code, or even `conflict`. It is **242,226 successful
+`transact ack`s all pinned at `seq=3`, interleaved with 81,125 `dirty=0`
+waves** — commits accepted, server sequence never advancing, nothing ever
+dirty. A CONVERGENCE failure, not a refusal. **The mechanism is not pinned and
+was deliberately not guessed at**; the obvious candidate (the observation
+recorded under a context key the reader does not look up) is not directly
+supported, since `executionContextKey` resolves from the effective context
+floor and scope context, not from `actingLane`.
+
+Also established, independent of the mechanism: **the narrow predicate is
+broader than the 114.** `#actionTransactionRouter !== undefined` fires for
+EVERY commit that replica makes, but the 114 are only the subset carrying an
+`executionClaimAssertion` — and the same router builds `action-run`
+observations with `executionClaimAssertion: undefined` explicitly. Those
+resolve `lane = undefined` today and `"space"` under the predicate: a
+population that has never named a lane.
+
+**THE CHEAPER ROUTE, and it needs no client change at all: RESTRICT the
+fallback rather than empty its population.**
+
+```ts
+const lane = options.actingContext ??
+  (assertedLane === "space" ? "space" : undefined);
+```
+
+The leak is exclusively about SCOPED lanes. `"space"` has no acting principal
+and `admitExecutionCommitLanes` returns early for it before the claim loop, so
+the space half of the fallback resolves no identity and decides nothing —
+`scopePrincipal` stays the committing principal either way. A forged
+`user:<bob>` or `session:…` assertion resolves `lane = undefined` and the write
+lands at the FORGER: the same structural closure the full deletion measured,
+with no client change, no sequencing, and the space-rank population byte-
+identical. The surviving space half is inert, and can be deleted later if the
+livelock is ever understood. (An exact-mirror alternative — name `"space"` iff
+the commit carries a space-lane assertion, passing the commit into
+`commitActingContext` — was also suggested and is strictly more work for the
+same result.)
+
+Site 1's `claim-not-live` becomes unreachable via the fallback under this
+restriction, but do NOT delete it in the same change: it is also the only thing
+fencing the forged-`"space"` assertion below.
 
 **§2.1's "the executor sends nothing for the space lane" is load-bearing in a
 way that file cannot show.** It reads as byte-identity preservation; it is also
