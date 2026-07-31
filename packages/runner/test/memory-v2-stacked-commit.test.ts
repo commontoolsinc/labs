@@ -2461,6 +2461,159 @@ Deno.test("memory v2 stacked commits: zero-read patch is not cascaded when an ea
   }
 });
 
+Deno.test("memory v2 stacked commits: surviving mergeable append does not resurrect a rejected materialization", async () => {
+  const harness = await createHarness();
+  const c1Verdict = Promise.withResolvers<void>();
+  const c2Verdict = Promise.withResolvers<void>();
+  try {
+    // A has no durable items array. B gives C1 a real confirmed read whose
+    // staleness can reject the whole A+B transaction without any remote write
+    // to A.
+    await seedAccepted(harness, DOCS.A, {});
+    await seedAccepted(harness, DOCS.B, valueFor("b0"));
+
+    // C1 materializes A.items locally and also writes B. A foreign B write
+    // lands before validation, so C1's confirmed read of B is stale and the
+    // server rejects the whole transaction, including the A materialization.
+    const c1 = beginBatch(
+      harness,
+      [
+        { op: "set", id: DOCS.A, value: { items: ["seeded"] } },
+        { op: "set", id: DOCS.B, value: valueFor("c1-b") },
+      ],
+      sourceFromReads([{ id: DOCS.B }]),
+    );
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "accept",
+      remoteInterleave: {
+        label: "foreign B write rejects C1",
+        operations: [{
+          op: "set",
+          id: DOCS.B,
+          value: valueFor("b-winner"),
+        }],
+      },
+      responseGate: c1Verdict.promise,
+    });
+
+    // C2 is an unconditional mergeable append through the optimistic array
+    // C1 materialized. Its local snapshot necessarily contains both values,
+    // but the append's own read is suppressed: its post-5110 wire commit has
+    // no PendingRead.localSeq dependency array naming C1, so C2 is independent
+    // and must survive C1's rejection.
+    const c2LocalSeq = c1.localSeq + 1;
+    harness.model.setOutcome(c2LocalSeq, {
+      kind: "accept",
+      responseGate: c2Verdict.promise,
+    });
+    const c2 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "append", path: "/value/items", values: ["mine"] }],
+      { items: ["seeded", "mine"] },
+    );
+
+    expectVisible(harness, { A: { items: ["seeded", "mine"] } });
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(c2LocalSeq),
+      "mergeable append to reach the wire",
+    );
+
+    // Reject C1 first. C2 remains pending and is replayed over A's confirmed
+    // empty object. Only C2's append may survive that replay.
+    c1Verdict.resolve();
+    await assertConflict(c1.promise, "stale confirmed read");
+    const visibleAfterC1Drop = visibleValue(harness.provider, DOCS.A);
+
+    // The server then accepts C2 independently. append's create-missing
+    // semantics produce exactly ["mine"] from durable A={}, proving that no
+    // remote A novelty or hidden C1 acceptance is needed for the scenario.
+    c2Verdict.resolve();
+    await assertResultOk(c2);
+    const acceptedC2 = harness.model.applied.get(c2LocalSeq);
+    assertExists(acceptedC2);
+    assertEquals(acceptedC2.commit.reads.confirmed, []);
+    assertEquals(acceptedC2.commit.reads.pending, []);
+    const acceptedOperation = acceptedC2.commit.operations[0];
+    assertExists(acceptedOperation);
+    assertEquals(acceptedOperation.op, "patch");
+    if (acceptedOperation.op !== "patch") {
+      throw new Error("expected C2 to carry a patch operation");
+    }
+    assertEquals(acceptedOperation.patches, [{
+      op: "append",
+      path: "/value/items",
+      values: ["mine"],
+    }]);
+    assertEquals(
+      harness.model.confirmed.get(DOCS.A)?.value,
+      { items: ["mine"] },
+    );
+    const visibleAfterC2Accept = visibleValue(harness.provider, DOCS.A);
+
+    // No-resurrection: neither pending replay nor accepted promotion may copy
+    // C1's rejected "seeded" value out of C2's optimistic full-value snapshot.
+    assertEquals(
+      { visibleAfterC1Drop, visibleAfterC2Accept },
+      {
+        visibleAfterC1Drop: { items: ["mine"] },
+        visibleAfterC2Accept: { items: ["mine"] },
+      },
+    );
+  } finally {
+    c1Verdict.resolve();
+    c2Verdict.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: operation replay composes with an independent projected patch", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, { title: "old" });
+
+    const c1 = beginBatch(harness, [
+      {
+        op: "set",
+        id: DOCS.A,
+        value: { title: "old", items: ["seeded"] },
+      },
+      { op: "set", id: DOCS.B, value: valueFor("c1-b") },
+    ]);
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "rejectConflict",
+      message: "reject C1 materialization",
+    });
+
+    const c2LocalSeq = c1.localSeq + 1;
+    harness.model.setOutcome(c2LocalSeq, { kind: "accept" });
+    const c2 = beginPatch(
+      harness,
+      DOCS.A,
+      [
+        { op: "append", path: "/value/items", values: ["mine"] },
+        {
+          op: "replace",
+          path: "/value/title",
+          value: "new",
+        },
+      ],
+      { title: "new", items: ["seeded", "mine"] },
+    );
+
+    await assertConflict(c1.promise, "reject C1 materialization");
+    await assertResultOk(c2);
+
+    // The operation-based append rebuilds from the live base, while the
+    // independent ordinary patch still projects its absolute final value.
+    const expected = { title: "new", items: ["mine"] };
+    assertEquals(harness.model.confirmed.get(DOCS.A)?.value, expected);
+    expectVisible(harness, { A: expected });
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: each cascaded victim emits one revert with its own doc ids", async () => {
   const harness = await createHarness();
   const g1 = Promise.withResolvers<void>();

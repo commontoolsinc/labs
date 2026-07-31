@@ -87,6 +87,12 @@ compile error). Each descriptor owns:
   `["from", "path"]` for `move`). This is the single source for the op's changed
   leaf paths.
 - `structural` — whether the op changes a container's key-set.
+- `operationBased` — whether the op carries relative mergeable intent that a
+  client must replay against its rebuilt live base. Snapshot-derived ops instead
+  replay by projecting their absolute changed paths from the transaction's final
+  optimistic value. Keeping this distinction in the descriptor prevents a
+  rejected pending layer's data from being copied through a surviving mergeable
+  op.
 
 Three separate path computations derive from `pointerFields` + `structural` via
 the exported `touchedPointerPaths` / `patchOpIsStructural` helpers, instead of
@@ -96,8 +102,10 @@ re-enumerating the ops:
   recursive-read commit conflicts and the scheduler reader-dirty index.
 - `engine.ts` `touchedPathsForPatch` — leaf paths plus the parent path for
   structural ops, for shape-only (nonRecursive) readers.
-- `runner storage/v2.ts` `changedPathsForPendingPatch` — leaf paths,
-  replay-resolved for structural ops, for the client's optimistic pending replay.
+- `runner storage/v2.ts` pending replay — operation-based ops use `applyPatch`
+  against the rebuilt base; snapshot-derived ops use
+  `changedPathsForPendingPatch`, with structural paths resolved against live
+  state.
 
 ### 2. Mergeable-op descriptors — `packages/runner/src/storage/mergeable-ops.ts`
 

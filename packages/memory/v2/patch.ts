@@ -482,6 +482,14 @@ const isContainer = (value: FabricValue): value is PatchContainer =>
  *   an ordinary append to an already-present child — the write-contention the
  *   mergeable ops exist to avoid. See
  *   docs/specs/memory-v2/08-conflict-granularity.md.
+ * - `operationBased` distinguishes mergeable intent ops from snapshot-derived
+ *   patches. A client rebuilding an optimistic pending stack must apply an
+ *   operation-based op to the rebuilt live base, exactly as the durable store
+ *   does, rather than copy the op's touched path from the transaction's final
+ *   optimistic value. That final value can contain data from an earlier pending
+ *   layer that was subsequently rejected; copying it would resurrect the
+ *   rejected layer. Snapshot-derived patches keep their value-projection replay
+ *   because their absolute effect was reconstructed from the transaction view.
  *
  * Adding a new wire op is a single new entry here: the `Record<PatchOp["op"],
  * …>` type makes a missing entry (or an entry for a tag not in the `PatchOp`
@@ -492,6 +500,7 @@ export type PatchOpDescriptor<Op extends PatchOp = PatchOp> = {
   readonly op: Op["op"];
   readonly pointerFields: readonly string[];
   readonly structural: boolean;
+  readonly operationBased: boolean;
   readonly apply: (state: FabricValue, op: Op) => FabricValue;
 };
 
@@ -504,24 +513,28 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
     op: "replace",
     pointerFields: ["path"],
     structural: false,
+    operationBased: false,
     apply: (state, op) => replaceAtPath(state, parsePointer(op.path), op.value),
   }),
   add: descriptor<Extract<PatchOp, { op: "add" }>>({
     op: "add",
     pointerFields: ["path"],
     structural: true,
+    operationBased: false,
     apply: (state, op) => addAtPath(state, parsePointer(op.path), op.value),
   }),
   remove: descriptor<Extract<PatchOp, { op: "remove" }>>({
     op: "remove",
     pointerFields: ["path"],
     structural: true,
+    operationBased: false,
     apply: (state, op) => removeAtPath(state, parsePointer(op.path)),
   }),
   move: descriptor<Extract<PatchOp, { op: "move" }>>({
     op: "move",
     pointerFields: ["from", "path"],
     structural: true,
+    operationBased: false,
     apply: (state, op) =>
       moveValue(state, parsePointer(op.from), parsePointer(op.path)),
   }),
@@ -529,6 +542,7 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
     op: "splice",
     pointerFields: ["path"],
     structural: false,
+    operationBased: false,
     apply: (state, op) =>
       spliceAtPath(state, parsePointer(op.path), op.index, op.remove, op.add),
   }),
@@ -536,12 +550,14 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
     op: "append",
     pointerFields: ["path"],
     structural: false,
+    operationBased: true,
     apply: (state, op) => appendAtPath(state, parsePointer(op.path), op.values),
   }),
   "add-unique": descriptor<Extract<PatchOp, { op: "add-unique" }>>({
     op: "add-unique",
     pointerFields: ["path"],
     structural: false,
+    operationBased: true,
     apply: (state, op) =>
       addUniqueAtPath(state, parsePointer(op.path), op.values),
   }),
@@ -549,6 +565,7 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
     op: "remove-by-value",
     pointerFields: ["path"],
     structural: false,
+    operationBased: true,
     apply: (state, op) =>
       removeByValueAtPath(state, parsePointer(op.path), op.value),
   }),
@@ -556,6 +573,7 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
     op: "increment",
     pointerFields: ["path"],
     structural: false,
+    operationBased: true,
     apply: (state, op) => incrementAtPath(state, parsePointer(op.path), op.by),
   }),
 };
@@ -580,6 +598,14 @@ export const touchedPointerPaths = (op: PatchOp): string[][] =>
  */
 export const patchOpIsStructural = (op: PatchOp): boolean =>
   patchOpDescriptors[op.op].structural;
+
+/**
+ * Whether the op carries mergeable intent that must be replayed against live
+ * state, rather than reconstructed by projecting a transaction's final
+ * optimistic value.
+ */
+export const patchOpIsOperationBased = (op: PatchOp): boolean =>
+  patchOpDescriptors[op.op].operationBased;
 
 /**
  * Whether the op changes its parent container's key set, so a shape-only

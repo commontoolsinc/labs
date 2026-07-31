@@ -109,18 +109,21 @@ for exactly which reads are kept. `Cell.push` is unconditional, so it merges.
 
 ## Mechanics
 
-The same machinery carries three mergeable ops. `append` is described below;
-`add-unique` and `increment` follow the same shape (see *The op family*).
+The same machinery carries four mergeable ops. `append` is described below;
+`add-unique`, `increment`, and `remove-by-value` follow the same shape (see *The
+op family*).
 
 - **`PatchOp` (`packages/memory/v2.ts`)** — a new `{ op: "append"; path; values }`
   variant. It carries only the array path and the elements to append.
 
 - **`appendAtPath` (`packages/memory/v2/patch.ts`)** — thaws (and creates, if
   missing) the array at `path` and pushes `values` at the tail; `applyPatch`'s
-  `append` case calls it. This one place covers both the server's commit-time
-  materialization and a peer client replaying the revision. The two engine
-  touched-path maps and the client's optimistic-replay path each gain an
-  `append` case that returns the array path, the same as `splice`.
+  `append` case calls it. This one place covers server materialization, peer
+  revision replay, and pending optimistic replay. The pending path applies the
+  operation payload against the rebuilt live base instead of copying the array
+  from the transaction's full optimistic snapshot: that snapshot may contain
+  data from an earlier pending transaction that was later rejected. The two
+  engine touched-path maps use the array path, the same as `splice`.
 
 - **Transaction (`packages/runner/src/storage/v2-transaction.ts`)** —
   `recordMergeableOp(address, { op: "append", count })` records, per document and
