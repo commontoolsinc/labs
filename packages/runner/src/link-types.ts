@@ -71,6 +71,16 @@ export type NormalizedLink = {
    * Read-side only: this is never serialized into a sigil link, never part of
    * link identity (`areNormalizedLinksSame`), and must never be stamped onto a
    * followed link's own scope (CT-1623).
+   *
+   * Caps are MONOTONIC across `asSchema()`: reinterpreting an address can
+   * tighten a cap (the next `key()` merges the narrower of the two) but never
+   * lift one. Clearing them on `asSchema` looks tempting — it is a sibling
+   * with a different schema, so carrying provenance from the discarded one
+   * reads as surprising — but it would turn every `asSchema`-based read
+   * helper into a cap bypass. `cellWithScopedLinkRequiredsRelaxed`, the piece
+   * read boundary itself, ends in `cell.asSchema(relaxed)`; the ancestor caps
+   * a narrowed cell carries exist nowhere else, so dropping them there would
+   * silently lift the caps that boundary is supposed to enforce.
    */
   scopeCaps?: readonly ScopeCapAtDepth[];
 };
