@@ -24,7 +24,7 @@ import {
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -2022,7 +2022,7 @@ describe("native-conversion", () => {
 
       const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
 
-      expect(isPlainObjectWithOnlyEnumerableStringKeys(result)).toBe(true);
+      expect(isInertPlainObject(result)).toBe(true);
       expect(result).toEqual({ a: 1 });
     });
 
