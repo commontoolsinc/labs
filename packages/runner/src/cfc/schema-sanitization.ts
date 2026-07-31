@@ -19,6 +19,7 @@ import {
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
   cfcSchemaChildRoot,
+  isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -1208,38 +1209,47 @@ const isSchemaObject = (
   typeof schema === "object" && schema !== null && !Array.isArray(schema);
 
 /**
- * Follow local `#/$defs/...` / `#/definitions/...` references to the schema
- * they name, so a `default` behind one is still seen. Chains are followed to
- * their end; anything unresolvable (a remote ref, a missing entry, a cycle)
- * yields the last schema reached rather than failing.
+ * Follow `$ref` chains to the schema they name, so a `default` behind one is
+ * still seen. Resolution is the canonical resolver's, not a private pointer
+ * parser: each hop goes through `resolveCfcSchemaRef` (which decodes JSON
+ * Pointer escapes, so `#/$defs/A~1B` names the `"A/B"` definition, and
+ * resolves the embedded-schema URIs) against the scope `cfcSchemaChildRoot`
+ * assigns — a subtree with its own `$defs` opens a new scope, exactly the
+ * root tracking `resolveCfcSchemaRefRoot` applies. A hand-rolled regex here
+ * previously disagreed with that resolver on escaped names and nested
+ * scopes, so this gate refused payloads the runtime's own materialization
+ * accepts.
+ *
+ * Chains are followed to their end; anything the canonical resolver does not
+ * resolve (a remote non-embedded ref, a `definitions` pointer — hoisting
+ * emits `$defs` only, so the runtime cannot resolve those either — a missing
+ * entry, a cycle) yields the last schema reached rather than failing. For
+ * the gates built on this, unresolvable keeps the field required, so the
+ * call is refused and the invocation id survives for a corrected retry.
  */
 export function localRefTarget(
   schema: JSONSchema,
   root: JSONSchema,
 ): JSONSchema {
   let current = schema;
-  const visited = new Set<object>();
-  while (isSchemaObject(current)) {
+  let currentRoot = cfcSchemaChildRoot(schema, root);
+  const seenRefs = new Map<JSONSchema, Set<string>>();
+  while (isSchemaObject(current) && typeof current.$ref === "string") {
     const ref = current.$ref;
-    if (typeof ref !== "string" || !isSchemaObject(root)) return current;
-    if (visited.has(current)) return current;
-    visited.add(current);
-    // `$defs` only, deliberately — NOT `definitions`. Hoisting emits `$defs`
-    // and `#/$defs/...` (schema-generator AGENTS.md: "anything that says
-    // `definitions` is out of date"), so a `definitions` ref is one the
-    // runtime cannot resolve either. Following it here would relax a required
-    // field on the strength of a default that never gets injected, letting an
-    // invalid payload through and spending its invocation id on a handling
-    // that receives no event — the exact failure the pre-dispatch gate exists
-    // to stop. Unresolvable refs keep the field required, so the call is
-    // refused before dispatch and the id survives.
-    const match = /^#\/\$defs\/(.+)$/.exec(ref);
-    if (!match) return current;
-    const pool = (root as Record<string, unknown>).$defs;
-    if (!isSchemaObject(pool as JSONSchema)) return current;
-    const target = (pool as Record<string, JSONSchema>)[match[1]];
-    if (target === undefined) return current;
-    current = target;
+    let refsForRoot = seenRefs.get(currentRoot);
+    if (refsForRoot?.has(ref)) return current;
+    if (!refsForRoot) {
+      refsForRoot = new Set();
+      seenRefs.set(currentRoot, refsForRoot);
+    }
+    refsForRoot.add(ref);
+    const next = resolveCfcSchemaRef(currentRoot, ref);
+    if (next === undefined) return current;
+    currentRoot = cfcSchemaChildRoot(
+      next,
+      isEmbeddedCfcSchemaRef(ref) ? next : currentRoot,
+    );
+    current = next;
   }
   return current;
 }

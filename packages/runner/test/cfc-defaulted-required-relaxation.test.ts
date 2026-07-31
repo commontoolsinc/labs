@@ -53,6 +53,48 @@ describe("relaxDefaultedRequired", () => {
     })).toBeUndefined();
   });
 
+  // Resolution is the canonical resolver's, JSON Pointer escapes included:
+  // `#/$defs/A~1B` names the `"A/B"` definition. The previous hand-rolled
+  // regex indexed `$defs` by the UNDECODED text, missed the default, left
+  // `mode` required, and both gates refused `{}` even though runtime
+  // materialization accepts it and supplies the default (review repro on the
+  // D5/D6 PR).
+  it("relaxes a default behind a JSON-Pointer-escaped name (A~1B names A/B)", () => {
+    expect(relaxedValidationError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/A~1B" } },
+      required: ["mode"],
+      $defs: { "A/B": { type: "string", default: "fast" } },
+    })).toBeUndefined();
+  });
+
+  it("relaxes a default behind a ~0 escape (A~0B names A~B)", () => {
+    expect(relaxedValidationError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/A~0B" } },
+      required: ["mode"],
+      $defs: { "A~B": { type: "string", default: "fast" } },
+    })).toBeUndefined();
+  });
+
+  // A subtree that declares its own `$defs` opens a new local-ref scope
+  // (`cfcSchemaChildRoot`), so its refs must resolve against ITS definitions,
+  // not the document root's. The outer decoy definition carries no default:
+  // resolving in the wrong scope leaves `mode` required and refuses `{}`.
+  it("relaxes a default the subtree's own $defs scope provides", () => {
+    expect(relaxedValidationError({}, {
+      type: "object",
+      properties: {
+        mode: {
+          $ref: "#/$defs/Mode",
+          $defs: { Mode: { type: "string", default: "fast" } },
+        },
+      },
+      required: ["mode"],
+      $defs: { Mode: { type: "number" } },
+    })).toBeUndefined();
+  });
+
   it("follows a $ref chain to find the default", () => {
     expect(relaxedValidationError({}, {
       type: "object",
@@ -191,5 +233,24 @@ describe("localRefTarget", () => {
       unresolvable,
       { $defs: { Present: { type: "string" } } } as JSONSchema,
     )).toBe(unresolvable);
+  });
+
+  it("decodes JSON Pointer escapes exactly like the canonical resolver", () => {
+    const target = { type: "string", default: "fast" } as const;
+    expect(localRefTarget(
+      { $ref: "#/$defs/A~1B" } as JSONSchema,
+      { $defs: { "A/B": target } } as JSONSchema,
+    )).toEqual(target);
+  });
+
+  it("resolves inside the scope a subtree's own $defs opens", () => {
+    const inner = { type: "string", default: "fast" } as const;
+    expect(localRefTarget(
+      {
+        $ref: "#/$defs/Mode",
+        $defs: { Mode: inner },
+      } as JSONSchema,
+      { $defs: { Mode: { type: "number" } } } as JSONSchema,
+    )).toEqual(inner);
   });
 });
