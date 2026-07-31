@@ -195,6 +195,9 @@ One line per archived document; each document's header carries the fuller
   — trusted-agent tool-input integrity scoping.
 - [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
   compilation cache.
+- [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
+  — the removed AMD bundle pipeline and the bundle-grained identity defect that
+  motivated content-addressed module loading.
 - [module-loading-verifier-and-engine-design.md](specs/module-loading-verifier-and-engine-design.md)
   — verifier port and engine integration.
 - [capability-wrappers.md](specs/pattern-construction/capability-wrappers.md)

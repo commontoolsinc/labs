@@ -18,7 +18,14 @@ declare interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {}
 declare type Reactive<T> = T;
 declare interface Cell<T> extends BrandedCell<T, "cell"> {}
 declare type Writable<T> = Cell<T>; // Alias for Cell with clearer write-access semantics
-declare interface Stream<T> extends BrandedCell<T, "stream"> {}
+declare const CELL_RESULT_TYPE: unique symbol;
+// Mirrors the real \`Stream<E, R = void>\`: a verb's declared result rides a
+// second type parameter, pinned by a property so it discriminates. The stub
+// carried one parameter long after the real type grew two, which made every
+// test here pass regardless of what the api declared.
+declare interface Stream<E, R = void> extends BrandedCell<E, "stream"> {
+  readonly [CELL_RESULT_TYPE]: R;
+}
 declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
 declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
 declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}

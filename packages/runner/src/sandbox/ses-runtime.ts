@@ -232,9 +232,10 @@ export class SESRuntime extends EventTarget {
 
   /**
    * Register a source map under `filename` so {@link mapPosition} (and stack
-   * parsing) can translate bundle coordinates back to original sources. The AMD
-   * isolate path does this implicitly via {@link SESIsolate.execute}; the ESM
-   * module-record loader composes a per-load bundle map and registers it here.
+   * parsing) can translate bundle coordinates back to original sources. The
+   * module-record loader composes a per-load bundle map from the per-module maps
+   * and registers it here; {@link SESIsolate.execute} registers one implicitly
+   * for a single-script evaluation.
    */
   loadSourceMap(filename: string, sourceMap: SourceMap): void {
     this.internals.loadSourceMap(filename, sourceMap);
