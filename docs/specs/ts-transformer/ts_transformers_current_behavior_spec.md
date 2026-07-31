@@ -445,7 +445,8 @@ Diagnostics emitted in all modes:
   - the message names the mechanism per kind: a getter or `toJSON()` member
     runs once when the result is stored and freezes its return to a snapshot; a
     method, setter, or function-valued property is a function value the
-    reactive data model cannot store (it throws `Cannot store function per se`)
+    reactive data model cannot store (it throws
+    ``Not representable as a `FabricValue`: function per se``)
   - exempt: members inside compute wrappers (computed/lift/handler/action),
     object literals outside pattern/render context, JSX event handlers,
     array-method/render callbacks, and a `toJSON` member that reads no reactive

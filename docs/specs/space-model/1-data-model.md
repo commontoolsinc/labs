@@ -89,7 +89,7 @@ Symbol handling at the fabric-value conversion gate:
   returns a string) are first-class fabric values, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
-  `"Cannot store unique (uninterned) symbol"`
+  ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
 - Round-trip via the `Symbol@1` JSON envelope (see
   `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
   byte-level form in `space-model-formal-spec/2-hash-byte-format.md`

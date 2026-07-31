@@ -79,6 +79,8 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
         doNotConvertCellResults: true,
         includeSchema: true,
       })
-    ).toThrow("Cannot store array that is not an inert array");
+    ).toThrow(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
   });
 });
