@@ -2987,6 +2987,10 @@ function maybeConvertArrayPathToDataURILink(
  */
 function containsCycle(value: unknown): boolean {
   const ancestors = new Set<object>();
+  // Nodes already walked to completion without finding a cycle. Without this
+  // memo the walk is exponential on shared acyclic references (a diamond per
+  // level doubles the work), and candidate values are user-controlled.
+  const completed = new Set<object>();
   const walk = (node: unknown): boolean => {
     if (
       node === null || typeof node !== "object" || isCell(node) ||
@@ -2994,6 +2998,7 @@ function containsCycle(value: unknown): boolean {
     ) {
       return false;
     }
+    if (completed.has(node)) return false;
     if (ancestors.has(node)) return true;
     ancestors.add(node);
     const values = Array.isArray(node) ? node : Object.values(node);
@@ -3001,6 +3006,7 @@ function containsCycle(value: unknown): boolean {
       if (walk(child)) return true;
     }
     ancestors.delete(node);
+    completed.add(node);
     return false;
   };
   return walk(value);

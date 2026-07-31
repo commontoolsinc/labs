@@ -1624,6 +1624,36 @@ describe("data-updating", () => {
       }
     });
 
+    it("framed addUnique handles a deeply shared acyclic candidate", () => {
+      // A diamond-shaped candidate (each level's object shared by two
+      // parents) is acyclic but has exponentially many paths. The cycle
+      // check must memoize completed nodes -- candidate values are
+      // user-controlled, and without the memo this walk (not the write)
+      // would hang the handler. This test simply completing is the guard.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "addUnique shared dag",
+        reactives: new Set(),
+      });
+      try {
+        const cell = runtime.getCell<unknown[]>(
+          space,
+          "addUnique shared dag",
+          undefined,
+          tx,
+        );
+        cell.set([]);
+        let node: Record<string, unknown> = { leaf: true };
+        for (let i = 0; i < 30; i++) {
+          node = { a: node, b: node };
+        }
+        cell.addUnique(node);
+        expect((cell.getRaw() as unknown[]).length).toBe(1);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
     it("framed addUnique accepts a new self-referential candidate", () => {
       // A cyclic candidate can never equal a stored element -- stored fabric
       // values are acyclic (cycles persist as links) -- so the dedup must
