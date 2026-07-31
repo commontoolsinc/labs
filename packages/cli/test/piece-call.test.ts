@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   CF_RUNTIME_ERROR_LOG,
+  normalizeAbsentVerbPayload,
   verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
@@ -183,6 +184,112 @@ describe("executePieceCallable", () => {
     // receipt burns the id while the call reports settled.
     expect(harness.tracker.handlerWrites).toEqual([]);
     expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  // Characterized first (pre-D5, observed passing on unmodified code): this
+  // exact call dispatched — the handler ran with `$event === undefined` and
+  // its receipt spent the invocation id. The schema below is the deployed
+  // shape absence reaches dispatch through: a top-level local $ref with the
+  // stream marker, which the arg parser cannot derive flags from, so a bare
+  // call parses to `input === undefined`.
+  it("refuses an absent payload against a verb that provably cannot run without one", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        $ref: "#/$defs/RecordMessageEvent",
+        asCell: ["stream"],
+        $defs: {
+          RecordMessageEvent: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => true,
+          invocationId: "inv-absent-retry",
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "recordMessage": no payload was supplied.*message.*send a payload/,
+    );
+
+    // Nothing reached the stream, so the invocation id was never spent — the
+    // retry that actually sends a payload can still use it.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refreshFeed",
+      inputSchema: {
+        $ref: "#/$defs/RefreshEvent",
+        asCell: ["stream"],
+        $defs: {
+          RefreshEvent: {
+            type: "object",
+            properties: {
+              mode: { type: "string", default: "fast" },
+              limit: { type: "number", default: 10 },
+            },
+            required: ["mode", "limit"],
+          },
+        },
+      } as JSONSchema,
+      receiptValue: {},
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refreshFeed",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocationId: "inv-defaulted",
+      },
+    );
+
+    // `{}` goes out instead of nothing: the runtime materializes defaults for
+    // a PRESENT object payload only, so this is the difference between the
+    // handler seeing `{ mode: "fast", limit: 10 }` and seeing `undefined`.
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["refreshFeed"],
+        value: {},
+      },
+    ]);
+    expect(result.invocation).toEqual({
+      id: "inv-defaulted",
+      status: "settled",
+    });
   });
 
   it("runs tools from schema-derived flags and returns JSON output", async () => {
@@ -1917,6 +2024,81 @@ describe("verbInputSchemaError", () => {
     (cyclic.properties as Record<string, unknown>).child = cyclic;
     expect(verbInputSchemaError({ name: "a" }, cyclic as JSONSchema))
       .toBeUndefined();
+  });
+});
+
+describe("normalizeAbsentVerbPayload", () => {
+  it("normalizes absence to {} against a plain object schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      type: "object",
+      properties: { message: { type: "string" } },
+      required: ["message"],
+    })).toEqual({});
+  });
+
+  it("normalizes absence to {} through a top-level local $ref", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Event",
+      asCell: ["stream"],
+      $defs: {
+        Event: {
+          type: "object",
+          properties: { message: { type: "string" } },
+          required: ["message"],
+        },
+      },
+    } as JSONSchema)).toEqual({});
+  });
+
+  it("leaves a supplied payload untouched, object schema or not", () => {
+    const payload = { message: "milk" };
+    expect(normalizeAbsentVerbPayload(payload, {
+      type: "object",
+      properties: { message: { type: "string" } },
+    })).toBe(payload);
+    expect(normalizeAbsentVerbPayload("text", { type: "string" })).toBe(
+      "text",
+    );
+  });
+
+  it("leaves absence alone when the verb declares no schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, undefined)).toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, true)).toBeUndefined();
+  });
+
+  // An absent payload must keep passing a `false` schema — a supplied one is
+  // already refused by the validator ("schema rejects all values"), and
+  // normalizing here would convert every call into that refusal.
+  it("leaves absence alone against a boolean false schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, false)).toBeUndefined();
+  });
+
+  it("leaves absence alone against a non-object schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, { type: "string" }))
+      .toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, {
+      type: "array",
+      items: { type: "string" },
+    })).toBeUndefined();
+  });
+
+  // Refuse only on proof: a $ref nobody can resolve proves nothing about the
+  // event being an object, so absence keeps today's pass-through behavior.
+  it("leaves absence alone when the top-level $ref cannot be resolved", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Absent",
+      asCell: ["stream"],
+      $defs: { Present: { type: "object" } },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
+  // type and no properties) is not an object schema; `{}` means nothing
+  // there.
+  it("leaves absence alone against a schema-less stream marker", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      asCell: ["stream"],
+    } as JSONSchema)).toBeUndefined();
   });
 });
 

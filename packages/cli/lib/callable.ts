@@ -279,6 +279,14 @@ function localRefTarget(
  * without the caller supplying it. Validating against the unrelaxed schema
  * would reject payloads the verb would have accepted.
  *
+ * This is honest only for a payload that is PRESENT (measured 2026-07-30,
+ * recorded on #5147): `SchemaObjectTraverser.traverseObjectWithSchema` (runner
+ * `traverse.ts`) fills each missing defaulted property of a present object
+ * before checking `required`, while a wholly absent event bypasses the object
+ * branch entirely — the handler sees `undefined` and no default is ever
+ * conjured. An absent payload is therefore normalized to `{}` before this
+ * relaxation is consulted (`normalizeAbsentVerbPayload`), never excused by it.
+ *
  * `seen` both memoizes and breaks reference cycles: the relaxed copy is
  * registered before its children are filled in, so a schema that reaches
  * itself resolves to the copy already under construction.
@@ -355,6 +363,40 @@ function relaxDefaultedRequired(
 }
 
 /**
+ * Normalize an absent payload to `{}` where the verb's event schema — after
+ * resolving a top-level local `$ref` (a stream's schema is often
+ * `{ $ref: "#/$defs/X", asCell: ["stream"], $defs: {...} }`) — is an object
+ * schema. Everything else passes through untouched: schema `undefined` /
+ * `true`, boolean `false` (an absent payload must pass; a supplied one is
+ * already refused), non-object schemas, and an unresolvable `$ref` (fail-open
+ * on uncertainty — refuse only on proof).
+ *
+ * Why `{}` rather than refusing absence outright (settled 2026-07-30,
+ * measured on #5147): the runtime materializes a property's `default` only
+ * for a PRESENT object payload — a wholly absent event bypasses default
+ * materialization entirely, the handler sees `undefined`, and the receipt
+ * still spends the invocation id. Normalizing lets absence flow through the
+ * same gate as any payload: `{}` fails the relaxed schema exactly when
+ * top-level `required` survives `relaxDefaultedRequired` (refusal, id never
+ * spent), and dispatching `{}` where every required property carries a
+ * default makes the runtime fill those defaults in — where an absent event
+ * would have delivered nothing.
+ */
+export function normalizeAbsentVerbPayload(
+  input: unknown,
+  schema: JSONSchema | undefined,
+): unknown {
+  if (input !== undefined) return input;
+  if (!isSchemaObject(schema)) return input;
+  const target = localRefTarget(schema, schema);
+  if (!isSchemaObject(target)) return input;
+  if (target.type !== "object" && !isSchemaObject(target.properties)) {
+    return input;
+  }
+  return {};
+}
+
+/**
  * Reject a payload that cannot satisfy the verb's event schema, before it is
  * sent.
  *
@@ -367,10 +409,11 @@ function relaxDefaultedRequired(
  * key: an id that was never dispatched is still spendable by the corrected
  * retry.
  *
- * A verb invoked with no payload at all is left alone. `$event` is genuinely
- * optional in the generated handler schema — value-less verbs are a supported
- * shape — so the rule is that a payload which *was* supplied must fit, not
- * that every verb must be given one.
+ * An absent payload reaches this function only after
+ * `normalizeAbsentVerbPayload`: against an object schema it arrives as `{}`
+ * and is judged like any supplied payload; against everything else it stays
+ * `undefined` and passes — `$event` is genuinely optional in the generated
+ * handler schema, and value-less verbs are a supported shape.
  */
 export function verbInputSchemaError(
   input: unknown,
@@ -384,15 +427,30 @@ export function verbInputSchemaError(
   );
 }
 
+/**
+ * The shared pre-dispatch gate. Returns the input to dispatch — the caller's
+ * own payload, or `{}` when an absent payload was normalized against an
+ * object schema — and throws `VerbInputValidationError` when that input
+ * cannot satisfy the schema. The absent-payload refusal says so explicitly:
+ * "send a payload" has to read differently from "fix your payload".
+ */
 function assertVerbInputSatisfiesSchema(
   verb: string,
   input: unknown,
   schema: JSONSchema | undefined,
-): void {
-  const detail = verbInputSchemaError(input, schema);
+): unknown {
+  const normalized = normalizeAbsentVerbPayload(input, schema);
+  const detail = verbInputSchemaError(normalized, schema);
   if (detail !== undefined) {
-    throw new VerbInputValidationError(verb, detail);
+    throw new VerbInputValidationError(
+      verb,
+      input === undefined
+        ? `no payload was supplied, and this verb cannot run without one ` +
+          `(${detail}) — send a payload`
+        : detail,
+    );
   }
+  return normalized;
 }
 
 function cloneWithoutBoundToolKeys(
@@ -522,8 +580,10 @@ export async function executeResolvedCallable(
     const send = resolved.callableCell.send;
     if (typeof send === "function") {
       // Before anything is dispatched, and so before the invocation id can be
-      // spent on a handling that would run with no event.
-      assertVerbInputSatisfiesSchema(
+      // spent on a handling that would run with no event. An absent payload
+      // is normalized to `{}` against an object schema (D5), so what goes out
+      // is what the gate judged.
+      const dispatchInput = assertVerbInputSatisfiesSchema(
         resolved.cellKey,
         input,
         resolved.callableCell.schema,
@@ -537,7 +597,7 @@ export async function executeResolvedCallable(
           try {
             send.call(
               resolved.callableCell,
-              input,
+              dispatchInput,
               resolve,
               invocationId !== undefined
                 ? { eventId: invocationId }
