@@ -44,7 +44,7 @@ import type {
 } from "./builder/types.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
-import { canFollowScopedLink } from "./scope.ts";
+import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
 import type {
   Activity,
   CommitError,
@@ -4011,6 +4011,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // work as expected. Handle boolean items values for element schema
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
+      // curDoc is advanced past the element's link below, so remember where
+      // the element itself lives for a blocked handle's address.
+      const elementSource = curDoc.address;
       if (isSigilLink(item)) {
         if (this.traverseCells) {
           const alreadyTracked = this.isLinkedDocumentCovered(
@@ -4153,9 +4156,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // to the child cell and observe it when the target materializes.
         const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-        const cellLink = isLink
-          ? getNextCellLink(curDoc, curSelector.schema!)
-          : getNormalizedLink(curDoc.address, curSelector.schema);
+        const cellLink = cappedHandleLink(
+          isLink
+            ? getNextCellLink(curDoc, curSelector.schema!)
+            : getNormalizedLink(curDoc.address, curSelector.schema),
+          curSelector.schema,
+          elementSource,
+        );
         const val = this.objectCreator.createObject(cellLink, undefined);
         arrayObj[index] = val;
       } else {
@@ -4264,7 +4271,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // link and do not descend/read nested properties from this value here.
         // If we have a value instead of a link, create a link to the value
         // We don't traverse and validate, since this is an asCell boundary.
-        const cellLink = getNormalizedLink(propAddress, propSchema);
+        const cellLink = cappedHandleLink(
+          getNormalizedLink(propAddress, propSchema),
+          propSchema,
+          propAddress,
+        );
         const val = this.objectCreator.createObject(cellLink, undefined);
         filteredObj[propKey] = val;
       } else {
@@ -4379,7 +4390,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
-      const cellLink = getNextCellLink(doc, schema);
+      const cellLink = cappedHandleLink(
+        getNextCellLink(doc, schema),
+        schema,
+        doc.address,
+      );
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
@@ -4461,7 +4476,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
-      const cellLink = getNextCellLink(redirDoc, combinedSchema);
+      const cellLink = cappedHandleLink(
+        getNextCellLink(redirDoc, combinedSchema),
+        combinedSchema,
+        redirDoc.address,
+      );
       logger.debug(
         "traverse",
         () => ["Next cell link:", {
@@ -4823,6 +4842,59 @@ function _mergeAnyOfBranchSchemasUncached(
  * @returns a normalized full link which will have the address and schema
  *   information that we should use for the cell.
  */
+/**
+ * The follow cap an `asCell` ENTRY declares, and only that.
+ *
+ * Deliberately NOT getSchemaScopeCap: that falls back to the schema's own
+ * `scope`, which authors also write to mean "this value lives at that scope".
+ * Honouring the fallback here would invent a follow cap nobody asked for on
+ * any node carrying both `asCell` and `scope`. Path resolution keeps using
+ * getSchemaScopeCap, which is what it has always done.
+ */
+const asCellEntryScopeCap = (
+  schema: JSONSchema | undefined,
+): SchemaScope | undefined => {
+  const entryScope = ContextualFlowControl.getAsCellScope(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  );
+  return isSchemaScope(entryScope) ? entryScope : undefined;
+};
+
+/**
+ * Gate a handle about to be built at an `asCell` boundary.
+ *
+ * A boundary is the one place a link becomes a handle INSTEAD of being
+ * followed, so followPointer's cap check never runs for it -- and the holder
+ * reads through that handle later, which is exactly the follow the cap was
+ * meant to bound (#5230). Checking the finished handle link covers every way
+ * the boundary is reached, including an array element whose link the traversal
+ * has already stepped past.
+ *
+ * A blocked handle resolves to undefined-data at `source`, matching what
+ * resolveLink hands back for a blocked follow: it still IS a Cell (so a
+ * `required` container is not voided), it reads as undefined, and it is not
+ * writable -- a data URI is a read-only address.
+ */
+function cappedHandleLink(
+  handleLink: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+  source: IMemorySpaceValueAddress,
+): NormalizedFullLink {
+  const schemaScope = asCellEntryScopeCap(schema);
+  if (canFollowScopedLink(schemaScope, handleLink.scope)) return handleLink;
+  logger.warn("traverse", () => [
+    `blocked narrower-scope asCell handle: a "${schemaScope}"-scoped read ` +
+    `cannot hold a "${handleLink.scope}"-scoped link, so the handle reads ` +
+    `as undefined. Declare the handle's asCell scope at least as narrow as ` +
+    `the value it points at.`,
+    { schemaScope, linkScope: handleLink.scope, target: handleLink },
+  ]);
+  return {
+    ...undefinedDataLink(getNormalizedLink(source, schema)),
+    ...(handleLink.schema !== undefined && { schema: handleLink.schema }),
+  };
+}
+
 function getNextCellLink(
   doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
@@ -4832,30 +4904,6 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
-    // An asCell boundary is the one place a link is turned into a handle
-    // instead of being followed, so followPointer's cap check never runs for
-    // it. Apply the same rule here, or the cap means nothing to anyone who
-    // reads THROUGH the handle (#5230). Resolve to undefined-data, matching
-    // what resolveLink hands back for a blocked follow, so the three routes to
-    // a capped handle agree.
-    const schemaScope = schemaFollowScopeCap(schema);
-    if (!canFollowScopedLink(schemaScope, lastLink.scope)) {
-      logger.warn("traverse", () => [
-        `blocked narrower-scope asCell handle: a "${schemaScope}"-scoped ` +
-        `read cannot hold a "${lastLink.scope}"-scoped link, so the handle ` +
-        `reads as undefined. Declare the handle's asCell scope at least as ` +
-        `narrow as the value it points at.`,
-        { schemaScope, linkScope: lastLink.scope, target: lastLink },
-      ]);
-      // Undefined-data in the SOURCE's place, matching resolveLink and the
-      // asCell path in schema.ts so a blocked handle has ONE identity however
-      // it was reached. `schema` keeps the asCell marker, so the caller still
-      // gets a handle -- one that reads as undefined.
-      return {
-        ...undefinedDataLink(getNormalizedLink(doc.address, schema)),
-        schema,
-      };
-    }
     // The link may not have the asCell flags, so pull that from itemSchema
     return {
       ...lastLink,

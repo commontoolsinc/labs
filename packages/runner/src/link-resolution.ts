@@ -11,6 +11,7 @@ import {
   type CellLink,
   type NormalizedFullLink,
   parseLink,
+  type ScopeCapAtDepth,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type {
@@ -21,7 +22,7 @@ import { linkResolutionProbe } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import { canFollowScopedLink, scopeRank } from "./scope.ts";
+import { canFollowScopedLink, narrowerScopeCap } from "./scope.ts";
 import type { SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
@@ -94,16 +95,25 @@ const recordDereferenceHop = (
 // recorded caps at all. Keeping it as a floor means this change can only block
 // more than before, never less.
 //
-// NOTE: no test reaches this floor — every shape tried either records a cap or
-// fails to resolve for unrelated reasons. It is here as a conservatism, not as
-// behavior anything depends on, so treat it as unproven rather than pinned.
-const narrowerCap = (
-  a: SchemaScope | undefined,
-  b: SchemaScope | undefined,
-): SchemaScope | undefined => {
-  if (a === undefined || a === "any") return b;
-  if (b === undefined || b === "any") return a;
-  return scopeRank(a) <= scopeRank(b) ? a : b;
+// This floor is load-bearing, not just belt-and-braces: a link assembled
+// directly (`runtime.getCellFromLink` with a multi-segment path) has no
+// recorded caps at all, and removing the floor lets such a read follow a
+// narrower link that main blocks. Pinned by a test.
+/**
+ * Shift recorded caps onto a link's target after a hop consumed `consumed`
+ * leading segments. Caps at or below the hop are dropped (already enforced);
+ * the rest move by `shift` so their depths still address the same segments.
+ */
+const rebaseScopeCaps = (
+  caps: readonly ScopeCapAtDepth[] | undefined,
+  consumed: number,
+  shift: number,
+): readonly ScopeCapAtDepth[] | undefined => {
+  if (caps === undefined) return undefined;
+  const moved = caps
+    .filter((cap) => cap.depth > consumed)
+    .map((cap) => ({ depth: cap.depth + shift, scope: cap.scope }));
+  return moved.length > 0 ? moved : undefined;
 };
 
 const schemaScopeForLinkAtDepth = (
@@ -112,7 +122,7 @@ const schemaScopeForLinkAtDepth = (
 ): SchemaScope | undefined => {
   const leafCap = ContextualFlowControl.getSchemaScopeCap(link.schema);
   if (depth >= link.path.length) return leafCap;
-  return narrowerCap(
+  return narrowerScopeCap(
     link.scopeCaps?.find((cap) => cap.depth === depth)?.scope,
     leafCap,
   );
@@ -126,11 +136,16 @@ const schemaScopeForLinkAtDepth = (
  */
 export const undefinedDataLink = (
   link: NormalizedFullLink,
-): NormalizedFullLink => ({
-  ...link,
-  id: dataUriFromValueWithResolvedLinks(undefined, link),
-  path: [],
-});
+): NormalizedFullLink => {
+  // `path` is rebased to [], so any recorded cap depths now address segments
+  // of a different document. Drop them rather than leave them misaligned.
+  const { scopeCaps: _dropped, ...rest } = link;
+  return {
+    ...rest,
+    id: dataUriFromValueWithResolvedLinks(undefined, link),
+    path: [],
+  };
+};
 
 const canFollowLinkHop = (
   source: NormalizedFullLink,
@@ -351,13 +366,28 @@ export function resolveLink(
       recordDereferenceHop(tx, nextHop);
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
+      // The hop consumed `nextHop.depth` of our path and re-rooted the rest
+      // under the target. Caps recorded for the consumed prefix have done
+      // their job; caps for the REMAINING segments still have to travel, or a
+      // capped handle below an already-followed link goes unchecked -- the
+      // shape you get whenever a cell's root value is a link. `nextHop.link`
+      // comes from `parseLink` and carries no caps of its own, so rebasing is
+      // just a shift onto the target's path.
+      const carriedCaps = rebaseScopeCaps(
+        link.scopeCaps,
+        nextHop.depth,
+        nextHop.link.path.length - (link.path.length - nextHop.depth),
+      );
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
           ...nextLink,
           schema: link.schema,
+          ...(carriedCaps !== undefined && { scopeCaps: carriedCaps }),
         };
       } else {
-        link = nextLink;
+        link = carriedCaps === undefined
+          ? nextLink
+          : { ...nextLink, scopeCaps: carriedCaps };
       }
       // Force fetching data from the server when the local replica cannot
       // serve the hop target: crossing spaces (the origin server never pushes

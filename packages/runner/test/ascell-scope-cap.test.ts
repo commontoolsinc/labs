@@ -189,12 +189,10 @@ describe("asCell scope cap", () => {
   });
 
   it("records the cap declared at the address key() starts from", () => {
-    // `outer.key("handle").key("field")` reaches the same leaf as
-    // `outer.key("handle", "field")`, but the cap on `handle` is now declared
-    // by the schema of the cell key() is CALLED ON rather than by a child
-    // schema the loop walks to. Without seeding from the starting link, that
-    // cap is never recorded and the chained form leaks where the varargs form
-    // blocks.
+    // The chained form must reach the same answer as the varargs form. This
+    // one does NOT depend on the seed -- `outer.key("handle")` already
+    // recorded depth 1 in its own loop, and the chained call inherits it. The
+    // seed is what the next test covers.
     const r = build("chained", "space", "session");
     const handle = r.outer.key("handle");
     expect(handle.key("field").getAsNormalizedFullLink().scopeCaps)
@@ -246,5 +244,203 @@ describe("asCell scope cap", () => {
     expect(reinterpreted.getAsNormalizedFullLink().scopeCaps)
       .toEqual([{ depth: 1, scope: "space" }]);
     expect(reinterpreted.key("field").get()).toBeUndefined();
+  });
+});
+
+// Shapes the first round of this change missed, each found by adversarial
+// review rather than by the tests above.
+describe("asCell scope cap, harder shapes", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  const sessionInner = (cause: string) => {
+    const inner = runtime.getCell(space, cause, innerSchema, tx, "session");
+    inner.set({ field: "secret" });
+    return inner;
+  };
+
+  it("caps an array element handle", () => {
+    // The motivating shape: a space-scoped list whose element handles must
+    // point somewhere every reader in the space can resolve. Array elements
+    // reach the boundary with the element's link already stepped past, so the
+    // handle is built from the target address rather than from a sigil.
+    const inner = sessionInner("arr-inner");
+    const outer = runtime.getCell(
+      space,
+      "arr-outer",
+      {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              ...innerSchema,
+              asCell: [{ kind: "cell", scope: "space" }],
+            },
+          },
+        },
+        required: ["items"],
+      } as JSONSchema,
+      tx,
+    );
+    outer.set({ items: [inner] } as never);
+
+    const readHandle = (v: unknown) =>
+      isCell(v) ? (v as { get(): unknown }).get() : v;
+
+    const viaKey = outer.key("items").get() as unknown[];
+    expect(readHandle(viaKey[0])).toBeUndefined();
+    const viaWhole = (outer.get() as { items: unknown[] }).items;
+    expect(readHandle(viaWhole[0])).toBeUndefined();
+    expect(readHandle(outer.key("items", "0").get())).toBeUndefined();
+  });
+
+  it("caps a handle below a link the resolver already followed", () => {
+    // `outer`'s own value is a link to `mid`, so resolution consumes a hop
+    // before it ever reaches the capped handle. Caps recorded for the
+    // remaining segments have to travel across that hop.
+    const inner = sessionInner("hop-inner");
+    const mid = runtime.getCell(space, "hop-mid", undefined, tx);
+    mid.set({ handle: inner } as never);
+    const outer = runtime.getCell(space, "hop-outer", undefined, tx);
+    outer.set(mid as never);
+
+    const capped = outer.asSchema(
+      {
+        type: "object",
+        properties: {
+          handle: {
+            ...innerSchema,
+            asCell: [{ kind: "cell", scope: "space" }],
+          },
+        },
+        required: ["handle"],
+      } as JSONSchema,
+    );
+    expect(capped.key("handle", "field").get()).toBeUndefined();
+    const projected = capped.key("handle").get();
+    expect(
+      isCell(projected) ? (projected as { get(): unknown }).get() : projected,
+    )
+      .toBeUndefined();
+  });
+
+  it("lets asSchema tighten a cap it cannot loosen", () => {
+    // A looser cap recorded at a depth must not shadow a tighter one declared
+    // for the same depth by a later asSchema().
+    const inner = sessionInner("tighten-inner");
+    const outer = runtime.getCell(
+      space,
+      "tighten-outer",
+      {
+        type: "object",
+        properties: {
+          handle: {
+            ...innerSchema,
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+        },
+        required: ["handle"],
+      } as JSONSchema,
+      tx,
+    );
+    outer.set({ handle: inner } as never);
+
+    // The permissive cap reads through, as it should.
+    expect(outer.key("handle", "field").get()).toBe("secret");
+    // Re-declaring it tighter blocks, on both routes.
+    const tightened = outer.key("handle").asSchema(
+      {
+        ...innerSchema,
+        asCell: [{ kind: "cell", scope: "space" }],
+      } as JSONSchema,
+    );
+    expect(tightened.key("field").get()).toBeUndefined();
+  });
+
+  it("applies the leaf cap to an ancestor hop of a directly-built link", () => {
+    // A link assembled without key() carries no recorded caps, so only the
+    // leaf-schema floor in schemaScopeForLinkAtDepth can answer for a hop
+    // found at an ancestor. Removing that floor lets this read through.
+    const inner = sessionInner("floor-inner");
+    const holder = runtime.getCell(space, "floor-holder", undefined, tx);
+    holder.set({ a: inner } as never);
+    const base = holder.getAsNormalizedFullLink();
+    const atLeaf = (schema: JSONSchema) =>
+      runtime.getCellFromLink({ ...base, path: ["a", "field"] }, schema, tx);
+
+    // Control: with no cap anywhere the ancestor hop is followed.
+    expect(atLeaf({ type: "string" } as JSONSchema).get()).toBe("secret");
+    const capped = atLeaf({ type: "string", scope: "space" } as JSONSchema);
+    expect(capped.getAsNormalizedFullLink().scopeCaps).toBeUndefined();
+    expect(capped.get()).toBeUndefined();
+  });
+
+  it("does not invent a cap from `scope` beside an uncapped asCell", () => {
+    // `scope` on a node also means "this value lives at that scope". Only the
+    // asCell entry's own scope is a follow cap at a handle boundary.
+    const inner = sessionInner("noinvent-inner");
+    const outer = runtime.getCell(
+      space,
+      "noinvent-outer",
+      {
+        type: "object",
+        properties: {
+          handle: { ...innerSchema, asCell: ["cell"], scope: "space" },
+        },
+        required: ["handle"],
+      } as JSONSchema,
+      tx,
+    );
+    outer.set({ handle: inner } as never);
+    const projected = outer.key("handle").get();
+    expect(
+      isCell(projected) ? (projected as { get(): unknown }).get() : projected,
+    )
+      .toEqual({ field: "secret" });
+  });
+
+  it("refuses writes through a blocked handle", () => {
+    const inner = sessionInner("write-inner");
+    const outer = runtime.getCell(
+      space,
+      "write-outer",
+      {
+        type: "object",
+        properties: {
+          handle: {
+            ...innerSchema,
+            asCell: [{ kind: "cell", scope: "space" }],
+          },
+        },
+        required: ["handle"],
+      } as JSONSchema,
+      tx,
+    );
+    outer.set({ handle: inner } as never);
+
+    const blocked = outer.key("handle").get();
+    expect(isCell(blocked)).toBe(true);
+    expect(() =>
+      (blocked as { set(v: unknown): void }).set({ field: "hacked" })
+    )
+      .toThrow();
+    expect(inner.get()).toEqual({ field: "secret" });
   });
 });

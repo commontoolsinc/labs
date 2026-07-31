@@ -22,7 +22,7 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
-import { canFollowScopedLink } from "./scope.ts";
+import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import {
@@ -1091,9 +1091,12 @@ export function validateAndTransform(
       // it, so resolveLink's cap check never sees this hop. Apply it here too,
       // or reading THROUGH the handle escapes the cap the schema declared
       // (#5230).
-      const schemaScope = ContextualFlowControl.getSchemaScopeCap(
-        effectiveSchema,
+      // Only the asCell entry's own scope, not getSchemaScopeCap's
+      // `schema.scope` fallback — see asCellEntryScopeCap in traverse.ts.
+      const entryScope = ContextualFlowControl.getAsCellScope(
+        ContextualFlowControl.getAsCellValues(effectiveSchema).at(0),
       );
+      const schemaScope = isSchemaScope(entryScope) ? entryScope : undefined;
       if (!canFollowScopedLink(schemaScope, next.scope)) {
         logger.warn(
           `blocked narrower-scope asCell handle: a "${schemaScope}"-scoped ` +

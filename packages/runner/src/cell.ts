@@ -126,7 +126,7 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -1923,8 +1923,18 @@ export class CellImpl<T extends FabricValue>
     const recordCap = (depth: number, schema: JSONSchema | undefined) => {
       const cap = ContextualFlowControl.getSchemaScopeCap(schema);
       if (cap === undefined) return;
-      // A repeated key() over the same prefix re-derives the same caps.
-      if (scopeCaps?.some((entry) => entry.depth === depth)) return;
+      // A repeated key() over the same prefix re-derives the same depth, and
+      // asSchema() can re-declare one with a DIFFERENT cap. Keep the narrower:
+      // skipping on depth alone would let a looser recorded cap shadow a
+      // tighter one the caller just asked for.
+      const existing = scopeCaps?.find((entry) => entry.depth === depth);
+      if (existing !== undefined) {
+        if (narrowerScopeCap(cap, existing.scope) === existing.scope) return;
+        scopeCaps = scopeCaps!.map((entry) =>
+          entry.depth === depth ? { depth, scope: cap } : entry
+        );
+        return;
+      }
       scopeCaps = [...(scopeCaps ?? []), { depth, scope: cap }];
     };
     // Seed with the cap declared at the address we start from: it governs a
