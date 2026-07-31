@@ -254,18 +254,13 @@ unblock each other:
    prerequisite for the flip being *measurable* at all: the corrected gate and
    the flip are disjoint surfaces, and today's probes contain no pattern
    effects, so the gate cannot see egress.
-3. **The toolshed / background-piece-service question — OWNER-GATED, and it is
-   a new prerequisite the four-item list never had.** `toolshed/runtime-options.ts`,
-   `background-piece-service/src/main.ts` and its `worker.ts` all use
-   `runtimePresets.productionServer` WITHOUT `externalSinkDisposition`, so they
-   egress on the CLIENT default today. **The flip silences three server-side
-   runtimes that are not the executor.** They run webhook deliveries and
-   background pieces. Decide: do they route through the executor (which D11
-   suggests), declare their own authority, or stay silent? That decision also
-   settles whether to move the param onto an executor-only preset so declaring
-   server authority is a reviewed one-caller act — today those three are one
-   line from re-authorising themselves, and a silenced deploy gives them the
-   motive.
+3. **toolshed and background-piece-service — RULED 2026-07-31, see D12 below.**
+   Both egress on the CLIENT default today, so the flip silences them.
+   `toolshed` routes through the executor NOW; `background-piece-service` is
+   **SUNSET** as part of this arc. Neither declares its own egress authority,
+   so the disposition param stays a one-caller act by outcome rather than by
+   preset surgery — **the §5.2 executor-only-preset idea is therefore MOOT
+   and should not be built.**
 4. **THEN** the flip itself: `externalSinkDisposition`'s client default
    (`runtime.ts`, the `?? "claim-conditional"` line, marked in a comment) to
    `"suppress"`.
@@ -376,9 +371,47 @@ things do:
    flip are DISJOINT surfaces — today's probes contain no pattern effects, so
    the gate cannot see egress at all.
 5. **NEW, and not in the original four: the toolshed / background-piece-service
-   population.** Three server runtimes that are not the executor egress on the
-   CLIENT default today, so the flip silences them. **Owner-gated** — see the
-   "Next up" list above.
+   population — RULED, see D12.** Three server runtimes that are not the
+   executor egress on the CLIENT default today, so the flip silences them.
+
+### D12 — owner ruling, 2026-07-31: the non-executor server runtimes
+
+Asked because the terminal flip silences three runtimes the four-item list
+never named. Both halves ruled at once:
+
+> **`background-piece-service` can be SUNSET once we've built this** — "it's a
+> runtime that runs pieces on the server by pretending to be a client" — **so
+> deprecate it as part of this arc.**
+>
+> **For toolshed, route that through the executor now.**
+
+**The BPS half is a new ARC GOAL, not a chore, and it is the first
+DELETION-of-a-whole-component the arc has earned.** Read the owner's
+description again: *a runtime that runs pieces on the server by pretending to
+be a client.* That is a precise statement of the thing D11 abolishes. BPS is
+not a casualty of the flip — it is a **pre-existing workaround for the serving
+gap**, and closing the gap is what makes it redundant. Its existence has been
+evidence for the arc all along.
+
+Consequences, and get the sequencing right:
+
+- **Sunset comes BEFORE the flip, not after.** The owner said "once we've
+  built this", and the flip IS the terminal condition — the last step. So the
+  order is: close the serving gap → migrate BPS's work onto the executor →
+  sunset BPS → flip. BPS must keep working until it is retired; do not silence
+  it early and call that the sunset.
+- **Do not give BPS `"server-executor"` authority as a stopgap.** That would
+  re-authorise a runtime we have just decided to delete, and it is exactly the
+  fail-open the `b198544af` investigation flagged: a silenced deploy gives a
+  well-meaning fix its motive. If BPS breaks before its sunset, fix the
+  sequencing, not the authority.
+- **The executor-only-preset idea (`b198544af`'s deferred §5.2) is now MOOT.**
+  Its whole purpose was to stop these three re-authorising themselves. With one
+  routed through the executor and one deleted, `executor-worker.ts` stays the
+  single declaring site by outcome. Do not build the preset.
+- **BPS is a servability oracle while it lasts.** Every piece it runs today is
+  a piece the executor must be able to run tomorrow. Its workload is a
+  ready-made coverage list for the serving gap — mine it before deleting it.
 
 **`claim-not-live` is the last claim-shaped fence, and it is LOAD-BEARING.**
 Kept in `e32a46e26` after measurement: deleting it lets an unprivileged client
