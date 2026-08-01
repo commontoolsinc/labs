@@ -157,6 +157,9 @@ async function setupDemoAgent(
     apiUrl: new URL(import.meta.url),
     storageManager,
     cfcEnforcementMode: "enforce-explicit",
+    // Sole party performing the effect under test, so it declares that
+    // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+    externalSinkDisposition: "server-executor",
   });
 
   // Play the agent kernel binding the direct user command BEFORE the agent

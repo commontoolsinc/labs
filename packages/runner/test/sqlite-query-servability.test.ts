@@ -164,6 +164,14 @@ async function observeSqliteQuery(
       persistentSchedulerState: true,
       serverPrimaryExecution: true,
     },
+    // `sqliteQuery` consults the sink gate BEFORE it flushes
+    // (`sqlite-builtins.ts:859`), so this whole file needs a runtime that may
+    // egress. It stands in for the executor, which is the only party that runs
+    // this effect at all now that a runtime declaring nothing is "suppress" —
+    // and without it BOTH tests below go quiet rather than red: the second
+    // never reaches `provider.sqliteQuery`, and the first still passes but
+    // stops judging the post-commit writeback it claims to cover.
+    externalSinkDisposition: "server-executor",
   });
   try {
     const compiled = await runtime.patternManager.compilePattern(
@@ -302,18 +310,22 @@ Deno.test("R5: sqliteQuery's effect descriptor assembles a summary and survives 
 });
 
 Deno.test("R5: sqliteQuery carries the acting lane into its post-commit read, and nothing when there is none", async () => {
-  // The client leg FIRST: strict additivity is the property that let this
-  // seam land at all, so it is pinned before the narrowing behavior.
-  const client = await observeSqliteQuery("sqliteQuery R5 client lane");
+  // The NO-LANE leg FIRST: strict additivity is the property that let this
+  // seam land at all, so it is pinned before the narrowing behavior. It used
+  // to be called the "client leg", and that name no longer describes anything
+  // — a client never reaches this flush. What is being pinned is unchanged and
+  // still the load-bearing half: a run with no acting lane must be BYTE-
+  // IDENTICAL to every pre-seam run, sending no `actingContext` at all.
+  const noLane = await observeSqliteQuery("sqliteQuery R5 no lane");
   assert(
-    client.queryCalls.length > 0,
+    noLane.queryCalls.length > 0,
     "expected the post-commit flush to reach provider.sqliteQuery",
   );
   assertEquals(
-    client.queryCalls.map((call) => call.options),
-    client.queryCalls.map(() => undefined),
-    "an ordinary client run acts as no lane and must send no actingContext — " +
-      "anything else changes how every existing query resolves its cell-db",
+    noLane.queryCalls.map((call) => call.options),
+    noLane.queryCalls.map(() => undefined),
+    "a run with no acting lane must send no actingContext — anything else " +
+      "changes how every existing query resolves its cell-db",
   );
 
   const alice = "did:key:z6MkrAliceServabilityProbe";

@@ -26,6 +26,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
 
@@ -236,6 +239,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const localTx = rt.edit();
     const { commonfabric } = createTrustedBuilder(rt);

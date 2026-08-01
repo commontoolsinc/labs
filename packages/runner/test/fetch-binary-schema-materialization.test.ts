@@ -92,6 +92,9 @@ describe("fetchBinary consumer materialization (CT-1836)", () => {
             headers: { "content-type": "image/png" },
           }),
         ),
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
   });

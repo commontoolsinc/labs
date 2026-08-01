@@ -1049,14 +1049,25 @@ export class Runtime {
     // mock is used as-is.
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
-    // THE TERMINAL FLIP CHANGES THIS ONE DEFAULT TO "suppress". Until then
-    // "claim-conditional" is byte-identical to the old "allow" default: a
-    // runtime that declares nothing egresses unless it observes a server
-    // effect claim for the action. The value is named rather than "allow" so
-    // that a runtime declaring authority must say "server-executor", which no
-    // client preset can spell (see ExternalSinkDispositionPolicy).
+    // THE TERMINAL CONDITION, LANDED. A client never runs an egress effect,
+    // full stop: `suppress` is what a runtime gets by declaring nothing, and
+    // `allow` is the exception a server-side executor EARNS by declaring
+    // "server-executor" — which `executor/executor-worker.ts` is the one site
+    // in the repo to do, and which no client preset can spell (see
+    // `ExternalSinkDispositionPolicy`).
+    //
+    // "egress effect" here means a POST-COMMIT SINK-REQUEST DISPATCH.
+    // Module resolution is excluded by construction, not by exemption: the
+    // gate can only suppress work whose result arrives by settlement, and a
+    // resolved module is a live JS object no settlement can deliver — see the
+    // item-3 ruling in `passivity-arc-orchestration.md` §1.
+    //
+    // The previous default, "claim-conditional", made a client stand down only
+    // when it happened to OBSERVE a server effect claim for the action. That
+    // made the correctness of a side effect depend on winning a race, which is
+    // what this default stops doing.
     this.externalSinkDisposition = options.externalSinkDisposition ??
-      "claim-conditional";
+      "suppress";
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));

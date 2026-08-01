@@ -199,6 +199,9 @@ describe("Runtime.fetchBuiltin", () => {
       patternEnvironment: { apiUrl: new URL("http://host-a.test/") },
       storageManager,
       experimental: { serverPrimaryExecution: true },
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const brokered: Array<{ builtinId: string; url: string }> = [];
     runtime.installServerBuiltinFetch((builtinId, url) => {

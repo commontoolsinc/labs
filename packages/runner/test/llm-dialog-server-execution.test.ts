@@ -13,13 +13,13 @@
 // variable the handler set in the same process.
 //
 // The end-to-end leg below runs two runtimes against ONE shared memory server,
-// exactly like two real sessions. The "client" runtime is configured
-// `externalSinkDisposition: "suppress"`, which is the same disposition a
-// passive client reaches when the server holds the effect claim
-// (`ExtendedStorageTransaction.externalSinkDisposition`, which returns
-// "suppress" for a configured suppress OR for a live server effect claim). So
-// the client can append the message but can never egress; if the dialog
-// advances at all, the server runtime advanced it.
+// exactly like two real sessions. The "client" runtime declares
+// `externalSinkDisposition: "suppress"` — which is now also what a runtime
+// gets by declaring nothing, so the declaration states the posture rather than
+// selecting it. The SERVER runtime is the one that has to say something: it
+// declares `"server-executor"`, the authority the terminal flip makes an
+// executor earn. So the client can append the message but can never egress; if
+// the dialog advances at all, the server runtime advanced it.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -197,9 +197,13 @@ describe("llmDialog server-side execution", () => {
       storageManager: clientStorage,
       externalSinkDisposition: "suppress",
     });
+    // The server peer: it is the party that must perform the model call, so
+    // it declares that authority. Declaring nothing means "suppress" now, and
+    // a suppressed pair would leave the dialog stuck forever.
     const serverRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: serverStorage,
+      externalSinkDisposition: "server-executor",
     });
 
     try {
@@ -270,13 +274,23 @@ describe("llmDialog server-side execution", () => {
       { role: "assistant", content: "Hi there!", id: "two-peer-r1" },
     );
 
+    // BOTH peers declare egress authority — that is what "unsuppressed" means
+    // now that a runtime declaring nothing is "suppress". The scenario the
+    // comment above describes (two browser tabs, flag off) can no longer
+    // produce it, but the guard is unchanged in substance and is if anything
+    // more load-bearing: two runtimes that each MAY egress must still issue
+    // exactly one request, and the only thing stopping the second is the
+    // document-level turn claim. A suppressed peer here would satisfy
+    // `sendRequestCalls === 1` without exercising that claim at all.
     const peerA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: clientStorage,
+      externalSinkDisposition: "server-executor",
     });
     const peerB = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: serverStorage,
+      externalSinkDisposition: "server-executor",
     });
 
     try {
@@ -377,6 +391,9 @@ describe("llmDialog server broker route", () => {
       patternEnvironment: { apiUrl: new URL("http://host-a.test/") },
       storageManager,
       experimental: { serverPrimaryExecution: true },
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const brokered: Array<{ builtinId: string; url: string }> = [];
     runtime.installServerBuiltinFetch((builtinId, url) => {

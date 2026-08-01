@@ -236,6 +236,9 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -352,6 +355,9 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "disabled",
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);

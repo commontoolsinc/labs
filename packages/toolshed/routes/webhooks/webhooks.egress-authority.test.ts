@@ -15,8 +15,13 @@ import { toolshedRuntimeOptions } from "@/runtime-options.ts";
  * `ensurePieceRunning`, LOADS THE PATTERN AND STARTS THE PIECE inside the API
  * server process, and then runs the piece's reactive graph — effect builtins
  * included. So toolshed's Runtime is an unrestricted pattern runtime reachable
- * from a plain stream write, and without a declaration it egresses on the
- * client default (`"claim-conditional"` → no server effect claim → `"allow"`).
+ * from a plain stream write. When this file was written, a runtime that
+ * declared nothing egressed on the client default (`"claim-conditional"` → no
+ * server effect claim → `"allow"`), and toolshed's declaration was the only
+ * thing standing between a stream write and the outside world. The terminal
+ * flip has since made `"suppress"` the default, so the declaration is now a
+ * statement of posture rather than the sole barrier — but it is still the
+ * BEHAVIOUR, not the default, that this file pins.
  *
  * The trap this file guards. The tempting alternative — stop toolshed starting
  * the piece at all (`doNotLoadPieceIfNotRunning`) — fails SILENTLY: the local
@@ -29,8 +34,12 @@ import { toolshedRuntimeOptions } from "@/runtime-options.ts";
  *
  * THE CONTROL ARM IS LOAD-BEARING. Without it a zero-egress assertion passes
  * for the wrong reason (piece never started / handler never ran / url never
- * set). `no declaration (pre-pin control)` runs the identical topology with
- * the declaration stripped and REQUIRES the release to happen.
+ * set). The control runs the identical topology on a runtime that MAY egress
+ * and REQUIRES the release to happen. It used to obtain that runtime by
+ * STRIPPING the declaration; the flip retired that route — a stripped runtime
+ * is now suppressed, so the control would have certified the fixture live
+ * while measuring nothing at all. It declares `"server-executor"` instead,
+ * which is the posture, not the absence of one.
  */
 
 /**
@@ -83,12 +92,13 @@ type ArmResult = {
 
 /**
  * One arm. `override` is applied on top of the real production options:
- * `undefined` keeps them verbatim, `"strip"` removes the declaration (the
- * pre-pin control), and a policy value declares one explicitly.
+ * `"verbatim"` keeps them untouched, `"strip"` removes the declaration so the
+ * runtime falls to the constructor default, and a policy value declares one
+ * explicitly.
  */
 const runWebhookArm = async (
   label: string,
-  override: "verbatim" | "strip" | "suppress",
+  override: "verbatim" | "strip" | "suppress" | "server-executor",
 ): Promise<ArmResult> => {
   const signer = await Identity.fromPassphrase(
     `toolshed webhook egress authority ${label}`,
@@ -108,8 +118,8 @@ const runWebhookArm = async (
   const fetched: string[] = [];
   const runtime = new Runtime({
     ...(override === "strip" ? withoutDeclaration : options),
-    ...(override === "suppress"
-      ? { externalSinkDisposition: "suppress" as const }
+    ...(override === "suppress" || override === "server-executor"
+      ? { externalSinkDisposition: override }
       : {}),
     // The network seam a released sink reaches (`runtime.fetchBuiltin` falls
     // through to `runtime.fetch` for a runtime with no builtin broker). This
@@ -182,13 +192,39 @@ const runWebhookArm = async (
   }
 };
 
-// THE CONTROL. Same topology with the declaration stripped — what toolshed
-// did before the pin. It must RELEASE, or the suppression arms below are
-// measuring an inert fixture rather than a suppressed one.
-Deno.test("a webhook delivery into a not-running piece egresses from toolshed's process when no disposition is declared", async () => {
-  const arm = await runWebhookArm("control", "strip");
-  assertEquals(arm.handlerRan, true, "the webhook never started the piece");
-  assertEquals(arm.fetched, [DOWNSTREAM_URL]);
+// THE CONTROL, and the fact that retired its previous form. Both arms run the
+// identical topology and differ only in the declared posture, so read them as
+// a pair: an egress-capable toolshed runtime DOES release the webhook's sink,
+// and a runtime that declares nothing does NOT.
+//
+// The second arm is what the control used to BE. It was written when declaring
+// nothing meant "claim-conditional" and therefore egress, so stripping the
+// declaration was how the fixture proved itself live. The terminal flip
+// inverted that, and the failure mode is the quiet one: strip-as-control would
+// still have "passed" the day the flip landed, certifying a fixture that could
+// not egress under any circumstances. Keeping the stripped arm here — asserting
+// the opposite of what it once asserted — is what makes the reversal visible
+// rather than merely absent.
+Deno.test("a webhook delivery into a not-running piece egresses from toolshed's process only when the runtime declares egress authority", async () => {
+  const authorized = await runWebhookArm("control", "server-executor");
+  assertEquals(
+    authorized.handlerRan,
+    true,
+    "the webhook never started the piece",
+  );
+  assertEquals(authorized.fetched, [DOWNSTREAM_URL]);
+
+  const stripped = await runWebhookArm("stripped", "strip");
+  assertEquals(
+    stripped.handlerRan,
+    true,
+    "the webhook never started the piece",
+  );
+  assertEquals(
+    stripped.fetched,
+    [],
+    "a runtime that declares nothing must not egress",
+  );
 });
 
 // The behaviour the pin buys, asserted independently of where the value comes
