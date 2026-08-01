@@ -10,6 +10,7 @@ import {
   describeError,
   describePinOutcome,
   isClean,
+  KNOWN_FLAGS,
   newestAutoGeneration,
   parseVintagePath,
   patternKeyFromMain,
@@ -27,11 +28,13 @@ import {
   reportPinNeedsOneTestKey,
   reportReplaySummary,
   reportUncovered,
+  reportUnknownFlags,
   reportUnmappedUrls,
   reportUpdateNeedsATestKey,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
+  unknownFlags,
   unmappedPatternUrls,
   vintageDir,
   vintageFileName,
@@ -1335,6 +1338,50 @@ describe("promoting a generation", () => {
     }
   });
 
+  it("REFUSES when only the COMPANION collides, which git does silently", async () => {
+    // The half the first guard missed. `git mv` refuses a destination FILE
+    // that exists, but moves a directory INTO an existing directory of that
+    // name — so a colliding companion is not refused, it is nested one level
+    // down while the stale leftover keeps the name the replay reads. Measured
+    // on the tracked path, which is the quiet one: untracked fails loudly
+    // with ENOTEMPTY.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const name = vintageFileName(stamp, ID_A);
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(auto, { recursive: true });
+      await Deno.mkdir(pinned, { recursive: true });
+      await Deno.writeTextFile(`${auto}/${name}`, "the auto generation");
+      await Deno.mkdir(vintageCompanionDir(`${auto}/${name}`), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        `${vintageCompanionDir(`${auto}/${name}`)}/child.sqlite`,
+        "the promoted child space",
+      );
+      // The pinned PRIMARY is absent, so the first guard does not fire — only
+      // a leftover companion is in the way.
+      const stale = vintageCompanionDir(`${pinned}/${name}`);
+      await Deno.mkdir(stale, { recursive: true });
+      await Deno.writeTextFile(`${stale}/child.sqlite`, "STALE LEFTOVER");
+
+      await expect(
+        promoteVintage(parseVintagePath(`${auto}/${name}`, root)!),
+      ).rejects.toThrow(/never overwrites a vintage/);
+
+      // Nothing nested, nothing moved, nothing overwritten.
+      expect(await exists(`${stale}/${vintageCompanionDir(name)}`)).toBe(false);
+      expect(await Deno.readTextFile(`${stale}/child.sqlite`)).toBe(
+        "STALE LEFTOVER",
+      );
+      expect(await exists(`${auto}/${name}`)).toBe(true);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("REFUSES to promote onto an existing pinned vintage", async () => {
     // A promotion is the only fixture-writing operation that could destroy a
     // pinned vintage, and a pinned vintage cannot be recaptured. `git mv`
@@ -1576,6 +1623,57 @@ describe("what the capture and promote commands print", () => {
     const message = reportEveryGenerationCurrent(4);
     expect(message).toContain("all 4 fixture(s) are current");
     expect(message).toContain("same world");
+  });
+
+  it("REFUSES a flag it does not recognise, rather than ignoring it", () => {
+    // A misspelled flag matches no branch and falls through to the plain gate:
+    // it replays everything, prints a healthy summary and exits 0, so someone
+    // who asked to capture a generation is told the tree is fine. Measured on
+    // the real command with `--capture-chnged` and `--pinn`.
+    expect(unknownFlags(["--capture-chnged"])).toEqual(["--capture-chnged"]);
+    expect(unknownFlags(["--pinn", "a/a.test.tsx"])).toEqual(["--pinn"]);
+    // Positionals are not flags — a test key is an argument, not a typo.
+    expect(unknownFlags(["--pin", "a/a.test.tsx"])).toEqual([]);
+    for (const flag of KNOWN_FLAGS) expect(unknownFlags([flag])).toEqual([]);
+
+    const message = reportUnknownFlags(["--capture-chnged"]);
+    expect(message).toContain("--capture-chnged");
+    // It must name what IS valid, or the reader is left guessing at a typo.
+    expect(message).toContain("--capture-changed");
+    expect(message).toContain("exit 0");
+  });
+
+  it("EXITS 1 on an empty tree, not just prints differently", () => {
+    // The message says an empty tree is the moment someone is most likely to
+    // believe the regime runs when it does not. An exit code is the half of
+    // that message a script can read, so pairing the warning with the healthy
+    // code makes "nothing here" indistinguishable from "all current" to
+    // everything except a human reading the terminal.
+    expect(
+      describeCaptureOutcome({ kind: "all-current", replayed: 0 }, "/repo")
+        .code,
+      "an empty tree reported success",
+    ).toBe(1);
+    // ...and a genuinely current tree still exits 0.
+    expect(
+      describeCaptureOutcome({ kind: "all-current", replayed: 4 }, "/repo")
+        .code,
+    ).toBe(0);
+  });
+
+  it("prints no empty stdout line when every capture failed", () => {
+    // `out: ""` still PRINTS, so the errors would arrive under a leading blank
+    // line that reads as truncated output.
+    const allFailed = describeCaptureOutcome({
+      kind: "captured",
+      captured: [],
+      pruned: [],
+      problems: ["  a/a.test.tsx: tests did not pass"],
+    }, "/repo");
+
+    expect(allFailed.out).toBeUndefined();
+    expect(allFailed.code).toBe(1);
+    expect(allFailed.err).toContain("a/a.test.tsx");
   });
 
   it("does not claim an EMPTY tree is current", () => {

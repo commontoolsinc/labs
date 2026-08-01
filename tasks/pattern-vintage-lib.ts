@@ -519,18 +519,32 @@ export async function promoteVintage(ref: VintageRef): Promise<string> {
   // operation that could destroy a pinned vintage, and a pinned vintage cannot
   // be recaptured. `captureVintage` and `removeVintages` both refuse the
   // equivalent; promotion was the gap.
-  if (await exists(destination)) {
+  const companion = vintageCompanionDir(ref.path);
+  const companionDestination = vintageCompanionDir(destination);
+  // BOTH halves are checked, because a fixture is the pair. Guarding only the
+  // primary leaves the companion able to collide on its own, and that
+  // collision is the silent one: `git mv` moves a directory INTO an existing
+  // directory of that name rather than refusing, so the promoted companion
+  // ends up nested one level down while the stale leftover keeps the name the
+  // replay reads. Measured, on the tracked path — untracked fails loudly with
+  // ENOTEMPTY, so the safer-looking branch was the corrupting one.
+  const collision = (await exists(destination))
+    ? destination
+    : (await exists(companion)) && (await exists(companionDestination))
+    ? companionDestination
+    : undefined;
+  if (collision !== undefined) {
     throw new Error(
-      `cannot promote ${ref.path}: ${destination} already exists, and a ` +
-        `promotion never overwrites a vintage — delete it deliberately first`,
+      `cannot promote ${ref.path}: ${collision} already exists, and a ` +
+        `promotion never overwrites a vintage — delete it and its ` +
+        `${VINTAGE_SPACES_SUFFIX} directory deliberately first`,
     );
   }
   await Deno.mkdir(destination.slice(0, destination.lastIndexOf("/")), {
     recursive: true,
   });
-  const companion = vintageCompanionDir(ref.path);
   if (await exists(companion)) {
-    await gitMove(companion, vintageCompanionDir(destination));
+    await gitMove(companion, companionDestination);
   }
   await gitMove(ref.path, destination);
   return destination;
@@ -663,12 +677,26 @@ export function describeCaptureOutcome(
         code: 1,
       };
     case "all-current":
-      return { out: reportEveryGenerationCurrent(outcome.replayed), code: 0 };
+      // An EMPTY tree exits 1. The message below says this is the moment
+      // someone is most likely to believe the regime is running when it is
+      // not — and an exit code is the half of that message anything scripting
+      // this can actually read. Pairing that text with the healthy exit code
+      // would make "there is nothing here" indistinguishable from "everything
+      // is current", which is the confusion the text exists to prevent. The
+      // plain gate calls the same tree a failure.
+      return {
+        out: reportEveryGenerationCurrent(outcome.replayed),
+        code: outcome.replayed === 0 ? 1 : 0,
+      };
     case "captured": {
-      const out = [
+      const lines = [
         ...outcome.captured.map((p) => `  + ${relativeToRepo(p, repoRoot)}`),
         ...outcome.pruned.map((p) => `  - ${relativeToRepo(p, repoRoot)}`),
-      ].join("\n");
+      ];
+      // No blank stdout line when every capture failed and nothing was
+      // pruned: `out: ""` still prints, so the errors would arrive under a
+      // leading empty line that looks like truncated output.
+      const out = lines.length > 0 ? lines.join("\n") : undefined;
       // A capture that partly failed still REPORTS what it wrote, then exits
       // 1. Suppressing the list would leave files on disk that the command
       // just claimed not to have made.
@@ -684,6 +712,43 @@ export function describeCaptureOutcome(
         : { out, code: 0 };
     }
   }
+}
+
+/** Every flag this task understands. Anything else is a mistake, not a hint. */
+export const KNOWN_FLAGS = ["--update", "--capture-changed", "--pin"] as const;
+
+/**
+ * Flags the task does not recognise.
+ *
+ * A misspelled flag is silently a DIFFERENT COMMAND here, and the difference
+ * is invisible: `--capture-chnged` matches no branch, so the run falls through
+ * to the plain gate, replays everything, prints a healthy summary and exits 0.
+ * Someone who meant to capture a generation is told the tree is fine. `--pinn`
+ * is worse — the stray positional is discarded and the same clean pass is
+ * printed instead of a promotion.
+ *
+ * For a gate whose every other design decision is about never reading as
+ * success by accident — `armVerdictGuard`, the `replayed`/`candidates`/
+ * `targets` floors, the per-fixture root control — accepting an unrecognised
+ * flag and exiting 0 is the same failure in the argument parser.
+ */
+export function unknownFlags(args: readonly string[]): string[] {
+  const known = new Set<string>(KNOWN_FLAGS);
+  return args.filter((arg) => arg.startsWith("--") && !known.has(arg));
+}
+
+/** What the task prints when it was handed a flag it does not know. */
+export function reportUnknownFlags(unknown: readonly string[]): string {
+  return [
+    `Unrecognised flag(s): ${unknown.join(", ")}.`,
+    "",
+    "Stopping rather than guessing. An unknown flag matches no command here,",
+    "so the run would fall through to the plain gate, replay everything and",
+    "exit 0 — reporting the tree healthy to someone who asked for something",
+    "else entirely.",
+    "",
+    `Known flags: ${KNOWN_FLAGS.join(", ")}.`,
+  ].join("\n");
 }
 
 /** What `--pin` prints when it was not given exactly one test key. */

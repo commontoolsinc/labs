@@ -1300,29 +1300,56 @@ describe("the vintage gate, end to end", () => {
     // `staleTestKeys`'s abstention rule is unit-tested against hand-built
     // outcomes, which proves the rule and NOT the wiring. Measured: replacing
     // `failed: report.failures.length > 0` with `failed: false` in `replayAll`
-    // left the whole suite green, because nothing asserted the field is
-    // actually derived from the fixture's own failures.
+    // left the whole suite green.
+    //
+    // TWO fixtures, because one cannot tell the two derivations apart. With a
+    // single fixture, "this fixture failed" and "the RUN has failures" are
+    // observationally identical, and the aggregate confusion — hoisting the
+    // `failures.push` above this and reading the run total — passed the whole
+    // file. That matters concretely: `perVintage[].failed` is the only input
+    // to `staleTestKeys`, so an aggregate reading lets ONE broken fixture
+    // suppress capture for every other test key in the tree.
     await captureMissing(
       roots,
       [TEST_KEY],
       new Date("2026-07-29T12:00:00.000Z"),
     );
     const [ref] = await collectVintages(roots.vintagesRoot);
+    // A second, healthy fixture that sorts AFTER the broken one, so it is
+    // walked once the run already carries a failure — the ordering under which
+    // an aggregate reading is wrong.
+    const secondKey = "zz/zz.test.tsx";
+    const secondDir = `${roots.vintagesRoot}/${secondKey}/${PINNED}`;
+    await Deno.mkdir(secondDir, { recursive: true });
+    await Deno.copyFile(
+      ref.path,
+      `${secondDir}/${ref.stamp}-${ref.identity}.sqlite`,
+    );
 
     const healthy = await replayAll(roots);
-    expect(healthy.perVintage).toHaveLength(1);
-    expect(healthy.perVintage[0].failed, "a clean fixture was marked failed")
-      .toBe(false);
-    expect(healthy.perVintage[0].ref.path).toBe(ref.path);
+    expect(healthy.perVintage).toHaveLength(2);
+    expect(
+      healthy.perVintage.map((o) => o.failed),
+      "a clean tree marked something failed",
+    ).toEqual([false, false]);
 
-    // Truncate the fixture so it cannot restore. Its OWN entry must flip.
+    // Truncate ONLY the first so it cannot restore.
     await Deno.writeTextFile(ref.path, "");
 
     const broken = await replayAll(roots);
     expect(broken.failures.length).toBeGreaterThan(0);
-    expect(broken.perVintage).toHaveLength(1);
-    expect(broken.perVintage[0].failed, "a failed fixture was marked clean")
+    const byKey = new Map(
+      broken.perVintage.map((o) => [o.ref.testKey, o.failed]),
+    );
+    expect(byKey.get(TEST_KEY), "the broken fixture was marked clean")
       .toBe(true);
+    // The assertion the single-fixture version could not make: the healthy
+    // one is still healthy in a run that HAS failures.
+    expect(
+      byKey.get(secondKey),
+      "a healthy fixture inherited the run's failure",
+    )
+      .toBe(false);
   });
 
   it("REFUSES to capture a generation onto a tree with any failure", async () => {
@@ -1396,6 +1423,43 @@ describe("the vintage gate, end to end", () => {
     );
     // The pinned vintage is untouched — retention can never reach it.
     expect(after.filter((v) => v.tier === PINNED)).toHaveLength(1);
+  });
+
+  it("still REPORTS what it captured when retention then fails", async () => {
+    // Files are already on disk by the time pruning runs. Throwing there would
+    // lose the record of which — leaving fixtures nobody was told about. Over-
+    // retention is a disk cost a re-run fixes; an unreported capture is not.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    await setSource(COMPATIBLE);
+    const replay = await replayAll(roots);
+    expect(replay.failures).toEqual([]);
+
+    // Make the retention read fail: a file where `collectVintages` will try to
+    // walk a directory.
+    const wedge = `${roots.vintagesRoot}/${TEST_KEY}/${AUTO}`;
+    await Deno.mkdir(wedge.slice(0, wedge.lastIndexOf("/")), {
+      recursive: true,
+    });
+    await Deno.writeTextFile(wedge, "not a directory");
+
+    const outcome = await captureChangedGenerations(
+      roots,
+      replay,
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    expect(outcome.kind).toBe("captured");
+    if (outcome.kind !== "captured") throw new Error("unreachable");
+    // Whatever happened to retention, the capture attempt is accounted for:
+    // either it wrote a file and said so, or it failed and said that.
+    expect(
+      outcome.captured.length + outcome.problems.length,
+      "a capture attempt went entirely unreported",
+    ).toBeGreaterThan(0);
   });
 
   it("promotes the newest generation, and says so when there is none", async () => {

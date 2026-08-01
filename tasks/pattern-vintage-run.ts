@@ -1220,10 +1220,26 @@ export async function captureChangedGenerations(
   // Prune AFTER capturing, against a RE-READ tree, so the new generations are
   // among the ones counted. Pruning first would keep `keep` old ones and then
   // add another, leaving the tree permanently one over the bound.
-  const pruned = autoGenerationsToPrune(
-    await collectVintages(roots.vintagesRoot),
-  );
-  await removeVintages(pruned, roots.vintagesRoot);
+  //
+  // A prune failure is REPORTED, never thrown. Files have already been written
+  // by this point, and throwing here would lose the record of which — leaving
+  // fixtures on disk that the command never told anyone about. Over-retention
+  // is a disk cost someone can fix by running this again; an unreported
+  // capture is a file nobody knows to look at.
+  let pruned: string[] = [];
+  try {
+    pruned = autoGenerationsToPrune(
+      await collectVintages(roots.vintagesRoot),
+    );
+    await removeVintages(pruned, roots.vintagesRoot);
+  } catch (error) {
+    return {
+      kind: "captured",
+      captured,
+      pruned: [],
+      problems: [...problems, `  retention: ${describeError(error)}`],
+    };
+  }
   return { kind: "captured", captured, pruned, problems };
 }
 

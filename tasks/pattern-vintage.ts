@@ -118,10 +118,12 @@ import {
   reportNothingReplayed,
   reportReplaySummary,
   reportUncovered,
+  reportUnknownFlags,
   reportUnmappedUrls,
   reportUpdateNeedsATestKey,
   requiredPatternKeys,
   uncoveredRequiredPatterns,
+  unknownFlags,
   unmappedPatternUrls,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
@@ -153,9 +155,10 @@ const FIXTURE_SIGNER = await Identity.fromPassphrase("pattern vintage fixture");
 /**
  * Print what a command decided to say and exit with the code it chose.
  *
- * `never` rather than `void`, so the compiler knows control does not come
- * back: a caller that forgot the command ends here would otherwise fall
- * through into the plain gate and replay everything a second time.
+ * `never` rather than `void`, and the annotation is doing real work even
+ * though `Deno.exit` already guarantees it: it is what would make a future
+ * `emit` that ever RETURNS a compile error at every call site, rather than a
+ * silent fall-through into the plain gate below.
  */
 function emit(shown: CommandOutput): never {
   if (shown.out !== undefined) console.log(shown.out);
@@ -183,6 +186,12 @@ async function main() {
     Deno.exit(1);
   }
   const required = requiredPatternKeys(systemUrls);
+
+  // Before anything else: a flag this task does not know is a MISTAKE, not a
+  // no-op. Unhandled, it falls through to the plain gate and exits 0 having
+  // answered a question nobody asked.
+  const unknown = unknownFlags(Deno.args);
+  if (unknown.length > 0) emit({ err: reportUnknownFlags(unknown), code: 1 });
 
   if (Deno.args.includes("--update")) {
     // A capture NAMES the test to run. There is no default set, and deriving
