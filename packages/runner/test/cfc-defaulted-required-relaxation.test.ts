@@ -95,6 +95,46 @@ describe("relaxDefaultedRequired", () => {
     })).toBeUndefined();
   });
 
+  // The recursion threads each level's own scope (`cfcSchemaChildRoot`), so
+  // a property `$ref` beneath a NESTED object's own `$defs` resolves against
+  // that pool. Passing the outer root at every level — the previous behavior
+  // — missed the nested pool's default, left `mode` required, and the gate
+  // refused `{ opts: {} }` ("opts: missing required property mode") for a
+  // payload runtime materialization accepts and defaults (review repro on
+  // the D5/D6 PR).
+  it("relaxes a defaulted-required behind a nested object's own $defs", () => {
+    expect(relaxedValidationError({ opts: {} }, {
+      type: "object",
+      properties: {
+        opts: {
+          type: "object",
+          properties: { mode: { $ref: "#/$defs/Mode" } },
+          required: ["mode"],
+          $defs: { Mode: { type: "string", default: "fast" } },
+        },
+      },
+      required: ["opts"],
+    })).toBeUndefined();
+  });
+
+  it("resolves a nested scope's ref in its own pool, not a decoy outer one", () => {
+    expect(relaxedValidationError({ opts: {} }, {
+      type: "object",
+      properties: {
+        opts: {
+          type: "object",
+          properties: { mode: { $ref: "#/$defs/Mode" } },
+          required: ["mode"],
+          $defs: { Mode: { type: "string", default: "fast" } },
+        },
+      },
+      required: ["opts"],
+      // Same name in the document root, WITHOUT a default: resolving in the
+      // wrong scope would keep `mode` required and refuse the payload.
+      $defs: { Mode: { type: "number" } },
+    })).toBeUndefined();
+  });
+
   it("follows a $ref chain to find the default", () => {
     expect(relaxedValidationError({}, {
       type: "object",
@@ -116,6 +156,48 @@ describe("relaxDefaultedRequired", () => {
         required: ["mode"],
       },
     })).toBeUndefined();
+  });
+
+  // Tuple slots are ordinary present objects to the runtime's default
+  // materialization, so their schemas get the same relaxation as `items`.
+  it("relaxes a defaulted property inside a prefixItems slot", () => {
+    expect(relaxedValidationError([{}], {
+      type: "array",
+      prefixItems: [{
+        type: "object",
+        properties: { mode: { type: "string", default: "fast" } },
+        required: ["mode"],
+      }],
+    } as unknown as JSONSchema)).toBeUndefined();
+  });
+
+  // The runtime's default-injection read consults the property schema's own
+  // `default` directly, without resolving the ref — so a ref-site sibling
+  // default satisfies the property even when the referenced definition
+  // carries none.
+  it("relaxes on a ref-site sibling default", () => {
+    expect(relaxedValidationError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Mode", default: "fast" } },
+      required: ["mode"],
+      $defs: { Mode: { type: "string" } },
+    })).toBeUndefined();
+  });
+
+  // The inverse boundary: a default stranded on an UNRESOLVABLE chain's last
+  // reachable wrapper is one the runtime never injects — the property schema
+  // itself has no default, and the chain cannot resolve to a view carrying
+  // one. Crediting it would admit `{}` and spend the invocation id on a
+  // handling missing the field; unresolvable keeps the field required.
+  it("does not relax on a default stranded mid-way through a broken chain", () => {
+    expect(relaxedValidationError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/A" } },
+      required: ["mode"],
+      $defs: {
+        A: { $ref: "#/$defs/Missing", default: "fast" },
+      },
+    } as unknown as JSONSchema)).toMatch(/mode/);
   });
 
   it("relaxes a defaulted property inside a combinator branch", () => {

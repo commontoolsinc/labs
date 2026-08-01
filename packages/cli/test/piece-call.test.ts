@@ -1937,6 +1937,17 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
+  // A boolean definition is a resolvable target that still proves nothing
+  // about the event being an object — absence passes through, like any other
+  // non-object target.
+  it("leaves absence alone when the top-level $ref names a boolean def", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Anything",
+      asCell: ["stream"],
+      $defs: { Anything: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
   // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
   // type and no properties) is not an object schema; `{}` means nothing
   // there.
