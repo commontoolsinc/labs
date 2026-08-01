@@ -233,6 +233,11 @@ function prepareActionResultValidation(
   const existing = prepared.get(value);
   if (existing !== undefined) return existing;
 
+  // Copying the prototype is safe because this runs on the output of
+  // `adaptSandboxResult()`, which has already re-rooted every record -- so the
+  // prototype in hand is `Object.prototype`. Anything that ran this pass
+  // first, on a value straight from the sandbox, would propagate a prototype
+  // no fabric record has.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)
