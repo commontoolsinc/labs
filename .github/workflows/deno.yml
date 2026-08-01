@@ -152,7 +152,7 @@ jobs:
       # that now exits 1 naming the key. Emptiness is judged per leaf, so
       # partial loss counts too.
       #
-      # The limit worth knowing (docs/plans/pattern-update-state-continuity.md):
+      # The limit worth knowing (docs/specs/pattern-update-testing.md):
       # a value that merely CHANGED is warned about rather than failed on,
       # because a replay recomputes as well as reads. So a moved key whose new
       # slot the pattern SEEDS reads back non-empty and only warns. The same
