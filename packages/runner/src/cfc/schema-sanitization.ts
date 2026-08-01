@@ -1345,7 +1345,21 @@ export function localRefTarget(
  *
  * `seen` both memoizes and breaks reference cycles: the relaxed copy is
  * registered before its children are filled in, so a schema that reaches
- * itself resolves to the copy already under construction.
+ * itself resolves to the copy already under construction. The memo is keyed
+ * by schema object identity alone — cycle-breaking requires registering
+ * before the scope of every reaching path is known — so a schema OBJECT
+ * shared verbatim across two different definition scopes relaxes in the
+ * scope that reaches it first. Generated schemas do not share fragment
+ * objects across scopes, so this stays theoretical.
+ *
+ * Scope discipline: a subtree that declares its own `$defs` opens a new
+ * local-ref scope (`cfcSchemaChildRoot`) — the same per-hop root tracking
+ * `localRefTarget` applies. Every ref consulted for a `default` and every
+ * recursion below resolves in the CURRENT schema's scope, so a property
+ * `$ref` beneath a nested object's own `$defs` finds that pool, not the
+ * document root's (which may not name the definition — or worse, name a
+ * decoy without the default, leaving the property required and refusing a
+ * payload the runtime materializes).
  */
 export function relaxDefaultedRequired(
   schema: JSONSchema,
@@ -1359,6 +1373,8 @@ export function relaxDefaultedRequired(
   const relaxed: Record<string, unknown> = { ...schema };
   seen.set(schema, relaxed as JSONSchema);
 
+  const scopeRoot = cfcSchemaChildRoot(schema, root);
+
   const properties = schema.properties;
   if (isSchemaObject(properties)) {
     const defaulted = new Set<string>();
@@ -1368,11 +1384,27 @@ export function relaxDefaultedRequired(
         properties as Record<string, JSONSchema>,
       )
     ) {
-      const target = localRefTarget(propSchema, root);
-      if (isSchemaObject(target) && target.default !== undefined) {
+      const target = localRefTarget(propSchema, scopeRoot);
+      // A property counts as defaulted only when the runtime would inject
+      // its default on read: a `default` on the property schema itself is
+      // read directly (ref-site siblings included — the default-injection
+      // read in runner `schema.ts` consults `propSchema.default` without
+      // resolving the ref), and a `default` on a fully RESOLVED chain end is
+      // materialized through the resolved view. A default stranded on an
+      // unresolvable chain's last reachable wrapper is neither: the runtime
+      // cannot resolve past it, so crediting it would admit `{}` and spend
+      // the invocation id on a handling missing the field. An unresolvable
+      // chain keeps the field required (fail-closed), matching
+      // `localRefTarget`'s contract for the gates.
+      const chainEndResolved = isSchemaObject(target) &&
+        typeof target.$ref !== "string";
+      if (
+        (isSchemaObject(propSchema) && propSchema.default !== undefined) ||
+        (chainEndResolved && target.default !== undefined)
+      ) {
         defaulted.add(key);
       }
-      next[key] = relaxDefaultedRequired(propSchema, root, seen);
+      next[key] = relaxDefaultedRequired(propSchema, scopeRoot, seen);
     }
     relaxed.properties = next;
     if (Array.isArray(schema.required)) {
@@ -1382,13 +1414,20 @@ export function relaxDefaultedRequired(
     }
   }
 
-  // `items` is a single schema here; the validator rejects the tuple form
-  // outright ("schema must be an object or boolean").
+  // `items` is a single schema here; the validator rejects the legacy tuple
+  // form of `items` outright ("schema must be an object or boolean"). Tuples
+  // are `prefixItems`, whose slot schemas get the same treatment — a present
+  // tuple-slot object is materialized like any present object.
   if (schema.items !== undefined) {
     relaxed.items = relaxDefaultedRequired(
       schema.items as JSONSchema,
-      root,
+      scopeRoot,
       seen,
+    );
+  }
+  if (Array.isArray(schema.prefixItems)) {
+    relaxed.prefixItems = (schema.prefixItems as JSONSchema[]).map((entry) =>
+      relaxDefaultedRequired(entry, scopeRoot, seen)
     );
   }
 
@@ -1397,7 +1436,7 @@ export function relaxDefaultedRequired(
     const branches = fields[combinator];
     if (Array.isArray(branches)) {
       relaxed[combinator] = (branches as JSONSchema[]).map((entry) =>
-        relaxDefaultedRequired(entry, root, seen)
+        relaxDefaultedRequired(entry, scopeRoot, seen)
       );
     }
   }
@@ -1409,7 +1448,7 @@ export function relaxDefaultedRequired(
       for (
         const [key, entry] of Object.entries(defs as Record<string, JSONSchema>)
       ) {
-        next[key] = relaxDefaultedRequired(entry, root, seen);
+        next[key] = relaxDefaultedRequired(entry, scopeRoot, seen);
       }
       relaxed[pool] = next;
     }
