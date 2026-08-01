@@ -1040,15 +1040,21 @@ function acquireIntervalNowTimer(
     timers.set(key, timer);
 
     // Initialize the value if the cell is empty or stale (e.g. after reload),
-    // then start the aligned timer. sample() reads without subscribing the
-    // acquiring action, so ticks never re-trigger it.
-    const coarsened = coarsenTimestamp(Date.now(), intervalMs);
-    const existing = cell.withTx(tx).sample() as number | null | undefined;
-    if (existing == null) {
-      cell.withTx(tx).set(coarsened);
-    } else if (existing !== coarsened) {
-      writeIntervalNowTick(runtime, timer, intervalMs);
-    }
+    // then start the aligned timer. The seed goes through the SAME
+    // own-transaction path as every later tick, and deliberately not through
+    // the acquiring action's `tx`: this cell is content-addressed by interval
+    // and shared by every instance in the space, so it is not — and cannot be
+    // — part of the wish action's static write surface. Seeding it inline made
+    // a resolving run write a document outside that surface, and the dynamic
+    // claim firewall rejected the whole run `dynamic-write-outside-static-
+    // surface` (`scheduler/servability.ts`, surface minted at `runner.ts`'s
+    // `selectorMintedResultWrite`). `writeIntervalNowTick` already subsumes
+    // both cases the inline seed distinguished — it writes when the cell is
+    // empty AND when it is stale — so the `sample()` probe goes with it rather
+    // than being kept as a gate: reading the cell here to decide whether to
+    // write it is exactly the stale-read that the interval's own commit
+    // precondition then rejects.
+    writeIntervalNowTick(runtime, timer, intervalMs);
     scheduleIntervalNowTick(runtime, timer, intervalMs);
   }
   timer.refCount++;
