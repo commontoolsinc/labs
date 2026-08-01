@@ -18,6 +18,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
 import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
@@ -1640,18 +1641,109 @@ describe("scheduler event receipts", () => {
       const commitStatus = new Promise<string>((resolve) => {
         // Through cell.send so the payload takes the real dispatch shape
         // (convertCellsToLinks turns the cell into a link) and the marker
-        // takes the real injection route (send options → queued event →
-        // dispatch transaction).
+        // takes the real injection route (minted send option → queued event
+        // → dispatch transaction).
         streamCell.send(
           { value: 7, result: resultHolder },
           (t: IExtendedStorageTransaction) => resolve(t.status().status),
-          { eventId, runtimeInjectedEventKeys: ["result"] },
+          {
+            eventId,
+            runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
+          },
         );
       });
 
       expect(await commitStatus).toBe("done");
       expect(observed.invocations).toBe(1);
       expect(observed.events).toEqual([{ value: 7 }]);
+    });
+
+    it("ignores an UNMINTED provenance marker — the option is a capability", async () => {
+      // The marker's value must come from markRuntimeInjectedEventKeys
+      // (runner-internal; no pattern compartment can import it — the sandbox
+      // module map exposes only the commonfabric surface). A plain array —
+      // exactly what any in-process or sandboxed caller could pass through
+      // send options — is dropped at the stream-send chokepoint, so the
+      // undeclared key is judged like any other and the send is refused.
+      const { root, observed } = runClosedVerbRoot("closed unminted root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      const holder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed unminted holder",
+        undefined,
+        tx,
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const errors: string[] = [];
+      runtime.scheduler.onError((error) => {
+        errors.push(error.message);
+      });
+
+      const eventId = "evt:closed-unminted:0:closed-unminted-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
+      const commitStatus = new Promise<string>((resolve) => {
+        streamCell.send(
+          { value: 7, result: holder },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
+          { eventId, runtimeInjectedEventKeys: ["result"] },
+        );
+      });
+
+      expect(await commitStatus).toBe("error");
+      await runtime.idle();
+      expect(observed.invocations).toBe(0);
+      expect(errors.length).toBe(1);
+      expect(errors[0]).toContain("additional property result");
+    });
+
+    it("delivers a marked key the schema DECLARES — the schema governs", async () => {
+      // A handler that declares the injected slot asked for it: the marked
+      // key is not stripped, the injected value is validated like any field
+      // (the link is accepted opaquely), and the handler receives it.
+      const { root, observed } = runClosedVerbRoot("closed declared root", {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+          result: { asCell: ["cell"] },
+        },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      const declaredHolder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed declared holder",
+        undefined,
+        tx,
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:closed-declared:0:closed-declared-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
+      const commitStatus = new Promise<string>((resolve) => {
+        streamCell.send(
+          { value: 7, result: declaredHolder },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
+          {
+            eventId,
+            runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
+          },
+        );
+      });
+
+      expect(await commitStatus).toBe("done");
+      expect(observed.invocations).toBe(1);
+      const delivered = observed.events[0] as Record<string, unknown>;
+      expect(delivered.value).toBe(7);
+      expect(Object.hasOwn(delivered, "result")).toBe(true);
     });
 
     it("rejects an UNMARKED result slot even when it carries a cell link", async () => {

@@ -285,17 +285,50 @@ export const recordRelevantSchemaWritePolicyInput = (
  * cell: `builtins/llm-dialog.ts` sends `{ ...input, result }`). The
  * dispatch-side closed-world gate exempts exactly these keys — and only
  * these — from an `additionalProperties: false` event schema. The marker is
- * PROVENANCE, not shape, and must stay unforgeable from payload data: it
- * rides this in-process options argument, never the event value, so no
- * remote or CLI caller can express it — payloads are plain data, and the
- * CLI's send surface (`CallableCellLike.send`, packages/cli/lib/callable.ts)
- * forwards only `eventId`. Adding a way to set it from serialized input
+ * PROVENANCE, not shape, and must stay unforgeable: it rides this
+ * in-process options argument, never the event value, so no remote or CLI
+ * caller can express it — payloads are plain data, and the CLI's send
+ * surface (`CallableCellLike.send`, packages/cli/lib/callable.ts) forwards
+ * only `eventId`. In-process callers are gated too: the value must be an
+ * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
+ * path drops any other value — and the mint lives in runner internals no
+ * pattern compartment can import, so sandboxed pattern code holding a real
+ * stream cell still cannot smuggle an undeclared key past closed-world by
+ * passing a plain array here. Adding any data-expressible way to set it
  * would reopen the accepted-and-ignored hole C5 closes.
  */
 export type StreamSendOptions = {
   eventId?: string;
   runtimeInjectedEventKeys?: readonly string[];
 };
+
+// The mint registry backing `runtimeInjectedEventKeys` (see
+// StreamSendOptions): membership here is the capability. Only code that can
+// call `markRuntimeInjectedEventKeys` — runner-internal modules and
+// same-package tests; never a pattern compartment, whose module graph cannot
+// import runner internals — can produce an array the send path accepts.
+const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
+
+/**
+ * Mint an injection-provenance marker for {@link StreamSendOptions}. The
+ * returned (frozen) array is the capability: `Cell.set`'s stream branch
+ * forwards `runtimeInjectedEventKeys` to dispatch only when it was minted
+ * here, so an unminted array — anything a spoofing caller can construct —
+ * is ignored and the closed-world gate judges the key like any other
+ * undeclared field.
+ */
+export function markRuntimeInjectedEventKeys(
+  keys: readonly string[],
+): readonly string[] {
+  const minted = Object.freeze([...keys]);
+  mintedRuntimeInjectedKeys.add(minted);
+  return minted;
+}
+
+const mintedRuntimeInjectedEventKeys = (
+  keys: readonly string[] | undefined,
+): readonly string[] | undefined =>
+  keys !== undefined && mintedRuntimeInjectedKeys.has(keys) ? keys : undefined;
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -1365,7 +1398,14 @@ export class CellImpl<T extends FabricValue>
             ? undefined
             : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
           originTx: this.tx ?? undefined,
-          runtimeInjectedEventKeys: sendOptions?.runtimeInjectedEventKeys,
+          // Forward injection provenance only when it carries the mint (see
+          // markRuntimeInjectedEventKeys): a plain array here — the shape any
+          // in-process or sandboxed caller could pass — is dropped, and the
+          // closed-world gate then judges the key like any other undeclared
+          // field.
+          runtimeInjectedEventKeys: mintedRuntimeInjectedEventKeys(
+            sendOptions?.runtimeInjectedEventKeys,
+          ),
         },
       );
 

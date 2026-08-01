@@ -861,25 +861,45 @@ function closedWorldEventRejection(
   // by `stripInjectedResult` there and `cloneWithoutBoundToolKeys` in the
   // CLI) — and the gate must not refuse a field the runtime injected. The
   // exemption is PROVENANCE, not shape: the injection site names its keys
-  // through the send's internal options, which travel out-of-band to
+  // through the send's internal options (mint-gated — see
+  // `markRuntimeInjectedEventKeys`, cell.ts), which travel out-of-band to
   // `tx.dispatchedRuntimeInjectedEventKeys`, so payload DATA can never claim
   // it — a caller-supplied `result`, cell-link-valued or not, arrives
   // unmarked and is judged like any other undeclared field. (A shape rule —
   // "any link-valued `result` passes" — would let every caller smuggle an
   // undeclared key past closed-world by supplying a link, recreating the
-  // accepted-and-ignored behavior this gate exists to kill.) Marked keys are
-  // the runtime's, not the caller's, so they are excluded from judgment
-  // entirely; the handler never sees an undeclared one either way — the
-  // schema read path only delivers declared fields.
+  // accepted-and-ignored behavior this gate exists to kill.)
+  //
+  // A marked key the schema DECLARES is not stripped: the schema governs —
+  // the handler asked for the slot, so the injected value is validated like
+  // any field and delivered intact (stripping it would fail a required
+  // declared `result` as missing). Only UNDECLARED marked keys are the
+  // runtime's invisible side-channel, excluded from judgment entirely; the
+  // handler never sees an undeclared one either way — the schema read path
+  // only delivers declared fields.
   let payload: unknown = event;
   if (
     runtimeInjectedEventKeys !== undefined &&
     runtimeInjectedEventKeys.length > 0 &&
     isRecord(event)
   ) {
+    const declaredProperties =
+      isRecord(refTarget) && isRecord(refTarget.properties)
+        ? refTarget.properties
+        : undefined;
     const rest = { ...(event as Record<string, unknown>) };
-    for (const key of runtimeInjectedEventKeys) delete rest[key];
-    payload = rest;
+    let strippedAny = false;
+    for (const key of runtimeInjectedEventKeys) {
+      if (
+        declaredProperties !== undefined &&
+        Object.hasOwn(declaredProperties, key)
+      ) {
+        continue;
+      }
+      delete rest[key];
+      strippedAny = true;
+    }
+    if (strippedAny) payload = rest;
   }
 
   const cacheable = isDeepFrozen(argumentSchema);

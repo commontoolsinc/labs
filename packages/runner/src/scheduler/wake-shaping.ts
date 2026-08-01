@@ -396,6 +396,9 @@ export function holdShapedEvent(
   // hold, so a shaped (delayed) delivery still stamps the instant the user
   // acted rather than the instant the shaper released it.
   const time = opts.time;
+  // Injection provenance rides the hold unchanged, so a shaped delivery
+  // cannot silently strip the closed-world gate's exemption.
+  const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
   shaper.hold({
     groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink)),
     deliver: () =>
@@ -403,6 +406,7 @@ export function holdShapedEvent(
         eventId,
         originTx,
         time,
+        runtimeInjectedEventKeys,
       }),
   });
 }
