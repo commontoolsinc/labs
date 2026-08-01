@@ -1413,9 +1413,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "--show-links",
     "Annotate the Invocation JSON with a links dictionary mapping result " +
       "paths to their backing cell addresses (before the callable name). " +
-      'The root "/" entry is the receipt itself; other entries appear only ' +
-      "where a path is backed by a different document. Handler invocations " +
-      "only — a tool already reports its result cell on stderr.",
+      'The root "/" entry is the result\'s own backing document — the ' +
+      "receipt, unless the result is itself a reference, in which case a " +
+      'separate "receipt" entry keeps the receipt address; other entries ' +
+      "appear only where a path is backed by a different document. Handler " +
+      "invocations only — a tool already reports its result cell on stderr.",
   )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")

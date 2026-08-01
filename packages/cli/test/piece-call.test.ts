@@ -2136,8 +2136,8 @@ interface MockLinkedDoc {
 }
 
 /** One node of a mock receipt tree: `doc` marks the value at this path as a
- * reference into another document; children without one live in the
- * enclosing doc. */
+ * reference into another document (on the ROOT node, a stored result that is
+ * itself a reference); children without one live in the enclosing doc. */
 interface MockLinkedNode {
   doc?: MockLinkedDoc;
   children?: Record<string, MockLinkedNode>;
@@ -2147,15 +2147,25 @@ interface MockLinkedNode {
  * A receipt cell whose key()/resolveAsCell traversal mirrors the runner's:
  * `key(segment)` reports the ENCLOSING doc's address extended by the segment
  * (the cell's own link), and only `resolveAsCell()` reveals the backing
- * document a stored reference points at. A collector that skipped the
- * resolve step would read every path as receipt-internal and emit no links —
- * which is exactly what these mocks would catch.
+ * document a stored reference points at — including at the root, where the
+ * receipt cell reports the receipt's address and resolving reveals whether
+ * the stored result is itself a reference. A collector that skipped the
+ * resolve step would read every path as receipt-internal and emit no links.
+ *
+ * Unresolved wrappers refuse traversal outright (`key()` hands back a
+ * barren cell), pinning that the collector reads descendants from RESOLVED
+ * cells only — a same-document link can redirect elsewhere, and children
+ * live under its target.
  */
 function linkedReceiptCell(
   receiptDoc: MockLinkedDoc,
   value: unknown,
   root: MockLinkedNode = {},
 ): CallableCellLike {
+  const barren: CallableCellLike = {
+    get: () => undefined,
+    key: () => barren,
+  };
   const build = (
     node: MockLinkedNode,
     doc: MockLinkedDoc,
@@ -2178,7 +2188,7 @@ function linkedReceiptCell(
           : build(childNode, doc, [...pathInDoc, segment]);
         return {
           get: () => undefined,
-          key: (next: string) => resolved.key(next),
+          key: () => barren,
           resolveAsCell: () => resolved,
           getAsNormalizedFullLink: () => ({
             id: doc.id,
@@ -2191,7 +2201,21 @@ function linkedReceiptCell(
     };
     return cell;
   };
-  return build(root, receiptDoc, receiptDoc.path ?? []);
+  const resolvedRoot = root.doc
+    ? build(root, root.doc, root.doc.path ?? [])
+    : build(root, receiptDoc, receiptDoc.path ?? []);
+  return {
+    get: () => value,
+    pull: () => Promise.resolve(value),
+    key: () => barren,
+    resolveAsCell: () => resolvedRoot,
+    getAsNormalizedFullLink: () => ({
+      id: receiptDoc.id,
+      space: receiptDoc.space,
+      scope: receiptDoc.scope,
+      path: receiptDoc.path ?? [],
+    }),
+  };
 }
 
 describe("collectInvocationResultLinks", () => {
@@ -2312,6 +2336,47 @@ describe("collectInvocationResultLinks", () => {
         id: "of:odd-key",
         scope: "space",
       },
+    });
+  });
+
+  it("resolves a result that is itself a reference — a scalar that is its own doc", () => {
+    // The design's motivating case for provenance-beside-the-value: an
+    // inline marker cannot annotate a scalar, and a scalar can be its own
+    // doc. "/" must expose the document that BACKS the value, not the
+    // receipt it was read through — and the receipt address stays available
+    // under the reserved bare key (pointer keys always start with "/", so
+    // no result path can collide with it).
+    const cell = linkedReceiptCell(receiptLink, 42, {
+      doc: { id: "of:answer-1", space: "did:key:test-home" },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, 42)).toEqual({
+      "/": { space: "did:key:test-home", id: "of:answer-1", scope: "space" },
+      receipt: receiptRef,
+    });
+  });
+
+  it("rebases children of a reference-backed root onto its document", () => {
+    const value = { body: "hi", author: { name: "b" } };
+    const cell = linkedReceiptCell(receiptLink, value, {
+      doc: { id: "of:comment-1", space: "did:key:test-home" },
+      children: {
+        author: { doc: { id: "of:author-1", space: "did:key:test-home" } },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+      receipt: receiptRef,
+      "/author": {
+        space: "did:key:test-home",
+        id: "of:author-1",
+        scope: "space",
+      },
+      // No "/body": it lives in the ROOT's backing document — comparing it
+      // against the receipt instead would wrongly annotate every child.
     });
   });
 

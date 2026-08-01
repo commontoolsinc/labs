@@ -196,8 +196,10 @@ export interface InvocationOutcome {
   deduplicated?: boolean;
   /** Under `--show-links` only: result paths mapped to their backing cell
    * addresses, provenance beside the value. The root `"/"` entry is the
-   * receipt itself; other entries appear only where a path's backing
-   * document differs from its enclosing one. */
+   * result value's own backing document — the receipt, unless the result is
+   * itself a reference, in which case the receipt address rides the
+   * reserved bare `"receipt"` key; other entries appear only where a path's
+   * backing document differs from its enclosing one. */
   links?: Record<string, InvocationResultLink>;
 }
 
@@ -528,34 +530,67 @@ function sameBackingDocument(
     (a.scope ?? "space") === (b.scope ?? "space");
 }
 
+/** The shape a backing address takes on its way into the dictionary. */
+type BackingLink = {
+  id: string;
+  space: string;
+  scope?: CellScope;
+  path?: readonly (string | number)[];
+};
+
 /**
  * Walk a settled result's backing links into the `{ "/path": <link> }`
  * dictionary `--show-links` emits (verb contract WS-F, F2).
  *
- * The root `"/"` entry is the receipt's own address. Below it, every value
- * path is resolved through the receipt cell (`key()` steps plus
- * `resolveAsCell`), and a path earns an entry exactly when its backing
- * document differs from its enclosing one — a path inside the same plain
- * JSON needs no link. Below an emitted entry the comparison rebases onto
- * that entry's document, so a chain of references annotates each hop once.
+ * The root `"/"` entry is the backing document of the result VALUE itself,
+ * resolved through `resolveAsCell` like every other path — the design's own
+ * motivating case is a result that is a reference (a scalar can be its own
+ * doc), and `"/"` must expose the document that actually backs it, not the
+ * cell it was read through. In the common case the root resolves to the
+ * receipt and `"/"` IS the receipt address; when it resolves elsewhere, the
+ * receipt address stays available under the reserved bare key `"receipt"` —
+ * pointer keys always begin with `/`, so no result path can collide with
+ * it.
+ *
+ * Below the root, every value path is resolved through the receipt cell
+ * (`key()` steps plus `resolveAsCell`), and a path earns an entry exactly
+ * when its backing document differs from its enclosing one — a path inside
+ * the same plain JSON needs no link. Below an emitted entry the comparison
+ * rebases onto that entry's document, so a chain of references annotates
+ * each hop once. Recursion always continues from the RESOLVED cell, even
+ * when no entry is emitted: a same-document link can still redirect to
+ * another path, and descendants must be read from the redirect's target.
  * Keys are RFC 6901 JSON pointers (the runner's `encodeJsonPointer`, the
  * same encoding the llm-dialog link strings use), so a property name
  * containing `/` or `~` stays unambiguous.
  *
  * The walk covers the VALUE that was read back — finite, already-loaded
  * JSON — not the graph, so it terminates without cycle tracking, and a
- * receipt cell that cannot resolve links (no `resolveAsCell`) degrades to
- * the root entry alone rather than guessing.
+ * receipt cell that cannot resolve links (no `resolveAsCell` /
+ * `getAsNormalizedFullLink`) degrades to the receipt-root entry alone
+ * rather than guessing.
  */
 export function collectInvocationResultLinks(
   receiptLink: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
   receiptCell: CallableCellLike | undefined,
   value: unknown,
 ): Record<string, InvocationResultLink> {
+  if (receiptCell === undefined) {
+    return { "/": toInvocationResultLink(receiptLink) };
+  }
+
+  const resolvedRoot = receiptCell.resolveAsCell?.() ?? receiptCell;
+  const rootLink = resolvedRoot.getAsNormalizedFullLink?.();
+  const rootBacking: BackingLink =
+    rootLink?.id !== undefined && rootLink.space !== undefined
+      ? rootLink as BackingLink
+      : receiptLink;
   const links: Record<string, InvocationResultLink> = {
-    "/": toInvocationResultLink(receiptLink),
+    "/": toInvocationResultLink(rootBacking),
   };
-  if (receiptCell === undefined) return links;
+  if (!sameBackingDocument(rootBacking, receiptLink)) {
+    links["receipt"] = toInvocationResultLink(receiptLink);
+  }
 
   const walk = (
     cell: CallableCellLike,
@@ -580,32 +615,22 @@ export function collectInvocationResultLinks(
       const segments = [...pathSegments, key];
       if (
         childLink?.id !== undefined && childLink.space !== undefined &&
-        !sameBackingDocument(
-          childLink as { id: string; space: string; scope?: CellScope },
-          base,
-        )
+        !sameBackingDocument(childLink as BackingLink, base)
       ) {
         links[encodeJsonPointer(["", ...segments])] = toInvocationResultLink(
-          childLink as {
-            id: string;
-            space: string;
-            scope?: CellScope;
-            path?: readonly (string | number)[];
-          },
+          childLink as BackingLink,
         );
-        walk(
-          resolved,
-          childValue,
-          segments,
-          childLink as { id: string; space: string; scope?: CellScope },
-        );
+        walk(resolved, childValue, segments, childLink as BackingLink);
       } else {
-        walk(child, childValue, segments, base);
+        // Same backing document — no entry — but descendants are still read
+        // from the RESOLVED cell: a same-doc link can redirect to another
+        // path, and the children live under its target.
+        walk(resolved, childValue, segments, base);
       }
     }
   };
 
-  walk(receiptCell, value, [], receiptLink);
+  walk(resolvedRoot, value, [], rootBacking);
   return links;
 }
 

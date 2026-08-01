@@ -691,15 +691,20 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
 
   **Done (F2) for callable results:** `cf piece call --show-links` emits the
   decided shape — a `links` field on the Invocation JSON, `{ "/path":
-  <link> }` with RFC 6901 pointer keys and the root `"/"` entry being the
-  receipt itself — with entries only where a path's backing document differs
-  from its enclosing one, resolved through the receipt cell's own link
-  traversal (`key()` steps plus `resolveAsCell`) after readback. Link values
-  reuse the CLI's existing cell-address shape (`resultRef`'s
-  `{ space, id, scope }`), plus a `path` when the link points below the
-  backing document's root. `resultRef` itself stays as-is, and
-  `--show-links --no-wait` is refused — the links ride the readback a
-  detached exit skips. The data-read surface (`cf piece get` /
+  <link> }` with RFC 6901 pointer keys — with entries only where a path's
+  backing document differs from its enclosing one, resolved through the
+  receipt cell's own link traversal (`key()` steps plus `resolveAsCell`)
+  after readback. The root `"/"` entry is the result value's own backing
+  document, resolved like any other path — the scalar-is-its-own-doc case
+  is the shape's whole point, so a result that is itself a reference maps
+  `"/"` to the referenced document and keeps the receipt address under the
+  reserved bare key `receipt` (pointer keys always begin with `/`, so no
+  result path can collide); in the common receipt-internal case `"/"` IS
+  the receipt address. Link values reuse the CLI's existing cell-address
+  shape (`resultRef`'s `{ space, id, scope }`), plus a `path` when the link
+  points below the backing document's root. `resultRef` itself stays as-is,
+  and `--show-links --no-wait` is refused — the links ride the readback
+  `--no-wait` skips. The data-read surface (`cf piece get` /
   `--include-ids`) is not part of that change and picks up the same
   dictionary shape when it lands.
 - **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
