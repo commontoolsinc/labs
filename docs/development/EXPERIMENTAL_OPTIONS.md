@@ -610,7 +610,8 @@ the per-epic implementation notes).
 
 - **Toggle via.** The `flushBeforeVerdict` constructor option on the memory-v2
   `Server` ([`packages/memory/v2/server.ts`](../../packages/memory/v2/server.ts));
-  not env-wired yet — deployments opt in where they construct the server.
+  not env-wired yet — a deployment needing the rollback hatch passes `false`
+  where it constructs the server.
 - **Added by.** Robin McCollum (CT-1927, 2026-07-30).
 - **Purpose.** Deliver the space's relevant sync state to every session BEFORE
   sending any transact verdict, implementing `04-protocol.md` §4.11.2's

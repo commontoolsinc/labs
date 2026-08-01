@@ -4,8 +4,9 @@
 // frame that precedes the verdict carries `caughtUpLocalSeq` for the commit
 // it reflects (the tightened stamping contract: the marker rides the frame
 // that carries the outcome), which is what client-side frame-time overlay
-// retirement keys on. Off (the default), behavior stays verdict-first: the
-// batched fan-out delivers novelty later — the deviation CT-1872 catalogued.
+// retirement keys on. Off (the rollback hatch — the flag defaults ON),
+// behavior stays verdict-first: the batched fan-out delivers novelty later —
+// the deviation CT-1872 catalogued.
 //
 // The long refresh delay in the flag-on tests is deliberate: it parks the
 // writer's novelty behind a timer the pre-verdict flush must cancel and
