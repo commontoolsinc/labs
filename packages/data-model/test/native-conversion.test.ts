@@ -998,29 +998,21 @@ describe("native-conversion", () => {
         expect(result).toBe(mutable); // identity -- no copy needed
       });
 
-      it("preserves `null` prototype on objects when `freeze=true`", () => {
+      it("throws for a null-prototype object, frozen or not", () => {
+        // A record has one shape in this system, and a prototype is not part
+        // of what a value says as data -- it would not survive the first
+        // encoding boundary. Rejecting says so, where accepting would mean
+        // carrying a distinction that quietly stops existing.
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
-        const result = shallowFabricFromNativeValue(obj, true) as Record<
-          string,
-          unknown
-        >;
-        expect(Object.getPrototypeOf(result)).toBe(null);
-        expect(Object.isFrozen(result)).toBe(true);
-        expect(result.a).toBe(1);
-      });
+        expect(() => shallowFabricFromNativeValue(obj, true)).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
 
-      it("preserves `null` prototype on objects when `freeze=false`", () => {
-        const obj = Object.create(null) as Record<string, unknown>;
-        obj.b = 2;
         Object.freeze(obj);
-        const result = shallowFabricFromNativeValue(obj, false) as Record<
-          string,
-          unknown
-        >;
-        expect(Object.getPrototypeOf(result)).toBe(null);
-        expect(Object.isFrozen(result)).toBe(false);
-        expect(result.b).toBe(2);
+        expect(() => shallowFabricFromNativeValue(obj, false)).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
       });
 
       it("converts native `Uint8Array` to `FabricBytes`", () => {
@@ -1873,25 +1865,20 @@ describe("native-conversion", () => {
         expect(Object.isFrozen(obj)).toBe(false);
       });
 
-      it("preserves `null` prototype on top-level object", () => {
+      it("throws for a null-prototype object at the top level", () => {
         const obj = Object.create(null) as Record<string, unknown>;
         obj.x = 1;
-        const result = fabricFromNativeValue(obj) as Record<string, unknown>;
-        expect(Object.getPrototypeOf(result)).toBe(null);
-        expect(Object.isFrozen(result)).toBe(true);
-        expect(result.x).toBe(1);
+        expect(() => fabricFromNativeValue(obj)).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
       });
 
-      it("preserves `null` prototype on nested object", () => {
+      it("throws for a null-prototype object nested in the graph", () => {
         const inner = Object.create(null) as Record<string, unknown>;
         inner.val = 42;
-        const outer = { nested: inner };
-        const result = fabricFromNativeValue(outer) as Record<
-          string,
-          Record<string, unknown>
-        >;
-        expect(Object.getPrototypeOf(result.nested)).toBe(null);
-        expect(result.nested!.val).toBe(42);
+        expect(() => fabricFromNativeValue({ nested: inner })).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
       });
     });
   });

@@ -200,6 +200,14 @@ export function isFabricObjectOrArray(
  * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()` check,
  * it preserves the value type — `FabricPlainObject`'s string index of `FabricValue`
  * keeps an indexed value typed as a `FabricValue`.
+ *
+ * This asks a shape question -- "may I read this by property name?" -- of a
+ * value the type already says is a `FabricValue`, and a null-prototype object
+ * answers yes as readily as any other record. That makes it deliberately
+ * looser than membership: a `FabricPlainObject` is `Object.prototype`-rooted,
+ * so `isFabricValue()` refuses the null-prototype object this accepts. The
+ * looseness costs nothing, the input being out of contract either way, and it
+ * keeps callers holding un-validated values from losing a reader they can use.
  */
 export function isFabricPlainObject(
   value: FabricValue,
