@@ -4,6 +4,7 @@ import {
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   getPersistentSchedulerStateConfig,
   type SchedulerActionSnapshotCursor,
@@ -789,7 +790,10 @@ const acceptsOpaqueCellOrUnresolvedLink = (
 
 // The relaxed copy of a handler's argument schema, built once per schema
 // rather than once per dispatched event: `generateHandlerSchema` interns its
-// result, so every dispatch of the same handler shares one entry by identity.
+// result (interned schemas are deep-frozen), so every dispatch of the same
+// handler shares one entry by identity. Only deep-frozen schemas are cached —
+// a mutable schema edited after its first dispatch must not keep serving a
+// stale relaxed copy (the same rule the cfc resolvedRefsCache applies).
 const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
 
 /**
@@ -801,8 +805,14 @@ const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
  * handler's `$event` schema itself, or off the definition a top-level local
  * `$ref` names (`generateHandlerSchema` hoists the event schema's `$defs`
  * onto the handler schema, so that schema is the root local refs resolve
- * against). Everything else returns `undefined` and keeps the measured
- * delivery behavior (recorded on #5147):
+ * against). Closure inside a combinator root (`allOf`/`anyOf`/`oneOf`) is
+ * deliberately NOT detected — the same recorded boundary as the CLI gate's
+ * absence rule (plan, D5 bullet: combinator roots are out of scope without a
+ * test proving each case; conservative and documented beats clever and
+ * silent). Generated event schemas never emit combinator roots, and the miss
+ * direction is safe: an undetected closure keeps today's open-schema
+ * delivery, never a false rejection. Everything else returns `undefined` and
+ * keeps the measured delivery behavior (recorded on #5147):
  *
  * - An OPEN event schema stays exactly as measured: the schema read path
  *   delivers the declared fields and ignores the rest, and a payload that
@@ -872,14 +882,17 @@ function closedWorldEventRejection(
     payload = rest;
   }
 
-  let relaxedRoot = relaxedHandlerSchemaCache.get(argumentSchema);
+  const cacheable = isDeepFrozen(argumentSchema);
+  let relaxedRoot = cacheable
+    ? relaxedHandlerSchemaCache.get(argumentSchema)
+    : undefined;
   if (relaxedRoot === undefined) {
     relaxedRoot = relaxDefaultedRequired(
       argumentSchema,
       argumentSchema,
       new Map(),
     );
-    relaxedHandlerSchemaCache.set(argumentSchema, relaxedRoot);
+    if (cacheable) relaxedHandlerSchemaCache.set(argumentSchema, relaxedRoot);
   }
   const relaxedEvent = isRecord(relaxedRoot) && isRecord(relaxedRoot.properties)
     ? relaxedRoot.properties.$event
