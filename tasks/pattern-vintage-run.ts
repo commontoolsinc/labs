@@ -16,11 +16,15 @@ import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
   AUTO,
+  autoGenerationsToPrune,
   collectVintages,
   describeError,
+  newestAutoGeneration,
   patternKeyFromMain,
   PINNED,
+  promoteVintage,
   relativeToRepo,
+  removeVintages,
   type ReplayFailure,
   stampFor,
   vintageFileName,
@@ -1155,6 +1159,105 @@ export async function captureMissing(
     }
   }
   return { captured, problems };
+}
+
+/**
+ * What `--capture-changed` decided and did. The shell only prints it.
+ *
+ * A discriminated result rather than console output written where the decision
+ * is made, so the decision is testable. The alternative was tried: the whole
+ * sequence — replay, refuse on red, select, capture, prune — lived in the task
+ * shell, where nothing imports it and every branch was uncovered. This module's
+ * own header already said where the work belongs.
+ */
+export type CaptureChangedOutcome =
+  | { kind: "refused-red"; failures: readonly ReplayFailure[] }
+  | { kind: "all-current"; replayed: number }
+  | {
+    kind: "captured";
+    captured: string[];
+    pruned: string[];
+    problems: string[];
+  };
+
+/**
+ * Decide whether a generation is due, capture it, and prune what aged out.
+ *
+ * Takes the replay it should judge rather than running one, so a caller cannot
+ * accidentally capture against a different run than the one it reported — and
+ * so the decision can be driven from a fixed replay in a test.
+ */
+export async function captureChangedGenerations(
+  roots: GateRoots,
+  replay: {
+    failures: readonly ReplayFailure[];
+    perVintage: readonly VintageOutcome[];
+  },
+  now: Date,
+): Promise<CaptureChangedOutcome> {
+  // Capture from a GREEN tree only. A fixture that failed is not a statement
+  // about which generation the world is on, and capturing beside it would mint
+  // a generation from a run whose verdict is red — the one moment the
+  // repository is least entitled to be recorded as a baseline. This is also
+  // what keeps the release process honest without a mid-write rule: a release
+  // promotes from a branch that already passed.
+  if (replay.failures.length > 0) {
+    return { kind: "refused-red", failures: replay.failures };
+  }
+  const stale = staleTestKeys(replay.perVintage);
+  if (stale.length === 0) {
+    return { kind: "all-current", replayed: replay.perVintage.length };
+  }
+  const { captured, problems } = await captureGenerations(roots, stale, now);
+  // Prune AFTER capturing, against a RE-READ tree, so the new generations are
+  // among the ones counted. Pruning first would keep `keep` old ones and then
+  // add another, leaving the tree permanently one over the bound.
+  const pruned = autoGenerationsToPrune(
+    await collectVintages(roots.vintagesRoot),
+  );
+  await removeVintages(pruned, roots.vintagesRoot);
+  return { kind: "captured", captured, pruned, problems };
+}
+
+/** What `--pin` decided and did. The shell only prints it. */
+export type PinOutcome =
+  | { kind: "needs-one-key"; given: number }
+  | { kind: "nothing-to-pin"; testKey: string; vintages: readonly VintageRef[] }
+  | { kind: "promoted"; from: string; to: string }
+  | { kind: "failed"; from: string; detail: string };
+
+/**
+ * Promote a key's newest AUTO generation into the tier retention cannot reach.
+ *
+ * A failure is RETURNED rather than thrown. A promotion moves a companion
+ * directory and then a primary file, so whoever ran it needs to know which of
+ * the pair moved — and an uncaught throw buries that under a stack trace of
+ * this module's own call frames.
+ */
+export async function pinNewestGeneration(
+  roots: GateRoots,
+  named: readonly string[],
+): Promise<PinOutcome> {
+  if (named.length !== 1) return { kind: "needs-one-key", given: named.length };
+  const testKey = named[0];
+  const vintages = await collectVintages(roots.vintagesRoot);
+  const newest = newestAutoGeneration(vintages, testKey);
+  if (newest === undefined) {
+    return { kind: "nothing-to-pin", testKey, vintages };
+  }
+  try {
+    return {
+      kind: "promoted",
+      from: newest.path,
+      to: await promoteVintage(newest),
+    };
+  } catch (error) {
+    return {
+      kind: "failed",
+      from: newest.path,
+      detail: describeError(error),
+    };
+  }
 }
 
 /**

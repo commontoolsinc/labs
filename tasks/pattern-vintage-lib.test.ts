@@ -6,7 +6,9 @@ import {
   AUTO_GENERATIONS_KEPT,
   autoGenerationsToPrune,
   collectVintages,
+  describeCaptureOutcome,
   describeError,
+  describePinOutcome,
   isClean,
   newestAutoGeneration,
   parseVintagePath,
@@ -1434,6 +1436,92 @@ describe("what the capture and promote commands print", () => {
 
     expect(message).toContain("b/b.test.tsx");
     expect(message).not.toContain("already has a pinned vintage");
+  });
+
+  it("pairs each pin outcome with the right stream and exit code", () => {
+    // Exit code is the part a human never reads and CI only reads. A promotion
+    // that printed its success to stderr, or a refusal that exited 0, would
+    // look completely normal in a terminal.
+    const root = "/repo";
+    expect(describePinOutcome({ kind: "needs-one-key", given: 0 }, root).code)
+      .toBe(1);
+    expect(
+      describePinOutcome({
+        kind: "nothing-to-pin",
+        testKey: "a/a.test.tsx",
+        vintages: [],
+      }, root).code,
+    ).toBe(1);
+
+    const failed = describePinOutcome({
+      kind: "failed",
+      from: "/repo/vintages/a/auto/x.sqlite",
+      detail: "disk full",
+    }, root);
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain("disk full");
+    // Repo-relative, because an absolute temp path is unreadable in a log.
+    expect(failed.err).toContain("vintages/a/auto/x.sqlite");
+    expect(failed.err).not.toContain("/repo/vintages");
+    expect(failed.out, "a failure wrote to stdout").toBeUndefined();
+
+    const promoted = describePinOutcome({
+      kind: "promoted",
+      from: "/repo/vintages/a/auto/x.sqlite",
+      to: "/repo/vintages/a/pinned/x.sqlite",
+    }, root);
+    expect(promoted.code).toBe(0);
+    expect(promoted.out).toContain("auto/x.sqlite");
+    expect(promoted.out).toContain("pinned/x.sqlite");
+    expect(promoted.err, "a success wrote to stderr").toBeUndefined();
+  });
+
+  it("still LISTS what a partly-failed capture wrote, and exits 1", () => {
+    // The shape that would otherwise lie: some generations captured, one
+    // failed. Suppressing the list because the command failed would leave
+    // files on disk it had just implied it did not create.
+    const partial = describeCaptureOutcome({
+      kind: "captured",
+      captured: ["/repo/vintages/a/auto/new.sqlite"],
+      pruned: ["/repo/vintages/a/auto/old.sqlite"],
+      problems: ["  b/b.test.tsx: tests did not pass"],
+    }, "/repo");
+
+    expect(partial.code).toBe(1);
+    expect(partial.out, "the written file went unreported").toContain(
+      "+ vintages/a/auto/new.sqlite",
+    );
+    expect(partial.out, "the pruned file went unreported").toContain(
+      "- vintages/a/auto/old.sqlite",
+    );
+    expect(partial.err).toContain("b/b.test.tsx");
+
+    // The clean case exits 0 and says nothing on stderr.
+    const clean = describeCaptureOutcome({
+      kind: "captured",
+      captured: ["/repo/vintages/a/auto/new.sqlite"],
+      pruned: [],
+      problems: [],
+    }, "/repo");
+    expect(clean.code).toBe(0);
+    expect(clean.err).toBeUndefined();
+
+    // And a refusal is stderr + exit 1, never a quiet success.
+    const refused = describeCaptureOutcome({
+      kind: "refused-red",
+      failures: [{ testKey: "a/a.test.tsx", path: "p", detail: "d" }],
+    }, "/repo");
+    expect(refused.code).toBe(1);
+    expect(refused.out).toBeUndefined();
+
+    // "Nothing to do" is a SUCCESS. Exiting 1 here would make the common,
+    // correct case indistinguishable from a broken one.
+    const current = describeCaptureOutcome(
+      { kind: "all-current", replayed: 4 },
+      "/repo",
+    );
+    expect(current.code).toBe(0);
+    expect(current.err).toBeUndefined();
   });
 
   it("says WHY it will not capture onto a red tree", () => {

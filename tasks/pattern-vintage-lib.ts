@@ -556,6 +556,106 @@ async function gitMove(from: string, to: string): Promise<void> {
   }
 }
 
+/**
+ * Everything a command wants to say, and the code it wants to exit with.
+ *
+ * Returned rather than printed so the OUTPUT is testable, not just the
+ * decision behind it. That is where this file's defects have actually lived:
+ * across five review rounds the recurring fault was never a wrong decision, it
+ * was the wrong text printed for a correct one — a remedy that did not fit the
+ * situation, or a promise about output the function did not control. Text
+ * assembled inside the task shell is text no test can read.
+ */
+export interface CommandOutput {
+  out?: string;
+  err?: string;
+  code: number;
+}
+
+/** What `--pin` says, given what it decided. */
+export function describePinOutcome(
+  outcome:
+    | { kind: "needs-one-key"; given: number }
+    | {
+      kind: "nothing-to-pin";
+      testKey: string;
+      vintages: readonly VintageRef[];
+    }
+    | { kind: "promoted"; from: string; to: string }
+    | { kind: "failed"; from: string; detail: string },
+  repoRoot: string,
+): CommandOutput {
+  switch (outcome.kind) {
+    case "needs-one-key":
+      return { err: reportPinNeedsOneTestKey(outcome.given), code: 1 };
+    case "nothing-to-pin":
+      return {
+        err: reportNothingToPin(outcome.testKey, outcome.vintages),
+        code: 1,
+      };
+    case "failed":
+      return {
+        err: `Could not promote ${
+          relativeToRepo(outcome.from, repoRoot)
+        }: ${outcome.detail}`,
+        code: 1,
+      };
+    case "promoted":
+      return {
+        out: [
+          `  ${relativeToRepo(outcome.from, repoRoot)}`,
+          `  → ${relativeToRepo(outcome.to, repoRoot)}`,
+        ].join("\n"),
+        code: 0,
+      };
+  }
+}
+
+/** What `--capture-changed` says, given what it decided. */
+export function describeCaptureOutcome(
+  outcome:
+    | { kind: "refused-red"; failures: readonly ReplayFailure[] }
+    | { kind: "all-current"; replayed: number }
+    | {
+      kind: "captured";
+      captured: readonly string[];
+      pruned: readonly string[];
+      problems: readonly string[];
+    },
+  repoRoot: string,
+): CommandOutput {
+  switch (outcome.kind) {
+    case "refused-red":
+      return {
+        err: `\n${reportFailures(outcome.failures)}\n\n${
+          reportCaptureRefusedOnRed(outcome.failures.length)
+        }`,
+        code: 1,
+      };
+    case "all-current":
+      return { out: reportEveryGenerationCurrent(outcome.replayed), code: 0 };
+    case "captured": {
+      const out = [
+        ...outcome.captured.map((p) => `  + ${relativeToRepo(p, repoRoot)}`),
+        ...outcome.pruned.map((p) => `  - ${relativeToRepo(p, repoRoot)}`),
+      ].join("\n");
+      // A capture that partly failed still REPORTS what it wrote, then exits
+      // 1. Suppressing the list would leave files on disk that the command
+      // just claimed not to have made.
+      return outcome.problems.length > 0
+        ? {
+          out,
+          err:
+            `\n${outcome.problems.length} generation(s) were not captured:\n${
+              outcome.problems.join("\n")
+            }`,
+          code: 1,
+        }
+        : { out, code: 0 };
+    }
+  }
+}
+
 /** What `--pin` prints when it was not given exactly one test key. */
 export function reportPinNeedsOneTestKey(given: number): string {
   return [

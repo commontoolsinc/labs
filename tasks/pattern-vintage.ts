@@ -109,20 +109,13 @@ import {
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
   armVerdictGuard,
-  autoGenerationsToPrune,
-  collectVintages,
-  describeError,
+  type CommandOutput,
+  describeCaptureOutcome,
+  describePinOutcome,
   isClean,
-  newestAutoGeneration,
-  promoteVintage,
   relativeToRepo,
-  removeVintages,
-  reportCaptureRefusedOnRed,
-  reportEveryGenerationCurrent,
   reportFailures,
   reportNothingReplayed,
-  reportNothingToPin,
-  reportPinNeedsOneTestKey,
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
@@ -133,11 +126,11 @@ import {
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
-  captureGenerations,
+  captureChangedGenerations,
   captureMissing,
   type GateRoots,
+  pinNewestGeneration,
   replayAll,
-  staleTestKeys,
 } from "./pattern-vintage-run.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
@@ -156,6 +149,19 @@ const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
  * too.)
  */
 const FIXTURE_SIGNER = await Identity.fromPassphrase("pattern vintage fixture");
+
+/**
+ * Print what a command decided to say and exit with the code it chose.
+ *
+ * `never` rather than `void`, so the compiler knows control does not come
+ * back: a caller that forgot the command ends here would otherwise fall
+ * through into the plain gate and replay everything a second time.
+ */
+function emit(shown: CommandOutput): never {
+  if (shown.out !== undefined) console.log(shown.out);
+  if (shown.err !== undefined) console.error(shown.err);
+  Deno.exit(shown.code);
+}
 
 async function main() {
   const roots: GateRoots = {
@@ -216,80 +222,22 @@ async function main() {
   }
 
   if (Deno.args.includes("--pin")) {
-    const named = Deno.args.filter((arg) => !arg.startsWith("--"));
-    if (named.length !== 1) {
-      console.error(reportPinNeedsOneTestKey(named.length));
-      Deno.exit(1);
-    }
-    const vintages = await collectVintages(roots.vintagesRoot);
-    const newest = newestAutoGeneration(vintages, named[0]);
-    if (newest === undefined) {
-      console.error(reportNothingToPin(named[0], vintages));
-      Deno.exit(1);
-    }
-    // A promotion moves a file and its companion directory, so a failure part
-    // way through is worth reporting as a message rather than a stack trace —
-    // whoever runs this needs to know which of the pair moved, and an uncaught
-    // throw buries that under a trace of this file's own call stack.
-    let moved: string;
-    try {
-      moved = await promoteVintage(newest);
-    } catch (error) {
-      console.error(
-        `Could not promote ${relativeToRepo(newest.path, REPO_ROOT)}: ${
-          describeError(error)
-        }`,
-      );
-      Deno.exit(1);
-    }
-    console.log(`  ${relativeToRepo(newest.path, REPO_ROOT)}`);
-    console.log(`  → ${relativeToRepo(moved, REPO_ROOT)}`);
-    return;
+    emit(describePinOutcome(
+      await pinNewestGeneration(
+        roots,
+        Deno.args.filter((arg) => !arg.startsWith("--")),
+      ),
+      REPO_ROOT,
+    ));
   }
 
   const replay = await replayAll(roots);
 
   if (Deno.args.includes("--capture-changed")) {
-    // Capture from a GREEN tree only. A fixture that failed is not a statement
-    // about which generation the world is on, and capturing beside it would
-    // mint a generation from a run whose verdict is red — the one moment the
-    // repository is least entitled to be recorded as a baseline. This is also
-    // what keeps the release process honest without a mid-write rule: a
-    // release promotes from a branch that already passed.
-    if (replay.failures.length > 0) {
-      console.error(`\n${reportFailures(replay.failures)}`);
-      console.error(`\n${reportCaptureRefusedOnRed(replay.failures.length)}`);
-      Deno.exit(1);
-    }
-    const stale = staleTestKeys(replay.perVintage);
-    if (stale.length === 0) {
-      console.log(reportEveryGenerationCurrent(replay.perVintage.length));
-      return;
-    }
-    const { captured, problems } = await captureGenerations(
-      roots,
-      stale,
-      new Date(),
-    );
-    for (const path of captured) {
-      console.log(`  + ${relativeToRepo(path, REPO_ROOT)}`);
-    }
-    // Prune AFTER capturing, against a re-read tree, so the new generations
-    // are among the ones counted. Pruning first would keep `keep` old ones and
-    // then add another, so the tree would sit permanently one over the bound.
-    const pruned = autoGenerationsToPrune(
-      await collectVintages(roots.vintagesRoot),
-    );
-    await removeVintages(pruned, roots.vintagesRoot);
-    for (const path of pruned) {
-      console.log(`  - ${relativeToRepo(path, REPO_ROOT)}`);
-    }
-    if (problems.length > 0) {
-      console.error(`\n${problems.length} generation(s) were not captured:`);
-      for (const problem of problems) console.error(problem);
-      Deno.exit(1);
-    }
-    return;
+    emit(describeCaptureOutcome(
+      await captureChangedGenerations(roots, replay, new Date()),
+      REPO_ROOT,
+    ));
   }
 
   // Coverage is judged against the SAME list that was replayed. A second walk

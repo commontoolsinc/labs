@@ -4,6 +4,7 @@ import { exists } from "@std/fs";
 import { Identity } from "@commonfabric/identity";
 import {
   AUTO,
+  AUTO_GENERATIONS_KEPT,
   collectVintages,
   PINNED,
   reportUncovered,
@@ -15,11 +16,13 @@ import {
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 import {
+  captureChangedGenerations,
   captureGenerations,
   captureMissing,
   captureVintage,
   type GateRoots,
   isUpgradeTarget,
+  pinNewestGeneration,
   replayAll,
   snippet,
   staleTestKeys,
@@ -1291,6 +1294,118 @@ describe("the vintage gate, end to end", () => {
       "the tree stayed stale after a capture",
     )
       .toEqual([]);
+  });
+
+  it("REFUSES to capture a generation onto a tree with any failure", async () => {
+    // A generation is a record of a world that WORKED. Capturing beside a
+    // failure would mint one from a run whose verdict is red, and everyone
+    // else would then replay it as evidence. This is also what removes the
+    // need for a rule about capturing mid-edit: a release promotes from a
+    // branch that already passed.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    // Break the pattern so the replay goes red AND the key is stale — without
+    // the staleness this would pass for the uninteresting reason that there
+    // was nothing to capture either way.
+    await setSource(BREAKING);
+    const replay = await replayAll(roots);
+    expect(replay.failures.length).toBeGreaterThan(0);
+
+    const outcome = await captureChangedGenerations(
+      roots,
+      replay,
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    expect(outcome.kind).toBe("refused-red");
+    // And nothing was written: a refusal that still captured would be worse
+    // than no refusal, because the message would say it had not.
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(1);
+  });
+
+  it("prunes to the retention bound AFTER capturing, not before", async () => {
+    // Ordering matters and is invisible in the happy path. Pruning first keeps
+    // `keep` old generations and then adds one, so the tree sits permanently
+    // one OVER the bound — a slow leak that no single run makes visible.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    // Fill the auto tier past the bound with copies of the real fixture, so
+    // they enumerate and sort like genuine generations.
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const autoDir = `${roots.vintagesRoot}/${TEST_KEY}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    for (let day = 1; day <= AUTO_GENERATIONS_KEPT + 2; day++) {
+      const stamp = `2026-06-${String(day).padStart(2, "0")}T00-00-00.000Z`;
+      await Deno.copyFile(
+        pinnedRef.path,
+        `${autoDir}/${stamp}-${pinnedRef.identity}.sqlite`,
+      );
+    }
+    await setSource(COMPATIBLE);
+
+    const outcome = await captureChangedGenerations(
+      roots,
+      await replayAll(roots),
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    expect(outcome.kind).toBe("captured");
+    const after = await collectVintages(roots.vintagesRoot);
+    const auto = after.filter((v) => v.tier === AUTO);
+    // Exactly the bound — the freshly captured one is COUNTED, which is the
+    // whole point of pruning against a re-read tree.
+    expect(auto).toHaveLength(AUTO_GENERATIONS_KEPT);
+    // The survivor set is the NEWEST, and the one just captured is in it.
+    expect(auto.map((v) => v.stamp).sort().at(-1)).toBe(
+      "2026-07-30T12-00-00.000Z",
+    );
+    // The pinned vintage is untouched — retention can never reach it.
+    expect(after.filter((v) => v.tier === PINNED)).toHaveLength(1);
+  });
+
+  it("promotes the newest generation, and says so when there is none", async () => {
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+
+    // Nothing in the auto tier yet.
+    expect((await pinNewestGeneration(roots, [TEST_KEY])).kind)
+      .toBe("nothing-to-pin");
+    // A command that named no key, or several, is its own answer — promotion
+    // is deliberate per fixture and is not undone by pinning less next time.
+    expect((await pinNewestGeneration(roots, [])).kind).toBe("needs-one-key");
+    expect((await pinNewestGeneration(roots, ["a", "b"])).kind)
+      .toBe("needs-one-key");
+
+    await setSource(COMPATIBLE);
+    await captureChangedGenerations(
+      roots,
+      await replayAll(roots),
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    const pinned = await pinNewestGeneration(roots, [TEST_KEY]);
+
+    expect(pinned.kind).toBe("promoted");
+    if (pinned.kind !== "promoted") throw new Error("unreachable");
+    expect(pinned.from).toContain(`/${AUTO}/`);
+    expect(pinned.to).toContain(`/${PINNED}/`);
+    // The tier moved and NOTHING else did: same file name, so the capture
+    // stamp still says which generation of the world this holds.
+    expect(pinned.to.split("/").at(-1)).toBe(pinned.from.split("/").at(-1));
+    const after = await collectVintages(roots.vintagesRoot);
+    expect(after.filter((v) => v.tier === AUTO)).toEqual([]);
+    expect(after.filter((v) => v.tier === PINNED)).toHaveLength(2);
+    // And it now CREDITS coverage, which is the entire point of promoting.
+    expect([...(await replayAll(roots)).covered]).toContain(KEY);
   });
 
   it("FAILS a fixture with candidates but no upgrade TARGET, on its own", async () => {
