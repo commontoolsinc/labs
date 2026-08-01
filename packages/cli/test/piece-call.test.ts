@@ -1948,6 +1948,47 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
+  // An allOf conjunction with an object-schema branch IS an object schema —
+  // no branch choice is involved, so `{}` is exactly as meaningful as for a
+  // direct object root, and the gate then judges it the same way (refused
+  // when non-defaulted required survives relaxation, dispatched with defaults
+  // engaging when it does not).
+  it("normalizes absence to {} against an allOf of object schemas", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      allOf: [
+        {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      ],
+    } as unknown as JSONSchema)).toEqual({});
+  });
+
+  it("normalizes absence through an allOf branch behind a $ref", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      allOf: [{ $ref: "#/$defs/Base" }],
+      $defs: {
+        Base: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+        },
+      },
+    } as unknown as JSONSchema)).toEqual({});
+  });
+
+  // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
+  // boundary): normalizing `{}` against anyOf/oneOf would pick among
+  // alternatives on the caller's behalf.
+  it("leaves absence alone against anyOf/oneOf roots", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      anyOf: [{ type: "object", properties: {} }],
+    } as unknown as JSONSchema)).toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, {
+      oneOf: [{ type: "object", properties: {} }],
+    } as unknown as JSONSchema)).toBeUndefined();
+  });
+
   // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
   // type and no properties) is not an object schema; `{}` means nothing
   // there.
