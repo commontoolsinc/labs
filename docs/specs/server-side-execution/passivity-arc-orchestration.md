@@ -217,13 +217,45 @@ resumable.
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
 
-> ## THE FLIP IS LANDED — `b46e9b7e0`, 2026-07-31
+> ## THE FLIP IS LANDED — `b46e9b7e0`, 2026-07-31 — AND GATED, 2026-08-01
 >
 > `externalSinkDisposition` defaults to **`"suppress"`**. A client never runs an
 > egress effect; `allow` is the exception a server-side executor EARNS by
 > declaring `"server-executor"`, and `executor/executor-worker.ts` is the one
 > site in the repo that does (grep-verified; no preset can spell it).
 >
+> ### EXACTLY TWO CONFIGURATIONS AND NO HYBRID — owner ruling, 2026-08-01
+>
+> The flip as landed made the client-passivity half **unconditional**, which
+> broke the flag-off configuration: a client suppressed every egress effect and
+> **no executor existed to perform it** — the silently-missing side effect this
+> box calls strictly worse than duplication. `serverPrimaryExecution` now
+> selects between two complete postures, and both defaults move together:
+>
+> | flag | `externalSinkDisposition` default | who egresses |
+> | --- | --- | --- |
+> | ON | `"suppress"` | the executor, which declares `"server-executor"` |
+> | OFF / absent | `"claim-conditional"` | the client, exactly as before this arc |
+>
+> Gated at the two sites that had it unconditional: `runner/src/runtime.ts`'s
+> constructor default and `toolshed/runtime-options.ts`'s declaration.
+> `executor-worker.ts` is untouched — it declares explicitly, and an explicit
+> declaration beats the default in **both** arms, which is also why the ~37
+> harnesses that declare `"server-executor"` are unaffected.
+>
+> **The reason the halves cannot be separated** is `addExecutionDemand`
+> (`runner.ts:3382`): it returns early unless the flag is on, so in the flag-off
+> arm there is provably nobody else to run a suppressed effect.
+>
+> **Measured, not asserted** — `runner/test/runtime-sink-disposition-arms.test.ts`
+> pins the disposition **the gate returns** and whether the sink was actually
+> RELEASED, per arm. Against the ungated default the flag-off arms read
+> `resolved: "suppress", gate: "suppress", releases: 0`; gated they read
+> `resolved: "claim-conditional", gate: "allow", authority: "client",
+> releases: 1`. Same measurement at the toolshed layer, on the real webhook
+> topology, in `webhooks.egress-authority.test.ts`'s production test.
+>
+
 > **The acceptance measurement**, from the webhook gate probe — a real pool
 > driving a real executor Worker:
 >
@@ -253,7 +285,9 @@ resumable.
 > end — recorded in the top box since `ab948050b` and now confirmed at the
 > close.
 
-**Last landed:** `b46e9b7e0` — the flip. Before it: `9c9513317` deleted
+**Last landed:** `PENDING-GATE-COMMIT` — the flip GATED on
+`serverPrimaryExecution`; two configurations, no hybrid (see the box above).
+Before it: `b46e9b7e0` — the flip. Before that: `9c9513317` deleted
 `background-piece-service` (D12) and `f945d1ed0` disabled it under the flag;
 `e519ec83e` routed toolshed's webhook egress through the executor and added the
 gate probe (item 4); item 3 closed as a definition fix.

@@ -14,9 +14,12 @@
 //
 // The end-to-end leg below runs two runtimes against ONE shared memory server,
 // exactly like two real sessions. The "client" runtime declares
-// `externalSinkDisposition: "suppress"` — which is now also what a runtime
-// gets by declaring nothing, so the declaration states the posture rather than
-// selecting it. The SERVER runtime is the one that has to say something: it
+// `externalSinkDisposition: "suppress"` — which is also what a runtime gets by
+// declaring nothing UNDER `serverPrimaryExecution`, so under that flag the
+// declaration states the posture rather than selecting it. Declared here
+// either way, because this file's topology is the server-primary one and the
+// leg must not depend on a flag it never sets. The SERVER runtime has to say
+// something regardless: it
 // declares `"server-executor"`, the authority the terminal flip makes an
 // executor earn. So the client can append the message but can never egress; if
 // the dialog advances at all, the server runtime advanced it.
@@ -201,8 +204,9 @@ describe("llmDialog server-side execution", () => {
       externalSinkDisposition: "suppress",
     });
     // The server peer: it is the party that must perform the model call, so
-    // it declares that authority. Declaring nothing means "suppress" now, and
-    // a suppressed pair would leave the dialog stuck forever.
+    // it declares that authority. Declaring nothing means "suppress" under
+    // server-primary execution, and a suppressed pair would leave the dialog
+    // stuck forever.
     const serverRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: serverStorage,

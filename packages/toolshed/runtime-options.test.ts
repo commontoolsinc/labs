@@ -1,6 +1,9 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import type { RuntimeOptions } from "@commonfabric/runner";
+import {
+  EXPERIMENTAL_ENV_VARS,
+  type RuntimeOptions,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   attachRuntimeOtelBridge,
@@ -25,7 +28,11 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
       API_URL: "http://api.test:9000/",
     },
     storageManager,
-    (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+    (name) =>
+      name === EXPERIMENTAL_ENV_VARS.modernCellRep ||
+        name === EXPERIMENTAL_ENV_VARS.serverPrimaryExecution
+        ? "true"
+        : undefined,
   );
 
   assertEquals(options.apiUrl.href, "http://memory.test:8000/");
@@ -38,14 +45,36 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   // Unset flags stay unset (tri-state fidelity), not coerced.
   assertEquals(options.experimental?.persistentSchedulerState, undefined);
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
-  // Toolshed declares no egress authority. A webhook delivery starts the
-  // target piece in this process and runs its effect builtins, so without the
-  // declaration those effects ride the client default and egress from the API
-  // server. What the declaration DOES — the piece still starts, the sink is
-  // recorded and never released — is pinned behaviourally in
-  // `routes/webhooks/webhooks.egress-authority.test.ts`; this is the cheap
-  // guard that production is actually wired to it.
+  // Toolshed declares no egress authority UNDER SERVER-PRIMARY EXECUTION. A
+  // webhook delivery starts the target piece in this process and runs its
+  // effect builtins, so without the declaration those effects ride the client
+  // posture and egress from the API server. What the declaration DOES — the
+  // piece still starts, the sink is recorded and never released — is pinned
+  // behaviourally in `routes/webhooks/webhooks.egress-authority.test.ts`; this
+  // is the cheap guard that production is actually wired to it.
   assertEquals(options.externalSinkDisposition, "suppress");
+
+  // THE OTHER CONFIGURATION, and it is the reason the declaration is derived
+  // rather than constant. With server-primary execution off there is no
+  // executor to relocate the effect to (`addExecutionDemand` is gated on the
+  // same flag), so suppressing here would DELETE the webhook's side effect
+  // instead of moving it. Toolshed keeps today's behaviour and egresses.
+  const withoutServerPrimary = toolshedRuntimeOptions(
+    {
+      MEMORY_URL: "http://memory.test:8000/",
+      API_URL: "http://api.test:9000/",
+    },
+    storageManager,
+    () => undefined,
+  );
+  assertEquals(
+    withoutServerPrimary.experimental?.serverPrimaryExecution,
+    undefined,
+  );
+  assertEquals(
+    withoutServerPrimary.externalSinkDisposition,
+    "claim-conditional",
+  );
 });
 
 // The runtime→OTel bridge attach rides Runtime construction (CT plan: the

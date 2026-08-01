@@ -186,10 +186,16 @@ Deno.test("server-executor authority cannot be forged through tx.executionEffect
     externalSinkDisposition: "claim-conditional",
   });
   // The posture every client actually ships with, kept alongside so the two
-  // are read together rather than one standing in for the other.
+  // are read together rather than one standing in for the other. It declares
+  // nothing and takes the constructor default — which is "suppress" only
+  // under `serverPrimaryExecution`, because the shipped posture IS the
+  // flag-on configuration. With the flag off the default is
+  // "claim-conditional" and there is no executor, which is the OTHER
+  // configuration entirely (pinned in `runtime-sink-disposition-arms.test.ts`).
   const defaultRuntime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
+    experimental: { serverPrimaryExecution: true },
   });
 
   try {
@@ -310,9 +316,13 @@ Deno.test("client builtin sink captures one exact claim and becomes passive", as
     experimental: { serverPrimaryExecution: true },
     externalSinkDisposition: "claim-conditional",
   });
+  // Declares nothing, so it takes the constructor default — "suppress" only
+  // under `serverPrimaryExecution`. Saying the flag explicitly is what makes
+  // this leg the SHIPPED posture rather than merely the unset one.
   const defaultRuntime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
+    experimental: { serverPrimaryExecution: true },
   });
 
   try {

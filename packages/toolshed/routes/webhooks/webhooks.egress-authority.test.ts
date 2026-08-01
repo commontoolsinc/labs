@@ -1,14 +1,23 @@
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import {
+  EXPERIMENTAL_ENV_VARS,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { toolshedRuntimeOptions } from "@/runtime-options.ts";
 
 /**
- * THE BEHAVIOURAL PIN behind toolshed's `externalSinkDisposition: "suppress"`
+ * THE BEHAVIOURAL PIN behind toolshed's `externalSinkDisposition`
  * declaration (`runtime-options.ts`). The declaration itself is asserted in
  * `runtime-options.test.ts`; this file asserts what the declaration DOES, and
  * — just as importantly — what it must NOT do.
+ *
+ * Every arm names its configuration. The declaration is `"suppress"` under
+ * `serverPrimaryExecution` and `"claim-conditional"` without it, because
+ * suppressing is only correct when an executor exists to relocate the effect
+ * to; the arms below run at the flag's ON value unless they say otherwise.
  *
  * Why it exists. A webhook delivery does not merely write a cell. The
  * scheduler finds no local handler for the inbox stream, calls
@@ -19,9 +28,11 @@ import { toolshedRuntimeOptions } from "@/runtime-options.ts";
  * declared nothing egressed on the client default (`"claim-conditional"` → no
  * server effect claim → `"allow"`), and toolshed's declaration was the only
  * thing standing between a stream write and the outside world. The terminal
- * flip has since made `"suppress"` the default, so the declaration is now a
- * statement of posture rather than the sole barrier — but it is still the
- * BEHAVIOUR, not the default, that this file pins.
+ * flip has since made `"suppress"` the default UNDER SERVER-PRIMARY
+ * EXECUTION, so under that flag the declaration is a statement of posture
+ * rather than the sole barrier — and without the flag it is the old world
+ * again, unchanged. Either way it is the BEHAVIOUR, not the default, that
+ * this file pins.
  *
  * The trap this file guards. The tempting alternative — stop toolshed starting
  * the piece at all (`doNotLoadPieceIfNotRunning`) — fails SILENTLY: the local
@@ -99,6 +110,15 @@ type ArmResult = {
 const runWebhookArm = async (
   label: string,
   override: "verbatim" | "strip" | "suppress" | "server-executor",
+  /**
+   * Which of the arc's two configurations this arm runs in. Toolshed's
+   * declaration is DERIVED from this flag (`runtime-options.ts`) — suppressing
+   * is only correct when a server-side executor exists to relocate the effect
+   * to, and `addExecutionDemand` is gated on the same flag — so an arm that
+   * does not say which configuration it is in is not saying anything.
+   * Server-primary execution is the shipped posture, hence the default.
+   */
+  serverPrimaryExecution = true,
 ): Promise<ArmResult> => {
   const signer = await Identity.fromPassphrase(
     `toolshed webhook egress authority ${label}`,
@@ -108,7 +128,10 @@ const runWebhookArm = async (
   const options = toolshedRuntimeOptions(
     TOOLSHED_CONFIG,
     storageManager,
-    () => undefined,
+    (name) =>
+      name === EXPERIMENTAL_ENV_VARS.serverPrimaryExecution
+        ? String(serverPrimaryExecution)
+        : undefined,
   );
   const declared = options.externalSinkDisposition;
   const {
@@ -200,11 +223,14 @@ const runWebhookArm = async (
 // The second arm is what the control used to BE. It was written when declaring
 // nothing meant "claim-conditional" and therefore egress, so stripping the
 // declaration was how the fixture proved itself live. The terminal flip
-// inverted that, and the failure mode is the quiet one: strip-as-control would
-// still have "passed" the day the flip landed, certifying a fixture that could
-// not egress under any circumstances. Keeping the stripped arm here — asserting
-// the opposite of what it once asserted — is what makes the reversal visible
-// rather than merely absent.
+// inverted that FOR THE SERVER-PRIMARY CONFIGURATION, which is the one both
+// arms here run in, and the failure mode is the quiet one: strip-as-control
+// would still have "passed" the day the flip landed, certifying a fixture that
+// could not egress under any circumstances. Keeping the stripped arm here —
+// asserting the opposite of what it once asserted — is what makes the reversal
+// visible rather than merely absent. Without the flag the stripped runtime is
+// "claim-conditional" again and egresses, which the production test below
+// measures directly.
 Deno.test("a webhook delivery into a not-running piece egresses from toolshed's process only when the runtime declares egress authority", async () => {
   const authorized = await runWebhookArm("control", "server-executor");
   assertEquals(
@@ -223,7 +249,7 @@ Deno.test("a webhook delivery into a not-running piece egresses from toolshed's 
   assertEquals(
     stripped.fetched,
     [],
-    "a runtime that declares nothing must not egress",
+    "under server-primary execution a runtime that declares nothing must not egress",
   );
 });
 
@@ -237,10 +263,30 @@ Deno.test("a suppress-declared toolshed runtime still starts the webhook's piece
   assertEquals(arm.fetched, []);
 });
 
-// The production wiring itself, end to end: no override at all.
-Deno.test("toolshed's production runtime options suppress the webhook piece's egress", async () => {
+// The production wiring itself, end to end: no override at all — and BOTH
+// configurations of it, because the wiring is now derived from the flag rather
+// than constant. Read the two arms as the whole claim the split makes:
+// server-primary on, toolshed is passive and the executor does the work; off,
+// toolshed behaves exactly as it did before this arc and does the work itself.
+// The flag-off arm is not a curiosity — it is the arm that fails if the
+// passivity half is ever made unconditional again, and it fails by DELETING a
+// webhook side effect, which is the silent failure the arc rates worst.
+Deno.test("toolshed's production runtime options suppress the webhook piece's egress under server-primary execution, and egress without it", async () => {
   const arm = await runWebhookArm("production", "verbatim");
   assertEquals(arm.handlerRan, true, "suppression also suppressed the start");
   assertEquals(arm.fetched, []);
   assertEquals(arm.declared, "suppress");
+
+  const legacy = await runWebhookArm(
+    "production-no-server-primary",
+    "verbatim",
+    /* serverPrimaryExecution */ false,
+  );
+  assertEquals(legacy.handlerRan, true, "the webhook never started the piece");
+  assertEquals(
+    legacy.fetched,
+    [DOWNSTREAM_URL],
+    "with no executor to relocate it to, the side effect was deleted",
+  );
+  assertEquals(legacy.declared, "claim-conditional");
 });

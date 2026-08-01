@@ -21,33 +21,46 @@ export function toolshedRuntimeOptions(
   storageManager: RuntimeOptions["storageManager"],
   envGet: EnvReader = Deno.env.get,
 ): RuntimeOptions {
+  const experimental = experimentalOptionsFromEnv(envGet);
   return runtimePresets.productionServer({
     apiUrl: new URL(config.MEMORY_URL),
     patternApiUrl: new URL(config.API_URL),
     storageManager,
-    experimental: experimentalOptionsFromEnv(envGet),
-    // Toolshed does not egress. It is not obvious that it ever could: nothing
-    // here calls an effect builtin. But a webhook delivery is a plain stream
-    // write, and a plain stream write is a pattern-execution entry point — the
-    // scheduler finds no local handler, `ensurePieceRunning` loads the pattern
-    // and starts the piece INSIDE THIS PROCESS, and the piece's whole reactive
-    // graph runs here, effect builtins included. Undeclared, those effects ride
-    // the client default (`"claim-conditional"`), which egresses unless a
-    // server effect claim happens to exist for the action — i.e. the
-    // correctness of a webhook side effect would depend on winning a race with
-    // the space executor.
+    experimental,
+    // Toolshed does not egress WHEN SOMETHING ELSE WILL. It is not obvious
+    // that it ever could: nothing here calls an effect builtin. But a webhook
+    // delivery is a plain stream write, and a plain stream write is a
+    // pattern-execution entry point — the scheduler finds no local handler,
+    // `ensurePieceRunning` loads the pattern and starts the piece INSIDE THIS
+    // PROCESS, and the piece's whole reactive graph runs here, effect builtins
+    // included. Undeclared, those effects ride the client posture
+    // (`"claim-conditional"`), which egresses unless a server effect claim
+    // happens to exist for the action — i.e. the correctness of a webhook side
+    // effect would depend on winning a race with the space executor.
     //
-    // The side effect still happens: the same `runtime.start()` that runs the
-    // piece is also the runner's demand publisher, so the space executor picks
-    // the closure up and performs the egress under its own claim. Suppressing
-    // the START instead would look cleaner and fail silently — it is the demand
-    // publication, so nothing would ever run the hook.
+    // Suppressing is right only when the effect still happens elsewhere: the
+    // same `runtime.start()` that runs the piece is also the runner's demand
+    // publisher, so the space executor picks the closure up and performs the
+    // egress under its own claim. Suppressing the START instead would look
+    // cleaner and fail silently — it is the demand publication, so nothing
+    // would ever run the hook.
+    //
+    // WHICH IS WHY THIS IS NOW CONDITIONAL, on the same flag and for the same
+    // reason as the constructor default in `runner/src/runtime.ts`. The arc
+    // has exactly two configurations: with `serverPrimaryExecution` OFF there
+    // is no executor to pick the closure up (`addExecutionDemand` is gated on
+    // that flag), so an unconditional suppression here would delete the
+    // webhook's side effect outright rather than relocate it — the silent
+    // failure the arc rates strictly worse than a duplicated one. Flag off,
+    // toolshed keeps today's behaviour and egresses itself.
     //
     // Pinned end to end by `routes/webhooks/webhooks.egress-authority.test.ts`
-    // (piece still starts, sink recorded but never released) and
-    // `patterns/integration/server-execution-webhook-egress-gate.test.ts`
-    // (exactly one broker egress, performed by the executor).
-    externalSinkDisposition: "suppress",
+    // (both arms: suppressed-and-relocated under the flag, egressing without
+    // it) and `patterns/integration/server-execution-webhook-egress-gate.test.ts`
+    // (flag on: exactly one broker egress, performed by the executor).
+    externalSinkDisposition: experimental.serverPrimaryExecution
+      ? "suppress"
+      : "claim-conditional",
   });
 }
 

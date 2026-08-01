@@ -68,8 +68,11 @@
  * |                            | localhost fallback); constructor default in the  |
  * |                            | local presets (patternTest/localDev/unitTest)    |
  * | fetch                      | real everywhere; patternTest delta (mock)        |
- * | externalSinkDisposition    | core-default ("suppress") everywhere — no        |
- * |                            | preset egresses by declaring nothing;            |
+ * | externalSinkDisposition    | core-default everywhere, and that default is     |
+ * |                            | GATED on serverPrimaryExecution: "suppress" with |
+ * |                            | it (no preset egresses by declaring nothing),    |
+ * |                            | "claim-conditional" without it (no executor      |
+ * |                            | exists, so the client must still egress);        |
  * |                            | productionServer delta: the executor declares    |
  * |                            | server-executor (its own egress authority)       |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |

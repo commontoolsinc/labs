@@ -97,9 +97,14 @@ export type ExternalSinkDisposition = "allow" | "suppress";
  *                       observer, so the claim-observer stand-down in
  *                       `ExtendedStorageTransaction.externalSinkDisposition`
  *                       does not apply to it.
- * - "claim-conditional" — legacy client posture: egress unless a server claim
- *                       for this action is observed. THIS IS THE VALUE THE
- *                       TERMINAL FLIP RETIRES.
+ * - "claim-conditional" — pre-server-primary client posture: egress unless a
+ *                       server claim for this action is observed. The
+ *                       terminal flip retires it FOR THE SERVER-PRIMARY
+ *                       CONFIGURATION, where it is replaced by "suppress" as
+ *                       the constructor default; with `serverPrimaryExecution`
+ *                       off it is still the default, because no executor
+ *                       exists then and a passive client would delete the
+ *                       effect rather than relocate it (`runtime.ts`).
  *
  * Note `"allow"` is deliberately NOT in this vocabulary: it remains the
  * gate's answer, but a runtime can no longer DECLARE it. That is what makes

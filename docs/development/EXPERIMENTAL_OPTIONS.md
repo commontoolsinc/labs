@@ -194,6 +194,18 @@ propagate](#how-flags-propagate).
   the optional `serverPrimaryExecutionV1` capability. When the flag is on, the
   server requires compatible clients and automatically claims every eligible
   action in every active compatible space; there is no per-space opt-in.
+  Since the client-passivity arc it also selects the **default external-sink
+  disposition** (`RuntimeOptions.externalSinkDisposition`, resolved in
+  [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts)),
+  and toolshed's declared one
+  ([`packages/toolshed/runtime-options.ts`](../../packages/toolshed/runtime-options.ts)):
+  on gives `"suppress"` — a client never runs an egress effect, and `allow` is
+  what a server-side executor earns by declaring `"server-executor"` — while
+  off gives `"claim-conditional"`, the pre-arc posture in which the client
+  performs the egress itself. The two halves are one switch on purpose: the
+  flag also gates `addExecutionDemand`, so a passive client with the flag off
+  would have no executor to relocate its effects to and the effects would
+  simply not happen. An explicit `externalSinkDisposition` overrides both arms.
 - **Current default and planned end state.** Off by default in every runtime.
   Both the server process and browser worker must enable it for a negotiated
   connection. The planned end state is to graduate the protocol after the

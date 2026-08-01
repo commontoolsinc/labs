@@ -1180,12 +1180,30 @@ export class Runtime {
     // mock is used as-is.
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
-    // THE TERMINAL CONDITION, LANDED. A client never runs an egress effect,
-    // full stop: `suppress` is what a runtime gets by declaring nothing, and
-    // `allow` is the exception a server-side executor EARNS by declaring
-    // "server-executor" — which `executor/executor-worker.ts` is the one site
-    // in the repo to do, and which no client preset can spell (see
-    // `ExternalSinkDispositionPolicy`).
+    // THE TERMINAL CONDITION, GATED. The arc has exactly TWO configurations
+    // and no hybrid, and this default is the client half of the second one:
+    //
+    //   serverPrimaryExecution ON  — the server executes AND the client is
+    //     passive. A client never runs an egress effect, full stop:
+    //     "suppress" is what a runtime gets by declaring nothing, and `allow`
+    //     is the exception a server-side executor EARNS by declaring
+    //     "server-executor" — which `executor/executor-worker.ts` is the one
+    //     site in the repo to do, and which no client preset can spell (see
+    //     `ExternalSinkDispositionPolicy`).
+    //
+    //   serverPrimaryExecution OFF — today's behaviour precisely: no server
+    //     execution, so the client does everything and egresses.
+    //     "claim-conditional" IS that behaviour — stand down only on an
+    //     OBSERVED server effect claim, and with the flag off nothing ever
+    //     issues one (`captureExecutionClaim` below is gated on the same
+    //     flag), so every action egresses from the client.
+    //
+    // Making the passivity half unconditional is the hybrid, and it fails in
+    // the direction this arc rates strictly worse than duplication: with the
+    // flag off a client would suppress every egress effect and NO EXECUTOR
+    // WOULD EXIST to perform it — a silently missing side effect. The
+    // claim-observer race that "suppress" retires only exists in the flag-ON
+    // world, where a server executor is there to win it.
     //
     // "egress effect" here means a POST-COMMIT SINK-REQUEST DISPATCH.
     // Module resolution is excluded by construction, not by exemption: the
@@ -1193,12 +1211,14 @@ export class Runtime {
     // resolved module is a live JS object no settlement can deliver — see the
     // item-3 ruling in `passivity-arc-orchestration.md` §1.
     //
-    // The previous default, "claim-conditional", made a client stand down only
-    // when it happened to OBSERVE a server effect claim for the action. That
-    // made the correctness of a side effect depend on winning a race, which is
-    // what this default stops doing.
+    // `this.experimental` is fully resolved above (ambient round-trip
+    // included), so this reads the flag's effective per-runtime value; an
+    // explicit `options.externalSinkDisposition` still overrides both arms,
+    // which is how the executor Worker declares its own egress authority.
     this.externalSinkDisposition = options.externalSinkDisposition ??
-      "suppress";
+      (this.experimental.serverPrimaryExecution
+        ? "suppress"
+        : "claim-conditional");
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
