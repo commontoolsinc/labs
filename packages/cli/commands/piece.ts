@@ -31,6 +31,7 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
@@ -511,6 +512,67 @@ export function pieceCallPhaseObserver(
       close(end);
     },
   };
+}
+
+/**
+ * The success tail of `cf piece call`, extracted from the command action so
+ * it is unit-coverable — command action bodies never execute under the unit
+ * suite, the same convention that keeps `cf test` out of its action body
+ * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
+ * finishes: no invocation ran, so there is no span to close.
+ */
+export function renderPieceCallOutcome(
+  observer: { finish: (end?: "settled" | "failed") => void },
+  result: ExecutedPieceCallable,
+  callableName: string,
+  piece: string,
+  deps: {
+    render?: (text: string) => void;
+    hint?: (text: string, prefix?: boolean) => void;
+    printError?: (text: string) => void;
+  } = {},
+): void {
+  const renderOut = deps.render ?? render;
+  const hintOut = deps.hint ?? hint;
+  const printError = deps.printError ?? console.error;
+  if (result.helpText) {
+    renderOut(result.helpText);
+    return;
+  }
+  observer.finish();
+  if (result.outputText) {
+    renderOut(result.outputText);
+    if (result.resultRef) {
+      // stderr, so stdout stays exactly the tool's JSON result. Routed
+      // through hint() DELIBERATELY: under --quiet the ref is suppressed —
+      // it is advisory until the invocation protocol carries it in the
+      // stdout Invocation JSON (verb contract WS-D), and --quiet callers
+      // asked for the bare result.
+      const ref = result.resultRef;
+      hintOut(
+        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        false,
+      );
+    }
+    return;
+  }
+  const nextSteps = cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${piece} ...`);
+  if (result.invocation) {
+    // The machine surface for a handler invocation: stdout carries the
+    // settled Invocation JSON, prose stays on stderr via hint().
+    renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    hintOut(nextSteps);
+    return;
+  }
+  const confirmation = `Called handler "${callableName}" on piece ${piece}`;
+  if (result.parsed.usedJsonInput) {
+    printError(confirmation);
+  } else {
+    renderOut(confirmation);
+  }
+  hintOut(nextSteps);
 }
 
 /**
@@ -1403,46 +1465,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
           observer,
         )
       );
-      if (result.helpText) {
-        render(result.helpText);
-        return;
-      }
-      observer.finish();
-      if (result.outputText) {
-        render(result.outputText);
-        if (result.resultRef) {
-          // stderr, so stdout stays exactly the tool's JSON result. Routed
-          // through hint() DELIBERATELY: under --quiet the ref is suppressed —
-          // it is advisory until the invocation protocol carries it in the
-          // stdout Invocation JSON (verb contract WS-D), and --quiet callers
-          // asked for the bare result.
-          const ref = result.resultRef;
-          hint(
-            `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
-            false,
-          );
-        }
-        return;
-      }
-      if (result.invocation) {
-        // The machine surface for a handler invocation: stdout carries the
-        // settled Invocation JSON, prose stays on stderr via hint().
-        render(JSON.stringify(invocationJson(result.invocation), null, 2));
-        hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
-        return;
-      }
-      const confirmation =
-        `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
-      if (result.parsed.usedJsonInput) {
-        console.error(confirmation);
-      } else {
-        render(confirmation);
-      }
-      hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+      renderPieceCallOutcome(observer, result, callableName, pieceConfig.piece);
     } catch (error) {
       exitPieceCallFailure(observer, error, invocationId, phase);
     }

@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import {
@@ -10,6 +11,7 @@ import {
   executePieceCallable,
   PieceResultProjectionError,
 } from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { ValidationError } from "@cliffy/command";
 import {
   exitPieceCallFailure,
@@ -22,6 +24,7 @@ import {
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
+  renderPieceCallOutcome,
   reportVerbInputErrorOrRethrow,
   resolveInvocationId,
   verbInputErrorReport,
@@ -2206,5 +2209,109 @@ describe("reportVerbInputErrorOrRethrow", () => {
 
     expect(printed).toEqual([]);
     expect(exited).toEqual([]);
+  });
+});
+
+describe("renderPieceCallOutcome", () => {
+  const observerRecorder = () => {
+    const finishes: (string | undefined)[] = [];
+    return {
+      observer: { finish: (end?: "settled" | "failed") => finishes.push(end) },
+      finishes,
+    };
+  };
+  const sinkRecorder = () => {
+    const rendered: string[] = [];
+    const hinted: string[] = [];
+    const errored: string[] = [];
+    return {
+      deps: {
+        render: (t: string) => rendered.push(t),
+        hint: (t: string) => hinted.push(t),
+        printError: (t: string) => errored.push(t),
+      },
+      rendered,
+      hinted,
+      errored,
+    };
+  };
+  const base = { parsed: { usedJsonInput: false }, resolved: {} };
+
+  it("help output returns before the observer finishes", () => {
+    const { observer, finishes } = observerRecorder();
+    const { deps, rendered } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      { ...base, helpText: "usage" } as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+    );
+    assertEquals(rendered, ["usage"]);
+    assertEquals(finishes.length, 0);
+  });
+
+  it("tool output finishes the span and hints the result ref", () => {
+    const { observer, finishes } = observerRecorder();
+    const { deps, rendered, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        outputText: "{}",
+        resultRef: { id: "of:x", space: "did:key:s", scope: "space" },
+      } as ExecutedPieceCallable,
+      "tool",
+      "fid1:piece",
+      deps,
+    );
+    assertEquals(finishes, [undefined]);
+    assertEquals(rendered, ["{}"]);
+    assertEquals(hinted.length, 1);
+    assertStringIncludes(hinted[0], "of:x");
+  });
+
+  it("handler invocations render the Invocation JSON with next steps", () => {
+    const { observer, finishes } = observerRecorder();
+    const { deps, rendered, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: { id: "inv-1", status: "settled" },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+    );
+    assertEquals(finishes, [undefined]);
+    assertEquals(JSON.parse(rendered[0]).invocation, "inv-1");
+    assertStringIncludes(hinted[0], "NEXT STEPS");
+  });
+
+  it("confirmations route to stderr under JSON input, stdout otherwise", () => {
+    const jsonCase = observerRecorder();
+    const jsonSinks = sinkRecorder();
+    renderPieceCallOutcome(
+      jsonCase.observer,
+      { ...base, parsed: { usedJsonInput: true } } as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      jsonSinks.deps,
+    );
+    assertEquals(jsonSinks.errored.length, 1);
+    assertEquals(jsonSinks.rendered.length, 0);
+
+    const plainCase = observerRecorder();
+    const plainSinks = sinkRecorder();
+    renderPieceCallOutcome(
+      plainCase.observer,
+      { ...base } as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      plainSinks.deps,
+    );
+    assertEquals(plainSinks.errored.length, 0);
+    assertStringIncludes(plainSinks.rendered[0], 'Called handler "addTopic"');
   });
 });
