@@ -1452,6 +1452,22 @@ describe("the vintage gate, end to end", () => {
         "over the bound",
       );
     }
+    // A THIRD key, also over the bound, but writable — and sorting before the
+    // denied one, so its deletion succeeds first and the failure lands
+    // mid-loop. Without it the doomed set is a single file that fails
+    // immediately, `pruned: []` is trivially right, and the partial case —
+    // deletions done but unreported — goes untested.
+    const early = "aa-retention/aa.test.tsx";
+    const earlyAuto = `${roots.vintagesRoot}/${early}/${AUTO}`;
+    await Deno.mkdir(earlyAuto, { recursive: true });
+    for (let day = 1; day <= AUTO_GENERATIONS_KEPT + 1; day++) {
+      await Deno.writeTextFile(
+        `${earlyAuto}/2026-06-${
+          String(day).padStart(2, "0")
+        }T00-00-00.000Z-bafyaa.sqlite`,
+        "over the bound",
+      );
+    }
     await Deno.chmod(otherAuto, 0o500);
     try {
       // The environment has to be able to deny an unlink at all. Asserted
@@ -1493,8 +1509,16 @@ describe("the vintage gate, end to end", () => {
       expect(outcome.captured[0]).toContain(`/${AUTO}/`);
       // ...and the retention failure is reported too, rather than swallowed.
       expect(outcome.problems.join("\n")).toContain("retention:");
-      // Nothing is claimed to have been pruned, because nothing was.
-      expect(outcome.pruned).toEqual([]);
+      // The deletion that DID happen before the failure is reported. Assuming
+      // all-or-nothing here loses the record of files this command removed —
+      // the same loss the try/catch exists to prevent, in the other direction.
+      expect(outcome.pruned, "a completed deletion went unreported")
+        .toHaveLength(1);
+      expect(outcome.pruned[0]).toContain(early);
+      expect(await exists(outcome.pruned[0]), "a reported prune did not happen")
+        .toBe(false);
+      // ...and the denied one is neither deleted nor claimed.
+      expect(outcome.pruned.some((p) => p.includes(other))).toBe(false);
     } finally {
       await Deno.chmod(otherAuto, 0o700);
     }

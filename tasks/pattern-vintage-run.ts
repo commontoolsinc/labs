@@ -1226,17 +1226,28 @@ export async function captureChangedGenerations(
   // fixtures on disk that the command never told anyone about. Over-retention
   // is a disk cost someone can fix by running this again; an unreported
   // capture is a file nobody knows to look at.
-  let pruned: string[] = [];
+  // Deletions are recorded AS THEY HAPPEN, one at a time, rather than assumed
+  // all-or-nothing. `removeVintages` deletes in a loop, so a failure part way
+  // through leaves the earlier deletions done — and reporting `pruned: []`
+  // there loses the record of files this command removed, which is the same
+  // loss the surrounding try/catch exists to prevent, in the other direction.
+  // Milder, since an auto generation is regenerable, but for one captured
+  // minutes ago and never committed nothing else records that it existed.
+  const pruned: string[] = [];
   try {
-    pruned = autoGenerationsToPrune(
-      await collectVintages(roots.vintagesRoot),
-    );
-    await removeVintages(pruned, roots.vintagesRoot);
+    for (
+      const path of autoGenerationsToPrune(
+        await collectVintages(roots.vintagesRoot),
+      )
+    ) {
+      await removeVintages([path], roots.vintagesRoot);
+      pruned.push(path);
+    }
   } catch (error) {
     return {
       kind: "captured",
       captured,
-      pruned: [],
+      pruned,
       problems: [...problems, `  retention: ${describeError(error)}`],
     };
   }

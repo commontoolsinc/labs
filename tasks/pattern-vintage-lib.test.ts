@@ -1382,6 +1382,49 @@ describe("promoting a generation", () => {
     }
   });
 
+  it("RESUMES an interrupted promotion instead of refusing it", async () => {
+    // The state the companion-first order exists to produce: the companion is
+    // already in `pinned/` and the primary is still in `auto/`. Re-running
+    // `--pin` must FINISH the job — that recoverability is the whole stated
+    // reason for the ordering, and it rests on one conjunct in the collision
+    // check (`exists(companion)`), which reads as belt-and-braces. Measured:
+    // dropping it refuses the resume and both test files stay green.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const name = vintageFileName(stamp, ID_A);
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(auto, { recursive: true });
+      await Deno.mkdir(pinned, { recursive: true });
+      await Deno.writeTextFile(`${auto}/${name}`, "the primary, not yet moved");
+      // The companion ALREADY moved; the source companion is gone.
+      const movedCompanion = vintageCompanionDir(`${pinned}/${name}`);
+      await Deno.mkdir(movedCompanion, { recursive: true });
+      await Deno.writeTextFile(
+        `${movedCompanion}/child.sqlite`,
+        "already promoted",
+      );
+
+      const moved = await promoteVintage(
+        parseVintagePath(`${auto}/${name}`, root)!,
+      );
+
+      expect(moved).toBe(`${pinned}/${name}`);
+      expect(await Deno.readTextFile(moved)).toBe("the primary, not yet moved");
+      expect(await exists(`${auto}/${name}`)).toBe(false);
+      // The already-moved companion is untouched — neither nested nor
+      // overwritten — so the promoted fixture is whole.
+      expect(await Deno.readTextFile(`${movedCompanion}/child.sqlite`)).toBe(
+        "already promoted",
+      );
+      expect(await exists(`${movedCompanion}/${vintageCompanionDir(name)}`))
+        .toBe(false);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("REFUSES to promote onto an existing pinned vintage", async () => {
     // A promotion is the only fixture-writing operation that could destroy a
     // pinned vintage, and a pinned vintage cannot be recaptured. `git mv`
@@ -1632,6 +1675,14 @@ describe("what the capture and promote commands print", () => {
     // the real command with `--capture-chnged` and `--pinn`.
     expect(unknownFlags(["--capture-chnged"])).toEqual(["--capture-chnged"]);
     expect(unknownFlags(["--pinn", "a/a.test.tsx"])).toEqual(["--pinn"]);
+    // A DROPPED dash counts too. Measured: `-capture-changed` and `-x` both
+    // fell through to the plain gate and exited 0 with a healthy summary —
+    // the very defect this function was added to prevent, inside the fix.
+    expect(unknownFlags(["-capture-changed"])).toEqual(["-capture-changed"]);
+    expect(unknownFlags(["-x"])).toEqual(["-x"]);
+    // `--` is the end-of-flags separator and `deno task` forwards it
+    // verbatim, so rejecting it refused an ordinary invocation.
+    expect(unknownFlags(["--", "--update", "a/a.test.tsx"])).toEqual([]);
     // Positionals are not flags — a test key is an argument, not a typo.
     expect(unknownFlags(["--pin", "a/a.test.tsx"])).toEqual([]);
     for (const flag of KNOWN_FLAGS) expect(unknownFlags([flag])).toEqual([]);
@@ -1649,16 +1700,25 @@ describe("what the capture and promote commands print", () => {
     // that message a script can read, so pairing the warning with the healthy
     // code makes "nothing here" indistinguishable from "all current" to
     // everything except a human reading the terminal.
-    expect(
-      describeCaptureOutcome({ kind: "all-current", replayed: 0 }, "/repo")
-        .code,
-      "an empty tree reported success",
-    ).toBe(1);
-    // ...and a genuinely current tree still exits 0.
-    expect(
-      describeCaptureOutcome({ kind: "all-current", replayed: 4 }, "/repo")
-        .code,
-    ).toBe(0);
+    const empty = describeCaptureOutcome(
+      { kind: "all-current", replayed: 0 },
+      "/repo",
+    );
+    expect(empty.code, "an empty tree reported success").toBe(1);
+    // On STDERR, like every other nonzero exit in both commands. Splitting
+    // this case in two is how that went wrong: leaving the failing half on
+    // stdout made `cmd 2>err.log >/dev/null || cat err.log` print nothing.
+    expect(empty.err, "a failure explained itself on stdout").toBeDefined();
+    expect(empty.out).toBeUndefined();
+
+    // ...and a genuinely current tree still exits 0, on stdout.
+    const current = describeCaptureOutcome(
+      { kind: "all-current", replayed: 4 },
+      "/repo",
+    );
+    expect(current.code).toBe(0);
+    expect(current.out).toBeDefined();
+    expect(current.err).toBeUndefined();
   });
 
   it("prints no empty stdout line when every capture failed", () => {

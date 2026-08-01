@@ -156,9 +156,13 @@ const FIXTURE_SIGNER = await Identity.fromPassphrase("pattern vintage fixture");
  * Print what a command decided to say and exit with the code it chose.
  *
  * `never` rather than `void`, and the annotation is doing real work even
- * though `Deno.exit` already guarantees it: it is what would make a future
- * `emit` that ever RETURNS a compile error at every call site, rather than a
- * silent fall-through into the plain gate below.
+ * though `Deno.exit` already guarantees it — but the work is HERE, not at the
+ * call sites. Measured: changing it to `void` produces no call-site error at
+ * all, because no `emit` call has code after it inside its own block, so
+ * `never` has no control flow to narrow. What it does catch is a future `emit`
+ * that can return: adding a bare `return;` to this body is a compile error on
+ * the spot. That is the thing that would otherwise let a command fall through
+ * into the plain gate below.
  */
 function emit(shown: CommandOutput): never {
   if (shown.out !== undefined) console.log(shown.out);

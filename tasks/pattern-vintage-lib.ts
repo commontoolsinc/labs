@@ -528,6 +528,14 @@ export async function promoteVintage(ref: VintageRef): Promise<string> {
   // ends up nested one level down while the stale leftover keeps the name the
   // replay reads. Measured, on the tracked path — untracked fails loudly with
   // ENOTEMPTY, so the safer-looking branch was the corrupting one.
+  //
+  // The companion check is CONDITIONAL on there being a source companion to
+  // move, and that conjunct is not belt-and-braces: it is what keeps an
+  // interrupted promotion resumable. Half-done, the companion is already in
+  // `pinned/` and the primary is still in `auto/` — exactly the state the
+  // companion-first order exists to produce — so re-running `--pin` must
+  // finish the job rather than refuse. With the conjunct dropped, that
+  // recovery is refused and the operator is left to move files by hand.
   const collision = (await exists(destination))
     ? destination
     : (await exists(companion)) && (await exists(companionDestination))
@@ -677,17 +685,21 @@ export function describeCaptureOutcome(
         code: 1,
       };
     case "all-current":
-      // An EMPTY tree exits 1. The message below says this is the moment
+      // An EMPTY tree exits 1, on STDERR. The message says this is the moment
       // someone is most likely to believe the regime is running when it is
       // not — and an exit code is the half of that message anything scripting
-      // this can actually read. Pairing that text with the healthy exit code
-      // would make "there is nothing here" indistinguishable from "everything
-      // is current", which is the confusion the text exists to prevent. The
-      // plain gate calls the same tree a failure.
-      return {
-        out: reportEveryGenerationCurrent(outcome.replayed),
-        code: outcome.replayed === 0 ? 1 : 0,
-      };
+      // this can read. Pairing that text with the healthy exit code would make
+      // "there is nothing here" indistinguishable from "everything is
+      // current"; the plain gate calls the same tree a failure.
+      //
+      // The stream matters as much as the code, and splitting this case in two
+      // is exactly how it went wrong: every other nonzero exit in both
+      // commands explains itself on stderr, so leaving this one on stdout made
+      // `cmd 2>err.log >/dev/null || cat err.log` report a bare exit 1 with no
+      // reason at all.
+      return outcome.replayed === 0
+        ? { err: reportEveryGenerationCurrent(0), code: 1 }
+        : { out: reportEveryGenerationCurrent(outcome.replayed), code: 0 };
     case "captured": {
       const lines = [
         ...outcome.captured.map((p) => `  + ${relativeToRepo(p, repoRoot)}`),
@@ -734,7 +746,19 @@ export const KNOWN_FLAGS = ["--update", "--capture-changed", "--pin"] as const;
  */
 export function unknownFlags(args: readonly string[]): string[] {
   const known = new Set<string>(KNOWN_FLAGS);
-  return args.filter((arg) => arg.startsWith("--") && !known.has(arg));
+  // A SINGLE dash counts. Testing for `--` was the same defect this function
+  // exists to prevent, sitting inside the fix for it: measured, a dropped
+  // leading dash (`-capture-changed`, `-x`) fell straight through to the plain
+  // gate and exited 0 with a healthy summary. No legitimate argument here
+  // begins with a dash — the positional filter is `!arg.startsWith("--")` and
+  // a test key is a path — so widening costs nothing.
+  //
+  // `--` alone is exempt. It is the conventional end-of-flags separator and
+  // `deno task` forwards it verbatim, so rejecting it refused the ordinary
+  // `deno task pattern-vintage -- --update <key>` invocation.
+  return args.filter((arg) =>
+    arg.startsWith("-") && arg !== "--" && !known.has(arg)
+  );
 }
 
 /** What the task prints when it was handed a flag it does not know. */
