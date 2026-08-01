@@ -26,8 +26,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   optional CI adoption and further fixture hardening.
 - [Inverting the physics of trust](inverting-the-physics-of-trust.md) explains
   the runtime's trust model and the work that follows from it.
-  sequences the replay tier that proves an updated pattern can still read the
-  state its predecessor wrote.
 - [Pattern verb contract implementation](pattern-verb-contract-implementation.md)
   sequences the implementation of the
   [pattern verb contract](pattern-verb-contract.md).

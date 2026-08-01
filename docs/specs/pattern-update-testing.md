@@ -235,10 +235,12 @@ Unrecognised flags are rejected. An unknown flag matches no command, so the run
 would otherwise fall through to the plain gate, replay everything and exit 0 —
 reporting the tree healthy to someone who asked for something else.
 
-**Neither `--capture-changed` nor `--pin` runs in CI.** CI runs the plain gate,
-which only reads the tree. Both writing commands land fixtures in the working
-tree to be committed and reviewed like any other change; a gate that wrote its
-own evidence would be grading its own homework.
+**No writing command runs in CI**, and there are three of them: `--update`
+captures a first pinned fixture, `--capture-changed` captures a generation, and
+`--pin` promotes one. CI runs only the plain gate, which reads the tree and
+never writes to it. All three land fixtures in the working tree to be committed
+and reviewed like any other change; a gate that wrote its own evidence would be
+grading its own homework.
 
 ## Invariants
 
