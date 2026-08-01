@@ -27,6 +27,32 @@
 > applies to write surfaces (output scope is discovered per transaction, not
 > declared statically), carried over to scheduling.
 >
+> ### THE ROOT CAUSE OF THIS ARC'S FAILURE MODES — owner, 2026-08-01
+>
+> Read this before the survival test; it is the general form and the survival
+> test is one consequence of it.
+>
+> > **The recurring problem in this arc is that we tried to partially move to
+> > the server and invented all kinds of things to support that, when the
+> > easier solution would have been to move all at once. All the rank stuff is
+> > to a large degree that.**
+>
+> **When a decision looks like "how do we make the mixed state coherent", the
+> answer is almost always "move all of it".** Machinery whose only job is to
+> keep a half-migrated system consistent has no referent once the migration
+> completes — so building it is work you will delete, and worse, it becomes
+> load-bearing while it exists and then resists deletion.
+>
+> Everything this arc has fought is that pattern: claim arbitration (deciding
+> per action which side runs it), the rank staging dials, the
+> `legacy-background` exclusion protocol (interlocking two executors), the
+> proposed "supersession" rule, and the fan-out scheduler Correction 2
+> refused. **Six fail-opens and four failed deletion routes, one explanation.**
+>
+> The diagnostic: if a mechanism would be meaningless in a world where the
+> server runs everything, it is migration scaffolding. Do not make it more
+> correct. Do not extend it to a new case. Ask what deletes it.
+>
 > ### THE SURVIVAL TEST — apply it before starting ANY item
 >
 > Owner, 2026-07-29: *"we keep falling back playing whack-a-mole with the
