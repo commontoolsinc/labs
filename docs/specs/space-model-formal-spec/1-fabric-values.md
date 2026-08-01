@@ -189,7 +189,10 @@ member of `FabricValue`.
 > **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
 > `FabricNativeObject` represents objects that provide a `toJSON()` method.
 > The conversion functions call `toJSON()` and process the
-> result (Section 8.2). This variant is **legacy and marked for removal** —
+> result (Section 8.2). Arrays are excluded: an array is decided by the array
+> rule of Section 1.5 whatever it carries, so one bearing a `toJSON` method is
+> rejected rather than converted. This variant is **legacy and marked for
+> removal** —
 > callers should migrate to the fabric protocol
 > (`FabricInstance` + `[CODEC]`). See Section 7.1 for migration guidance.
 
@@ -2913,8 +2916,10 @@ boundary-only serialization and the three-layer architecture:
 > object has a `toJSON()` method and does not implement `FabricInstance`, the
 > conversion functions call `toJSON()` and process the result. Arrays are
 > outside this: an array is answered by the array rule of Section 1.5 whatever
-> it carries, and `toJSON` is a named own property, which that rule rejects.
-> This preserves
+> it carries. An own `toJSON` is a named key, which that rule rejects; an
+> inherited one is not array content, and honoring it would mean a single
+> assignment to `Array.prototype.toJSON` could route every array in the process
+> through it. This preserves
 > backward compatibility with existing code. However, `toJSON()` support is
 > **marked for removal**: it eagerly converts to JSON-compatible shapes, which
 > is incompatible with late serialization. Implementors should migrate to the
@@ -3212,8 +3217,10 @@ if the value is:
   string). Unique symbols return `false`; see the Section 1.3 callout.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
-  `Uint8Array`, or an object with a `toJSON()` method — legacy)
-- An array where every present element satisfies `isFabricCompatible()`
+  `Uint8Array`, or a non-array object with a `toJSON()` method — legacy)
+- An array where every present element satisfies `isFabricCompatible()`, and
+  which the array rule of Section 1.5 accepts — a `toJSON` method does not
+  make an otherwise-rejected array compatible
 - A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,

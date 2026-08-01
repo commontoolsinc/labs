@@ -137,12 +137,16 @@ export function tagFromNativeClass(
  *
  * An array answers `Array` before anything else is consulted, `toJSON()`
  * included. `Array.isArray()` is realm-agnostic and sees through both a
- * subclass and a severed prototype, so every array-shaped value reaches array
- * handling and is answered by the array rule, which alone decides what an
- * array may be. Nothing an array carries can route it elsewhere: a `toJSON()`
- * method is a named own property, which that rule rejects anyway, so honoring
- * it here would mean converting a value by the very property that disqualifies
- * it.
+ * subclass and a severed prototype, so every array reaches array handling and
+ * is answered by the array rule, which alone decides what an array may be.
+ *
+ * A `toJSON()` method reaches an array by one of two routes, and neither may
+ * decide its fate. As an own property it is a named key, which the array rule
+ * rejects -- so honoring it would convert a value by the very property that
+ * disqualifies it. Inherited, it is not array content at all: `hasToJSON()`
+ * answers on `in`, so a single `Array.prototype.toJSON` assignment anywhere in
+ * the process would otherwise route *every* array in the system through it.
+ * Answering `Array` up front is what makes arrays immune to that.
  *
  * Otherwise dispatches via the value's constructor (O(1) switch in
  * `tagFromNativeClass`, which matches `Error` subclasses via
@@ -177,7 +181,9 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   // `tagFromNativeClass()` handles dedicated types (`Error`, `Date`, `Map`, etc.) and
   // returns `HasToJSON` for classes whose prototype has `toJSON()`. For those,
   // return immediately -- no instance-level override needed.
-  if (tag !== null && tag !== NATIVE_TAGS.Object) {
+  if (
+    tag !== null && tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.Array
+  ) {
     return tag;
   }
 

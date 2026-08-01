@@ -129,12 +129,28 @@ describe("native-type-tags", () => {
 
     it("returns `Array` tag for arrays with `toJSON()`", () => {
       // An array answers `Array` whatever it carries, so the array rule is
-      // what decides its fate. A `toJSON()` method is a named own property,
-      // which that rule rejects, so routing the value by it would convert an
-      // array by the very property that disqualifies it.
+      // what decides its fate. Here `toJSON` is a named own key, which that
+      // rule rejects, so routing the value by it would convert an array by the
+      // very property that disqualifies it.
       const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
       arr.toJSON = () => "custom array";
       expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.Array);
+    });
+
+    it("returns `Array` tag despite an inherited `toJSON()`", () => {
+      // The other route in, and the one that makes answering `Array` up front
+      // matter: `hasToJSON()` answers on `in`, so were an inherited `toJSON`
+      // consulted, one assignment to `Array.prototype` would route every array
+      // in the process through it.
+      const proto = Array.prototype as unknown as Record<string, unknown>;
+      try {
+        proto.toJSON = () => "hijacked";
+        const arr = [1, 2];
+        expect(Object.hasOwn(arr, "toJSON")).toBe(false);
+        expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.Array);
+      } finally {
+        delete proto.toJSON;
+      }
     });
 
     it("returns `Array` tag for an `Array` subclass carrying `toJSON()`", () => {
