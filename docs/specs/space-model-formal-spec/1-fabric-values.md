@@ -1246,8 +1246,43 @@ Section 4.5.
   name-driven copying or serialization
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
+- **Host restriction, not a model rule:** the property names `__proto__` and
+  `constructor` cause rejection in the JavaScript implementation. See the
+  callout below
 - Reconstruction produces regular plain objects, which is the only object
   shape a fabric value has
+
+> **Property names this implementation reserves.** A fabric record's keys are
+> strings, and the model attaches no meaning to any particular one: a property
+> name is data. Two names are nonetheless refused by the JavaScript
+> implementation, `__proto__` and `constructor`, for two different reasons —
+> neither of which is a limit of the language, and both of which are removable.
+>
+> `__proto__` cannot be rebuilt by the copying this implementation performs.
+> Records are reconstructed at each boundary — conversion, cloning, decoding —
+> by assignment (`target[key] = value`) and `Object.assign()`, and for this name
+> both reach `Object.prototype`'s accessor rather than creating a property: the
+> value is dropped, and the copy's prototype is repointed as well when that
+> value is an object or `null`. Mechanisms that carry the name faithfully do
+> exist — spread, `Object.fromEntries()`, `Object.defineProperty()`, and
+> `JSON.parse()` — so what stands in the way is the copy loops, not JavaScript.
+>
+> `constructor` copies faithfully. It is reserved because other boundaries in
+> this implementation already refuse it: the projection to native values drops
+> it, and `FabricError` throws on it. Admitting it here would mean accepting a
+> key that a later boundary discards without saying so.
+>
+> The boundary refuses such a record rather than corrupting it in transit
+> ("death before confusion"), and a decoder that meets one reports a
+> `ProblematicValue` rather than reconstructing something the bytes do not say.
+>
+> **This reservation belongs to the implementation, not to the model.** A host
+> that does not route property assignment through a prototype chain — Rust,
+> Swift, C++, Python, and most others — reserves no names at all and must not
+> adopt this rule. Even here it is not permanent: rebuilding the copy loops on
+> a faithful mechanism, and revisiting the boundaries that filter these names,
+> would retire it. It is expressed as a check separate from the inertness rules
+> so that it can be removed as a unit when that happens.
 
 ### 1.6 Circular References and Shared References
 

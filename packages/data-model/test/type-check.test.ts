@@ -147,6 +147,15 @@ describe("type-check", () => {
         expect(isFabricValueLayer({})).toBe(true);
       });
 
+      it("returns `false` for a property name this runtime reserves", () => {
+        // Not a statement about the data model: such an object is perfectly
+        // inert, and a runtime that does not route assignment through a
+        // prototype chain would carry it fine. It is refused because in this
+        // host the name cannot survive the copy that every boundary performs.
+        expect(isFabricValueLayer({ ["__proto__"]: 1, other: 2 })).toBe(false);
+        expect(isFabricValueLayer({ ["constructor"]: 1 })).toBe(false);
+      });
+
       it("returns `false` for a null-prototype object", () => {
         // A record has one shape here: `Object.prototype`-rooted. A prototype
         // is not part of what a value says as data and would not survive
@@ -286,6 +295,14 @@ describe("type-check", () => {
         expect(isFabricValue({})).toBe(true);
         expect(isFabricValue({ a: 1, b: "two", c: null })).toBe(true);
         expect(isFabricValue({ nested: { deeply: { value: 1 } } })).toBe(true);
+      });
+
+      it("returns `false` for a reserved property name, at any depth", () => {
+        const unsafe = { ["__proto__"]: 1 };
+        expect(isFabricValue(unsafe)).toBe(false);
+        expect(isFabricValue({ nested: unsafe })).toBe(false);
+        expect(isFabricValue([unsafe])).toBe(false);
+        expect(isFabricValue({ ["constructor"]: 1 })).toBe(false);
       });
 
       it("returns `false` for a null-prototype object, at any depth", () => {

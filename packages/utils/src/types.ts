@@ -168,3 +168,45 @@ const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
 export function isUnsafeObjectKey(key: string): boolean {
   return UNSAFE_OBJECT_KEYS.has(key);
 }
+
+/**
+ * Returns the reserved own property name the given object carries, if any.
+ *
+ * This asks about this implementation, not about the data model. A property
+ * name is data like any other, and an implementation on a host that does not
+ * route property assignment through a prototype chain -- which is most of them
+ * -- would reserve no names at all. The two here are refused for two different
+ * local reasons, and neither is a limit of the language:
+ *
+ * * `__proto__` cannot be rebuilt by the copying this system actually does.
+ *   Records are reconstructed by assignment (`target[key] = value`) and
+ *   `Object.assign()`, and for this name both reach `Object.prototype`'s
+ *   accessor instead of creating a property: the value is dropped, and the
+ *   copy's prototype is repointed as well when that value is an object or
+ *   `null`. Faithful mechanisms do exist -- spread, `Object.fromEntries()`,
+ *   `Object.defineProperty()`, and `JSON.parse()` all carry the name -- so
+ *   what stands in the way is the copy loops, not JavaScript.
+ * * `constructor` copies faithfully. It is reserved because other boundaries
+ *   in this implementation already refuse it: the projection to native values
+ *   drops it, and `FabricError` throws on it. Accepting it here would mean
+ *   admitting a key that a later boundary discards without saying so.
+ *
+ * Both are therefore removable, by rebuilding the copy loops on a faithful
+ * mechanism and revisiting the boundaries that filter these names. Until then
+ * the reservation is what keeps a record from being corrupted in transit.
+ *
+ * The check is two `Object.hasOwn()` calls rather than a key walk, so it costs
+ * nothing per property and can sit on a hot validation path.
+ *
+ * @param value The object to check.
+ * @returns The offending property name, or `undefined` if there is none.
+ */
+export function unsafeObjectKeyIn(value: object): string | undefined {
+  for (const key of UNSAFE_OBJECT_KEYS) {
+    if (Object.hasOwn(value, key)) {
+      return key;
+    }
+  }
+
+  return undefined;
+}

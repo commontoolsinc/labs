@@ -812,6 +812,42 @@ describe("native-conversion", () => {
 
     // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
     // members and pass through unchanged.
+    describe("property names this runtime reserves", () => {
+      // A restriction of this runtime rather than of the data model: such an
+      // object is perfectly inert, and its keys are strings like any other.
+      // `__proto__` is refused because the assignment that rebuilds records
+      // cannot create it, `constructor` because other boundaries here already
+      // drop or refuse it.
+      it("throws for `__proto__`, naming it as the cause", () => {
+        expect(() => fabricFromNativeValue({ ["__proto__"]: 1, a: 2 })).toThrow(
+          "Not representable as a `FabricValue`: object with a property name " +
+            "this runtime reserves (`__proto__`)",
+        );
+      });
+
+      it("throws for `constructor`, naming it as the cause", () => {
+        // Type dispatch reads the constructor from the prototype, so an own
+        // `constructor` property no longer decides the value's type: it
+        // reaches the object rule and is named, rather than failing as some
+        // unrecognized type or being rebuilt as whatever class it held.
+        expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
+          "Not representable as a `FabricValue`: object with a property name " +
+            "this runtime reserves (`constructor`)",
+        );
+        expect(() => fabricFromNativeValue({ ["constructor"]: Error })).toThrow(
+          "this runtime reserves (`constructor`)",
+        );
+      });
+
+      it("throws for a reserved name nested in the graph", () => {
+        expect(() => fabricFromNativeValue({ a: { ["__proto__"]: 1 } }))
+          .toThrow("this runtime reserves (`__proto__`)");
+        expect(() => fabricFromNativeValue([{ ["__proto__"]: 1 }])).toThrow(
+          "this runtime reserves (`__proto__`)",
+        );
+      });
+    });
+
     describe("special numbers", () => {
       it("passes `NaN` through", () => {
         expect(Number.isNaN(shallowFabricFromNativeValue(NaN))).toBe(true);
@@ -2061,6 +2097,14 @@ describe("native-conversion", () => {
         sub.push(1, 2);
         expect(isFabricCompatible(sub)).toBe(false);
         expect(isFabricCompatible({ data: sub })).toBe(false);
+      });
+
+      it("returns `false` for a property name this runtime reserves", () => {
+        expect(isFabricCompatible({ ["__proto__"]: 1 })).toBe(false);
+        expect(isFabricCompatible({ ["constructor"]: 1 })).toBe(false);
+        expect(isFabricCompatible({ nested: { ["__proto__"]: 1 } })).toBe(
+          false,
+        );
       });
 
       it("rejects an array whose prototype was severed", () => {

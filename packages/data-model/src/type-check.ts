@@ -1,6 +1,6 @@
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
   type FabricPlainObject,
@@ -52,8 +52,10 @@ export function isFabricValueLayer(
       // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
       // `string`, so a symbol key has no representation either, and neither
       // does a non-enumerable string key; an accessor-backed property is live
-      // code rather than inert data.
-      return isInertPlainObject(value);
+      // code rather than inert data. The names this runtime reserves are a
+      // separate question from inertness -- see `unsafeObjectKeyIn()`.
+      return isInertPlainObject(value) &&
+        (unsafeObjectKeyIn(value) === undefined);
     }
 
     case "symbol": {
@@ -156,8 +158,11 @@ export function isFabricValue(value: unknown): value is FabricValue {
     } else if (isPlainObject(item)) {
       // Symbol-keyed and non-enumerable string-keyed properties have no fabric
       // representation, the same as an array's non-index properties; an
-      // accessor-backed property is live code rather than inert data.
+      // accessor-backed property is live code rather than inert data. The
+      // names this runtime reserves are a separate question from inertness --
+      // see `unsafeObjectKeyIn()`.
       if (!isInertPlainObject(item)) return false;
+      if (unsafeObjectKeyIn(item) !== undefined) return false;
       const record = item as Record<string, unknown>;
       for (const key of Object.keys(record)) {
         if (!check(record[key])) return false;
