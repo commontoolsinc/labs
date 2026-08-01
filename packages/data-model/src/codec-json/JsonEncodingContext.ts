@@ -365,9 +365,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
           if (isUnsafeObjectKey(key)) {
             return new ProblematicValue(
               key,
-              inner as unknown as FabricValue,
+              inner,
               `object contains a key this runtime reserves: "${key}"`,
-            ) as unknown as FabricValue;
+            );
           }
           result[key] = this.#decodeValue(val, context, registry);
         }
@@ -384,9 +384,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (tag === "") {
         return new ProblematicValue(
           tag,
-          state as unknown as FabricValue,
+          state,
           `object has bare "/" key`,
-        ) as unknown as FabricValue;
+        );
       }
 
       // Registry-based (tag lookup) dispatch
@@ -408,9 +408,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
             return deepFreeze(
               new ProblematicValue(
                 tag,
-                state as unknown as FabricValue,
+                state,
                 e instanceof Error ? e.message : String(e),
-              ) as unknown as FabricValue,
+              ),
             );
           }
         }
@@ -468,9 +468,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (key.startsWith("/")) {
         return new ProblematicValue(
           key.slice(1),
-          data as unknown as FabricValue,
+          data,
           `object contains reserved /-prefixed key: "${key}"`,
-        ) as unknown as FabricValue;
+        );
       }
       // A name this runtime reserves cannot be rebuilt by the assignment
       // below: `__proto__` would repoint the result's prototype instead of
@@ -480,9 +480,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (isUnsafeObjectKey(key)) {
         return new ProblematicValue(
           key,
-          data as unknown as FabricValue,
+          data,
           `object contains a key this runtime reserves: "${key}"`,
-        ) as unknown as FabricValue;
+        );
       }
       result[key] = this.#decodeValue(val, context, registry);
     }
