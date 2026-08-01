@@ -823,9 +823,14 @@ run_three_topic_fixture() {
   CHILD_A_PATH=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.path')
 
   # --- 3. Child B's response is deliberately dropped. -----------------------
-  # Killed after dispatch, triggered by the CLI's own `invocation:`
-  # announcement through a blocking pipe read (D3's mechanism) — lands in the
-  # window without racing a clock. The caller is left holding only the id.
+  # The commit-then-lost-response window is entered deterministically, not by
+  # racing a clock: the call runs with the CLI's test-only phase
+  # announcements on (CF_TEST_ANNOUNCE_INVOCATION_PHASES — stderr lines of
+  # the form `invocation: <id> phase: <phase>`, emitted only under that env
+  # var), and a blocking pipe read waits for `phase: committed`, which the
+  # CLI prints only once the handling's durable commit is acknowledged and
+  # before the response is consumed. Only then is the process killed, so
+  # commit-before-kill is a property of the mechanism, not of the schedule.
   INV_CHILD_B=$(new_invocation_id)
   CHILD_B_PAYLOAD=$(jq -cn --arg u "$UMBRELLA_ID" \
     '{title: "Child B", body: ("Extends " + $u + "."), agentName: "fable-d4",
@@ -837,32 +842,33 @@ run_three_topic_fixture() {
   # the kill) goes to a separate file so the baseline's command count is
   # exact rather than ±1 on the kill race.
   CF_CLI_INTEGRATION_TIMINGS_FILE="$D4_TIMINGS.killed" \
+  CF_TEST_ANNOUNCE_INVOCATION_PHASES=1 \
     cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" --invocation "$INV_CHILD_B" \
     createTopic -- --json "$CHILD_B_PAYLOAD" > /dev/null 2> "$ANNOUNCE_FIFO" &
   CALL_PID=$!
   set -e
-  ANNOUNCED=""
+  COMMIT_ANNOUNCED=""
   while IFS= read -r line; do
     case "$line" in
-      *"invocation: $INV_CHILD_B"*)
-        ANNOUNCED="yes"
+      *"invocation: $INV_CHILD_B phase: committed"*)
+        COMMIT_ANNOUNCED="yes"
         break
         ;;
     esac
   done < "$ANNOUNCE_FIFO"
   kill_process_tree "$CALL_PID"
   rm -f "$ANNOUNCE_FIFO"
-  if [ -z "$ANNOUNCED" ]; then
-    error "cf piece call should announce its invocation id at dispatch"
+  if [ -z "$COMMIT_ANNOUNCED" ]; then
+    error "The dropped call must reach its committed phase before the kill; the phase announcement never arrived"
   fi
 
-  # Whether the killed call got its commit in is genuinely racy; both
-  # outcomes are correct but exercise different machinery, so record which
-  # one ran (D3's convention). Committed → the retry MUST collide; not
-  # committed → the retry applies cleanly and its own handling is the
-  # original.
-  TOPICS_BEFORE_RETRY=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics 2>/dev/null | jq 'length')
-  echo "dropped-response: topics committed before kill = $TOPICS_BEFORE_RETRY"
+  # The kill landed only after the durable commit, so the create MUST be
+  # visible — a hard assertion, not a recorded race branch. If the kill ever
+  # lands pre-commit, the scenario fails here.
+  TOPICS_AFTER_KILL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics 2>/dev/null | jq 'length')
+  if [ "$TOPICS_AFTER_KILL" != "3" ]; then
+    error "The dropped create committed before the kill, so three topics must exist, got: $TOPICS_AFTER_KILL"
+  fi
 
   set +e
   CHILD_B_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
@@ -872,14 +878,12 @@ run_three_topic_fixture() {
   if [ "$CHILD_B_STATUS" -ne 0 ]; then
     error "Retrying the dropped create under the same id should exit 0, got $CHILD_B_STATUS"
   fi
-  if [ "$TOPICS_BEFORE_RETRY" = "3" ]; then
-    echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
-      error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
-  elif echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null; then
-    error "The dropped create never committed, so its retry must not deduplicate, got: $CHILD_B_JSON"
-  fi
-  # Either way the retry's Invocation JSON carries the settled handling's
-  # result — the readback the caller acts on after losing a response.
+  # The commit provably preceded the kill, so the retry MUST collide on the
+  # create-only receipt and settle as the ORIGINAL handling — every run.
+  echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+    error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
+  # The retry's Invocation JSON carries the settled handling's result — the
+  # readback the caller acts on after losing a response.
   CHILD_B_ID=$(echo "$CHILD_B_JSON" | jq -re '.result.topic.id') ||
     error "The dropped create's retry should read the result back, got: $CHILD_B_JSON"
   CHILD_B_PATH=$(echo "$CHILD_B_JSON" | jq -re '.result.topic.path')

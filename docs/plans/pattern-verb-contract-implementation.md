@@ -804,7 +804,13 @@ change that alters them.
   directly, standing in for the live pass's fid rendering; the
   dropped-response retry — and a same-id replay with a different payload —
   must read the ORIGINAL result back off the receipt (the assertion D3 left
-  open). Results flow schema-free per the C3 deferral: the value path is
+  open). The drop is deterministic, not a recorded race branch: the call
+  runs with a test-only per-phase stderr announcement
+  (`CF_TEST_ANNOUNCE_INVOCATION_PHASES`, off by default) and is killed only
+  after a blocking pipe read sees `phase: committed`, so the
+  commit-then-lost-response window is a property of the mechanism and the
+  dedup-with-original-result path is asserted unconditionally, every run.
+  Results flow schema-free per the C3 deferral: the value path is
   what the fixture proves, and no assertion reads a result schema from the
   durable store. Command counts, payload sizes, and per-command wall-clock
   print as `[d4-baseline]` lines (per-phase timings await #5233's

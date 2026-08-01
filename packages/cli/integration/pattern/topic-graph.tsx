@@ -87,7 +87,10 @@ export default pattern<TopicGraphInput, TopicGraphOutput>(({ topics }) => {
         throw new Error("createTopic: agentName must be non-blank");
       }
       const list = topics.get() ?? [];
-      const id = `topic-${list.length + 1}`;
+      // Captured before the push so the derivation cannot depend on whether
+      // `list` is a live view or a snapshot of the cell's value.
+      const index = list.length;
+      const id = `topic-${index + 1}`;
       topics.push({
         id,
         title: trimmed,
@@ -96,7 +99,7 @@ export default pattern<TopicGraphInput, TopicGraphOutput>(({ topics }) => {
         bodyUpdatedBy: "",
         references: references ?? [],
       });
-      return { topic: { id, path: `topics/${list.length}` } };
+      return { topic: { id, path: `topics/${index}` } };
     },
   );
 
