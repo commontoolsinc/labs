@@ -14,7 +14,9 @@ import {
   PieceResultProjectionError,
   PieceVerbReadError,
 } from "../lib/piece.ts";
+import { ValidationError } from "@cliffy/command";
 import {
+  exitPieceCallFailure,
   exitWithDataError,
   invocationJson,
   invocationPhaseReporter,
@@ -1630,6 +1632,132 @@ describe("piece call stdin payloads", () => {
     expect(stderrLines[0]).toMatch(/^timing: initial_sync → dispatched \d/);
     expect(stderrLines[1]).toMatch(/^timing: dispatched → settled \d/);
     expect(stdoutLines).toEqual([]);
+  });
+
+  it("closes the verbose span on the failure exit and reports the retry key", () => {
+    const lines: string[] = [];
+    const printed: string[] = [];
+    const exited: number[] = [];
+    let t = 3000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 3020;
+    observer.onPhase("dispatched");
+    t = 3050;
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new Error("send blew up"),
+        "inv-7",
+        "dispatched",
+        {
+          printError: (message) => printed.push(message),
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 20.0ms",
+      "timing: dispatched → failed 30.0ms",
+    ]);
+    expect(printed).toEqual([
+      "send blew up",
+      "invocation: inv-7 phase: dispatched",
+    ]);
+    expect(exited).toEqual([1]);
+  });
+
+  it("closes the verbose span before rethrowing a usage error", () => {
+    // A Cliffy ValidationError renders the usage screen upstream — but the
+    // in-flight span must still close as failed first, so malformed
+    // input/options leave a complete timing stream.
+    const lines: string[] = [];
+    const printed: string[] = [];
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => 0,
+    );
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new ValidationError("bad flags"),
+        "inv-8",
+        "initial_sync",
+        {
+          printError: (message) => printed.push(message),
+          exit: (): never => {
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow(ValidationError);
+    expect(lines).toEqual(["timing: initial_sync → failed 0.0ms"]);
+    // The usage error reports through Cliffy, not the failure printer.
+    expect(printed).toEqual([]);
+  });
+
+  it("closes the verbose span on the pre-dispatch payload-rejection exit", () => {
+    // reportVerbInputErrorOrRethrow terminates the process from inside the
+    // promise chain, bypassing the action's catch — without the observer
+    // threading, --verbose would leave the initial_sync span dangling.
+    const lines: string[] = [];
+    const printed: string[] = [];
+    const exited: number[] = [];
+    let t = 4000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 4012;
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError("addTopic", "missing required title"),
+        "fid1:piece-123",
+        {
+          printError: (message) => printed.push(message),
+          printHint: () => {},
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+        observer,
+      )
+    ).toThrow("exit-sentinel");
+    expect(lines).toEqual(["timing: initial_sync → failed 12.0ms"]);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toMatch(/Invalid input for "addTopic"/);
+    expect(exited).toEqual([1]);
+
+    // A rethrown (non-payload) error leaves the span open: the action's own
+    // failure exit closes it later, so nothing may be emitted here.
+    const rethrowLines: string[] = [];
+    const rethrowObserver = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => rethrowLines.push(line),
+      () => 0,
+    );
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new Error("network unreachable"),
+        "fid1:piece-123",
+        undefined,
+        rethrowObserver,
+      )
+    ).toThrow("network unreachable");
+    expect(rethrowLines).toEqual([]);
   });
 
   it("shapes the settled Invocation JSON an agent parses", () => {
