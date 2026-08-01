@@ -781,11 +781,16 @@ export async function replayAll(
       // worth naming is the pattern a fixture records and the run then does
       // not credit. First fixture wins, and the walk is path-sorted, so the
       // name a failure prints does not change run to run.
-      if (!coveredBy.has(key)) {
-        coveredBy.set(key, {
-          testKey: vintage.testKey,
-          pinned: vintage.tier === PINNED,
-        });
+      // A PINNED attribution always WINS, and first-wins only breaks ties
+      // within a tier. `collectVintages` sorts by path and `auto` sorts before
+      // `pinned`, so plain first-wins handed a pattern recorded by both tiers
+      // to the AUTO one — and the two carry opposite remedies. The reader
+      // would be told to pin a fixture that is already pinned while the real
+      // failure kept the gate red.
+      const existing = coveredBy.get(key);
+      const pinned = vintage.tier === PINNED;
+      if (existing === undefined || (pinned && !existing.pinned)) {
+        coveredBy.set(key, { testKey: vintage.testKey, pinned });
       }
     }
     failures.push(...report.failures);

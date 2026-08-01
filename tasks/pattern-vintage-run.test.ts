@@ -956,6 +956,41 @@ describe("the vintage gate, end to end", () => {
     });
   });
 
+  it("prefers the PINNED fixture when both tiers record a pattern", async () => {
+    // The two tiers carry OPPOSITE remedies — a pinned fixture that failed
+    // says "read the failures", an auto one says "pin it" — so which fixture
+    // wins the attribution decides which advice a reader gets.
+    //
+    // Plain first-wins gets it backwards: `collectVintages` sorts by path and
+    // `auto` sorts before `pinned`, so the auto fixture is walked first. A
+    // pattern recorded by both would be reported AUTO-only even when the
+    // pinned replay is the thing that failed, telling the reader to pin a
+    // fixture that is already pinned while the real failure keeps the gate red.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    // The SAME bytes under `auto/` as well, so both tiers record the pattern.
+    const autoDir = `${roots.vintagesRoot}/${pinnedRef.testKey}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    await Deno.copyFile(
+      pinnedRef.path,
+      `${autoDir}/${pinnedRef.stamp}-${pinnedRef.identity}.sqlite`,
+    );
+
+    const { coveredBy, replayed } = await replayAll(roots);
+
+    // Both were walked — otherwise "pinned won" would be true for the
+    // uninteresting reason that the auto one never ran.
+    expect(replayed).toBe(2);
+    expect(coveredBy.get(KEY)).toEqual({
+      testKey: pinnedRef.testKey,
+      pinned: true,
+    });
+  });
+
   it("attributes a pattern whose fixture no longer holds its root", async () => {
     // The case the attribution most needs to explain, and the one an earlier
     // ordering missed: `recorded` was populated AFTER the presence-control
