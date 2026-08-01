@@ -9,10 +9,11 @@ the test had to match, because the convention held for 91 of 120 tests in
 `packages/patterns` and not for the interesting ones — `topics/main.tsx` is
 tested by `topics/topics.test.tsx`, and `lunch-poll/main.test.tsx` is named
 after none of the several patterns it drives. Both were uncapturable rather
-than merely un-required. There are now FOUR fixtures — `system/home.test.tsx`,
-`system/default-app.test.tsx`, `topics/topics.test.tsx`,
-`lunch-poll/main.test.tsx` — carrying 84 recorded instantiations and 73 upgrade
-targets. Coverage is judged from what the replay actually REPLAYED, since a
+than merely un-required. Four TEST KEYS are covered —
+`system/home.test.tsx`, `system/default-app.test.tsx`,
+`topics/topics.test.tsx`, `lunch-poll/main.test.tsx` — by five fixtures,
+`system/home.test.tsx` having a second, auto-tier generation. Together they
+carry 90 recorded instantiations and 78 upgrade targets. Coverage is judged from what the replay actually REPLAYED, since a
 fixture routinely covers several patterns and a directory name stopped being
 the evidence.
 
@@ -135,7 +136,7 @@ Measured on branch `tier2`, not assumed:
 | The committed fixtures really do restore, and their names are provenance | the same controls, run against them: both replay clean, so each fixture contains the identity its filename records |
 | A root in ANOTHER space would have read green too | measured over a subject that instantiates a child via `Factory.inSpace(…)` — the shape `profile-create.tsx` uses. An entity id is content-derived and carries no space, so reading the child's recorded id under the FIXTURE's DID succeeds at finding nothing: the cell is absent, the broken candidate materializes onto it, and the run reports `changed: 2, updated: 2, failures: []` over a break. Two things were wrong and each alone still produced that green — the replay read `vintage.space` instead of the recorded `entry.space`, and `snapshot` copied only the primary space's SQLite file while the run had written two. Fixed by reading the recorded space and carrying every space the run wrote in a `.sqlite.spaces/` companion directory. Red/green: reverting the read reds exactly the cross-space case; disabling the companion copy reds all four |
 | A fixture covering NOTHING hides behind one that covers something | measured: two fixtures, the second's manifest rewritten so every recorded instantiation is a test pattern, reports `targets: 1, failures: []` and `isClean` true — the second applied today's source to nothing and said so nowhere. The `targets` floor is a SUM, so it only catches the case where every fixture covers nothing. Fixed with a per-fixture failure, which is what `candidates` already had. Reachable rather than theoretical: `isUpgradeTarget` has grown four exclusions, two added after fixtures already existed, and fixtures are append-only — a new exclusion silently zeroes an old fixture's coverage |
-| The cross-space mechanism is exercised only by a SYNTHETIC fixture | all four committed fixtures are single-space. `profile-create.tsx` is recorded, but `home.test.tsx` never fires the create, so its `inSpace` child never materializes. `tasks/pattern-vintage-run.test.ts` is therefore the whole of the coverage for companion stores, and it is meant to be: it can break a child on purpose, which a pinned fixture cannot. A real cross-space fixture would follow a required pattern's tests actually creating a profile — worth having, not a substitute |
+| The cross-space mechanism is exercised only by a SYNTHETIC fixture | every committed fixture is single-space. `profile-create.tsx` is recorded, but `home.test.tsx` never fires the create, so its `inSpace` child never materializes. `tasks/pattern-vintage-run.test.ts` is therefore the whole of the coverage for companion stores, and it is meant to be: it can break a child on purpose, which a pinned fixture cannot. A real cross-space fixture would follow a required pattern's tests actually creating a profile — worth having, not a substitute |
 | ABSENT, not just cross-space, is the real class — and a space-level control does not cover it | measured two further ways, both green over the same break without a PER-ROOT control: a companion store truncated to zero bytes (a valid empty SQLite database, so it restores and `restoredSpaces` lists it), and a recorded cell id that names nothing in the primary space. "Carries the space" is not "holds the root": `engine.ts` opens with `{ create: true }`, so merely reaching a space leaves a store file behind. Fixed with `vintageHoldsRoot`, run per target before anything is applied — the evidence being the `patternSetupIdentity` marker, which the runner stamps under the SAME condition that reports an instantiation to the capture observer, so every manifest entry's cell carries one by construction. A value check would instead depend on the pattern's result shape and would misread a root whose result is legitimately `{}`. Red/green: forcing the control true reds both absence cases |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
@@ -298,7 +299,7 @@ automatic updater performs no structural check at all.
 
 ### 3. Curated vintages in git
 
-- [x] `packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite`,
+- [x] `packages/piece/test/vintages/<test key>/pinned/<iso>-<identity>.sqlite`,
       labelled by the pattern identity that wrote it (provenance, not an
       address — nothing looks a fixture up by it; the replay enumerates the
       directory). **Not** under `packages/patterns/`, though the key is a path
@@ -314,7 +315,7 @@ automatic updater performs no structural check at all.
       so a fixture holding only the primary file would record roots whose state
       it does not have. The companion directory is part of the fixture, not a
       fixture itself, so `parseVintagePath` declines everything inside one
-- [x] Seed the auto-updating patterns from today's source
+- [x] Capture a named test's fixture from today's source
 - [x] Assert every REQUIRED pattern has a vintage, and replay every vintage
       that exists under today's source
 - [x] `deno task pattern-vintage` wired into CI
@@ -337,15 +338,20 @@ argument one level in, and the level that matters, because a root can be absent
 while the fixture is otherwise perfectly good — recorded in a space that did
 not travel, in a companion store that restored empty, or at a cell id nothing
 ever wrote. Each of those was measured to replay a real break with no failures
-at all. It compares no VALUES, though — and that is now the only remaining
-reason, since a captured vintage holds real data written through real handlers.
-So the storage-move class — the one this tier was built for — replays clean
-here: measured on the real `home.tsx`, renaming `.for("favorites")` to
-`.for("favouriteList")` exits 0. That is pinned as a limit in
-`tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
-`state-continuity.test.ts` over a populated vintage, and listed in stage 5 as
-the thing to close. Until it is closed, this gate's honest claim is "the update
-still APPLIES", not "the data survives".
+at all. It now compares VALUES too, so the storage-move class — the one this
+tier was built for — is caught: measured on the real `home.tsx`, renaming
+`.for("journal")` exits 1 naming the key and showing what was there. Emptiness
+is judged per LEAF at any depth, so partial loss counts — two of three rows
+gone, a field vanishing while its sibling survives, a container that stopped
+being one.
+
+The limit that remains is narrower and is pinned by name in
+`tasks/pattern-vintage-run.test.ts`: a value that merely CHANGED is warned
+about rather than failed on, because a replay recomputes as well as reads. So a
+moved key whose new slot the pattern SEEDS reads back non-empty and only warns,
+while the same move into a slot that stays empty fails. Weighting a key by
+whether it is backed by an `of:` document rather than a `computed:` one is the
+candidate for closing that.
 
 **A run that reaches no verdict is a failure.** The first version of this gate
 could exit 0 having replayed nothing and printed nothing: a pattern that fails
@@ -365,10 +371,13 @@ drift from the runtime. This plan previously said "every
 holds personal variants (`*-ben.tsx`) and modules that are not patterns
 (`piece-registry-migration.ts`), and a first attempt at requiring all 23 wedged
 on a file with no default export. A vintage that EXISTS is always replayed;
-the required list only governs what CI insists on. Pinning a profile or other
-long-lived pattern is a deliberate act, and is spelled
-`deno task pattern-vintage --update <pattern key>` — named keys are captured
-under the same only-ever-ADD rule as the required ones.
+the derived required set only governs what CI insists on. Pinning a profile or
+other long-lived pattern is a deliberate act, and is spelled
+`deno task pattern-vintage --update <test key>` — a TEST path, because a
+fixture is produced by RUNNING a test and covers whatever that test
+instantiates. There is no bare `--update` and no list of what CI replays: every
+fixture under the vintages tree is replayed by the plain command, so committing
+a captured fixture is the whole of adding one. Captures only ever ADD.
 
 **Fixtures are stored RAW, and both size arguments this plan reasoned from were
 wrong.** A store is mostly slack — 99 revisions in 3.5 MiB — and gzips 15-48x
@@ -479,10 +488,11 @@ that fails SILENTLY rather than loudly — which for a gate means passing:
 
 ### 4. Test-populated vintages, captured per generation, in git
 
-The vintages stage 3 seeds are captured straight off setup, so they hold a
-freshly materialized root and **no data**. That is why the gate can only assert
-"the update still applies" — there is nothing in the fixture for a change to
-strand. This stage fixes the fixture rather than the gate.
+Stage 3's vintages were captured straight off setup, so they held a freshly
+materialized root and **no data** — which is why the gate could only assert
+"the update still applies": there was nothing in the fixture for a change to
+strand. This stage fixed the fixture rather than the gate. Captures now run a
+pattern's own tests, so the state arrived through real handlers.
 
 A vintage becomes **a fresh database with that generation's pattern tests
 having run on it**. Not one root database migrated forward: each generation
@@ -525,11 +535,46 @@ exactly what a migrated-forward database no longer holds.
       `pattern-vintage-run.test.ts`. See the invariant below: a test pattern
       creates stores and is never an upgrade target, and this is the guard that
       keeps that from being merely written down.
-- [ ] Capture on identity change, committed — not uploaded as an artifact
-      (see the decision above).
-- [ ] Retention, if any, weighed as LOST COVERAGE against working-tree disk —
-      not applied as housekeeping, and still structurally unable to reach
-      `pinned/`.
+- [x] Capture on identity change, committed — not uploaded as an artifact
+      (see the decision above). `--capture-changed` replays the tree and
+      captures a generation for every test key whose fixtures have all moved on.
+      The trigger is the `changed` count the replay ALREADY computes per target,
+      so no new measurement and no naming convention: a fixture replaying with
+      `changed === 0` IS the current generation, and once no fixture for a key
+      reports zero, the next one is due. The command refuses to capture onto a
+      tree with any failure, which is also what removes the need for a rule
+      about capturing mid-edit.
+- [x] Retention, weighed as LOST COVERAGE against working-tree disk — four
+      generations per test key, and structurally unable to reach `pinned/`:
+      `autoGenerationsToPrune` filters the tier BEFORE it sorts or slices, so
+      no ordering of the later steps can name a pinned fixture, and
+      `removeVintages` refuses one again at the point of deletion. Both are
+      mutation-verified; moving the filter after the slice goes red.
+- [x] Promotion, so the tier split is a lifecycle rather than two directories.
+      `--pin <test key>` `git mv`s a key's newest generation into `pinned/`,
+      carrying the capture stamp over unchanged — restamping would date the
+      promotion instead, and the capture date is what says which generation of
+      the world the fixture holds.
+
+**Neither capture nor promotion runs in CI.** CI runs the plain gate, which
+only ever READS the tree. A gate that wrote its own evidence would be grading
+its own homework, so both land in the working tree to be committed and reviewed
+like every other change — the same trust-and-review discipline the append-only
+rule rests on.
+
+**Why the auto tier credits no coverage.** It is pruned by count, so letting a
+generation satisfy the coverage requirement would let retention delete a
+pattern's only evidence while the gate still read green. Coverage counts pinned
+vintages only, and `reportUncovered` tells a pattern recorded by a clean auto
+generation to promote it.
+
+**What the tier split buys.** A single pinned vintage proves today's source can
+read one particular old world. A run of generations proves it can read every
+world the pattern has passed through — the gate gets stronger as the repository
+ages rather than merely staying green. That is affordable only because of the
+raw-storage measurement above: git deltas adjacent generations to ~9 KiB, while
+each costs 3.5 MiB of working-tree disk in every clone. Accumulate in the place
+that is cheap, bound the place that is not.
 
 **INVARIANT: a test pattern creates stores. It is never an upgrade target.**
 
@@ -811,8 +856,10 @@ Three further limits, all measured, all in the gate as shipped:
   three roots, all derived names.
 - **A target whose every comparable key is a rendering** reports "updated
   cleanly with no state stranded" having compared nothing, and the output cannot
-  distinguish that from a real check. Three of fourteen targets today
-  (`profile-picker.tsx`, and the two map-body hoists).
+  distinguish that from a real check. A real share of the targets today:
+  `profile-picker.tsx`, plus every `__cfPattern_N` map-body hoist — 26 hoist
+  instances across 5 distinct hoists, of 78 targets, once topics and lunch-poll
+  joined the fixture set. "The two" was true of the pre-#5253 14-target set.
 
 ## Open questions
 

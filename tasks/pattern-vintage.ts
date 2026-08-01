@@ -41,13 +41,21 @@
  * compared as the DOCUMENT it points at, so a field that moved to a different
  * doc is still a finding.
  *
- *   deno task pattern-vintage                            # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update                   # capture where a REQUIRED one is missing
- *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one deliberately
+ *   deno task pattern-vintage                                  # replay; fail on a stranded fixture
+ *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one
+ *   deno task pattern-vintage --capture-changed                # capture a generation where due
+ *   deno task pattern-vintage --pin topics/topics.test.tsx     # promote the newest generation
  *
- * A named key is a TEST path, not a pattern path — a fixture is produced by
- * running a test, and covers whatever that test instantiates. `system/x.tsx`
+ * `--update` always names a TEST path, never a pattern path — a fixture is
+ * produced by RUNNING a test, and covers whatever that test instantiates, which
+ * is routinely several patterns none of which share its name. `system/x.tsx`
  * names no test and captures nothing.
+ *
+ * There is no bare `--update`, and no list of what CI replays. Every fixture
+ * under the vintages tree is replayed by the plain command, so committing a
+ * captured fixture is the whole of adding one. A default seed set would only
+ * ever serve a MISSING fixture, and that is exactly when nothing on disk knows
+ * which test covers the pattern.
  *
  * `--update` can only ADD. It never rewrites or deletes an existing fixture,
  * for the reason Tier 1's baselines are append-only: a command that could
@@ -55,6 +63,30 @@
  * break. Deleting one is a deliberate act that shows up in review as a deleted
  * file. Naming keys explicitly does not weaken that — a key that already has a
  * pinned vintage is skipped whichever way it was asked for.
+ *
+ * ## The two tiers
+ *
+ * `pinned/` is evidence: never pruned, and the only tier that credits
+ * coverage. `auto/` is history: captured automatically wherever today's source
+ * has moved past every generation on disk, and pruned by count.
+ *
+ * That split is what makes the gate get STRONGER over time rather than just
+ * staying green. A single pinned vintage only ever proves today's source can
+ * read one particular old world; a run of generations proves it can read every
+ * world the pattern has passed through. Accumulating them is cheap in the only
+ * place it is permanent — git deltas adjacent generations of a near-identical
+ * store to ~9 KiB — and bounded where it is not, since each one also costs
+ * 3.5 MiB of working-tree disk in every clone.
+ *
+ * Neither command runs in CI. CI runs the plain gate, which only ever READS
+ * the tree. Capture and promotion write fixtures, and a gate that wrote its own
+ * evidence would be grading its own homework; both land in the working tree to
+ * be committed and reviewed like any other change.
+ *
+ * `--capture-changed` refuses to capture onto a red tree, which is also what
+ * removes the need for a rule about capturing mid-edit: a generation is a
+ * record of a world that worked, and a release promotes from a branch that
+ * already passed.
  *
  * That discipline is enforced HERE, in what the command will do, and otherwise
  * rests on review — deliberately, and unlike Tier 1, whose baselines have a
@@ -77,23 +109,29 @@ import {
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
   armVerdictGuard,
+  type CommandOutput,
+  describeCaptureOutcome,
+  describePinOutcome,
   isClean,
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
-  reportNothingToSeed,
   reportReplaySummary,
   reportUncovered,
+  reportUnknownFlags,
   reportUnmappedUrls,
-  REQUIRED_TEST_KEYS,
+  reportUpdateNeedsATestKey,
   requiredPatternKeys,
   uncoveredRequiredPatterns,
+  unknownFlags,
   unmappedPatternUrls,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
+  captureChangedGenerations,
   captureMissing,
   type GateRoots,
+  pinNewestGeneration,
   replayAll,
 } from "./pattern-vintage-run.ts";
 
@@ -113,6 +151,24 @@ const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
  * too.)
  */
 const FIXTURE_SIGNER = await Identity.fromPassphrase("pattern vintage fixture");
+
+/**
+ * Print what a command decided to say and exit with the code it chose.
+ *
+ * `never` rather than `void`, and the annotation is doing real work even
+ * though `Deno.exit` already guarantees it — but the work is HERE, not at the
+ * call sites. Measured: changing it to `void` produces no call-site error at
+ * all, because no `emit` call has code after it inside its own block, so
+ * `never` has no control flow to narrow. What it does catch is a future `emit`
+ * that can return: adding a bare `return;` to this body is a compile error on
+ * the spot. That is the thing that would otherwise let a command fall through
+ * into the plain gate below.
+ */
+function emit(shown: CommandOutput): never {
+  if (shown.out !== undefined) console.log(shown.out);
+  if (shown.err !== undefined) console.error(shown.err);
+  Deno.exit(shown.code);
+}
 
 async function main() {
   const roots: GateRoots = {
@@ -135,25 +191,37 @@ async function main() {
   }
   const required = requiredPatternKeys(systemUrls);
 
+  // Before anything else: a flag this task does not know is a MISTAKE, not a
+  // no-op. Unhandled, it falls through to the plain gate and exits 0 having
+  // answered a question nobody asked.
+  const unknown = unknownFlags(Deno.args);
+  if (unknown.length > 0) emit({ err: reportUnknownFlags(unknown), code: 1 });
+
   if (Deno.args.includes("--update")) {
-    // Keys named on the command line pin a pattern nobody auto-updates — the
-    // deliberate act the layout allows for. With none named, the required set
-    // is what gets seeded.
-    // Keys name TEST files now, not patterns — a fixture is produced by
-    // running a test, and covers whatever that test instantiates.
+    // A capture NAMES the test to run. There is no default set, and deriving
+    // one is not possible in the case that would need it: the seed list only
+    // ever did work when a fixture was MISSING, and nothing on disk knows
+    // which test covers a pattern whose fixture is gone — a test need not be
+    // named after what it drives. A hand-kept list papered over that and
+    // introduced a seam instead: the required PATTERNS come from the runtime's
+    // URL constants, so adding one no listed test instantiates left the gate
+    // red while `--update` reported everything fine and exited 0.
+    //
+    // The guidance moved to where someone actually needs it —
+    // `reportUncovered`, which fires exactly when a required pattern has no
+    // fixture and can now name the test where one is known.
     const named = Deno.args.filter((arg) => !arg.startsWith("--"));
-    const wanted = named.length > 0 ? named : REQUIRED_TEST_KEYS;
+    if (named.length === 0) {
+      console.error(reportUpdateNeedsATestKey());
+      Deno.exit(1);
+    }
     const { captured, problems } = await captureMissing(
       roots,
-      wanted,
+      named,
       new Date(),
     );
     if (captured.length === 0 && problems.length === 0) {
-      console.log(
-        named.length > 0
-          ? `Already pinned: ${named.join(", ")}.`
-          : reportNothingToSeed(REQUIRED_TEST_KEYS),
-      );
+      console.log(`Already pinned: ${named.join(", ")}.`);
     }
     for (const path of captured) {
       console.log(`  + ${relativeToRepo(path, REPO_ROOT)}`);
@@ -166,13 +234,37 @@ async function main() {
     return;
   }
 
+  if (Deno.args.includes("--pin")) {
+    emit(describePinOutcome(
+      await pinNewestGeneration(
+        roots,
+        Deno.args.filter((arg) => !arg.startsWith("--")),
+      ),
+      REPO_ROOT,
+    ));
+  }
+
   const replay = await replayAll(roots);
+
+  if (Deno.args.includes("--capture-changed")) {
+    emit(describeCaptureOutcome(
+      await captureChangedGenerations(roots, replay, new Date()),
+      REPO_ROOT,
+    ));
+  }
+
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
   const uncovered = uncoveredRequiredPatterns(required, replay.covered);
 
-  if (uncovered.length > 0) console.error(reportUncovered(uncovered));
+  if (uncovered.length > 0) {
+    console.error(reportUncovered(
+      uncovered,
+      replay.coveredBy,
+      new Set(replay.failures.map((failure) => failure.testKey)),
+    ));
+  }
   if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);
   if (replay.failures.length > 0) {
     console.error(`\n${reportFailures(replay.failures)}`);

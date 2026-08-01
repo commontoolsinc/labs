@@ -146,14 +146,30 @@ jobs:
       # apply. The space roots auto-update onto a root someone is already
       # using, so a break here bricks a live piece.
       #
-      # What it does NOT yet catch (measured, and tracked as stage 5 in
-      # docs/plans/pattern-update-state-continuity.md): a MOVED storage key.
-      # The committed vintages DO hold real data — capture drives a pattern
-      # through its own tests — but the replay asks only whether the migration
-      # applied, never whether the values survived it, so `.for('x')` →
-      # `.for('y')` replays clean here.
-      # `packages/piece/test/state-continuity.test.ts` covers that class.
-      - name: 🔁 Replay pinned vintages under today's source
+      # It also checks the values SURVIVE, not merely that the migration
+      # applied: a moved storage key (`.for('x')` → `.for('y')`) leaves the
+      # declared contract untouched while the old documents go unreachable, and
+      # that now exits 1 naming the key. Emptiness is judged per leaf, so
+      # partial loss counts too.
+      #
+      # The limit worth knowing (docs/plans/pattern-update-state-continuity.md):
+      # a value that merely CHANGED is warned about rather than failed on,
+      # because a replay recomputes as well as reads. So a moved key whose new
+      # slot the pattern SEEDS reads back non-empty and only warns. The same
+      # move into a slot that stays empty DOES fail, and
+      # `tasks/pattern-vintage-run.test.ts` pins both halves by name.
+      #
+      # EVERY fixture is replayed, both tiers. `pinned/` is what CREDITS
+      # coverage — it is never pruned — while `auto/` accumulates generations
+      # so today's source is proved against every world a pattern has passed
+      # through, not just one. Committing a fixture is the whole of adding one;
+      # there is no list here of what gets replayed.
+      #
+      # This job only ever READS the tree. Capturing (`--capture-changed`) and
+      # promoting (`--pin`) are commands someone runs and commits, deliberately
+      # not CI steps: a gate that wrote its own evidence would be grading its
+      # own homework.
+      - name: 🔁 Replay every committed vintage under today's source
         run: deno task pattern-vintage
 
   baselines-append-only:

@@ -15,11 +15,16 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
+  AUTO,
+  autoGenerationsToPrune,
   collectVintages,
   describeError,
+  newestAutoGeneration,
   patternKeyFromMain,
   PINNED,
+  promoteVintage,
   relativeToRepo,
+  removeVintages,
   type ReplayFailure,
   stampFor,
   vintageFileName,
@@ -129,6 +134,72 @@ export function snippet(value: unknown): string {
   }
 }
 
+/** Which test's fixture records a pattern, and whether it can credit it. */
+export interface VintageAttribution {
+  testKey: string;
+  /**
+   * PINNED is the only tier coverage counts. It breaks TIES over which test to
+   * name, and selects a remedy: `reportUncovered` scopes by whether the
+   * recording fixture FAILED and then by tier, so an auto generation that
+   * replayed cleanly is told to promote itself.
+   */
+  pinned: boolean;
+}
+
+/** What replaying ONE fixture found, kept per fixture rather than summed. */
+export interface VintageOutcome {
+  ref: VintageRef;
+  /** Recorded instantiations that are legitimate upgrade targets. */
+  targets: number;
+  /** Of those, the ones whose source moved since this fixture was captured. */
+  changed: number;
+  /** Whether replaying this fixture produced any failure at all. */
+  failed: boolean;
+}
+
+/**
+ * Test keys whose newest generation no longer matches today's source.
+ *
+ * A fixture that replays with `changed === 0` IS the current generation: every
+ * target it recorded still compiles to the identity it captured, so a fresh
+ * capture would record the same world and cost a 3.5 MiB file to say so. Once
+ * every fixture for a key reports something changed, the tree no longer holds
+ * a generation of today, and the next one is due.
+ *
+ * Two shapes deliberately do NOT count as current, for opposite reasons:
+ *
+ *   - a fixture with no targets proved nothing, so it cannot be evidence that
+ *     the world has not moved;
+ *   - a fixture that FAILED is not a statement about currency at all — it is
+ *     the gate's own red, and reading it either way would let a broken fixture
+ *     decide whether to capture.
+ *
+ * The second is a SECOND LOCK, not the operative rule.
+ * `captureChangedGenerations` returns `refused-red` on any failure before this
+ * is ever called, so no production path reaches it today. It stays because
+ * this function is exported and answers a question — "is a generation due" —
+ * that a caller could reasonably ask without refusing on red first, and
+ * because the honest answer to that question from a broken fixture is "this
+ * fixture cannot tell you".
+ *
+ * A served-route-only fixture reports `changed === 0` and so reads as current,
+ * which is right: its identity is not reproducible from the repo, so no
+ * capture could ever move it off zero and a staleness rule that counted it
+ * would capture a new generation on every single run, forever.
+ */
+export function staleTestKeys(
+  outcomes: readonly VintageOutcome[],
+): string[] {
+  const seen = new Set<string>();
+  const current = new Set<string>();
+  for (const outcome of outcomes) {
+    seen.add(outcome.ref.testKey);
+    if (outcome.failed || outcome.targets === 0) continue;
+    if (outcome.changed === 0) current.add(outcome.ref.testKey);
+  }
+  return [...seen].filter((key) => !current.has(key)).sort();
+}
+
 /** What replaying one fixture found. */
 export interface ReplayReport {
   /** Instantiations the fixture recorded. Zero means it proved nothing. */
@@ -169,6 +240,22 @@ export interface ReplayReport {
    * "X was replayed" — and the second is the one that matters.
    */
   covered: Set<string>;
+  /**
+   * Pattern keys this fixture's manifest NAMES, whether or not each was
+   * credited as coverage.
+   *
+   * Deliberately not a subset of `covered`, and that is the whole point.
+   * `covered` answers "was this replayed and credited"; a pattern can be
+   * recorded and then not credited — a root the fixture no longer holds, a
+   * source that stopped resolving or compiling, a fixture that failed outright
+   * before any target ran, or an auto-tier generation, which credits nothing
+   * by design however cleanly it replays.
+   * (NOT a served route: those are credited, `covered.add` running
+   * unconditionally below the served-route branch.) Deriving attribution from
+   * `covered` made the "recorded by X" branch unreachable by construction,
+   * since `uncovered` is exactly the required keys ABSENT from `covered`.
+   */
+  recorded: Set<string>;
   failures: ReplayFailure[];
 }
 
@@ -188,7 +275,15 @@ export async function replayVintage(
     testKey: vintage.testKey,
     path: relativeToRepo(vintage.path, roots.repoRoot),
   };
-  const fail = (detail: string): ReplayReport => ({
+  // A fixture-level failure still ATTRIBUTES what its manifest names, when the
+  // manifest could be read. Returning an empty `recorded` routed those patterns
+  // into "no fixture records this, capture one" — false, since the fixture is
+  // sitting in the tree, and the suggested capture then prints "Already pinned"
+  // and exits 0. That is the dead end this whole change removes, one layer down.
+  const fail = (
+    detail: string,
+    recorded: Set<string> = new Set<string>(),
+  ): ReplayReport => ({
     candidates: 0,
     targets: 0,
     unmappable: 0,
@@ -197,8 +292,16 @@ export async function replayVintage(
     stranded: 0,
     servedRoute: 0,
     covered: new Set<string>(),
+    recorded,
     failures: [{ ...where, detail }],
   });
+  /** Every pattern key a manifest names, for attributing a failed fixture. */
+  const recordedFrom = (entries: readonly VintageManifestEntry[]) =>
+    new Set(
+      entries
+        .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
+        .filter((key): key is string => key !== undefined),
+    );
   // Stated once, because every "this fixture is not usable" message needs it and
   // the obvious remedy is WRONG: `--update` skips a key that already has a
   // pinned vintage and the capture refuses to overwrite one, so "recapture it"
@@ -222,7 +325,7 @@ export async function replayVintage(
     if (!await vintageRootHasState(runtimeVintage)) {
       return fail(
         "this fixture holds no captured root — it did not restore, so " +
-          "replaying it would prove nothing",
+          `replaying it would prove nothing. ${remedy}`,
       );
     }
     const manifest = await readVintageManifest(runtimeVintage);
@@ -243,7 +346,13 @@ export async function replayVintage(
         `this fixture's name records identity ${vintage.identity}, which it ` +
           `does not contain (it holds ${
             [...new Set(manifest.entries.map((e) => e.identity))].join(", ")
-          }) — so it is not the state its name claims`,
+          }) — so it is not the state its name claims. Renaming the file to ` +
+          `one of the identities it does hold keeps the vintage, which a ` +
+          `recapture would replace with today's state; a deep vintage cannot ` +
+          `be recaptured at all, since the version that wrote it no longer ` +
+          `exists in runnable form. Only if the file is genuinely junk: ` +
+          `${remedy}`,
+        recordedFrom(manifest.entries),
       );
     }
 
@@ -285,6 +394,7 @@ export async function replayVintage(
           `${unmappable.length} cannot be mapped to a file at all, and the ` +
           `rest are test patterns or keyless session pointers. Replaying it ` +
           `asserts nothing. ${remedy}`,
+        recordedFrom(manifest.entries),
       );
     }
     // The per-entry control, and the one the whole gate leans on: does this
@@ -325,6 +435,7 @@ export async function replayVintage(
       // gate without ever being materialized or compared. The docstring says
       // coverage means "X was replayed"; now it does.
       covered: new Set<string>(),
+      recorded: new Set<string>(),
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -361,7 +472,10 @@ export async function replayVintage(
               `${entry.space}, so this fixture does not hold that root`
             : `was materialized in ${entry.space}, which this fixture does ` +
               `not carry (it holds ${[...carried].sort().join(", ")})`) +
-          ` — it was recorded but NOT validated. ${remedy}`,
+          ` — it was recorded but NOT validated. If the space is one the ` +
+          `fixture should carry, its companion store is missing: restore it ` +
+          `rather than recapturing, which would replace the vintage with ` +
+          `today's state. Only if the fixture is genuinely wrong: ${remedy}`,
       });
     }
 
@@ -409,18 +523,28 @@ export async function replayVintage(
     }
 
     for (const entry of targets) {
-      // Already reported above. Materializing it anyway would apply today's
-      // source to an empty cell and count the result as a clean update.
-      if (missing.has(entry)) continue;
       // A recorded `main` is either a repo path or the ROUTE the toolshed
       // serves the pattern at; both name a file under `packages/patterns/`.
       const key = patternKeyFromMain(entry.main, patternsPrefix(roots));
+      // RECORDED before any skip, including the presence control below. The
+      // manifest names this pattern whatever happens next, and that is what
+      // makes the fixture worth pointing a reader at. Ordering this after the
+      // `missing` skip left the "fixture no longer holds the root" case — the
+      // one this attribution most needs to explain — reported as though no
+      // fixture recorded the pattern at all, which is the dead end the seam
+      // removal exists to close, one layer down.
+      if (key !== undefined) report.recorded.add(key);
+      // Already reported above. Materializing it anyway would apply today's
+      // source to an empty cell and count the result as a clean update.
+      if (missing.has(entry)) continue;
       if (key === undefined) {
         report.failures.push({
           ...where,
           detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
             `names "${entry.main}", which is neither a repo path nor a served ` +
-            `pattern route, so today's source for it cannot be found`,
+            `pattern route, so today's source for it cannot be found. The ` +
+            `capture guard refuses this shape now, so a fixture holding one ` +
+            `predates it: ${remedy}`,
         });
         continue;
       }
@@ -433,7 +557,11 @@ export async function replayVintage(
       } catch (error) {
         report.failures.push({
           ...where,
-          detail: `${entry.main} no longer resolves: ${describeError(error)}`,
+          detail:
+            `${entry.main} no longer resolves: ${
+              describeError(error)
+            }. If it moved deliberately, the fixture records a path that is no ` +
+            `longer there: ${remedy}`,
         });
         continue;
       }
@@ -464,7 +592,9 @@ export async function replayVintage(
       } catch (error) {
         report.failures.push({
           ...where,
-          detail: `${entry.main} no longer compiles: ${describeError(error)}`,
+          detail: `${entry.main} no longer compiles: ${
+            describeError(error)
+          }. Fix the source; if it was removed deliberately, ${remedy}`,
         });
         continue;
       }
@@ -497,8 +627,8 @@ export async function replayVintage(
       // gate's only evidence for a pattern and the run still reads green. That
       // guarantee used to live in `coveredPatternKeys`, which coverage stopped
       // going through when it moved to what the replay actually replayed; it is
-      // restored here rather than left to the fact that nothing writes an auto
-      // capture yet.
+      // restored here, and `--capture-changed` now writes auto generations, so
+      // it is load-bearing rather than anticipatory.
       if (vintage.tier === PINNED) report.covered.add(key);
       const today = runtimeVintage.runtime.patternManager
         .getArtifactEntryRef(pattern)?.identity;
@@ -598,7 +728,7 @@ export async function replayVintage(
               ? `carries a setup marker but no readable stored schema, so `
               : `stores a result schema that reads back nothing, so `) +
             `applying ${entry.main} over it could not be checked for stranded ` +
-            `state`,
+            `state. The fixture does not hold what it claims: ${remedy}`,
         });
         continue;
       }
@@ -704,11 +834,45 @@ export async function replayAll(
     stranded: number;
     servedRoute: number;
     covered: Set<string>;
+    /**
+     * Which TEST's fixture RECORDS each pattern, and whether that fixture is
+     * the tier that credits coverage.
+     *
+     * Derived from the run rather than kept by hand: a manifest records the
+     * authored file of every instantiation, so the fixture tree already knows
+     * which test names which pattern. Built from `recorded`, NOT `covered` —
+     * a pattern that was credited never reaches an uncovered report, so the
+     * only ones worth attributing are those a fixture records and the run then
+     * declines to credit.
+     *
+     * `pinned` breaks a TIE, and now also selects a remedy. When two fixtures
+     * record one pattern, the pinned one is the more useful to name, and
+     * `collectVintages` sorts `auto` before `pinned` so plain first-wins picks
+     * the wrong one. `reportUncovered` additionally branches on it: an
+     * auto-recorded pattern that replayed cleanly is one `--pin` away from
+     * being covered, which is a different instruction from anything a pinned
+     * fixture can need.
+     */
+    coveredBy: Map<string, VintageAttribution>;
+    /**
+     * What each fixture individually found, in walk order.
+     *
+     * The aggregate counts above cannot answer whether any ONE generation is
+     * current, because `changed` sums across fixtures: a tree holding a
+     * current generation and three older ones reports a positive `changed`
+     * that says nothing about whether the newest still matches today. Deciding
+     * when the next generation is due needs the per-fixture answer, so it is
+     * returned rather than recomputed by a second walk that could disagree
+     * with the one that produced the verdict.
+     */
+    perVintage: VintageOutcome[];
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
+  const perVintage: VintageOutcome[] = [];
   const covered = new Set<string>();
+  const coveredBy = new Map<string, VintageAttribution>();
   let servedRoute = 0;
   let candidates = 0,
     targets = 0,
@@ -719,6 +883,12 @@ export async function replayAll(
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
+    perVintage.push({
+      ref: vintage,
+      targets: report.targets,
+      changed: report.changed,
+      failed: report.failures.length > 0,
+    });
     candidates += report.candidates;
     targets += report.targets;
     unmappable += report.unmappable;
@@ -727,6 +897,23 @@ export async function replayAll(
     stranded += report.stranded;
     servedRoute += report.servedRoute;
     for (const key of report.covered) covered.add(key);
+    for (const key of report.recorded) {
+      // From `recorded`, NOT `covered`: a pattern that was credited needs no
+      // attribution, because it never reaches an uncovered report. The one
+      // worth naming is the pattern a fixture records and the run then does
+      // not credit. First fixture wins, and the walk is path-sorted, so the
+      // name a failure prints does not change run to run.
+      // A PINNED attribution always WINS, and first-wins only breaks ties
+      // within a tier. `collectVintages` sorts by path and `auto` sorts before
+      // `pinned`, so plain first-wins named the AUTO fixture when both record
+      // one pattern — and the pinned one is the useful name, being the fixture
+      // whose failure the reader is about to read.
+      const existing = coveredBy.get(key);
+      const pinned = vintage.tier === PINNED;
+      if (existing === undefined || (pinned && !existing.pinned)) {
+        coveredBy.set(key, { testKey: vintage.testKey, pinned });
+      }
+    }
     failures.push(...report.failures);
   }
   return {
@@ -740,6 +927,8 @@ export async function replayAll(
     stranded,
     servedRoute,
     covered,
+    coveredBy,
+    perVintage,
     failures,
   };
 }
@@ -781,6 +970,7 @@ export async function captureVintage(
   roots: GateRoots,
   testKey: string,
   now: Date,
+  tier: string = PINNED,
 ): Promise<string> {
   const testPath = testPathFor(roots, testKey);
   const dir = await Deno.makeTempDir({ prefix: "pattern-vintage-capture-" });
@@ -892,14 +1082,20 @@ export async function captureVintage(
       );
     }
     await writeVintageManifest(vintage, entries);
-    const outDir = `${roots.vintagesRoot}/${testKey}/${PINNED}`;
+    const outDir = `${roots.vintagesRoot}/${testKey}/${tier}`;
     await Deno.mkdir(outDir, { recursive: true });
     const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
-    // Never write over an existing fixture. `captureMissing` already skips a
-    // covered key, so reaching this with the file present means something else
-    // did — and the cleanup below deletes files on the way out, which must
-    // never be somebody else's pinned state. A fixture is deleted deliberately
-    // and visibly in a diff, never by an error path.
+    // Never write over an existing fixture, in EITHER tier. `captureMissing`
+    // already skips a covered key, so reaching this with the file present
+    // means something else did — and the cleanup below deletes files on the
+    // way out, which must never be somebody else's state. A fixture is deleted
+    // deliberately and visibly in a diff, never by an error path.
+    //
+    // This still holds for the auto tier, whose whole job is to ADD a
+    // generation beside the existing ones: the name carries a millisecond
+    // stamp AND the identity, so a collision means the same test compiled to
+    // the same identity within one millisecond — which is a second capture of
+    // a generation already on disk, not a new one.
     //
     // The companion directory is deliberately NOT part of this guard, so the
     // cleanup can remove a LEFTOVER one. A companion directory whose primary
@@ -909,7 +1105,7 @@ export async function captureVintage(
     if (await exists(path)) {
       throw new Error(
         `cannot capture ${testKey}: ${path} already exists, and a capture ` +
-          `never overwrites a pinned vintage — delete it deliberately first`,
+          `never overwrites a vintage — delete it deliberately first`,
       );
     }
     try {
@@ -967,6 +1163,164 @@ export async function captureMissing(
       // Report every failure rather than dying on the first: a run that
       // captures 9 of 10 and then throws leaves the tree half-seeded with no
       // statement about which one is the problem.
+      problems.push(`  ${key}: ${describeError(error)}`);
+    }
+  }
+  return { captured, problems };
+}
+
+/**
+ * What `--capture-changed` decided and did. The shell only prints it.
+ *
+ * A discriminated result rather than console output written where the decision
+ * is made, so the decision is testable. The alternative was tried: the whole
+ * sequence — replay, refuse on red, select, capture, prune — lived in the task
+ * shell, where nothing imports it and every branch was uncovered. This module's
+ * own header already said where the work belongs.
+ */
+export type CaptureChangedOutcome =
+  | { kind: "refused-red"; failures: readonly ReplayFailure[] }
+  | { kind: "all-current"; replayed: number }
+  | {
+    kind: "captured";
+    captured: string[];
+    pruned: string[];
+    problems: string[];
+  };
+
+/**
+ * Decide whether a generation is due, capture it, and prune what aged out.
+ *
+ * Takes the replay it should judge rather than running one, so a caller cannot
+ * accidentally capture against a different run than the one it reported — and
+ * so the decision can be driven from a fixed replay in a test.
+ */
+export async function captureChangedGenerations(
+  roots: GateRoots,
+  replay: {
+    failures: readonly ReplayFailure[];
+    perVintage: readonly VintageOutcome[];
+  },
+  now: Date,
+): Promise<CaptureChangedOutcome> {
+  // Capture from a GREEN tree only. A fixture that failed is not a statement
+  // about which generation the world is on, and capturing beside it would mint
+  // a generation from a run whose verdict is red — the one moment the
+  // repository is least entitled to be recorded as a baseline. This is also
+  // what keeps the release process honest without a mid-write rule: a release
+  // promotes from a branch that already passed.
+  if (replay.failures.length > 0) {
+    return { kind: "refused-red", failures: replay.failures };
+  }
+  const stale = staleTestKeys(replay.perVintage);
+  if (stale.length === 0) {
+    return { kind: "all-current", replayed: replay.perVintage.length };
+  }
+  const { captured, problems } = await captureGenerations(roots, stale, now);
+  // Prune AFTER capturing, against a RE-READ tree, so the new generations are
+  // among the ones counted. Pruning first would keep `keep` old ones and then
+  // add another, leaving the tree permanently one over the bound.
+  //
+  // A prune failure is REPORTED, never thrown. Files have already been written
+  // by this point, and throwing here would lose the record of which — leaving
+  // fixtures on disk that the command never told anyone about. Over-retention
+  // is a disk cost someone can fix by running this again; an unreported
+  // capture is a file nobody knows to look at.
+  // Deletions are recorded AS THEY HAPPEN, one at a time, rather than assumed
+  // all-or-nothing. `removeVintages` deletes in a loop, so a failure part way
+  // through leaves the earlier deletions done — and reporting `pruned: []`
+  // there loses the record of files this command removed, which is the same
+  // loss the surrounding try/catch exists to prevent, in the other direction.
+  // Milder, since an auto generation is regenerable, but for one captured
+  // minutes ago and never committed nothing else records that it existed.
+  const pruned: string[] = [];
+  try {
+    for (
+      const path of autoGenerationsToPrune(
+        await collectVintages(roots.vintagesRoot),
+      )
+    ) {
+      await removeVintages([path], roots.vintagesRoot);
+      pruned.push(path);
+    }
+  } catch (error) {
+    return {
+      kind: "captured",
+      captured,
+      pruned,
+      problems: [...problems, `  retention: ${describeError(error)}`],
+    };
+  }
+  return { kind: "captured", captured, pruned, problems };
+}
+
+/** What `--pin` decided and did. The shell only prints it. */
+export type PinOutcome =
+  | { kind: "needs-one-key"; given: number }
+  | { kind: "nothing-to-pin"; testKey: string; vintages: readonly VintageRef[] }
+  | { kind: "promoted"; from: string; to: string }
+  | { kind: "failed"; from: string; detail: string };
+
+/**
+ * Promote a key's newest AUTO generation into the tier retention cannot reach.
+ *
+ * A failure is RETURNED rather than thrown. A promotion moves a companion
+ * directory and then a primary file, so whoever ran it needs to know which of
+ * the pair moved — and an uncaught throw buries that under a stack trace of
+ * this module's own call frames.
+ */
+export async function pinNewestGeneration(
+  roots: GateRoots,
+  named: readonly string[],
+): Promise<PinOutcome> {
+  if (named.length !== 1) return { kind: "needs-one-key", given: named.length };
+  const testKey = named[0];
+  const vintages = await collectVintages(roots.vintagesRoot);
+  const newest = newestAutoGeneration(vintages, testKey);
+  if (newest === undefined) {
+    return { kind: "nothing-to-pin", testKey, vintages };
+  }
+  try {
+    return {
+      kind: "promoted",
+      from: newest.path,
+      to: await promoteVintage(newest),
+    };
+  } catch (error) {
+    return {
+      kind: "failed",
+      from: newest.path,
+      detail: describeError(error),
+    };
+  }
+}
+
+/**
+ * Capture a fresh AUTO generation for every key whose newest one has aged out.
+ *
+ * This is what makes the auto tier a real thing rather than a directory name.
+ * The selection is automatic — derived from what the replay measured, not from
+ * a list — which is the entire distinction from `pinned`: a pinned vintage is
+ * one a human deliberately chose to keep, an auto one is whatever the tree
+ * happened to need on the day someone ran this.
+ *
+ * It is a COMMAND, not a CI step. Nothing here pushes a commit; the capture
+ * lands in the working tree and is committed like any other change, under the
+ * same review-the-diff discipline every other fixture gets. A gate that
+ * committed to the repository on its own would be writing the very evidence it
+ * grades itself against.
+ */
+export async function captureGenerations(
+  roots: GateRoots,
+  testKeys: readonly string[],
+  now: Date,
+): Promise<{ captured: string[]; problems: string[] }> {
+  const captured: string[] = [];
+  const problems: string[] = [];
+  for (const key of testKeys) {
+    try {
+      captured.push(await captureVintage(roots, key, now, AUTO));
+    } catch (error) {
       problems.push(`  ${key}: ${describeError(error)}`);
     }
   }

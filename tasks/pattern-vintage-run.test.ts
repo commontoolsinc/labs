@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { exists } from "@std/fs";
 import { Identity } from "@commonfabric/identity";
-import { AUTO, collectVintages, PINNED } from "./pattern-vintage-lib.ts";
+import {
+  AUTO,
+  AUTO_GENERATIONS_KEPT,
+  collectVintages,
+  PINNED,
+  reportUncovered,
+} from "./pattern-vintage-lib.ts";
 import {
   openFileBackedRuntime,
   readVintageManifest,
@@ -9,12 +16,16 @@ import {
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 import {
+  captureChangedGenerations,
+  captureGenerations,
   captureMissing,
   captureVintage,
   type GateRoots,
   isUpgradeTarget,
+  pinNewestGeneration,
   replayAll,
   snippet,
+  staleTestKeys,
 } from "./pattern-vintage-run.ts";
 
 /**
@@ -910,6 +921,285 @@ describe("the vintage gate, end to end", () => {
     ).toContain("stranded state the vintage held");
   });
 
+  it("attributes a RECORDED pattern the run did not credit", async () => {
+    // The provenance an uncovered-pattern failure prints. It has to come from
+    // what a fixture RECORDS, not from what the run CREDITS: `uncovered` is
+    // exactly the required keys absent from the credited set, so a map built
+    // from that set can never name one of them and the "covered by" branch is
+    // unreachable by construction. An earlier version made precisely that
+    // mistake, and its unit test passed only by hand-building a pair the gate
+    // cannot produce.
+    //
+    // Driven here through the real path, using the auto tier as the reason for
+    // withholding credit — it is the one exclusion a test can arrange without
+    // corrupting the fixture.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const autoDir = `${roots.vintagesRoot}/${pinnedRef.testKey}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    await Deno.copyFile(
+      pinnedRef.path,
+      `${autoDir}/${pinnedRef.stamp}-${pinnedRef.identity}.sqlite`,
+    );
+    await Deno.remove(pinnedRef.path);
+
+    const { covered, coveredBy, targets, failures } = await replayAll(roots);
+
+    // The control that actually controls: the fixture got PAST the presence
+    // check and the target filter and produced no failure, so "not credited"
+    // is a decision rather than the uninteresting case of nothing having run.
+    // (`replayed` would not do — it counts fixtures COLLECTED, before any of
+    // those.)
+    expect(targets).toBeGreaterThan(0);
+    expect(failures, "the auto fixture failed for an unrelated reason")
+      .toEqual([]);
+    expect([...covered], "an auto fixture credited coverage").toEqual([]);
+    // ...and the pattern is still attributed to the test that records it,
+    // with the tier that decides the remedy — a reader is told to PIN it, not
+    // to read failures that do not exist or capture a fixture that does.
+    expect(coveredBy.get(KEY)).toEqual({
+      testKey: pinnedRef.testKey,
+      pinned: false,
+    });
+  });
+
+  it("gives EVERY fixture-level failure a remedy, and attributes it", async () => {
+    // The whole point of routing a remedy into each failure: the report stops
+    // promising one it does not control. Both halves are asserted together
+    // because they fail together — a failure with no remedy and no attribution
+    // is the dead end this branch has now chased through four review rounds
+    // (gate red, printed advice exits 0 having done nothing).
+    //
+    // Deleting any one interpolation used to leave every test green; five of
+    // the seven were unguarded, four of them added as the FIX for the previous
+    // round. This drives the reachable fixture-level shapes at once.
+    const shapes: { name: string; break_: () => Promise<void> }[] = [
+      {
+        name: "did not restore",
+        break_: async () => {
+          const [pinned] = await collectVintages(roots.vintagesRoot);
+          await Deno.writeFile(pinned.path, new Uint8Array(0));
+        },
+      },
+      {
+        name: "identity its name does not claim",
+        break_: async () => {
+          const [pinned] = await collectVintages(roots.vintagesRoot);
+          const tmp = await Deno.makeTempDir({ prefix: "vg-idmm-" });
+          const v = await openFileBackedRuntime(signer, tmp, pinned.path);
+          try {
+            const entries = (await readVintageManifest(v))?.entries ?? [];
+            await writeVintageManifest(
+              v,
+              entries.map((e) => ({ ...e, identity: "someoneelse" })),
+            );
+            await v.snapshot(`${tmp}/r.sqlite`);
+          } finally {
+            await v.dispose().catch(() => {});
+          }
+          await Deno.copyFile(`${tmp}/r.sqlite`, pinned.path);
+          await Deno.remove(tmp, { recursive: true }).catch(() => {});
+        },
+      },
+      {
+        name: "source no longer resolves",
+        break_: async () => {
+          await Deno.remove(`${roots.patternsRoot}/${KEY}`);
+        },
+      },
+      {
+        name: "source no longer compiles",
+        break_: async () => {
+          await Deno.writeTextFile(
+            `${roots.patternsRoot}/${KEY}`,
+            "export const notAPattern = 1;\n",
+          );
+        },
+      },
+    ];
+
+    for (const shape of shapes) {
+      // A fresh tree per shape, so one break cannot mask another.
+      await Deno.remove(roots.vintagesRoot, { recursive: true }).catch(
+        () => {},
+      );
+      await Deno.writeTextFile(`${roots.patternsRoot}/${KEY}`, HEALTHY);
+      await captureMissing(
+        roots,
+        [TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      await shape.break_();
+
+      const { failures } = await replayAll(roots);
+
+      expect(failures.length, `${shape.name}: produced no failure`)
+        .toBeGreaterThan(0);
+      // EVERY failure names what to do. `remedy` is the only string that does,
+      // and it is recognisable by the delete-then-update instruction.
+      for (const failure of failures) {
+        expect(
+          failure.detail,
+          `${shape.name}: a failure carries no remedy, so the reader is told ` +
+            `something is wrong and nothing about what to do`,
+        ).toContain("deno task pattern-vintage --update");
+      }
+    }
+  });
+
+  it("attributes a fixture that failed OUTRIGHT, before any target ran", async () => {
+    // A fixture-level failure returns before the per-target recording loop, so
+    // its attribution has to come from the manifest directly. Without that the
+    // pattern reads as "nothing records it, capture one" — and the capture
+    // prints "Already pinned" and exits 0, which is the dead end this whole
+    // change removes, reached one layer down.
+    //
+    // Driven through the ZERO-TARGETS failure, which the code documents as
+    // reachable by design: `isUpgradeTarget` has grown four exclusions, two
+    // added after fixtures already existed, and fixtures are append-only — so
+    // a new exclusion silently zeroes an old fixture. Deleting the attribution
+    // leaves every other test green, which is why this exists.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-notarget2-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinnedRef.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // Every entry a TEST pattern, which `isUpgradeTarget` excludes by rule —
+      // so the fixture records the pattern and offers zero targets.
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({
+          ...entry,
+          main: entry.main === undefined
+            ? entry.main
+            : entry.main.replace(/\.tsx$/, ".test.tsx"),
+        })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinnedRef.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { coveredBy, failures } = await replayAll(roots);
+
+    // It failed at the FIXTURE level — no target ran at all.
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("not one is something today's source");
+    // Every fixture-level failure carries its own remedy, so the report can
+    // point at it rather than promising one it does not control.
+    expect(failures[0].detail).toContain("Delete");
+    // ...and what the manifest NAMES is still attributed, so the reader is
+    // sent to the fixture instead of told to capture one that already exists.
+    // The recorded key is the rewritten `.test.tsx` one, because that is what
+    // this manifest now names — the point is that a fixture-level failure
+    // attributes at all, not which key it happens to carry.
+    expect(coveredBy.get(TEST_KEY)?.testKey).toBe(pinnedRef.testKey);
+    expect(coveredBy.size, "a fixture-level failure attributed nothing")
+      .toBeGreaterThan(0);
+  });
+
+  it("prefers the PINNED fixture when both tiers record a pattern", async () => {
+    // The two tiers carry OPPOSITE remedies — a pinned fixture that failed
+    // says "read the failures", an auto one says "pin it" — so which fixture
+    // wins the attribution decides which advice a reader gets.
+    //
+    // Plain first-wins gets it backwards: `collectVintages` sorts by path and
+    // `auto` sorts before `pinned`, so the auto fixture is walked first. A
+    // pattern recorded by both would be reported AUTO-only even when the
+    // pinned replay is the thing that failed, telling the reader to pin a
+    // fixture that is already pinned while the real failure keeps the gate red.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    // The same bytes under a DIFFERENT test key's `auto/`, so the two tiers
+    // record one pattern under two names and the tie-break has a visible
+    // effect. Copying under the same test key makes `testKey` identical either
+    // way, which is what the first version of this case did — it then pinned
+    // only the `pinned` flag, a field nothing outside the tie-break consumes.
+    const otherTestKey = `other-${TEST_KEY}`;
+    const autoDir = `${roots.vintagesRoot}/${otherTestKey}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    await Deno.copyFile(
+      pinnedRef.path,
+      `${autoDir}/${pinnedRef.stamp}-${pinnedRef.identity}.sqlite`,
+    );
+
+    const { coveredBy, replayed } = await replayAll(roots);
+
+    // Both were walked — otherwise "pinned won" would be true for the
+    // uninteresting reason that the auto one never ran.
+    expect(replayed).toBe(2);
+    // The CONSUMER-visible effect: `reportUncovered` prints this name and the
+    // capture command built from it, so naming the auto fixture would send a
+    // reader to the wrong one.
+    expect(coveredBy.get(KEY)).toEqual({
+      testKey: pinnedRef.testKey,
+      pinned: true,
+    });
+    expect(
+      reportUncovered([KEY], coveredBy),
+      "the report names the auto fixture, so the reader is sent to the wrong one",
+    ).toContain(pinnedRef.testKey);
+    expect(reportUncovered([KEY], coveredBy)).not.toContain(otherTestKey);
+  });
+
+  it("attributes a pattern whose fixture no longer holds its root", async () => {
+    // The case the attribution most needs to explain, and the one an earlier
+    // ordering missed: `recorded` was populated AFTER the presence-control
+    // skip, so a fixture that no longer holds a recorded root reported as
+    // though NO fixture recorded the pattern — sending a reader to capture one
+    // that is sitting right there, which is the dead end this whole change
+    // exists to close.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-lostroot-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinnedRef.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // Same pattern, a root the fixture does not hold: the presence control
+      // reports it and the target is skipped before anything is applied.
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({ ...entry, cellId: "of:fid1:nosuchroot" })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinnedRef.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { covered, coveredBy, failures } = await replayAll(roots);
+
+    // It failed the presence control, so it is genuinely uncredited...
+    expect(failures.length).toBeGreaterThan(0);
+    expect([...covered]).toEqual([]);
+    // ...and still attributed, from a PINNED fixture — so the remedy is "read
+    // the failures", not "capture one".
+    expect(coveredBy.get(KEY)).toEqual({
+      testKey: pinnedRef.testKey,
+      pinned: true,
+    });
+  });
+
   it("credits coverage only for a PINNED fixture", async () => {
     // An auto capture is regenerable and pruned by COUNT, so letting one
     // satisfy the coverage gate means retention can delete the gate's only
@@ -948,6 +1238,329 @@ describe("the vintage gate, end to end", () => {
     expect([...asAuto.covered], "an AUTO fixture credited coverage").toEqual(
       [],
     );
+  });
+
+  it("captures a new generation once today's source moves past every fixture", async () => {
+    // The producer, end to end and through the real path. Every branch that
+    // reasons about the auto tier — the coverage exclusion, the attribution
+    // tie-break, the remedy the report prints — was reachable only from a
+    // fixture a test hand-built until this existed, which is exactly why they
+    // kept drifting: prose about a tier with no producer can only be checked
+    // against intent.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+
+    // Nothing is due while the pinned vintage still matches today's source.
+    const current = await replayAll(roots);
+    expect(current.failures).toEqual([]);
+    expect(staleTestKeys(current.perVintage), "a current tree looked stale")
+      .toEqual([]);
+
+    // Move the world on, compatibly — a change the update APPLIES rather than
+    // one it refuses, because a generation records a world that worked.
+    await setSource(COMPATIBLE);
+
+    const moved = await replayAll(roots);
+    expect(moved.failures).toEqual([]);
+    expect(moved.changed, "the source change was not seen as a migration")
+      .toBeGreaterThan(0);
+    expect(staleTestKeys(moved.perVintage)).toEqual([TEST_KEY]);
+
+    const { captured, problems } = await captureGenerations(
+      roots,
+      staleTestKeys(moved.perVintage),
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+    expect(problems).toEqual([]);
+    expect(captured).toHaveLength(1);
+
+    // It landed in the AUTO tier, beside the pinned one rather than over it.
+    const found = await collectVintages(roots.vintagesRoot);
+    expect(found).toHaveLength(2);
+    expect(found.map((v) => v.tier).sort()).toEqual([AUTO, PINNED]);
+    expect(await exists(found.find((v) => v.tier === PINNED)!.path)).toBe(true);
+
+    // And the cycle CLOSES: the fresh generation matches today, so the tree is
+    // no longer stale and a second run captures nothing. Without this the
+    // command would mint a generation on every invocation forever — the shape
+    // that turns retention into a treadmill and buries the pinned vintage.
+    const after = await replayAll(roots);
+    expect(after.failures).toEqual([]);
+    expect(
+      staleTestKeys(after.perVintage),
+      "the tree stayed stale after a capture",
+    )
+      .toEqual([]);
+  });
+
+  it("records per fixture WHETHER it failed, not just the run's total", async () => {
+    // `staleTestKeys`'s abstention rule is unit-tested against hand-built
+    // outcomes, which proves the rule and NOT the wiring. Measured: replacing
+    // `failed: report.failures.length > 0` with `failed: false` in `replayAll`
+    // left the whole suite green.
+    //
+    // TWO fixtures, because one cannot tell the two derivations apart. With a
+    // single fixture, "this fixture failed" and "the RUN has failures" are
+    // observationally identical, and the aggregate confusion — hoisting the
+    // `failures.push` above this and reading the run total — passed the whole
+    // file. That matters concretely: `perVintage[].failed` is the only input
+    // to `staleTestKeys`, so an aggregate reading lets ONE broken fixture
+    // suppress capture for every other test key in the tree.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [ref] = await collectVintages(roots.vintagesRoot);
+    // A second, healthy fixture that sorts AFTER the broken one, so it is
+    // walked once the run already carries a failure — the ordering under which
+    // an aggregate reading is wrong.
+    const secondKey = "zz/zz.test.tsx";
+    const secondDir = `${roots.vintagesRoot}/${secondKey}/${PINNED}`;
+    await Deno.mkdir(secondDir, { recursive: true });
+    await Deno.copyFile(
+      ref.path,
+      `${secondDir}/${ref.stamp}-${ref.identity}.sqlite`,
+    );
+
+    const healthy = await replayAll(roots);
+    expect(healthy.perVintage).toHaveLength(2);
+    expect(
+      healthy.perVintage.map((o) => o.failed),
+      "a clean tree marked something failed",
+    ).toEqual([false, false]);
+
+    // Truncate ONLY the first so it cannot restore.
+    await Deno.writeTextFile(ref.path, "");
+
+    const broken = await replayAll(roots);
+    expect(broken.failures.length).toBeGreaterThan(0);
+    const byKey = new Map(
+      broken.perVintage.map((o) => [o.ref.testKey, o.failed]),
+    );
+    expect(byKey.get(TEST_KEY), "the broken fixture was marked clean")
+      .toBe(true);
+    // The assertion the single-fixture version could not make: the healthy
+    // one is still healthy in a run that HAS failures.
+    expect(
+      byKey.get(secondKey),
+      "a healthy fixture inherited the run's failure",
+    )
+      .toBe(false);
+  });
+
+  it("REFUSES to capture a generation onto a tree with any failure", async () => {
+    // A generation is a record of a world that WORKED. Capturing beside a
+    // failure would mint one from a run whose verdict is red, and everyone
+    // else would then replay it as evidence. This is also what removes the
+    // need for a rule about capturing mid-edit: a release promotes from a
+    // branch that already passed.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    // Break the pattern so the replay goes red AND the key is stale — without
+    // the staleness this would pass for the uninteresting reason that there
+    // was nothing to capture either way.
+    await setSource(BREAKING);
+    const replay = await replayAll(roots);
+    expect(replay.failures.length).toBeGreaterThan(0);
+
+    const outcome = await captureChangedGenerations(
+      roots,
+      replay,
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    expect(outcome.kind).toBe("refused-red");
+    // And nothing was written: a refusal that still captured would be worse
+    // than no refusal, because the message would say it had not.
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(1);
+  });
+
+  it("prunes to the retention bound AFTER capturing, not before", async () => {
+    // Ordering matters and is invisible in the happy path. Pruning first keeps
+    // `keep` old generations and then adds one, so the tree sits permanently
+    // one OVER the bound — a slow leak that no single run makes visible.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    // Fill the auto tier past the bound with copies of the real fixture, so
+    // they enumerate and sort like genuine generations.
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const autoDir = `${roots.vintagesRoot}/${TEST_KEY}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    for (let day = 1; day <= AUTO_GENERATIONS_KEPT + 2; day++) {
+      const stamp = `2026-06-${String(day).padStart(2, "0")}T00-00-00.000Z`;
+      await Deno.copyFile(
+        pinnedRef.path,
+        `${autoDir}/${stamp}-${pinnedRef.identity}.sqlite`,
+      );
+    }
+    await setSource(COMPATIBLE);
+
+    const outcome = await captureChangedGenerations(
+      roots,
+      await replayAll(roots),
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    expect(outcome.kind).toBe("captured");
+    const after = await collectVintages(roots.vintagesRoot);
+    const auto = after.filter((v) => v.tier === AUTO);
+    // Exactly the bound — the freshly captured one is COUNTED, which is the
+    // whole point of pruning against a re-read tree.
+    expect(auto).toHaveLength(AUTO_GENERATIONS_KEPT);
+    // The survivor set is the NEWEST, and the one just captured is in it.
+    expect(auto.map((v) => v.stamp).sort().at(-1)).toBe(
+      "2026-07-30T12-00-00.000Z",
+    );
+    // The pinned vintage is untouched — retention can never reach it.
+    expect(after.filter((v) => v.tier === PINNED)).toHaveLength(1);
+  });
+
+  it("still REPORTS what it captured when retention then fails", async () => {
+    // Files are already on disk by the time pruning runs. Throwing there would
+    // lose the record of which — leaving fixtures nobody was told about. Over-
+    // retention is a disk cost a re-run fixes; an unreported capture is not.
+    //
+    // The capture must SUCCEED and the prune must FAIL, which is fiddly to
+    // arrange and worth arranging. A first version wedged a file where the
+    // capture's own output directory goes: that failed the `mkdir` inside
+    // `captureVintage`, so it exercised the capture-failure path instead and
+    // the retention branch stayed red — passing for the wrong reason, and only
+    // caught by reading the coverage report.
+    //
+    // So the denial is put somewhere the capture never touches: ANOTHER test
+    // key's auto tier, over the retention bound, with its directory made
+    // unwritable. The capture writes to its own key and succeeds; retention
+    // selects a victim under the read-only directory and cannot unlink it.
+    const other = "zz-retention/zz.test.tsx";
+    const otherAuto = `${roots.vintagesRoot}/${other}/${AUTO}`;
+    await Deno.mkdir(otherAuto, { recursive: true });
+    for (let day = 1; day <= AUTO_GENERATIONS_KEPT + 1; day++) {
+      await Deno.writeTextFile(
+        `${otherAuto}/2026-06-${
+          String(day).padStart(2, "0")
+        }T00-00-00.000Z-bafyzz.sqlite`,
+        "over the bound",
+      );
+    }
+    // A THIRD key, also over the bound, but writable — and sorting before the
+    // denied one, so its deletion succeeds first and the failure lands
+    // mid-loop. Without it the doomed set is a single file that fails
+    // immediately, `pruned: []` is trivially right, and the partial case —
+    // deletions done but unreported — goes untested.
+    const early = "aa-retention/aa.test.tsx";
+    const earlyAuto = `${roots.vintagesRoot}/${early}/${AUTO}`;
+    await Deno.mkdir(earlyAuto, { recursive: true });
+    for (let day = 1; day <= AUTO_GENERATIONS_KEPT + 1; day++) {
+      await Deno.writeTextFile(
+        `${earlyAuto}/2026-06-${
+          String(day).padStart(2, "0")
+        }T00-00-00.000Z-bafyaa.sqlite`,
+        "over the bound",
+      );
+    }
+    await Deno.chmod(otherAuto, 0o500);
+    try {
+      // The environment has to be able to deny an unlink at all. Asserted
+      // rather than assumed: as root it cannot, and this test would then pass
+      // while proving nothing.
+      const denied = await Deno.remove(
+        `${otherAuto}/2026-06-01T00-00-00.000Z-bafyzz.sqlite`,
+      )
+        .then(() => false).catch(() => true);
+      expect(
+        denied,
+        "this environment cannot deny an unlink, so the retention " +
+          "failure cannot be simulated (running as root?)",
+      ).toBe(true);
+
+      // A synthetic replay, so the dummy fixtures above do not have to be
+      // replayable: this function takes the run it should judge precisely so
+      // the judgement can be driven directly.
+      const outcome = await captureChangedGenerations(roots, {
+        failures: [],
+        perVintage: [{
+          ref: {
+            testKey: TEST_KEY,
+            tier: PINNED,
+            stamp: "2026-07-29T12-00-00.000Z",
+            identity: "bafyold",
+            path: `${roots.vintagesRoot}/${TEST_KEY}/${PINNED}/x.sqlite`,
+          },
+          targets: 1,
+          changed: 1,
+          failed: false,
+        }],
+      }, new Date("2026-07-30T12:00:00.000Z"));
+
+      expect(outcome.kind).toBe("captured");
+      if (outcome.kind !== "captured") throw new Error("unreachable");
+      // The whole point: the capture is still reported.
+      expect(outcome.captured, "the capture went unreported").toHaveLength(1);
+      expect(outcome.captured[0]).toContain(`/${AUTO}/`);
+      // ...and the retention failure is reported too, rather than swallowed.
+      expect(outcome.problems.join("\n")).toContain("retention:");
+      // The deletion that DID happen before the failure is reported. Assuming
+      // all-or-nothing here loses the record of files this command removed —
+      // the same loss the try/catch exists to prevent, in the other direction.
+      expect(outcome.pruned, "a completed deletion went unreported")
+        .toHaveLength(1);
+      expect(outcome.pruned[0]).toContain(early);
+      expect(await exists(outcome.pruned[0]), "a reported prune did not happen")
+        .toBe(false);
+      // ...and the denied one is neither deleted nor claimed.
+      expect(outcome.pruned.some((p) => p.includes(other))).toBe(false);
+    } finally {
+      await Deno.chmod(otherAuto, 0o700);
+    }
+  });
+
+  it("promotes the newest generation, and says so when there is none", async () => {
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+
+    // Nothing in the auto tier yet.
+    expect((await pinNewestGeneration(roots, [TEST_KEY])).kind)
+      .toBe("nothing-to-pin");
+    // A command that named no key, or several, is its own answer — promotion
+    // is deliberate per fixture and is not undone by pinning less next time.
+    expect((await pinNewestGeneration(roots, [])).kind).toBe("needs-one-key");
+    expect((await pinNewestGeneration(roots, ["a", "b"])).kind)
+      .toBe("needs-one-key");
+
+    await setSource(COMPATIBLE);
+    await captureChangedGenerations(
+      roots,
+      await replayAll(roots),
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+
+    const pinned = await pinNewestGeneration(roots, [TEST_KEY]);
+
+    expect(pinned.kind).toBe("promoted");
+    if (pinned.kind !== "promoted") throw new Error("unreachable");
+    expect(pinned.from).toContain(`/${AUTO}/`);
+    expect(pinned.to).toContain(`/${PINNED}/`);
+    // The tier moved and NOTHING else did: same file name, so the capture
+    // stamp still says which generation of the world this holds.
+    expect(pinned.to.split("/").at(-1)).toBe(pinned.from.split("/").at(-1));
+    const after = await collectVintages(roots.vintagesRoot);
+    expect(after.filter((v) => v.tier === AUTO)).toEqual([]);
+    expect(after.filter((v) => v.tier === PINNED)).toHaveLength(2);
+    // And it now CREDITS coverage, which is the entire point of promoting.
+    expect([...(await replayAll(roots)).covered]).toContain(KEY);
   });
 
   it("FAILS a fixture with candidates but no upgrade TARGET, on its own", async () => {
@@ -1407,18 +2020,24 @@ describe("the vintage gate, end to end", () => {
       );
     });
 
-    it("refuses to write over a pinned vintage, rather than replacing it", async () => {
+    it("refuses to write over an existing vintage, rather than replacing it", async () => {
       // `--update` can only ADD: a command that could replace a fixture could
       // replace the very fixture that would have caught a break. The cleanup
       // above is why this is enforced HERE and not only in `captureMissing` —
       // a capture that wrote over someone else's state and then failed would
       // delete it on the way out.
+      //
+      // The guard covers BOTH tiers. An auto capture's whole job is to add a
+      // generation beside the existing ones, and it is still never allowed to
+      // land on top of one: the name carries a millisecond stamp and the
+      // identity, so a collision is a second capture of a generation already
+      // on disk rather than a new one.
       const first = await captureVintage(roots, CROSS_TEST_KEY, STAMP);
       const before = await Deno.stat(first);
 
       await expect(captureVintage(roots, CROSS_TEST_KEY, STAMP)).rejects
         .toThrow(
-          "never overwrites a pinned vintage",
+          "never overwrites a vintage",
         );
 
       expect((await Deno.stat(first)).mtime).toEqual(before.mtime);
@@ -1492,5 +2111,78 @@ describe("the stranded-value snippet", () => {
 
   it("keeps a finding short enough to read", () => {
     expect(snippet("x".repeat(500)).length).toBe(80);
+  });
+});
+
+describe("deciding when the next generation is due", () => {
+  const outcome = (
+    testKey: string,
+    changed: number,
+    targets = 1,
+    failed = false,
+  ) => ({
+    ref: {
+      testKey,
+      tier: AUTO,
+      stamp: "2026-01-01T00-00-00.000Z",
+      identity: "bafy",
+      path: `vintages/${testKey}/${AUTO}/x.sqlite`,
+    },
+    targets,
+    changed,
+    failed,
+  });
+
+  it("says nothing is due while ONE generation still matches today", () => {
+    // The whole point of the rule. A tree holding a current generation and
+    // three older ones has a positive `changed` in aggregate, which says
+    // nothing — only the per-fixture answer decides.
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 3),
+      outcome("a/a.test.tsx", 1),
+      outcome("a/a.test.tsx", 0),
+    ])).toEqual([]);
+  });
+
+  it("says a generation is due once every fixture has moved on", () => {
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 3),
+      outcome("a/a.test.tsx", 1),
+    ])).toEqual(["a/a.test.tsx"]);
+  });
+
+  it("does not let a fixture with no targets vouch for currency", () => {
+    // It proved nothing, so it cannot be the evidence that the world has not
+    // moved. Counting it would suppress the capture that a key with one dead
+    // fixture most needs.
+    expect(staleTestKeys([outcome("a/a.test.tsx", 0, 0)]))
+      .toEqual(["a/a.test.tsx"]);
+  });
+
+  it("does not let a FAILED fixture decide either way", () => {
+    // A failure is the gate's own red, not a statement about which generation
+    // the world is on. Reading it as current would suppress a capture; reading
+    // it as stale would capture beside a break. It abstains.
+    expect(staleTestKeys([outcome("a/a.test.tsx", 0, 1, true)]))
+      .toEqual(["a/a.test.tsx"]);
+    // ...and a healthy sibling still settles it.
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 0, 1, true),
+      outcome("a/a.test.tsx", 0),
+    ])).toEqual([]);
+  });
+
+  it("answers per test key", () => {
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 0),
+      outcome("b/b.test.tsx", 2),
+    ])).toEqual(["b/b.test.tsx"]);
+  });
+
+  it("returns nothing for an empty tree, rather than capturing blind", () => {
+    // No fixtures is a COVERAGE problem, reported by `reportUncovered` with
+    // the test key it cannot derive. Treating it as staleness would have this
+    // command inventing captures for keys nobody named.
+    expect(staleTestKeys([])).toEqual([]);
   });
 });

@@ -3,24 +3,38 @@ import { expect } from "@std/expect";
 import {
   armVerdictGuard,
   AUTO,
+  AUTO_GENERATIONS_KEPT,
+  autoGenerationsToPrune,
   collectVintages,
+  describeCaptureOutcome,
   describeError,
+  describePinOutcome,
   isClean,
+  KNOWN_FLAGS,
+  newestAutoGeneration,
   parseVintagePath,
   patternKeyFromMain,
   PINNED,
+  promotedPath,
+  promoteVintage,
   relativeToRepo,
+  removeVintages,
+  reportCaptureRefusedOnRed,
+  reportEveryGenerationCurrent,
   reportFailures,
   reportNothingReplayed,
-  reportNothingToSeed,
+  reportNothingToPin,
   reportNoVerdict,
+  reportPinNeedsOneTestKey,
   reportReplaySummary,
   reportUncovered,
+  reportUnknownFlags,
   reportUnmappedUrls,
-  REQUIRED_TEST_KEYS,
+  reportUpdateNeedsATestKey,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
+  unknownFlags,
   unmappedPatternUrls,
   vintageDir,
   vintageFileName,
@@ -30,6 +44,7 @@ import {
   schemaRelaxedForComparison,
   strandedKeys,
 } from "../packages/piece/test/state-continuity-harness.ts";
+import { exists } from "@std/fs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   companionFileName,
@@ -313,7 +328,7 @@ describe("reporting", () => {
 
     expect(report).toContain("system/home.tsx");
     expect(report).toContain("system/default-app.tsx");
-    expect(report).toContain("deno task pattern-vintage --update");
+    expect(report).toContain("deno task pattern-vintage --update <test path>");
     // Says WHY it matters, not just what is missing — the reader is usually
     // someone who has never heard of this gate.
     expect(report).toContain("bricks that piece");
@@ -391,44 +406,117 @@ describe("reporting", () => {
     );
   });
 
-  it("seeds only TEST keys, which is what a capture can run", () => {
-    // A capture runs the key as a test. A pattern path names no test, so it
-    // captures nothing and the entry silently buys no coverage — the exact
-    // confusion the `--update` message now has to explain. Cheap to assert,
-    // and the list is hand-kept against the runtime's URL constants.
-    expect(REQUIRED_TEST_KEYS.length).toBeGreaterThan(0);
-    for (const key of REQUIRED_TEST_KEYS) {
-      expect(key, `${key} is not a test path`).toMatch(/\.test\.tsx$/);
-      // Repo-relative under `packages/patterns/`, never absolute or `../`.
-      expect(key.startsWith("/"), `${key} is absolute`).toBe(false);
-      expect(key.includes(".."), `${key} escapes the patterns root`).toBe(
-        false,
-      );
-    }
-    // No duplicates: a repeated key is a capture attempted twice.
-    expect(new Set(REQUIRED_TEST_KEYS).size).toBe(REQUIRED_TEST_KEYS.length);
+  it("refuses --update with no test named, and says what to name", () => {
+    // There is deliberately no default set. The only moment one would help is
+    // when a fixture is MISSING — precisely when nothing on disk can say which
+    // test covers the pattern, since a test need not be named after what it
+    // drives. The hand-kept list that used to stand in for that answer was a
+    // seam: the required PATTERNS derive from the runtime's URL constants, so
+    // adding one no listed test instantiated left the gate red while --update
+    // reported everything fine and exited 0.
+    const message = reportUpdateNeedsATestKey();
+
+    expect(message).toContain("--update <test path>");
+    // A concrete example, because "test path" alone is the thing people get
+    // wrong — a pattern path names no test and captures nothing.
+    expect(message).toContain("topics/topics.test.tsx");
+    expect(message).toContain("not a pattern");
+    // And the fact that removes the recurring confusion: nothing lists what
+    // CI replays, so committing a fixture is the whole of adding one.
+    expect(message).toContain("no list anywhere");
   });
 
-  it("says what --update actually checked, not what it cannot know", () => {
-    // The required PATTERNS come from the runtime's URL constants; the seed
-    // list is a hand-kept set of TEST keys. So "every auto-updating pattern
-    // already has a pinned vintage" is a claim this command cannot make — add a
-    // system pattern no seeded test instantiates and the gate goes red telling
-    // you to run --update, which then reported everything fine and exited 0.
-    const message = reportNothingToSeed([
-      "system/home.test.tsx",
-      "topics/topics.test.tsx",
-    ]);
+  it("gives each uncovered pattern the ONE remedy that fits its situation", () => {
+    // Four situations, four different pieces of advice, and each must exclude
+    // the others' — a merge is the defect this split keeps producing, and it
+    // is invisible unless the assertions say what each case must LACK as well
+    // as contain.
+    //
+    // Every branch is chosen from an argument, never inferred from output this
+    // function does not control. That is the property under test: hand it the
+    // same pattern in four different situations and the advice must change.
+    const from = (testKey: string, pinned = true) => ({ testKey, pinned });
+    const HOME = "system/home.tsx";
+    const TEST = "system/home.test.tsx";
+    const recorded = new Map([[HOME, from(TEST)]]);
+    const recordedAuto = new Map([[HOME, from(TEST, false)]]);
 
-    expect(message).toContain("Every seeded test");
-    // It names the tests it checked, so the reader can see their pattern is
-    // not among them rather than concluding the gate is confused.
-    expect(message).toContain("system/home.test.tsx");
-    expect(message).toContain("topics/topics.test.tsx");
-    // ...and the remedy, which is the whole point: the old text left none.
-    expect(message).toContain("REQUIRED_TEST_KEYS");
-    // It must NOT claim anything about patterns being covered.
-    expect(message).not.toContain("auto-updating pattern");
+    // 1. Recorded by a fixture that FAILED. Capturing another would change
+    //    nothing; the printed failure carries the remedy.
+    const broken = reportUncovered([HOME], recorded, new Set([TEST]));
+    expect(broken).toContain("(recorded by system/home.test.tsx)");
+    expect(broken).toContain("FAILED this run");
+    expect(broken).not.toContain("--pin");
+    expect(broken).not.toContain("<test path>");
+
+    // 2. Recorded by an AUTO generation that replayed cleanly. This is the
+    //    branch that could not fire at all until something wrote an auto
+    //    capture, and the one whose absent producer cost a defect a round.
+    const promotable = reportUncovered([HOME], recordedAuto, new Set());
+    expect(promotable).toContain("deno task pattern-vintage --pin " + TEST);
+    expect(promotable).not.toContain("FAILED this run");
+    expect(promotable).not.toContain("<test path>");
+
+    // 3. Recorded by a PINNED fixture that did not fail — no known route
+    //    reaches it, so it must NOT invent an instruction.
+    const unexplained = reportUncovered([HOME], recorded, new Set());
+    expect(unexplained).toContain("no known route");
+    expect(unexplained).not.toContain("--pin");
+    expect(unexplained).not.toContain("--update");
+
+    // 4. Named by nothing at all. The test cannot be derived, so the
+    //    placeholder stands rather than a concrete key.
+    const unnamed = reportUncovered(["system/newcomer.tsx"], new Map());
+    expect(unnamed).not.toContain("recorded by");
+    expect(unnamed).toContain("--update <test path>");
+    expect(unnamed).not.toContain("--pin");
+    expect(unnamed).not.toContain("FAILED this run");
+
+    // The tier now CHANGES the advice, where it used to be a tie-break only.
+    // Asserting the two differ is what would catch the branch being collapsed
+    // back: every other assertion here passes with `pinned` ignored entirely.
+    expect(promotable).not.toBe(unexplained);
+
+    // All four at once, each keeping its own remedy rather than collapsing
+    // into whichever branch happens to be evaluated first.
+    const mixed = reportUncovered(
+      [HOME, "topics/main.tsx", "system/newcomer.tsx"],
+      new Map([
+        [HOME, from(TEST)],
+        ["topics/main.tsx", from("topics/topics.test.tsx", false)],
+      ]),
+      new Set([TEST]),
+    );
+    expect(mixed).toContain("FAILED this run");
+    expect(mixed).toContain(
+      "deno task pattern-vintage --pin topics/topics.test.tsx",
+    );
+    expect(mixed).toContain("--update <test path>");
+  });
+
+  it("names each promotable test key ONCE, however many patterns it records", () => {
+    // A fixture routinely records several patterns — that is the whole reason
+    // fixtures are keyed by TEST — so a per-pattern loop prints the identical
+    // `--pin` line once per pattern. Harmless-looking, and it is how a reader
+    // concludes there are three things to do when there is one.
+    const auto = (testKey: string) => ({ testKey, pinned: false });
+    const message = reportUncovered(
+      ["topics/main.tsx", "topics/topic.tsx", "topics/list.tsx"],
+      new Map([
+        ["topics/main.tsx", auto("topics/topics.test.tsx")],
+        ["topics/topic.tsx", auto("topics/topics.test.tsx")],
+        ["topics/list.tsx", auto("topics/topics.test.tsx")],
+      ]),
+    );
+
+    const pins = message.split("\n").filter((line) => line.includes("--pin"));
+    expect(pins).toEqual([
+      "  deno task pattern-vintage --pin topics/topics.test.tsx",
+    ]);
+    // All three patterns are still LISTED — deduping the command must not
+    // dedupe the inventory, or two of the three go unmentioned.
+    expect(message).toContain("topics/topic.tsx");
+    expect(message).toContain("topics/list.tsx");
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {
@@ -452,8 +540,10 @@ describe("reporting", () => {
       false,
     );
     expect(reportNothingReplayed()).toContain("covered NOTHING");
+    // WITH the argument. Bare `--update` exits 1 without capturing, so a
+    // recovery instruction that omits it sends a fresh checkout nowhere.
     expect(reportNothingReplayed()).toContain(
-      "deno task pattern-vintage --update",
+      "deno task pattern-vintage --update <test path>",
     );
   });
 
@@ -1008,5 +1098,654 @@ describe("a recorded `main` maps back to a pattern key", () => {
     expect(
       patternKeyFromMain("/elsewhere/patterns/x.tsx", "/packages/patterns/"),
     ).toBeUndefined();
+  });
+});
+
+describe("retention over the auto tier", () => {
+  const ref = (testKey: string, tier: string, stamp: string) => ({
+    testKey,
+    tier,
+    stamp,
+    identity: ID_A,
+    path: `${vintageDir(testKey, tier)}/${vintageFileName(stamp, ID_A)}`,
+  });
+  // Deliberately NOT in order, and deliberately not in the order a path sort
+  // would produce either. Retention that happened to work on sorted input is
+  // the bug that ships, because `collectVintages` returns path order and the
+  // stamps only agree with it while the identities are identical.
+  const stamps = [
+    "2026-01-04T00-00-00.000Z",
+    "2026-01-01T00-00-00.000Z",
+    "2026-01-05T00-00-00.000Z",
+    "2026-01-03T00-00-00.000Z",
+    "2026-01-02T00-00-00.000Z",
+  ];
+
+  it("keeps the NEWEST generations and drops the oldest", () => {
+    const vintages = stamps.map((stamp) =>
+      ref("topics/t.test.tsx", AUTO, stamp)
+    );
+
+    const doomed = autoGenerationsToPrune(vintages, 3);
+
+    // The two oldest, by STAMP — not the two that happened to be listed last.
+    expect(doomed).toEqual([
+      ref("topics/t.test.tsx", AUTO, "2026-01-01T00-00-00.000Z").path,
+      ref("topics/t.test.tsx", AUTO, "2026-01-02T00-00-00.000Z").path,
+    ]);
+  });
+
+  it("CANNOT name a pinned vintage, whatever the tree looks like", () => {
+    // The one property that must never regress. A pinned vintage cannot be
+    // recaptured — the pattern that wrote it no longer exists in runnable form
+    // — so this is the difference between a pruner and a data-loss bug.
+    const vintages = [
+      ...stamps.map((s) => ref("topics/t.test.tsx", PINNED, s)),
+      ...stamps.map((s) => ref("topics/t.test.tsx", AUTO, s)),
+    ];
+
+    const doomed = autoGenerationsToPrune(vintages, 1);
+
+    expect(doomed.length).toBe(stamps.length - 1);
+    for (const path of doomed) {
+      expect(path, "retention named a fixture outside the auto tier")
+        .toContain(`/${AUTO}/`);
+      expect(path).not.toContain(`/${PINNED}/`);
+    }
+    // Stated as a count too, because the two ways this can break are caught by
+    // different assertions and neither covers the other. MEASURED:
+    //
+    //   - filtering AFTER the slice names five AUTO fixtures and no pinned
+    //     ones — wrong count, right tier, caught only by the length above;
+    //   - dropping the filter entirely names four PINNED ones — right count,
+    //     wrong tier, caught only by the path check.
+    expect(doomed.filter((p) => p.includes(`/${PINNED}/`))).toEqual([]);
+  });
+
+  it("counts generations PER test key, not across the tree", () => {
+    // Two keys with three generations each, keeping two, must drop one from
+    // each — not the three oldest overall, which would empty the older key.
+    const vintages = [
+      ...stamps.slice(0, 3).map((s) => ref("a/a.test.tsx", AUTO, s)),
+      ...stamps.slice(0, 3).map((s) => ref("b/b.test.tsx", AUTO, s)),
+    ];
+
+    const doomed = autoGenerationsToPrune(vintages, 2);
+
+    expect(doomed.filter((p) => p.includes("a/a.test.tsx")).length).toBe(1);
+    expect(doomed.filter((p) => p.includes("b/b.test.tsx")).length).toBe(1);
+  });
+
+  it("drops nothing when a key is under the limit", () => {
+    const vintages = stamps.slice(0, 2).map((s) =>
+      ref("topics/t.test.tsx", AUTO, s)
+    );
+    expect(autoGenerationsToPrune(vintages, AUTO_GENERATIONS_KEPT)).toEqual([]);
+  });
+
+  it("REFUSES to delete anything that is not an auto generation", async () => {
+    // A second lock on the only irreversible door in this system. It is
+    // redundant with the selection above by construction, and it stays: the
+    // cost is a string comparison and the failure it guards is unrecoverable.
+    const root = await Deno.makeTempDir({ prefix: "vintage-prune-" });
+    try {
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(pinned, { recursive: true });
+      const victim = `${pinned}/${vintageFileName(stamps[0], ID_A)}`;
+      await Deno.writeTextFile(victim, "pinned bytes");
+
+      await expect(removeVintages([victim], root)).rejects.toThrow(
+        /refusing to prune/,
+      );
+      // The refusal is worth nothing if the file went anyway.
+      expect(await Deno.readTextFile(victim)).toBe("pinned bytes");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("takes the companion directory with the fixture it belongs to", async () => {
+    // A companion store is part of the fixture, not a fixture of its own, so
+    // nothing enumerates it. Leaving one behind strands a directory that
+    // nothing will ever read or clean up again.
+    const root = await Deno.makeTempDir({ prefix: "vintage-prune-" });
+    try {
+      const dir = `${root}/topics/t.test.tsx/${AUTO}`;
+      await Deno.mkdir(dir, { recursive: true });
+      const path = `${dir}/${vintageFileName(stamps[0], ID_A)}`;
+      await Deno.writeTextFile(path, "primary");
+      const companion = vintageCompanionDir(path);
+      await Deno.mkdir(companion, { recursive: true });
+      await Deno.writeTextFile(`${companion}/did-abc.sqlite`, "companion");
+
+      await removeVintages([path], root);
+
+      expect(await exists(path)).toBe(false);
+      expect(await exists(companion), "the companion store was orphaned")
+        .toBe(false);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("promoting a generation", () => {
+  const ref = (testKey: string, tier: string, stamp: string) => ({
+    testKey,
+    tier,
+    stamp,
+    identity: ID_A,
+    path: `${vintageDir(testKey, tier)}/${vintageFileName(stamp, ID_A)}`,
+  });
+
+  it("picks the NEWEST auto generation of the named key", () => {
+    const vintages = [
+      ref("a/a.test.tsx", AUTO, "2026-01-01T00-00-00.000Z"),
+      ref("a/a.test.tsx", AUTO, "2026-01-09T00-00-00.000Z"),
+      ref("a/a.test.tsx", AUTO, "2026-01-05T00-00-00.000Z"),
+      // Another key's newer generation, which must not be chosen.
+      ref("b/b.test.tsx", AUTO, "2026-02-01T00-00-00.000Z"),
+      // And a pinned one, which is not a promotion candidate at all.
+      ref("a/a.test.tsx", PINNED, "2026-03-01T00-00-00.000Z"),
+    ];
+
+    const newest = newestAutoGeneration(vintages, "a/a.test.tsx");
+
+    expect(newest?.stamp).toBe("2026-01-09T00-00-00.000Z");
+    expect(newest?.tier).toBe(AUTO);
+  });
+
+  it("has nothing to promote when the key has only pinned vintages", () => {
+    const vintages = [ref("a/a.test.tsx", PINNED, "2026-01-01T00-00-00.000Z")];
+    expect(newestAutoGeneration(vintages, "a/a.test.tsx")).toBeUndefined();
+  });
+
+  it("lands under pinned/ with the capture stamp CARRIED OVER", () => {
+    // Restamping would date the promotion rather than the capture, and the
+    // capture date is the whole content of the label: it says which
+    // generation of the world the fixture holds.
+    const source = ref("a/a.test.tsx", AUTO, "2026-01-09T00-00-00.000Z");
+
+    const destination = promotedPath(source);
+
+    expect(destination).toBe(
+      `${vintageDir("a/a.test.tsx", PINNED)}/${
+        vintageFileName("2026-01-09T00-00-00.000Z", ID_A)
+      }`,
+    );
+    // And it still parses as the same fixture, one tier over — a promoted
+    // vintage the enumerator no longer recognises would silently stop being
+    // replayed, which is the failure this whole tier exists to prevent.
+    const reparsed = parseVintagePath(destination);
+    expect(reparsed?.tier).toBe(PINNED);
+    expect(reparsed?.testKey).toBe("a/a.test.tsx");
+    expect(reparsed?.stamp).toBe(source.stamp);
+    expect(reparsed?.identity).toBe(source.identity);
+  });
+
+  it("promotes a generation git does not track yet", async () => {
+    // The defect the first real `--pin` run hit, and one only running it could
+    // find: `git mv` refuses an untracked file outright, and a generation
+    // captured minutes ago is exactly that. Capture-then-promote in one
+    // sitting is the most natural first use of these two commands, and it
+    // died with a raw stack trace.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      // Deliberately a real repository, because the fallback is chosen from
+      // what git SAYS: outside a repo git fails differently ("not a git
+      // repository"), so a test run in a bare temp dir would take the fallback
+      // for the wrong reason and pass while the real case still crashed.
+      const git = (...args: string[]) =>
+        new Deno.Command("git", {
+          args,
+          cwd: root,
+          stdout: "null",
+          stderr: "null",
+        })
+          .output();
+      await git("init");
+
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      await Deno.mkdir(auto, { recursive: true });
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const path = `${auto}/${vintageFileName(stamp, ID_A)}`;
+      await Deno.writeTextFile(path, "captured minutes ago, never committed");
+      const companion = vintageCompanionDir(path);
+      await Deno.mkdir(companion, { recursive: true });
+      await Deno.writeTextFile(`${companion}/did-abc.sqlite`, "child space");
+
+      const ref = parseVintagePath(path, root)!;
+      expect(ref.tier, "the fixture under test is not an auto generation")
+        .toBe(AUTO);
+
+      const moved = await promoteVintage(ref);
+
+      expect(await exists(moved), "the promoted fixture is not there").toBe(
+        true,
+      );
+      expect(await exists(path), "the source was left behind").toBe(false);
+      expect(await Deno.readTextFile(moved)).toBe(
+        "captured minutes ago, never committed",
+      );
+      // The companion travels with it, or the promoted fixture records roots
+      // whose state it no longer has.
+      expect(
+        await Deno.readTextFile(`${vintageCompanionDir(moved)}/did-abc.sqlite`),
+      ).toBe("child space");
+      expect(parseVintagePath(moved, root)?.tier).toBe(PINNED);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("REFUSES when only the COMPANION collides, which git does silently", async () => {
+    // The half the first guard missed. `git mv` refuses a destination FILE
+    // that exists, but moves a directory INTO an existing directory of that
+    // name — so a colliding companion is not refused, it is nested one level
+    // down while the stale leftover keeps the name the replay reads. Measured
+    // on the tracked path, which is the quiet one: untracked fails loudly
+    // with ENOTEMPTY.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const name = vintageFileName(stamp, ID_A);
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(auto, { recursive: true });
+      await Deno.mkdir(pinned, { recursive: true });
+      await Deno.writeTextFile(`${auto}/${name}`, "the auto generation");
+      await Deno.mkdir(vintageCompanionDir(`${auto}/${name}`), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        `${vintageCompanionDir(`${auto}/${name}`)}/child.sqlite`,
+        "the promoted child space",
+      );
+      // The pinned PRIMARY is absent, so the first guard does not fire — only
+      // a leftover companion is in the way.
+      const stale = vintageCompanionDir(`${pinned}/${name}`);
+      await Deno.mkdir(stale, { recursive: true });
+      await Deno.writeTextFile(`${stale}/child.sqlite`, "STALE LEFTOVER");
+
+      await expect(
+        promoteVintage(parseVintagePath(`${auto}/${name}`, root)!),
+      ).rejects.toThrow(/never overwrites a vintage/);
+
+      // Nothing nested, nothing moved, nothing overwritten.
+      expect(await exists(`${stale}/${vintageCompanionDir(name)}`)).toBe(false);
+      expect(await Deno.readTextFile(`${stale}/child.sqlite`)).toBe(
+        "STALE LEFTOVER",
+      );
+      expect(await exists(`${auto}/${name}`)).toBe(true);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("RESUMES an interrupted promotion instead of refusing it", async () => {
+    // The state the companion-first order exists to produce: the companion is
+    // already in `pinned/` and the primary is still in `auto/`. Re-running
+    // `--pin` must FINISH the job — that recoverability is the whole stated
+    // reason for the ordering, and it rests on one conjunct in the collision
+    // check (`exists(companion)`), which reads as belt-and-braces. Measured:
+    // dropping it refuses the resume and both test files stay green.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const name = vintageFileName(stamp, ID_A);
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(auto, { recursive: true });
+      await Deno.mkdir(pinned, { recursive: true });
+      await Deno.writeTextFile(`${auto}/${name}`, "the primary, not yet moved");
+      // The companion ALREADY moved; the source companion is gone.
+      const movedCompanion = vintageCompanionDir(`${pinned}/${name}`);
+      await Deno.mkdir(movedCompanion, { recursive: true });
+      await Deno.writeTextFile(
+        `${movedCompanion}/child.sqlite`,
+        "already promoted",
+      );
+
+      const moved = await promoteVintage(
+        parseVintagePath(`${auto}/${name}`, root)!,
+      );
+
+      expect(moved).toBe(`${pinned}/${name}`);
+      expect(await Deno.readTextFile(moved)).toBe("the primary, not yet moved");
+      expect(await exists(`${auto}/${name}`)).toBe(false);
+      // The already-moved companion is untouched — neither nested nor
+      // overwritten — so the promoted fixture is whole.
+      expect(await Deno.readTextFile(`${movedCompanion}/child.sqlite`)).toBe(
+        "already promoted",
+      );
+      expect(await exists(`${movedCompanion}/${vintageCompanionDir(name)}`))
+        .toBe(false);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("REFUSES to promote onto an existing pinned vintage", async () => {
+    // A promotion is the only fixture-writing operation that could destroy a
+    // pinned vintage, and a pinned vintage cannot be recaptured. `git mv`
+    // refuses a destination that exists, so this looked covered — but the
+    // untracked fallback is a plain rename, which overwrites in SILENCE, and
+    // untracked is the normal state of a generation captured minutes ago. The
+    // one path with no protection was the common one.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const name = vintageFileName(stamp, ID_A);
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(auto, { recursive: true });
+      await Deno.mkdir(pinned, { recursive: true });
+      await Deno.writeTextFile(`${auto}/${name}`, "the auto generation");
+      await Deno.writeTextFile(`${pinned}/${name}`, "IRREPLACEABLE");
+
+      await expect(
+        promoteVintage(parseVintagePath(`${auto}/${name}`, root)!),
+      ).rejects.toThrow(/never overwrites a vintage/);
+
+      // The refusal is worth nothing if the bytes went anyway. This is the
+      // assertion that fails without the guard — the rejection alone would not.
+      expect(
+        await Deno.readTextFile(`${pinned}/${name}`),
+        "the pinned vintage was destroyed",
+      ).toBe("IRREPLACEABLE");
+      // ...and the source is still there to promote deliberately later.
+      expect(await exists(`${auto}/${name}`)).toBe(true);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("STAGES the rename when the fixture is tracked", async () => {
+    // The other half, and the one that carries the argument for using git at
+    // all: a committed fixture renamed behind git's back shows up as a delete
+    // plus an add, which is precisely the diff that reads as someone
+    // destroying a vintage — in a tree whose append-only discipline is people
+    // reading diffs. Without this the fallback could swallow every case and
+    // the untracked test above would still pass.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const git = (...args: string[]) =>
+        new Deno.Command("git", {
+          args,
+          cwd: root,
+          stdout: "piped",
+          stderr: "null",
+        }).output();
+      await git("init", "-q");
+      await git("config", "user.email", "test@example.com");
+      await git("config", "user.name", "Test");
+
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      await Deno.mkdir(auto, { recursive: true });
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const path = `${auto}/${vintageFileName(stamp, ID_A)}`;
+      await Deno.writeTextFile(path, "a committed generation");
+      // Staged is enough — `git ls-files` reads the index, so this needs no
+      // commit and therefore trips over no signing configuration.
+      await git("add", "-A");
+
+      const moved = await promoteVintage(parseVintagePath(path, root)!);
+
+      expect(await exists(moved)).toBe(true);
+      expect(await exists(path)).toBe(false);
+      // git knows about the move: the destination is in the index and the
+      // source is not. A plain rename would leave the source staged and the
+      // destination untracked.
+      const staged = new TextDecoder()
+        .decode((await git("ls-files")).stdout)
+        .split("\n")
+        .filter((line) => line.length > 0);
+      expect(staged, "the promoted path is not in the index").toContain(
+        moved.slice(root.length + 1),
+      );
+      expect(staged, "the source path is still in the index").not.toContain(
+        path.slice(root.length + 1),
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("handles a nested test key without folding the path", () => {
+    // `a/b/c.test.tsx` has slashes in the KEY, so anything that finds the tier
+    // by counting from the front loses a directory here.
+    const source = ref(
+      "deep/nest/c.test.tsx",
+      AUTO,
+      "2026-01-09T00-00-00.000Z",
+    );
+    expect(promotedPath(source)).toBe(
+      `${VINTAGES_DIR}/deep/nest/c.test.tsx/${PINNED}/${
+        vintageFileName("2026-01-09T00-00-00.000Z", ID_A)
+      }`,
+    );
+  });
+});
+
+describe("what the capture and promote commands print", () => {
+  it("tells --pin it needs exactly one test key", () => {
+    expect(reportPinNeedsOneTestKey(0)).toContain("names the TEST");
+    expect(reportPinNeedsOneTestKey(0)).toContain("--pin topics");
+    expect(reportPinNeedsOneTestKey(3)).toContain("3 were named");
+  });
+
+  it("points --pin at capture when the key is already current", () => {
+    const vintages = [{
+      testKey: "a/a.test.tsx",
+      tier: PINNED,
+      stamp: "2026-01-01T00-00-00.000Z",
+      identity: ID_A,
+      path: `${vintageDir("a/a.test.tsx", PINNED)}/x.sqlite`,
+    }];
+
+    const message = reportNothingToPin("a/a.test.tsx", vintages);
+
+    // The dead end this avoids: "nothing to promote" with no statement of what
+    // WOULD produce something to promote.
+    expect(message).toContain("already has a pinned vintage");
+    expect(message).toContain("--capture-changed");
+  });
+
+  it("lists the keys that DO have a generation when the named one does not", () => {
+    const vintages = [{
+      testKey: "b/b.test.tsx",
+      tier: AUTO,
+      stamp: "2026-01-01T00-00-00.000Z",
+      identity: ID_A,
+      path: `${vintageDir("b/b.test.tsx", AUTO)}/x.sqlite`,
+    }];
+
+    const message = reportNothingToPin("a/a.test.tsx", vintages);
+
+    expect(message).toContain("b/b.test.tsx");
+    expect(message).not.toContain("already has a pinned vintage");
+  });
+
+  it("pairs each pin outcome with the right stream and exit code", () => {
+    // Exit code is the part a human never reads and CI only reads. A promotion
+    // that printed its success to stderr, or a refusal that exited 0, would
+    // look completely normal in a terminal.
+    const root = "/repo";
+    expect(describePinOutcome({ kind: "needs-one-key", given: 0 }, root).code)
+      .toBe(1);
+    expect(
+      describePinOutcome({
+        kind: "nothing-to-pin",
+        testKey: "a/a.test.tsx",
+        vintages: [],
+      }, root).code,
+    ).toBe(1);
+
+    const failed = describePinOutcome({
+      kind: "failed",
+      from: "/repo/vintages/a/auto/x.sqlite",
+      detail: "disk full",
+    }, root);
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain("disk full");
+    // Repo-relative, because an absolute temp path is unreadable in a log.
+    expect(failed.err).toContain("vintages/a/auto/x.sqlite");
+    expect(failed.err).not.toContain("/repo/vintages");
+    expect(failed.out, "a failure wrote to stdout").toBeUndefined();
+
+    const promoted = describePinOutcome({
+      kind: "promoted",
+      from: "/repo/vintages/a/auto/x.sqlite",
+      to: "/repo/vintages/a/pinned/x.sqlite",
+    }, root);
+    expect(promoted.code).toBe(0);
+    expect(promoted.out).toContain("auto/x.sqlite");
+    expect(promoted.out).toContain("pinned/x.sqlite");
+    expect(promoted.err, "a success wrote to stderr").toBeUndefined();
+  });
+
+  it("still LISTS what a partly-failed capture wrote, and exits 1", () => {
+    // The shape that would otherwise lie: some generations captured, one
+    // failed. Suppressing the list because the command failed would leave
+    // files on disk it had just implied it did not create.
+    const partial = describeCaptureOutcome({
+      kind: "captured",
+      captured: ["/repo/vintages/a/auto/new.sqlite"],
+      pruned: ["/repo/vintages/a/auto/old.sqlite"],
+      problems: ["  b/b.test.tsx: tests did not pass"],
+    }, "/repo");
+
+    expect(partial.code).toBe(1);
+    expect(partial.out, "the written file went unreported").toContain(
+      "+ vintages/a/auto/new.sqlite",
+    );
+    expect(partial.out, "the pruned file went unreported").toContain(
+      "- vintages/a/auto/old.sqlite",
+    );
+    expect(partial.err).toContain("b/b.test.tsx");
+
+    // The clean case exits 0 and says nothing on stderr.
+    const clean = describeCaptureOutcome({
+      kind: "captured",
+      captured: ["/repo/vintages/a/auto/new.sqlite"],
+      pruned: [],
+      problems: [],
+    }, "/repo");
+    expect(clean.code).toBe(0);
+    expect(clean.err).toBeUndefined();
+
+    // And a refusal is stderr + exit 1, never a quiet success.
+    const refused = describeCaptureOutcome({
+      kind: "refused-red",
+      failures: [{ testKey: "a/a.test.tsx", path: "p", detail: "d" }],
+    }, "/repo");
+    expect(refused.code).toBe(1);
+    expect(refused.out).toBeUndefined();
+
+    // "Nothing to do" is a SUCCESS. Exiting 1 here would make the common,
+    // correct case indistinguishable from a broken one.
+    const current = describeCaptureOutcome(
+      { kind: "all-current", replayed: 4 },
+      "/repo",
+    );
+    expect(current.code).toBe(0);
+    expect(current.err).toBeUndefined();
+  });
+
+  it("says WHY it will not capture onto a red tree", () => {
+    const message = reportCaptureRefusedOnRed(2);
+    expect(message).toContain("2 fixture(s) failed");
+    // The reasoning, not just the refusal: a generation is a record of a world
+    // that worked, and everyone else will replay it as evidence.
+    expect(message).toContain("record of a world that WORKED");
+  });
+
+  it("distinguishes 'nothing to do' from 'nothing happened'", () => {
+    // A command that captures nothing and says nothing reads as broken. This
+    // is the message that makes a no-op legible as the common, correct case.
+    const message = reportEveryGenerationCurrent(4);
+    expect(message).toContain("all 4 fixture(s) are current");
+    expect(message).toContain("same world");
+  });
+
+  it("REFUSES a flag it does not recognise, rather than ignoring it", () => {
+    // A misspelled flag matches no branch and falls through to the plain gate:
+    // it replays everything, prints a healthy summary and exits 0, so someone
+    // who asked to capture a generation is told the tree is fine. Measured on
+    // the real command with `--capture-chnged` and `--pinn`.
+    expect(unknownFlags(["--capture-chnged"])).toEqual(["--capture-chnged"]);
+    expect(unknownFlags(["--pinn", "a/a.test.tsx"])).toEqual(["--pinn"]);
+    // A DROPPED dash counts too. Measured: `-capture-changed` and `-x` both
+    // fell through to the plain gate and exited 0 with a healthy summary —
+    // the very defect this function was added to prevent, inside the fix.
+    expect(unknownFlags(["-capture-changed"])).toEqual(["-capture-changed"]);
+    expect(unknownFlags(["-x"])).toEqual(["-x"]);
+    // `--` is the end-of-flags separator and `deno task` forwards it
+    // verbatim, so rejecting it refused an ordinary invocation.
+    expect(unknownFlags(["--", "--update", "a/a.test.tsx"])).toEqual([]);
+    // Positionals are not flags — a test key is an argument, not a typo.
+    expect(unknownFlags(["--pin", "a/a.test.tsx"])).toEqual([]);
+    for (const flag of KNOWN_FLAGS) expect(unknownFlags([flag])).toEqual([]);
+
+    const message = reportUnknownFlags(["--capture-chnged"]);
+    expect(message).toContain("--capture-chnged");
+    // It must name what IS valid, or the reader is left guessing at a typo.
+    expect(message).toContain("--capture-changed");
+    expect(message).toContain("exit 0");
+  });
+
+  it("EXITS 1 on an empty tree, not just prints differently", () => {
+    // The message says an empty tree is the moment someone is most likely to
+    // believe the regime runs when it does not. An exit code is the half of
+    // that message a script can read, so pairing the warning with the healthy
+    // code makes "nothing here" indistinguishable from "all current" to
+    // everything except a human reading the terminal.
+    const empty = describeCaptureOutcome(
+      { kind: "all-current", replayed: 0 },
+      "/repo",
+    );
+    expect(empty.code, "an empty tree reported success").toBe(1);
+    // On STDERR, like every other nonzero exit in both commands. Splitting
+    // this case in two is how that went wrong: leaving the failing half on
+    // stdout made `cmd 2>err.log >/dev/null || cat err.log` print nothing.
+    expect(empty.err, "a failure explained itself on stdout").toBeDefined();
+    expect(empty.out).toBeUndefined();
+
+    // ...and a genuinely current tree still exits 0, on stdout.
+    const current = describeCaptureOutcome(
+      { kind: "all-current", replayed: 4 },
+      "/repo",
+    );
+    expect(current.code).toBe(0);
+    expect(current.out).toBeDefined();
+    expect(current.err).toBeUndefined();
+  });
+
+  it("prints no empty stdout line when every capture failed", () => {
+    // `out: ""` still PRINTS, so the errors would arrive under a leading blank
+    // line that reads as truncated output.
+    const allFailed = describeCaptureOutcome({
+      kind: "captured",
+      captured: [],
+      pruned: [],
+      problems: ["  a/a.test.tsx: tests did not pass"],
+    }, "/repo");
+
+    expect(allFailed.out).toBeUndefined();
+    expect(allFailed.code).toBe(1);
+    expect(allFailed.err).toContain("a/a.test.tsx");
+  });
+
+  it("does not claim an EMPTY tree is current", () => {
+    // "all 0 fixture(s) are current" is vacuously true and actively
+    // misleading: it asserts currency about a tree that proved nothing, at the
+    // moment someone is most likely to believe the regime is running when it
+    // is not. `--capture-changed` cannot fix an empty tree — it only ever adds
+    // a generation beside an existing fixture — so it must name what does.
+    const message = reportEveryGenerationCurrent(0);
+
+    expect(message).not.toContain("are current");
+    expect(message).toContain("no fixtures");
+    expect(message).toContain("--update <test path>");
   });
 });
