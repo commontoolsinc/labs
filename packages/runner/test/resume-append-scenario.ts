@@ -213,12 +213,11 @@ export async function runResumeAppendScenario(
     const started = await rt2.start(rc2);
     expect(started).toBe(true);
 
-    // Standing effect so `idle()` drives the coordinator without `pull()`. While
-    // the gate holds the per-element documents, `pull()` would block on the
-    // armed recovery's cross-space promise, but `idle()` does not.
-    // A standing effect keeps the coordinator pulled, so the scheduler drives it
-    // to reconcile on its own as inputs load — the test awaits real edges rather
-    // than pumping idle() in a loop.
+    // Standing effect so `idle()` drives the coordinator without `pull()`: while
+    // the gate holds the per-element documents, `pull()` would block on them and
+    // `idle()` does not. A standing effect keeps the coordinator pulled, so the
+    // scheduler drives it to reconcile on its own as inputs load — the test
+    // awaits real edges rather than pumping idle() in a loop.
     const cancel = rc2.key(scenario.resultKey).sink(() => {});
     let heldCount = 0;
     try {
@@ -226,8 +225,9 @@ export async function runResumeAppendScenario(
       // its first read of the per-element result cells causes their documents to
       // be requested, and the gate holds the first one. Only after that reconcile
       // is the resume-await flag cleared, so an element appended now is a
-      // post-resume append that arms the recovery — appending earlier would fold
-      // it into the resume batch instead, with no recovery.
+      // post-resume append, whose op runs inline on a reconcile that is about to
+      // be rejected — appending earlier would fold it into the resume batch
+      // instead, which defers its run until sync completes.
       await gate.firstHeld;
       expect(gate.heldCount).toBeGreaterThan(0);
 
@@ -238,22 +238,24 @@ export async function runResumeAppendScenario(
       const cur = (rc2.key("items").get() ?? []) as unknown[];
       rc2.withTx(tx1).key("items").set([...cur, scenario.appended]);
       await tx1.commit();
-      // Let the coordinator reconcile the appended element (and arm its recovery)
-      // against the still-held results. idle() drives the scheduler to quiescence
-      // without blocking on the held documents the way pull() would.
+      // Let the coordinator reconcile the appended element against the still-held
+      // results. idle() drives the scheduler to quiescence without blocking on
+      // the held documents the way pull() would.
       await rt2.idle();
 
       // The window was genuinely open: per-element documents were held while the
       // appended element reconciled.
       heldCount = gate.heldCount;
 
-      // Release the held documents. The space catches up, the stale write is
-      // dropped, and the post-sync recovery re-applies the appended element.
+      // Release the held documents. The space catches up and the stale write is
+      // dropped, leaving the appended element's run reverted while the
+      // coordinator's `elementRuns` entry survives.
       gate.release();
 
-      // Converge: pull() awaits the recovery's cross-space work (now unblocked)
-      // and re-reads to quiescence; settled() then flushes the reconcile the
-      // recovery's write triggers. Both converge internally, so no loop here.
+      // Converge: the next reconcile finds that entry's result cell empty and
+      // re-instantiates the op (src/builtins/list-element-run.ts), so pull()
+      // re-reads to quiescence and settled() flushes the reconcile that write
+      // triggers. Both converge internally, so no loop here.
       await rc2.pull();
       await rt2.settled();
     } finally {

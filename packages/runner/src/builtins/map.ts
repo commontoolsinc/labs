@@ -36,6 +36,7 @@ import {
 } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { elementRunOutputMissing } from "./list-element-run.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
@@ -357,7 +358,13 @@ export function map(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        // An entry is not evidence the run's write survived: a rejected resume
+        // reconcile reverts the instantiation and leaves the entry behind. Ask
+        // the result cell (see list-element-run.ts).
+        if (
+          (argumentUsage.usesIndex && existing.lastIndex !== i) ||
+          elementRunOutputMissing(existing.resultCell, tx)
+        ) {
           runtime.runner.run(
             tx,
             opPattern,

@@ -40,7 +40,7 @@ import {
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
-import { createResumeRecovery } from "./resume-recover.ts";
+import { elementRunOutputMissing } from "./list-element-run.ts";
 import {
   linkResolutionProbe,
   machineryRead,
@@ -158,17 +158,6 @@ export function filter(
         ),
     );
   };
-
-  // Whether this coordinator was started from a resume (its inputs are streaming
-  // in from storage). Set once, never cleared — a fresh runtime never arms the
-  // post-sync recovery below.
-  const wasResumed = !!awaitSync;
-  const resumeRecovery = createResumeRecovery({
-    runtime,
-    space: parentCell.space,
-    elementRuns,
-    logger,
-  });
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
     const elementAwaitSync = resumeBatchAwaitSync;
@@ -373,7 +362,13 @@ export function filter(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        // An entry is not evidence the run's write survived: a rejected resume
+        // reconcile reverts the instantiation and leaves the entry behind. Ask
+        // the result cell (see list-element-run.ts).
+        if (
+          (argumentUsage.usesIndex && existing.lastIndex !== i) ||
+          elementRunOutputMissing(existing.resultCell, tx)
+        ) {
           runtime.runner.run(
             tx,
             opPattern,
@@ -410,19 +405,6 @@ export function filter(
 
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
-
-        // An element first seen after the resume batch cleared, while the space
-        // may still be syncing: its inline op write rode on this reconcile's
-        // transaction and is reverted if the commit is preempted. Arm a post-sync
-        // recovery so the value is re-applied once the space settles.
-        if (wasResumed && !elementAwaitSync) {
-          resumeRecovery.schedule(
-            elementKey,
-            resultCell,
-            opPattern,
-            (index) => createRunInput(list[i], index),
-          );
-        }
       }
 
       // Read predicate result — creates subscription for reactivity.
