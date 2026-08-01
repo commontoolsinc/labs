@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { AUTO, collectVintages, PINNED } from "./pattern-vintage-lib.ts";
+import {
+  AUTO,
+  collectVintages,
+  PINNED,
+  reportUncovered,
+} from "./pattern-vintage-lib.ts";
 import {
   openFileBackedRuntime,
   readVintageManifest,
@@ -956,6 +961,90 @@ describe("the vintage gate, end to end", () => {
     });
   });
 
+  it("gives EVERY fixture-level failure a remedy, and attributes it", async () => {
+    // The whole point of routing a remedy into each failure: the report stops
+    // promising one it does not control. Both halves are asserted together
+    // because they fail together — a failure with no remedy and no attribution
+    // is the dead end this branch has now chased through four review rounds
+    // (gate red, printed advice exits 0 having done nothing).
+    //
+    // Deleting any one interpolation used to leave every test green; five of
+    // the seven were unguarded, four of them added as the FIX for the previous
+    // round. This drives the reachable fixture-level shapes at once.
+    const shapes: { name: string; break_: () => Promise<void> }[] = [
+      {
+        name: "did not restore",
+        break_: async () => {
+          const [pinned] = await collectVintages(roots.vintagesRoot);
+          await Deno.writeFile(pinned.path, new Uint8Array(0));
+        },
+      },
+      {
+        name: "identity its name does not claim",
+        break_: async () => {
+          const [pinned] = await collectVintages(roots.vintagesRoot);
+          const tmp = await Deno.makeTempDir({ prefix: "vg-idmm-" });
+          const v = await openFileBackedRuntime(signer, tmp, pinned.path);
+          try {
+            const entries = (await readVintageManifest(v))?.entries ?? [];
+            await writeVintageManifest(
+              v,
+              entries.map((e) => ({ ...e, identity: "someoneelse" })),
+            );
+            await v.snapshot(`${tmp}/r.sqlite`);
+          } finally {
+            await v.dispose().catch(() => {});
+          }
+          await Deno.copyFile(`${tmp}/r.sqlite`, pinned.path);
+          await Deno.remove(tmp, { recursive: true }).catch(() => {});
+        },
+      },
+      {
+        name: "source no longer resolves",
+        break_: async () => {
+          await Deno.remove(`${roots.patternsRoot}/${KEY}`);
+        },
+      },
+      {
+        name: "source no longer compiles",
+        break_: async () => {
+          await Deno.writeTextFile(
+            `${roots.patternsRoot}/${KEY}`,
+            "export const notAPattern = 1;\n",
+          );
+        },
+      },
+    ];
+
+    for (const shape of shapes) {
+      // A fresh tree per shape, so one break cannot mask another.
+      await Deno.remove(roots.vintagesRoot, { recursive: true }).catch(
+        () => {},
+      );
+      await Deno.writeTextFile(`${roots.patternsRoot}/${KEY}`, HEALTHY);
+      await captureMissing(
+        roots,
+        [TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      await shape.break_();
+
+      const { failures } = await replayAll(roots);
+
+      expect(failures.length, `${shape.name}: produced no failure`)
+        .toBeGreaterThan(0);
+      // EVERY failure names what to do. `remedy` is the only string that does,
+      // and it is recognisable by the delete-then-update instruction.
+      for (const failure of failures) {
+        expect(
+          failure.detail,
+          `${shape.name}: a failure carries no remedy, so the reader is told ` +
+            `something is wrong and nothing about what to do`,
+        ).toContain("deno task pattern-vintage --update");
+      }
+    }
+  });
+
   it("attributes a fixture that failed OUTRIGHT, before any target ran", async () => {
     // A fixture-level failure returns before the per-target recording loop, so
     // its attribution has to come from the manifest directly. Without that the
@@ -1030,8 +1119,13 @@ describe("the vintage gate, end to end", () => {
       new Date("2026-07-29T12:00:00.000Z"),
     );
     const [pinnedRef] = await collectVintages(roots.vintagesRoot);
-    // The SAME bytes under `auto/` as well, so both tiers record the pattern.
-    const autoDir = `${roots.vintagesRoot}/${pinnedRef.testKey}/${AUTO}`;
+    // The same bytes under a DIFFERENT test key's `auto/`, so the two tiers
+    // record one pattern under two names and the tie-break has a visible
+    // effect. Copying under the same test key makes `testKey` identical either
+    // way, which is what the first version of this case did — it then pinned
+    // only the `pinned` flag, a field nothing outside the tie-break consumes.
+    const otherTestKey = `other-${TEST_KEY}`;
+    const autoDir = `${roots.vintagesRoot}/${otherTestKey}/${AUTO}`;
     await Deno.mkdir(autoDir, { recursive: true });
     await Deno.copyFile(
       pinnedRef.path,
@@ -1043,10 +1137,18 @@ describe("the vintage gate, end to end", () => {
     // Both were walked — otherwise "pinned won" would be true for the
     // uninteresting reason that the auto one never ran.
     expect(replayed).toBe(2);
+    // The CONSUMER-visible effect: `reportUncovered` prints this name and the
+    // capture command built from it, so naming the auto fixture would send a
+    // reader to the wrong one.
     expect(coveredBy.get(KEY)).toEqual({
       testKey: pinnedRef.testKey,
       pinned: true,
     });
+    expect(
+      reportUncovered([KEY], coveredBy),
+      "the report names the auto fixture, so the reader is sent to the wrong one",
+    ).toContain(pinnedRef.testKey);
+    expect(reportUncovered([KEY], coveredBy)).not.toContain(otherTestKey);
   });
 
   it("attributes a pattern whose fixture no longer holds its root", async () => {

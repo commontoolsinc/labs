@@ -414,39 +414,48 @@ describe("reporting", () => {
     // Two situations, two remedies, and each must exclude the other's — a
     // merge is the defect this split keeps producing, and it is invisible
     // unless the assertions say what each case must LACK as well as contain.
+    //
+    // The two are told apart by whether the capture command carries a CONCRETE
+    // test key. A named pattern already has a fixture, so if capturing is the
+    // answer at all the test is known and is printed; an unnamed one has no
+    // fixture, so the test cannot be derived and the placeholder stands.
     const from = (testKey: string, pinned = true) => ({ testKey, pinned });
 
-    // NAMED: a fixture in the tree records it, so capturing another changes
-    // nothing. The failure below carries the remedy for the actual fault.
     const named = reportUncovered(
       ["system/home.tsx"],
       new Map([["system/home.tsx", from("system/home.test.tsx")]]),
     );
     expect(named).toContain("(recorded by system/home.test.tsx)");
-    expect(named).toContain("capturing another would change nothing");
-    // ...and NOT the capture instruction, which would send a reader to make a
-    // second fixture for a pattern that already has one.
-    expect(named).not.toContain("--update");
+    expect(named).toContain("ARE recorded by a fixture already in the");
+    // The command names the test, because the fixture is right there.
+    expect(named).toContain(
+      "deno task pattern-vintage --update system/home.test.tsx",
+    );
+    // ...and NOT the placeholder, which claims the test is underivable.
+    expect(named).not.toContain("<test path>");
 
-    // UNNAMED: capture one, and which test writes that state is not derivable.
     const unnamed = reportUncovered(["system/newcomer.tsx"], new Map());
     expect(unnamed).not.toContain("recorded by");
     expect(unnamed).toContain("--update <test path>");
     // ...and NOT the named advice. Without this the branches can merge and
-    // every other assertion here still passes — measured: making `named` match
-    // `coveredBy.has` in both directions left the old three-way test green.
-    expect(unnamed).not.toContain("capturing another would change nothing");
+    // every other assertion here still passes.
+    expect(unnamed).not.toContain("ARE recorded by a fixture already in the");
 
     // Both at once, each keeping its own remedy rather than collapsing.
     const mixed = reportUncovered(
       ["system/home.tsx", "system/newcomer.tsx"],
       new Map([["system/home.tsx", from("system/home.test.tsx")]]),
     );
-    expect(mixed).toContain("capturing another would change nothing");
+    expect(mixed).toContain("ARE recorded by a fixture already in the");
     expect(mixed).toContain("--update <test path>");
+    expect(mixed).toContain(
+      "deno task pattern-vintage --update system/home.test.tsx",
+    );
 
     // The tier is NOT part of the split — it only breaks ties over which test
     // to name — so an auto-recorded pattern reads exactly like a pinned one.
+    // Which remedy applies is scoped by whether a failure was printed, a fact
+    // the reader can check, rather than by a tier this function guessed at.
     const auto = reportUncovered(
       ["system/home.tsx"],
       new Map([["system/home.tsx", from("system/home.test.tsx", false)]]),

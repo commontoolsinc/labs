@@ -400,8 +400,22 @@ export function reportUncovered(
       ? [
         "",
         "The ones with a test named ARE recorded by a fixture already in the",
-        "tree, so capturing another would change nothing — its failure is",
-        "printed below and carries the remedy for that particular fault.",
+        "tree. Which remedy applies is something the output below tells you,",
+        "and this line must not guess:",
+        "",
+        "  * a failure printed below for that fixture — read it, it carries",
+        "    the remedy for that particular fault, and capturing another",
+        "    fixture would change nothing;",
+        "  * NO failure for it — then it replayed fine and simply cannot",
+        "    credit coverage, which today means an auto capture (pruned by",
+        "    count, so letting one count would let retention delete a",
+        "    pattern's only evidence). Pin it:",
+        "",
+        ...named.map((key) =>
+          `      deno task pattern-vintage --update ${
+            coveredBy.get(key)!.testKey
+          }`
+        ),
       ]
       : []),
     ...(unnamed.length > 0

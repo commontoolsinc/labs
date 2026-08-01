@@ -820,8 +820,10 @@ Three further limits, all measured, all in the gate as shipped:
   three roots, all derived names.
 - **A target whose every comparable key is a rendering** reports "updated
   cleanly with no state stranded" having compared nothing, and the output cannot
-  distinguish that from a real check. A minority of the targets today
-  (`profile-picker.tsx`, and the two map-body hoists).
+  distinguish that from a real check. A real share of the targets today:
+  `profile-picker.tsx`, plus every `__cfPattern_N` map-body hoist — 26 hoist
+  instances across 5 distinct hoists, of 73 targets, once topics and lunch-poll
+  joined the fixture set. "The two" was true of the pre-#5253 14-target set.
 
 ## Open questions
 

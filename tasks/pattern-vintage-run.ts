@@ -132,7 +132,12 @@ export function snippet(value: unknown): string {
 /** Which test's fixture records a pattern, and whether it can credit it. */
 export interface VintageAttribution {
   testKey: string;
-  /** PINNED is the only tier coverage counts, so this decides the remedy. */
+  /**
+   * PINNED is the only tier coverage counts. It breaks TIES over which test to
+   * name; the report does not branch on it — see `reportUncovered`, which
+   * scopes its two remedies by whether a failure was printed rather than by
+   * tier.
+   */
   pinned: boolean;
 }
 
@@ -281,7 +286,12 @@ export async function replayVintage(
         `this fixture's name records identity ${vintage.identity}, which it ` +
           `does not contain (it holds ${
             [...new Set(manifest.entries.map((e) => e.identity))].join(", ")
-          }) — so it is not the state its name claims. ${remedy}`,
+          }) — so it is not the state its name claims. Renaming the file to ` +
+          `one of the identities it does hold keeps the vintage, which a ` +
+          `recapture would replace with today's state; a deep vintage cannot ` +
+          `be recaptured at all, since the version that wrote it no longer ` +
+          `exists in runnable form. Only if the file is genuinely junk: ` +
+          `${remedy}`,
         recordedFrom(manifest.entries),
       );
     }
@@ -402,7 +412,10 @@ export async function replayVintage(
               `${entry.space}, so this fixture does not hold that root`
             : `was materialized in ${entry.space}, which this fixture does ` +
               `not carry (it holds ${[...carried].sort().join(", ")})`) +
-          ` — it was recorded but NOT validated. ${remedy}`,
+          ` — it was recorded but NOT validated. If the space is one the ` +
+          `fixture should carry, its companion store is missing: restore it ` +
+          `rather than recapturing, which would replace the vintage with ` +
+          `today's state. Only if the fixture is genuinely wrong: ${remedy}`,
       });
     }
 
@@ -469,7 +482,9 @@ export async function replayVintage(
           ...where,
           detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
             `names "${entry.main}", which is neither a repo path nor a served ` +
-            `pattern route, so today's source for it cannot be found`,
+            `pattern route, so today's source for it cannot be found. The ` +
+            `capture guard refuses this shape now, so a fixture holding one ` +
+            `predates it: ${remedy}`,
         });
         continue;
       }
@@ -653,7 +668,7 @@ export async function replayVintage(
               ? `carries a setup marker but no readable stored schema, so `
               : `stores a result schema that reads back nothing, so `) +
             `applying ${entry.main} over it could not be checked for stranded ` +
-            `state`,
+            `state. The fixture does not hold what it claims: ${remedy}`,
         });
         continue;
       }
@@ -810,10 +825,9 @@ export async function replayAll(
       // name a failure prints does not change run to run.
       // A PINNED attribution always WINS, and first-wins only breaks ties
       // within a tier. `collectVintages` sorts by path and `auto` sorts before
-      // `pinned`, so plain first-wins handed a pattern recorded by both tiers
-      // to the AUTO one — and the two carry opposite remedies. The reader
-      // would be told to pin a fixture that is already pinned while the real
-      // failure kept the gate red.
+      // `pinned`, so plain first-wins named the AUTO fixture when both record
+      // one pattern — and the pinned one is the useful name, being the fixture
+      // whose failure the reader is about to read.
       const existing = coveredBy.get(key);
       const pinned = vintage.tier === PINNED;
       if (existing === undefined || (pinned && !existing.pinned)) {
