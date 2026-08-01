@@ -3,7 +3,7 @@ status: historical
 created: 2026-07-30
 archived: 2026-07-30
 reason: "Investigation record: why the open-argument update class went unvalidated, and the correction of an earlier measurement that pointed at the wrong mechanism."
-superseded-by: docs/plans/pattern-update-state-continuity.md
+superseded-by: docs/specs/pattern-update-testing.md
 ---
 
 # Open-argument update validation: what was actually broken
@@ -11,7 +11,7 @@ superseded-by: docs/plans/pattern-update-state-continuity.md
 A record of one investigation, kept because its conclusion reversed a
 measurement this repository had already written down as fact. The behaviour it
 describes has since changed; read
-[`docs/plans/pattern-update-state-continuity.md`](../../plans/pattern-update-state-continuity.md)
+[`docs/specs/pattern-update-testing.md`](../../specs/pattern-update-testing.md)
 for the current system.
 
 ## The gap

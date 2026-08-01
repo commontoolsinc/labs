@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-29
+archived: 2026-08-01
+reason: "Executed plan; stages 1-4 and stage 5's value comparison shipped. The live description of the resulting gates is docs/specs/pattern-update-testing.md."
+superseded-by: docs/specs/pattern-update-testing.md
+---
+
 # Pattern update state continuity (Tier 2)
 
 Status: In progress. Stages 1–4 are complete and the tier is now a REAL GATE:
@@ -69,7 +77,7 @@ land or the plan is abandoned, archive this document under
 `home.tsx`, `default-app.tsx`, and the profile patterns auto-update: the runtime
 resolves a source pointer to a current identity and swaps the pattern in place
 onto the same result cell. The specification is
-[`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md),
+[`docs/specs/pattern-imports/pattern-updates.md`](../../specs/pattern-imports/pattern-updates.md),
 and it already names this tier as required work — "CI and golden replay tests
 must exercise representative prior state and verify that the proposed source
 still reads and preserves it".
@@ -150,7 +158,7 @@ Measured on branch `tier2`, not assumed:
 | Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **five of six** (the sixth takes no snapshot); undoing `.for('itemList')` reds the storage-move case; giving the argument candidate a COMPATIBLE type reds the argument case |
 | A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, and the argument case carries the same control for the same reason |
 | Tier 1 **defers** the open-argument evolution class to a runtime guard, and that guard now fires on both update routes | over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…") on the ground that the runner validates the piece's merged durable arguments. Measured on both routes: the hot-swap refused it already; the roll-forward materialize now does too, with `updated arguments do not match the candidate schema: count: value does not match type number`, and the captured bytes survive the refusal. Guarded in `packages/runner/test/pattern-update-argument-validation.test.ts` (both routes, plus the cold-link control) and replayed from a captured vintage in `state-continuity.test.ts` |
-| The `{ unresolvedLinkRaw }` leniency draws the link/plain line by itself | measured: `overlayUnresolvedLinkPlaceholders` substitutes the opaque placeholder only where the *raw* value at that slot is a cell link that materialized to nothing, so a plain wrong-typed value reaches `validateSchemaValue` and is rejected, under both write shapes (argument supplied at `run()`, and argument written through the root's `argument` meta the way the capture does). Validating an update strictly therefore costs nothing in CT-1917 deferral, and needs no change to this path. An investigation record of a superseded reading of this mechanism is in [`docs/history/plans/pattern-update-open-argument-investigation.md`](../history/plans/pattern-update-open-argument-investigation.md) |
+| The `{ unresolvedLinkRaw }` leniency draws the link/plain line by itself | measured: `overlayUnresolvedLinkPlaceholders` substitutes the opaque placeholder only where the *raw* value at that slot is a cell link that materialized to nothing, so a plain wrong-typed value reaches `validateSchemaValue` and is rejected, under both write shapes (argument supplied at `run()`, and argument written through the root's `argument` meta the way the capture does). Validating an update strictly therefore costs nothing in CT-1917 deferral, and needs no change to this path. An investigation record of a superseded reading of this mechanism is in [`docs/history/plans/pattern-update-open-argument-investigation.md`](pattern-update-open-argument-investigation.md) |
 | A repair path cannot tell an update from a replay by the pattern POINTER | the roll-forward materialize commits the candidate's identity and then calls `runSynced` (`pieces-controller.ts`), and `PatternUpdater`'s instantiated mode moves the pointer with no setup at all, leaving a root that boots through the cold-start setup repair. Both reach setup with the pointer already naming the pattern being installed, so `samePattern` is true for what is an update. `patternSetupIdentity` — stamped only once setup has staged an identity's schema, arguments, internal cells and result projection — is the signal that survives, and `PatternUpdater` already used it for the same purpose (`setupNeedsRepair`). Now read in `setupInternal` via `storedSetupMarker`, which returns `"matches" | "other" | "absent"` — three states rather than a boolean, because an absent marker is not evidence that the running graph is this pattern and must not be read as one. The routes that hand setup a pattern the pointer does not name yet (`PatternUpdater`'s default-root apply, `cf piece setsrc`) were recognized as changes already, which is why they validated before this change |
 | An ABSENT setup marker still skips the re-stage, and that currently covers most roots | deliberate, and the residual: a root written before the marker existed cannot be told from a pending update, and re-staging every such root would validate and rewrite defaults over arguments no update is touching. The window is one setup wide per root and needs a pre-stamped pointer, so an ordinary identity change (`samePattern` false) validates regardless. What the arithmetic understates: `patternSetupIdentity` was introduced 2026-07-24, so a root written before then is exempt for its first repair-route update — and aged roots are exactly the population likeliest to hold an argument a new schema cannot read. This tier does NOT cover them: a capture runs setup through the current runner, so a captured vintage is always marked. The exemption is pinned as a decision in `pattern-update-argument-validation.test.ts` (marker stripped, update admitted, marker written on the way through so the exemption closes behind itself) |
 | Re-staging widens the repair transaction's conflict set | the re-stage reads the stored argument and `validateArgument` materializes it, and `ignoreReadForScheduling` suppresses scheduling only — it is not `ignoreReadForCommit` — so both reads join the commit's conflict set on paths that previously did neither. Accepted rather than closed, with the mitigation stated narrowly: the `runSynced` callers reach `applySetupState` inside an `editWithRetry`, so a conflict retries rather than failing the repair, and `runSynced` pre-syncs the cells it is about to set up — but `swapToPattern` uses a bare `edit()`, and the marker read itself sits in `setupInternal` and so joins every setup's conflict set, including a caller-managed transaction that does not retry. The nested-piece repair opts out of the re-stage entirely, so it adds neither read. Not reproduced; recorded because the internal-cell code one screen up avoids exactly this hazard for its own probe read |
@@ -186,7 +194,7 @@ restoring is a file copy. A JSON dump would need a re-writer that reconstructs
 docs, causes, and links — and getting causes wrong silently produces a fixture
 that is not the state that was captured. Restore is same-DID; re-keying is an
 unbounded migration that destroys the fidelity the fixture exists to buy (see
-[`space-clone-rehearsal.md`](space-clone-rehearsal.md)).
+[`space-clone-rehearsal.md`](../../plans/space-clone-rehearsal.md)).
 
 **Every capture lives in git. DECIDED — this reverses the original split.**
 Auto captures were to live in CI artifacts because "at ~1.5 MB a floor,
@@ -882,9 +890,9 @@ Three further limits, all measured, all in the gate as shipped:
 
 ## References
 
-- [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md)
+- [`docs/specs/pattern-imports/pattern-updates.md`](../../specs/pattern-imports/pattern-updates.md)
   — the updater this tier guards, and the § that requires this work
-- [`space-clone-rehearsal.md`](space-clone-rehearsal.md) — same-DID reasoning
+- [`space-clone-rehearsal.md`](../../plans/space-clone-rehearsal.md) — same-DID reasoning
   and the rehearsal practice this shares mechanics with
 - `packages/piece/test/check-update-default-pattern.test.ts` — the update path
   driven with inline sources; stage 2 drives it from a captured vintage instead

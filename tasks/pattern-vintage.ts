@@ -42,7 +42,7 @@
  * doc is still a finding.
  *
  *   deno task pattern-vintage                                  # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one
+ *   deno task pattern-vintage --update topics/topics.test.tsx  # first pinned fixture
  *   deno task pattern-vintage --capture-changed                # capture a generation where due
  *   deno task pattern-vintage --pin topics/topics.test.tsx     # promote the newest generation
  *
@@ -78,10 +78,11 @@
  * store to ~9 KiB — and bounded where it is not, since each one also costs
  * 3.5 MiB of working-tree disk in every clone.
  *
- * Neither command runs in CI. CI runs the plain gate, which only ever READS
- * the tree. Capture and promotion write fixtures, and a gate that wrote its own
- * evidence would be grading its own homework; both land in the working tree to
- * be committed and reviewed like any other change.
+ * NO writing command runs in CI, and there are three: `--update`,
+ * `--capture-changed` and `--pin`. CI runs the plain gate, which only ever
+ * READS the tree. A gate that wrote its own evidence would be grading its own
+ * homework, so all three land in the working tree to be committed and reviewed
+ * like any other change.
  *
  * `--capture-changed` refuses to capture onto a red tree, which is also what
  * removes the need for a rule about capturing mid-edit: a generation is a
