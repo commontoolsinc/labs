@@ -190,11 +190,47 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** item 3 closed as a DEFINITION fix (no code change) — **all four
-terminal-condition items are now closed**, and only D12's
-`background-piece-service` sunset stands between here and the flip. Code head is
-`e519ec83e`: toolshed's webhook egress routed through the executor (D12), plus
-the arc's **first gate probe that can see egress** (item 4).
+
+> ## THE FLIP IS LANDED — `b46e9b7e0`, 2026-07-31
+>
+> `externalSinkDisposition` defaults to **`"suppress"`**. A client never runs an
+> egress effect; `allow` is the exception a server-side executor EARNS by
+> declaring `"server-executor"`, and `executor/executor-worker.ts` is the one
+> site in the repo that does (grep-verified; no preset can spell it).
+>
+> **The acceptance measurement**, from the webhook gate probe — a real pool
+> driving a real executor Worker:
+>
+> ```
+> executorBrokerEgress=[<one url>]  actingLanes=["space"]  apiServerEgress=[]
+> candidateUnservedByCode={}  actionFirewallRejects=0
+> settlementsCommitted=2      settlementsUnserved=0
+> ```
+>
+> Exactly one egress, performed by the EXECUTOR, none by the client-side
+> runtime, with the corrected gate at zero in all three arms. Runner 1379/0
+> (identical to the pre-flip baseline), memory 845/0, toolshed 67/0.
+>
+> **THE 32 WERE NEVER A SERVING GAP, and this corrects `ab948050b`'s trial.**
+> The flipped arm failed 32 tests before the harnesses were fixed; every one was
+> an effect-builtin test whose runtime was a bare
+> `new Runtime({apiUrl, storageManager})` with no declared posture. The trial's
+> 29 had the **same 123-step signature**, so that set was ALWAYS harness
+> configuration. Its conclusion — "a post-commit effect never ran" — was
+> accurate and incomplete: it never ran because nobody had told those runtimes
+> they were allowed to run it. **Do not cite the 29 as evidence of unserved
+> work.**
+>
+> **What the flip did NOT require**, which is the arc's own summary: no change
+> to claim arbitration, the pool, the lease, routing, or servability. The
+> machinery this arc spent months on was not what stood between here and the
+> end — recorded in the top box since `ab948050b` and now confirmed at the
+> close.
+
+**Last landed:** `b46e9b7e0` — the flip. Before it: `9c9513317` deleted
+`background-piece-service` (D12) and `f945d1ed0` disabled it under the flag;
+`e519ec83e` routed toolshed's webhook egress through the executor and added the
+gate probe (item 4); item 3 closed as a definition fix.
 
 Earlier, most recent first: `64d9d76e5` §2.11, any process that writes to a
 stream cell is a pattern runtime; `f2bf77cd8` **D12** — background-piece-service
@@ -258,15 +294,13 @@ unblock each other:
 2. ~~A gate probe containing a pattern effect~~ — **DONE `e519ec83e`.** Use it:
    it is the only instrument that reads the corrected gate and an egress count
    off the same run, so it is how the flip gets measured.
-3. **`background-piece-service` SUNSET (D12).** The remaining half of D12;
-   toolshed's is done. **Sunset must precede the flip** — see D12 for the
-   sequencing and for why it must NOT be given `"server-executor"` authority as
-   a stopgap.
-4. **THEN** the flip itself: `externalSinkDisposition`'s client default
-   (`runtime.ts`, the `?? "claim-conditional"` line, marked in a comment) to
-   `"suppress"`. **Toolshed is already flipped ahead of it** (`e519ec83e`), so
-   it doubles as an early acceptance sample: whatever the flip does globally,
-   it has already been done to one server runtime and measured.
+3. ~~`background-piece-service` SUNSET~~ — **DONE `9c9513317`** (disabled
+   `f945d1ed0`, deleted `9c9513317`, −6754 lines).
+4. ~~THEN the flip~~ — **DONE `b46e9b7e0`.** See the box at the top of §1.
+
+**THE ARC'S TERMINAL CONDITION IS MET.** What remains below is real work, but
+none of it gates the categorical statement — that statement is now true and
+pinned.
 
 **With item 3 closed as a definition fix, only the BPS sunset stands between
 here and the flip.**
