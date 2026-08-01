@@ -312,7 +312,7 @@ describe("reporting", () => {
 
     expect(report).toContain("system/home.tsx");
     expect(report).toContain("system/default-app.tsx");
-    expect(report).toContain("deno task pattern-vintage --update");
+    expect(report).toContain("deno task pattern-vintage --update <test path>");
     // Says WHY it matters, not just what is missing — the reader is usually
     // someone who has never heard of this gate.
     expect(report).toContain("bricks that piece");
@@ -411,33 +411,38 @@ describe("reporting", () => {
   });
 
   it("tells an uncovered pattern apart from one that was merely not credited", () => {
-    // Two different problems with two different remedies. A pattern some
-    // fixture DID replay was excluded after the fact — a served route, or a
-    // fixture that no longer holds the root — and recapturing it fixes
-    // nothing. A pattern no fixture records has nothing to replay at all.
+    // Two problems with two remedies. A pattern some fixture RECORDED but that
+    // the run did not credit — a served route, an auto-tier fixture, a root the
+    // fixture no longer holds — is named with the test whose fixture records
+    // it, and recapturing would fix nothing. A pattern no fixture records has
+    // nothing to replay at all.
+    //
+    // The attribution map must therefore be built from what fixtures RECORD,
+    // not from what the run CREDITS. Built from the credited set, this branch
+    // is unreachable by construction — `uncovered` is exactly the required keys
+    // absent from that set — and an earlier version of this case passed only
+    // because it hand-built a pair the gate can never produce.
+    // `pattern-vintage-run.test.ts` drives the real path.
     const both = reportUncovered(
       ["system/home.tsx", "system/newcomer.tsx"],
       new Map([["system/home.tsx", "system/home.test.tsx"]]),
     );
 
-    // The known one is named WITH the test that covers it, so the reader can
-    // go look at that fixture rather than guessing.
     expect(both).toContain(
       "system/home.tsx  (covered by system/home.test.tsx)",
     );
     expect(both).toContain("replayed and");
-    // ...and the unknown one gets the capture instruction.
     expect(both).toContain("--update <test path>");
 
-    // With everything already covered by some fixture, the capture advice must
-    // NOT appear — it would send a reader to recapture a fixture that exists.
+    // Everything already recorded somewhere: the capture advice must NOT
+    // appear, or it sends a reader to recapture a fixture that exists.
     const knownOnly = reportUncovered(
       ["system/home.tsx"],
       new Map([["system/home.tsx", "system/home.test.tsx"]]),
     );
     expect(knownOnly).not.toContain("--update <test path>");
 
-    // With none known, no fixture is named and the advice is the whole of it.
+    // Nothing recorded: no fixture is named and the advice is the whole of it.
     const unknownOnly = reportUncovered(["system/newcomer.tsx"], new Map());
     expect(unknownOnly).not.toContain("covered by");
     expect(unknownOnly).toContain("--update <test path>");
@@ -464,8 +469,10 @@ describe("reporting", () => {
       false,
     );
     expect(reportNothingReplayed()).toContain("covered NOTHING");
+    // WITH the argument. Bare `--update` exits 1 without capturing, so a
+    // recovery instruction that omits it sends a fresh checkout nowhere.
     expect(reportNothingReplayed()).toContain(
-      "deno task pattern-vintage --update",
+      "deno task pattern-vintage --update <test path>",
     );
   });
 

@@ -41,13 +41,19 @@
  * compared as the DOCUMENT it points at, so a field that moved to a different
  * doc is still a finding.
  *
- *   deno task pattern-vintage                            # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update                   # capture where a REQUIRED one is missing
- *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one deliberately
+ *   deno task pattern-vintage                                  # replay; fail on a stranded fixture
+ *   deno task pattern-vintage --update topics/topics.test.tsx  # capture one
  *
- * A named key is a TEST path, not a pattern path — a fixture is produced by
- * running a test, and covers whatever that test instantiates. `system/x.tsx`
+ * `--update` always names a TEST path, never a pattern path — a fixture is
+ * produced by RUNNING a test, and covers whatever that test instantiates, which
+ * is routinely several patterns none of which share its name. `system/x.tsx`
  * names no test and captures nothing.
+ *
+ * There is no bare `--update`, and no list of what CI replays. Every fixture
+ * under the vintages tree is replayed by the plain command, so committing a
+ * captured fixture is the whole of adding one. A default seed set would only
+ * ever serve a MISSING fixture, and that is exactly when nothing on disk knows
+ * which test covers the pattern.
  *
  * `--update` can only ADD. It never rewrites or deletes an existing fixture,
  * for the reason Tier 1's baselines are append-only: a command that could

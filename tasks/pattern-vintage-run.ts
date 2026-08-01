@@ -169,6 +169,19 @@ export interface ReplayReport {
    * "X was replayed" — and the second is the one that matters.
    */
   covered: Set<string>;
+  /**
+   * Pattern keys this fixture's manifest NAMES, whether or not each was
+   * credited as coverage.
+   *
+   * Deliberately not a subset of `covered`, and that is the whole point.
+   * `covered` answers "was this replayed and credited"; a pattern can be
+   * recorded and then not credited — a served route, an auto-tier fixture, a
+   * root the fixture no longer holds, a source that stopped compiling. Deriving
+   * attribution from `covered` made the "covered by X" branch unreachable by
+   * construction, since `uncovered` is exactly the required keys ABSENT from
+   * `covered`.
+   */
+  recorded: Set<string>;
   failures: ReplayFailure[];
 }
 
@@ -197,6 +210,7 @@ export async function replayVintage(
     stranded: 0,
     servedRoute: 0,
     covered: new Set<string>(),
+    recorded: new Set<string>(),
     failures: [{ ...where, detail }],
   });
   // Stated once, because every "this fixture is not usable" message needs it and
@@ -325,6 +339,7 @@ export async function replayVintage(
       // gate without ever being materialized or compared. The docstring says
       // coverage means "X was replayed"; now it does.
       covered: new Set<string>(),
+      recorded: new Set<string>(),
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -424,6 +439,10 @@ export async function replayVintage(
         });
         continue;
       }
+      // Recorded from HERE — the manifest names this pattern, which is what
+      // makes the fixture worth pointing a reader at. Everything below can
+      // still decline to CREDIT it, and attribution must survive that.
+      report.recorded.add(key);
       const source = `${roots.patternsRoot}/${key}`;
       let program;
       try {
@@ -737,10 +756,13 @@ export async function replayAll(
     updated += report.updated;
     stranded += report.stranded;
     servedRoute += report.servedRoute;
-    for (const key of report.covered) {
-      covered.add(key);
-      // First fixture wins, and the walk is path-sorted, so the name a failure
-      // prints does not change run to run when two tests cover one pattern.
+    for (const key of report.covered) covered.add(key);
+    for (const key of report.recorded) {
+      // From `recorded`, NOT `covered`: a pattern that was credited needs no
+      // attribution, because it never reaches an uncovered report. The one
+      // worth naming is the pattern a fixture records and the run then does
+      // not credit. First fixture wins, and the walk is path-sorted, so the
+      // name a failure prints does not change run to run.
       if (!coveredBy.has(key)) coveredBy.set(key, vintage.testKey);
     }
     failures.push(...report.failures);

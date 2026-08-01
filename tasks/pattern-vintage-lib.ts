@@ -501,9 +501,16 @@ export function reportNothingReplayed(): string {
     "A run that replays nothing proves nothing, so it is a failure rather than",
     "a pass. Either the fixture tree is missing (a bad checkout, or a path that",
     "moved without this task moving with it) or every file under it was",
-    "declined as not a fixture. Capture one with:",
+    "declined as not a fixture. Capture one by naming the TEST that writes",
+    "the state — a test path, not a pattern path, because a fixture is produced",
+    "by RUNNING a test:",
     "",
-    "  deno task pattern-vintage --update",
+    "  deno task pattern-vintage --update <test path>",
+    "",
+    "e.g. `--update system/home.test.tsx`. Bare `--update` captures nothing:",
+    "there is no default set, because the one case a default would serve is a",
+    "MISSING fixture, and nothing on disk knows which test covers a pattern",
+    "whose fixture is gone.",
   ].join("\n");
 }
 

@@ -910,6 +910,44 @@ describe("the vintage gate, end to end", () => {
     ).toContain("stranded state the vintage held");
   });
 
+  it("attributes a RECORDED pattern the run did not credit", async () => {
+    // The provenance an uncovered-pattern failure prints. It has to come from
+    // what a fixture RECORDS, not from what the run CREDITS: `uncovered` is
+    // exactly the required keys absent from the credited set, so a map built
+    // from that set can never name one of them and the "covered by" branch is
+    // unreachable by construction. An earlier version made precisely that
+    // mistake, and its unit test passed only by hand-building a pair the gate
+    // cannot produce.
+    //
+    // Driven here through the real path, using the auto tier as the reason for
+    // withholding credit — it is the one exclusion a test can arrange without
+    // corrupting the fixture.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const autoDir = `${roots.vintagesRoot}/${pinnedRef.testKey}/${AUTO}`;
+    await Deno.mkdir(autoDir, { recursive: true });
+    await Deno.copyFile(
+      pinnedRef.path,
+      `${autoDir}/${pinnedRef.stamp}-${pinnedRef.identity}.sqlite`,
+    );
+    await Deno.remove(pinnedRef.path);
+
+    const { covered, coveredBy, replayed } = await replayAll(roots);
+
+    // The control: it WAS replayed, so "not credited" is a decision rather
+    // than the uninteresting case of nothing having run.
+    expect(replayed).toBe(1);
+    expect([...covered], "an auto fixture credited coverage").toEqual([]);
+    // ...and the pattern is still attributed to the test that records it,
+    // which is the whole point — a reader is sent to the fixture rather than
+    // told to capture one that already exists.
+    expect(coveredBy.get(KEY)).toBe(pinnedRef.testKey);
+  });
+
   it("credits coverage only for a PINNED fixture", async () => {
     // An auto capture is regenerable and pruned by COUNT, so letting one
     // satisfy the coverage gate means retention can delete the gate's only
