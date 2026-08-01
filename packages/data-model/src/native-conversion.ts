@@ -41,7 +41,8 @@ function rejectExtraProperties(value: object, typeName: string): void {
 /**
  * Returns a shallow clone of the given array carrying nothing but its
  * enumerable index properties and `length`, that is, one which satisfies
- * `isInertArray()`. Holes are preserved as holes, and
+ * `isInertArray()` -- a direct `Array` instance, whatever the given array's
+ * prototype. Holes are preserved as holes, and
  * elements are copied by reference without themselves being converted or
  * validated, this being a shallow operation.
  *
@@ -249,11 +250,14 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Array: {
-      // An array in this system is INERT: it may only carry numeric index
-      // properties, each a data property. A named or symbol-keyed property
-      // has no fabric representation, and an accessor-backed index is live
-      // code rather than inert data; reject any of them outright rather than
-      // silently dropping or flattening ("death before confusion").
+      // An array in this system is INERT: a direct `Array` instance, which
+      // may only carry numeric index properties, each a data property. A named
+      // or symbol-keyed property has no fabric representation, and an
+      // accessor-backed index is live code rather than inert data -- as is the
+      // prototype of an `Array` subclass instance, which can make iteration
+      // answer differently than the indices say. Reject any of them outright
+      // rather than silently dropping or flattening ("death before
+      // confusion").
       if (!isInertArray(value)) {
         throw new Error(
           "Not representable as a `FabricValue`: array that is not an " +
@@ -295,7 +299,8 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.HasToJSON: {
-      // Objects (or arrays/class instances) with a `toJSON()` method.
+      // Objects (or class instances) with a `toJSON()` method. Arrays never
+      // reach here: they are tagged `Array` whatever they carry.
       // Call `toJSON()` and validate the result.
       const converted = (value as { toJSON: () => unknown }).toJSON();
       if (!isFabricValueLayer(converted)) {
@@ -663,8 +668,8 @@ function isFabricCompatibleInternal(
       seen.add(value);
 
       if (Array.isArray(value)) {
-        // Check array structure (no non-index properties, no
-        // accessor-backed indices).
+        // Check array structure (a direct `Array` instance, no non-index
+        // properties, no accessor-backed indices).
         if (!isInertArray(value)) {
           seen.delete(value);
           return false;

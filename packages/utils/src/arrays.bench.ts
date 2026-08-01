@@ -24,8 +24,8 @@
  *    `ownKeys` trap plus a `getOwnPropertyDescriptor` trap per key to filter
  *    for enumerability, where `Reflect.ownKeys()` fires exactly one trap. The
  *    runtime proxies heavily, so the proxied figure is not a curiosity. For
- *    `isInertArray()` a proxy also pays one `getOwnPropertyDescriptor` trap
- *    per index.
+ *    `isInertArray()` a proxy also pays one `getPrototypeOf` trap for the
+ *    directness check, plus one `getOwnPropertyDescriptor` trap per index.
  *
  * 3. **The inert/index-only spread itself.** Per-index
  *    `Object.getOwnPropertyDescriptor()` allocates a descriptor object per

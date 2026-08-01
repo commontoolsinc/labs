@@ -85,9 +85,9 @@ export function isArrayIndexPropertyName(name: string): boolean {
  *
  * A `Proxy` is the exception, and unavoidably so: it can throw from its own
  * traps, and such an error propagates rather than being reported as `false`.
- * A revoked proxy fails the array test itself, and a live one can throw from
- * `ownKeys()`. Reporting `false` there would mean reading "this is not an
- * index-only array" into what is actually a failure to find out.
+ * A revoked proxy makes `Array.isArray()` itself throw, and a live one can
+ * throw from `ownKeys()`. Reporting `false` there would mean reading "this is
+ * not an index-only array" into what is actually a failure to find out.
  *
  * **Note:** This function relies on the given array producing `Reflect.ownKeys()`
  * output which agrees with the JavaScript spec with regards to key ordering,
@@ -121,9 +121,10 @@ export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
 }
 
 /**
- * Indicates whether the given array is an _inert_ array: every own property an
- * array index holding a _data_ property, `length` aside -- which is what a
- * well-formed array means in this system. Beyond the index-only requirement of
+ * Indicates whether the given array is an _inert_ array: a direct instance of
+ * `Array`, every own property of which is an array index holding a _data_
+ * property, `length` aside -- which is what a well-formed array means in this
+ * system. Beyond the index-only requirement of
  * {@link isArrayWithOnlyIndexProperties} (which this check subsumes; there is
  * no need to call both), an accessor-backed (getter and/or setter) index
  * causes rejection, because it makes the array non-inert: an accessor is live
@@ -133,16 +134,36 @@ export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
  * enumeration-driven copying, so an index's enumerability has no bearing on
  * the array's inertness.
  *
+ * "Direct instance" means the prototype is `Array.prototype` exactly. An
+ * `Array` subclass instance is rejected, because its prototype is live code
+ * just as much as an accessor is: an overridden `Symbol.iterator` (or `at()`,
+ * or `values()`) makes iteration answer differently than the indices say, and
+ * again freezing changes nothing. An array whose prototype has been severed
+ * (`null`) is rejected too, as is an array from another realm, whose prototype
+ * is a different `Array.prototype` carrying whatever that realm did to it.
+ * None of those prototypes are part of what an array says as data, so
+ * accepting one would mean carrying an alien prototype along in defiance of
+ * the type, or silently dropping it.
+ *
  * The array-recognition, `Proxy`, and key-ordering caveats described on
- * {@link isArrayWithOnlyIndexProperties} apply here as well.
+ * {@link isArrayWithOnlyIndexProperties} apply here as well. A `Proxy` over a
+ * direct `Array` passes: absent a `getPrototypeOf()` trap, the prototype
+ * question forwards to the target, and a trap that answers otherwise is the
+ * proxy's own bug to own.
  *
  * @param array The value to check.
  * @returns `true` if the array is an inert array, `false` otherwise.
  */
 export function isInertArray(array: unknown): boolean {
   // `Array.isArray()` sees through a `Proxy` to its target, so a proxied array
-  // is still recognized as one here.
-  if (!Array.isArray(array)) {
+  // is still recognized as one here, and -- absent a `getPrototypeOf()` trap --
+  // answers its target's prototype as well. `Array.isArray()` is deliberately
+  // realm-agnostic, so the prototype comparison is what makes this the local
+  // `Array` and not merely something array-shaped.
+  if (
+    !Array.isArray(array) ||
+    (Object.getPrototypeOf(array) !== Array.prototype)
+  ) {
     return false;
   }
 

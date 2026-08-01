@@ -189,7 +189,10 @@ member of `FabricValue`.
 > **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
 > `FabricNativeObject` represents objects that provide a `toJSON()` method.
 > The conversion functions call `toJSON()` and process the
-> result (Section 8.2). This variant is **legacy and marked for removal** —
+> result (Section 8.2). Arrays are excluded: an array is decided by the array
+> rule of Section 1.5 whatever it carries, so one bearing a `toJSON` method is
+> rejected rather than converted. This variant is **legacy and marked for
+> removal** —
 > callers should migrate to the fabric protocol
 > (`FabricInstance` + `[CODEC]`). See Section 7.1 for migration guidance.
 
@@ -1183,6 +1186,16 @@ Section 4.5.
 ### 1.5 Recursive Containers
 
 **Arrays:**
+- Direct `Array` instances only: the prototype must be `Array.prototype`
+  itself. An `Array` subclass instance, an array whose prototype has been
+  severed or replaced, and an array from another realm all cause rejection,
+  because an array's prototype has no representation as array content, so
+  accepting one could only mean dropping it silently. A subclass prototype is
+  live code besides — an overridden `Symbol.iterator`, say, makes iteration
+  answer differently than the indices do, and freezing the array does not
+  change that. (Plain objects are treated differently on this point: see the
+  object rule below, which admits a null prototype and normalizes it on
+  reconstruction.)
 - May be dense or sparse
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
@@ -2901,7 +2914,12 @@ boundary-only serialization and the three-layer architecture:
 > **`toJSON()` compatibility and migration.** The conversion functions and their
 > variants currently honor `toJSON()` methods on objects that have them — if an
 > object has a `toJSON()` method and does not implement `FabricInstance`, the
-> conversion functions call `toJSON()` and process the result. This preserves
+> conversion functions call `toJSON()` and process the result. Arrays are
+> outside this: an array is answered by the array rule of Section 1.5 whatever
+> it carries. An own `toJSON` is a named key, which that rule rejects; an
+> inherited one is not array content, and honoring it would mean a single
+> assignment to `Array.prototype.toJSON` could route every array in the process
+> through it. This preserves
 > backward compatibility with existing code. However, `toJSON()` support is
 > **marked for removal**: it eagerly converts to JSON-compatible shapes, which
 > is incompatible with late serialization. Implementors should migrate to the
@@ -3062,10 +3080,14 @@ export function fabricFromNativeValue(
 > single constructor lookup that returns a tag string (e.g., `"Error"`,
 > `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
 > `"FabricInstance"`). The conversion function then switches on the tag to
-> route to the appropriate wrapping logic. Fallback paths handle exotic Error
-> subclasses (via `Error.isError()`), cross-realm arrays (via
-> `Array.isArray()`), null-prototype objects, and objects with `toJSON()`
-> methods.
+> route to the appropriate wrapping logic. An array is the exception to the
+> constructor lookup: `Array.isArray()` is consulted first and answers
+> `"Array"` unconditionally, so a subclass instance, a severed-prototype array,
+> and a cross-realm array all reach array handling and are answered by the
+> array rule of Section 1.5, rather than being rejected as some unrecognized
+> class or routed elsewhere by something the array carries. Fallback paths
+> handle exotic Error subclasses (via `Error.isError()`), null-prototype
+> objects, and objects with `toJSON()` methods.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in
@@ -3195,8 +3217,10 @@ if the value is:
   string). Unique symbols return `false`; see the Section 1.3 callout.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
-  `Uint8Array`, or an object with a `toJSON()` method — legacy)
-- An array where every present element satisfies `isFabricCompatible()`
+  `Uint8Array`, or a non-array object with a `toJSON()` method — legacy)
+- An array where every present element satisfies `isFabricCompatible()`, and
+  which the array rule of Section 1.5 accepts — a `toJSON` method does not
+  make an otherwise-rejected array compatible
 - A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,

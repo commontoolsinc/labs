@@ -385,6 +385,51 @@ describe("cloneIfNecessary", () => {
     });
   });
 
+  describe(`indirect \`Array\` instances`, () => {
+    // An `Array` subclass is not a `FabricValue`, so the deep-frozen identity
+    // optimization must not answer for one: returning it as-is would carry a
+    // live prototype into stored state, where an overridden `Symbol.iterator`
+    // answers content that the indices never show.
+    class Smuggler extends Array<unknown> {
+      override *[Symbol.iterator](): Generator<unknown> {
+        yield "smuggled";
+      }
+    }
+
+    function frozenSmuggler(): unknown[] {
+      const result = new Smuggler();
+      result.push("benign");
+      Object.freeze(result);
+      return result;
+    }
+
+    it("does not report a frozen subclass instance as deep-frozen", () => {
+      // This is what turns off the identity optimization below.
+      expect(isDeepFrozenFabricValue(frozenSmuggler() as FabricValue))
+        .toBe(false);
+    });
+
+    it("deep-clones a frozen subclass instance into a direct `Array`", () => {
+      const value = frozenSmuggler();
+      const result = cloneIfNecessary(value as FabricValue) as unknown[];
+
+      expect(result).not.toBe(value);
+      expect(Object.getPrototypeOf(result)).toBe(Array.prototype);
+      expect([...result]).toEqual(["benign"]);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("deep-clones a nested frozen subclass instance", () => {
+      const value = { data: frozenSmuggler() };
+      const result = cloneIfNecessary(value as FabricValue) as {
+        data: unknown[];
+      };
+
+      expect(Object.getPrototypeOf(result.data)).toBe(Array.prototype);
+      expect([...result.data]).toEqual(["benign"]);
+    });
+  });
+
   describe(`circular reference detection`, () => {
     it("throws on direct circular object reference", () => {
       const obj = {} as Record<string, unknown>;
