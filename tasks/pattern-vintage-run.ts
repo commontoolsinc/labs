@@ -15,6 +15,7 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
+  AUTO,
   collectVintages,
   describeError,
   patternKeyFromMain,
@@ -134,11 +135,57 @@ export interface VintageAttribution {
   testKey: string;
   /**
    * PINNED is the only tier coverage counts. It breaks TIES over which test to
-   * name; the report does not branch on it — see `reportUncovered`, which
-   * scopes its two remedies by whether a failure was printed rather than by
-   * tier.
+   * name, and selects a remedy: `reportUncovered` scopes by whether the
+   * recording fixture FAILED and then by tier, so an auto generation that
+   * replayed cleanly is told to promote itself.
    */
   pinned: boolean;
+}
+
+/** What replaying ONE fixture found, kept per fixture rather than summed. */
+export interface VintageOutcome {
+  ref: VintageRef;
+  /** Recorded instantiations that are legitimate upgrade targets. */
+  targets: number;
+  /** Of those, the ones whose source moved since this fixture was captured. */
+  changed: number;
+  /** Whether replaying this fixture produced any failure at all. */
+  failed: boolean;
+}
+
+/**
+ * Test keys whose newest generation no longer matches today's source.
+ *
+ * A fixture that replays with `changed === 0` IS the current generation: every
+ * target it recorded still compiles to the identity it captured, so a fresh
+ * capture would record the same world and cost a 3.5 MiB file to say so. Once
+ * every fixture for a key reports something changed, the tree no longer holds
+ * a generation of today, and the next one is due.
+ *
+ * Two shapes deliberately do NOT count as current, for opposite reasons:
+ *
+ *   - a fixture with no targets proved nothing, so it cannot be evidence that
+ *     the world has not moved;
+ *   - a fixture that FAILED is not a statement about currency at all — it is
+ *     the gate's own red, and reading it either way would let a broken fixture
+ *     decide whether to capture.
+ *
+ * A served-route-only fixture reports `changed === 0` and so reads as current,
+ * which is right: its identity is not reproducible from the repo, so no
+ * capture could ever move it off zero and a staleness rule that counted it
+ * would capture a new generation on every single run, forever.
+ */
+export function staleTestKeys(
+  outcomes: readonly VintageOutcome[],
+): string[] {
+  const seen = new Set<string>();
+  const current = new Set<string>();
+  for (const outcome of outcomes) {
+    seen.add(outcome.ref.testKey);
+    if (outcome.failed || outcome.targets === 0) continue;
+    if (outcome.changed === 0) current.add(outcome.ref.testKey);
+  }
+  return [...seen].filter((key) => !current.has(key)).sort();
 }
 
 /** What replaying one fixture found. */
@@ -189,7 +236,8 @@ export interface ReplayReport {
    * `covered` answers "was this replayed and credited"; a pattern can be
    * recorded and then not credited — a root the fixture no longer holds, a
    * source that stopped resolving or compiling, a fixture that failed outright
-   * before any target ran, or an auto-tier fixture once something writes one.
+   * before any target ran, or an auto-tier generation, which credits nothing
+   * by design however cleanly it replays.
    * (NOT a served route: those are credited, `covered.add` running
    * unconditionally below the served-route branch.) Deriving attribution from
    * `covered` made the "recorded by X" branch unreachable by construction,
@@ -567,8 +615,8 @@ export async function replayVintage(
       // gate's only evidence for a pattern and the run still reads green. That
       // guarantee used to live in `coveredPatternKeys`, which coverage stopped
       // going through when it moved to what the replay actually replayed; it is
-      // restored here rather than left to the fact that nothing writes an auto
-      // capture yet.
+      // restored here, and `--capture-changed` now writes auto generations, so
+      // it is load-bearing rather than anticipatory.
       if (vintage.tier === PINNED) report.covered.add(key);
       const today = runtimeVintage.runtime.patternManager
         .getArtifactEntryRef(pattern)?.identity;
@@ -785,18 +833,32 @@ export async function replayAll(
      * only ones worth attributing are those a fixture records and the run then
      * declines to credit.
      *
-     * `pinned` exists only to break a TIE. When two fixtures record one
-     * pattern, the pinned one is the more useful to name, and `collectVintages`
-     * sorts `auto` before `pinned` so plain first-wins picks the wrong one.
-     * The report does NOT branch on it: doing so cost a defect every review
-     * round while the auto tier had nothing writing to it — see
-     * `reportUncovered`.
+     * `pinned` breaks a TIE, and now also selects a remedy. When two fixtures
+     * record one pattern, the pinned one is the more useful to name, and
+     * `collectVintages` sorts `auto` before `pinned` so plain first-wins picks
+     * the wrong one. `reportUncovered` additionally branches on it: an
+     * auto-recorded pattern that replayed cleanly is one `--pin` away from
+     * being covered, which is a different instruction from anything a pinned
+     * fixture can need.
      */
     coveredBy: Map<string, VintageAttribution>;
+    /**
+     * What each fixture individually found, in walk order.
+     *
+     * The aggregate counts above cannot answer whether any ONE generation is
+     * current, because `changed` sums across fixtures: a tree holding a
+     * current generation and three older ones reports a positive `changed`
+     * that says nothing about whether the newest still matches today. Deciding
+     * when the next generation is due needs the per-fixture answer, so it is
+     * returned rather than recomputed by a second walk that could disagree
+     * with the one that produced the verdict.
+     */
+    perVintage: VintageOutcome[];
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
+  const perVintage: VintageOutcome[] = [];
   const covered = new Set<string>();
   const coveredBy = new Map<string, VintageAttribution>();
   let servedRoute = 0;
@@ -809,6 +871,12 @@ export async function replayAll(
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
+    perVintage.push({
+      ref: vintage,
+      targets: report.targets,
+      changed: report.changed,
+      failed: report.failures.length > 0,
+    });
     candidates += report.candidates;
     targets += report.targets;
     unmappable += report.unmappable;
@@ -848,6 +916,7 @@ export async function replayAll(
     servedRoute,
     covered,
     coveredBy,
+    perVintage,
     failures,
   };
 }
@@ -889,6 +958,7 @@ export async function captureVintage(
   roots: GateRoots,
   testKey: string,
   now: Date,
+  tier: string = PINNED,
 ): Promise<string> {
   const testPath = testPathFor(roots, testKey);
   const dir = await Deno.makeTempDir({ prefix: "pattern-vintage-capture-" });
@@ -1000,14 +1070,20 @@ export async function captureVintage(
       );
     }
     await writeVintageManifest(vintage, entries);
-    const outDir = `${roots.vintagesRoot}/${testKey}/${PINNED}`;
+    const outDir = `${roots.vintagesRoot}/${testKey}/${tier}`;
     await Deno.mkdir(outDir, { recursive: true });
     const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
-    // Never write over an existing fixture. `captureMissing` already skips a
-    // covered key, so reaching this with the file present means something else
-    // did — and the cleanup below deletes files on the way out, which must
-    // never be somebody else's pinned state. A fixture is deleted deliberately
-    // and visibly in a diff, never by an error path.
+    // Never write over an existing fixture, in EITHER tier. `captureMissing`
+    // already skips a covered key, so reaching this with the file present
+    // means something else did — and the cleanup below deletes files on the
+    // way out, which must never be somebody else's state. A fixture is deleted
+    // deliberately and visibly in a diff, never by an error path.
+    //
+    // This still holds for the auto tier, whose whole job is to ADD a
+    // generation beside the existing ones: the name carries a millisecond
+    // stamp AND the identity, so a collision means the same test compiled to
+    // the same identity within one millisecond — which is a second capture of
+    // a generation already on disk, not a new one.
     //
     // The companion directory is deliberately NOT part of this guard, so the
     // cleanup can remove a LEFTOVER one. A companion directory whose primary
@@ -1017,7 +1093,7 @@ export async function captureVintage(
     if (await exists(path)) {
       throw new Error(
         `cannot capture ${testKey}: ${path} already exists, and a capture ` +
-          `never overwrites a pinned vintage — delete it deliberately first`,
+          `never overwrites a vintage — delete it deliberately first`,
       );
     }
     try {
@@ -1075,6 +1151,38 @@ export async function captureMissing(
       // Report every failure rather than dying on the first: a run that
       // captures 9 of 10 and then throws leaves the tree half-seeded with no
       // statement about which one is the problem.
+      problems.push(`  ${key}: ${describeError(error)}`);
+    }
+  }
+  return { captured, problems };
+}
+
+/**
+ * Capture a fresh AUTO generation for every key whose newest one has aged out.
+ *
+ * This is what makes the auto tier a real thing rather than a directory name.
+ * The selection is automatic — derived from what the replay measured, not from
+ * a list — which is the entire distinction from `pinned`: a pinned vintage is
+ * one a human deliberately chose to keep, an auto one is whatever the tree
+ * happened to need on the day someone ran this.
+ *
+ * It is a COMMAND, not a CI step. Nothing here pushes a commit; the capture
+ * lands in the working tree and is committed like any other change, under the
+ * same review-the-diff discipline every other fixture gets. A gate that
+ * committed to the repository on its own would be writing the very evidence it
+ * grades itself against.
+ */
+export async function captureGenerations(
+  roots: GateRoots,
+  testKeys: readonly string[],
+  now: Date,
+): Promise<{ captured: string[]; problems: string[] }> {
+  const captured: string[] = [];
+  const problems: string[] = [];
+  for (const key of testKeys) {
+    try {
+      captured.push(await captureVintage(roots, key, now, AUTO));
+    } catch (error) {
       problems.push(`  ${key}: ${describeError(error)}`);
     }
   }

@@ -42,7 +42,9 @@
  * doc is still a finding.
  *
  *   deno task pattern-vintage                                  # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update topics/topics.test.tsx  # capture one
+ *   deno task pattern-vintage --update topics/topics.test.tsx  # pin one
+ *   deno task pattern-vintage --capture-changed                # capture a generation where due
+ *   deno task pattern-vintage --pin topics/topics.test.tsx     # promote the newest generation
  *
  * `--update` always names a TEST path, never a pattern path — a fixture is
  * produced by RUNNING a test, and covers whatever that test instantiates, which
@@ -61,6 +63,30 @@
  * break. Deleting one is a deliberate act that shows up in review as a deleted
  * file. Naming keys explicitly does not weaken that — a key that already has a
  * pinned vintage is skipped whichever way it was asked for.
+ *
+ * ## The two tiers
+ *
+ * `pinned/` is evidence: never pruned, and the only tier that credits
+ * coverage. `auto/` is history: captured automatically wherever today's source
+ * has moved past every generation on disk, and pruned by count.
+ *
+ * That split is what makes the gate get STRONGER over time rather than just
+ * staying green. A single pinned vintage only ever proves today's source can
+ * read one particular old world; a run of generations proves it can read every
+ * world the pattern has passed through. Accumulating them is cheap in the only
+ * place it is permanent — git deltas adjacent generations of a near-identical
+ * store to ~9 KiB — and bounded where it is not, since each one also costs
+ * 3.5 MiB of working-tree disk in every clone.
+ *
+ * Neither command runs in CI. CI runs the plain gate, which only ever READS
+ * the tree. Capture and promotion write fixtures, and a gate that wrote its own
+ * evidence would be grading its own homework; both land in the working tree to
+ * be committed and reviewed like any other change.
+ *
+ * `--capture-changed` refuses to capture onto a red tree, which is also what
+ * removes the need for a rule about capturing mid-edit: a generation is a
+ * record of a world that worked, and a release promotes from a branch that
+ * already passed.
  *
  * That discipline is enforced HERE, in what the command will do, and otherwise
  * rests on review — deliberately, and unlike Tier 1, whose baselines have a
@@ -83,10 +109,20 @@ import {
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
   armVerdictGuard,
+  autoGenerationsToPrune,
+  collectVintages,
+  describeError,
   isClean,
+  newestAutoGeneration,
+  promoteVintage,
   relativeToRepo,
+  removeVintages,
+  reportCaptureRefusedOnRed,
+  reportEveryGenerationCurrent,
   reportFailures,
   reportNothingReplayed,
+  reportNothingToPin,
+  reportPinNeedsOneTestKey,
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
@@ -97,9 +133,11 @@ import {
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
+  captureGenerations,
   captureMissing,
   type GateRoots,
   replayAll,
+  staleTestKeys,
 } from "./pattern-vintage-run.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
@@ -177,14 +215,94 @@ async function main() {
     return;
   }
 
+  if (Deno.args.includes("--pin")) {
+    const named = Deno.args.filter((arg) => !arg.startsWith("--"));
+    if (named.length !== 1) {
+      console.error(reportPinNeedsOneTestKey(named.length));
+      Deno.exit(1);
+    }
+    const vintages = await collectVintages(roots.vintagesRoot);
+    const newest = newestAutoGeneration(vintages, named[0]);
+    if (newest === undefined) {
+      console.error(reportNothingToPin(named[0], vintages));
+      Deno.exit(1);
+    }
+    // A promotion moves a file and its companion directory, so a failure part
+    // way through is worth reporting as a message rather than a stack trace —
+    // whoever runs this needs to know which of the pair moved, and an uncaught
+    // throw buries that under a trace of this file's own call stack.
+    let moved: string;
+    try {
+      moved = await promoteVintage(newest);
+    } catch (error) {
+      console.error(
+        `Could not promote ${relativeToRepo(newest.path, REPO_ROOT)}: ${
+          describeError(error)
+        }`,
+      );
+      Deno.exit(1);
+    }
+    console.log(`  ${relativeToRepo(newest.path, REPO_ROOT)}`);
+    console.log(`  → ${relativeToRepo(moved, REPO_ROOT)}`);
+    return;
+  }
+
   const replay = await replayAll(roots);
+
+  if (Deno.args.includes("--capture-changed")) {
+    // Capture from a GREEN tree only. A fixture that failed is not a statement
+    // about which generation the world is on, and capturing beside it would
+    // mint a generation from a run whose verdict is red — the one moment the
+    // repository is least entitled to be recorded as a baseline. This is also
+    // what keeps the release process honest without a mid-write rule: a
+    // release promotes from a branch that already passed.
+    if (replay.failures.length > 0) {
+      console.error(`\n${reportFailures(replay.failures)}`);
+      console.error(`\n${reportCaptureRefusedOnRed(replay.failures.length)}`);
+      Deno.exit(1);
+    }
+    const stale = staleTestKeys(replay.perVintage);
+    if (stale.length === 0) {
+      console.log(reportEveryGenerationCurrent(replay.perVintage.length));
+      return;
+    }
+    const { captured, problems } = await captureGenerations(
+      roots,
+      stale,
+      new Date(),
+    );
+    for (const path of captured) {
+      console.log(`  + ${relativeToRepo(path, REPO_ROOT)}`);
+    }
+    // Prune AFTER capturing, against a re-read tree, so the new generations
+    // are among the ones counted. Pruning first would keep `keep` old ones and
+    // then add another, so the tree would sit permanently one over the bound.
+    const pruned = autoGenerationsToPrune(
+      await collectVintages(roots.vintagesRoot),
+    );
+    await removeVintages(pruned, roots.vintagesRoot);
+    for (const path of pruned) {
+      console.log(`  - ${relativeToRepo(path, REPO_ROOT)}`);
+    }
+    if (problems.length > 0) {
+      console.error(`\n${problems.length} generation(s) were not captured:`);
+      for (const problem of problems) console.error(problem);
+      Deno.exit(1);
+    }
+    return;
+  }
+
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
   const uncovered = uncoveredRequiredPatterns(required, replay.covered);
 
   if (uncovered.length > 0) {
-    console.error(reportUncovered(uncovered, replay.coveredBy));
+    console.error(reportUncovered(
+      uncovered,
+      replay.coveredBy,
+      new Set(replay.failures.map((failure) => failure.testKey)),
+    ));
   }
   if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);
   if (replay.failures.length > 0) {

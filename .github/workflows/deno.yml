@@ -158,7 +158,18 @@ jobs:
       # slot the pattern SEEDS reads back non-empty and only warns. The same
       # move into a slot that stays empty DOES fail, and
       # `tasks/pattern-vintage-run.test.ts` pins both halves by name.
-      - name: 🔁 Replay pinned vintages under today's source
+      #
+      # EVERY fixture is replayed, both tiers. `pinned/` is what CREDITS
+      # coverage — it is never pruned — while `auto/` accumulates generations
+      # so today's source is proved against every world a pattern has passed
+      # through, not just one. Committing a fixture is the whole of adding one;
+      # there is no list here of what gets replayed.
+      #
+      # This job only ever READS the tree. Capturing (`--capture-changed`) and
+      # promoting (`--pin`) are commands someone runs and commits, deliberately
+      # not CI steps: a gate that wrote its own evidence would be grading its
+      # own homework.
+      - name: 🔁 Replay every committed vintage under today's source
         run: deno task pattern-vintage
 
   baselines-append-only:

@@ -71,7 +71,11 @@
  * everyone who clones.
  */
 
-import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/vintage-layout.ts";
+import { exists } from "@std/fs";
+import {
+  VINTAGE_SPACES_SUFFIX,
+  vintageCompanionDir,
+} from "../packages/piece/test/vintage-layout.ts";
 import { resolveSystemPatternSource } from "@commonfabric/runner";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
@@ -222,6 +226,127 @@ export async function collectVintages(
 }
 
 /**
+ * How many generations of one test key the working tree keeps.
+ *
+ * A bound on CHECKOUTS, not on history. A vintage costs ~9 KiB of git history
+ * per generation — packfile delta search makes adjacent generations of a
+ * near-identical store nearly free — and 3.5 MiB of working-tree disk in every
+ * clone, forever. Those are different orders of magnitude and only the second
+ * one argues for a limit.
+ *
+ * Four is chosen to be small enough to matter on disk and large enough that a
+ * key keeps a real span of history rather than just "the last one".
+ */
+export const AUTO_GENERATIONS_KEPT = 4;
+
+/**
+ * The AUTO fixtures to delete so no test key keeps more than `keep` of them.
+ *
+ * Pure, and returns paths rather than deleting, so the selection can be tested
+ * without a filesystem — and so the one property that must never regress is
+ * checkable by reading the return value: **it can only ever name a fixture
+ * under an `auto/` directory.** That is not a rule written down and obeyed, it
+ * is the shape of the function. The tier filter comes first, before any
+ * sorting or slicing, so there is no ordering of the later steps that could
+ * reach a pinned vintage.
+ *
+ * This matters more than it looks. A deep vintage cannot be recaptured — the
+ * pattern that wrote it no longer exists in runnable form — and a pruner is
+ * invoked by people who are doing something else and not reading its output.
+ */
+export function autoGenerationsToPrune(
+  vintages: readonly VintageRef[],
+  keep: number = AUTO_GENERATIONS_KEPT,
+): string[] {
+  const byKey = new Map<string, VintageRef[]>();
+  for (const vintage of vintages) {
+    if (vintage.tier !== AUTO) continue;
+    const group = byKey.get(vintage.testKey);
+    if (group === undefined) byKey.set(vintage.testKey, [vintage]);
+    else group.push(vintage);
+  }
+  const doomed: string[] = [];
+  for (const group of byKey.values()) {
+    // Newest first, so the survivors are the newest `keep`. Sorted on the
+    // STAMP rather than the path: both begin with the same directory, but a
+    // path sort would order by identity once the stamps tie, and the stamp is
+    // the only field that means age.
+    const ordered = [...group].sort((left, right) =>
+      right.stamp.localeCompare(left.stamp)
+    );
+    doomed.push(...ordered.slice(Math.max(keep, 0)).map((v) => v.path));
+  }
+  return doomed.sort();
+}
+
+/**
+ * Delete pruned fixtures, refusing anything that is not an AUTO generation.
+ *
+ * The refusal is redundant with `autoGenerationsToPrune`, which structurally
+ * cannot name a pinned fixture, and it stays anyway. This is the only code in
+ * the repository that deletes a vintage, the thing it deletes cannot be
+ * recreated, and the cost of the check is a string comparison. A second lock
+ * on the one irreversible door is worth more than the line it costs.
+ *
+ * A companion directory goes with its primary file. It is part of the fixture
+ * rather than a fixture of its own — nothing enumerates it — so leaving one
+ * behind would strand a directory nothing will ever read or clean up again.
+ */
+export async function removeVintages(
+  paths: readonly string[],
+  root: string = VINTAGES_DIR,
+): Promise<void> {
+  for (const path of paths) {
+    const ref = parseVintagePath(path, root);
+    if (ref?.tier !== AUTO) {
+      throw new Error(
+        `refusing to prune ${path}: retention only ever deletes an ${AUTO} ` +
+          `generation, and this is ${
+            ref === undefined ? "not a vintage at all" : `tier ${ref.tier}`
+          }`,
+      );
+    }
+    await Deno.remove(path);
+    await Deno.remove(vintageCompanionDir(path), { recursive: true })
+      .catch(() => {});
+  }
+}
+
+/**
+ * The newest AUTO generation of one test key — what a release would promote.
+ *
+ * Promotion is the moment an auto capture stops being regenerable and starts
+ * being evidence: a pinned vintage is never pruned and is the only tier that
+ * credits coverage. Picking the NEWEST is the point — it is the generation
+ * closest to what shipped, and the one whose successor will have the most to
+ * migrate across.
+ */
+export function newestAutoGeneration(
+  vintages: readonly VintageRef[],
+  testKey: string,
+): VintageRef | undefined {
+  return vintages
+    .filter((v) => v.tier === AUTO && v.testKey === testKey)
+    .sort((left, right) => right.stamp.localeCompare(left.stamp))[0];
+}
+
+/**
+ * Where a promoted fixture lands: the same name, under `pinned/`.
+ *
+ * The stamp and identity are carried over UNCHANGED, so a promoted vintage
+ * still records when it was captured and by which test — restamping it would
+ * date the promotion instead, and the capture date is what says which
+ * generation of the world it holds.
+ */
+export function promotedPath(ref: VintageRef): string {
+  const cut = ref.path.lastIndexOf("/");
+  const fileName = ref.path.slice(cut + 1);
+  const upToTier = ref.path.slice(0, cut);
+  const tierCut = upToTier.lastIndexOf("/");
+  return `${upToTier.slice(0, tierCut)}/${PINNED}/${fileName}`;
+}
+
+/**
  * Pattern keys that MUST have a pinned vintage.
  *
  * Derived from the runtime's own constants rather than a hand-kept list, so
@@ -353,6 +478,164 @@ export function relativeToRepo(path: string, repoRoot: string): string {
 }
 
 /**
+ * Promote an AUTO generation to `pinned/`, with `git mv`.
+ *
+ * `git mv` rather than a plain rename, because the point of promotion is that
+ * the move lands in a COMMIT: a release promotes a fixture out of the prunable
+ * tier so retention can never reach it, and a rename git has not been told
+ * about shows up as a delete plus an add — which is exactly the diff that
+ * looks like someone destroying a vintage, in a tree whose append-only
+ * discipline rests on people reading diffs.
+ *
+ * The companion directory moves too, and moves FIRST. If the pair is going to
+ * be split by an interrupted promotion, the survivable order is the one that
+ * leaves the primary file where the enumerator still finds it: a fixture whose
+ * companion has moved out from under it fails loudly on the next replay, where
+ * a companion orphaned beside a moved primary is invisible.
+ */
+export async function promoteVintage(ref: VintageRef): Promise<string> {
+  const destination = promotedPath(ref);
+  await Deno.mkdir(destination.slice(0, destination.lastIndexOf("/")), {
+    recursive: true,
+  });
+  const companion = vintageCompanionDir(ref.path);
+  if (await exists(companion)) {
+    await gitMove(companion, vintageCompanionDir(destination));
+  }
+  await gitMove(ref.path, destination);
+  return destination;
+}
+
+/**
+ * `git mv`, falling back to a plain rename for anything git does not track.
+ *
+ * The fallback is not defensive tidiness, it is the common case. A generation
+ * captured minutes ago is UNTRACKED, and capture-then-promote in one sitting is
+ * the most natural first use of these two commands. Measured, not reasoned
+ * about: the first real `--pin` run died on exactly this.
+ *
+ * Where the fixture IS tracked, `git mv` is what runs, because there the staged
+ * rename is the entire point — renaming a committed fixture behind git's back
+ * reads in review as a delete plus an add, which is the diff that looks like
+ * someone destroying a vintage.
+ *
+ * Which of the two applies is decided by ASKING git, rather than by matching
+ * its error text. The first attempt matched on "not under version control" and
+ * was wrong twice over: `git mv` resolves the repository from the process's
+ * working directory rather than the file's, so the same untracked fixture
+ * produces a different message ("is outside repository") depending on where
+ * the command was invoked from — and every unmatched message became a crash.
+ * `cwd` is pinned to the fixture's own directory for the same reason.
+ */
+async function gitMove(from: string, to: string): Promise<void> {
+  const cwd = from.slice(0, from.lastIndexOf("/"));
+  const tracked = await new Deno.Command("git", {
+    args: ["ls-files", "--error-unmatch", from],
+    cwd,
+    stdout: "null",
+    stderr: "null",
+  }).output();
+  if (!tracked.success) {
+    // Untracked, or not in a repository at all. Either way there is no index
+    // entry to move, so the rename IS the whole operation.
+    await Deno.rename(from, to);
+    return;
+  }
+  const result = await new Deno.Command("git", {
+    args: ["mv", from, to],
+    cwd,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!result.success) {
+    throw new Error(
+      `git mv ${from} ${to} failed: ${
+        new TextDecoder().decode(result.stderr).trim()
+      }`,
+    );
+  }
+}
+
+/** What `--pin` prints when it was not given exactly one test key. */
+export function reportPinNeedsOneTestKey(given: number): string {
+  return [
+    given === 0
+      ? "`--pin` names the TEST whose newest auto generation to promote."
+      : `\`--pin\` promotes one test key at a time; ${given} were named.`,
+    "",
+    "  deno task pattern-vintage --pin topics/topics.test.tsx",
+    "",
+    "Promotion is a deliberate act per fixture — it moves a generation into",
+    "the tier retention can never reach, and pinning a batch by accident is",
+    "not undone by pinning less next time.",
+  ].join("\n");
+}
+
+/** What `--pin` prints when a key has no auto generation to promote. */
+export function reportNothingToPin(
+  testKey: string,
+  vintages: readonly VintageRef[],
+): string {
+  const keys = [
+    ...new Set(vintages.filter((v) => v.tier === AUTO).map((v) => v.testKey)),
+  ].sort();
+  const alreadyPinned = vintages.some(
+    (v) => v.tier === PINNED && v.testKey === testKey,
+  );
+  return [
+    `No ${AUTO} generation of ${testKey} to promote.`,
+    "",
+    ...(alreadyPinned
+      ? [
+        `${testKey} already has a pinned vintage, and promotion only ever`,
+        "moves a generation the automatic capture produced. To pin a NEWER",
+        "one, capture it first:",
+        "",
+        "  deno task pattern-vintage --capture-changed",
+        "",
+        "which captures only where today's source has moved past every",
+        "generation on disk — so it does nothing if this key is current.",
+      ]
+      : keys.length === 0
+      ? [
+        "Nothing in the tree has one. Auto generations are captured by:",
+        "",
+        "  deno task pattern-vintage --capture-changed",
+      ]
+      : [
+        "Keys that do have one:",
+        "",
+        ...keys.map((key) => `  ${key}`),
+      ]),
+  ].join("\n");
+}
+
+/** What `--capture-changed` prints when it will not capture onto a red tree. */
+export function reportCaptureRefusedOnRed(failures: number): string {
+  return [
+    `Captured nothing: ${failures} fixture(s) failed to replay.`,
+    "",
+    "A generation is a record of a world that WORKED. Capturing beside a",
+    "failure would mint one from a run whose verdict is red, and the fixture",
+    "would then be replayed by everyone else as though it were evidence.",
+    "",
+    "Fix the failures above, or delete the fixture that can no longer replay",
+    "— deliberately, so it shows up in the diff — and run this again.",
+  ].join("\n");
+}
+
+/** What `--capture-changed` prints when no key needs a new generation. */
+export function reportEveryGenerationCurrent(replayed: number): string {
+  return [
+    `Captured nothing: all ${replayed} fixture(s) are current.`,
+    "",
+    "Every target each fixture recorded still compiles to the identity it",
+    "captured, so a fresh capture would record the same world and cost a file",
+    "to say so.",
+  ].join("\n");
+}
+
+/**
  * What the gate prints when a pattern has no vintage.
  *
  * The report is the gate's entire interface to whoever trips it, so it is
@@ -363,26 +646,46 @@ export function reportUncovered(
   uncovered: readonly string[],
   coveredBy: ReadonlyMap<string, { testKey: string; pinned: boolean }> =
     new Map(),
+  failedTestKeys: ReadonlySet<string> = new Set(),
 ): string {
-  // TWO situations, and the split is by the only fact this function reliably
-  // has: does some fixture in the tree NAME this pattern.
+  // Every branch below is chosen from a fact this function was HANDED, never
+  // from one it infers about output it does not control. That distinction is
+  // the whole design of this report, and it was arrived at expensively: across
+  // four review rounds the recurring defect was always the same shape — a
+  // remedy printed for a situation it did not fit — and always because the
+  // text was reasoning about something out of frame.
   //
-  // It used to split three ways, on the tier of the recording fixture. That
-  // cost a defect every review round, for three reasons worth recording so it
-  // is not rebuilt: the AUTO branch could not fire at all (nothing writes an
-  // auto capture yet, so it was reachable only from a hand-built map); the
-  // PINNED branch's whole content was a PROMISE about text it does not
-  // control — "each failure below names its own remedy" — which was false for
-  // three of the five failure shapes that reach it; and the third branch
-  // merged "nothing records it" with "a fixture records it and could not be
-  // read", whose remedies are opposites.
+  // The last version got as far as refusing to guess: it listed BOTH possible
+  // remedies and told the reader to work out which applied from the failures
+  // printed below. Honest, and still the reader's problem to solve. `failures`
+  // carries a `testKey`, so which fixtures failed is knowable here — and once
+  // known, each pattern gets the one remedy that fits it.
   //
-  // The promise is now a fact instead: every fixture-level failure
-  // interpolates its own `remedy`, so pointing at the failures is enough and
-  // this function states nothing it cannot see. Re-add a tier branch when
-  // something actually writes an auto capture, with a test that can reach it.
+  // Three situations, and each is a question with an answer in hand: does a
+  // fixture NAME this pattern (`coveredBy`), did that fixture FAIL
+  // (`failedTestKeys`), and is it the tier that credits coverage (`pinned`).
   const named = uncovered.filter((key) => coveredBy.has(key));
   const unnamed = uncovered.filter((key) => !coveredBy.has(key));
+  const broken = named.filter((key) =>
+    failedTestKeys.has(coveredBy.get(key)!.testKey)
+  );
+  // Recorded by an AUTO generation that replayed FINE. The generation is real
+  // and it works; it just does not credit coverage, because retention can
+  // delete it and coverage that retention can delete is not coverage. The
+  // remedy is to move it into the tier retention cannot reach.
+  const promotable = named.filter((key) =>
+    !failedTestKeys.has(coveredBy.get(key)!.testKey) &&
+    !coveredBy.get(key)!.pinned
+  );
+  // Recorded by a PINNED fixture that replayed without failing, and still not
+  // credited. Deliberately NOT given a remedy: every route to it that can be
+  // named ends in a failure, so reaching it means the gate's own accounting
+  // disagrees with itself, and any instruction printed here would be a guess
+  // about a state whose cause is unknown. Saying so is the useful output.
+  const unexplained = named.filter((key) =>
+    !failedTestKeys.has(coveredBy.get(key)!.testKey) &&
+    coveredBy.get(key)!.pinned
+  );
   return [
     `${uncovered.length} auto-updating pattern(s) are not covered by a pinned`,
     "vintage this run replayed:",
@@ -396,26 +699,36 @@ export function reportUncovered(
     "",
     "These patterns auto-update onto a root someone is already using, so a",
     "change that cannot read the old state bricks that piece.",
-    ...(named.length > 0
+    ...(broken.length > 0
       ? [
         "",
-        "The ones with a test named ARE recorded by a fixture already in the",
-        "tree. Which remedy applies is something the output below tells you,",
-        "and this line must not guess:",
+        "Recorded by a fixture that FAILED this run. The failure printed below",
+        "carries the remedy for that particular fault; capturing another",
+        "fixture would change nothing:",
         "",
-        "  * a failure printed below for that fixture — read it, it carries",
-        "    the remedy for that particular fault, and capturing another",
-        "    fixture would change nothing;",
-        "  * NO failure for it — then it replayed fine and simply cannot",
-        "    credit coverage, which today means an auto capture (pruned by",
-        "    count, so letting one count would let retention delete a",
-        "    pattern's only evidence). Pin it:",
+        ...broken.map((key) => `  ${key}  ${coveredBy.get(key)!.testKey}`),
+      ]
+      : []),
+    ...(promotable.length > 0
+      ? [
         "",
-        ...named.map((key) =>
-          `      deno task pattern-vintage --update ${
-            coveredBy.get(key)!.testKey
-          }`
-        ),
+        `Recorded by an ${AUTO} generation that replayed cleanly. Auto`,
+        "generations are pruned by count, so letting one credit coverage would",
+        "let retention delete a pattern's only evidence. Promote it:",
+        "",
+        ...[...new Set(promotable.map((key) => coveredBy.get(key)!.testKey))]
+          .map((testKey) => `  deno task pattern-vintage --pin ${testKey}`),
+      ]
+      : []),
+    ...(unexplained.length > 0
+      ? [
+        "",
+        "Recorded by a PINNED fixture that replayed without failing, and still",
+        "not credited. No remedy is printed because there is no known route to",
+        "this state — the gate's own accounting is disagreeing with itself, and",
+        "an instruction here would be a guess. Worth reporting as a gate bug:",
+        "",
+        ...unexplained.map((key) => `  ${key}  ${coveredBy.get(key)!.testKey}`),
       ]
       : []),
     ...(unnamed.length > 0

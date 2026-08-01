@@ -534,11 +534,46 @@ exactly what a migrated-forward database no longer holds.
       `pattern-vintage-run.test.ts`. See the invariant below: a test pattern
       creates stores and is never an upgrade target, and this is the guard that
       keeps that from being merely written down.
-- [ ] Capture on identity change, committed — not uploaded as an artifact
-      (see the decision above).
-- [ ] Retention, if any, weighed as LOST COVERAGE against working-tree disk —
-      not applied as housekeeping, and still structurally unable to reach
-      `pinned/`.
+- [x] Capture on identity change, committed — not uploaded as an artifact
+      (see the decision above). `--capture-changed` replays the tree and
+      captures a generation for every test key whose fixtures have all moved on.
+      The trigger is the `changed` count the replay ALREADY computes per target,
+      so no new measurement and no naming convention: a fixture replaying with
+      `changed === 0` IS the current generation, and once no fixture for a key
+      reports zero, the next one is due. The command refuses to capture onto a
+      tree with any failure, which is also what removes the need for a rule
+      about capturing mid-edit.
+- [x] Retention, weighed as LOST COVERAGE against working-tree disk — four
+      generations per test key, and structurally unable to reach `pinned/`:
+      `autoGenerationsToPrune` filters the tier BEFORE it sorts or slices, so
+      no ordering of the later steps can name a pinned fixture, and
+      `removeVintages` refuses one again at the point of deletion. Both are
+      mutation-verified; moving the filter after the slice goes red.
+- [x] Promotion, so the tier split is a lifecycle rather than two directories.
+      `--pin <test key>` `git mv`s a key's newest generation into `pinned/`,
+      carrying the capture stamp over unchanged — restamping would date the
+      promotion instead, and the capture date is what says which generation of
+      the world the fixture holds.
+
+**Neither capture nor promotion runs in CI.** CI runs the plain gate, which
+only ever READS the tree. A gate that wrote its own evidence would be grading
+its own homework, so both land in the working tree to be committed and reviewed
+like every other change — the same trust-and-review discipline the append-only
+rule rests on.
+
+**Why the auto tier credits no coverage.** It is pruned by count, so letting a
+generation satisfy the coverage requirement would let retention delete a
+pattern's only evidence while the gate still read green. Coverage counts pinned
+vintages only, and `reportUncovered` tells a pattern recorded by a clean auto
+generation to promote it.
+
+**What the tier split buys.** A single pinned vintage proves today's source can
+read one particular old world. A run of generations proves it can read every
+world the pattern has passed through — the gate gets stronger as the repository
+ages rather than merely staying green. That is affordable only because of the
+raw-storage measurement above: git deltas adjacent generations to ~9 KiB, while
+each costs 3.5 MiB of working-tree disk in every clone. Accumulate in the place
+that is cheap, bound the place that is not.
 
 **INVARIANT: a test pattern creates stores. It is never an upgrade target.**
 

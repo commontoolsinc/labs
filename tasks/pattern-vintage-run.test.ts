@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { exists } from "@std/fs";
 import { Identity } from "@commonfabric/identity";
 import {
   AUTO,
@@ -14,12 +15,14 @@ import {
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 import {
+  captureGenerations,
   captureMissing,
   captureVintage,
   type GateRoots,
   isUpgradeTarget,
   replayAll,
   snippet,
+  staleTestKeys,
 } from "./pattern-vintage-run.ts";
 
 /**
@@ -1234,6 +1237,62 @@ describe("the vintage gate, end to end", () => {
     );
   });
 
+  it("captures a new generation once today's source moves past every fixture", async () => {
+    // The producer, end to end and through the real path. Every branch that
+    // reasons about the auto tier — the coverage exclusion, the attribution
+    // tie-break, the remedy the report prints — was reachable only from a
+    // fixture a test hand-built until this existed, which is exactly why they
+    // kept drifting: prose about a tier with no producer can only be checked
+    // against intent.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+
+    // Nothing is due while the pinned vintage still matches today's source.
+    const current = await replayAll(roots);
+    expect(current.failures).toEqual([]);
+    expect(staleTestKeys(current.perVintage), "a current tree looked stale")
+      .toEqual([]);
+
+    // Move the world on, compatibly — a change the update APPLIES rather than
+    // one it refuses, because a generation records a world that worked.
+    await setSource(COMPATIBLE);
+
+    const moved = await replayAll(roots);
+    expect(moved.failures).toEqual([]);
+    expect(moved.changed, "the source change was not seen as a migration")
+      .toBeGreaterThan(0);
+    expect(staleTestKeys(moved.perVintage)).toEqual([TEST_KEY]);
+
+    const { captured, problems } = await captureGenerations(
+      roots,
+      staleTestKeys(moved.perVintage),
+      new Date("2026-07-30T12:00:00.000Z"),
+    );
+    expect(problems).toEqual([]);
+    expect(captured).toHaveLength(1);
+
+    // It landed in the AUTO tier, beside the pinned one rather than over it.
+    const found = await collectVintages(roots.vintagesRoot);
+    expect(found).toHaveLength(2);
+    expect(found.map((v) => v.tier).sort()).toEqual([AUTO, PINNED]);
+    expect(await exists(found.find((v) => v.tier === PINNED)!.path)).toBe(true);
+
+    // And the cycle CLOSES: the fresh generation matches today, so the tree is
+    // no longer stale and a second run captures nothing. Without this the
+    // command would mint a generation on every invocation forever — the shape
+    // that turns retention into a treadmill and buries the pinned vintage.
+    const after = await replayAll(roots);
+    expect(after.failures).toEqual([]);
+    expect(
+      staleTestKeys(after.perVintage),
+      "the tree stayed stale after a capture",
+    )
+      .toEqual([]);
+  });
+
   it("FAILS a fixture with candidates but no upgrade TARGET, on its own", async () => {
     // Per fixture, not just in the run's total. `isClean` floors the SUM of
     // targets, which a fixture covering nothing slips under the moment another
@@ -1691,18 +1750,24 @@ describe("the vintage gate, end to end", () => {
       );
     });
 
-    it("refuses to write over a pinned vintage, rather than replacing it", async () => {
+    it("refuses to write over an existing vintage, rather than replacing it", async () => {
       // `--update` can only ADD: a command that could replace a fixture could
       // replace the very fixture that would have caught a break. The cleanup
       // above is why this is enforced HERE and not only in `captureMissing` —
       // a capture that wrote over someone else's state and then failed would
       // delete it on the way out.
+      //
+      // The guard covers BOTH tiers. An auto capture's whole job is to add a
+      // generation beside the existing ones, and it is still never allowed to
+      // land on top of one: the name carries a millisecond stamp and the
+      // identity, so a collision is a second capture of a generation already
+      // on disk rather than a new one.
       const first = await captureVintage(roots, CROSS_TEST_KEY, STAMP);
       const before = await Deno.stat(first);
 
       await expect(captureVintage(roots, CROSS_TEST_KEY, STAMP)).rejects
         .toThrow(
-          "never overwrites a pinned vintage",
+          "never overwrites a vintage",
         );
 
       expect((await Deno.stat(first)).mtime).toEqual(before.mtime);
@@ -1776,5 +1841,78 @@ describe("the stranded-value snippet", () => {
 
   it("keeps a finding short enough to read", () => {
     expect(snippet("x".repeat(500)).length).toBe(80);
+  });
+});
+
+describe("deciding when the next generation is due", () => {
+  const outcome = (
+    testKey: string,
+    changed: number,
+    targets = 1,
+    failed = false,
+  ) => ({
+    ref: {
+      testKey,
+      tier: AUTO,
+      stamp: "2026-01-01T00-00-00.000Z",
+      identity: "bafy",
+      path: `vintages/${testKey}/${AUTO}/x.sqlite`,
+    },
+    targets,
+    changed,
+    failed,
+  });
+
+  it("says nothing is due while ONE generation still matches today", () => {
+    // The whole point of the rule. A tree holding a current generation and
+    // three older ones has a positive `changed` in aggregate, which says
+    // nothing — only the per-fixture answer decides.
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 3),
+      outcome("a/a.test.tsx", 1),
+      outcome("a/a.test.tsx", 0),
+    ])).toEqual([]);
+  });
+
+  it("says a generation is due once every fixture has moved on", () => {
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 3),
+      outcome("a/a.test.tsx", 1),
+    ])).toEqual(["a/a.test.tsx"]);
+  });
+
+  it("does not let a fixture with no targets vouch for currency", () => {
+    // It proved nothing, so it cannot be the evidence that the world has not
+    // moved. Counting it would suppress the capture that a key with one dead
+    // fixture most needs.
+    expect(staleTestKeys([outcome("a/a.test.tsx", 0, 0)]))
+      .toEqual(["a/a.test.tsx"]);
+  });
+
+  it("does not let a FAILED fixture decide either way", () => {
+    // A failure is the gate's own red, not a statement about which generation
+    // the world is on. Reading it as current would suppress a capture; reading
+    // it as stale would capture beside a break. It abstains.
+    expect(staleTestKeys([outcome("a/a.test.tsx", 0, 1, true)]))
+      .toEqual(["a/a.test.tsx"]);
+    // ...and a healthy sibling still settles it.
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 0, 1, true),
+      outcome("a/a.test.tsx", 0),
+    ])).toEqual([]);
+  });
+
+  it("answers per test key", () => {
+    expect(staleTestKeys([
+      outcome("a/a.test.tsx", 0),
+      outcome("b/b.test.tsx", 2),
+    ])).toEqual(["b/b.test.tsx"]);
+  });
+
+  it("returns nothing for an empty tree, rather than capturing blind", () => {
+    // No fixtures is a COVERAGE problem, reported by `reportUncovered` with
+    // the test key it cannot derive. Treating it as staleness would have this
+    // command inventing captures for keys nobody named.
+    expect(staleTestKeys([])).toEqual([]);
   });
 });
