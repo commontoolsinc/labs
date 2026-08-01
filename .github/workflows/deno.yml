@@ -155,8 +155,9 @@ jobs:
       # The limit worth knowing (docs/plans/pattern-update-state-continuity.md):
       # a value that merely CHANGED is warned about rather than failed on,
       # because a replay recomputes as well as reads. So a moved key whose new
-      # slot the pattern SEEDS reads back non-empty and only warns.
-      # `packages/piece/test/state-continuity.test.ts` covers that class.
+      # slot the pattern SEEDS reads back non-empty and only warns. The same
+      # move into a slot that stays empty DOES fail, and
+      # `tasks/pattern-vintage-run.test.ts` pins both halves by name.
       - name: 🔁 Replay pinned vintages under today's source
         run: deno task pattern-vintage
 

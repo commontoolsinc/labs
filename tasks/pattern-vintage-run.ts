@@ -208,7 +208,15 @@ export async function replayVintage(
     testKey: vintage.testKey,
     path: relativeToRepo(vintage.path, roots.repoRoot),
   };
-  const fail = (detail: string): ReplayReport => ({
+  // A fixture-level failure still ATTRIBUTES what its manifest names, when the
+  // manifest could be read. Returning an empty `recorded` routed those patterns
+  // into "no fixture records this, capture one" — false, since the fixture is
+  // sitting in the tree, and the suggested capture then prints "Already pinned"
+  // and exits 0. That is the dead end this whole change removes, one layer down.
+  const fail = (
+    detail: string,
+    recorded: Set<string> = new Set<string>(),
+  ): ReplayReport => ({
     candidates: 0,
     targets: 0,
     unmappable: 0,
@@ -217,9 +225,16 @@ export async function replayVintage(
     stranded: 0,
     servedRoute: 0,
     covered: new Set<string>(),
-    recorded: new Set<string>(),
+    recorded,
     failures: [{ ...where, detail }],
   });
+  /** Every pattern key a manifest names, for attributing a failed fixture. */
+  const recordedFrom = (entries: readonly VintageManifestEntry[]) =>
+    new Set(
+      entries
+        .map((e) => patternKeyFromMain(e.main, patternsPrefix(roots)))
+        .filter((key): key is string => key !== undefined),
+    );
   // Stated once, because every "this fixture is not usable" message needs it and
   // the obvious remedy is WRONG: `--update` skips a key that already has a
   // pinned vintage and the capture refuses to overwrite one, so "recapture it"
@@ -265,6 +280,7 @@ export async function replayVintage(
           `does not contain (it holds ${
             [...new Set(manifest.entries.map((e) => e.identity))].join(", ")
           }) — so it is not the state its name claims`,
+        recordedFrom(manifest.entries),
       );
     }
 
@@ -306,6 +322,7 @@ export async function replayVintage(
           `${unmappable.length} cannot be mapped to a file at all, and the ` +
           `rest are test patterns or keyless session pointers. Replaying it ` +
           `asserts nothing. ${remedy}`,
+        recordedFrom(manifest.entries),
       );
     }
     // The per-entry control, and the one the whole gate leans on: does this
@@ -747,8 +764,9 @@ export async function replayAll(
      *
      * `pinned` is what separates the two remedies. A PINNED fixture that did
      * not credit its pattern hit a failure, and the failures say why. An AUTO
-     * fixture records the pattern and cannot credit it by construction, and no
-     * failure is printed at all — that one needs pinning, not investigating.
+     * fixture cannot credit its pattern by construction, so the remedy is to
+     * pin it rather than to investigate — though it MAY also have failed, since
+     * a lost root or a broken source is reported whatever the tier. Read both.
      */
     coveredBy: Map<string, VintageAttribution>;
     failures: ReplayFailure[];

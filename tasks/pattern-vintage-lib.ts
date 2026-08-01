@@ -367,12 +367,15 @@ export function reportUncovered(
   // THREE situations, three remedies, and giving one answer to all of them is
   // how the seam this gate just removed got built in the first place.
   //
-  // - A PINNED fixture records it and did not credit it. Something failed —
-  //   the source stopped resolving or compiling — and the failures say what.
-  //   Recapturing would destroy the evidence.
+  // - A PINNED fixture records it and did not credit it. Something failed, and
+  //   the failures carry their own remedies — a source that stopped resolving
+  //   wants fixing, a fixture that lost its root wants deleting and
+  //   recapturing. This branch must not pick one of those for the reader, which
+  //   is what "recapturing would throw away the evidence" did: it contradicted
+  //   the delete-and-recapture instruction the SAME run printed underneath.
   // - An AUTO fixture records it. Auto captures are pruned by count and never
-  //   credit coverage, so nothing failed and no failure is printed; it needs
-  //   pinning.
+  //   credit coverage, so pinning is the remedy whether or not it also failed
+  //   (a lost root or broken source is reported whatever the tier).
   // - Nothing records it. There is no fixture to replay, so one has to be
   //   captured, and which test writes that state cannot be derived.
   const failed = uncovered.filter((key) => coveredBy.get(key)?.pinned === true);
@@ -384,8 +387,8 @@ export function reportUncovered(
     const from = coveredBy.get(key);
     return from === undefined
       ? `  ${key}`
-      : `  ${key}  (recorded by ${from.testKey}${
-        from.pinned ? "" : ", AUTO tier"
+      : `  ${key}  (recorded by ${from.testKey}, ${
+        from.pinned ? "PINNED" : "AUTO tier"
       })`;
   };
   return [
@@ -399,15 +402,18 @@ export function reportUncovered(
     ...(failed.length > 0
       ? [
         "",
-        "A PINNED fixture records the ones above with a test named, and it was",
-        "replayed — so something stopped it being credited. Read the failures",
-        "above; recapturing would throw away the evidence.",
+        "The ones marked PINNED above ARE recorded by a fixture in the tree, so",
+        "there is nothing to capture: something stopped that fixture being",
+        "credited. Each failure printed below names its own remedy — some want",
+        "the source fixed, some want the fixture deleted and recaptured — so",
+        "read the one for the fixture named here rather than guessing.",
       ]
       : []),
     ...(autoOnly.length > 0
       ? [
         "",
-        "The AUTO-tier ones are recorded by a fixture that cannot count as",
+        "The ones marked AUTO tier are recorded by a fixture that cannot count",
+        "as",
         "coverage: auto captures are pruned by count, so letting one satisfy",
         "the gate means retention can delete its only evidence. Pin the test",
         "that records it:",
@@ -420,8 +426,11 @@ export function reportUncovered(
     ...(absent.length > 0
       ? [
         "",
-        "No fixture records the rest, so there is nothing to replay for them.",
-        "Capture the TEST that instantiates one — a test path, not a pattern",
+        "Nothing this run could READ records the rest. (A fixture that failed to",
+        "open cannot say what it holds, so check the failures below before",
+        "capturing — the fixture you would create may already be there.)",
+        "Otherwise capture the TEST that instantiates one — a test path, not a",
+        "pattern",
         "path, because a fixture is produced by RUNNING a test:",
         "",
         "  deno task pattern-vintage --update <test path>",

@@ -314,7 +314,7 @@ automatic updater performs no structural check at all.
       so a fixture holding only the primary file would record roots whose state
       it does not have. The companion directory is part of the fixture, not a
       fixture itself, so `parseVintagePath` declines everything inside one
-- [x] Seed the auto-updating patterns from today's source
+- [x] Capture a named test's fixture from today's source
 - [x] Assert every REQUIRED pattern has a vintage, and replay every vintage
       that exists under today's source
 - [x] `deno task pattern-vintage` wired into CI
@@ -337,15 +337,20 @@ argument one level in, and the level that matters, because a root can be absent
 while the fixture is otherwise perfectly good — recorded in a space that did
 not travel, in a companion store that restored empty, or at a cell id nothing
 ever wrote. Each of those was measured to replay a real break with no failures
-at all. It compares no VALUES, though — and that is now the only remaining
-reason, since a captured vintage holds real data written through real handlers.
-So the storage-move class — the one this tier was built for — replays clean
-here: measured on the real `home.tsx`, renaming `.for("favorites")` to
-`.for("favouriteList")` exits 0. That is pinned as a limit in
-`tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
-`state-continuity.test.ts` over a populated vintage, and listed in stage 5 as
-the thing to close. Until it is closed, this gate's honest claim is "the update
-still APPLIES", not "the data survives".
+at all. It now compares VALUES too, so the storage-move class — the one this
+tier was built for — is caught: measured on the real `home.tsx`, renaming
+`.for("journal")` exits 1 naming the key and showing what was there. Emptiness
+is judged per LEAF at any depth, so partial loss counts — two of three rows
+gone, a field vanishing while its sibling survives, a container that stopped
+being one.
+
+The limit that remains is narrower and is pinned by name in
+`tasks/pattern-vintage-run.test.ts`: a value that merely CHANGED is warned
+about rather than failed on, because a replay recomputes as well as reads. So a
+moved key whose new slot the pattern SEEDS reads back non-empty and only warns,
+while the same move into a slot that stays empty fails. Weighting a key by
+whether it is backed by an `of:` document rather than a `computed:` one is the
+candidate for closing that.
 
 **A run that reaches no verdict is a failure.** The first version of this gate
 could exit 0 having replayed nothing and printed nothing: a pattern that fails
@@ -482,10 +487,11 @@ that fails SILENTLY rather than loudly — which for a gate means passing:
 
 ### 4. Test-populated vintages, captured per generation, in git
 
-The vintages stage 3 seeds are captured straight off setup, so they hold a
-freshly materialized root and **no data**. That is why the gate can only assert
-"the update still applies" — there is nothing in the fixture for a change to
-strand. This stage fixes the fixture rather than the gate.
+Stage 3's vintages were captured straight off setup, so they held a freshly
+materialized root and **no data** — which is why the gate could only assert
+"the update still applies": there was nothing in the fixture for a change to
+strand. This stage fixed the fixture rather than the gate. Captures now run a
+pattern's own tests, so the state arrived through real handlers.
 
 A vintage becomes **a fresh database with that generation's pattern tests
 having run on it**. Not one root database migrated forward: each generation
@@ -814,7 +820,7 @@ Three further limits, all measured, all in the gate as shipped:
   three roots, all derived names.
 - **A target whose every comparable key is a rendering** reports "updated
   cleanly with no state stranded" having compared nothing, and the output cannot
-  distinguish that from a real check. Three of fourteen targets today
+  distinguish that from a real check. A minority of the targets today
   (`profile-picker.tsx`, and the two map-body hoists).
 
 ## Open questions

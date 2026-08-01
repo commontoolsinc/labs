@@ -423,8 +423,9 @@ describe("reporting", () => {
       ["system/home.tsx"],
       new Map([["system/home.tsx", pinnedFrom("system/home.test.tsx")]]),
     );
-    expect(failed).toContain("(recorded by system/home.test.tsx)");
-    expect(failed).toContain("Read the failures");
+    expect(failed).toContain("(recorded by system/home.test.tsx, PINNED)");
+    expect(failed).toContain("nothing to capture");
+    expect(failed).toContain("failure printed below");
     expect(failed).not.toContain("--update");
 
     // (2) An AUTO fixture records it. Nothing failed and no failure is printed
@@ -438,14 +439,18 @@ describe("reporting", () => {
     expect(auto).toContain(
       "deno task pattern-vintage --update system/home.test.tsx",
     );
-    // It must NOT send the reader to read failures that do not exist.
-    expect(auto).not.toContain("Read the failures");
+    // ...and NOT the generic capture block. An AUTO row already names the test
+    // to pin, so adding "capture one, the test cannot be derived" alongside it
+    // gives two commands for one pattern and tells the reader the mapping is
+    // unknown while printing it. Without this the branches can merge and every
+    // other assertion here still passes.
+    expect(auto).not.toContain("<test path>");
 
     // (3) Nothing records it: capture one, and the test cannot be derived.
     const absent = reportUncovered(["system/newcomer.tsx"], new Map());
     expect(absent).not.toContain("recorded by");
     expect(absent).toContain("--update <test path>");
-    expect(absent).not.toContain("Read the failures");
+    expect(absent).not.toContain("nothing to capture");
 
     // All three at once, each keeping its own remedy rather than collapsing.
     const mixed = reportUncovered(
@@ -455,7 +460,7 @@ describe("reporting", () => {
         ["system/default-app.tsx", autoFrom("system/default-app.test.tsx")],
       ]),
     );
-    expect(mixed).toContain("Read the failures");
+    expect(mixed).toContain("nothing to capture");
     expect(mixed).toContain(
       "deno task pattern-vintage --update system/default-app.test.tsx",
     );
