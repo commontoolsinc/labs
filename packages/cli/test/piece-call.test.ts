@@ -1627,7 +1627,11 @@ describe("piece get data errors", () => {
   });
 
   it("refuses a path that lands on a verb with the call redirect and exit 1", () => {
-    const verbError = new PieceVerbReadError("addTopic", "fid1:piece-123");
+    const verbError = new PieceVerbReadError(
+      "addTopic",
+      "fid1:piece-123",
+      true,
+    );
     expect(isPieceGetDataError(verbError)).toBe(true);
     const report = pieceGetDataErrorReport(verbError, {
       input: false,
@@ -1640,6 +1644,20 @@ describe("piece get data errors", () => {
       "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
     );
     expect(report?.hint).toBeUndefined();
+
+    // A nested verb is not root-callable, so its report must not suggest a
+    // command that would fail — it redirects at the parent read and the
+    // verbs listing instead, still hint-free.
+    const nestedReport = pieceGetDataErrorReport(
+      new PieceVerbReadError("removeItem", "fid1:piece-123", false),
+      { input: false, piece: "fid1:piece-123" },
+    );
+    expect(nestedReport?.message).toMatch(/not directly callable/);
+    expect(nestedReport?.message).toMatch(
+      /cf piece verbs --piece fid1:piece-123/,
+    );
+    expect(nestedReport?.message).not.toContain("cf piece call");
+    expect(nestedReport?.hint).toBeUndefined();
 
     // Threaded through the shared data-error exit: stderr message, exit 1.
     const printed: string[] = [];

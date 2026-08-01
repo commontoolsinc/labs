@@ -1012,17 +1012,26 @@ describe("cli piece parsing", () => {
   describe("read-path guard (verb contract WS-F)", () => {
     /** Minimal cell double for the guard's classification walk: value
      * access, key() descent, and asSchemaFromLinks identity — the same
-     * surface piece-verbs.test.ts doubles for listPieceCallables. */
+     * surface piece-verbs.test.ts doubles for listPieceCallables. Its
+     * asSchema models the real forced-cast semantics: the cast schema
+     * survives resolution for inline values and schema-less links, so a
+     * forced probe answers "stream" for ANY name. The guard is certain-only
+     * and must never consult that cast — the data reads below go through
+     * this double to pin it. */
     function guardCell(value: unknown): {
       get: () => unknown;
       getRaw: () => unknown;
       asSchemaFromLinks: () => unknown;
+      asSchema: (schema: unknown) => unknown;
       key: (...segments: (string | number)[]) => unknown;
     } {
       const self = {
         get: () => value,
         getRaw: () => value,
         asSchemaFromLinks: () => self,
+        asSchema: (_schema: unknown) => ({
+          key: (_name: string) => ({ isStream: () => true }),
+        }),
         key: (...segments: (string | number)[]) => {
           let child: unknown = value;
           for (const segment of segments) {
@@ -1065,10 +1074,15 @@ describe("cli piece parsing", () => {
       createController: () => ({ get: () => Promise.resolve(piece) }) as never,
     });
 
-    const guardPiece = (resultValue: unknown, pieceCell?: unknown) => ({
+    const guardPiece = (
+      resultValue: unknown,
+      pieceCell?: unknown,
+      inputValue?: unknown,
+    ) => ({
       input: {
-        get: () => Promise.resolve(undefined),
-        getCell: () => Promise.resolve(guardCell(undefined)),
+        get: (path: (string | number)[]) =>
+          Promise.resolve(readPath(inputValue, path)),
+        getCell: () => Promise.resolve(guardCell(inputValue)),
       },
       result: {
         get: (path: (string | number)[]) =>
@@ -1085,7 +1099,7 @@ describe("cli piece parsing", () => {
       piece: PIECE,
     };
 
-    it("refuses a path that lands on a verb, pointing at cf piece call", async () => {
+    it("refuses a root verb path, pointing at cf piece call", async () => {
       const deps = guardDeps(guardPiece(RESULT_VALUE));
       const error = await getCellValue(config, ["addItem"], {}, deps)
         .catch((error) => error);
@@ -1094,40 +1108,99 @@ describe("cli piece parsing", () => {
         `Path resolves to a verb; use 'cf piece call --piece ${PIECE} addItem' instead.`,
       );
 
-      // The same guard covers a verb nested below the result root, and a
-      // tool-shaped verb — both are callable, so both redirect.
-      await expect(getCellValue(config, ["nested", "removeItem"], {}, deps))
-        .rejects.toThrow(PieceVerbReadError);
-      await expect(getCellValue(config, ["search"], {}, deps))
-        .rejects.toThrow(PieceVerbReadError);
+      // A root verb on the input cell redirects the same way: the dispatcher
+      // resolves result root then input root, so it is callable by name.
+      const inputDeps = guardDeps(
+        guardPiece(undefined, undefined, { setup: { $stream: true } }),
+      );
+      await expect(
+        getCellValue(config, ["setup"], { input: true }, inputDeps),
+      ).rejects.toThrow(/use 'cf piece call/);
     });
 
-    it("refuses a verb only reachable through the forced-stream probe", async () => {
-      // Ordinary detection sees a plain object; only the forced stream cast
-      // on the piece cell — cf piece call's third resolution path — proves
-      // it is a handler. The guard must agree with the dispatcher.
+    it("refuses on the stored schema marker even when the value reads empty", async () => {
+      // The second definite signal: the link-derived schema answers as a
+      // stream while the read value is an empty object (the marker survives
+      // in stored links even when the serialization is bare).
+      const rootCell = {
+        get: () => ({ notify: {} }),
+        key: (name: string) => ({
+          asSchemaFromLinks: () => ({ isStream: () => name === "notify" }),
+        }),
+      };
+      const piece = {
+        input: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(guardCell(undefined)),
+        },
+        result: {
+          get: () => Promise.resolve({}),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
+        .rejects.toThrow(/use 'cf piece call/);
+    });
+
+    it("refuses a nested verb path without suggesting an uncallable command", async () => {
+      // `cf piece call` resolves root-level names only, so `cf piece call
+      // removeItem` would fail — the refusal must not suggest it. It says
+      // why the read refused and where to go instead.
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      const error = await getCellValue(
+        config,
+        ["nested", "removeItem"],
+        {},
+        deps,
+      ).catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toBe(
+        "Path resolves to a verb that is not directly callable: verbs are " +
+          "invoked at the piece's root surface. Read the parent object " +
+          "instead, or list the callable verbs with " +
+          `'cf piece verbs --piece ${PIECE}'.`,
+      );
+      expect((error as Error).message).not.toContain("cf piece call");
+    });
+
+    it("reads a probe-classifiable but marker-less output (fails open)", async () => {
+      // The CTS integration shape: a plain data output the forced-stream
+      // probe would classify as callable (the cast schema survives
+      // resolution, so the probe answers "stream" for it), with no stored
+      // marker and no sentinel. The dispatcher and the listing may
+      // over-include it — a read guard must not: the read succeeds.
       const pieceCell = {
         asSchema: () => ({
-          key: (name: string) => ({ isStream: () => name === "hiddenPing" }),
+          key: (_name: string) => ({ isStream: () => true }),
         }),
       };
       const deps = guardDeps(
-        guardPiece({ hiddenPing: {}, count: 3 }, pieceCell),
+        guardPiece(
+          { lastMessage: { text: "hi" }, count: 3 },
+          pieceCell,
+        ),
       );
-      await expect(getCellValue(config, ["hiddenPing"], {}, deps))
-        .rejects.toThrow(/use 'cf piece call/);
-      // A data sibling on the same piece still reads: the probe answers for
-      // the one name, not the whole piece.
+      await expect(getCellValue(config, ["lastMessage"], {}, deps))
+        .resolves.toEqual({ text: "hi" });
       await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
     });
 
-    it("still reads plain data paths and a verb's parent object", async () => {
-      const deps = guardDeps(guardPiece(RESULT_VALUE));
+    it("still reads plain data, tool bindings, and a verb's parent object", async () => {
+      const deps = guardDeps(
+        guardPiece(RESULT_VALUE, undefined, { config: { retries: 2 } }),
+      );
       await expect(getCellValue(config, ["title"], {}, deps)).resolves.toBe(
         "Groceries",
       );
       await expect(getCellValue(config, ["nested", "list"], {}, deps))
         .resolves.toEqual(["milk"]);
+      await expect(
+        getCellValue(config, ["config"], { input: true }, deps),
+      ).resolves.toEqual({ retries: 2 });
+      // A tool binding reads as data — the llm-dialog read tool reads tools
+      // too; only streams have a serialization no reader wants.
+      await expect(getCellValue(config, ["search"], {}, deps)).resolves
+        .toEqual(RESULT_VALUE.search);
       // Only the path that lands ON the verb refuses: its parent object —
       // named or the path-less full result — keeps reading, verbs included.
       await expect(getCellValue(config, ["nested"], {}, deps)).resolves
