@@ -114,8 +114,8 @@ describe("incremental observation adoption (live)", () => {
     // delivery outruns — the receiver then re-runs instead of adopting.
     // This suite pins adoption under the batched (opt-out / old-server)
     // delivery; the default-on describe below pins the current
-    // re-run-and-converge reality. Adoption under default-on delivery is
-    // an open item on CT-1927.
+    // timing-dependent reality (re-run or adoption, converging either
+    // way). Reliable adoption under default-on delivery is CT-1930.
     server = newSharedServer({ flushBeforeVerdict: false });
     managerA = SharedServerStorageManager.connectTo(server, { as: signer });
     managerB = SharedServerStorageManager.connectTo(server, { as: signer });
@@ -265,11 +265,14 @@ describe("incremental observation adoption (live)", () => {
 
 // CT-1927 default-on reality: the pre-verdict flush delivers the value frame
 // BEFORE the writer's post-verdict computation run exists, so its adoption
-// observation cannot ride along — the receiver re-runs the computation and
-// converges. Functionally correct (values agree; re-running is adoption's
-// safe fallback), but the dedup is lost; restoring adoption under
-// pre-verdict delivery is an open item on CT-1927. This pins the current
-// behavior so a change in either direction is loud.
+// observation cannot ride along — the receiver usually re-runs the
+// computation. But the observation-only commit rides the NEXT sync window,
+// and when that window reaches the receiver before its deferred dispatch
+// fires, adoption still wins — the race is real in both directions, so
+// neither outcome can be asserted (CI observed both). What IS deterministic:
+// the receiver converges, and its dirt resolves through one of exactly two
+// paths — adoption or re-run. Restoring RELIABLE dedup under pre-verdict
+// delivery is CT-1930.
 describe("incremental observation adoption (live, CT-1927 default-on)", () => {
   let server: MemoryV2Server.Server;
   let managerA: SharedServerStorageManager;
@@ -287,7 +290,7 @@ describe("incremental observation adoption (live, CT-1927 default-on)", () => {
     await server?.close();
   });
 
-  it("a receiver re-runs and converges under pre-verdict delivery", async () => {
+  it("a receiver converges under pre-verdict delivery via re-run or adoption", async () => {
     const rt1 = newRuntime(managerA);
     const rt2 = newRuntime(managerB);
     try {
@@ -327,6 +330,7 @@ describe("incremental observation adoption (live, CT-1927 default-on)", () => {
       expect(resultCell2.key("doubled").getAsQueryResult()).toBe(2);
 
       rt2.scheduler.setActionRunTraceEnabled(true);
+      const adoptedBefore = adoptOkCount();
       const tx2 = rt1.edit();
       valueCell1.withTx(tx2).set(10);
       expect((await tx2.commit()).error).toBeUndefined();
@@ -340,13 +344,19 @@ describe("incremental observation adoption (live, CT-1927 default-on)", () => {
           (v) => v === 20,
         ),
       ).toBe(20);
-      // The receiver RAN the computation: the pre-verdict value frame
-      // outran the writer's observation, so full adoption dedup is lost
-      // (frame-timing may still land a partial adoption alongside, so no
-      // count is asserted). Convergence is preserved; restoring dedup
-      // under pre-verdict delivery is the open CT-1927 item.
+      // Let the receiver's scheduler finish resolving the integrate dirt
+      // before inspecting how it did so.
+      await rt2.idle();
+      // The value-frame-vs-observation race lands EITHER way (pre-verdict
+      // delivery usually outruns the observation and forces a re-run, but
+      // the observation's next-window delivery can still beat the deferred
+      // dispatch and adopt), so no single outcome is asserted. The
+      // deterministic pin: the dirt was resolved through one of the two
+      // legitimate paths, never left dangling. Reliable dedup is CT-1930.
       const liveTrace = rt2.scheduler.getActionRunTrace();
-      expect(opRuns(liveTrace).length).toBeGreaterThan(0);
+      expect(
+        opRuns(liveTrace).length > 0 || adoptOkCount() > adoptedBefore,
+      ).toBe(true);
 
       cancelSink1();
       cancelSink2();

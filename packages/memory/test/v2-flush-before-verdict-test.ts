@@ -597,9 +597,41 @@ Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", 
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://flush-before-verdict-multi-space",
   });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
+  const { server, space, committerMessages } = context;
+
+  // A SECOND space with its own observing session, so stranding is
+  // observable: without an observer, a stranded space holds dirty docs no
+  // assertion can see, and the pin passes even against the pre-fix code.
   const spaceB = "did:key:z6Mk-flush-before-verdict-second-space";
+  const observerMessages: ServerMessage[] = [];
+  const observer = server.connect((message) => observerMessages.push(message));
+  await observer.receive(encodeMemoryBoundary(HELLO));
+  const observerSessionOpen = expectHelloOk(observerMessages);
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "observer-open",
+    space: spaceB,
+    session: {},
+    invocation: authInvocation(observerSessionOpen),
+  }));
+  const observerSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(observerMessages))
+      .ok!.sessionId;
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.watch.set",
+    requestId: "watch-z",
+    space: spaceB,
+    sessionId: observerSessionId,
+    watches: [{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:doc:z", selector: { path: [], schema: false } }],
+      },
+    }],
+  }));
+  assertResponse(shiftMessage(observerMessages));
+  // Parked novelty in spaceB, mirroring setup's doc:b in the first space.
   await server.writeDocument(spaceB, "of:doc:z", { parked: true });
 
   const original = server.syncSessionForConnection.bind(server);
@@ -621,24 +653,29 @@ Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", 
     threw = true;
   }
   assertEquals(threw, true);
+  // The failing pass delivered NOTHING: the rejected sync sent no frame,
+  // and the pass aborted before reaching the other space.
+  assertEquals(committerMessages.length, 0);
+  assertEquals(observerMessages.length, 0);
 
-  // BOTH spaces must remain discoverable: pre-fix the whole selection was
-  // deleted from the dirty set up front, so the not-yet-processed spaceB
-  // kept its dirty docs but no refresh would ever visit them again.
+  // Recovery must reach BOTH spaces: the failed space's consumed batch was
+  // requeued, and the unreached space was never removed from the dirty set
+  // (spaces leave it at their own processing turn). Pre-fix the whole
+  // selection was deleted up front, so whichever space the failure skipped
+  // stayed stranded and its observer never heard the parked novelty.
   await server.flushSessions();
-  const effect = assertEffect(shiftMessage(committerMessages));
+  const committerSync = assertEffect(shiftMessage(committerMessages))
+    .effect as SessionSync;
   assertEquals(
-    (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
+    committerSync.upserts.map((upsert) => upsert.id),
     ["of:doc:b"],
   );
-  // spaceB has no session to observe, but a third flush finding nothing to
-  // do proves its dirty state was consumed by the recovery pass rather
-  // than stranded (a stranded space would still hold docs with no space
-  // entry — invisible either way — so the observable claim is the
-  // successful recovery delivery above plus this clean settle).
-  await server.flushSessions();
-  assertEquals(committerMessages.length, 0);
-  void committerSessionId;
+  const observerSync = assertEffect(shiftMessage(observerMessages))
+    .effect as SessionSync;
+  assertEquals(
+    observerSync.upserts.map((upsert) => upsert.id),
+    ["of:doc:z"],
+  );
 });
 
 Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
@@ -647,8 +684,7 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://flush-before-verdict-requeue-origin",
   });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
+  const { server, space, committerMessages, committerSessionId } = context;
 
   // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
   // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
@@ -663,7 +699,11 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
       failed = true;
       server.markSpaceDirty(space, ["space\u0000of:doc:b"], {
         sessionId: committerSessionId,
-        seq: 99,
+        // doc:b's ACTUAL seq: echo suppression fires only when the origin's
+        // seq matches the delivered upsert's seq, so a fabricated seq would
+        // never suppress and the pin would pass even without the provenance
+        // rule it exists to guard.
+        seq: 1,
       });
       return Promise.reject(new Error("synthetic fan-out failure"));
     }
