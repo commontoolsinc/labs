@@ -9,10 +9,11 @@ the test had to match, because the convention held for 91 of 120 tests in
 `packages/patterns` and not for the interesting ones — `topics/main.tsx` is
 tested by `topics/topics.test.tsx`, and `lunch-poll/main.test.tsx` is named
 after none of the several patterns it drives. Both were uncapturable rather
-than merely un-required. There are now FOUR fixtures — `system/home.test.tsx`,
-`system/default-app.test.tsx`, `topics/topics.test.tsx`,
-`lunch-poll/main.test.tsx` — carrying 84 recorded instantiations and 73 upgrade
-targets. Coverage is judged from what the replay actually REPLAYED, since a
+than merely un-required. Four TEST KEYS are covered —
+`system/home.test.tsx`, `system/default-app.test.tsx`,
+`topics/topics.test.tsx`, `lunch-poll/main.test.tsx` — by five fixtures,
+`system/home.test.tsx` having a second, auto-tier generation. Together they
+carry 90 recorded instantiations and 78 upgrade targets. Coverage is judged from what the replay actually REPLAYED, since a
 fixture routinely covers several patterns and a directory name stopped being
 the evidence.
 
@@ -857,7 +858,7 @@ Three further limits, all measured, all in the gate as shipped:
   cleanly with no state stranded" having compared nothing, and the output cannot
   distinguish that from a real check. A real share of the targets today:
   `profile-picker.tsx`, plus every `__cfPattern_N` map-body hoist — 26 hoist
-  instances across 5 distinct hoists, of 73 targets, once topics and lunch-poll
+  instances across 5 distinct hoists, of 78 targets, once topics and lunch-poll
   joined the fixture set. "The two" was true of the pre-#5253 14-target set.
 
 ## Open questions

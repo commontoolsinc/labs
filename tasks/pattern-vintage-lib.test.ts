@@ -1149,10 +1149,13 @@ describe("retention over the auto tier", () => {
         .toContain(`/${AUTO}/`);
       expect(path).not.toContain(`/${PINNED}/`);
     }
-    // Stated as a count too: with `keep` at 1, every pinned fixture survives
-    // and only the auto ones are candidates at all. A tier filter applied
-    // AFTER the slice would pass every assertion above and still delete four
-    // pinned vintages here.
+    // Stated as a count too, because the two ways this can break are caught by
+    // different assertions and neither covers the other. MEASURED:
+    //
+    //   - filtering AFTER the slice names five AUTO fixtures and no pinned
+    //     ones — wrong count, right tier, caught only by the length above;
+    //   - dropping the filter entirely names four PINNED ones — right count,
+    //     wrong tier, caught only by the path check.
     expect(doomed.filter((p) => p.includes(`/${PINNED}/`))).toEqual([]);
   });
 
@@ -1327,6 +1330,41 @@ describe("promoting a generation", () => {
         await Deno.readTextFile(`${vintageCompanionDir(moved)}/did-abc.sqlite`),
       ).toBe("child space");
       expect(parseVintagePath(moved, root)?.tier).toBe(PINNED);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("REFUSES to promote onto an existing pinned vintage", async () => {
+    // A promotion is the only fixture-writing operation that could destroy a
+    // pinned vintage, and a pinned vintage cannot be recaptured. `git mv`
+    // refuses a destination that exists, so this looked covered — but the
+    // untracked fallback is a plain rename, which overwrites in SILENCE, and
+    // untracked is the normal state of a generation captured minutes ago. The
+    // one path with no protection was the common one.
+    const root = await Deno.makeTempDir({ prefix: "vintage-promote-" });
+    try {
+      const stamp = "2026-01-09T00-00-00.000Z";
+      const name = vintageFileName(stamp, ID_A);
+      const auto = `${root}/topics/t.test.tsx/${AUTO}`;
+      const pinned = `${root}/topics/t.test.tsx/${PINNED}`;
+      await Deno.mkdir(auto, { recursive: true });
+      await Deno.mkdir(pinned, { recursive: true });
+      await Deno.writeTextFile(`${auto}/${name}`, "the auto generation");
+      await Deno.writeTextFile(`${pinned}/${name}`, "IRREPLACEABLE");
+
+      await expect(
+        promoteVintage(parseVintagePath(`${auto}/${name}`, root)!),
+      ).rejects.toThrow(/never overwrites a vintage/);
+
+      // The refusal is worth nothing if the bytes went anyway. This is the
+      // assertion that fails without the guard — the rejection alone would not.
+      expect(
+        await Deno.readTextFile(`${pinned}/${name}`),
+        "the pinned vintage was destroyed",
+      ).toBe("IRREPLACEABLE");
+      // ...and the source is still there to promote deliberately later.
+      expect(await exists(`${auto}/${name}`)).toBe(true);
     } finally {
       await Deno.remove(root, { recursive: true });
     }
@@ -1538,5 +1576,18 @@ describe("what the capture and promote commands print", () => {
     const message = reportEveryGenerationCurrent(4);
     expect(message).toContain("all 4 fixture(s) are current");
     expect(message).toContain("same world");
+  });
+
+  it("does not claim an EMPTY tree is current", () => {
+    // "all 0 fixture(s) are current" is vacuously true and actively
+    // misleading: it asserts currency about a tree that proved nothing, at the
+    // moment someone is most likely to believe the regime is running when it
+    // is not. `--capture-changed` cannot fix an empty tree — it only ever adds
+    // a generation beside an existing fixture — so it must name what does.
+    const message = reportEveryGenerationCurrent(0);
+
+    expect(message).not.toContain("are current");
+    expect(message).toContain("no fixtures");
+    expect(message).toContain("--update <test path>");
   });
 });

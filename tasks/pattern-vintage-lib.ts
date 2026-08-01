@@ -317,9 +317,14 @@ export async function removeVintages(
  *
  * Promotion is the moment an auto capture stops being regenerable and starts
  * being evidence: a pinned vintage is never pruned and is the only tier that
- * credits coverage. Picking the NEWEST is the point — it is the generation
- * closest to what shipped, and the one whose successor will have the most to
- * migrate across.
+ * credits coverage. The NEWEST is chosen because it is the generation closest
+ * to what shipped, which is what a release wants to keep.
+ *
+ * That is deliberately NOT the deepest evidence. The newest generation is the
+ * one a future version has the LEAST to migrate across, and the oldest — the
+ * one retention deletes first — is the strongest test. Promotion optimises for
+ * "what shipped" rather than for depth, and pinning an older generation
+ * instead is a `git mv` anyone can do by hand.
  */
 export function newestAutoGeneration(
   vintages: readonly VintageRef[],
@@ -487,14 +492,39 @@ export function relativeToRepo(path: string, repoRoot: string): string {
  * looks like someone destroying a vintage, in a tree whose append-only
  * discipline rests on people reading diffs.
  *
- * The companion directory moves too, and moves FIRST. If the pair is going to
- * be split by an interrupted promotion, the survivable order is the one that
- * leaves the primary file where the enumerator still finds it: a fixture whose
- * companion has moved out from under it fails loudly on the next replay, where
- * a companion orphaned beside a moved primary is invisible.
+ * The companion directory moves too, and moves FIRST — for RECOVERABILITY, not
+ * for visibility. Measured, both orders leave the same wreckage if the
+ * promotion is interrupted between the two moves: an enumerated fixture whose
+ * companion is missing, which fails loudly on the next replay, plus an
+ * invisible orphan directory, differing only in which tier it lands in.
+ *
+ * What differs is whether the operator can finish the job. With the companion
+ * first, re-running `--pin` completes the promotion: `newestAutoGeneration`
+ * still finds the primary in `auto/`, and the `exists` check below skips the
+ * companion that already moved. With the primary first, the primary is in
+ * `pinned/`, `newestAutoGeneration` returns nothing, the command reports there
+ * is nothing to promote, and the half-moved fixture needs fixing by hand. That
+ * is also what makes the `exists` check load-bearing rather than defensive.
  */
 export async function promoteVintage(ref: VintageRef): Promise<string> {
   const destination = promotedPath(ref);
+  // Never promote ONTO an existing pinned vintage. `git mv` refuses this on
+  // its own ("destination exists"), which is precisely why the guard has to be
+  // here: the untracked fallback is a plain rename, which overwrites in
+  // silence — and untracked is the normal state of a generation captured
+  // minutes ago, so the one path with no protection was the common one.
+  //
+  // A collision needs the same stamp AND identity in both tiers, which is
+  // unlikely and totally destructive: this is the only fixture-writing
+  // operation that could destroy a pinned vintage, and a pinned vintage cannot
+  // be recaptured. `captureVintage` and `removeVintages` both refuse the
+  // equivalent; promotion was the gap.
+  if (await exists(destination)) {
+    throw new Error(
+      `cannot promote ${ref.path}: ${destination} already exists, and a ` +
+        `promotion never overwrites a vintage — delete it deliberately first`,
+    );
+  }
   await Deno.mkdir(destination.slice(0, destination.lastIndexOf("/")), {
     recursive: true,
   });
@@ -726,6 +756,23 @@ export function reportCaptureRefusedOnRed(failures: number): string {
 
 /** What `--capture-changed` prints when no key needs a new generation. */
 export function reportEveryGenerationCurrent(replayed: number): string {
+  // An empty tree is a DIFFERENT statement, and the vacuous one is worse than
+  // useless: "all 0 fixture(s) are current" asserts currency about a tree that
+  // proved nothing, at the exact moment someone is most likely to believe the
+  // regime is running when it is not. `--capture-changed` cannot help here —
+  // it only ever adds a generation beside an existing one — so it says what
+  // will.
+  if (replayed === 0) {
+    return [
+      "Captured nothing: there are no fixtures to capture a generation FROM.",
+      "",
+      "A generation is captured beside an existing fixture, for a test key the",
+      "tree already covers. With nothing there, the first fixture for a key is",
+      "a deliberate act:",
+      "",
+      "  deno task pattern-vintage --update <test path>",
+    ].join("\n");
+  }
   return [
     `Captured nothing: all ${replayed} fixture(s) are current.`,
     "",

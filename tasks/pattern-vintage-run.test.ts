@@ -1296,6 +1296,35 @@ describe("the vintage gate, end to end", () => {
       .toEqual([]);
   });
 
+  it("records per fixture WHETHER it failed, not just the run's total", async () => {
+    // `staleTestKeys`'s abstention rule is unit-tested against hand-built
+    // outcomes, which proves the rule and NOT the wiring. Measured: replacing
+    // `failed: report.failures.length > 0` with `failed: false` in `replayAll`
+    // left the whole suite green, because nothing asserted the field is
+    // actually derived from the fixture's own failures.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [ref] = await collectVintages(roots.vintagesRoot);
+
+    const healthy = await replayAll(roots);
+    expect(healthy.perVintage).toHaveLength(1);
+    expect(healthy.perVintage[0].failed, "a clean fixture was marked failed")
+      .toBe(false);
+    expect(healthy.perVintage[0].ref.path).toBe(ref.path);
+
+    // Truncate the fixture so it cannot restore. Its OWN entry must flip.
+    await Deno.writeTextFile(ref.path, "");
+
+    const broken = await replayAll(roots);
+    expect(broken.failures.length).toBeGreaterThan(0);
+    expect(broken.perVintage).toHaveLength(1);
+    expect(broken.perVintage[0].failed, "a failed fixture was marked clean")
+      .toBe(true);
+  });
+
   it("REFUSES to capture a generation onto a tree with any failure", async () => {
     // A generation is a record of a world that WORKED. Capturing beside a
     // failure would mint one from a run whose verdict is red, and everyone

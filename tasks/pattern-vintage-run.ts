@@ -174,6 +174,14 @@ export interface VintageOutcome {
  *     the gate's own red, and reading it either way would let a broken fixture
  *     decide whether to capture.
  *
+ * The second is a SECOND LOCK, not the operative rule.
+ * `captureChangedGenerations` returns `refused-red` on any failure before this
+ * is ever called, so no production path reaches it today. It stays because
+ * this function is exported and answers a question — "is a generation due" —
+ * that a caller could reasonably ask without refusing on red first, and
+ * because the honest answer to that question from a broken fixture is "this
+ * fixture cannot tell you".
+ *
  * A served-route-only fixture reports `changed === 0` and so reads as current,
  * which is right: its identity is not reproducible from the repo, so no
  * capture could ever move it off zero and a staleness rule that counted it
