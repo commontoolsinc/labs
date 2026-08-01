@@ -298,7 +298,7 @@ automatic updater performs no structural check at all.
 
 ### 3. Curated vintages in git
 
-- [x] `packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite`,
+- [x] `packages/piece/test/vintages/<test key>/pinned/<iso>-<identity>.sqlite`,
       labelled by the pattern identity that wrote it (provenance, not an
       address — nothing looks a fixture up by it; the replay enumerates the
       directory). **Not** under `packages/patterns/`, though the key is a path
@@ -365,10 +365,13 @@ drift from the runtime. This plan previously said "every
 holds personal variants (`*-ben.tsx`) and modules that are not patterns
 (`piece-registry-migration.ts`), and a first attempt at requiring all 23 wedged
 on a file with no default export. A vintage that EXISTS is always replayed;
-the required list only governs what CI insists on. Pinning a profile or other
-long-lived pattern is a deliberate act, and is spelled
-`deno task pattern-vintage --update <pattern key>` — named keys are captured
-under the same only-ever-ADD rule as the required ones.
+the derived required set only governs what CI insists on. Pinning a profile or
+other long-lived pattern is a deliberate act, and is spelled
+`deno task pattern-vintage --update <test key>` — a TEST path, because a
+fixture is produced by RUNNING a test and covers whatever that test
+instantiates. There is no bare `--update` and no list of what CI replays: every
+fixture under the vintages tree is replayed by the plain command, so committing
+a captured fixture is the whole of adding one. Captures only ever ADD.
 
 **Fixtures are stored RAW, and both size arguments this plan reasoned from were
 wrong.** A store is mostly slack — 99 revisions in 3.5 MiB — and gzips 15-48x

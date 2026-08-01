@@ -361,41 +361,68 @@ export function relativeToRepo(path: string, repoRoot: string): string {
  */
 export function reportUncovered(
   uncovered: readonly string[],
-  coveredBy: ReadonlyMap<string, string> = new Map(),
+  coveredBy: ReadonlyMap<string, { testKey: string; pinned: boolean }> =
+    new Map(),
 ): string {
-  // A pattern this run DID cover from some fixture is a different problem from
-  // one nothing covers, and the remedy differs: the first was replayed and
-  // then excluded (a served route, a fixture that lost its root), the second
-  // has no fixture to replay at all. Naming the test that covers it is only
-  // possible for the first, which is exactly why the mapping is derived from
-  // the run rather than kept in a list — a list cannot know either.
-  const known = uncovered.filter((key) => coveredBy.has(key));
-  const unknown = uncovered.filter((key) => !coveredBy.has(key));
+  // THREE situations, three remedies, and giving one answer to all of them is
+  // how the seam this gate just removed got built in the first place.
+  //
+  // - A PINNED fixture records it and did not credit it. Something failed —
+  //   the source stopped resolving or compiling — and the failures say what.
+  //   Recapturing would destroy the evidence.
+  // - An AUTO fixture records it. Auto captures are pruned by count and never
+  //   credit coverage, so nothing failed and no failure is printed; it needs
+  //   pinning.
+  // - Nothing records it. There is no fixture to replay, so one has to be
+  //   captured, and which test writes that state cannot be derived.
+  const failed = uncovered.filter((key) => coveredBy.get(key)?.pinned === true);
+  const autoOnly = uncovered.filter((key) =>
+    coveredBy.get(key)?.pinned === false
+  );
+  const absent = uncovered.filter((key) => !coveredBy.has(key));
+  const describe = (key: string) => {
+    const from = coveredBy.get(key);
+    return from === undefined
+      ? `  ${key}`
+      : `  ${key}  (recorded by ${from.testKey}${
+        from.pinned ? "" : ", AUTO tier"
+      })`;
+  };
   return [
-    `${uncovered.length} auto-updating pattern(s) have no pinned vintage:`,
+    `${uncovered.length} auto-updating pattern(s) are not covered by a pinned`,
+    "vintage this run replayed:",
     "",
-    ...uncovered.map((key) =>
-      coveredBy.has(key)
-        ? `  ${key}  (covered by ${coveredBy.get(key)})`
-        : `  ${key}`
-    ),
+    ...uncovered.map(describe),
     "",
     "These patterns auto-update onto a root someone is already using, so a",
     "change that cannot read the old state bricks that piece.",
-    ...(known.length > 0
+    ...(failed.length > 0
       ? [
         "",
-        "A fixture DOES record the ones marked above, so they were replayed and",
-        "then not credited — a served route, or a fixture that no longer holds",
-        "the root. Read the failures above rather than recapturing.",
+        "A PINNED fixture records the ones above with a test named, and it was",
+        "replayed — so something stopped it being credited. Read the failures",
+        "above; recapturing would throw away the evidence.",
       ]
       : []),
-    ...(unknown.length > 0
+    ...(autoOnly.length > 0
+      ? [
+        "",
+        "The AUTO-tier ones are recorded by a fixture that cannot count as",
+        "coverage: auto captures are pruned by count, so letting one satisfy",
+        "the gate means retention can delete its only evidence. Pin the test",
+        "that records it:",
+        "",
+        ...autoOnly.map((key) =>
+          `  deno task pattern-vintage --update ${coveredBy.get(key)!.testKey}`
+        ),
+      ]
+      : []),
+    ...(absent.length > 0
       ? [
         "",
         "No fixture records the rest, so there is nothing to replay for them.",
         "Capture the TEST that instantiates one — a test path, not a pattern",
-        "path, because a fixture is produced by running a test:",
+        "path, because a fixture is produced by RUNNING a test:",
         "",
         "  deno task pattern-vintage --update <test path>",
         "",

@@ -146,12 +146,16 @@ jobs:
       # apply. The space roots auto-update onto a root someone is already
       # using, so a break here bricks a live piece.
       #
-      # What it does NOT yet catch (measured, and tracked as stage 5 in
-      # docs/plans/pattern-update-state-continuity.md): a MOVED storage key.
-      # The committed vintages DO hold real data — capture drives a pattern
-      # through its own tests — but the replay asks only whether the migration
-      # applied, never whether the values survived it, so `.for('x')` →
-      # `.for('y')` replays clean here.
+      # It also checks the values SURVIVE, not merely that the migration
+      # applied: a moved storage key (`.for('x')` → `.for('y')`) leaves the
+      # declared contract untouched while the old documents go unreachable, and
+      # that now exits 1 naming the key. Emptiness is judged per leaf, so
+      # partial loss counts too.
+      #
+      # The limit worth knowing (docs/plans/pattern-update-state-continuity.md):
+      # a value that merely CHANGED is warned about rather than failed on,
+      # because a replay recomputes as well as reads. So a moved key whose new
+      # slot the pattern SEEDS reads back non-empty and only warns.
       # `packages/piece/test/state-continuity.test.ts` covers that class.
       - name: 🔁 Replay pinned vintages under today's source
         run: deno task pattern-vintage

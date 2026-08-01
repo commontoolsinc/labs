@@ -129,6 +129,13 @@ export function snippet(value: unknown): string {
   }
 }
 
+/** Which test's fixture records a pattern, and whether it can credit it. */
+export interface VintageAttribution {
+  testKey: string;
+  /** PINNED is the only tier coverage counts, so this decides the remedy. */
+  pinned: boolean;
+}
+
 /** What replaying one fixture found. */
 export interface ReplayReport {
   /** Instantiations the fixture recorded. Zero means it proved nothing. */
@@ -424,12 +431,20 @@ export async function replayVintage(
     }
 
     for (const entry of targets) {
-      // Already reported above. Materializing it anyway would apply today's
-      // source to an empty cell and count the result as a clean update.
-      if (missing.has(entry)) continue;
       // A recorded `main` is either a repo path or the ROUTE the toolshed
       // serves the pattern at; both name a file under `packages/patterns/`.
       const key = patternKeyFromMain(entry.main, patternsPrefix(roots));
+      // RECORDED before any skip, including the presence control below. The
+      // manifest names this pattern whatever happens next, and that is what
+      // makes the fixture worth pointing a reader at. Ordering this after the
+      // `missing` skip left the "fixture no longer holds the root" case — the
+      // one this attribution most needs to explain — reported as though no
+      // fixture recorded the pattern at all, which is the dead end the seam
+      // removal exists to close, one layer down.
+      if (key !== undefined) report.recorded.add(key);
+      // Already reported above. Materializing it anyway would apply today's
+      // source to an empty cell and count the result as a clean update.
+      if (missing.has(entry)) continue;
       if (key === undefined) {
         report.failures.push({
           ...where,
@@ -439,10 +454,6 @@ export async function replayVintage(
         });
         continue;
       }
-      // Recorded from HERE — the manifest names this pattern, which is what
-      // makes the fixture worth pointing a reader at. Everything below can
-      // still decline to CREDIT it, and attribution must survive that.
-      report.recorded.add(key);
       const source = `${roots.patternsRoot}/${key}`;
       let program;
       try {
@@ -724,21 +735,28 @@ export async function replayAll(
     servedRoute: number;
     covered: Set<string>;
     /**
-     * Which TEST's fixture replayed each covered pattern.
+     * Which TEST's fixture RECORDS each pattern, and whether that fixture is
+     * the tier that credits coverage.
      *
-     * Derived from the run rather than kept by hand: a fixture's manifest
-     * records the authored file of every instantiation, so the fixture tree
-     * already knows which test covers which pattern. It is what lets an
-     * uncovered-pattern failure name a concrete `--update` argument instead of
-     * a command that prints "already pinned" and exits 0.
+     * Derived from the run rather than kept by hand: a manifest records the
+     * authored file of every instantiation, so the fixture tree already knows
+     * which test names which pattern. Built from `recorded`, NOT `covered` —
+     * a pattern that was credited never reaches an uncovered report, so the
+     * only ones worth attributing are those a fixture records and the run then
+     * declines to credit.
+     *
+     * `pinned` is what separates the two remedies. A PINNED fixture that did
+     * not credit its pattern hit a failure, and the failures say why. An AUTO
+     * fixture records the pattern and cannot credit it by construction, and no
+     * failure is printed at all — that one needs pinning, not investigating.
      */
-    coveredBy: Map<string, string>;
+    coveredBy: Map<string, VintageAttribution>;
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
   const covered = new Set<string>();
-  const coveredBy = new Map<string, string>();
+  const coveredBy = new Map<string, VintageAttribution>();
   let servedRoute = 0;
   let candidates = 0,
     targets = 0,
@@ -763,7 +781,12 @@ export async function replayAll(
       // worth naming is the pattern a fixture records and the run then does
       // not credit. First fixture wins, and the walk is path-sorted, so the
       // name a failure prints does not change run to run.
-      if (!coveredBy.has(key)) coveredBy.set(key, vintage.testKey);
+      if (!coveredBy.has(key)) {
+        coveredBy.set(key, {
+          testKey: vintage.testKey,
+          pinned: vintage.tier === PINNED,
+        });
+      }
     }
     failures.push(...report.failures);
   }

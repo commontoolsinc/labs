@@ -936,16 +936,67 @@ describe("the vintage gate, end to end", () => {
     );
     await Deno.remove(pinnedRef.path);
 
-    const { covered, coveredBy, replayed } = await replayAll(roots);
+    const { covered, coveredBy, targets, failures } = await replayAll(roots);
 
-    // The control: it WAS replayed, so "not credited" is a decision rather
-    // than the uninteresting case of nothing having run.
-    expect(replayed).toBe(1);
+    // The control that actually controls: the fixture got PAST the presence
+    // check and the target filter and produced no failure, so "not credited"
+    // is a decision rather than the uninteresting case of nothing having run.
+    // (`replayed` would not do — it counts fixtures COLLECTED, before any of
+    // those.)
+    expect(targets).toBeGreaterThan(0);
+    expect(failures, "the auto fixture failed for an unrelated reason")
+      .toEqual([]);
     expect([...covered], "an auto fixture credited coverage").toEqual([]);
     // ...and the pattern is still attributed to the test that records it,
-    // which is the whole point — a reader is sent to the fixture rather than
-    // told to capture one that already exists.
-    expect(coveredBy.get(KEY)).toBe(pinnedRef.testKey);
+    // with the tier that decides the remedy — a reader is told to PIN it, not
+    // to read failures that do not exist or capture a fixture that does.
+    expect(coveredBy.get(KEY)).toEqual({
+      testKey: pinnedRef.testKey,
+      pinned: false,
+    });
+  });
+
+  it("attributes a pattern whose fixture no longer holds its root", async () => {
+    // The case the attribution most needs to explain, and the one an earlier
+    // ordering missed: `recorded` was populated AFTER the presence-control
+    // skip, so a fixture that no longer holds a recorded root reported as
+    // though NO fixture recorded the pattern — sending a reader to capture one
+    // that is sitting right there, which is the dead end this whole change
+    // exists to close.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-lostroot-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinnedRef.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // Same pattern, a root the fixture does not hold: the presence control
+      // reports it and the target is skipped before anything is applied.
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({ ...entry, cellId: "of:fid1:nosuchroot" })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinnedRef.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { covered, coveredBy, failures } = await replayAll(roots);
+
+    // It failed the presence control, so it is genuinely uncredited...
+    expect(failures.length).toBeGreaterThan(0);
+    expect([...covered]).toEqual([]);
+    // ...and still attributed, from a PINNED fixture — so the remedy is "read
+    // the failures", not "capture one".
+    expect(coveredBy.get(KEY)).toEqual({
+      testKey: pinnedRef.testKey,
+      pinned: true,
+    });
   });
 
   it("credits coverage only for a PINNED fixture", async () => {

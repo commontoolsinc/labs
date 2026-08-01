@@ -410,42 +410,56 @@ describe("reporting", () => {
     expect(message).toContain("no list anywhere");
   });
 
-  it("tells an uncovered pattern apart from one that was merely not credited", () => {
-    // Two problems with two remedies. A pattern some fixture RECORDED but that
-    // the run did not credit — a served route, an auto-tier fixture, a root the
-    // fixture no longer holds — is named with the test whose fixture records
-    // it, and recapturing would fix nothing. A pattern no fixture records has
-    // nothing to replay at all.
-    //
-    // The attribution map must therefore be built from what fixtures RECORD,
-    // not from what the run CREDITS. Built from the credited set, this branch
-    // is unreachable by construction — `uncovered` is exactly the required keys
-    // absent from that set — and an earlier version of this case passed only
-    // because it hand-built a pair the gate can never produce.
-    // `pattern-vintage-run.test.ts` drives the real path.
-    const both = reportUncovered(
-      ["system/home.tsx", "system/newcomer.tsx"],
-      new Map([["system/home.tsx", "system/home.test.tsx"]]),
-    );
+  it("gives a DIFFERENT remedy for each reason a pattern is uncovered", () => {
+    // Three situations, three remedies. One answer for all of them is how the
+    // seam this change removes got built, so the message must not merge them.
+    const pinnedFrom = (testKey: string) => ({ testKey, pinned: true });
+    const autoFrom = (testKey: string) => ({ testKey, pinned: false });
 
-    expect(both).toContain(
-      "system/home.tsx  (covered by system/home.test.tsx)",
-    );
-    expect(both).toContain("replayed and");
-    expect(both).toContain("--update <test path>");
-
-    // Everything already recorded somewhere: the capture advice must NOT
-    // appear, or it sends a reader to recapture a fixture that exists.
-    const knownOnly = reportUncovered(
+    // (1) A PINNED fixture records it and did not credit it — something failed
+    // and the failures say what. Recapturing would destroy the evidence, so no
+    // capture command may appear for it.
+    const failed = reportUncovered(
       ["system/home.tsx"],
-      new Map([["system/home.tsx", "system/home.test.tsx"]]),
+      new Map([["system/home.tsx", pinnedFrom("system/home.test.tsx")]]),
     );
-    expect(knownOnly).not.toContain("--update <test path>");
+    expect(failed).toContain("(recorded by system/home.test.tsx)");
+    expect(failed).toContain("Read the failures");
+    expect(failed).not.toContain("--update");
 
-    // Nothing recorded: no fixture is named and the advice is the whole of it.
-    const unknownOnly = reportUncovered(["system/newcomer.tsx"], new Map());
-    expect(unknownOnly).not.toContain("covered by");
-    expect(unknownOnly).toContain("--update <test path>");
+    // (2) An AUTO fixture records it. Nothing failed and no failure is printed
+    // — auto captures cannot credit coverage — so it needs PINNING, and the
+    // command names the very test the fixture came from.
+    const auto = reportUncovered(
+      ["system/home.tsx"],
+      new Map([["system/home.tsx", autoFrom("system/home.test.tsx")]]),
+    );
+    expect(auto).toContain("AUTO tier");
+    expect(auto).toContain(
+      "deno task pattern-vintage --update system/home.test.tsx",
+    );
+    // It must NOT send the reader to read failures that do not exist.
+    expect(auto).not.toContain("Read the failures");
+
+    // (3) Nothing records it: capture one, and the test cannot be derived.
+    const absent = reportUncovered(["system/newcomer.tsx"], new Map());
+    expect(absent).not.toContain("recorded by");
+    expect(absent).toContain("--update <test path>");
+    expect(absent).not.toContain("Read the failures");
+
+    // All three at once, each keeping its own remedy rather than collapsing.
+    const mixed = reportUncovered(
+      ["system/home.tsx", "system/default-app.tsx", "system/newcomer.tsx"],
+      new Map([
+        ["system/home.tsx", pinnedFrom("system/home.test.tsx")],
+        ["system/default-app.tsx", autoFrom("system/default-app.test.tsx")],
+      ]),
+    );
+    expect(mixed).toContain("Read the failures");
+    expect(mixed).toContain(
+      "deno task pattern-vintage --update system/default-app.test.tsx",
+    );
+    expect(mixed).toContain("--update <test path>");
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {
