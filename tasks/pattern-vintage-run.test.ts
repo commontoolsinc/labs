@@ -1429,37 +1429,75 @@ describe("the vintage gate, end to end", () => {
     // Files are already on disk by the time pruning runs. Throwing there would
     // lose the record of which — leaving fixtures nobody was told about. Over-
     // retention is a disk cost a re-run fixes; an unreported capture is not.
-    await captureMissing(
-      roots,
-      [TEST_KEY],
-      new Date("2026-07-29T12:00:00.000Z"),
-    );
-    await setSource(COMPATIBLE);
-    const replay = await replayAll(roots);
-    expect(replay.failures).toEqual([]);
+    //
+    // The capture must SUCCEED and the prune must FAIL, which is fiddly to
+    // arrange and worth arranging. A first version wedged a file where the
+    // capture's own output directory goes: that failed the `mkdir` inside
+    // `captureVintage`, so it exercised the capture-failure path instead and
+    // the retention branch stayed red — passing for the wrong reason, and only
+    // caught by reading the coverage report.
+    //
+    // So the denial is put somewhere the capture never touches: ANOTHER test
+    // key's auto tier, over the retention bound, with its directory made
+    // unwritable. The capture writes to its own key and succeeds; retention
+    // selects a victim under the read-only directory and cannot unlink it.
+    const other = "zz-retention/zz.test.tsx";
+    const otherAuto = `${roots.vintagesRoot}/${other}/${AUTO}`;
+    await Deno.mkdir(otherAuto, { recursive: true });
+    for (let day = 1; day <= AUTO_GENERATIONS_KEPT + 1; day++) {
+      await Deno.writeTextFile(
+        `${otherAuto}/2026-06-${
+          String(day).padStart(2, "0")
+        }T00-00-00.000Z-bafyzz.sqlite`,
+        "over the bound",
+      );
+    }
+    await Deno.chmod(otherAuto, 0o500);
+    try {
+      // The environment has to be able to deny an unlink at all. Asserted
+      // rather than assumed: as root it cannot, and this test would then pass
+      // while proving nothing.
+      const denied = await Deno.remove(
+        `${otherAuto}/2026-06-01T00-00-00.000Z-bafyzz.sqlite`,
+      )
+        .then(() => false).catch(() => true);
+      expect(
+        denied,
+        "this environment cannot deny an unlink, so the retention " +
+          "failure cannot be simulated (running as root?)",
+      ).toBe(true);
 
-    // Make the retention read fail: a file where `collectVintages` will try to
-    // walk a directory.
-    const wedge = `${roots.vintagesRoot}/${TEST_KEY}/${AUTO}`;
-    await Deno.mkdir(wedge.slice(0, wedge.lastIndexOf("/")), {
-      recursive: true,
-    });
-    await Deno.writeTextFile(wedge, "not a directory");
+      // A synthetic replay, so the dummy fixtures above do not have to be
+      // replayable: this function takes the run it should judge precisely so
+      // the judgement can be driven directly.
+      const outcome = await captureChangedGenerations(roots, {
+        failures: [],
+        perVintage: [{
+          ref: {
+            testKey: TEST_KEY,
+            tier: PINNED,
+            stamp: "2026-07-29T12-00-00.000Z",
+            identity: "bafyold",
+            path: `${roots.vintagesRoot}/${TEST_KEY}/${PINNED}/x.sqlite`,
+          },
+          targets: 1,
+          changed: 1,
+          failed: false,
+        }],
+      }, new Date("2026-07-30T12:00:00.000Z"));
 
-    const outcome = await captureChangedGenerations(
-      roots,
-      replay,
-      new Date("2026-07-30T12:00:00.000Z"),
-    );
-
-    expect(outcome.kind).toBe("captured");
-    if (outcome.kind !== "captured") throw new Error("unreachable");
-    // Whatever happened to retention, the capture attempt is accounted for:
-    // either it wrote a file and said so, or it failed and said that.
-    expect(
-      outcome.captured.length + outcome.problems.length,
-      "a capture attempt went entirely unreported",
-    ).toBeGreaterThan(0);
+      expect(outcome.kind).toBe("captured");
+      if (outcome.kind !== "captured") throw new Error("unreachable");
+      // The whole point: the capture is still reported.
+      expect(outcome.captured, "the capture went unreported").toHaveLength(1);
+      expect(outcome.captured[0]).toContain(`/${AUTO}/`);
+      // ...and the retention failure is reported too, rather than swallowed.
+      expect(outcome.problems.join("\n")).toContain("retention:");
+      // Nothing is claimed to have been pruned, because nothing was.
+      expect(outcome.pruned).toEqual([]);
+    } finally {
+      await Deno.chmod(otherAuto, 0o700);
+    }
   });
 
   it("promotes the newest generation, and says so when there is none", async () => {
