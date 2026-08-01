@@ -408,8 +408,8 @@ export function invocationPhaseReporter(
  * Invocation JSON an agent parses, and lines stream as transitions happen so
  * a failure exit keeps every span observed before the failure — `finish`
  * closes the in-flight span with the outcome that ended it: `settled`,
- * `failed`, or `detached` for a `--no-wait` exit that left settlement to
- * happen elsewhere.
+ * `failed`, or `detached` for a `--no-wait` exit that stopped at the commit
+ * acknowledgement and skipped the readback.
  */
 export function pieceCallPhaseObserver(
   verbose: boolean,
@@ -470,12 +470,14 @@ export function invocationJson(
 /** How long `cf piece call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
  * acknowledgement plus receipt readback, optionally bounded by the caller's
- * patience (`--wait <seconds>`). `detach` (`--no-wait`) returns as soon as
- * the dispatch is on its way. */
+ * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
+ * transaction-local commit acknowledgement — the durable point; the handler
+ * runs in THIS process, so the acknowledgement is not skippable — and skips
+ * only the receipt readback. */
 export interface PieceCallWaitControl {
-  mode: "settle" | "detach";
+  mode: "settle" | "commit";
   /** Caller-chosen patience bound in seconds (`--wait`). Never set for
-   * `detach` — there is no wait left to bound. */
+   * `commit` — the readback the bound would cover is already skipped. */
   boundSeconds?: number;
 }
 
@@ -505,7 +507,7 @@ export function resolveWaitControl(
           "pass one.",
       );
     }
-    return { mode: "detach" };
+    return { mode: "commit" };
   }
   if (typeof options.wait === "number") {
     if (!Number.isFinite(options.wait) || options.wait <= 0) {
@@ -519,16 +521,21 @@ export function resolveWaitControl(
 }
 
 /**
- * The caller's patience bound expired before the invocation settled. This is
- * NOT a failed invocation: the dispatch (if it got that far) is still
- * settling, and with a caller-supplied id a retry is safe in every phase, so
- * the caller re-invokes with the same id or reads the receipt to learn the
- * outcome. The exit reports the id and the furthest phase so it can.
+ * The caller's patience bound expired before the invocation settled. The
+ * handler runs in THIS process's runtime, so an exit before the commit is
+ * acknowledged abandons un-executed work rather than leaving it settling
+ * elsewhere: before the `committed` phase, the invocation may not have
+ * executed or committed at all. The recovery is re-invoking with the SAME
+ * id — safe in every phase, because it deduplicates against the create-only
+ * receipt when the commit landed and re-executes when it never did. The
+ * exit reports the id and the furthest phase so the caller can.
  */
 export class WaitBoundExpired extends Error {
   constructor(readonly seconds: number) {
     super(
-      `--wait bound of ${seconds}s expired before the invocation settled`,
+      `--wait bound of ${seconds}s expired: the invocation may not have ` +
+        "executed or committed — re-invoke with the same invocation id " +
+        "to finish it or read the outcome back",
     );
     this.name = "WaitBoundExpired";
   }
@@ -538,11 +545,14 @@ export class WaitBoundExpired extends Error {
  * Bound an in-flight settlement wait by the caller's chosen patience.
  *
  * This is a patience bound, not a correctness timeout (the distinction
- * docs/development/waiting-in-tests.md draws): firing early is safe because a
- * caller-supplied invocation id makes a same-id retry safe in EVERY phase —
- * an early fire loses confirmation, never the invocation. That is what
- * permits a wall-clock bound here at all, and only because the caller asked
- * for one; nothing waits by default.
+ * docs/development/waiting-in-tests.md draws): firing early is safe because
+ * a caller-supplied invocation id makes a same-id re-invoke safe in EVERY
+ * phase. Safe is not lossless — the handler runs locally, so a bound that
+ * fires before the commit is acknowledged abandons work that may never have
+ * executed or committed — but the re-invoke recovers either way: it
+ * deduplicates when the commit landed and re-executes when it never did.
+ * That is what permits a wall-clock bound here at all, and only because the
+ * caller asked for one; nothing waits by default.
  *
  * Mechanism: one deadline racing the outermost await — the settlement work
  * underneath is event-driven and untouched, and there is no polling anywhere.
@@ -1386,14 +1396,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "--wait <seconds:number>",
     "Bound the settlement wait by a chosen patience, in seconds (before " +
       "the callable name). On expiry the exit is nonzero with the " +
-      "invocation id and furthest phase on stderr; a same-id retry is safe " +
-      "in every phase, so nothing is lost but confirmation.",
+      "invocation id and furthest phase on stderr; the invocation may not " +
+      "have executed or committed, and re-invoking with the same id is " +
+      "safe in every phase — it finishes the work or reads the outcome " +
+      "back.",
   )
   .option(
     "--no-wait",
-    "Exit 0 as soon as the invocation id is announced and the dispatch is " +
-      "sent (before the callable name), without awaiting commit " +
-      "acknowledgement or readback. Handler invocations only.",
+    "Exit once this handling's commit is acknowledged (before the callable " +
+      "name), skipping only the receipt readback: stdout reports status " +
+      '"committed", and a later call with the same --invocation id reads ' +
+      "the outcome back. The handler still executes here and its commit " +
+      "is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
@@ -1430,7 +1444,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
           invocation.rawArgs,
           {
             invocationId,
-            detachAfterDispatch: waitControl.mode === "detach",
+            skipReadback: waitControl.mode === "commit",
             showLinks: !!options.showLinks,
             onPhase: invocationPhaseReporter(
               invocationId,
@@ -1446,7 +1460,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
         render(result.helpText);
         return;
       }
-      observer.finish(waitControl.mode === "detach" ? "detached" : "settled");
+      observer.finish(waitControl.mode === "commit" ? "detached" : "settled");
       if (result.outputText) {
         render(result.outputText);
         if (result.resultRef) {
@@ -1465,13 +1479,13 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       if (result.invocation) {
         // The machine surface for a handler invocation: stdout carries the
-        // Invocation JSON — settled, or carrying the furthest phase for a
-        // detached dispatch — prose stays on stderr via hint().
+        // Invocation JSON — settled, or stopped at "committed" under
+        // --no-wait — prose stays on stderr via hint().
         render(JSON.stringify(invocationJson(result.invocation), null, 2));
-        if (waitControl.mode === "detach") {
+        if (waitControl.mode === "commit") {
           hint(cliText(`NEXT STEPS:
-  → Confirm outcome: cf piece call --piece ${pieceConfig.piece} --invocation ${invocationId} ${callableName} ... (a same-id retry deduplicates and settles on the original outcome)
-  → Verify state:    cf piece get --piece ${pieceConfig.piece} <path> ...`));
+  → Read the outcome: cf piece call --piece ${pieceConfig.piece} --invocation ${invocationId} ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
+  → Verify state:     cf piece get --piece ${pieceConfig.piece} <path> ...`));
         } else {
           hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
@@ -1501,10 +1515,12 @@ after --. Handlers interpret piped input when no input argument is present.`,
       // retries deduplicate; a fresh id would re-execute).
       console.error(`invocation: ${invocationId} phase: ${phase}`);
       if (error instanceof WaitBoundExpired) {
-        // The caller's patience expired, not the invocation: it is still
-        // settling somewhere, so stdout carries the Invocation JSON with the
-        // furthest observed phase — the same machine surface as a settled
-        // call, letting a script parse one shape either way.
+        // The caller's patience expired. The handler runs in this process,
+        // so the invocation may not have executed or committed — the
+        // recovery is a same-id re-invoke, which the stderr message names.
+        // stdout still carries the Invocation JSON with the furthest
+        // observed phase — the same machine surface as a settled call, so a
+        // script parses one shape either way.
         render(
           JSON.stringify(
             invocationJson({ id: invocationId, status: phase }),
