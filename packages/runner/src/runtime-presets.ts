@@ -100,6 +100,7 @@
 
 import {
   SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV,
+  SERVER_PRIMARY_EXECUTION_DEFAULT,
   SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
   SERVER_PRIMARY_EXECUTION_ENV,
 } from "@commonfabric/memory/v2";
@@ -209,17 +210,14 @@ export const EXPERIMENTAL_ENV_VARS = {
   // the runner), so referencing the constants here keeps the one mapping
   // canonical without a second copy that could drift.
   serverPrimaryExecution: SERVER_PRIMARY_EXECUTION_ENV,
-  // C1 rollout dial: flipped programmatically by the C1.9 measurement
-  // fixture alongside the memory-side claim-rank dial; no env exposure.
+  // The three rank/cross-space CANDIDATE dials stay programmatic-only, and
+  // that is now a stronger decision than it was: they default ON with the
+  // memory-side dial set, so a partial combination is a TESTING-ONLY
+  // affordance that nothing ships in. Giving one of them an env var would be
+  // giving a deployment a way to run a configuration nobody measures — the
+  // master flag is the whole rollback, and it is the only one env-reachable.
   serverPrimaryExecutionUserRankCandidates: null,
-  // C2 rollout dial (session rank, C2.5): fixture-only like the user-rank
-  // dial above; the CA4 ordering invariant forbids ambient enablement
-  // before C2.6 lands, so no env exposure.
   serverPrimaryExecutionSessionRankCandidates: null,
-  // C3 rollout dial (cross-space-read, C3.6): fixture-only like the rank
-  // dials above; the CA4/C3A17 ordering invariant forbids ambient enablement
-  // until the memory-side `cross-space-read` stage AND the
-  // `cross-space-claims-v1` cohort gate are both in place, so no env exposure.
   serverPrimaryExecutionCrossSpaceReadCandidates: null,
   // P0 demand-shrink-gate hold: NUMERIC, programmatic-only (tests shorten it
   // to assert the held-shrink contract; production keeps the gate's 10s
@@ -285,6 +283,27 @@ export function experimentalOptionsFromEnv(
     }
   }
   return opts;
+}
+
+/**
+ * Resolve the master server-primary dial for a flag bag, applying the same
+ * default the `Runtime` constructor does (`SERVER_PRIMARY_EXECUTION_DEFAULT`,
+ * owned by `@commonfabric/memory/v2` — both halves of the handshake resolve
+ * it, so the spelling lives in one place).
+ *
+ * Callers that construct a `Runtime` never need this: the constructor
+ * round-trips the flag through its ambient control point and
+ * `runtime.experimental.serverPrimaryExecution` is then the effective value.
+ * It exists for the one site that has to decide BEFORE the Runtime exists —
+ * toolshed choosing `externalSinkDisposition` while assembling
+ * `RuntimeOptions` — where reading the raw option would see `undefined` for
+ * the default and silently pick the flag-off posture.
+ */
+export function resolveServerPrimaryExecution(
+  experimental: Pick<ExperimentalOptions, "serverPrimaryExecution">,
+): boolean {
+  return experimental.serverPrimaryExecution ??
+    SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 // ---------------------------------------------------------------------------

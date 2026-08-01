@@ -789,6 +789,15 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
         },
       }],
       removes: [],
+      // A server-primary session carries its execution feed delta on every
+      // sync frame. Empty here (no claims in this space), but present: the
+      // capability defaults on since 2026-08-01, so this is what a sync frame
+      // now looks like rather than an artifact of this test.
+      execution: {
+        events: [],
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+      },
     });
   } finally {
     await writerClient.close();

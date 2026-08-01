@@ -58,8 +58,18 @@ describe("ExperimentalOptions", () => {
         serverPrimaryExecution: false,
         // Env-resolved (F4's doc-set watch flag): false with the env unset.
         serverPrimaryExecutionDocSetWatch: false,
-        // Same, for C1.7's context-lattice-claims negotiation flag.
-        serverPrimaryExecutionContextLatticeClaims: false,
+        // Same, for C1.7's context-lattice-claims negotiation flag, which
+        // defaults ON with the rest of the server-primary dial set.
+        serverPrimaryExecutionContextLatticeClaims: true,
+        // The three CANDIDATE dials have no ambient control point; the
+        // constructor normalizes them locally, and they default on with the
+        // set. Not named in `experimental` above, so these are the defaults —
+        // an explicit `serverPrimaryExecution: false` does NOT drag them down,
+        // because they are inert without the master flag anyway (no executor
+        // exists to produce a candidate).
+        serverPrimaryExecutionUserRankCandidates: true,
+        serverPrimaryExecutionSessionRankCandidates: true,
+        serverPrimaryExecutionCrossSpaceReadCandidates: true,
         computedCellIds: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
@@ -86,7 +96,10 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         serverPrimaryExecution: true,
         serverPrimaryExecutionDocSetWatch: false,
-        serverPrimaryExecutionContextLatticeClaims: false,
+        serverPrimaryExecutionContextLatticeClaims: true,
+        serverPrimaryExecutionUserRankCandidates: true,
+        serverPrimaryExecutionSessionRankCandidates: true,
+        serverPrimaryExecutionCrossSpaceReadCandidates: true,
         computedCellIds: true,
         eagerSourceAnnotation: false,
       });
@@ -101,13 +114,19 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {},
       });
+      // The DEFAULT CONFIGURATION, in one place. The server-primary dial set
+      // moves as one and is on; the doc-set watch feed is deliberately not
+      // part of that set (its rollout gate is the separate W2.9 measurement).
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: true,
         commitPreconditions: true,
-        serverPrimaryExecution: false,
+        serverPrimaryExecution: true,
         serverPrimaryExecutionDocSetWatch: false,
-        serverPrimaryExecutionContextLatticeClaims: false,
+        serverPrimaryExecutionContextLatticeClaims: true,
+        serverPrimaryExecutionUserRankCandidates: true,
+        serverPrimaryExecutionSessionRankCandidates: true,
+        serverPrimaryExecutionCrossSpaceReadCandidates: true,
         computedCellIds: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
@@ -223,7 +242,9 @@ describe("ExperimentalOptions", () => {
       );
 
       await runtime.dispose();
-      expect(getServerPrimaryExecutionConfig()).toBe(false);
+      // Back to the DEFAULTS, which is not the same as back to false: the
+      // base dial defaults on, the doc-set watch dial does not.
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
       expect(getServerPrimaryExecutionDocSetWatchConfig()).toBe(false);
       await sm.close();
     });
@@ -255,8 +276,30 @@ describe("ExperimentalOptions", () => {
       expect(getServerPrimaryExecutionDocSetWatchConfig()).toBe(false);
 
       await runtime.dispose();
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
+      expect(getServerPrimaryExecutionContextLatticeClaimsConfig()).toBe(true);
+      await sm.close();
+    });
+
+    // The other direction of the same propagation, and the one that matters
+    // now that the dial set defaults on: an explicit `false` must reach the
+    // ambient, because that is the deployment's rollback lever.
+    it("constructing Runtime with the server-primary dials off sets global config off", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          serverPrimaryExecution: false,
+          serverPrimaryExecutionContextLatticeClaims: false,
+        },
+      });
+
       expect(getServerPrimaryExecutionConfig()).toBe(false);
       expect(getServerPrimaryExecutionContextLatticeClaimsConfig()).toBe(false);
+      expect(runtime.experimental.serverPrimaryExecution).toBe(false);
+
+      await runtime.dispose();
       await sm.close();
     });
 
@@ -307,7 +350,7 @@ describe("ExperimentalOptions", () => {
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(true);
       expect(getCommitPreconditionsConfig()).toBe(true);
-      expect(getServerPrimaryExecutionConfig()).toBe(false);
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
     });
   });
 });

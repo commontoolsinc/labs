@@ -12,14 +12,16 @@ import type { ExternalSinkDispositionPolicy } from "../src/storage/interface.ts"
  * `serverPrimaryExecution` selects between exactly two postures, and this file
  * is the measurement that says so rather than the assertion that it is so:
  *
- *   OFF — today's behaviour precisely. No server execution, so the client does
- *         everything AND EGRESSES. The constructor default is
+ *   OFF — the pre-arc behaviour precisely. No server execution, so the client
+ *         does everything AND EGRESSES. The constructor default is
  *         "claim-conditional", `captureExecutionClaim` is not consulted at all
  *         (it is gated on the same flag), and the gate answers "allow".
  *   ON  — the server executes and the client is passive. The constructor
  *         default is "suppress", the gate answers "suppress", and `allow` is
  *         the exception a server-side executor earns by DECLARING
- *         "server-executor".
+ *         "server-executor". THIS IS THE DEFAULT since 2026-08-01: the flag
+ *         is absent-ON, and `false` is the deployment's rollback to the other
+ *         posture.
  *
  * Why the halves must move together. The passivity half used to be
  * unconditional, which is the hybrid: with the flag OFF a client suppressed
@@ -145,17 +147,21 @@ Deno.test("serverPrimaryExecution selects the sink disposition, and both arms ar
     },
   );
 
-  // Flag ABSENT is the same posture as flag OFF — no runtime is passive by
-  // accident of omission, which is exactly the hole the unconditional default
-  // opened.
+  // Flag ABSENT is the DEFAULT CONFIGURATION, and since 2026-08-01 that is
+  // the flag-ON one. Omission still selects a complete posture — the point
+  // the unconditional default violated is that a runtime must never be
+  // passive WITHOUT an executor, and the flag it now inherits is the same one
+  // that gates `addExecutionDemand`, so the executor comes with it. The row
+  // below is therefore identical to flag-on, and it is here to fail loudly if
+  // the two ever diverge again.
   assertEquals(
     await runArm("flag-absent", {}),
     {
-      resolved: "claim-conditional",
-      gate: "allow",
-      authority: "client",
+      resolved: "suppress",
+      gate: "suppress",
+      authority: undefined,
       capturedClaim: false,
-      releases: 1,
+      releases: 0,
     },
   );
 

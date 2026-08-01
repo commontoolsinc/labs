@@ -8,8 +8,6 @@ import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import {
-  resetServerPrimaryExecutionConfig,
-  resetServerPrimaryExecutionDocSetWatchConfig,
   type SessionSync,
   type SessionSyncRemove,
   type SessionSyncUpsert,
@@ -664,8 +662,11 @@ Deno.test("flag-on: doc-set membership survives reconnect and is re-registered",
 });
 
 Deno.test("flag-off: the client never registers a docs watch (byte-identical to graph watches)", async () => {
-  resetServerPrimaryExecutionConfig();
-  resetServerPrimaryExecutionDocSetWatchConfig();
+  // Explicitly OFF, not `reset`: the base dial defaults ON since 2026-08-01,
+  // so reset would leave this measuring "doc-set dial off" rather than the
+  // flag-off arm this test is named for.
+  setServerPrimaryExecutionConfig(false);
+  setServerPrimaryExecutionDocSetWatchConfig(false);
   const transport = new DocSetWatchTransport();
   transport.store.set(ROOT, { seq: 1, value: { child: CHILD } });
   transport.store.set(CHILD, { seq: 1, value: { n: 1 } });

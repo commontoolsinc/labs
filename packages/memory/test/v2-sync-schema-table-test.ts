@@ -832,10 +832,21 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
     const messages: ServerMessage[] = [];
     const connection = server.connect((message) => messages.push(message));
     const space = `did:key:z6Mk-sync-schema-table-${mode}`;
+    // The non-v2 bags must still carry the server-primary capability triple:
+    // it defaults ON since 2026-08-01, and a server-primary host REFUSES a
+    // peer that cannot promise claim routing and builtin passivity (that
+    // refusal is the anti-double-execution rule, not a schema-table concern).
+    // Without them this test measured session admission instead of
+    // schema-table negotiation.
     const clientFlags = mode === "v2" ? flags : {
       modernCellRep: flags.modernCellRep,
       persistentSchedulerState: flags.persistentSchedulerState,
       commitPreconditions: flags.commitPreconditions,
+      serverPrimaryExecutionV1: flags.serverPrimaryExecutionV1,
+      serverPrimaryExecutionClaimRoutingV1:
+        flags.serverPrimaryExecutionClaimRoutingV1,
+      serverPrimaryExecutionBuiltinPassivityV1:
+        flags.serverPrimaryExecutionBuiltinPassivityV1,
       ...(mode === "legacy" ? { syncSchemaTable: true } : {}),
     };
 

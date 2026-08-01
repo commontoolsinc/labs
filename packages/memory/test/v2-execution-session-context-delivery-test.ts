@@ -150,11 +150,17 @@ type DeliveryServer = Server & {
   ): SessionGrant | null;
 };
 
+// "Without" must SUBTRACT, not merely decline to add — spreading the ambient
+// flags left the negotiation flag riding the process default, so once
+// `serverPrimaryExecutionContextLatticeClaimsV1` began defaulting on
+// (2026-08-01) the "non-negotiating" client negotiated and the downgrade
+// fences below stopped being exercised.
 const flagsWithoutContextLattice = {
   ...getMemoryProtocolFlags(),
   serverPrimaryExecutionV1: true,
   serverPrimaryExecutionClaimRoutingV1: true,
   serverPrimaryExecutionBuiltinPassivityV1: true,
+  serverPrimaryExecutionContextLatticeClaimsV1: false,
 };
 
 const flagsWithContextLattice = {

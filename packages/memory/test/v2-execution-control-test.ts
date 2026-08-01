@@ -974,7 +974,11 @@ Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable",
     setServerPrimaryExecutionClaimRankConfig(rank?: "space" | "user"): void;
     resetServerPrimaryExecutionClaimRankConfig(): void;
   };
-  flags.resetServerPrimaryExecutionClaimRankConfig();
+  // Explicitly `space`, not `reset`: the dial's default is the TOP of the
+  // ladder since 2026-08-01, so reset would leave user-rank issuance enabled
+  // and this test would assert nothing. A lower stage is still reachable, and
+  // that is exactly what this pins.
+  flags.setServerPrimaryExecutionClaimRankConfig("space");
   try {
     const lease = await demandAndAcquireLease(server, session);
     const userClaimKey: ActionClaimKey = {
@@ -984,7 +988,7 @@ Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable",
       ) as `user:${string}`,
     };
 
-    // Dial off (the default): user-rank issuance is refused while space-rank
+    // Dial at `space`: user-rank issuance is refused while space-rank
     // behavior stays byte-identical.
     await assertRejects(
       () => server.setExecutionClaim(lease, userClaimKey),
@@ -1013,8 +1017,10 @@ Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable",
     assertEquals(renewed.claimGeneration, userClaim.claimGeneration);
 
     // Disabling the rank revokes its live claims at renewal, mirroring the
-    // serverPrimaryExecutionV1 flag-off revoke; space claims survive.
-    flags.resetServerPrimaryExecutionClaimRankConfig();
+    // serverPrimaryExecutionV1 flag-off revoke; space claims survive. Dialed
+    // back to `space` explicitly — `reset` returns to the default, which is
+    // the TOP of the ladder since 2026-08-01 and would disable nothing.
+    flags.setServerPrimaryExecutionClaimRankConfig("space");
     assertEquals(await server.renewExecutionClaim(lease, renewed), null);
     assertEquals(server.hasLiveExecutionClaim(userClaim), false);
     const renewedSpace = await server.renewExecutionClaim(lease, spaceClaim);

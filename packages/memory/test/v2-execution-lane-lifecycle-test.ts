@@ -330,11 +330,19 @@ Deno.test("inertness: user lanes stay disabled until the rank dial and subcapabi
         serverPrimaryExecutionV1: true,
         serverPrimaryExecutionClaimRoutingV1: true,
         serverPrimaryExecutionBuiltinPassivityV1: true,
+        // Explicit FALSE, not omission: this bag merges OVER the ambient
+        // flags, and the subcapability defaults on since 2026-08-01, so
+        // omitting it would advertise it and the "without" server would not
+        // be without it.
+        serverPrimaryExecutionContextLatticeClaimsV1: false,
       },
     } as unknown as ConstructorParameters<typeof Server>[0],
   ) as LaneServer;
   try {
-    // Default rank dial (space): disabled regardless of the subcapability.
+    // Rank dial held at `space` — explicitly, because the DEFAULT is the top
+    // of the ladder since 2026-08-01: disabled regardless of the
+    // subcapability.
+    rankDial.setServerPrimaryExecutionClaimRankConfig("space");
     assertEquals(withSubcapability.executionUserLanesEnabled(), false);
     rankDial.setServerPrimaryExecutionClaimRankConfig("user");
     assertEquals(withSubcapability.executionUserLanesEnabled(), true);

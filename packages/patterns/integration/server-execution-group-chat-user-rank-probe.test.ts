@@ -262,15 +262,23 @@ type RankArm = "space" | "user" | "session";
 
 const runArm = async (rank: RankArm): Promise<ArmReport> => {
   const dials = rank !== "space";
-  const flags: Partial<MemoryProtocolFlags> = dials
-    ? { ...BASE_FLAGS, serverPrimaryExecutionContextLatticeClaimsV1: true }
-    : { ...BASE_FLAGS };
+  // EXPLICIT in both arms. This bag merges OVER the ambient flags, and the
+  // context-lattice subcapability defaults on since 2026-08-01, so omitting
+  // it in the `space` arm advertised it and the arm stopped being the
+  // dials-off control.
+  const flags: Partial<MemoryProtocolFlags> = {
+    ...BASE_FLAGS,
+    serverPrimaryExecutionContextLatticeClaimsV1: dials,
+  };
   const spaceIdentity = await Identity.generate({ implementation: "noble" });
   const space = spaceIdentity.did() as MemorySpace;
   const storeDir = await Deno.makeTempDir({
     prefix: `group-chat-rank-${rank}-`,
   });
-  if (dials) setServerPrimaryExecutionClaimRankConfig(rank);
+  // Always SET the rank dial, never leave it at the default: the default is
+  // the top of the ladder since 2026-08-01, so the `space` arm has to name
+  // `space` to stay the control.
+  setServerPrimaryExecutionClaimRankConfig(rank);
   const server = new Server({
     store: new URL(`file://${storeDir}/`),
     authorizeSessionOpen(message) {
@@ -323,10 +331,13 @@ const runArm = async (rank: RankArm): Promise<ArmReport> => {
       experimental: {
         persistentSchedulerState: true,
         serverPrimaryExecution: true,
-        ...(dials ? { serverPrimaryExecutionUserRankCandidates: true } : {}),
-        ...(rank === "session"
-          ? { serverPrimaryExecutionSessionRankCandidates: true }
-          : {}),
+        // EXPLICIT in both arms: the candidate dials default ON since
+        // 2026-08-01 (the Runtime constructor normalizes an omitted value),
+        // so a conditional spread would give the dials-off arm the dials-on
+        // configuration and the probe would compare a set with itself.
+        serverPrimaryExecutionUserRankCandidates: dials,
+        serverPrimaryExecutionSessionRankCandidates: rank === "session",
+        serverPrimaryExecutionCrossSpaceReadCandidates: false,
       },
       // Wire the SAME two recorders toolshed wires (routes/storage/memory.ts)
       // — they are what populates `executionStats.candidateClaimReadyBySpace`
@@ -505,7 +516,7 @@ const runArm = async (rank: RankArm): Promise<ArmReport> => {
     await bob?.runtime.dispose().catch(() => undefined);
     await bob?.storage.close().catch(() => undefined);
     await server.close().catch(() => undefined);
-    if (dials) resetServerPrimaryExecutionClaimRankConfig();
+    resetServerPrimaryExecutionClaimRankConfig();
     await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
   }
 };

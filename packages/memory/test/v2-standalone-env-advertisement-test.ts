@@ -16,8 +16,11 @@
 // canonical env names.
 //
 // Discrimination legs: the dial-off runs prove the advertisement is WIRED TO
-// the env dials (returns to the all-false default when unset) rather than
-// unconditionally on, and pin the full default flag set byte-for-byte.
+// the env dials rather than unconditionally on, and pin the full default flag
+// set byte-for-byte. Since 2026-08-01 those legs must set the env explicitly
+// to `"false"`: the server-primary dial set defaults ON, so "unset" is no
+// longer the off direction and a discrimination leg that relies on omission
+// proves nothing.
 
 import { assert, assertEquals, assertExists } from "@std/assert";
 import {
@@ -29,6 +32,8 @@ import {
   resetServerPrimaryExecutionContextLatticeClaimsConfig,
   resetServerPrimaryExecutionDocSetWatchConfig,
   resetServerPrimaryExecutionGraphRetirementConfig,
+  setServerPrimaryExecutionConfig,
+  setServerPrimaryExecutionContextLatticeClaimsConfig,
   type WireMemoryProtocolFlags,
   wireMemoryProtocolFlags,
 } from "../v2.ts";
@@ -45,11 +50,13 @@ const CONTEXT_LATTICE_CLAIMS_ENV =
 const DEFAULT_ADVERTISED_FLAGS = {
   modernCellRep: false,
   persistentSchedulerState: true,
-  serverPrimaryExecutionV1: false,
-  serverPrimaryExecutionClaimRoutingV1: false,
-  serverPrimaryExecutionBuiltinPassivityV1: false,
-  serverPrimaryExecutionContextLatticeClaimsV1: false,
-  serverPrimaryExecutionCrossSpaceClaimsV1: false,
+  // The server-primary dial SET defaults on together (2026-08-01); the
+  // doc-set watch feed is deliberately not part of that set.
+  serverPrimaryExecutionV1: true,
+  serverPrimaryExecutionClaimRoutingV1: true,
+  serverPrimaryExecutionBuiltinPassivityV1: true,
+  serverPrimaryExecutionContextLatticeClaimsV1: true,
+  serverPrimaryExecutionCrossSpaceClaimsV1: true,
   serverPrimaryExecutionDocSetWatchV1: false,
   schedulerWriterLookup: true,
   commitPreconditions: true,
@@ -139,7 +146,7 @@ Deno.test("FW6: a production-constructed standalone server advertises the server
   await withEnv({
     [BASE_ENV]: "true",
     [DOC_SET_WATCH_ENV]: "true",
-    [CONTEXT_LATTICE_CLAIMS_ENV]: undefined,
+    [CONTEXT_LATTICE_CLAIMS_ENV]: "false",
   }, async () => {
     const server = StandaloneMemoryServer.start();
     try {
@@ -148,10 +155,13 @@ Deno.test("FW6: a production-constructed standalone server advertises the server
       assertEquals(flags.serverPrimaryExecutionClaimRoutingV1, true);
       assertEquals(flags.serverPrimaryExecutionBuiltinPassivityV1, true);
       assertEquals(flags.serverPrimaryExecutionDocSetWatchV1, true);
-      // Subcapabilities with their own (unset) dials stay off: each canonical
-      // dial is wired independently, and no dial implies another.
+      // Each canonical dial is wired independently and no dial implies
+      // another — pinned in the direction that still discriminates now that
+      // the set defaults on: an explicit `false` on the context-lattice dial
+      // withholds it while its siblings stay advertised.
       assertEquals(flags.serverPrimaryExecutionContextLatticeClaimsV1, false);
-      assertEquals(flags.serverPrimaryExecutionCrossSpaceClaimsV1, false);
+      // No env dial of its own; rides the dial-set default.
+      assertEquals(flags.serverPrimaryExecutionCrossSpaceClaimsV1, true);
     } finally {
       await server.close();
     }
@@ -173,19 +183,26 @@ Deno.test("C1.7: the context-lattice-claims subcap advertises from its own env d
       const flags = await advertisedFlagsOverWebSocket(server.url);
       assertEquals(flags.serverPrimaryExecutionV1, true);
       assertEquals(flags.serverPrimaryExecutionContextLatticeClaimsV1, true);
-      // Independent of the sibling subcapability dials, both directions.
+      // Independent of the sibling subcapability dials, both directions: the
+      // doc-set feed is not in the dial set (default off), cross-space claims
+      // are (default on).
       assertEquals(flags.serverPrimaryExecutionDocSetWatchV1, false);
-      assertEquals(flags.serverPrimaryExecutionCrossSpaceClaimsV1, false);
+      assertEquals(flags.serverPrimaryExecutionCrossSpaceClaimsV1, true);
     } finally {
       await server.close();
     }
   });
 });
 
-Deno.test("C1.7: the context-lattice-claims subcap stays layered — base dial alone never advertises it", async () => {
+// Was "base dial alone never advertises it", which stopped being a
+// proposition when the subcap joined the default-on dial set. What still
+// needs pinning — and is the same wiring property — is the OTHER direction:
+// an explicit `false` withholds the subcap while the base capability stays
+// advertised, so the two are not one flag wearing two names.
+Deno.test("C1.7: the context-lattice-claims subcap is separately wired — an explicit false withholds it", async () => {
   await withEnv({
     [BASE_ENV]: "true",
-    [CONTEXT_LATTICE_CLAIMS_ENV]: undefined,
+    [CONTEXT_LATTICE_CLAIMS_ENV]: "false",
   }, async () => {
     const server = StandaloneMemoryServer.start();
     try {
@@ -204,10 +221,9 @@ Deno.test("C1.7: the context-lattice-claims subcap stays layered — base dial a
 // one env var.
 Deno.test("C1.7: the context-lattice-claims dial alone never advertises without the base dial", async () => {
   await withEnv({
-    [BASE_ENV]: undefined,
+    [BASE_ENV]: "false",
     [CONTEXT_LATTICE_CLAIMS_ENV]: "true",
   }, async () => {
-    resetServerPrimaryExecutionConfig();
     const server = StandaloneMemoryServer.start();
     try {
       const flags = await advertisedFlagsOverWebSocket(server.url);
@@ -265,6 +281,12 @@ Deno.test("FW6: non-canonical env values are ignored (with a warning), never coe
     [DOC_SET_WATCH_ENV]: "yes",
     [CONTEXT_LATTICE_CLAIMS_ENV]: "on",
   }, async () => {
+    // Pre-set the two default-ON dials to `false`, so "ignored" and "coerced
+    // to true" have DIFFERENT observable outcomes. Without this the garbage
+    // values would land on the same advertisement the default produces and
+    // the test would pass whether or not the parser coerced.
+    setServerPrimaryExecutionConfig(false);
+    setServerPrimaryExecutionContextLatticeClaimsConfig(false);
     const server = StandaloneMemoryServer.start();
     try {
       const flags = await advertisedFlagsOverWebSocket(server.url);

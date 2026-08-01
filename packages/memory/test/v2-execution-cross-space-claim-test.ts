@@ -134,7 +134,11 @@ const fullFlags = (crossSpace: boolean) => ({
   serverPrimaryExecutionClaimRoutingV1: true,
   serverPrimaryExecutionBuiltinPassivityV1: true,
   serverPrimaryExecutionContextLatticeClaimsV1: true,
-  ...(crossSpace ? { serverPrimaryExecutionCrossSpaceClaimsV1: true } : {}),
+  // Explicit FALSE, not omission: these bags are merged OVER the ambient
+  // flags, and `serverPrimaryExecutionCrossSpaceClaimsV1` defaults on since
+  // 2026-08-01 — so omitting it stopped withholding it, and the
+  // ordering-invariant and mixed-version-race cases stopped being tested.
+  serverPrimaryExecutionCrossSpaceClaimsV1: crossSpace,
 });
 
 const createServer = (

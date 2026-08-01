@@ -190,7 +190,10 @@ const fullFlags = (crossSpace: boolean) => ({
   serverPrimaryExecutionClaimRoutingV1: true,
   serverPrimaryExecutionBuiltinPassivityV1: true,
   serverPrimaryExecutionContextLatticeClaimsV1: true,
-  ...(crossSpace ? { serverPrimaryExecutionCrossSpaceClaimsV1: true } : {}),
+  // EXPLICIT in both arms: this bag merges over the ambient flags, and
+  // `serverPrimaryExecutionCrossSpaceClaimsV1` defaults on since 2026-08-01,
+  // so omission no longer withholds it and the off arm would advertise it.
+  serverPrimaryExecutionCrossSpaceClaimsV1: crossSpace,
 });
 
 const createServer = (name: string): IdleServer =>

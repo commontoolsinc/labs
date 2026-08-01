@@ -235,7 +235,13 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
-  /** Enable the trusted-client server-primary execution protocol (default off). */
+  /**
+   * Enable the trusted-client server-primary execution protocol (default ON).
+   * It is the ONE lever over the whole configuration: it gates demand
+   * publication, claim issuance at every rank, and the client-passivity half
+   * (the `externalSinkDisposition` default below). `false` selects the pre-arc
+   * client-primary posture whole.
+   */
   serverPrimaryExecution?: boolean | undefined;
   /**
    * Hold window (ms) of the P0 demand-shrink gate: demand GROWTH publishes
@@ -251,12 +257,13 @@ export interface ExperimentalOptions {
   /**
    * Let the executor Worker produce USER-RANK candidate claims for
    * computation actions whose surfaces are user-scoped (context-lattice
-   * C1.5a). Default off: every observation classifies exactly as the
-   * space-only executor does (space or unservable), and no user-rank claim
-   * is ever requested. Effects and session-scoped surfaces are unaffected
-   * either way (amendment 8: user-rank is computation-only in C1).
-   * Programmatic-only — the C1.9 measurement fixture flips it together with
-   * the memory-side `serverPrimaryExecutionClaimRank` dial.
+   * C1.5a). Default ON, with the rest of the dial set. Off, every observation
+   * classifies exactly as the space-only executor does (space or unservable)
+   * and no user-rank claim is ever requested; effects and session-scoped
+   * surfaces are unaffected either way (amendment 8: user-rank is
+   * computation-only in C1). Programmatic-only — it has no env mapping, and
+   * the C1.9 measurement fixture pins it off together with the memory-side
+   * `serverPrimaryExecutionClaimRank` dial to measure the space-only arm.
    */
   serverPrimaryExecutionUserRankCandidates?: boolean | undefined;
   /**
@@ -268,10 +275,11 @@ export interface ExperimentalOptions {
    * `session:<did>:<sessionId>` context keys of OPEN session lanes only;
    * with no open session lane a session-rank action produces zero
    * candidates (review CA9: the session identity source is the host's
-   * lane-grant machinery — never a key fabricated from a DID). Default off:
-   * session-scoped surfaces classify exactly as the pre-C2.5 executor does
-   * (unservable), byte-identical space/user behavior. Programmatic-only,
-   * flipped inside C2 gate fixtures together with the memory-side
+   * lane-grant machinery — never a key fabricated from a DID). Default ON,
+   * with the rest of the dial set. Off, session-scoped surfaces classify
+   * exactly as the pre-C2.5 executor does (unservable), byte-identical
+   * space/user behavior. Programmatic-only; C2 gate fixtures pin it, in both
+   * directions, together with the memory-side
    * `serverPrimaryExecutionClaimRank` dial's `session` stage.
    */
   serverPrimaryExecutionSessionRankCandidates?: boolean | undefined;
@@ -282,14 +290,16 @@ export interface ExperimentalOptions {
    * `crossSpaceReadSpaces` capability, and the executor issues a
    * cross-space-read claim (the host re-verifies the acting principal's
    * foreign READ per space at issuance and soft-declines otherwise). Default
-   * off: foreign reads classify exactly as the pre-C3.6 executor does
-   * (`foreign-read-space`, unservable), byte-identical. Foreign-read admission
-   * is ORTHOGONAL to the rank dials — it is a capability, not a fifth lane —
-   * so it composes with any of space/user/session candidacy. Programmatic-only
-   * and, per the CA4/C3A17 ordering invariant, never enabled outside gate
-   * fixtures until the memory-side `serverPrimaryExecutionClaimRank` reaches
-   * the `cross-space-read` stage AND the host advertises the
-   * `cross-space-claims-v1` cohort gate.
+   * ON, with the rest of the dial set — which is also what satisfies the
+   * CA4/C3A17 ordering invariant (this dial must not be on while the
+   * memory-side `serverPrimaryExecutionClaimRank` is below `cross-space-read`
+   * or the `cross-space-claims-v1` cohort gate is unadvertised): both now
+   * default on beside it, so the ordering holds by construction instead of by
+   * withholding this one. Off, foreign reads classify exactly as the pre-C3.6
+   * executor does (`foreign-read-space`, unservable), byte-identical.
+   * Foreign-read admission is ORTHOGONAL to the rank dials — it is a
+   * capability, not a fifth lane — so it composes with any of
+   * space/user/session candidacy. Programmatic-only.
    */
   serverPrimaryExecutionCrossSpaceReadCandidates?: boolean | undefined;
   /**
@@ -323,9 +333,9 @@ export interface ExperimentalOptions {
    * amendment-11 cohort gate requires EVERY session of a principal to have
    * negotiated before a user lane may open, so a fleet whose clients cannot
    * negotiate makes every server-side rank dial inert (client-passivity §5g
-   * item 5, the CA4 audit). Default off; a mixed fleet stays valid either way
-   * — the cohort gate fences lanes around non-negotiating sessions rather
-   * than rejecting them. Registered in
+   * item 5, the CA4 audit). Default ON, with the rest of the dial set; a mixed
+   * fleet stays valid either way — the cohort gate fences lanes around
+   * non-negotiating sessions rather than rejecting them. Registered in
    * docs/development/EXPERIMENTAL_OPTIONS.md.
    */
   serverPrimaryExecutionContextLatticeClaims?: boolean | undefined;
@@ -1097,6 +1107,22 @@ export class Runtime {
     // builder frame. Normalize its local default after override logging so an
     // omitted option does not appear as an explicit `true` override.
     this.experimental.computedCellIds ??= true;
+
+    // The three server-primary CANDIDATE dials are runtime-local in the same
+    // way — there is no ambient control point, the host reads them off
+    // `runtime.experimental` and hands them to the executor Worker — so they
+    // need the same local normalization to resolve their default. They default
+    // ON, together with the memory-side dial set they partner with
+    // (`serverPrimaryExecutionClaimRank` and the two claim-delivery
+    // subcapabilities, packages/memory/v2.ts): the runner dials decide what a
+    // client PROPOSES, the memory dials what a host ISSUES, and a set where
+    // only one side moved is a client proposing ranks the host refuses. Every
+    // partial combination is still reachable programmatically and every gate
+    // fixture uses one — but it is a TESTING-ONLY affordance, and nothing
+    // ships in one.
+    this.experimental.serverPrimaryExecutionUserRankCandidates ??= true;
+    this.experimental.serverPrimaryExecutionSessionRankCandidates ??= true;
+    this.experimental.serverPrimaryExecutionCrossSpaceReadCandidates ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in

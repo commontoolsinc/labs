@@ -206,7 +206,10 @@ export const openGateClient = async (
     storageManager: storage,
     experimental: {
       persistentSchedulerState: true,
-      ...(serverPrimary ? { serverPrimaryExecution: true } : {}),
+      // EXPLICIT in both arms. Omission used to mean "off"; since 2026-08-01
+      // the flag defaults ON, so a conditional spread would hand the control
+      // arm the treatment configuration and the gate would measure nothing.
+      serverPrimaryExecution: serverPrimary,
     },
   });
   const sessionId = () => {

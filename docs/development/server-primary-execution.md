@@ -1,19 +1,29 @@
 # Server-Primary Execution Rollout
 
 Server-primary execution is implemented through the trusted-client authority
-split and remains off by default. It moves claimed derived writes and supported
-fetch/generate effects to one user-sponsored server Worker while clients keep
-speculatively computing for UI latency. It does not yet reduce browser action
-runs. There is one rollout switch: when it is off, clients remain primary and
-no server-execution pool runs; when it is on, every compatible eligible piece
-automatically participates. Client-compute suppression is a later optimization
-within that final server-primary posture, not another authority mode.
+split and is **on by default since 2026-08-01**, together with the rest of the
+server-primary dial set (the summary is the ruling box at the top of
+[the experimental-flag registry](./EXPERIMENTAL_OPTIONS.md)). It moves claimed
+derived writes and supported fetch/generate effects to one user-sponsored
+server Worker while clients keep speculatively computing for UI latency. It
+does not yet reduce browser action runs. There is one rollout switch: when it
+is off, clients remain primary, no server-execution pool runs, and the client
+performs its own egress effects; when it is on, every compatible eligible piece
+automatically participates and a client never runs an egress effect.
+Client-compute suppression is a later optimization within that final
+server-primary posture, not another authority mode.
+
+Because the default moved, the operational task below is no longer "enable it"
+but "know which posture a deployment is in". Unset means ON. `false` is the
+rollback, and it is a rollback of the whole configuration — see
+[Deployment rollback](#deployment-rollback).
 
 ## Prerequisites
 
 - Deploy toolshed and shell/client builds from the same revision.
-- Enable persistent scheduler state (the current default) and
-  `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true` on the toolshed and clients.
+- Persistent scheduler state and `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` are
+  both on by default; leave them unset rather than setting them to `true`, and
+  make sure no deployment config pins either to `false`.
 - Restart/redeploy both sides so the memory handshake advertises
   `serverPrimaryExecutionV1`, claim routing, and builtin passivity together.
 - Verify first with staging pieces whose active computations are same-space and
@@ -32,8 +42,9 @@ within that final server-primary posture, not another authority mode.
 
 ## Enable server-primary execution
 
-Set `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true` in both the toolshed and
-client build, then restart/redeploy both sides. Compatible clients publish
+Nothing to set: the flag defaults on in both the toolshed and the client build.
+Confirm neither side pins `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false`, then
+restart/redeploy both sides. Compatible clients publish
 demand and the shared pool starts one Worker per active eligible branch/space.
 The Worker discovers the graph and claims each servable action automatically.
 Actions that are not yet servable remain client-primary; their server discovery
@@ -208,12 +219,19 @@ latency without a shared trace or timestamp.
 
 ## Deployment rollback
 
-1. Disable `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` on the server and restart it.
-2. Rebuild/restart clients with the flag disabled.
+1. Set `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false` on the server and restart
+   it. Unsetting the variable is NOT a rollback any more — unset is on.
+2. Rebuild/restart clients with the flag set to `false`.
 
 Do not disable only the clients. A server-primary host rejects an incompatible
 client because falling back silently would let stale clients duplicate claimed
 writes or effects. No data migration or overlay cleanup command is required.
+
+This one variable is the whole rollback. It gates claim issuance at every
+context rank, demand publication, and the client-passivity half — so the other
+server-primary dials (the claim-rank stage, the two claim-delivery
+subcapabilities, the executor's rank candidate dials) go inert with it and need
+no separate lever. That is why only this one is environment-reachable.
 
 ## Validation and rollout limits
 

@@ -571,9 +571,12 @@ P5 rather than smuggled into "we'll fix targeting later".
 
 Ship it behind the session-lane dial ladder that already exists
 (`serverPrimaryExecutionSessionRankCandidates`,
-`shared-execution-pool.ts:1015-1022`), so it is off by default,
-per-deployment, and measurable — and register it in
-`docs/development/EXPERIMENTAL_OPTIONS.md` if a new dial is added.
+`shared-execution-pool.ts:1015-1022`) so it is measurable against the
+ladder — but note that ladder no longer defaults off: as of 2026-08-01
+the whole server-primary dial set defaults ON and its partial states are
+a testing-only affordance (registry ruling box). If this needs a genuine
+off-by-default rollout lever of its own, add one and register it in
+`docs/development/EXPERIMENTAL_OPTIONS.md`.
 
 ---
 

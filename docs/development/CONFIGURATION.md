@@ -279,7 +279,7 @@ Most shell config is **build-time**: esbuild injects defines in
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset = runtime on)_ | See experimental flags. |
-| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | `EXPERIMENTAL.serverPrimaryExecution` | _(unset = runtime off)_ | See experimental flags. |
+| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | `EXPERIMENTAL.serverPrimaryExecution` | _(unset = runtime on)_ | See experimental flags. Set to `false` to roll a deployment back to client-primary. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 

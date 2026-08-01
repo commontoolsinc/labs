@@ -58,8 +58,37 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   // rather than constant. With server-primary execution off there is no
   // executor to relocate the effect to (`addExecutionDemand` is gated on the
   // same flag), so suppressing here would DELETE the webhook's side effect
-  // instead of moving it. Toolshed keeps today's behaviour and egresses.
+  // instead of moving it. Toolshed keeps the pre-arc behaviour and egresses.
+  // Reaching it takes an explicit `"false"` since 2026-08-01 — the flag
+  // defaults ON.
   const withoutServerPrimary = toolshedRuntimeOptions(
+    {
+      MEMORY_URL: "http://memory.test:8000/",
+      API_URL: "http://api.test:9000/",
+    },
+    storageManager,
+    (name) =>
+      name === EXPERIMENTAL_ENV_VARS.serverPrimaryExecution
+        ? "false"
+        : undefined,
+  );
+  assertEquals(
+    withoutServerPrimary.experimental?.serverPrimaryExecution,
+    false,
+  );
+  assertEquals(
+    withoutServerPrimary.externalSinkDisposition,
+    "claim-conditional",
+  );
+
+  // AND THE DEFAULT, which is what actually ships: with nothing set at all
+  // the option stays `undefined` (tri-state fidelity is preserved — the
+  // resolver applies the default, it does not write it into the bag) and the
+  // disposition resolves to the server-primary posture. Reading the raw
+  // option here instead of resolving it is the bug this pins: it would give
+  // an unconfigured toolshed the flag-OFF egress posture inside the flag-ON
+  // configuration, i.e. a double dispatch.
+  const unconfigured = toolshedRuntimeOptions(
     {
       MEMORY_URL: "http://memory.test:8000/",
       API_URL: "http://api.test:9000/",
@@ -68,13 +97,10 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
     () => undefined,
   );
   assertEquals(
-    withoutServerPrimary.experimental?.serverPrimaryExecution,
+    unconfigured.experimental?.serverPrimaryExecution,
     undefined,
   );
-  assertEquals(
-    withoutServerPrimary.externalSinkDisposition,
-    "claim-conditional",
-  );
+  assertEquals(unconfigured.externalSinkDisposition, "suppress");
 });
 
 // The runtime→OTel bridge attach rides Runtime construction (CT plan: the

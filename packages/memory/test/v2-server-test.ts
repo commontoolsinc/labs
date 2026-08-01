@@ -3026,6 +3026,15 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
       upserts: [],
       removes: [],
       caughtUpLocalSeq: 2,
+      // A server-primary session carries its execution feed delta on every
+      // sync frame — empty here, but present, because the capability defaults
+      // on since 2026-08-01. The property under test is that `fromSeq` is
+      // PRESERVED across the empty caught-up frame, and it still is.
+      execution: {
+        events: [],
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+      },
     });
     assertEquals(messages.length, 0);
   } finally {

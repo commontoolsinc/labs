@@ -129,11 +129,19 @@ type DeliveryServer = Server & {
   }[];
 };
 
+// "Without" must SUBTRACT, not merely decline to add. Spreading the ambient
+// flags and adding the ones we want on left the negotiation flag riding
+// whatever the process default happened to be — so once
+// `serverPrimaryExecutionContextLatticeClaimsV1` began defaulting on
+// (2026-08-01) this bag advertised it, the "non-negotiating" client
+// negotiated, and every cohort-fence assertion in this file silently stopped
+// exercising a fence.
 const flagsWithoutContextLattice = {
   ...getMemoryProtocolFlags(),
   serverPrimaryExecutionV1: true,
   serverPrimaryExecutionClaimRoutingV1: true,
   serverPrimaryExecutionBuiltinPassivityV1: true,
+  serverPrimaryExecutionContextLatticeClaimsV1: false,
 };
 
 const flagsWithContextLattice = {

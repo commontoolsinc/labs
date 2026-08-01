@@ -47,9 +47,12 @@ where server and clients knowingly duplicate authoritative work.
 - **The named seams are mandatory reading.** If symbols move, follow the
   current code and describe the delta; do not create parallel scheduler,
   identity, transaction, or serialization machinery.
-- **Flags default off.** Every experimental option is registered in
+- **New flags default off.** Every experimental option is registered in
   docs/development/EXPERIMENTAL_OPTIONS.md in the same change. Flag-off
-  behavior is proven by test.
+  behavior is proven by test. The server-primary dial SET is the graduated
+  exception, not a counterexample: as of 2026-08-01 it defaults ON, whole, and
+  the partial combinations it used to be staged through are a testing-only
+  affordance that nothing ships in (registry ruling box).
 - **Preserve transaction boundaries.** Servability is decided for a whole
   action transaction. Never commit its space-scoped subset on the server and
   send scoped or foreign-space operations back to a client.
@@ -594,7 +597,8 @@ capability and both graduated sub-capabilities.
    server memory or duplicate retained-success delivery.
 6. Authorize demand using the session's existing READ access. Sponsor
    eligibility is a separate WRITE check in W1.1.
-7. Use `serverPrimaryExecution`, default off, as the only rollout authority
+7. Use `serverPrimaryExecution` — default ON since 2026-08-01, `false` being
+   the rollback — as the only rollout authority
    switch. With it off, start no execution pool and preserve client-primary
    behavior. With it on, automatically claim every eligible action in every
    active compatible space. Do not add a per-space authority document or CLI;

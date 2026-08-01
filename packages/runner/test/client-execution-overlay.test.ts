@@ -631,7 +631,10 @@ Deno.test("unserved settlement dirties the claimed producer before exact revoke"
 });
 
 Deno.test("flag off keeps an otherwise matching claimed computation upstream", async () => {
-  resetServerPrimaryExecutionConfig();
+  // Explicitly OFF, not `reset`: the flag defaults ON since 2026-08-01, so
+  // reset returns to the ON configuration and this test would measure the
+  // wrong arm.
+  setServerPrimaryExecutionConfig(false);
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
   try {

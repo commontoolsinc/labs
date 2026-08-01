@@ -1759,13 +1759,46 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // These ambient flags and the memory protocol flags below are catalogued, with
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
+//
+// THE SERVER-PRIMARY DIAL SET MOVES AS ONE (owner ruling, 2026-08-01).
+// "Server-primary execution is on" names the WHOLE configuration, not a flag:
+// the master dial, the issuance rank at its top stage, and both claim-delivery
+// subcapabilities default on TOGETHER, and the runner's matching candidate
+// dials default on beside them (runner/src/runtime.ts). The intermediate
+// states — master on with a lower rank stage, or a subcapability withheld —
+// remain reachable programmatically, but they are a TESTING-ONLY affordance:
+// nothing ships in one. A deployment has exactly the two configurations the
+// arc admits, selected by the master dial alone (`serverPrimaryExecution`,
+// which gates issuance in `#assertExecutionClaimCapabilityEnabled` and demand
+// publication in `runner.ts`), so `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false`
+// is the whole rollback and no dial beneath it needs its own lever.
+/**
+ * Default of the master server-primary dial. Exported because a construction
+ * site that must decide BEFORE a Runtime exists — toolshed's
+ * `externalSinkDisposition`, which is chosen while assembling
+ * `RuntimeOptions` — has to resolve the same "unset means what?" the
+ * constructor does, and two spellings of a default is how they drift.
+ */
+export const SERVER_PRIMARY_EXECUTION_DEFAULT = true;
+
+/** Top of the issuance ladder, and the default: a host issues claims at every
+ * context rank and admits foreign space-scoped reads. */
+export const SERVER_PRIMARY_EXECUTION_CLAIM_RANK_DEFAULT = "cross-space-read";
+
 let persistentSchedulerStateEnabled = true;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
-let serverPrimaryExecutionEnabled = false;
-let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank = "space";
-let serverPrimaryExecutionContextLatticeClaimsEnabled = false;
-let serverPrimaryExecutionCrossSpaceClaimsEnabled = false;
+let serverPrimaryExecutionEnabled = SERVER_PRIMARY_EXECUTION_DEFAULT;
+let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank =
+  SERVER_PRIMARY_EXECUTION_CLAIM_RANK_DEFAULT;
+let serverPrimaryExecutionContextLatticeClaimsEnabled = true;
+let serverPrimaryExecutionCrossSpaceClaimsEnabled = true;
+// NOT part of the set above, deliberately: the F3/F4 doc-set feed and its F5
+// per-space retirement dial are a WATCH-SURFACE rollout, not an execution
+// authority one. Their graduation condition is the W2.9 wall-time gate, which
+// is still a live measurement, and flipping the boolean alone would change
+// nothing anyway — the retirement set below admits no space, so every `docs`
+// watch is still rejected. Both stay at their pre-arc defaults.
 let serverPrimaryExecutionDocSetWatchEnabled = false;
 let serverPrimaryExecutionGraphRetirementSpaces: ReadonlySet<string> =
   new Set();
@@ -1789,11 +1822,20 @@ export function resetPersistentSchedulerStateConfig(): void {
 
 /**
  * Ambient runtime flag for the server-primary execution protocol. The
- * capability is optional and defaults off; when enabled, compatible peers
- * use server-primary authority for every eligible claimed action.
+ * capability is optional and defaults ON; compatible peers use server-primary
+ * authority for every eligible claimed action. Passing `false` selects the
+ * pre-arc configuration whole — no demand publication, no claim issuance at
+ * any rank, and the client keeps its own egress — and that is the ONE
+ * rollback lever for the dial set (see the block comment above).
+ *
+ * The default is spelled here rather than at a call site because both halves
+ * of the handshake resolve it: a memory server applies the env var at
+ * construction, a runner Runtime bridges its `ExperimentalOptions` value, and
+ * an omitted value on either side must mean the same thing
+ * ({@link SERVER_PRIMARY_EXECUTION_DEFAULT}).
  */
 export function setServerPrimaryExecutionConfig(enabled?: boolean): void {
-  serverPrimaryExecutionEnabled = enabled ?? false;
+  serverPrimaryExecutionEnabled = enabled ?? SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 export function getServerPrimaryExecutionConfig(): boolean {
@@ -1801,7 +1843,7 @@ export function getServerPrimaryExecutionConfig(): boolean {
 }
 
 export function resetServerPrimaryExecutionConfig(): void {
-  serverPrimaryExecutionEnabled = false;
+  serverPrimaryExecutionEnabled = SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 /**
@@ -1822,9 +1864,11 @@ export function resetServerPrimaryExecutionConfig(): void {
  * it (a host issuing cross-space-read claims also issues session/user/space
  * claims, §6), while `serverPrimaryExecutionCrossSpaceReadsEnabled` — the
  * predicate the issuance preflight consults — is true only AT this stage.
- * Structurally never enabled outside fixtures until C3.6b's
- * cross-space-claims-v1 cohort gate is in place (the CA4-style ordering
- * invariant, C3A17). Registered in docs/development/EXPERIMENTAL_OPTIONS.md
+ * `cross-space-read` is now the DEFAULT: the dial set moves as one, so the
+ * CA4/C3A17 ordering invariant (never at this stage without C3.6b's
+ * cross-space-claims-v1 cohort gate) is satisfied by construction rather than
+ * by withholding the stage. A lower stage is a testing-only affordance;
+ * nothing ships in one. Registered in docs/development/EXPERIMENTAL_OPTIONS.md
  * as `serverPrimaryExecutionClaimRank`.
  */
 export type ServerPrimaryExecutionClaimRank =
@@ -1859,7 +1903,8 @@ export const serverPrimaryExecutionCrossSpaceReadsEnabled = (): boolean =>
 export function setServerPrimaryExecutionClaimRankConfig(
   rank?: ServerPrimaryExecutionClaimRank,
 ): void {
-  serverPrimaryExecutionClaimRank = rank ?? "space";
+  serverPrimaryExecutionClaimRank = rank ??
+    SERVER_PRIMARY_EXECUTION_CLAIM_RANK_DEFAULT;
 }
 
 export function getServerPrimaryExecutionClaimRankConfig(): ServerPrimaryExecutionClaimRank {
@@ -1867,22 +1912,24 @@ export function getServerPrimaryExecutionClaimRankConfig(): ServerPrimaryExecuti
 }
 
 export function resetServerPrimaryExecutionClaimRankConfig(): void {
-  serverPrimaryExecutionClaimRank = "space";
+  serverPrimaryExecutionClaimRank = SERVER_PRIMARY_EXECUTION_CLAIM_RANK_DEFAULT;
 }
 
 /**
  * Ambient runtime flag for the context-lattice-claims-v1 subcapability
  * (context-lattice C1.7): whether this server ADVERTISES context-scoped
- * claim delivery. Defaults off; a mixed fleet stays valid either way — the
- * amendment-11 cohort gate fences user lanes around sessions that did not
- * negotiate it rather than rejecting them. Registered in
+ * claim delivery. Defaults ON with the rest of the dial set; a mixed fleet
+ * stays valid either way — the amendment-11 cohort gate fences user lanes
+ * around sessions that did not negotiate it rather than rejecting them.
+ * Registered in
  * docs/development/EXPERIMENTAL_OPTIONS.md as
  * `serverPrimaryExecutionContextLatticeClaimsV1`.
  */
 export function setServerPrimaryExecutionContextLatticeClaimsConfig(
   enabled?: boolean,
 ): void {
-  serverPrimaryExecutionContextLatticeClaimsEnabled = enabled ?? false;
+  serverPrimaryExecutionContextLatticeClaimsEnabled = enabled ??
+    SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 export function getServerPrimaryExecutionContextLatticeClaimsConfig(): boolean {
@@ -1890,26 +1937,29 @@ export function getServerPrimaryExecutionContextLatticeClaimsConfig(): boolean {
 }
 
 export function resetServerPrimaryExecutionContextLatticeClaimsConfig(): void {
-  serverPrimaryExecutionContextLatticeClaimsEnabled = false;
+  serverPrimaryExecutionContextLatticeClaimsEnabled =
+    SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 /**
  * Ambient runtime flag for the cross-space-claims-v1 subcapability (C3.6b):
  * whether this server ADVERTISES cross-space-read claim delivery. Defaults
- * off; a mixed fleet stays valid either way — the A11 cohort gate fences
- * cross-space-read claims around a delivery cohort that did not uniformly
- * negotiate it rather than rejecting the sessions. Gated one stage above the
- * claim-rank dial's `cross-space-read` entry: this advertises the wire
- * subcapability, `serverPrimaryExecutionCrossSpaceReadsEnabled` (the rank
- * dial) admits issuance; the ordering invariant (C3A17) is that issuance is
- * refused unless BOTH hold, so the stage is never live without the gate.
+ * ON with the rest of the dial set; a mixed fleet stays valid either way —
+ * the A11 cohort gate fences cross-space-read claims around a delivery cohort
+ * that did not uniformly negotiate it rather than rejecting the sessions.
+ * Paired with the claim-rank dial's `cross-space-read` entry, which is also
+ * the default: this advertises the wire subcapability,
+ * `serverPrimaryExecutionCrossSpaceReadsEnabled` (the rank dial) admits
+ * issuance; the ordering invariant (C3A17) is that issuance is refused unless
+ * BOTH hold, and moving the set together is what satisfies it.
  * Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
  * `serverPrimaryExecutionCrossSpaceClaimsV1`.
  */
 export function setServerPrimaryExecutionCrossSpaceClaimsConfig(
   enabled?: boolean,
 ): void {
-  serverPrimaryExecutionCrossSpaceClaimsEnabled = enabled ?? false;
+  serverPrimaryExecutionCrossSpaceClaimsEnabled = enabled ??
+    SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 export function getServerPrimaryExecutionCrossSpaceClaimsConfig(): boolean {
@@ -1917,7 +1967,8 @@ export function getServerPrimaryExecutionCrossSpaceClaimsConfig(): boolean {
 }
 
 export function resetServerPrimaryExecutionCrossSpaceClaimsConfig(): void {
-  serverPrimaryExecutionCrossSpaceClaimsEnabled = false;
+  serverPrimaryExecutionCrossSpaceClaimsEnabled =
+    SERVER_PRIMARY_EXECUTION_DEFAULT;
 }
 
 /**
@@ -2082,8 +2133,10 @@ const applyBooleanEnvFlag = (
  * {@link applyServerPrimaryExecutionGraphRetirementEnvConfig} — so the
  * advertisement derives from the env directly, not from whether a Runtime
  * happens to live (or has been disposed) in the server's realm. Unset env ⇒
- * dials untouched (default off) ⇒ the advertisement is byte-identical to
- * the pre-bridge behavior.
+ * dials untouched, which since 2026-08-01 means the base capability and the
+ * context-lattice subcapability advertise ON by default (the doc-set watch
+ * dial still defaults off; see the block comment at the top of this section).
+ * `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false` is the deployment rollback.
  */
 export function applyServerPrimaryExecutionEnvConfig(
   readEnv: (name: string) => string | undefined,

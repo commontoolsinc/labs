@@ -18,6 +18,10 @@ import {
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionContextLatticeClaimsConfig,
+  resetServerPrimaryExecutionCrossSpaceClaimsConfig,
+  resetServerPrimaryExecutionDocSetWatchConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
@@ -130,6 +134,13 @@ describe("memory v2 flags", () => {
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
+    // The server-primary dial set is not what this test toggles; reset it so
+    // the rows below are its DEFAULTS (on together since 2026-08-01) rather
+    // than whatever a sibling test in this process left behind.
+    resetServerPrimaryExecutionConfig();
+    resetServerPrimaryExecutionContextLatticeClaimsConfig();
+    resetServerPrimaryExecutionCrossSpaceClaimsConfig();
+    resetServerPrimaryExecutionDocSetWatchConfig();
     setModernCellRepConfig(false);
     setPersistentSchedulerStateConfig(false);
     setCommitPreconditionsConfig(false);
@@ -138,11 +149,13 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
       persistentSchedulerState: false,
-      serverPrimaryExecutionV1: false,
-      serverPrimaryExecutionClaimRoutingV1: false,
-      serverPrimaryExecutionBuiltinPassivityV1: false,
-      serverPrimaryExecutionContextLatticeClaimsV1: false,
-      serverPrimaryExecutionCrossSpaceClaimsV1: false,
+      // The dial set defaults ON together; the doc-set watch feed is
+      // deliberately not part of it.
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+      serverPrimaryExecutionCrossSpaceClaimsV1: true,
       serverPrimaryExecutionDocSetWatchV1: false,
       schedulerWriterLookup: true,
       commitPreconditions: false,
@@ -164,11 +177,13 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
       persistentSchedulerState: true,
-      serverPrimaryExecutionV1: false,
-      serverPrimaryExecutionClaimRoutingV1: false,
-      serverPrimaryExecutionBuiltinPassivityV1: false,
-      serverPrimaryExecutionContextLatticeClaimsV1: false,
-      serverPrimaryExecutionCrossSpaceClaimsV1: false,
+      // The dial set defaults ON together; the doc-set watch feed is
+      // deliberately not part of it.
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+      serverPrimaryExecutionCrossSpaceClaimsV1: true,
       serverPrimaryExecutionDocSetWatchV1: false,
       schedulerWriterLookup: true,
       commitPreconditions: true,

@@ -19,6 +19,7 @@ export {
   type PatternTestPresetParams,
   type ProductionServerPresetParams,
   type RemoteClientPresetParams,
+  resolveServerPrimaryExecution,
   RUNTIME_OPTION_KEYS,
   type RuntimeOptionKey,
   runtimePresets,

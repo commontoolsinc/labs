@@ -1,6 +1,7 @@
 import {
   type EnvReader,
   experimentalOptionsFromEnv,
+  resolveServerPrimaryExecution,
   Runtime,
   type RuntimeOptions,
   runtimePresets,
@@ -58,7 +59,14 @@ export function toolshedRuntimeOptions(
     // (both arms: suppressed-and-relocated under the flag, egressing without
     // it) and `patterns/integration/server-execution-webhook-egress-gate.test.ts`
     // (flag on: exactly one broker egress, performed by the executor).
-    externalSinkDisposition: experimental.serverPrimaryExecution
+    //
+    // Read through the resolver, NOT off the raw option: this decision is made
+    // before the Runtime exists, so an unset flag is `undefined` here while the
+    // constructor would resolve it to the default (now ON). Testing the raw
+    // value would put an unconfigured toolshed in the flag-ON configuration
+    // with the flag-OFF egress posture — a double dispatch, and exactly the
+    // hybrid the arc forbids.
+    externalSinkDisposition: resolveServerPrimaryExecution(experimental)
       ? "suppress"
       : "claim-conditional",
   });
