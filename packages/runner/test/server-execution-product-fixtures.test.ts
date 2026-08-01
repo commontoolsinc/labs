@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -16,6 +16,7 @@ import {
 } from "../src/executor/action-transaction-router.ts";
 import type { CandidateClaim } from "../src/executor/deno-space-executor.ts";
 import {
+  type ActionClaimKey,
   sessionExecutionContextKey,
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
@@ -372,7 +373,7 @@ const driveLunchPollThroughRouter = async (
   candidates: CandidateClaim[];
   diagnostics: ExecutorCandidateDiagnostic[];
   sessionLane: string;
-  userLane: string;
+  userLane: ActionClaimKey["contextKey"];
 }> => {
   const signer = await Identity.fromPassphrase(
     `server execution lunch-poll session placement ${sessionDial}`,
@@ -462,6 +463,124 @@ const driveLunchPollThroughRouter = async (
   return { candidates, diagnostics, sessionLane, userLane };
 };
 
+/** The scope lattice, BROADEST FIRST (context-lattice §2: `space < user <
+ * session`). The index IS the comparison — a lower index is a broader write
+ * surface. */
+const RANK_LATTICE = ["space", "user", "session"] as const;
+
+type CandidateRank = (typeof RANK_LATTICE)[number];
+
+/** The rank a candidate's lane names. A scoped-rank run keys one candidate
+ * per OPEN lane of its own rank (`candidateLaneKeys`), so a candidate's key
+ * rank IS the classified rank of the run that emitted it. */
+const candidateRank = (
+  contextKey: ActionClaimKey["contextKey"],
+): CandidateRank =>
+  contextKey.startsWith("session:")
+    ? "session"
+    : contextKey.startsWith("user:")
+    ? "user"
+    : "space";
+
+/** One logical action instance — the unit whose successive RUNS are compared.
+ * Rank belongs to a run of an action in a piece, so two pieces sharing an
+ * action id are independent sequences and must not be merged into one. */
+const actionRunSequenceKey = (claimKey: ActionClaimKey): string =>
+  `${claimKey.actionId} @ ${claimKey.pieceId}`;
+
+/** Each action instance's observed ranks, in candidate-emission order. */
+const actionRankSequences = (
+  candidates: readonly CandidateClaim[],
+): Map<string, CandidateRank[]> => {
+  const sequences = new Map<string, CandidateRank[]>();
+  for (const candidate of candidates) {
+    const key = actionRunSequenceKey(candidate.claimKey);
+    const rank = candidateRank(candidate.claimKey.contextKey);
+    const sequence = sequences.get(key);
+    if (sequence === undefined) sequences.set(key, [rank]);
+    else sequence.push(rank);
+  }
+  return sequences;
+};
+
+type RankWidening = {
+  readonly action: string;
+  readonly from: CandidateRank;
+  readonly to: CandidateRank;
+};
+
+/** Every point at which an action's rank WIDENED: a run classified it back
+ * out to a lane broader than one it had already narrowed past. Narrowing is
+ * expected and safe (see the C2.10 docblock below); widening is the
+ * violation, so the watermark is the NARROWEST rank seen so far and it never
+ * moves back out. */
+const rankWidenings = (
+  candidates: readonly CandidateClaim[],
+): RankWidening[] => {
+  const widenings: RankWidening[] = [];
+  for (const [action, sequence] of actionRankSequences(candidates)) {
+    let narrowest = sequence[0];
+    for (const rank of sequence.slice(1)) {
+      if (RANK_LATTICE.indexOf(rank) < RANK_LATTICE.indexOf(narrowest)) {
+        widenings.push({ action, from: narrowest, to: rank });
+      } else {
+        narrowest = rank;
+      }
+    }
+  }
+  return widenings;
+};
+
+/**
+ * C2.10, classification half: the real lunch-poll vote workload classifies
+ * claim-ready at SESSION rank, keyed by the open session lane's canonical key
+ * (CA9), and never WIDENS an action's rank across that action's runs.
+ *
+ * RANK IS PER RUN. `contextRank` is derived from the summary of the run that
+ * just committed — the narrowest scope any admitted surface declares
+ * (`scheduler/servability.ts:344-350`, read at
+ * `executor/action-transaction-router.ts:424-427`) — and nothing carries it
+ * across runs. That is the arc's top box working as designed: *scope is
+ * DISCOVERED by running, not declared before it*
+ * (`docs/specs/server-side-execution/passivity-arc-orchestration.md`), the
+ * same inversion `scoped-cell-instances.md` already applies to write surfaces.
+ * An action whose upstreams resolve in order therefore TIGHTENS as it
+ * discovers them: `__cfLift_28` — the `{participantIdentity[UI]}`
+ * interpolation at `packages/patterns/lunch-poll/main.tsx:1414` — runs
+ * space -> user -> session, because the child output it reads whole mixes the
+ * parent's user-scoped `#profileName` wish result with the card's
+ * `Writable.perSession` state.
+ *
+ * THIS TEST USED TO ASSERT RANK DISJOINTNESS — that no action ever appears at
+ * both scoped ranks. Owner ruling, 2026-07-31: that assertion is wrong. It
+ * treats rank as an action-LIFETIME property, and it held only as an artifact
+ * of the pre-merge product shape, in which the identity card wished for
+ * ITSELF (`participant-identity-card.tsx:149-150` at `ed46f266e`) so no parent
+ * lift ever read a user-scoped value alongside session-scoped state. Hoisting
+ * those wishes to the parent (`main.tsx:1027-1029`) did not break an
+ * invariant; it built the first workload in which rank's per-run nature is
+ * observable at this seam.
+ *
+ * TRANSIENT RANK DIVERGENCE IS SAFE, AND THE LATTICE IS WHY. Two principals
+ * can sit at different ranks at the same moment — session-scoped for A while
+ * still user-scoped for B, because B has not yet caught up. Nobody thereby
+ * gets a BROADER write than anyone else: if the result is space-scoped it is
+ * space-scoped for everyone, and if it is user-scoped for one it is *at least*
+ * user-scoped for all, with some going finer. The divergence is
+ * convergence-in-progress. Simultaneity is separately fenced and does not rest
+ * on this test: issuance rejects a second live claim for one action tuple at a
+ * chain-compatible rank (`memory/v2/server.ts:1048-1070`,
+ * `executionClaimChainCompatible`), so a lane move is revoke-before-issue, and
+ * `emitCandidates` skips any lane already holding live authority.
+ *
+ * WHAT IS STILL FORBIDDEN, AND IS WHAT THIS TEST PINS: widening. Once an
+ * action has narrowed, a later run may not classify it back out to a broader
+ * lane — that lane would write more broadly than the scope already discovered,
+ * which is the §4 cross-principal hazard the exact-lane write rule
+ * (`laneAdmitsWriteScope`, `scheduler/servability.ts:903-909`) and the
+ * engine's own fence refuse. Narrowing needs no such rule; widening is the
+ * only direction that can hand somebody a wider write than the run before it.
+ */
 Deno.test("lunch-poll vote workload classifies claim-ready at session rank with the session dial on, keyed by the open session lane (C2.10)", async () => {
   const { candidates, diagnostics, sessionLane, userLane } =
     await driveLunchPollThroughRouter(true);
@@ -483,20 +602,52 @@ Deno.test("lunch-poll vote workload classifies claim-ready at session rank with 
     [],
     "a session candidate names something other than the open session lane",
   );
-  // Rank disjointness at the router seam (CA9's filter): no action
-  // classifies at both scoped ranks.
-  const sessionActionIds = new Set(
-    sessionCandidates.map((candidate) => candidate.claimKey.actionId),
+  // MONOTONE NARROWING at the router seam, replacing the disjointness clause
+  // this test carried from `1a6dcc076` (owner ruling, 2026-07-31 — see the
+  // docblock). "Nothing widened" is trivially true of a stream in which no
+  // action ever moved rank at all, so the pin is guarded in both directions
+  // before it is trusted.
+  //
+  // GUARD 1 — the workload must actually move an action across ranks, or
+  // there is no sequence to be monotone about.
+  const rankSequences = actionRankSequences(candidates);
+  const movedActions = [...rankSequences].filter(([, ranks]) =>
+    new Set(ranks).size > 1
   );
-  const userActionIds = new Set(
-    candidates
-      .filter((candidate) => candidate.claimKey.contextKey === userLane)
-      .map((candidate) => candidate.claimKey.actionId),
+  assert(
+    movedActions.length > 0,
+    `no action changed rank across its runs, so the narrowing pin proves nothing: ${
+      JSON.stringify([...rankSequences])
+    }`,
   );
+  // GUARD 2 — the detector must REPORT the violation it exists to catch. The
+  // widening case: this run's own session-rank candidate, followed by the
+  // SAME action re-emitted at the user lane. That is a user lane taking a run
+  // whose writes the session lane already owns, and `laneAdmitsWriteScope`
+  // (`scheduler/servability.ts:903-909`) is exact-lane, so such a commit could
+  // only bounce off the write fence.
+  const [sessionCandidate] = sessionCandidates;
   assertEquals(
-    [...sessionActionIds].filter((actionId) => userActionIds.has(actionId)),
+    rankWidenings([
+      sessionCandidate,
+      {
+        ...sessionCandidate,
+        claimKey: { ...sessionCandidate.claimKey, contextKey: userLane },
+      },
+    ]),
+    [{
+      action: actionRunSequenceKey(sessionCandidate.claimKey),
+      from: "session",
+      to: "user",
+    }],
+    "the widening detector no longer reports a session -> user regression",
+  );
+  // THE PROPERTY: an action's rank may tighten across its runs; it may never
+  // widen back out.
+  assertEquals(
+    rankWidenings(candidates),
     [],
-    "an action classified at both scoped ranks through the router",
+    "an action's rank WIDENED across its run sequence — a later run classified it back out to a broader lane than one it had already narrowed past",
   );
 });
 
