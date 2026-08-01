@@ -170,17 +170,30 @@ export function isUnsafeObjectKey(key: string): boolean {
 }
 
 /**
- * Returns the host-unsafe own property name the given object carries, if any.
+ * Returns the reserved own property name the given object carries, if any.
  *
- * This asks about the JavaScript host, not about the data model. A property
- * name is data like any other, and a runtime that does not route property
- * assignment through a prototype chain -- which is most of them -- has no
- * unsafe names at all. What makes these two names unusable *here* is that
- * name-driven copying (`target[key] = value`), which is how records are
- * rebuilt at every boundary, does not create the property: it reaches
- * `Object.prototype`'s `__proto__` accessor instead, mutating the copy's
- * prototype and dropping the value. So a record carrying one cannot survive
- * a copy in this host, whatever the model says about it.
+ * This asks about this implementation, not about the data model. A property
+ * name is data like any other, and an implementation on a host that does not
+ * route property assignment through a prototype chain -- which is most of them
+ * -- would reserve no names at all. The two here are refused for two different
+ * local reasons, and neither is a limit of the language:
+ *
+ * * `__proto__` cannot be rebuilt by the copying this system actually does.
+ *   Records are reconstructed by assignment (`target[key] = value`) and
+ *   `Object.assign()`, and for this name both reach `Object.prototype`'s
+ *   accessor instead of creating a property: the value is dropped, and the
+ *   copy's prototype is repointed as well when that value is an object or
+ *   `null`. Faithful mechanisms do exist -- spread, `Object.fromEntries()`,
+ *   `Object.defineProperty()`, and `JSON.parse()` all carry the name -- so
+ *   what stands in the way is the copy loops, not JavaScript.
+ * * `constructor` copies faithfully. It is reserved because other boundaries
+ *   in this implementation already refuse it: the projection to native values
+ *   drops it, and `FabricError` throws on it. Accepting it here would mean
+ *   admitting a key that a later boundary discards without saying so.
+ *
+ * Both are therefore removable, by rebuilding the copy loops on a faithful
+ * mechanism and revisiting the boundaries that filter these names. Until then
+ * the reservation is what keeps a record from being corrupted in transit.
  *
  * The check is two `Object.hasOwn()` calls rather than a key walk, so it costs
  * nothing per property and can sit on a hot validation path.

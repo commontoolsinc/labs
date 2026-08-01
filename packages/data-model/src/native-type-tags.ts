@@ -169,9 +169,17 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Array;
   }
 
-  // Guard: null-prototype objects or exotic objects may not have a function
-  // constructor.
-  const ctor = value.constructor;
+  // The constructor is read from the PROTOTYPE, not from the value. What is
+  // being asked is which class the value is an instance of, and that is a fact
+  // about its prototype; an own `constructor` property is ordinary data that
+  // happens to share the name, and must not decide the value's type. Reading
+  // it off the value would let `{constructor: Error}` -- a plain record --
+  // answer `Error` and be silently rebuilt as one.
+  //
+  // Guard: a null-prototype object has no constructor to find, and an exotic
+  // one may not have a callable one.
+  const proto = Object.getPrototypeOf(value);
+  const ctor = proto === null ? undefined : proto.constructor;
   let tag: NativeTag | null = null;
 
   if (typeof ctor === "function") {
@@ -198,12 +206,11 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
-    // Plain objects whose constructor was unusable: a null prototype, or an
-    // own `constructor` property shadowing the real one with something that
-    // is not a class. Both are answered `Object` so the object rule decides
-    // them by name, the same way an indirect array is answered `Array`.
-    const proto = Object.getPrototypeOf(value);
-    if (proto === null || proto === Object.prototype) tag = NATIVE_TAGS.Object;
+    // Null-prototype objects (`Object.create(null)`), which have no
+    // constructor to have been recognized. Answered `Object` so the object
+    // rule decides them by name, the same way an indirect array is answered
+    // `Array`.
+    if (proto === null) tag = NATIVE_TAGS.Object;
   }
 
   // For `Object` and still-null tags: a per-instance `toJSON()` method

@@ -812,6 +812,42 @@ describe("native-conversion", () => {
 
     // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
     // members and pass through unchanged.
+    describe("property names this runtime reserves", () => {
+      // A restriction of this runtime rather than of the data model: such an
+      // object is perfectly inert, and its keys are strings like any other.
+      // `__proto__` is refused because the assignment that rebuilds records
+      // cannot create it, `constructor` because other boundaries here already
+      // drop or refuse it.
+      it("throws for `__proto__`, naming it as the cause", () => {
+        expect(() => fabricFromNativeValue({ ["__proto__"]: 1, a: 2 })).toThrow(
+          "Not representable as a `FabricValue`: object with a property name " +
+            "this runtime reserves (`__proto__`)",
+        );
+      });
+
+      it("throws for `constructor`, naming it as the cause", () => {
+        // Type dispatch reads the constructor from the prototype, so an own
+        // `constructor` property no longer decides the value's type: it
+        // reaches the object rule and is named, rather than failing as some
+        // unrecognized type or being rebuilt as whatever class it held.
+        expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
+          "Not representable as a `FabricValue`: object with a property name " +
+            "this runtime reserves (`constructor`)",
+        );
+        expect(() => fabricFromNativeValue({ ["constructor"]: Error })).toThrow(
+          "this runtime reserves (`constructor`)",
+        );
+      });
+
+      it("throws for a reserved name nested in the graph", () => {
+        expect(() => fabricFromNativeValue({ a: { ["__proto__"]: 1 } }))
+          .toThrow("this runtime reserves (`__proto__`)");
+        expect(() => fabricFromNativeValue([{ ["__proto__"]: 1 }])).toThrow(
+          "this runtime reserves (`__proto__`)",
+        );
+      });
+    });
+
     describe("special numbers", () => {
       it("passes `NaN` through", () => {
         expect(Number.isNaN(shallowFabricFromNativeValue(NaN))).toBe(true);
@@ -1865,37 +1901,6 @@ describe("native-conversion", () => {
         expect(Object.isFrozen(obj)).toBe(false);
       });
 
-      it("throws for a host-unsafe property name, naming the cause", () => {
-        // The message says "this JavaScript host" rather than blaming
-        // inertness, because such an object is inert: what it violates is a
-        // restriction of the runtime, not of the data model.
-        expect(() => fabricFromNativeValue({ ["__proto__"]: 1, a: 2 })).toThrow(
-          "Not representable as a `FabricValue`: object with a property name " +
-            "this JavaScript host cannot carry (`__proto__`)",
-        );
-      });
-
-      it("throws for a `constructor` property, reaching the object rule", () => {
-        // Type-tag dispatch reads `value.constructor`, which such an object
-        // shadows with a non-class. It answers `Object` on the prototype
-        // instead, so the value is rejected by name rather than as some
-        // unrecognized type.
-        expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
-          "Not representable as a `FabricValue`: object with a property name " +
-            "this JavaScript host cannot carry (`constructor`)",
-        );
-      });
-
-      it("throws for a host-unsafe name nested in the graph", () => {
-        expect(() => fabricFromNativeValue({ a: { ["__proto__"]: 1 } }))
-          .toThrow(
-            "this JavaScript host cannot carry (`__proto__`)",
-          );
-        expect(() => fabricFromNativeValue([{ ["__proto__"]: 1 }])).toThrow(
-          "this JavaScript host cannot carry (`__proto__`)",
-        );
-      });
-
       it("throws for a null-prototype object at the top level", () => {
         const obj = Object.create(null) as Record<string, unknown>;
         obj.x = 1;
@@ -2094,7 +2099,7 @@ describe("native-conversion", () => {
         expect(isFabricCompatible({ data: sub })).toBe(false);
       });
 
-      it("rejects a host-unsafe property name", () => {
+      it("returns `false` for a property name this runtime reserves", () => {
         expect(isFabricCompatible({ ["__proto__"]: 1 })).toBe(false);
         expect(isFabricCompatible({ ["constructor"]: 1 })).toBe(false);
         expect(isFabricCompatible({ nested: { ["__proto__"]: 1 } })).toBe(

@@ -147,7 +147,7 @@ describe("type-check", () => {
         expect(isFabricValueLayer({})).toBe(true);
       });
 
-      it("returns `false` for a host-unsafe property name", () => {
+      it("returns `false` for a property name this runtime reserves", () => {
         // Not a statement about the data model: such an object is perfectly
         // inert, and a runtime that does not route assignment through a
         // prototype chain would carry it fine. It is refused because in this
@@ -297,7 +297,7 @@ describe("type-check", () => {
         expect(isFabricValue({ nested: { deeply: { value: 1 } } })).toBe(true);
       });
 
-      it("returns `false` for a host-unsafe property name, at any depth", () => {
+      it("returns `false` for a reserved property name, at any depth", () => {
         const unsafe = { ["__proto__"]: 1 };
         expect(isFabricValue(unsafe)).toBe(false);
         expect(isFabricValue({ nested: unsafe })).toBe(false);

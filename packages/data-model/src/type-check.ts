@@ -52,8 +52,8 @@ export function isFabricValueLayer(
       // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
       // `string`, so a symbol key has no representation either, and neither
       // does a non-enumerable string key; an accessor-backed property is live
-      // code rather than inert data. The host-unsafe names are a separate
-      // question from inertness -- see `unsafeObjectKeyIn()`.
+      // code rather than inert data. The names this runtime reserves are a
+      // separate question from inertness -- see `unsafeObjectKeyIn()`.
       return isInertPlainObject(value) &&
         (unsafeObjectKeyIn(value) === undefined);
     }
@@ -159,8 +159,8 @@ export function isFabricValue(value: unknown): value is FabricValue {
       // Symbol-keyed and non-enumerable string-keyed properties have no fabric
       // representation, the same as an array's non-index properties; an
       // accessor-backed property is live code rather than inert data. The
-      // host-unsafe names are a separate question from inertness -- see
-      // `unsafeObjectKeyIn()`.
+      // names this runtime reserves are a separate question from inertness --
+      // see `unsafeObjectKeyIn()`.
       if (!isInertPlainObject(item)) return false;
       if (unsafeObjectKeyIn(item) !== undefined) return false;
       const record = item as Record<string, unknown>;

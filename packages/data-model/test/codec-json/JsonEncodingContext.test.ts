@@ -851,6 +851,91 @@ describe("JsonEncodingContext", () => {
         expect(result["/x"]!["/quote"]).toBe("inner");
       });
     });
+
+    describe("property names this runtime reserves", () => {
+      it("produces a `ProblematicValue` for a reserved key", () => {
+        // The decoder is a boundary where external bytes enter, and the
+        // assignment it rebuilds records with cannot create these names: in a
+        // realm that keeps the `__proto__` accessor, the key would be lost and
+        // the result's prototype repointed to whatever the bytes carried.
+        // Nothing this implementation writes can contain one, so bytes that do
+        // are reported rather than reconstructed.
+        //
+        // The keys are computed on purpose: in an object literal a bare or
+        // quoted `__proto__:` sets the prototype instead of creating a
+        // property, so a literal cannot express this wire shape at all.
+        // `JSON.parse()`, which is how such bytes actually arrive, does create
+        // the own property.
+        expect(fromWireFormat({ ["__proto__"]: { hostile: true }, a: 1 }))
+          .toBeInstanceOf(ProblematicValue);
+        expect(fromWireFormat({ ["constructor"]: "c" }))
+          .toBeInstanceOf(ProblematicValue);
+      });
+
+      it("produces a `ProblematicValue` for a reserved key nested in the graph", () => {
+        const result = fromWireFormat({
+          nested: { ["__proto__"]: 1 },
+        }) as Record<string, unknown>;
+        expect(result.nested).toBeInstanceOf(ProblematicValue);
+        expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+      });
+
+      it("produces a `ProblematicValue` for a reserved key inside `/object`", () => {
+        expect(fromWireFormat({ "/object": { ["__proto__"]: 1 } }))
+          .toBeInstanceOf(ProblematicValue);
+      });
+
+      it("leaves `Object.prototype` untouched where the accessor is standard", () => {
+        // The refusal above is checked in Deno, which replaces
+        // `Object.prototype.__proto__` with a setter that defines an own
+        // property -- so a decoder that assigned the key would look correct
+        // here no matter what. This installs the standard accessor, which is
+        // what browsers have and what this code also runs under, and pins the
+        // outcome the refusal exists to produce: nothing reconstructed, and no
+        // prototype repointed.
+        const saved = Object.getOwnPropertyDescriptor(
+          Object.prototype,
+          "__proto__",
+        );
+        try {
+          Object.defineProperty(Object.prototype, "__proto__", {
+            configurable: true,
+            get(this: object) {
+              return Object.getPrototypeOf(this);
+            },
+            set(this: object, v: unknown) {
+              // Spec-faithful: a no-op unless the value is an object or `null`.
+              if ((typeof v === "object") || (typeof v === "function")) {
+                Object.setPrototypeOf(this, v as object | null);
+              }
+            },
+          });
+
+          const hostile = { hostile: true };
+          expect(fromWireFormat({ ["__proto__"]: hostile, a: 1 }))
+            .toBeInstanceOf(ProblematicValue);
+
+          const nested = fromWireFormat({
+            deep: { ["__proto__"]: hostile },
+          }) as Record<string, unknown>;
+          expect(nested.deep).toBeInstanceOf(ProblematicValue);
+          expect(Object.getPrototypeOf(nested)).toBe(Object.prototype);
+
+          // The payload reached nobody: not the decoded records, and not the
+          // shared prototype every object in the process answers through.
+          expect(
+            (Object.prototype as Record<string, unknown>).hostile,
+          ).toBe(undefined);
+          expect(({} as Record<string, unknown>).hostile).toBe(undefined);
+        } finally {
+          if (saved === undefined) {
+            delete (Object.prototype as Record<string, unknown>)["__proto__"];
+          } else {
+            Object.defineProperty(Object.prototype, "__proto__", saved);
+          }
+        }
+      });
+    });
   });
 
   describe("/quote handling", () => {

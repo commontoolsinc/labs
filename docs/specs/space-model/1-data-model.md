@@ -64,8 +64,9 @@ authoritative statement of these rules.
   (getter and/or setter) and non-enumerable properties cause rejection as
   non-fabric
 - The names `__proto__` and `constructor` cause rejection in the JavaScript
-  implementation. This is a restriction of that host, which cannot copy those
-  names by assignment, rather than a rule of the model; see Section 1.5 of
+  implementation. This is a reservation of that implementation — one name its
+  copy loops cannot rebuild, one that its other boundaries already refuse —
+  rather than a rule of the model; see Section 1.5 of
   `space-model-formal-spec/1-fabric-values.md`
 - Values must be valid fabric values
 - Reconstruction produces regular plain objects, which is the only object

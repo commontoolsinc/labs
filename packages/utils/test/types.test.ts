@@ -417,7 +417,7 @@ describe("types", () => {
   });
 
   describe("unsafeObjectKeyIn", () => {
-    it("finds an unsafe own key", () => {
+    it("returns the offending name for a reserved own key", () => {
       const withProto = { other: 1 } as Record<string, unknown>;
       Object.defineProperty(withProto, "__proto__", {
         value: 1,
@@ -436,7 +436,7 @@ describe("types", () => {
       );
     });
 
-    it("ignores an inherited unsafe name", () => {
+    it("returns `undefined` for an inherited reserved name", () => {
       // Every object inherits `constructor`, and most inherit `__proto__`.
       // Only an OWN property is the value's own data, and only that can fail
       // to survive a copy.
@@ -445,7 +445,7 @@ describe("types", () => {
       );
     });
 
-    it("pins the host behavior the restriction exists for", () => {
+    it("is needed because assignment loses the key where the accessor is standard", () => {
       // The companion to the `__proto__`-is-inert test above, from the other
       // side. Deno neutralises the accessor, so a copy loop there is safe and
       // no test can see the hazard. A realm that keeps the accessor -- every
@@ -463,8 +463,14 @@ describe("types", () => {
           get(this: object) {
             return Object.getPrototypeOf(this);
           },
-          set(this: object, v: object | null) {
-            Object.setPrototypeOf(this, v);
+          set(this: object, v: unknown) {
+            // Spec-faithful: the setter is a no-op unless the value is an
+            // object or `null`. A primitive-valued `__proto__` assignment
+            // silently does nothing at all -- the key is still lost, but the
+            // prototype is untouched.
+            if ((typeof v === "object") || (typeof v === "function")) {
+              Object.setPrototypeOf(this, v as object | null);
+            }
           },
         });
 
@@ -473,6 +479,13 @@ describe("types", () => {
 
         expect(Object.hasOwn(copy, "__proto__")).toBe(false);
         expect(Object.getPrototypeOf(copy)).not.toBe(Object.prototype);
+
+        // A primitive value loses the key without touching the prototype:
+        // the same data loss, a quieter failure.
+        const primitive: Record<string, unknown> = {};
+        primitive["__proto__"] = "payload";
+        expect(Object.hasOwn(primitive, "__proto__")).toBe(false);
+        expect(Object.getPrototypeOf(primitive)).toBe(Object.prototype);
       } finally {
         if (saved === undefined) {
           delete (Object.prototype as Record<string, unknown>)["__proto__"];

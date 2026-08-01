@@ -1252,28 +1252,37 @@ Section 4.5.
 - Reconstruction produces regular plain objects, which is the only object
   shape a fabric value has
 
-> **Host-unsafe property names.** A fabric record's keys are strings, and the
-> model attaches no meaning to any particular one: a property name is data. Two
-> names are nonetheless refused by the JavaScript implementation, `__proto__`
-> and `constructor`.
+> **Property names this implementation reserves.** A fabric record's keys are
+> strings, and the model attaches no meaning to any particular one: a property
+> name is data. Two names are nonetheless refused by the JavaScript
+> implementation, `__proto__` and `constructor`, for two different reasons —
+> neither of which is a limit of the language, and both of which are removable.
 >
-> The reason is entirely local to that host. Records are rebuilt by name-driven
-> copying at every boundary — conversion, cloning, encoding, decoding — and in
-> JavaScript `target[key] = value` for those names does not create a property:
-> it reaches `Object.prototype`'s `__proto__` accessor, mutating the copy's
-> prototype and dropping the value, or shadows the constructor that type
-> dispatch reads. A record carrying such a name therefore cannot survive a copy
-> in this host, and the boundary refuses it rather than corrupting it in transit
-> ("death before confusion").
+> `__proto__` cannot be rebuilt by the copying this implementation performs.
+> Records are reconstructed at each boundary — conversion, cloning, decoding —
+> by assignment (`target[key] = value`) and `Object.assign()`, and for this name
+> both reach `Object.prototype`'s accessor rather than creating a property: the
+> value is dropped, and the copy's prototype is repointed as well when that
+> value is an object or `null`. Mechanisms that carry the name faithfully do
+> exist — spread, `Object.fromEntries()`, `Object.defineProperty()`, and
+> `JSON.parse()` — so what stands in the way is the copy loops, not JavaScript.
 >
-> This restriction belongs to the implementation, not to the model. A host that
-> does not route property assignment through a prototype chain — Rust, Swift,
-> C++, Python, and most others — has no unsafe names at all and must not adopt
-> this rule. In the JavaScript implementation it is expressed as a check
-> separate from the inertness rules, so that it can be removed as a unit if
-> those boundaries are ever rebuilt on `Object.defineProperty()` or an
-> equivalent that copies any name faithfully. An implementation in another
-> language accepts these names as ordinary keys.
+> `constructor` copies faithfully. It is reserved because other boundaries in
+> this implementation already refuse it: the projection to native values drops
+> it, and `FabricError` throws on it. Admitting it here would mean accepting a
+> key that a later boundary discards without saying so.
+>
+> The boundary refuses such a record rather than corrupting it in transit
+> ("death before confusion"), and a decoder that meets one reports a
+> `ProblematicValue` rather than reconstructing something the bytes do not say.
+>
+> **This reservation belongs to the implementation, not to the model.** A host
+> that does not route property assignment through a prototype chain — Rust,
+> Swift, C++, Python, and most others — reserves no names at all and must not
+> adopt this rule. Even here it is not permanent: rebuilding the copy loops on
+> a faithful mechanism, and revisiting the boundaries that filter these names,
+> would retire it. It is expressed as a check separate from the inertness rules
+> so that it can be removed as a unit when that happens.
 
 ### 1.6 Circular References and Shared References
 
