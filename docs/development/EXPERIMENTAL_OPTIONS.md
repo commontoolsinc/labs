@@ -148,11 +148,17 @@ propagate](#how-flags-propagate).
 - **Purpose.** A handler's return value containing reactives/cells projects
   into its per-event receipt cell via the result-pattern path, but a **plain
   JSON return is discarded** — the receipt-only branch writes `{}`. Under this
-  flag the receipt carries the (already-normalized) plain return instead, so a
+  flag the receipt carries the (already-normalized) return instead, so a
   caller — or a same-id retry that collides on the create-only receipt — can
   read the verb's result back by receipt address. `{}` remains the shape for
-  value-less handlers. Requires `commitPreconditions` (the receipt write
-  itself) to be active, which it is by default.
+  value-less handlers. The value goes through the receipt cell's standard
+  write flow (`set` → `diffAndUpdate`), the same conversion any cell write
+  gets: plain JSON persists as-is and a live `Cell` handle converts to a
+  link — so a one-line setter verb (`action(() => cell.set(...))`, whose
+  expression body implicitly returns the cell `set()` hands back for
+  chaining) records a link to the mutated cell in its receipt. Receipts
+  reflect what was returned. Requires `commitPreconditions` (the receipt
+  write itself) to be active, which it is by default.
 - **Current default and planned end state.** Off by default. Flips on once the
   verb-contract WS-D integration proof (caller-supplied event id → collide →
   read back the original result, cross-process) is green; after a bake period
