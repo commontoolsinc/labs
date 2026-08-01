@@ -81,11 +81,10 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
-  reportNothingToSeed,
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
-  REQUIRED_TEST_KEYS,
+  reportUpdateNeedsATestKey,
   requiredPatternKeys,
   uncoveredRequiredPatterns,
   unmappedPatternUrls,
@@ -136,24 +135,30 @@ async function main() {
   const required = requiredPatternKeys(systemUrls);
 
   if (Deno.args.includes("--update")) {
-    // Keys named on the command line pin a pattern nobody auto-updates — the
-    // deliberate act the layout allows for. With none named, the required set
-    // is what gets seeded.
-    // Keys name TEST files now, not patterns — a fixture is produced by
-    // running a test, and covers whatever that test instantiates.
+    // A capture NAMES the test to run. There is no default set, and deriving
+    // one is not possible in the case that would need it: the seed list only
+    // ever did work when a fixture was MISSING, and nothing on disk knows
+    // which test covers a pattern whose fixture is gone — a test need not be
+    // named after what it drives. A hand-kept list papered over that and
+    // introduced a seam instead: the required PATTERNS come from the runtime's
+    // URL constants, so adding one no listed test instantiates left the gate
+    // red while `--update` reported everything fine and exited 0.
+    //
+    // The guidance moved to where someone actually needs it —
+    // `reportUncovered`, which fires exactly when a required pattern has no
+    // fixture and can now name the test where one is known.
     const named = Deno.args.filter((arg) => !arg.startsWith("--"));
-    const wanted = named.length > 0 ? named : REQUIRED_TEST_KEYS;
+    if (named.length === 0) {
+      console.error(reportUpdateNeedsATestKey());
+      Deno.exit(1);
+    }
     const { captured, problems } = await captureMissing(
       roots,
-      wanted,
+      named,
       new Date(),
     );
     if (captured.length === 0 && problems.length === 0) {
-      console.log(
-        named.length > 0
-          ? `Already pinned: ${named.join(", ")}.`
-          : reportNothingToSeed(REQUIRED_TEST_KEYS),
-      );
+      console.log(`Already pinned: ${named.join(", ")}.`);
     }
     for (const path of captured) {
       console.log(`  + ${relativeToRepo(path, REPO_ROOT)}`);
@@ -172,7 +177,9 @@ async function main() {
   // "everything is covered" is the disagreement that reads as a pass.
   const uncovered = uncoveredRequiredPatterns(required, replay.covered);
 
-  if (uncovered.length > 0) console.error(reportUncovered(uncovered));
+  if (uncovered.length > 0) {
+    console.error(reportUncovered(uncovered, replay.coveredBy));
+  }
   if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);
   if (replay.failures.length > 0) {
     console.error(`\n${reportFailures(replay.failures)}`);

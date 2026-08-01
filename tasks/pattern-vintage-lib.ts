@@ -359,16 +359,51 @@ export function relativeToRepo(path: string, repoRoot: string): string {
  * built here and tested rather than assembled inline: a gate that fails with
  * an unclear message costs more than one that fails a little late.
  */
-export function reportUncovered(uncovered: readonly string[]): string {
+export function reportUncovered(
+  uncovered: readonly string[],
+  coveredBy: ReadonlyMap<string, string> = new Map(),
+): string {
+  // A pattern this run DID cover from some fixture is a different problem from
+  // one nothing covers, and the remedy differs: the first was replayed and
+  // then excluded (a served route, a fixture that lost its root), the second
+  // has no fixture to replay at all. Naming the test that covers it is only
+  // possible for the first, which is exactly why the mapping is derived from
+  // the run rather than kept in a list — a list cannot know either.
+  const known = uncovered.filter((key) => coveredBy.has(key));
+  const unknown = uncovered.filter((key) => !coveredBy.has(key));
   return [
     `${uncovered.length} auto-updating pattern(s) have no pinned vintage:`,
     "",
-    ...uncovered.map((key) => `  ${key}`),
+    ...uncovered.map((key) =>
+      coveredBy.has(key)
+        ? `  ${key}  (covered by ${coveredBy.get(key)})`
+        : `  ${key}`
+    ),
     "",
     "These patterns auto-update onto a root someone is already using, so a",
-    "change that cannot read the old state bricks that piece. Capture one with:",
-    "",
-    "  deno task pattern-vintage --update",
+    "change that cannot read the old state bricks that piece.",
+    ...(known.length > 0
+      ? [
+        "",
+        "A fixture DOES record the ones marked above, so they were replayed and",
+        "then not credited — a served route, or a fixture that no longer holds",
+        "the root. Read the failures above rather than recapturing.",
+      ]
+      : []),
+    ...(unknown.length > 0
+      ? [
+        "",
+        "No fixture records the rest, so there is nothing to replay for them.",
+        "Capture the TEST that instantiates one — a test path, not a pattern",
+        "path, because a fixture is produced by running a test:",
+        "",
+        "  deno task pattern-vintage --update <test path>",
+        "",
+        "e.g. `--update topics/topics.test.tsx`. Which test that is cannot be",
+        "derived: a test need not be named after what it drives, and nothing on",
+        "disk knows until a fixture exists.",
+      ]
+      : []),
   ].join("\n");
 }
 
@@ -431,47 +466,32 @@ export function reportReplaySummary(
 }
 
 /**
- * What `--update` prints when every seeded test already has a fixture.
+ * What `--update` prints when it was given no test to capture.
  *
- * It must say what was actually CHECKED. The required PATTERNS come from the
- * runtime's URL constants while the seed list is a hand-kept set of TEST keys,
- * so "every auto-updating pattern already has a pinned vintage" is a claim this
- * command cannot make: add a system pattern no seeded test instantiates and the
- * gate goes red telling you to run `--update`, which then reported everything
- * fine and exited 0 — a dead end whose message blamed the reader.
- *
- * Lives here rather than in the task shell because the shell is only reachable
- * through `import.meta.main` and so is never exercised by a test; a message
- * this load-bearing should be.
+ * There is deliberately no default set. A capture RUNS the named key as a
+ * test, and the only moment a default would help is when a fixture is missing
+ * — precisely when nothing on disk can say which test covers the pattern,
+ * because a test need not be named after what it drives. A hand-kept list
+ * looked like an answer and was a seam: the required PATTERNS derive from the
+ * runtime's URL constants, so adding one that no listed test instantiates left
+ * the gate red while this command reported everything fine and exited 0.
  */
-export function reportNothingToSeed(seededTestKeys: readonly string[]): string {
-  return `Every seeded test already has a pinned vintage (${
-    seededTestKeys.join(", ")
-  }). If the gate still reports a pattern uncovered, no seeded test ` +
-    `instantiates it — add the test that does to REQUIRED_TEST_KEYS in ` +
-    `tasks/pattern-vintage.ts, or pin its test explicitly with ` +
-    `\`--update <test path>\`.`;
+export function reportUpdateNeedsATestKey(): string {
+  return [
+    "`--update` needs the TEST to capture, and was given none.",
+    "",
+    "  deno task pattern-vintage --update <test path>",
+    "",
+    "e.g. `--update topics/topics.test.tsx`. It is a test path, not a pattern",
+    "path: a fixture is produced by RUNNING a test, and covers whatever that",
+    "test instantiates — routinely several patterns, none of which need share",
+    "its name.",
+    "",
+    "Every fixture already under packages/piece/test/vintages/ is replayed by",
+    "`deno task pattern-vintage` with no list anywhere, so a captured fixture",
+    "is covered from the moment it is committed.",
+  ].join("\n");
 }
-
-/**
- * The tests whose fixtures CI seeds by default.
- *
- * TEST keys, because a fixture is produced by running a test. The required
- * PATTERNS are still derived from the runtime's own URL constants — this list
- * only says which tests are known to cover them, which is not derivable: a test
- * need not be named after what it drives, and `topics/main.tsx` is tested by
- * `topics/topics.test.tsx`.
- *
- * Lives beside the rest of the coverage vocabulary rather than in the task
- * shell, which no test loads (it is reachable only through `import.meta.main`),
- * so the invariant every entry has to satisfy can be asserted.
- */
-export const REQUIRED_TEST_KEYS = [
-  "system/home.test.tsx",
-  "system/default-app.test.tsx",
-  "topics/topics.test.tsx",
-  "lunch-poll/main.test.tsx",
-];
 
 /** What the gate prints when it found no fixture to replay at all. */
 export function reportNothingReplayed(): string {

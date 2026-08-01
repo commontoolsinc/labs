@@ -12,12 +12,11 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
-  reportNothingToSeed,
   reportNoVerdict,
   reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
-  REQUIRED_TEST_KEYS,
+  reportUpdateNeedsATestKey,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
@@ -391,44 +390,57 @@ describe("reporting", () => {
     );
   });
 
-  it("seeds only TEST keys, which is what a capture can run", () => {
-    // A capture runs the key as a test. A pattern path names no test, so it
-    // captures nothing and the entry silently buys no coverage — the exact
-    // confusion the `--update` message now has to explain. Cheap to assert,
-    // and the list is hand-kept against the runtime's URL constants.
-    expect(REQUIRED_TEST_KEYS.length).toBeGreaterThan(0);
-    for (const key of REQUIRED_TEST_KEYS) {
-      expect(key, `${key} is not a test path`).toMatch(/\.test\.tsx$/);
-      // Repo-relative under `packages/patterns/`, never absolute or `../`.
-      expect(key.startsWith("/"), `${key} is absolute`).toBe(false);
-      expect(key.includes(".."), `${key} escapes the patterns root`).toBe(
-        false,
-      );
-    }
-    // No duplicates: a repeated key is a capture attempted twice.
-    expect(new Set(REQUIRED_TEST_KEYS).size).toBe(REQUIRED_TEST_KEYS.length);
+  it("refuses --update with no test named, and says what to name", () => {
+    // There is deliberately no default set. The only moment one would help is
+    // when a fixture is MISSING — precisely when nothing on disk can say which
+    // test covers the pattern, since a test need not be named after what it
+    // drives. The hand-kept list that used to stand in for that answer was a
+    // seam: the required PATTERNS derive from the runtime's URL constants, so
+    // adding one no listed test instantiated left the gate red while --update
+    // reported everything fine and exited 0.
+    const message = reportUpdateNeedsATestKey();
+
+    expect(message).toContain("--update <test path>");
+    // A concrete example, because "test path" alone is the thing people get
+    // wrong — a pattern path names no test and captures nothing.
+    expect(message).toContain("topics/topics.test.tsx");
+    expect(message).toContain("not a pattern");
+    // And the fact that removes the recurring confusion: nothing lists what
+    // CI replays, so committing a fixture is the whole of adding one.
+    expect(message).toContain("no list anywhere");
   });
 
-  it("says what --update actually checked, not what it cannot know", () => {
-    // The required PATTERNS come from the runtime's URL constants; the seed
-    // list is a hand-kept set of TEST keys. So "every auto-updating pattern
-    // already has a pinned vintage" is a claim this command cannot make — add a
-    // system pattern no seeded test instantiates and the gate goes red telling
-    // you to run --update, which then reported everything fine and exited 0.
-    const message = reportNothingToSeed([
-      "system/home.test.tsx",
-      "topics/topics.test.tsx",
-    ]);
+  it("tells an uncovered pattern apart from one that was merely not credited", () => {
+    // Two different problems with two different remedies. A pattern some
+    // fixture DID replay was excluded after the fact — a served route, or a
+    // fixture that no longer holds the root — and recapturing it fixes
+    // nothing. A pattern no fixture records has nothing to replay at all.
+    const both = reportUncovered(
+      ["system/home.tsx", "system/newcomer.tsx"],
+      new Map([["system/home.tsx", "system/home.test.tsx"]]),
+    );
 
-    expect(message).toContain("Every seeded test");
-    // It names the tests it checked, so the reader can see their pattern is
-    // not among them rather than concluding the gate is confused.
-    expect(message).toContain("system/home.test.tsx");
-    expect(message).toContain("topics/topics.test.tsx");
-    // ...and the remedy, which is the whole point: the old text left none.
-    expect(message).toContain("REQUIRED_TEST_KEYS");
-    // It must NOT claim anything about patterns being covered.
-    expect(message).not.toContain("auto-updating pattern");
+    // The known one is named WITH the test that covers it, so the reader can
+    // go look at that fixture rather than guessing.
+    expect(both).toContain(
+      "system/home.tsx  (covered by system/home.test.tsx)",
+    );
+    expect(both).toContain("replayed and");
+    // ...and the unknown one gets the capture instruction.
+    expect(both).toContain("--update <test path>");
+
+    // With everything already covered by some fixture, the capture advice must
+    // NOT appear — it would send a reader to recapture a fixture that exists.
+    const knownOnly = reportUncovered(
+      ["system/home.tsx"],
+      new Map([["system/home.tsx", "system/home.test.tsx"]]),
+    );
+    expect(knownOnly).not.toContain("--update <test path>");
+
+    // With none known, no fixture is named and the advice is the whole of it.
+    const unknownOnly = reportUncovered(["system/newcomer.tsx"], new Map());
+    expect(unknownOnly).not.toContain("covered by");
+    expect(unknownOnly).toContain("--update <test path>");
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {

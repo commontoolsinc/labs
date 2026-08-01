@@ -704,11 +704,22 @@ export async function replayAll(
     stranded: number;
     servedRoute: number;
     covered: Set<string>;
+    /**
+     * Which TEST's fixture replayed each covered pattern.
+     *
+     * Derived from the run rather than kept by hand: a fixture's manifest
+     * records the authored file of every instantiation, so the fixture tree
+     * already knows which test covers which pattern. It is what lets an
+     * uncovered-pattern failure name a concrete `--update` argument instead of
+     * a command that prints "already pinned" and exits 0.
+     */
+    coveredBy: Map<string, string>;
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
   const covered = new Set<string>();
+  const coveredBy = new Map<string, string>();
   let servedRoute = 0;
   let candidates = 0,
     targets = 0,
@@ -726,7 +737,12 @@ export async function replayAll(
     updated += report.updated;
     stranded += report.stranded;
     servedRoute += report.servedRoute;
-    for (const key of report.covered) covered.add(key);
+    for (const key of report.covered) {
+      covered.add(key);
+      // First fixture wins, and the walk is path-sorted, so the name a failure
+      // prints does not change run to run when two tests cover one pattern.
+      if (!coveredBy.has(key)) coveredBy.set(key, vintage.testKey);
+    }
     failures.push(...report.failures);
   }
   return {
@@ -740,6 +756,7 @@ export async function replayAll(
     stranded,
     servedRoute,
     covered,
+    coveredBy,
     failures,
   };
 }
