@@ -1234,6 +1234,41 @@ inferable from the fence site.
    has an unrelated namesake in `server-builtin-channel.ts` (a broker RPC error
    envelope) — also not the same thing.
 
+### 2.12 An async builtin must PUBLISH its own result — a wake will not come
+
+Found 2026-07-31 diagnosing two of main's `fetch-claim-takeover` cases red
+after the merge. The failure looked like a bad conflict resolution in the
+fetch builtins and was not: main's `fetch-program.ts` dropped in wholesale
+fails identically.
+
+**The arc's source-action propagation makes a continuation's commit the
+action's OWN commit, for the scheduler.** The post-commit outbox flushes each
+effect inside `runWithTransactionSourceAction(tx.sourceAction, …)`, and every
+`Runtime.edit()` underneath inherits it (`runtime.ts`, and
+`compile-and-run.ts` documents why: without it the writes are unattributable
+and no executor claim can cover them). So the transaction an async builtin's
+network result lands in carries the action as its `sourceAction`, and
+`processStorageNotification` classifies the change `skip-own-commit-source`
+(scheduler-v2 P5). **Measured: the writeback commits, the notification
+matches the trigger index, the action is never re-run.**
+
+Consequence for anyone writing or reviewing an async builtin: **the result
+must be written to the output cells by the continuation itself.** Every other
+one already does — `fetch.ts`'s `startFetch` takes `pending`/`result`/`error`
+and writes them; so do `llm`, `llmDialog`, `compileAndRun`, `sqliteQuery`.
+`fetchProgram` was the sole holdout (it wrote only its durable cache and let
+the action's next run project it), which is why it stranded `pending: true`
+with no result and no error, forever.
+
+**Do NOT fix this in the scheduler.** Exempting continuation transactions
+from P5 (flag the inherited lineage, require the un-flagged form to suppress)
+restores the pre-arc wake and fixes fetchProgram — and was measured to break
+four arc tests, because it also adds a redundant post-writeback re-run and an
+empty commit to every claimed builtin run: `runtime-host-for-space`'s llm
+broker case reads the LAST matching observation and gets the empty one, and
+both C2.8 lane e2e cases breach their barrier. Adjacent A/B, same three files:
+16/0 clean, 4 failed with the scheduler change.
+
 ---
 
 ## 3. Rules of engagement
