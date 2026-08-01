@@ -310,20 +310,22 @@ describe("Cell", () => {
     expect(result.length).toBe(4);
   });
 
-  it("should call toJSON() on arrays with toJSON method during set", () => {
+  it("should reject arrays carrying a toJSON method during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should call toJSON() on arrays with toJSON method during set",
+      "should reject arrays carrying a toJSON method during set",
       undefined,
       tx,
     );
     const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
     arrWithToJSON.toJSON = () => "custom-array-value";
-    c.set({ arr: arrWithToJSON });
 
-    const result = c.get() as { arr: unknown } | undefined;
-    // toJSON() should have been called
-    expect(result?.arr).toBe("custom-array-value");
+    // An array is answered by the array rule whatever it carries, and `toJSON`
+    // is a named own property, which that rule rejects. Converting by it would
+    // mean storing an array by the very property that disqualifies it.
+    expect(() => c.set({ arr: arrWithToJSON })).toThrow(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
   });
 
   it("should create a proxy for the cell", () => {

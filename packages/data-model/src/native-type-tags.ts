@@ -135,14 +135,23 @@ export function tagFromNativeClass(
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`,
- * which matches `Error` subclasses via `prototype instanceof Error`). Falls
- * back to native error detection and `Array.isArray()` for values whose
- * constructor is unreachable -- a severed prototype, or another realm -- and
- * to a prototype check for null-prototype objects.
+ * An array answers `Array` before anything else is consulted, `toJSON()`
+ * included. `Array.isArray()` is realm-agnostic and sees through both a
+ * subclass and a severed prototype, so every array-shaped value reaches array
+ * handling and is answered by the array rule, which alone decides what an
+ * array may be. Nothing an array carries can route it elsewhere: a `toJSON()`
+ * method is a named own property, which that rule rejects anyway, so honoring
+ * it here would mean converting a value by the very property that disqualifies
+ * it.
  *
- * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
- * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
+ * Otherwise dispatches via the value's constructor (O(1) switch in
+ * `tagFromNativeClass`, which matches `Error` subclasses via
+ * `prototype instanceof Error`), falling back to native error detection for
+ * values whose constructor is unreachable -- a severed prototype, or another
+ * realm -- and to a prototype check for null-prototype objects.
+ *
+ * For tags that have pass-through handling (`Object`) or no dedicated handler
+ * (`null`), a per-instance `hasToJSON()` check upgrades the tag to
  * `HasToJSON`. Dedicated types (`Error`, `Date`, `Map`, etc.) and `HasToJSON` from
  * `tagFromNativeClass()` are returned as-is.
  */
@@ -150,6 +159,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (value === null || typeof value !== "object") {
     return NATIVE_TAGS.Primitive;
   }
+
+  // Arrays first, and unconditionally: see above.
+  if (Array.isArray(value)) {
+    return NATIVE_TAGS.Array;
+  }
+
   // Guard: null-prototype objects or exotic objects may not have a function
   // constructor.
   const ctor = value.constructor;
@@ -162,9 +177,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   // `tagFromNativeClass()` handles dedicated types (`Error`, `Date`, `Map`, etc.) and
   // returns `HasToJSON` for classes whose prototype has `toJSON()`. For those,
   // return immediately -- no instance-level override needed.
-  if (
-    tag !== null && tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.Array
-  ) {
+  if (tag !== null && tag !== NATIVE_TAGS.Object) {
     return tag;
   }
 
@@ -179,20 +192,15 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
-    // Cross-realm arrays may have a different constructor.
-    if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
-
     // Null-prototype objects (`Object.create(null)`).
-    if (tag === null) {
-      const proto = Object.getPrototypeOf(value);
-      if (proto === null) tag = NATIVE_TAGS.Object;
-    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null) tag = NATIVE_TAGS.Object;
   }
 
-  // For `Object`, `Array`, and still-null tags: a per-instance `toJSON()` method
+  // For `Object` and still-null tags: a per-instance `toJSON()` method
   // overrides to `HasToJSON`. This catches plain objects with `toJSON()` as an own
-  // property, arrays with `toJSON()` added, and unrecognized class instances
-  // whose prototype wasn't caught by `tagFromNativeClass()`.
+  // property, and unrecognized class instances whose prototype wasn't caught by
+  // `tagFromNativeClass()`.
   if (hasToJSON(value)) return NATIVE_TAGS.HasToJSON;
 
   return tag;

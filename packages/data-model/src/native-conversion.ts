@@ -299,7 +299,8 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.HasToJSON: {
-      // Objects (or arrays/class instances) with a `toJSON()` method.
+      // Objects (or class instances) with a `toJSON()` method. Arrays never
+      // reach here: they are tagged `Array` whatever they carry.
       // Call `toJSON()` and validate the result.
       const converted = (value as { toJSON: () => unknown }).toJSON();
       if (!isFabricValueLayer(converted)) {

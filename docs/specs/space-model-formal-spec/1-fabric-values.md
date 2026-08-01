@@ -1186,9 +1186,13 @@ Section 4.5.
 - Direct `Array` instances only: the prototype must be `Array.prototype`
   itself. An `Array` subclass instance, an array whose prototype has been
   severed or replaced, and an array from another realm all cause rejection,
-  because a prototype is live code rather than an inert value — an overridden
-  `Symbol.iterator`, say, makes iteration answer differently than the indices
-  do — and no prototype has any representation as array content
+  because an array's prototype has no representation as array content, so
+  accepting one could only mean dropping it silently. A subclass prototype is
+  live code besides — an overridden `Symbol.iterator`, say, makes iteration
+  answer differently than the indices do, and freezing the array does not
+  change that. (Plain objects are treated differently on this point: see the
+  object rule below, which admits a null prototype and normalizes it on
+  reconstruction.)
 - May be dense or sparse
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
@@ -2907,7 +2911,10 @@ boundary-only serialization and the three-layer architecture:
 > **`toJSON()` compatibility and migration.** The conversion functions and their
 > variants currently honor `toJSON()` methods on objects that have them — if an
 > object has a `toJSON()` method and does not implement `FabricInstance`, the
-> conversion functions call `toJSON()` and process the result. This preserves
+> conversion functions call `toJSON()` and process the result. Arrays are
+> outside this: an array is answered by the array rule of Section 1.5 whatever
+> it carries, and `toJSON` is a named own property, which that rule rejects.
+> This preserves
 > backward compatibility with existing code. However, `toJSON()` support is
 > **marked for removal**: it eagerly converts to JSON-compatible shapes, which
 > is incompatible with late serialization. Implementors should migrate to the
@@ -3068,13 +3075,14 @@ export function fabricFromNativeValue(
 > single constructor lookup that returns a tag string (e.g., `"Error"`,
 > `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
 > `"FabricInstance"`). The conversion function then switches on the tag to
-> route to the appropriate wrapping logic. Fallback paths handle exotic Error
-> subclasses (via `Error.isError()`), arrays whose constructor is unreachable
-> or foreign (via `Array.isArray()`), null-prototype objects, and objects with
-> `toJSON()` methods. Dispatch classifies more broadly than the type admits:
-> tagging a subclass instance or a cross-realm array as `"Array"` is what lets
-> the array rule of Section 1.5 reject it by name, rather than as some
-> unrecognized class.
+> route to the appropriate wrapping logic. An array is the exception to the
+> constructor lookup: `Array.isArray()` is consulted first and answers
+> `"Array"` unconditionally, so a subclass instance, a severed-prototype array,
+> and a cross-realm array all reach array handling and are answered by the
+> array rule of Section 1.5, rather than being rejected as some unrecognized
+> class or routed elsewhere by something the array carries. Fallback paths
+> handle exotic Error subclasses (via `Error.isError()`), null-prototype
+> objects, and objects with `toJSON()` methods.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in
