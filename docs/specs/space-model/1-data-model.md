@@ -57,14 +57,15 @@ authoritative statement of these rules.
 
 #### Objects
 
-- Plain objects only (no class instances)
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself, so class instances and null-prototype objects alike cause rejection
 - Keys must be strings; symbol keys cause rejection as non-fabric
 - Every property must be an enumerable *data* property; accessor-backed
   (getter and/or setter) and non-enumerable properties cause rejection as
   non-fabric
 - Values must be valid fabric values
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- Reconstruction produces regular plain objects, which is the only object
+  shape a fabric value has
 
 ### Special Values
 
@@ -459,8 +460,8 @@ The system aims for an **immutable-forward** design:
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects
+- Reconstruction always produces regular plain objects, that being the only
+  object shape a fabric value has
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.

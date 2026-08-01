@@ -1193,9 +1193,8 @@ Section 4.5.
   accepting one could only mean dropping it silently. A subclass prototype is
   live code besides — an overridden `Symbol.iterator`, say, makes iteration
   answer differently than the indices do, and freezing the array does not
-  change that. (Plain objects are treated differently on this point: see the
-  object rule below, which admits a null prototype and normalizes it on
-  reconstruction.)
+  change that. Plain objects are governed by the same principle; see the
+  object rule below.
 - May be dense or sparse
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
@@ -1231,7 +1230,12 @@ Section 4.5.
 > `3-json-encoding.md` for the specific JSON encoding and examples.
 
 **Objects:**
-- Plain objects only (class instances must implement the fabric protocol)
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself. A class instance must implement the fabric protocol, and a
+  null-prototype object causes rejection, for the reason arrays give above — a
+  prototype has no representation as object content, so accepting one could
+  only mean dropping it silently. A record therefore has exactly one shape,
+  the one the natural syntax produces
 - Keys must be strings; symbol-keyed *properties* cause rejection (this
   is distinct from symbol *values*, which are admitted per Section 1.2
   with the runtime restriction in Section 1.3)
@@ -1242,8 +1246,8 @@ Section 4.5.
   name-driven copying or serialization
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- Reconstruction produces regular plain objects, which is the only object
+  shape a fabric value has
 
 ### 1.6 Circular References and Shared References
 
@@ -1851,8 +1855,8 @@ The system follows an **immutable-forward** design:
   boundary, not of whether type-tag reconstruction occurred.
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects.
+- Reconstruction always produces regular plain objects, that being the only
+  object shape a fabric value has.
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
@@ -3087,7 +3091,10 @@ export function fabricFromNativeValue(
 > array rule of Section 1.5, rather than being rejected as some unrecognized
 > class or routed elsewhere by something the array carries. Fallback paths
 > handle exotic Error subclasses (via `Error.isError()`), null-prototype
-> objects, and objects with `toJSON()` methods.
+> objects, and objects with `toJSON()` methods. Tagging a null-prototype
+> object `"Object"` classifies more broadly than the type admits, for the same
+> reason the array tag does: it is what lets the object rule of Section 1.5
+> reject the value by name rather than as some unrecognized class.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

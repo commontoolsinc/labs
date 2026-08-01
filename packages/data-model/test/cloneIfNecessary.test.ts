@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { cloneIfNecessary, type CloneOptions } from "@/fabric-value.ts";
+import {
+  cloneIfNecessary,
+  type CloneOptions,
+  isFabricValue,
+} from "@/fabric-value.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { isDeepFrozen, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -304,54 +308,59 @@ describe("cloneIfNecessary", () => {
     });
   });
 
-  describe(`\`null\` prototype preservation`, () => {
-    it("preserves `null` prototype on objects", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.a = 1;
-      value.b = "two";
-      const result = cloneIfNecessary(
-        value as FabricValue,
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.a).toBe(1);
-      expect(result.b).toBe("two");
-      expect(Object.isFrozen(result)).toBe(true);
+  describe(`\`null\` prototype canonicalization`, () => {
+    // A null-prototype object is not a `FabricValue`, so none can arrive here
+    // by any validating route. Should one reach this function anyway, the
+    // clone leaves in the shape a fabric record has -- the same canonicalizing
+    // answer the array case gives an `Array` subclass -- rather than
+    // propagating a shape the model has no representation for.
+    function nullProto(
+      fields: Record<string, unknown>,
+    ): Record<string, unknown> {
+      return Object.assign(
+        Object.create(null) as Record<string, unknown>,
+        fields,
+      );
+    }
+
+    for (
+      const [label, opts] of [
+        ["deep and frozen", undefined],
+        ["deep and unfrozen", { frozen: false }],
+        ["shallow and frozen", { deep: false }],
+        ["shallow and unfrozen", { frozen: false, deep: false }],
+      ] as const
+    ) {
+      it(`re-roots a null-prototype object, ${label}`, () => {
+        const value = nullProto({ a: 1, b: "two" });
+        const result = cloneIfNecessary(
+          value as FabricValue,
+          opts as CloneOptions | undefined,
+        ) as Record<string, unknown>;
+
+        expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+        expect(result.a).toBe(1);
+        expect(result.b).toBe("two");
+        expect(Object.isFrozen(result)).toBe(opts?.frozen !== false);
+      });
+    }
+
+    it("re-roots a nested null-prototype object on a deep clone", () => {
+      const value = { child: nullProto({ v: 42 }) };
+      const result = cloneIfNecessary(value as FabricValue) as {
+        child: Record<string, unknown>;
+      };
+
+      expect(Object.getPrototypeOf(result.child)).toBe(Object.prototype);
+      expect(result.child.v).toBe(42);
     });
 
-    it("preserves `null` prototype when `frozen=false`", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.x = 42;
-      const result = cloneIfNecessary(
-        value as FabricValue,
-        { frozen: false },
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.x).toBe(42);
-      expect(Object.isFrozen(result)).toBe(false);
-    });
-
-    it("preserves `null` prototype on shallow clone", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.a = 1;
-      const result = cloneIfNecessary(
-        value as FabricValue,
-        { deep: false },
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.a).toBe(1);
-      expect(Object.isFrozen(result)).toBe(true);
-    });
-
-    it("preserves `null` prototype on shallow clone when `frozen=false`", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.b = 2;
-      const result = cloneIfNecessary(
-        value as FabricValue,
-        { frozen: false, deep: false },
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.b).toBe(2);
-      expect(Object.isFrozen(result)).toBe(false);
+    it("produces a value `isFabricValue()` accepts", () => {
+      // The point of canonicalizing: what comes out is a member of the type,
+      // where the input was not.
+      const value = nullProto({ a: 1 });
+      expect(isFabricValue(value)).toBe(false);
+      expect(isFabricValue(cloneIfNecessary(value as FabricValue))).toBe(true);
     });
   });
 

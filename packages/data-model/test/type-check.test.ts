@@ -66,12 +66,6 @@ describe("type-check", () => {
         expect(isFabricValueLayer({ nested: { object: true } })).toBe(true);
       });
 
-      it("returns `true` for a null-prototype object", () => {
-        const obj = Object.create(null) as Record<string, unknown>;
-        obj.a = 1;
-        expect(isFabricValueLayer(obj)).toBe(true);
-      });
-
       it("returns `true` for a dense array", () => {
         expect(isFabricValueLayer([])).toBe(true);
         expect(isFabricValueLayer([1, 2, 3])).toBe(true);
@@ -151,7 +145,17 @@ describe("type-check", () => {
       it("returns `true` for an object whose keys are all enumerable strings", () => {
         expect(isFabricValueLayer({ a: 1, b: 2 })).toBe(true);
         expect(isFabricValueLayer({})).toBe(true);
-        expect(isFabricValueLayer(Object.create(null))).toBe(true);
+      });
+
+      it("returns `false` for a null-prototype object", () => {
+        // A record has one shape here: `Object.prototype`-rooted. A prototype
+        // is not part of what a value says as data and would not survive
+        // encoding, so a value carrying a different one is refused rather than
+        // accepted and quietly changed.
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.a = 1;
+        expect(isFabricValueLayer(obj)).toBe(false);
+        expect(isFabricValueLayer(Object.create(null))).toBe(false);
       });
     });
 
@@ -284,10 +288,12 @@ describe("type-check", () => {
         expect(isFabricValue({ nested: { deeply: { value: 1 } } })).toBe(true);
       });
 
-      it("returns `true` for a null-prototype object", () => {
+      it("returns `false` for a null-prototype object, at any depth", () => {
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
-        expect(isFabricValue(obj)).toBe(true);
+        expect(isFabricValue(obj)).toBe(false);
+        expect(isFabricValue({ nested: obj })).toBe(false);
+        expect(isFabricValue([obj])).toBe(false);
       });
 
       it("returns `false` for an object with a symbol-keyed property", () => {

@@ -3,8 +3,8 @@
  */
 
 /**
- * Indicates whether the given value is an *inert* plain object -- prototype
- * `Object.prototype` or `null`, every own property an enumerable
+ * Indicates whether the given value is an *inert* plain object -- a direct
+ * instance of `Object`, every own property an enumerable
  * string-keyed *data* property -- which is what "plain object" means in this
  * system. Symbol keys and non-enumerable string keys cause rejection,
  * whether or not they carry data, because neither has any representation as
@@ -14,6 +14,16 @@
  * enumerable string, because it makes the object non-inert: an accessor is
  * live code, a read of which executes it and can answer differently every
  * time -- and freezing the object does not change that.
+ *
+ * "Direct instance" means the prototype is `Object.prototype` exactly, so a
+ * null-prototype object is rejected along with every class instance. A
+ * prototype is not part of what an object says as data: it has no
+ * representation in any encoding, so a record that crosses a storage boundary
+ * comes back `Object.prototype`-rooted whatever it went in as. Accepting a
+ * null-prototype object would therefore mean carrying a distinction that
+ * exists only in memory and stops existing at the first boundary. A caller
+ * holding one and meaning to shed it can say so with
+ * `shallowCleanPlainObject()`, which rebuilds the record `Object`-rooted.
  *
  * Anything that isn't a plain object is rejected, class instances and arrays
  * included, which also makes this function total: it answers rather than
@@ -31,8 +41,7 @@ export function isInertPlainObject(
     return false;
   }
 
-  const proto = Object.getPrototypeOf(value);
-  if (!((proto === Object.prototype) || (proto === null))) {
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
     return false;
   }
 

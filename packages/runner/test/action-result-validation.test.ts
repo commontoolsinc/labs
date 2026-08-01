@@ -94,6 +94,27 @@ describe("normalizeSandboxResult", () => {
     expect(value.first).not.toBe(shared);
   });
 
+  it("re-roots a bare null-prototype record, nested included", () => {
+    // `Object.create(null)` is an ordinary way to build a dictionary, and a
+    // pattern may return one. This boundary is a canonicalizing copy, so it
+    // leaves in the one shape a fabric record has, rather than being carried
+    // across intact and refused later by the conversion functions.
+    const inner = Object.create(null) as Record<string, unknown>;
+    inner.v = 42;
+    const outer = Object.create(null) as Record<string, unknown>;
+    outer.child = inner;
+    outer.a = 1;
+
+    const normalized = normalizeSandboxResult(outer);
+    const value = normalized.value as Record<string, unknown>;
+
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(value.a).toBe(1);
+    const child = value.child as Record<string, unknown>;
+    expect(Object.getPrototypeOf(child)).toBe(Object.prototype);
+    expect(child.v).toBe(42);
+  });
+
   it("rejects custom instances with null-rooted prototypes", () => {
     class NullRooted {
       value = 1;
