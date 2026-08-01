@@ -167,7 +167,8 @@ async function observeSqliteQuery(
     // `sqliteQuery` consults the sink gate BEFORE it flushes
     // (`sqlite-builtins.ts:859`), so this whole file needs a runtime that may
     // egress. It stands in for the executor, which is the only party that runs
-    // this effect at all now that a runtime declaring nothing is "suppress" —
+    // this effect at all now that a runtime declaring nothing is "suppress"
+    // under the `serverPrimaryExecution` this file enables —
     // and without it BOTH tests below go quiet rather than red: the second
     // never reaches `provider.sqliteQuery`, and the first still passes but
     // stops judging the post-commit writeback it claims to cover.

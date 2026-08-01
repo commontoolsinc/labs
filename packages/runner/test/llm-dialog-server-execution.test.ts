@@ -282,9 +282,12 @@ describe("llmDialog server-side execution", () => {
     );
 
     // BOTH peers declare egress authority — that is what "unsuppressed" means
-    // now that a runtime declaring nothing is "suppress". The scenario the
-    // comment above describes (two browser tabs, flag off) can no longer
-    // produce it, but the guard is unchanged in substance and is if anything
+    // in the server-primary configuration, where a runtime declaring nothing
+    // is "suppress". The scenario the comment above describes (two browser
+    // tabs, flag off) can still produce it — the flag-off default is
+    // "claim-conditional" — but declaring it here keeps the guard from
+    // depending on which default the flag selects, and the guard is unchanged
+    // in substance and is if anything
     // more load-bearing: two runtimes that each MAY egress must still issue
     // exactly one request, and the only thing stopping the second is the
     // document-level turn claim. A suppressed peer here would satisfy

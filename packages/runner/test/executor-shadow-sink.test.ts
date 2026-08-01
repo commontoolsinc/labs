@@ -152,12 +152,17 @@ Deno.test("externalSinkDisposition is idempotent across a server-executor policy
 //
 // The posture under test is "claim-conditional", DECLARED — and that is the
 // whole of what changed here. It used to be reached by declaring nothing,
-// which no longer works: the terminal flip made the default "suppress", and a
-// suppress-configured runtime returns from the gate's first branch without
+// which no longer works in the configuration this test runs in: under
+// `serverPrimaryExecution` the terminal flip made the default "suppress", and
+// a suppress-configured runtime returns from the gate's first branch without
 // ever consulting `executionEffectAuthority`. It would still pass this test,
-// and for a reason with nothing to do with forgery. Claim-conditional is the
-// only posture in which the forged field is reachable at all, so it is the
-// only posture in which this guard discriminates.
+// and for a reason with nothing to do with forgery. Declaring it also means
+// the guard no longer depends on WHICH default the flag selects — with the
+// flag off the default is "claim-conditional" again, and a test that relied
+// on that would be reading the right answer off the wrong configuration.
+// Claim-conditional is the only posture in which the forged field is
+// reachable at all, so it is the only posture in which this guard
+// discriminates.
 Deno.test("server-executor authority cannot be forged through tx.executionEffectAuthority", async () => {
   const signer = await Identity.fromPassphrase(
     "client forges server executor authority",
@@ -284,7 +289,9 @@ Deno.test("post-commit builtin continuations inherit their source action", async
 
 // The double-egress guard. Its posture is "claim-conditional", DECLARED —
 // see the note on the forgery guard above for why declaring nothing no longer
-// reaches it. Read the two legs as before-and-after, because the difference is
+// reaches it under `serverPrimaryExecution`, and why declaring it is what
+// keeps the guard independent of which default the flag selects.
+// Read the two legs as before-and-after, because the difference is
 // the arc's whole point: the claim-conditional leg is passive BECAUSE it
 // observed an exact claim, and the claimless leg is passive FULL STOP. The
 // second is not a weaker version of the first; it is what the first was a
