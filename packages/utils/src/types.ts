@@ -86,7 +86,16 @@ export function isFiniteNumber(value: unknown): boolean {
 }
 
 /**
- * Check whether a value is a plain object.
+ * Check whether a value is a plain object: prototype `Object.prototype` or
+ * `null`, with no constraint on its properties.
+ *
+ * This is the shape question -- "may I read this by property name?" -- and is
+ * deliberately looser than what the data model admits as a record. For that,
+ * see `isInertPlainObject()`, which requires a direct `Object` instance whose
+ * every own property is an enumerable string-keyed data property. A
+ * null-prototype object answers `true` here and `false` there, and both
+ * answers are right for their own question.
+ *
  * @param value - The value to check
  * @returns True if the value is a plain object
  */

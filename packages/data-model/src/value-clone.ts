@@ -216,9 +216,12 @@ export function cloneHelper(
       if (canReturnAsIs(value)) return value;
       const obj = value as object;
       if (deep) seen = trackForCircularity(obj, seen);
-      // Preserve null prototypes (e.g. `Object.create(null)`).
-      const proto = Object.getPrototypeOf(obj);
-      const copy = Object.create(proto) as Record<string, FabricValue>;
+      // A clone is built in the shape a fabric record has, the same way the
+      // array case above builds a fresh `Array`. Valid input is already
+      // `Object.prototype`-rooted, so this changes nothing for it; input that
+      // reached here carrying some other prototype leaves canonical rather
+      // than propagating a shape no fabric value has.
+      const copy = {} as Record<string, FabricValue>;
       if (deep) {
         for (const [key, val] of Object.entries(obj)) {
           copy[key] = cloneHelper(

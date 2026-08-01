@@ -118,9 +118,10 @@ export function shallowCleanArray(
  * the rejection happen ("death before confusion").
  *
  * The result is always `Object.prototype`-based, so a null-prototype input
- * comes back with an ordinary prototype. That is not a loss here: the fabric
- * model draws no distinction between the two, and reconstruction produces
- * ordinary plain objects either way.
+ * comes back with an ordinary prototype. That re-rooting is the point for such
+ * an input: a fabric record has exactly one shape, so this is how a caller
+ * holding a null-prototype object says it means to shed the prototype rather
+ * than have the conversion functions refuse the value.
  *
  * @param value The object to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
@@ -538,10 +539,9 @@ function fabricFromNativeValueInternal(
     result = resultArray;
   } else {
     // Recurse into object properties. Preserve `undefined`-valued properties.
-    // Use `Object.create()` to preserve null prototypes (`Object.fromEntries()`
-    // always produces `Object.prototype`-backed results).
-    const proto = Object.getPrototypeOf(value);
-    const obj = Object.create(proto) as Record<string, FabricValue>;
+    // The result is `Object.prototype`-rooted, which is the shape a fabric
+    // record has and the only one an accepted input can carry.
+    const obj = {} as Record<string, FabricValue>;
     for (const [key, val] of Object.entries(value)) {
       obj[key] = fabricFromNativeValueInternal(
         val,
