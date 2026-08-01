@@ -832,6 +832,7 @@ const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
 function closedWorldEventRejection(
   argumentSchema: JSONSchema | undefined,
   event: unknown,
+  runtimeInjectedEventKeys?: readonly string[],
 ): string | undefined {
   if (event === undefined) return undefined;
   if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
@@ -844,27 +845,30 @@ function closedWorldEventRejection(
     (isRecord(refTarget) && refTarget.additionalProperties === false);
   if (!closed) return undefined;
 
-  // The LLM tool-call path injects a `result` cell into every handler-tool
-  // payload (`builtins/llm-dialog.ts`: `handler.send({ ...input, result })` —
-  // "doesn't HAVE to be used, but can be"), and the advertised schema
-  // deliberately hides the slot (`stripInjectedResult` there; the CLI's
-  // `cloneWithoutBoundToolKeys` does the same), so a closed schema that does
-  // not declare `result` still receives it — invisibly to the handler, since
-  // the schema read path never delivers undeclared fields. Judge the payload
-  // without the injected slot: refusing a field the runtime itself injected
-  // would reject every closed-schema tool call. Only the injected SHAPE is
-  // exempt — an undeclared `result` carrying plain data is still a rejection.
+  // The runtime itself merges keys into some payloads — the LLM tool-call
+  // path injects a `result` cell (`builtins/llm-dialog.ts`:
+  // `handler.send({ ...input, result })`, hidden from the advertised schema
+  // by `stripInjectedResult` there and `cloneWithoutBoundToolKeys` in the
+  // CLI) — and the gate must not refuse a field the runtime injected. The
+  // exemption is PROVENANCE, not shape: the injection site names its keys
+  // through the send's internal options, which travel out-of-band to
+  // `tx.dispatchedRuntimeInjectedEventKeys`, so payload DATA can never claim
+  // it — a caller-supplied `result`, cell-link-valued or not, arrives
+  // unmarked and is judged like any other undeclared field. (A shape rule —
+  // "any link-valued `result` passes" — would let every caller smuggle an
+  // undeclared key past closed-world by supplying a link, recreating the
+  // accepted-and-ignored behavior this gate exists to kill.) Marked keys are
+  // the runtime's, not the caller's, so they are excluded from judgment
+  // entirely; the handler never sees an undeclared one either way — the
+  // schema read path only delivers declared fields.
   let payload: unknown = event;
   if (
-    isRecord(event) &&
-    isCellLink((event as Record<string, unknown>).result) &&
-    !(isRecord(refTarget) && isRecord(refTarget.properties) &&
-      Object.hasOwn(refTarget.properties, "result"))
+    runtimeInjectedEventKeys !== undefined &&
+    runtimeInjectedEventKeys.length > 0 &&
+    isRecord(event)
   ) {
-    const { result: _injectedResult, ...rest } = event as Record<
-      string,
-      unknown
-    >;
+    const rest = { ...(event as Record<string, unknown>) };
+    for (const key of runtimeInjectedEventKeys) delete rest[key];
     payload = rest;
   }
 
@@ -5257,6 +5261,7 @@ export class Runner {
       const closedWorldRejection = closedWorldEventRejection(
         module.argumentSchema,
         event,
+        tx.dispatchedRuntimeInjectedEventKeys,
       );
       if (closedWorldRejection !== undefined) {
         throw new Error(closedWorldRejection);

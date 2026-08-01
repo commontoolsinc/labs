@@ -356,13 +356,19 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   into every handler-tool payload (`llm-dialog.ts` sends
   `{ ...input, result }` and hides the slot from the advertised schema via
   `stripInjectedResult`; the CLI's `cloneWithoutBoundToolKeys` does the
-  same), so the gate exempts an undeclared link-valued `result` slot — the
-  runtime cannot refuse a field the runtime itself injected, and the
-  unmodified gate rejected every closed-schema tool call in the CFC
-  integrity suites. Only the injected shape is exempt; an undeclared
-  `result` carrying plain data still rejects. Pinned in
-  `packages/runner/test/scheduler-event-receipts.test.ts`
-  ("closed-world event schemas at dispatch"). What stopped: emitting
+  same) — the runtime cannot refuse a field the runtime itself injected,
+  and the unmodified gate rejected every closed-schema tool call in the CFC
+  integrity suites. The exemption is PROVENANCE, not shape (review,
+  2026-07-31): the injection site names its keys through the send's
+  internal options (`runtimeInjectedEventKeys`, cell.ts
+  `StreamSendOptions`), which travel out-of-band through the queued event
+  to the dispatch transaction
+  (`tx.dispatchedRuntimeInjectedEventKeys`) — payload data can never
+  express them, so a caller-supplied `result`, cell-link-valued or not,
+  arrives unmarked and is refused like any other undeclared field. Pinned
+  both ways in `packages/runner/test/scheduler-event-receipts.test.ts`
+  ("closed-world event schemas at dispatch"), and end-to-end by the CFC
+  tool-integrity suites, which dispatch through the real injection site. What stopped: emitting
   `additionalProperties: false` on generated event schemas fails
   `deno task pattern-compat` — the update gate judges a stream property
   under its enclosing role, and the argument-role additionalProperties rule

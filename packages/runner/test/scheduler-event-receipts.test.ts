@@ -1608,14 +1608,17 @@ describe("scheduler event receipts", () => {
       expect(receipt.get()).toEqual({});
     });
 
-    it("exempts the runtime-injected result slot from closure", async () => {
+    it("exempts a runtime-injected key named by the send's provenance marker", async () => {
       // The LLM tool-call path sends `{ ...input, result: <cell> }` to a
       // handler tool and deliberately hides the slot from the advertised
       // schema (llm-dialog `stripInjectedResult`, CLI
       // `cloneWithoutBoundToolKeys`), so a closed schema that does not
-      // declare `result` still receives it. The gate must not refuse a field
-      // the runtime itself injected; the handler never sees it either way —
-      // the schema read path only delivers declared fields.
+      // declare `result` still receives it. The injection site names its key
+      // through the send's internal options (`runtimeInjectedEventKeys`),
+      // which travel out-of-band to the dispatch transaction — provenance,
+      // not shape. The gate exempts exactly the marked keys; the handler
+      // never sees the slot either way — the schema read path only delivers
+      // declared fields.
       const { root, observed } = runClosedVerbRoot("closed injected root", {
         type: "object",
         properties: { value: { type: "number" } },
@@ -1635,12 +1638,14 @@ describe("scheduler event receipts", () => {
       const eventId = "evt:closed-injected:0:closed-injected-root";
       const streamCell = root.key("stream") as Cell<unknown>;
       const commitStatus = new Promise<string>((resolve) => {
-        // Through cell.send so the payload takes the real dispatch shape:
-        // convertCellsToLinks turns the cell into the link the gate sees.
+        // Through cell.send so the payload takes the real dispatch shape
+        // (convertCellsToLinks turns the cell into a link) and the marker
+        // takes the real injection route (send options → queued event →
+        // dispatch transaction).
         streamCell.send(
           { value: 7, result: resultHolder },
           (t: IExtendedStorageTransaction) => resolve(t.status().status),
-          { eventId },
+          { eventId, runtimeInjectedEventKeys: ["result"] },
         );
       });
 
@@ -1649,16 +1654,24 @@ describe("scheduler event receipts", () => {
       expect(observed.events).toEqual([{ value: 7 }]);
     });
 
-    it("still rejects an undeclared result slot carrying plain data", async () => {
-      // Only the injected SHAPE (a cell link) is exempt: a caller that typos
-      // a data field as `result` is inside the closed world like any other
-      // undeclared field.
+    it("rejects an UNMARKED result slot even when it carries a cell link", async () => {
+      // Shape is not provenance: a caller cannot smuggle an undeclared key
+      // past closed-world by supplying a link-valued `result` — only the
+      // runtime's own injection site can mark the key, through the internal
+      // send options that payload data can never express. Unmarked, the slot
+      // is an undeclared field like any other.
       const { root, observed } = runClosedVerbRoot("closed forged root", {
         type: "object",
         properties: { value: { type: "number" } },
         required: ["value"],
         additionalProperties: false,
       });
+      const smuggled = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed forged smuggled holder",
+        undefined,
+        tx,
+      );
       await tx.commit();
       tx = runtime.edit();
       await root.pull();
@@ -1669,13 +1682,11 @@ describe("scheduler event receipts", () => {
       });
 
       const eventId = "evt:closed-forged:0:closed-forged-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
       const commitStatus = new Promise<string>((resolve) => {
-        runtime.scheduler.queueEvent(
-          resolvedStreamLink(root.key("stream"), runtime),
-          { value: 7, result: { note: "not a link" } },
-          undefined,
-          (commitTx) => resolve(commitTx.status().status),
-          false,
+        streamCell.send(
+          { value: 7, result: smuggled },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
           { eventId },
         );
       });

@@ -1057,6 +1057,18 @@ export interface IExtendedStorageTransaction
   dispatchedEventId?: string;
 
   /**
+   * Payload keys the RUNTIME itself injected into the dispatched event's
+   * value (e.g. the LLM tool-call path's `result` cell). Set by the
+   * scheduler's event dispatch from the send's internal options; consumed by
+   * the runner's closed-world gate to exempt exactly these keys from an
+   * `additionalProperties: false` event schema. Provenance, not shape: the
+   * marker travels out-of-band from the injection site, so payload DATA can
+   * never claim it — a caller-supplied `result` field, link-valued or not,
+   * arrives unmarked and is judged like any other undeclared field.
+   */
+  dispatchedRuntimeInjectedEventKeys?: readonly string[];
+
+  /**
    * The durable address of this handling's result/receipt cell (spec §7.6:
    * "the receipt is the handling's result cell"). Set by the runner when a
    * handler's outcome is written; consumed by a sender's commit callback to

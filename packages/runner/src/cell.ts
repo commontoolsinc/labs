@@ -275,6 +275,29 @@ export const recordRelevantSchemaWritePolicyInput = (
 };
 
 /**
+ * Internal-only stream-send options.
+ *
+ * `eventId` is a caller-supplied durable event id (verb contract WS-D): a
+ * same-id retry collides on the handling's create-only receipt.
+ *
+ * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
+ * into this send's event value (the LLM tool-call path injects a `result`
+ * cell: `builtins/llm-dialog.ts` sends `{ ...input, result }`). The
+ * dispatch-side closed-world gate exempts exactly these keys — and only
+ * these — from an `additionalProperties: false` event schema. The marker is
+ * PROVENANCE, not shape, and must stay unforgeable from payload data: it
+ * rides this in-process options argument, never the event value, so no
+ * remote or CLI caller can express it — payloads are plain data, and the
+ * CLI's send surface (`CallableCellLike.send`, packages/cli/lib/callable.ts)
+ * forwards only `eventId`. Adding a way to set it from serialized input
+ * would reopen the accepted-and-ignored hole C5 closes.
+ */
+export type StreamSendOptions = {
+  eventId?: string;
+  runtimeInjectedEventKeys?: readonly string[];
+};
+
+/**
  * Module augmentation for runtime-specific cell methods.
  * These augmentations add implementation details specific to the runner runtime.
  */
@@ -287,14 +310,18 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
-      sendOptions?: { eventId?: string },
+      sendOptions?: {
+        eventId?: string;
+        runtimeInjectedEventKeys?: readonly string[];
+      },
     ): C;
   }
 
   /**
    * Augment Streamable to add onCommit callback and internal send-options
-   * support (`eventId` — caller-supplied durable event id, verb contract
-   * WS-D). Event is optional only when T is void (matching public API).
+   * support (see `StreamSendOptions` — `eventId` and the runtime-injected
+   * key marker). Event is optional only when T is void (matching public
+   * API).
    */
   interface IStreamable<T> {
     send(
@@ -304,7 +331,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string },
+          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
@@ -312,7 +339,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string },
+          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
         ]
     ): void;
   }
@@ -1285,16 +1312,19 @@ export class CellImpl<T extends FabricValue>
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     /**
-     * Internal-only stream-send options. `eventId` supplies the durable event
-     * id (spec §7.5) instead of minting one: an ingress caller that owns a
-     * delivery id passes it through so a retry of the same id collides on the
-     * handling's create-only receipt (verb contract WS-D,
+     * Internal-only stream-send options (see {@link StreamSendOptions}).
+     * `eventId` supplies the durable event id (spec §7.5) instead of minting
+     * one: an ingress caller that owns a delivery id passes it through so a
+     * retry of the same id collides on the handling's create-only receipt
+     * (verb contract WS-D,
      * docs/plans/pattern-verb-contract-implementation.md). The receipt is a
      * COMMIT witness, not an execution witness — the redelivered event still
      * runs the handler body and then loses the race, so effects outside the
-     * transaction repeat. Ignored on the plain-cell write path.
+     * transaction repeat. `runtimeInjectedEventKeys` carries the
+     * runtime-injection provenance the closed-world gate consumes. Ignored on
+     * the plain-cell write path.
      */
-    sendOptions?: { eventId?: string },
+    sendOptions?: StreamSendOptions,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -1335,6 +1365,7 @@ export class CellImpl<T extends FabricValue>
             ? undefined
             : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
           originTx: this.tx ?? undefined,
+          runtimeInjectedEventKeys: sendOptions?.runtimeInjectedEventKeys,
         },
       );
 
@@ -1423,7 +1454,7 @@ export class CellImpl<T extends FabricValue>
       ] | [
         AnyCellWrapping<T>,
         ((tx: IExtendedStorageTransaction) => void) | undefined,
-        { eventId?: string },
+        StreamSendOptions,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
@@ -1438,13 +1469,14 @@ export class CellImpl<T extends FabricValue>
         AnyCellWrapping<T>,
         ((tx: IExtendedStorageTransaction) => void) | undefined,
         /**
-         * Internal-only stream-send options: `eventId` passes a
-         * caller-supplied durable event id through to the scheduler, so a
-         * same-id retry collides on the handling's create-only receipt and
-         * cannot commit twice — though the body does re-run (verb contract
-         * WS-D).
+         * Internal-only stream-send options (see {@link StreamSendOptions}):
+         * `eventId` passes a caller-supplied durable event id through to the
+         * scheduler, so a same-id retry collides on the handling's
+         * create-only receipt and cannot commit twice — though the body does
+         * re-run (verb contract WS-D). `runtimeInjectedEventKeys` carries
+         * runtime-injection provenance for the closed-world gate.
          */
-        { eventId?: string },
+        StreamSendOptions,
       ]
   ): void {
     const [event, onCommit, sendOptions] = args;

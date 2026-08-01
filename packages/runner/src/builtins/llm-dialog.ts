@@ -2751,14 +2751,23 @@ async function handleInvoke(
     if (pattern) {
       runtime.run(tx, pattern, invocationArgs, result);
     } else if (handler) {
-      handler.withTx(tx).send({
-        ...input,
-        result, // doesn't HAVE to be used, but can be
-      }, (completedTx: IExtendedStorageTransaction) => {
-        const summary = formatTransactionSummary(completedTx, space);
-        const value = result.withTx(completedTx);
-        resolve({ value, summary });
-      });
+      handler.withTx(tx).send(
+        {
+          ...input,
+          result, // doesn't HAVE to be used, but can be
+        },
+        (completedTx: IExtendedStorageTransaction) => {
+          const summary = formatTransactionSummary(completedTx, space);
+          const value = result.withTx(completedTx);
+          resolve({ value, summary });
+        },
+        // Provenance for the closed-world gate: `result` above is OUR
+        // injection, not the caller's input, so name it through the internal
+        // options bag — never inferable from the payload's shape, so a
+        // caller-supplied `result` (link-valued or not) stays inside the
+        // closed world and is refused when undeclared.
+        { runtimeInjectedEventKeys: ["result"] },
+      );
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }

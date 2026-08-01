@@ -190,6 +190,7 @@ function readyQueuedEvent(args: {
   readonly onCommit?: QueuedEvent["onCommit"];
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
+  readonly runtimeInjectedEventKeys?: readonly string[];
 }): QueuedEvent {
   return {
     id: args.id,
@@ -199,6 +200,7 @@ function readyQueuedEvent(args: {
     action: (tx) => args.handler(tx, args.event),
     handler: args.handler,
     event: args.event,
+    runtimeInjectedEventKeys: args.runtimeInjectedEventKeys,
     retry: args.retries,
     onCommit: args.onCommit,
   };
@@ -256,6 +258,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventId?: string;
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
+  readonly runtimeInjectedEventKeys?: readonly string[];
 }): void {
   // `eventId` here is an already-durable delivery id, used verbatim — an
   // ingress caller's opaque idempotency key is bound to its stream earlier,
@@ -300,6 +303,9 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         // rate-limited.
         lastSameOrigin.event = args.event;
         lastSameOrigin.action = (tx) => handler(tx, args.event);
+        // Last-wins takes the newest event's injection provenance with its
+        // payload — the marker must describe the payload that dispatches.
+        lastSameOrigin.runtimeInjectedEventKeys = args.runtimeInjectedEventKeys;
         // Last-wins takes the newest event's time too, so the dispatched
         // handler's clock reflects the event it actually runs. For a same-origin
         // handler flood every collapsed event already shares one frozen instant,
@@ -931,6 +937,7 @@ export async function dispatchQueuedEvent(state: {
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;
   tx.dispatchedEventTime = queuedEvent.time;
+  tx.dispatchedRuntimeInjectedEventKeys = queuedEvent.runtimeInjectedEventKeys;
   tx.tx.immediate = true;
   tx.tx.sourceAction = action;
   if (queuedEvent.originTx !== undefined) {
@@ -972,6 +979,7 @@ export async function dispatchQueuedEvent(state: {
       eventLink: queuedEvent.eventLink,
       handler,
       event: eventValue,
+      runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
     };
@@ -1001,6 +1009,7 @@ export async function dispatchQueuedEvent(state: {
       eventLink: queuedEvent.eventLink,
       handler,
       event: eventValue,
+      runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
       retryAttempts: attempts,

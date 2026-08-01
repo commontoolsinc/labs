@@ -264,6 +264,11 @@ export interface DeliverOpts {
   eventId?: string;
   originTx?: IExtendedStorageTransaction;
   time?: number;
+  /** Runtime-injection provenance, carried through a held delivery unchanged
+   * so shaping can never strip the closed-world gate's exemption. Renderer
+   * events (the only shapable class) are never injection sites, so this is
+   * defensive plumbing, not a live path. */
+  runtimeInjectedEventKeys?: readonly string[];
 }
 
 export type DeliverFn = (
