@@ -182,11 +182,13 @@ export interface ReplayReport {
    *
    * Deliberately not a subset of `covered`, and that is the whole point.
    * `covered` answers "was this replayed and credited"; a pattern can be
-   * recorded and then not credited — a served route, an auto-tier fixture, a
-   * root the fixture no longer holds, a source that stopped compiling. Deriving
-   * attribution from `covered` made the "covered by X" branch unreachable by
-   * construction, since `uncovered` is exactly the required keys ABSENT from
-   * `covered`.
+   * recorded and then not credited — a root the fixture no longer holds, a
+   * source that stopped resolving or compiling, a fixture that failed outright
+   * before any target ran, or an auto-tier fixture once something writes one.
+   * (NOT a served route: those are credited, `covered.add` running
+   * unconditionally below the served-route branch.) Deriving attribution from
+   * `covered` made the "recorded by X" branch unreachable by construction,
+   * since `uncovered` is exactly the required keys ABSENT from `covered`.
    */
   recorded: Set<string>;
   failures: ReplayFailure[];
@@ -258,7 +260,7 @@ export async function replayVintage(
     if (!await vintageRootHasState(runtimeVintage)) {
       return fail(
         "this fixture holds no captured root — it did not restore, so " +
-          "replaying it would prove nothing",
+          `replaying it would prove nothing. ${remedy}`,
       );
     }
     const manifest = await readVintageManifest(runtimeVintage);
@@ -279,7 +281,7 @@ export async function replayVintage(
         `this fixture's name records identity ${vintage.identity}, which it ` +
           `does not contain (it holds ${
             [...new Set(manifest.entries.map((e) => e.identity))].join(", ")
-          }) — so it is not the state its name claims`,
+          }) — so it is not the state its name claims. ${remedy}`,
         recordedFrom(manifest.entries),
       );
     }
@@ -480,7 +482,11 @@ export async function replayVintage(
       } catch (error) {
         report.failures.push({
           ...where,
-          detail: `${entry.main} no longer resolves: ${describeError(error)}`,
+          detail:
+            `${entry.main} no longer resolves: ${
+              describeError(error)
+            }. If it moved deliberately, the fixture records a path that is no ` +
+            `longer there: ${remedy}`,
         });
         continue;
       }
@@ -511,7 +517,9 @@ export async function replayVintage(
       } catch (error) {
         report.failures.push({
           ...where,
-          detail: `${entry.main} no longer compiles: ${describeError(error)}`,
+          detail: `${entry.main} no longer compiles: ${
+            describeError(error)
+          }. Fix the source; if it was removed deliberately, ${remedy}`,
         });
         continue;
       }
@@ -762,11 +770,12 @@ export async function replayAll(
      * only ones worth attributing are those a fixture records and the run then
      * declines to credit.
      *
-     * `pinned` is what separates the two remedies. A PINNED fixture that did
-     * not credit its pattern hit a failure, and the failures say why. An AUTO
-     * fixture cannot credit its pattern by construction, so the remedy is to
-     * pin it rather than to investigate — though it MAY also have failed, since
-     * a lost root or a broken source is reported whatever the tier. Read both.
+     * `pinned` exists only to break a TIE. When two fixtures record one
+     * pattern, the pinned one is the more useful to name, and `collectVintages`
+     * sorts `auto` before `pinned` so plain first-wins picks the wrong one.
+     * The report does NOT branch on it: doing so cost a defect every review
+     * round while the auto tier had nothing writing to it — see
+     * `reportUncovered`.
      */
     coveredBy: Map<string, VintageAttribution>;
     failures: ReplayFailure[];

@@ -410,61 +410,48 @@ describe("reporting", () => {
     expect(message).toContain("no list anywhere");
   });
 
-  it("gives a DIFFERENT remedy for each reason a pattern is uncovered", () => {
-    // Three situations, three remedies. One answer for all of them is how the
-    // seam this change removes got built, so the message must not merge them.
-    const pinnedFrom = (testKey: string) => ({ testKey, pinned: true });
-    const autoFrom = (testKey: string) => ({ testKey, pinned: false });
+  it("splits on whether a fixture NAMES the pattern, and nothing else", () => {
+    // Two situations, two remedies, and each must exclude the other's — a
+    // merge is the defect this split keeps producing, and it is invisible
+    // unless the assertions say what each case must LACK as well as contain.
+    const from = (testKey: string, pinned = true) => ({ testKey, pinned });
 
-    // (1) A PINNED fixture records it and did not credit it — something failed
-    // and the failures say what. Recapturing would destroy the evidence, so no
-    // capture command may appear for it.
-    const failed = reportUncovered(
+    // NAMED: a fixture in the tree records it, so capturing another changes
+    // nothing. The failure below carries the remedy for the actual fault.
+    const named = reportUncovered(
       ["system/home.tsx"],
-      new Map([["system/home.tsx", pinnedFrom("system/home.test.tsx")]]),
+      new Map([["system/home.tsx", from("system/home.test.tsx")]]),
     );
-    expect(failed).toContain("(recorded by system/home.test.tsx, PINNED)");
-    expect(failed).toContain("nothing to capture");
-    expect(failed).toContain("failure printed below");
-    expect(failed).not.toContain("--update");
+    expect(named).toContain("(recorded by system/home.test.tsx)");
+    expect(named).toContain("capturing another would change nothing");
+    // ...and NOT the capture instruction, which would send a reader to make a
+    // second fixture for a pattern that already has one.
+    expect(named).not.toContain("--update");
 
-    // (2) An AUTO fixture records it. Nothing failed and no failure is printed
-    // — auto captures cannot credit coverage — so it needs PINNING, and the
-    // command names the very test the fixture came from.
+    // UNNAMED: capture one, and which test writes that state is not derivable.
+    const unnamed = reportUncovered(["system/newcomer.tsx"], new Map());
+    expect(unnamed).not.toContain("recorded by");
+    expect(unnamed).toContain("--update <test path>");
+    // ...and NOT the named advice. Without this the branches can merge and
+    // every other assertion here still passes — measured: making `named` match
+    // `coveredBy.has` in both directions left the old three-way test green.
+    expect(unnamed).not.toContain("capturing another would change nothing");
+
+    // Both at once, each keeping its own remedy rather than collapsing.
+    const mixed = reportUncovered(
+      ["system/home.tsx", "system/newcomer.tsx"],
+      new Map([["system/home.tsx", from("system/home.test.tsx")]]),
+    );
+    expect(mixed).toContain("capturing another would change nothing");
+    expect(mixed).toContain("--update <test path>");
+
+    // The tier is NOT part of the split — it only breaks ties over which test
+    // to name — so an auto-recorded pattern reads exactly like a pinned one.
     const auto = reportUncovered(
       ["system/home.tsx"],
-      new Map([["system/home.tsx", autoFrom("system/home.test.tsx")]]),
+      new Map([["system/home.tsx", from("system/home.test.tsx", false)]]),
     );
-    expect(auto).toContain("AUTO tier");
-    expect(auto).toContain(
-      "deno task pattern-vintage --update system/home.test.tsx",
-    );
-    // ...and NOT the generic capture block. An AUTO row already names the test
-    // to pin, so adding "capture one, the test cannot be derived" alongside it
-    // gives two commands for one pattern and tells the reader the mapping is
-    // unknown while printing it. Without this the branches can merge and every
-    // other assertion here still passes.
-    expect(auto).not.toContain("<test path>");
-
-    // (3) Nothing records it: capture one, and the test cannot be derived.
-    const absent = reportUncovered(["system/newcomer.tsx"], new Map());
-    expect(absent).not.toContain("recorded by");
-    expect(absent).toContain("--update <test path>");
-    expect(absent).not.toContain("nothing to capture");
-
-    // All three at once, each keeping its own remedy rather than collapsing.
-    const mixed = reportUncovered(
-      ["system/home.tsx", "system/default-app.tsx", "system/newcomer.tsx"],
-      new Map([
-        ["system/home.tsx", pinnedFrom("system/home.test.tsx")],
-        ["system/default-app.tsx", autoFrom("system/default-app.test.tsx")],
-      ]),
-    );
-    expect(mixed).toContain("nothing to capture");
-    expect(mixed).toContain(
-      "deno task pattern-vintage --update system/default-app.test.tsx",
-    );
-    expect(mixed).toContain("--update <test path>");
+    expect(auto).toBe(named);
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {

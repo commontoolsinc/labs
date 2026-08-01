@@ -364,80 +364,60 @@ export function reportUncovered(
   coveredBy: ReadonlyMap<string, { testKey: string; pinned: boolean }> =
     new Map(),
 ): string {
-  // THREE situations, three remedies, and giving one answer to all of them is
-  // how the seam this gate just removed got built in the first place.
+  // TWO situations, and the split is by the only fact this function reliably
+  // has: does some fixture in the tree NAME this pattern.
   //
-  // - A PINNED fixture records it and did not credit it. Something failed, and
-  //   the failures carry their own remedies — a source that stopped resolving
-  //   wants fixing, a fixture that lost its root wants deleting and
-  //   recapturing. This branch must not pick one of those for the reader, which
-  //   is what "recapturing would throw away the evidence" did: it contradicted
-  //   the delete-and-recapture instruction the SAME run printed underneath.
-  // - An AUTO fixture records it. Auto captures are pruned by count and never
-  //   credit coverage, so pinning is the remedy whether or not it also failed
-  //   (a lost root or broken source is reported whatever the tier).
-  // - Nothing records it. There is no fixture to replay, so one has to be
-  //   captured, and which test writes that state cannot be derived.
-  const failed = uncovered.filter((key) => coveredBy.get(key)?.pinned === true);
-  const autoOnly = uncovered.filter((key) =>
-    coveredBy.get(key)?.pinned === false
-  );
-  const absent = uncovered.filter((key) => !coveredBy.has(key));
-  const describe = (key: string) => {
-    const from = coveredBy.get(key);
-    return from === undefined
-      ? `  ${key}`
-      : `  ${key}  (recorded by ${from.testKey}, ${
-        from.pinned ? "PINNED" : "AUTO tier"
-      })`;
-  };
+  // It used to split three ways, on the tier of the recording fixture. That
+  // cost a defect every review round, for three reasons worth recording so it
+  // is not rebuilt: the AUTO branch could not fire at all (nothing writes an
+  // auto capture yet, so it was reachable only from a hand-built map); the
+  // PINNED branch's whole content was a PROMISE about text it does not
+  // control — "each failure below names its own remedy" — which was false for
+  // three of the five failure shapes that reach it; and the third branch
+  // merged "nothing records it" with "a fixture records it and could not be
+  // read", whose remedies are opposites.
+  //
+  // The promise is now a fact instead: every fixture-level failure
+  // interpolates its own `remedy`, so pointing at the failures is enough and
+  // this function states nothing it cannot see. Re-add a tier branch when
+  // something actually writes an auto capture, with a test that can reach it.
+  const named = uncovered.filter((key) => coveredBy.has(key));
+  const unnamed = uncovered.filter((key) => !coveredBy.has(key));
   return [
     `${uncovered.length} auto-updating pattern(s) are not covered by a pinned`,
     "vintage this run replayed:",
     "",
-    ...uncovered.map(describe),
+    ...uncovered.map((key) => {
+      const from = coveredBy.get(key);
+      return from === undefined
+        ? `  ${key}`
+        : `  ${key}  (recorded by ${from.testKey})`;
+    }),
     "",
     "These patterns auto-update onto a root someone is already using, so a",
     "change that cannot read the old state bricks that piece.",
-    ...(failed.length > 0
+    ...(named.length > 0
       ? [
         "",
-        "The ones marked PINNED above ARE recorded by a fixture in the tree, so",
-        "there is nothing to capture: something stopped that fixture being",
-        "credited. Each failure printed below names its own remedy — some want",
-        "the source fixed, some want the fixture deleted and recaptured — so",
-        "read the one for the fixture named here rather than guessing.",
+        "The ones with a test named ARE recorded by a fixture already in the",
+        "tree, so capturing another would change nothing — its failure is",
+        "printed below and carries the remedy for that particular fault.",
       ]
       : []),
-    ...(autoOnly.length > 0
+    ...(unnamed.length > 0
       ? [
         "",
-        "The ones marked AUTO tier are recorded by a fixture that cannot count",
-        "as",
-        "coverage: auto captures are pruned by count, so letting one satisfy",
-        "the gate means retention can delete its only evidence. Pin the test",
-        "that records it:",
-        "",
-        ...autoOnly.map((key) =>
-          `  deno task pattern-vintage --update ${coveredBy.get(key)!.testKey}`
-        ),
-      ]
-      : []),
-    ...(absent.length > 0
-      ? [
-        "",
-        "Nothing this run could READ records the rest. (A fixture that failed to",
-        "open cannot say what it holds, so check the failures below before",
-        "capturing — the fixture you would create may already be there.)",
-        "Otherwise capture the TEST that instantiates one — a test path, not a",
-        "pattern",
-        "path, because a fixture is produced by RUNNING a test:",
+        "Nothing this run could READ names the rest. That is either a pattern",
+        "no fixture covers, or a fixture too broken to say what it holds — the",
+        "failures below tell which. For the first, capture the TEST that",
+        "instantiates it, a test path rather than a pattern path because a",
+        "fixture is produced by RUNNING a test:",
         "",
         "  deno task pattern-vintage --update <test path>",
         "",
         "e.g. `--update topics/topics.test.tsx`. Which test that is cannot be",
-        "derived: a test need not be named after what it drives, and nothing on",
-        "disk knows until a fixture exists.",
+        "derived: a test need not be named after what it drives, and nothing",
+        "on disk knows until a fixture exists.",
       ]
       : []),
   ].join("\n");
@@ -523,7 +503,7 @@ export function reportUpdateNeedsATestKey(): string {
     "test instantiates — routinely several patterns, none of which need share",
     "its name.",
     "",
-    "Every fixture already under packages/piece/test/vintages/ is replayed by",
+    `Every fixture already under ${VINTAGES_DIR}/ is replayed by`,
     "`deno task pattern-vintage` with no list anywhere, so a captured fixture",
     "is covered from the moment it is committed.",
   ].join("\n");

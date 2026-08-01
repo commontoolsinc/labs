@@ -956,6 +956,64 @@ describe("the vintage gate, end to end", () => {
     });
   });
 
+  it("attributes a fixture that failed OUTRIGHT, before any target ran", async () => {
+    // A fixture-level failure returns before the per-target recording loop, so
+    // its attribution has to come from the manifest directly. Without that the
+    // pattern reads as "nothing records it, capture one" — and the capture
+    // prints "Already pinned" and exits 0, which is the dead end this whole
+    // change removes, reached one layer down.
+    //
+    // Driven through the ZERO-TARGETS failure, which the code documents as
+    // reachable by design: `isUpgradeTarget` has grown four exclusions, two
+    // added after fixtures already existed, and fixtures are append-only — so
+    // a new exclusion silently zeroes an old fixture. Deleting the attribution
+    // leaves every other test green, which is why this exists.
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+    const [pinnedRef] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-notarget2-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinnedRef.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // Every entry a TEST pattern, which `isUpgradeTarget` excludes by rule —
+      // so the fixture records the pattern and offers zero targets.
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({
+          ...entry,
+          main: entry.main === undefined
+            ? entry.main
+            : entry.main.replace(/\.tsx$/, ".test.tsx"),
+        })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinnedRef.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { coveredBy, failures } = await replayAll(roots);
+
+    // It failed at the FIXTURE level — no target ran at all.
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("not one is something today's source");
+    // Every fixture-level failure carries its own remedy, so the report can
+    // point at it rather than promising one it does not control.
+    expect(failures[0].detail).toContain("Delete");
+    // ...and what the manifest NAMES is still attributed, so the reader is
+    // sent to the fixture instead of told to capture one that already exists.
+    // The recorded key is the rewritten `.test.tsx` one, because that is what
+    // this manifest now names — the point is that a fixture-level failure
+    // attributes at all, not which key it happens to carry.
+    expect(coveredBy.get(TEST_KEY)?.testKey).toBe(pinnedRef.testKey);
+    expect(coveredBy.size, "a fixture-level failure attributed nothing")
+      .toBeGreaterThan(0);
+  });
+
   it("prefers the PINNED fixture when both tiers record a pattern", async () => {
     // The two tiers carry OPPOSITE remedies — a pinned fixture that failed
     // says "read the failures", an auto one says "pin it" — so which fixture
