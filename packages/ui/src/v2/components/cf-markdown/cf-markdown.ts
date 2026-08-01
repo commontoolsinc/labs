@@ -4,6 +4,7 @@ import { consume } from "@lit/context";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
+import { HeadingIdRenderer } from "./heading-id.ts";
 import { BaseElement } from "../../core/base-element.ts";
 import "../cf-copy-button/index.ts";
 import "../cf-cell-link/index.ts";
@@ -443,10 +444,14 @@ export class CFMarkdown extends BaseElement {
     if (!content) return "";
 
     // Use marked.parse with options to avoid mutating global state
+    // A fresh HeadingIdRenderer per parse restarts the duplicate-heading
+    // suffixes, so the same content always renders the same ids.
     let renderedHtml = marked.parse(content, {
       breaks: true,
       gfm: true,
-    }) as string;
+      async: false,
+      renderer: new HeadingIdRenderer(),
+    });
 
     // Wrap code blocks with copy buttons
     renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);

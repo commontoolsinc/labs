@@ -1,6 +1,6 @@
 ---
 name: lit-component
-description: Guide for developing Lit web components in the Common UI v2 system (@commonfabric/ui/v2). Use when creating or modifying cf- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Fabric runtime.
+description: Guide for developing Lit web components in the Common UI v2 system (@commonfabric/ui). Use when creating or modifying cf- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Fabric runtime.
 ---
 
 # Lit Component Development for Common UI
@@ -271,12 +271,14 @@ Run with: `deno task test` (includes required flags)
 
 ## Package Structure
 
-Components are exported from `@commonfabric/ui/v2`:
+Each component is declared in its own directory under
+`packages/ui/src/v2/components/`. `packages/ui/src/v2/index.ts` re-exports every
+component, and the package root re-exports that in turn, so consumers import
+them from `@commonfabric/ui`:
 
 ```typescript
 // packages/ui/src/v2/index.ts
-export { CFButton } from "./components/cf-button/index.ts";
-export type { ButtonVariant } from "./components/cf-button/index.ts";
+export * from "./components/cf-button/index.ts";
 ```
 
 ## Reference Documentation

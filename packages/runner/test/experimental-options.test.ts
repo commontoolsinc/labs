@@ -24,8 +24,8 @@ const signer = await Identity.fromPassphrase("test experimental");
 
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
- * `Runtime` construction/disposal correctly propagates flags to all the ambient
- * configs.
+ * `Runtime` construction/disposal correctly resolves flags and propagates the
+ * flags whose consumers are ambient.
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
@@ -48,6 +48,7 @@ describe("ExperimentalOptions", () => {
           persistentSchedulerState: false,
           commitPreconditions: false,
           serverPrimaryExecution: false,
+          computedCellIds: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -59,6 +60,7 @@ describe("ExperimentalOptions", () => {
         serverPrimaryExecutionDocSetWatch: false,
         // Same, for C1.7's context-lattice-claims negotiation flag.
         serverPrimaryExecutionContextLatticeClaims: false,
+        computedCellIds: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -85,6 +87,7 @@ describe("ExperimentalOptions", () => {
         serverPrimaryExecution: true,
         serverPrimaryExecutionDocSetWatch: false,
         serverPrimaryExecutionContextLatticeClaims: false,
+        computedCellIds: true,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -105,6 +108,7 @@ describe("ExperimentalOptions", () => {
         serverPrimaryExecution: false,
         serverPrimaryExecutionDocSetWatch: false,
         serverPrimaryExecutionContextLatticeClaims: false,
+        computedCellIds: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -114,7 +118,7 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("Runtime sets and resets global config", () => {
+  describe("Runtime sets and resets ambient config", () => {
     it("constructing Runtime with modernCellRep sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({

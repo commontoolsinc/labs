@@ -222,12 +222,20 @@ and sponsoring user while metrics keep those DIDs out of their labels.
 
 | Var | Default | Notes |
 |---|---|---|
-| `TOOLSHED_GIT_SHA` | _(auto-detected)_ | Deployed commit SHA, surfaced via `lib/build-info.ts`. Takes priority over the build-baked SHA. |
+| `TOOLSHED_GIT_SHA` | _(unset)_ | Explicit toolshed commit override, surfaced via `lib/build-info.ts`. Takes priority over the build-baked SHA for `/api/meta`. |
+| `COMMIT_SHA` | _(unset)_ | Source-run build metadata fallback. It lets `/api/meta` present the same `gitSha` field that a compiled toolshed obtains from baked metadata. On a compiled toolshed, baked metadata takes priority. The system-pattern updater does not consult this value. |
+
+Set `COMMIT_SHA` to the Labs revision that describes a source checkout when you
+want source-run metadata to match compiled-binary metadata. A parent start
+script can export it once so toolshed and shell diagnostics describe the same
+checkout. It is descriptive metadata, not update authorization; only stamp a
+revision that actually describes the launched sources. The explicit
+toolshed-only `TOOLSHED_GIT_SHA` override remains highest priority.
 
 The compilation cache for compiled patterns is the content-addressed cell
 cache (always on under an enforcing CFC mode; see
 `packages/runner/src/compilation-cache/cell-cache.ts`). The former
-`COMPILATION_CACHE_*` env vars configured the removed AMD bundle cache and no
+`COMPILATION_CACHE_*` env vars configured an earlier whole-bundle cache and no
 longer exist.
 
 ---
@@ -268,7 +276,7 @@ Most shell config is **build-time**: esbuild injects defines in
 |---|---|---|---|
 | `PRODUCTION` | `$ENVIRONMENT` (`"production"` if set, else `"development"`) | _(unset = dev)_ | Triggers minified bundle and disables sourcemaps. |
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
-| `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging. |
+| `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset = runtime on)_ | See experimental flags. |
 | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | `EXPERIMENTAL.serverPrimaryExecution` | _(unset = runtime off)_ | See experimental flags. |
@@ -293,6 +301,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
 | `CF_CLI_INTEGRATION_USE_LOCAL` | _(unset)_ | Used by integration tests to dispatch through local source rather than a built binary. |
+| `CF_LABS_ROOT` | _(unset)_ | Read by `bin/cf` only. Selects which labs checkout answers, overriding the nearest one walking up from the cwd. Must be a checkout (a directory with `packages/cli/launcher.ts`) or `bin/cf` exits 2. Chooses the CLI, not the working directory. |
 
 ### Global args
 
@@ -351,7 +360,7 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `check` | Type-check all packages (`./tasks/check.sh`). |
 | `test` | Run all package tests (`./tasks/test.ts`). |
 | `integration` | Run integration tests (`./tasks/integration.ts`). |
-| `build-binaries` | Build standalone binaries (`toolshed`, `cf`). |
+| `build-binaries` | Build all standalone binaries, build only the named targets passed after the task (`toolshed` or `cf`), or use the legacy `deno task build-binaries --cli-only` alias to build only `cf`. |
 | `cf` | Run the CLI via the launcher. |
 | `initialize-db` | Initialize the local development database. |
 | `install-hooks` | Install git pre-commit hooks. |

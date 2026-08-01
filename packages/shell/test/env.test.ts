@@ -51,9 +51,8 @@ Deno.test({
       serverPrimaryExecutionDocSetWatch: true,
       serverPrimaryExecutionContextLatticeClaims: true,
       eagerSourceAnnotation: false,
-      // Default ON for the non-home root; home stays off.
+      // Default ON — one flag covers default-app and home roots alike.
       systemPatternAutoUpdate: true,
-      systemPatternAutoUpdateHome: undefined,
     });
   },
 });

@@ -1,11 +1,22 @@
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import type {
+  FabricError as ApiFabricError,
+  FabricErrorConstructor as ApiFabricErrorConstructor,
+} from "@commonfabric/api";
+
+import type { FabricValue } from "@/interface.ts";
+import {
+  DEEP_CLONE_CORE,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
@@ -79,7 +90,8 @@ export type FabricErrorState = {
  * `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
-export class FabricError extends FabricNativeWrapper<Error> {
+export class FabricError extends FabricNativeWrapper<Error>
+  implements ApiFabricError {
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   type: string;
   /** The `.name` property (always a concrete string). */
@@ -257,7 +269,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): FabricError {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricError {
     return new FabricError({
       type: this.type,
       name: this.name,
@@ -312,25 +324,29 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return frozen ? Object.freeze(error) : error;
   }
 
-  /** @inheritDoc */
-  override deepClone(frozen: boolean): FabricError {
-    if (frozen && isDeepFrozen(this)) return this;
-
-    // The codec honors `context.shouldDeepFreeze`. This clone path owns its own
-    // frozenness decision via the wrapper `frozen ? deepFreeze : result` below,
-    // so pre-freezing inside the codec would be redundant when `frozen` is true
-    // and wrong when it is false. Match the context to this clone's intent.
+  /**
+   * @inheritDoc
+   *
+   * Round-trips through the codec, matching the codec's `shouldDeepFreeze` to
+   * this clone's `frozen` intent (the `deepClone()` template owns the final
+   * top-level freeze).
+   *
+   * KNOWN GAP (pre-existing): `encode()` passes `cause` and the extras through
+   * by reference, so an unfrozen clone still SHARES those nested values with
+   * the original -- it is not yet fully deeply independent. Pinned by a test
+   * in `FabricError.test.ts`.
+   */
+  protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
     const reconstructContext = new EmptyReconstructionContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
-    const result = codec.decode(
+    return codec.decode(
       CODEC_TYPE_TAGS.Error,
       codec.encode(this),
       reconstructContext,
     ) as FabricError;
-    return frozen ? deepFreeze(result) : result;
   }
 
   static #codec = Object.freeze(
@@ -400,3 +416,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return this.#codec;
   }
 }
+
+// Compile-time check that the exported `FabricError` constructor matches the
+// `FabricErrorConstructor` declared in `@commonfabric/api`. This catches a
+// declared member that is missing here or has the wrong type. It does NOT
+// catch the other direction: `satisfies` is an assignability check, so a
+// public member on this class that the declaration omits passes silently.
+// Members added here need adding there by hand.
+FabricError satisfies ApiFabricErrorConstructor;

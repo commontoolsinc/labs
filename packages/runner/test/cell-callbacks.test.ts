@@ -2,6 +2,7 @@
 // after cell writes reach a final commit result.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
@@ -460,6 +461,44 @@ describe("Cell commit callbacks", () => {
       expect(result).toEqual([1, 3, 4]);
     });
 
+    it("should not remove a stored -0 when asked to remove 0", () => {
+      // `0` and `-0` are distinct stored values.
+      const frame = pushFrame();
+      const cell = runtime.getCell<number[]>(
+        space,
+        "remove-negzero-test",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+
+      cell.set([-0, 1]);
+      cell.remove(0);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(2);
+      expect(Object.is(result[0], -0)).toBe(true);
+    });
+
+    it("should keep 0 when removing all -0 elements", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<number[]>(
+        space,
+        "removeall-negzero-test",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+
+      cell.set([0, -0, 1]);
+      cell.removeAll(-0);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(2);
+      expect(Object.is(result[0], 0)).toBe(true);
+      expect(result[1]).toBe(1);
+    });
+
     it("should remove first matching object from array using link comparison", () => {
       const frame = pushFrame();
       const cell = runtime.getCell<{ name: string }[]>(
@@ -768,7 +807,11 @@ describe("Cell commit callbacks", () => {
         const resolved = itemCell.resolveAsCell();
         const resolvedLink = resolved.getAsNormalizedFullLink();
 
-        expect(resolvedLink.id.startsWith("data:application/json,")).toBe(true);
+        expect(
+          resolvedLink.id.startsWith(
+            `data:${DATA_URI_MEDIA_TYPE},`,
+          ),
+        ).toBe(true);
         expect(resolvedLink.path).toEqual([]);
         expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
       });
@@ -860,7 +903,7 @@ describe("Cell commit callbacks", () => {
         const resolved = first.resolveAsCell();
         expect(
           resolved.getAsNormalizedFullLink().id.startsWith(
-            "data:application/json,",
+            `data:${DATA_URI_MEDIA_TYPE},`,
           ),
         ).toBe(true);
         expect(resolved.getAsNormalizedFullLink().path).toEqual([]);

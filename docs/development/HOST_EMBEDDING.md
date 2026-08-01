@@ -30,6 +30,7 @@ weeks later.
 | 1 | Wish targets + result semantics | API | `runner` | yes | `test/wish.test.ts` — `host embedding contract: profile wish targets` |
 | 2 | `runtimeContext` / `spaceContext` | API | `ui` | yes | `src/v2/runtime-context.test.ts` |
 | 3 | Navigation events | API | `shell`, `lib-shell` | `cf-navigate` yes; `cf-open-external` yes (with CT-1830); others available, not bound | `test/navigate-contract.test.ts` |
+| 3a | Piece menu | API + component | `ui` | available, not bound | `src/v2/components/cf-render/cf-render.test.ts` — `CFRender piece context menu`; `src/v2/components/cf-piece-menu/cf-piece-menu.test.ts` |
 | 4 | `getCfcLabel` egress check | API | `ui` (label shape in `runner`) | yes | `src/v2/core/cfc-label.test.ts` — `cfcLabelViewIsPublic (egress check)` |
 | 5 | Guarded-define idiom | API | `ui` | yes | `src/v2/components/host-embedding-guarded-define.test.ts` |
 | 6 | Trusted-mark threat model | policy record | `runner` | n/a | `test/cfc-ui-contract.test.ts` — `host embedding contract: trusted-mark threat model` |
@@ -134,6 +135,91 @@ DOM). A host embeds by listening for:
 and detail shapes); the pattern-side shape is also guarded by
 `packages/shell/test/runtime-navigation.test.ts`. `cf-open-external` is
 untested here by design — it lands and is tested with CT-1830.
+
+---
+
+## 3a. The piece menu
+
+**Contract.** A right-click on a piece rendered by `cf-render` opens
+`cf-piece-menu` for that piece. **View source** shows the piece's retained
+authored files. **Origin and history** shows its active origin and recorded
+source revisions. A piece with an active origin also has **Stop following
+source**. That action keeps the exact current source and clears the active
+origin.
+
+Historical entries can restore an exact retained source version or resume
+following an earlier web or fabric origin. An incompatible pattern contract or
+retained link is shown before mutation and requires a second explicit
+confirmation. The runtime binds that confirmation to the exact reviewed code
+and source-state snapshot. If the piece's actual retained input does not satisfy
+the candidate's argument schema, the runtime rejects the transition instead.
+The input must be repaired before that source can be selected. Nothing is
+required of the host to get these controls. Importing `cf-render` registers the
+menu. The menu reads and changes the piece through
+`RuntimeClient.getPieceSource()` and `RuntimeClient.updatePieceSource()` on the
+runtime the piece already runs in.
+
+Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
+followed piece. The runtime records the canonical URL and retained initial
+source in one creation transaction. Calling it with a source string or
+`Program` creates a detached piece when that source can be retained.
+
+`updatePieceSource()` returns a one-use `confirmationToken` with an
+incompatibility warning. Passing that token back confirms only the reported
+pattern-contract or durable linked-producer warning. The token is valid only
+for the compiled candidate, retained argument evidence, and linked-producer
+contracts that produced the warning. An `executionWarning` means the source
+transition was saved but a later running-piece or source-detail refresh failed;
+hosts must not present that case as an unsaved change.
+
+The menu mounts itself on `document.body`, not inside the piece, because a piece's
+own `overflow: hidden` would clip it and the tile variant's
+`transform: scale(0.5)` would shrink it; it copies the `--cf-theme-*` tokens
+across from the element that opened it, so it follows the host's theme.
+
+Before the menu opens, `cf-render` announces the click. The event is
+**cancellable, and cancelling it takes the click**: the built-in menu does not
+open, and the host is responsible for what appears instead. Either way the
+browser's own context menu is suppressed. Unlike the navigation events, this one
+BUBBLES from the DOM (`bubbles`, `composed`), so a host may listen on its mount
+container or on `globalThis`.
+
+Every `cf-render` variant resolves a link-valued cell to the piece it displays
+before it chooses the menu target. This includes nested pieces rendered with the
+full variant. The renderer observes the link itself and resolves again when its
+target changes.
+
+```ts
+import type { DID } from "@commonfabric/identity";
+
+// packages/ui/src/v2/components/cf-render/cf-render.ts
+export const PIECE_CONTEXT_MENU_EVENT = "cf-piece-context-menu";
+
+export interface PieceContextMenuDetail {
+  space: DID;
+  /** The piece's full schemed id (`of:fid1:…`). */
+  pieceId: string;
+  /** Client coordinates of the click, for placing the menu. */
+  x: number;
+  y: number;
+  variant: "full" | "chip" | "tile";
+}
+```
+
+Three clicks are never announced, so a host needs no special cases for them: a
+click on a text entry, a click held with Shift, and a `cf-render` bound to a
+value inside a piece rather than to a whole piece. The innermost rendered piece
+announces, so a right-click on a tile inside a piece names the tile.
+
+See [docs/specs/piece-source-lifecycle.md](../specs/piece-source-lifecycle.md)
+for what an origin means.
+
+**Test.** `packages/ui/src/v2/components/cf-render/cf-render.test.ts`,
+`describe("CFRender piece context menu")` — the event name, the detail shape, and
+when the click is taken. `packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.test.ts`
+— the entries, lifecycle actions, compatibility confirmation, and their test
+hooks. The menu's DOM behaviour is driven end to end by
+`packages/shell/integration/piece-menu.test.ts`.
 
 ---
 

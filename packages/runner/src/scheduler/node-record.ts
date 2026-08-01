@@ -128,6 +128,17 @@ export class NodeRegistry {
     }
     this.activeComputations.delete(action);
     this.invalidNodes.delete(action);
+    // Drop the child from its parent's index. The index holds actions
+    // strongly, so a child left in it is retained by the parent — along with
+    // the frame of the child's last run, that run's storage transaction, and
+    // the values the transaction read — for as long as the parent lives. A
+    // parent that starts and stops children repeatedly, such as a list
+    // projecting a window that moves, accumulates one of those per child run.
+    // The record keeps `parentAction`, so the parent stays known across a
+    // re-registration window, and re-subscribing re-enters the index.
+    if (record.parentAction !== undefined) {
+      this.childActionsByParent.get(record.parentAction)?.delete(action);
+    }
     return record;
   }
 

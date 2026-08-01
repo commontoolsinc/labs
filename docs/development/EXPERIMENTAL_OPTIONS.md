@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-13. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-31. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -37,9 +37,10 @@ was last checked against the code.
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`serverPrimaryExecutionDemandGrace`](#serverprimaryexecutiondemandgrace) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS` env (non-negative integer ms), applied at pool construction in toolshed's storage route; a `SharedExecutionPool` option, host-internal, not negotiated | 10000 ms on toolshed (pool default is 0 = legacy immediate abort/drain) | Bernhard Seefeld (client-passivity P0, 2026-07-26) | fold into `serverPrimaryExecution` once P1 calibrates a fixed value | implemented |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
+| [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | off | Mike Salisbury (verb contract WS-C) | flip default after the invocation-protocol integration proof, then fold into receipt semantics and delete flag | implemented, off by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
-| [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
+| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -53,6 +54,7 @@ was last checked against the code.
 | [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1; `cross-space-read` stage C3.6) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the `cross-space-read` stage (C3.6), space-only by default |
 | [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS` env (both peers), or `setServerPrimaryExecutionContextLatticeClaimsConfig()`; then negotiated per connection, absent-false | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once the lattice ranks graduate, then retire the negotiation | implemented (user + session delivery), off by default |
 | [`serverPrimaryExecutionCrossSpaceClaimsV1`](#serverprimaryexecutioncrossspaceclaimsv1) | `setServerPrimaryExecutionCrossSpaceClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C3.6b) | fold into `serverPrimaryExecution` once cross-space reads graduate, then retire the negotiation | implemented (delivery gate + amendment-11 attach fence), off by default |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -70,8 +72,9 @@ These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default".
-`persistentSchedulerState` and `commitPreconditions` default on; the other
-flags in this category default off unless their section says otherwise.
+`persistentSchedulerState`, `commitPreconditions` and `computedCellIds`
+default on; the other flags in this category default off unless their section
+says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -79,10 +82,10 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed and the CLI
 both go through that one mapping, so their wirings cannot drift; the shell
 reads the same variables from its build-time defines.
-Eight flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+Nine flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `serverPrimaryExecution`, `serverPrimaryExecutionDocSetWatch`,
 `serverPrimaryExecutionContextLatticeClaims`, `eagerSourceAnnotation`,
-`systemPatternAutoUpdate`, `systemPatternAutoUpdateHome`);
+`systemPatternAutoUpdate`, `plainResultReceipts`, `computedCellIds`);
 `commitPreconditions` and the three rank/
 cross-space candidate dials are deliberately mapped to `null` there, which
 records "not env-reachable" as a decision rather than an omission. Note the
@@ -647,6 +650,29 @@ propagate](#how-flags-propagate).
 - **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 
+### `plainResultReceipts`
+
+- **Toggle via.** `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env var, or
+  `RuntimeOptions.experimental.plainResultReceipts`. Env-reachable so the CLI
+  invocation-protocol work can enable it per process during integration.
+- **Added by.** Mike Salisbury, verb-contract WS-C
+  (`docs/plans/pattern-verb-contract-implementation.md`).
+- **Purpose.** A handler's return value containing reactives/cells projects
+  into its per-event receipt cell via the result-pattern path, but a **plain
+  JSON return is discarded** — the receipt-only branch writes `{}`. Under this
+  flag the receipt carries the (already-normalized) plain return instead, so a
+  caller — or a same-id retry that collides on the create-only receipt — can
+  read the verb's result back by receipt address. `{}` remains the shape for
+  value-less handlers. Requires `commitPreconditions` (the receipt write
+  itself) to be active, which it is by default.
+- **Current default and planned end state.** Off by default. Flips on once the
+  verb-contract WS-D integration proof (caller-supplied event id → collide →
+  read back the original result, cross-process) is green; after a bake period
+  the behavior folds into base receipt semantics and the flag is deleted.
+- **Path to removal.** Delete the flag and make the projection unconditional in
+  `handleJavaScriptHandlerResult`'s receipt-only branch; update the receipt
+  content note in `docs/specs/scheduler-v2/README.md` §7.6.
+
 ### `commitPreconditions`
 
 - **Toggle via.** `RuntimeOptions.experimental.commitPreconditions` only. It has
@@ -668,9 +694,12 @@ propagate](#how-flags-propagate).
 - **Current default and planned end state.** On by default as part of
   scheduler-v2 speculation lineage and receipt enforcement. An explicit
   programmatic `false` remains a rollback override; under that override,
-  single-use grants fail closed rather than silently becoming multi-use. The
-  planned end state is to remove the rollback flag and make the behavior
-  unconditional.
+  single-use grants fail closed rather than silently becoming multi-use, and
+  no handling publishes a receipt address on its transaction
+  (`tx.handlingReceiptLink` stays absent) — nothing creates or create-only
+  marks that cell while the flag is off, so an address would name a witness
+  that does not exist. The planned end state is to remove the rollback flag
+  and make the behavior unconditional.
 - **Status on 2026-07-10.** Implemented for lineage commits and event-result
   receipts, single-use grant consumption, and the memory protocol; on by
   default, with explicit programmatic opt-out retained temporarily.
@@ -726,45 +755,103 @@ propagate](#how-flags-propagate).
 - **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
   rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
   #4619 (2026-07-09).
-- **Purpose.** At space open, rolls a space's **non-home** root system pattern
-  (default-app) forward in place when its toolshed serves a newer content
-  identity: version gate (client vs toolshed build sha) → cached `?identity`
-  compare → in-place `patternIdentity` swap, re-instantiated by the existing
-  pattern watcher onto the same result cell. Best-effort and non-blocking: no
-  failure of the check may break space open. When either build sha is unknown
-  (dev/source servers carry none) the check skips silently; the `versionSkew`
-  IPC signal — which raises the shell's reload banner — fires only on a proven
-  mismatch (both shas known and different). See
+- **Purpose.** Rolls same-toolshed system-source patterns forward in place when
+  their source serves a newer content identity. Persisted default-app and home
+  roots reconcile before bootstrap. Every other watched pattern starts first;
+  its successful instantiation commit launches a background check, so network
+  and compilation never delay its current graph. An unstamped non-root recovers
+  its verified authored entry filename and becomes tracked only when that
+  same-origin route implements `?identity`. Missing/failing identity routes are
+  ordinary non-system sources and remain untouched.
+  Every accepted move downloads and compiles the complete authored closure and
+  permits an in-place `patternIdentity` swap only when the compiler-produced
+  entry has exactly the advertised identity and selected export symbol.
+  Ordinary patterns preserve their selected export; default-pattern routes
+  select the official source's `default` export. Fetch, compile, evaluation,
+  identity-mismatch, and commit failures leave the original pointer and running
+  graph untouched. Equal identities let ordinary patterns stop immediately
+  (and persist newly proven source provenance); roots take the fast path only
+  after the persisted artifact loads, so an unloadable root can rebuild through
+  the same identity-authorized source path before bootstrap.
+  Persisted roots are resolved without starting. A pre-provenance root may be
+  back-filled only when its stored `{ identity, symbol }` exactly equals the
+  current official entry's advertised content identity; stale, custom, and
+  repository-pinned sourceless roots remain pinned —
+  except a stale sourceless root whose stored pattern the current runtime
+  explicitly cannot load (probe resolves `undefined`; a probe error stays
+  pinned, and `cfcEnforcementMode: "disabled"` — where the probe is
+  unsupported — stays pinned too): that root is replaced with the official
+  system root for the space kind (home.tsx / default-app.tsx), recording the
+  displaced ref under `displacedPattern` meta (see pattern-updates.md for the
+  full exception semantics).
+  URL-based root creation and recreation stamp provenance; custom
+  `RuntimeProgram` recreation does not. Repository-pinned sourceless patterns,
+  cross-origin sources, default roots reached by the generic post-start hook,
+  and starts that intentionally install no pattern watcher remain excluded. The
+  check remains best-effort; if identity lookup or replacement compilation is
+  unavailable, an ordinary pattern keeps running and the subsequent root start
+  retains its normal loud failure behavior. The update path does not consult
+  build SHA metadata; a rolling deployment that mixes
+  identity/source/import revisions fails closed at the compiled-identity
+  comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+
+  **Current behavior.** Before a release, the existing golden replay tests load
+  representative state written by the previous pattern version. They verify
+  that the new version preserves the state's intended meaning and behavior. The
+  updater itself does not infer stable-key, stable-cause, migration, or
+  behavioral compatibility during deployment.
+
+  **Planned behavior.** The general piece-source lifecycle will reject known
+  structural schema incompatibilities before applying an unattended source
+  transition. Semantic compatibility will continue to be checked before release
+  rather than inferred by the runtime.
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for non-home roots. Server-side processes (toolshed, CLI)
-  leave it off unless the env var is set. End state:
-  graduate to always-on for system roots once golden-replay coverage has soaked
-  and the home audit lands, then delete both auto-update flags.
-- **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
-  off elsewhere.
-- **Path to removal.** Graduate the home root (below), make the check
-  unconditional, and remove both flags together.
+  builds) run it on for roots and other same-toolshed system-source patterns.
+  Server-side processes
+  (toolshed, CLI) leave it off unless the env var is
+  set. End state:
+  graduate to always-on for system sources once golden-replay coverage has
+  soaked, then delete the flag.
+- **Status on 2026-07-22.** Implemented; on in the shell for all tracked system
+  roots, home included ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
+  removed), and for other patterns whose verified source path exposes
+  `?identity`; off elsewhere. Root reconciliation and broken-root repair run
+  before bootstrap, while ordinary-pattern checks run after instantiation.
+- **Path to removal.** Make the check unconditional and remove the flag.
 
-### `systemPatternAutoUpdateHome`
+### `computedCellIds`
 
-- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` environment
-  variable, the shell build define of the same name, or
-  `RuntimeOptions.experimental.systemPatternAutoUpdateHome`.
-- **Added by.** Bernhard Seefeld, in #4611 (2026-07-08).
-- **Purpose.** Second gate holding the **home** root (home.tsx) out of
-  [`systemPatternAutoUpdate`](#systempatternautoupdate): the home root carries
-  real user data (favorites, journal, the spaces list) and stays pinned until
-  the stable-addressing audit verifies an in-place swap preserves that state.
-  Both flags must be on for a home root to auto-update.
-- **Current default and planned end state.** Off everywhere (no shell-side
-  default-on). End state: flip on after the home.tsx stable-addressing audit,
-  then remove together with `systemPatternAutoUpdate`.
-- **Status on 2026-07-09.** Implemented, off by default.
-- **Path to removal.** Complete the audit, default the home root on, and delete
-  both flags when the check becomes unconditional.
+- **Toggle via.** `EXPERIMENTAL_COMPUTED_CELL_IDS` environment variable
+  (through the canonical env registry) or
+  `RuntimeOptions.experimental.computedCellIds`.
+- **Added by.** Robin McCollum, in #4659 (spec:
+  [`docs/specs/computed-cell-identity.md`](../specs/computed-cell-identity.md)).
+- **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
+  `computed:` URI scheme replacing `of:`) for derived internal cells. The
+  builder classifies written internals as computed by default, then applies
+  conservative writer- and input-side disqualifiers. These include streams;
+  handler, writable-proxy, effect, opaque, and non-replayable writers; and
+  roots handed writable to handlers, sub-patterns, sub-pattern operations, or
+  non-replayable builtins. The linked spec is the exhaustive classifier
+  reference. The flag gates minting only; readers accept both id forms
+  unconditionally, so it can flip either way without a migration — but see the
+  version-skew note below.
+- **Current default and planned end state.** On by default. An explicit
+  `false` remains a rollback override for version skew while the flag soaks;
+  clients predating the `computed:` scheme throw on such ids arriving via sync
+  (old servers are safe — an unknown scheme parses as no kind and stays
+  strict). Once the rollout is stable, make minting unconditional and delete
+  the flag. The computed-cell write-conflict policy (ack-and-drop for stale
+  all-computed commits) remains a separately gated follow-up.
+- **Status on 2026-07-23.** Kind-schemed minting landed in #4659 and is on by
+  default. Readers accept both schemes unconditionally, and explicit `false`
+  retains the legacy `of:` minting behavior as a temporary rollback path.
+- **Path to removal.** Confirm all syncing clients carry `computed:`-aware
+  readers and the default-on rollout has soaked; then remove the environment
+  mapping, runtime option, builder guard, and legacy rollback tests.
 
 ---
 
@@ -1259,6 +1346,79 @@ the per-epic implementation notes).
 >   lacks the capability advertises it absent (parsed as `false`), and a newer
 >   runner fails open to piece-root discovery without sending the unsupported
 >   request. It was added by Bernhard Seefeld for server-side execution W0.3.
+> - **`pendingReadStacks`** is a build-inherent capability, hardwired to `true`,
+>   advertising that this build's engine resolves array-`localSeq` pending reads
+>   (the full-stack dependency sets of CT-1872 1c; `resolvePendingReads` in
+>   [`packages/memory/v2/engine.ts`](../../packages/memory/v2/engine.ts)). It is
+>   not configuration: against a server that advertises it absent, the client
+>   scalarizes each dependency array to its top-of-stack element before sending
+>   (`scalarizePendingReadStacks` in
+>   [`packages/runner/src/storage/v2.ts`](../../packages/runner/src/storage/v2.ts)),
+>   and HOLDS the send until every omitted lower dependency has settled — a
+>   dropped one dooms the commit locally before it reaches the wire; once all
+>   are accepted the scalar shape is sound. (Sending while an omitted
+>   dependency is unsettled would let the old server durably accept a commit
+>   the client cascade-rejects — a split-brain where the caller sees a
+>   conflict for a write that landed.) Scheduler observations degrade instead
+>   of holding: a multi-layer observation is dropped client-side (flag-off
+>   semantics), so the flush that semantic commits await never waits on
+>   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
+>   the scalarization fallback once every server in the fleet advertises the
+>   capability; the flag itself then reads as permanent documentation of the
+>   wire shape. (The CT-1910 basis repair — `basisSeq` on pending reads,
+>   scanned with own-session exclusion — landed WITHOUT a capability of its
+>   own: servers ignore unknown read fields, so clients attach it
+>   unconditionally and older servers keep the legacy max-dependency basis.
+>   CT-1910's remaining scope, server-inferred dependencies, stays a
+>   follow-on protocol step.)
+> - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
+>   It advertises that the memory server can list live space-scoped entity
+>   identifiers without returning stored values. Older servers omit it, which
+>   parses as `false`. It is permanent.
+> - **`entityIdPagination`** is a build-inherent capability, hardwired to
+>   `true`. It advertises snapshot-checked, server-capped pages for
+>   `entity-id.list`. Older servers return the historical complete response.
+>   It is permanent.
+> - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
+>   It advertises identifier-only `entity-id.exists` point lookup. Older
+>   servers omit it, which parses as `false`. It is permanent.
+
+### `experimentalConcurrentWatchRefresh`
+
+- **Toggle via.** `experimentalConcurrentWatchRefresh` on
+  `IRemoteStorageProviderSettings`
+  ([`packages/runner/src/storage/interface.ts`](../../packages/runner/src/storage/interface.ts)),
+  passed through `StorageManager` settings. The runner mirrors it onto each
+  memory session via `SpaceSession.setConcurrentWatchRefresh()`
+  ([`packages/memory/v2/client.ts`](../../packages/memory/v2/client.ts)) —
+  per-session, not a process global. In the **shell** it is a per-browser-profile
+  dogfood toggle: run `commonfabric.concurrentWatchRefresh(true)` in the console
+  and reload. The flag crosses the worker IPC in `InitializationData` and is
+  fixed at `StorageManager.open` time, so — like the render ceiling — it takes
+  effect on the next runtime (reload), not live. Threaded shell → worker via
+  `runtimeHostFlags()`
+  ([`packages/shell/src/lib/host-toggles.ts`](../../packages/shell/src/lib/host-toggles.ts))
+  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings.
+- **Added by.** Ben Follington (#4937; shell dogfood toggle #4974).
+- **Purpose.** By default watch acquisition is strict single-flight per space: a
+  guard holds every watch refresh after the first until the prior response
+  lands, so traversal-driven pulls discovered a tick apart serialize into
+  one-round-trip-each frames even when nothing depends on the prior response. On
+  a high-RTT link this dominates cold-load wall-clock. With the flag on,
+  refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
+  currently 8) in `storage/v2.ts`, and the memory client issues the whole
+  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
+  wire order is preserved and application stays ordered. Same-tick microtask
+  coalescing is unchanged.
+- **Current default and planned end state.** Off by default. It is a spike
+  pending live measurement on a real (estuary-latency) load; the window size is
+  a tuning value. End state is either graduation to always-on with a settled
+  window, or removal if the render-side fix (initial-render descent) makes the
+  waterfall shallow enough that concurrency no longer pays.
+- **Status on 2026-07-24.** Implemented behind the flag, off by default; not yet
+  measured end-to-end over real latency.
+- **Path to removal.** Graduate to always-on once measured safe and beneficial,
+  or remove if superseded by reducing the round-trip count at the source.
 
 ---
 
@@ -1346,8 +1506,7 @@ The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
 `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION`,
 `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME`) reach the runtime through the
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`) reach the runtime through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
 dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 
@@ -1505,6 +1664,20 @@ config reaches:
 These are recorded so that references to them elsewhere in the tree do not send a
 future reader hunting for a flag that no longer exists.
 
+### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
+
+The second gate that held the **home** root (home.tsx) out of
+[`systemPatternAutoUpdate`](#systempatternautoupdate) while the
+stable-addressing question was open: the home root carries real user data
+(favorites, journal, the spaces list), and an in-place roll had to be proven
+state-preserving first. `home-golden-replay.test.ts` pins exactly that (seed
+representative home data, roll N→N+1 in place, prove every list survives), and
+the 2026-07-21 estuary incident — a runtime migration bricking every
+old-generation home root with no self-repair path because this flag was off —
+made the cost of the extra gate concrete. Removed at the flag owner's direction;
+home roots now ride `systemPatternAutoUpdate` like every other tracked system
+root.
+
 ### `schedulerHistoricalMightWrite` (removed)
 
 An `ExperimentalOptions` flag that preserved the scheduler's cumulative
@@ -1516,11 +1689,11 @@ scheduler-v2 spec documents still mention it as part of their migration history.
 
 ### `esmModuleLoader` / `CF_ESM_MODULE_LOADER` (removed)
 
-The flag that selected the ESM module-record loader over the older AMD bundle
-path during the content-addressed module-loading rollout. (An early draft of the
-plan called it `EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then
-the flag, the AMD bundle pipeline, and the AMD compilation cache were all
-removed; the ESM loader is now the only loader. See
+The flag that selected the ESM module-record loader during the
+content-addressed module-loading rollout. (An early draft of the plan called it
+`EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then the flag and
+the whole-bundle loader and cache it switched away from were all removed; the
+ESM module-record loader is now the only loader. See
 [`docs/history/specs/module-loading-implementation-plan.md`](../history/specs/module-loading-implementation-plan.md),
 whose status header records the removal.
 

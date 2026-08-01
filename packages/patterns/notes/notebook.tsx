@@ -90,6 +90,12 @@ export interface NotebookOutput extends NotebookPiece {
   cancelNewNestedNotebook: Stream<void>;
   startEditTitle: Stream<void>;
   stopEditTitle: Stream<void>;
+  goToAllNotes: Stream<void>;
+  createNoteFromPrompt: Stream<void>;
+  createAnotherNoteFromPrompt: Stream<void>;
+  createNestedNotebookFromPrompt: Stream<void>;
+  createAnotherNestedNotebookFromPrompt: Stream<void>;
+  createNotebookFromSelectionPrompt: Stream<void>;
   // Test-accessible state
   selectedNoteIndices: number[];
   selectedCount: number;
@@ -143,12 +149,13 @@ const handleDropOntoCurrentNotebook = handler<
     // Remove from all notebooks
     removeFromAllNotebooks(notebooks, itemsToMove);
 
-    // Add all to this notebook (deduplicated)
+    // Add all to this notebook, deduplicated by link identity on the server.
+    // The whole-list read above genuinely has to stay (it resolves the dragged
+    // index against the selection), so this write still contends on concurrent
+    // notes changes; addUnique keeps a re-add a no-op instead of a duplicate.
     for (const item of itemsToMove) {
-      if (!notesList.some((n) => equals(item, n))) {
-        notes.push(item);
-        item.key("isHidden").set(true);
-      }
+      notes.addUnique(item);
+      item.key("isHidden").set(true);
     }
     selectedNoteIndices.set([]);
   } else {
@@ -157,7 +164,9 @@ const handleDropOntoCurrentNotebook = handler<
 
     removeFromAllNotebooks(notebooks, [sourceCell]);
     sourceCell.key("isHidden").set(true);
-    notes.push(sourceCell);
+    // Deduplicated by link identity; the early return above already covers the
+    // common already-present case, and the retained read keeps this contended.
+    notes.addUnique(sourceCell);
   }
 });
 
@@ -182,9 +191,14 @@ const handleDropOntoNotebook = handler<
   if (!targetNotebook.key("isNotebook").get()) return;
 
   const targetNotesCell = targetNotebook.key("notes");
-  const targetNotesList = targetNotesCell.get() ?? [];
   const currentList = currentNotes.get();
   const selected = selectedNoteIndices.get();
+
+  // The only binding today passes the notebook's own SELF as the target, so
+  // target and current usually alias the same notes collection. In that case
+  // there is nothing to remove from "current": removing would strip or
+  // reorder the very memberships addUnique confirms below.
+  const targetIsCurrent = equals(targetNotesCell, currentNotes);
 
   // Check if dragged item is in the selection
   const draggedIndex = currentList.findIndex((n) => equals(sourceCell, n));
@@ -197,12 +211,12 @@ const handleDropOntoNotebook = handler<
       Boolean,
     );
 
-    // Add all to target (deduplicated)
+    // Add all to target, deduplicated by link identity on the server —
+    // addUnique needs no read of the target list, so concurrent drops onto the
+    // same notebook merge instead of conflicting.
     for (const item of itemsToMove) {
-      if (!targetNotesList.some((n) => equals(item, n))) {
-        targetNotesCell.push(item);
-        item.key("isHidden").set(true);
-      }
+      targetNotesCell.addUnique(item);
+      item.key("isHidden").set(true);
     }
 
     // Find target notebook index to skip it during removal
@@ -214,27 +228,40 @@ const handleDropOntoNotebook = handler<
     // Remove from all notebooks except target
     removeFromAllNotebooks(notebooks, itemsToMove, targetIndex);
 
-    // Remove from current notebook
-    currentNotes.set(
-      currentList.filter(
-        (n) => !itemsToMove.some((item) => equals(n, item)),
-      ),
-    );
+    // Remove from current notebook — unless current IS the target, where
+    // "removing" would strip the memberships this drop just confirmed. (The
+    // pre-addUnique code ran this unconditionally, so a same-notebook
+    // multi-drop silently dropped the selected notes from the notebook.)
+    if (!targetIsCurrent) {
+      currentNotes.set(
+        currentList.filter(
+          (n) => !itemsToMove.some((item) => equals(n, item)),
+        ),
+      );
+    }
     selectedNoteIndices.set([]);
   } else {
     // Single-item move
-    if (targetNotesList.some((n) => equals(sourceCell, n))) return;
-
-    // Remove from current notebook if present
-    const indexInCurrent = currentList.findIndex((n) => equals(sourceCell, n));
-    if (indexInCurrent !== -1) {
-      const copy = [...currentList];
-      copy.splice(indexInCurrent, 1);
-      currentNotes.set(copy);
+    // Remove from current notebook if present — unless current IS the
+    // target, where the removal would turn addUnique's no-op below into a
+    // move-to-tail reorder of an already-present note.
+    if (!targetIsCurrent) {
+      const indexInCurrent = currentList.findIndex((n) =>
+        equals(sourceCell, n)
+      );
+      if (indexInCurrent !== -1) {
+        const copy = [...currentList];
+        copy.splice(indexInCurrent, 1);
+        currentNotes.set(copy);
+      }
     }
 
     sourceCell.key("isHidden").set(true);
-    targetNotesCell.push(sourceCell);
+    // Deduplicated by link identity on the server, so a note the target
+    // already holds keeps a single membership with no whole-list read. For a
+    // genuinely distinct target this completes the move (the old guard
+    // skipped it entirely, leaving the note in both notebooks).
+    targetNotesCell.addUnique(sourceCell);
   }
 });
 
@@ -264,10 +291,10 @@ const deleteSelectedNotes = handler<
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[] | Default<[]>>;
+    pieceRegistry: Writable<NotePiece[] | Default<[]>>;
     notebooks: Writable<NotebookPiece[]>;
   }
->((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
+>((_, { notes, selectedNoteIndices, pieceRegistry, notebooks }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
   const itemsToDelete = selected.map((idx) => notesList[idx]).filter(Boolean);
@@ -282,9 +309,9 @@ const deleteSelectedNotes = handler<
     ),
   );
 
-  // Remove from allPieces (permanent delete)
-  allPieces.set(
-    (allPieces.get() ?? []).filter(
+  // Remove from the registry (permanent delete)
+  pieceRegistry.set(
+    (pieceRegistry.get() ?? []).filter(
       (piece) => !itemsToDelete.some((item) => equals(piece, item)),
     ),
   );
@@ -414,7 +441,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
     notes: Writable<NotePiece[]>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, state) => {
@@ -424,7 +451,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction,
     selectedNoteIndices,
     notes,
-    allPieces,
+    pieceRegistry,
     notebooks,
   } = state;
 
@@ -441,7 +468,7 @@ const createNotebookFromPrompt = handler<
     notes: selectedItems,
     isHidden: true,
   });
-  allPieces.push(newNotebook);
+  pieceRegistry.push(newNotebook);
 
   if (actionType === "move") {
     // Remove from all existing notebooks
@@ -455,8 +482,11 @@ const createNotebookFromPrompt = handler<
       newNotebook,
     ]);
   } else {
-    // For add: just add the new notebook as sibling
-    notes.push(newNotebook);
+    // For add: append the new notebook as sibling. Its contents derive from
+    // the notes snapshot read above, so write the whole list from that same
+    // snapshot; the read stays in the conflict set and a concurrent change
+    // rejects this commit and retries against fresh state.
+    notes.set([...notesList, newNotebook]);
   }
 
   // Clean up state
@@ -517,13 +547,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       scope: ["."],
       headless: true,
     });
-    // Notebooks discovered via wish scope (replaces allPieces emoji filtering)
+    // Notebooks discovered through wish scope.
     const notebooks = notebookWish.candidates;
 
-    // Still need allPieces for write operations (push new notes/notebooks)
-    const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
-      { query: "#default", headless: true },
-    ).result!;
+    // The registry is writable for creating notes and notebooks.
+    const pieceRegistry = wish<Writable<NotePiece[]>>({
+      query: "#pieceRegistry",
+      headless: true,
+    }).result!;
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);
@@ -598,7 +629,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // TODO(seefeld,mathpirate): We need some better way to find the "All Notes" notebook.
     const goToAllNotesAction = action(() => {
-      const pieces = allPieces.get() ?? [];
+      const pieces = pieceRegistry.get() ?? [];
       const existing = pieces.find((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
@@ -631,7 +662,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       }
     });
 
-    // ===== Actions (close over notes, allPieces, self) =====
+    // ===== Actions (close over notes, pieceRegistry, self) =====
     // These work because all inputs use Default<> (not optional ?), so self
     // always satisfies the output schema's required properties at runtime.
 
@@ -650,7 +681,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           isHidden: true,
           parentNotebook: self,
         });
-        allPieces.push(newNote);
+        pieceRegistry.push(newNote);
         notes.push(newNote);
         if (navigate) {
           navigateTo(newNote);
@@ -675,7 +706,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             parentNotebook: self,
           }));
         }
-        allPieces.push(...created);
+        pieceRegistry.push(...created);
         notes.push(...created);
         return created;
       },
@@ -711,7 +742,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           notes: notesToAdd,
         });
 
-        allPieces.push(newNotebook);
+        pieceRegistry.push(newNotebook);
         return newNotebook;
       },
     );
@@ -725,7 +756,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: self,
       });
-      allPieces.push(newNote);
+      pieceRegistry.push(newNote);
       notes.push(newNote);
 
       // Close modal and navigate (unless "Create Another" was previously used)
@@ -746,7 +777,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: self,
       });
-      allPieces.push(newNote);
+      pieceRegistry.push(newNote);
       notes.push(newNote);
 
       // Keep modal open for "Create Another"
@@ -763,7 +794,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: self,
       });
-      allPieces.push(nb);
+      pieceRegistry.push(nb);
       notes.push(nb);
 
       const shouldNavigate = !usedCreateAnotherNotebook.get();
@@ -783,7 +814,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: undefined,
       });
-      allPieces.push(nb);
+      pieceRegistry.push(nb);
       notes.push(nb);
 
       usedCreateAnotherNotebook.set(true);
@@ -803,7 +834,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             isHidden: true,
             parentNotebook: self, // Set parent for back navigation
           });
-          allPieces.push(newNote);
+          pieceRegistry.push(newNote);
           notes.push(newNote);
         }
       }
@@ -927,9 +958,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       backlinks.get().length > 0 ? "flex" : "none"
     );
 
-    // All Notes button display - search allPieces by name (matches default-app approach)
+    // All Notes button display - search the registry by name.
     const allNotesButtonDisplay = computed(() => {
-      const pieces = allPieces.get() ?? [];
+      const pieces = pieceRegistry.get() ?? [];
       const exists = pieces.some((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
@@ -1191,14 +1222,12 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                     self,
                                   })}
                                 >
-                                  <cf-cell-context $cell={note}>
-                                    <cf-chip
-                                      label={note?.[NAME] ??
-                                        note?.title ??
-                                        "Untitled"}
-                                      interactive
-                                    />
-                                  </cf-cell-context>
+                                  <cf-chip
+                                    label={note?.[NAME] ??
+                                      note?.title ??
+                                      "Untitled"}
+                                    interactive
+                                  />
                                 </div>
                               </cf-drag-source>
                             </cf-drop-zone>
@@ -1310,7 +1339,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     onClick={deleteSelectedNotes({
                       notes,
                       selectedNoteIndices,
-                      allPieces,
+                      pieceRegistry,
                       notebooks,
                     })}
                     style={{ color: "var(--cf-theme-color-error, #dc3545)" }}
@@ -1355,7 +1384,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   pendingNotebookAction,
                   selectedNoteIndices,
                   notes,
-                  allPieces,
+                  pieceRegistry,
                   notebooks,
                 })}
               >
@@ -1492,7 +1521,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       deleteSelected: deleteSelectedNotes({
         notes,
         selectedNoteIndices,
-        allPieces,
+        pieceRegistry,
         notebooks,
       }),
       duplicateSelected: doDuplicateSelectedNotes,
@@ -1503,6 +1532,20 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       cancelNewNestedNotebook: cancelNewNestedNotebookPromptAction,
       startEditTitle: startEditingTitleAction,
       stopEditTitle: stopEditingTitleAction,
+      goToAllNotes: goToAllNotesAction,
+      createNoteFromPrompt: createNoteAction,
+      createAnotherNoteFromPrompt: createAnotherNoteAction,
+      createNestedNotebookFromPrompt: createNestedNotebookAction,
+      createAnotherNestedNotebookFromPrompt: createAnotherNestedNotebookAction,
+      createNotebookFromSelectionPrompt: createNotebookFromPrompt({
+        newNotebookName,
+        showNewNotebookPrompt,
+        pendingNotebookAction,
+        selectedNoteIndices,
+        notes,
+        pieceRegistry,
+        notebooks,
+      }),
       // Test-accessible state
       selectedNoteIndices,
       selectedCount,

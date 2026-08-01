@@ -16,7 +16,7 @@ import {
   Home,
   homeSchema,
 } from "@commonfabric/home-schemas";
-import { tagsFromSchema } from "@commonfabric/data-model/schema-tags";
+import { tagsFromSchema } from "./schema-tags.ts";
 
 type HandlerName = "addFavorite" | "removeFavorite";
 

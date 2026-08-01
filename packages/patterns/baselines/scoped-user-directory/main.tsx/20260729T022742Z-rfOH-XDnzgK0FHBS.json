@@ -1,0 +1,159 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Directory": {
+        "properties": {
+          "users": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/User"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "displayName"
+        ],
+        "type": "object"
+      },
+      "UserPointer": {
+        "properties": {
+          "user": {
+            "$ref": "#/$defs/User"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "properties": {
+      "directory": {
+        "$ref": "#/$defs/Directory",
+        "default": {
+          "users": []
+        },
+        "scope": "space"
+      },
+      "me": {
+        "$ref": "#/$defs/UserPointer",
+        "scope": "user"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "scoped-user-directory/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Directory": {
+        "properties": {
+          "users": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/User"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "type": "object"
+      },
+      "JoinAsEvent": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "RenameEvent": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "displayName"
+        ],
+        "type": "object"
+      },
+      "UserPointer": {
+        "properties": {
+          "user": {
+            "$ref": "#/$defs/User"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "directory": {
+        "$ref": "#/$defs/Directory",
+        "default": {
+          "users": []
+        },
+        "scope": "space"
+      },
+      "joinAs": {
+        "$ref": "#/$defs/JoinAsEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "me": {
+        "$ref": "#/$defs/UserPointer",
+        "scope": "user"
+      },
+      "rename": {
+        "$ref": "#/$defs/RenameEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "userCount": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "directory",
+      "me",
+      "userCount",
+      "joinAs",
+      "rename",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

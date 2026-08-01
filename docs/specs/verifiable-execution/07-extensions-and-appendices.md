@@ -1,6 +1,6 @@
 # CF Protocol: Extensions & Appendices (Sections 13–17)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 13. Trusted UI and Interaction Integrity
 

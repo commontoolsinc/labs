@@ -89,6 +89,79 @@ describe("RuntimeClient.setForwardWorkerConsole", () => {
   });
 });
 
+describe("RuntimeClient.getPieceSource", () => {
+  it("asks the worker for one piece's source state", async () => {
+    const source = {
+      space: "did:key:z6Mk-runtime-client-source",
+      pieceId: "of:fid1:piece",
+      files: [{ name: "/main.tsx", contents: "export default 1;" }],
+      history: [],
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ source });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    const result = await client.getPieceSource(
+      "of:fid1:piece",
+      "did:key:z6Mk-runtime-client-source" as never,
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceGetSource,
+      pieceId: "of:fid1:piece",
+      space: "did:key:z6Mk-runtime-client-source",
+    }]);
+    // The response is unwrapped: callers get the source state, not the envelope.
+    expect(result).toBe(source);
+  });
+});
+
+describe("RuntimeClient.updatePieceSource", () => {
+  it("sends a discriminated source action to the worker", async () => {
+    const source = {
+      space: "did:key:z6Mk-runtime-client-source",
+      pieceId: "of:fid1:piece",
+      files: [],
+      history: [],
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ source });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    const response = await client.updatePieceSource(
+      "of:fid1:piece",
+      "did:key:z6Mk-runtime-client-source" as never,
+      { kind: "restore", revisionId: "revision-1" },
+      { confirmationToken: "confirmation-1" },
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceUpdateSource,
+      pieceId: "of:fid1:piece",
+      space: "did:key:z6Mk-runtime-client-source",
+      action: { kind: "restore", revisionId: "revision-1" },
+      confirmationToken: "confirmation-1",
+    }]);
+    expect(response).toEqual({ source });
+  });
+});
+
 describe("RuntimeClient.resolveSpaceName", () => {
   it("resolves the name inside the worker runtime", async () => {
     const space = "did:key:z6Mk-runtime-client-named-space";
@@ -200,6 +273,43 @@ describe("RuntimeClient.hasPendingWrites", () => {
     expect(client.hasPendingWrites()).toBe(false);
 
     expect(emitted).toEqual([true, false]);
+  });
+});
+
+describe("RuntimeClient.getPatternCoverage", () => {
+  // Same connection stub as above: the method is a single request whose response
+  // `data` it returns verbatim (null included), so a stub that records the
+  // request and replies with a fixed response pins the wiring.
+  function clientWithResponse(
+    response: unknown,
+  ): { client: RuntimeClient; requests: unknown[] } {
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve(response);
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    return { client, requests };
+  }
+
+  it("returns the worker's coverage report", async () => {
+    const data = {
+      spans: [],
+      hits: [{ fileName: "/main.tsx", id: 1, count: 2 }],
+    };
+    const { client, requests } = clientWithResponse({ data });
+    expect(await client.getPatternCoverage()).toEqual(data);
+    expect(requests).toEqual([{ type: RequestType.GetPatternCoverage }]);
+  });
+
+  it("returns null when the worker has no collector", async () => {
+    const { client } = clientWithResponse({ data: null });
+    expect(await client.getPatternCoverage()).toBeNull();
   });
 });
 

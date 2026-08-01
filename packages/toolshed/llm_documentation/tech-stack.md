@@ -6,10 +6,10 @@ For intra-service communication, we use hono stacks RPC style calls. See
 [Hono Stacks Documentation](https://hono.dev/docs/concepts/stacks) for more
 details.
 
-Whenever possible, make sure to use packages from JSR instead of npm.
-
-We are using Deno 2, so imports are a little different than deno 1. The
-deno.jsonc file includes all of the dependencies and handles the mapping.
+We use Deno 2 and resolve bare imports through workspace import maps. Declare
+Toolshed-only registry dependencies in `packages/toolshed/deno.jsonc`. Follow
+the [dependency maintenance guide](../../../docs/development/DEPENDENCIES.md)
+for registry choice, dependency placement, and update procedures.
 
 ## Core Technologies
 

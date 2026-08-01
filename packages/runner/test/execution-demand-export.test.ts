@@ -51,21 +51,26 @@ function createRuntime(
   return { runtime, storageManager };
 }
 
-/** Await the gate's delayed shrink publish: poll until the LAST recorded
- * demand call carries exactly `pieces`, bounded well above the test hold. */
+/** Await the gate's delayed shrink publish: drive logical time until the LAST
+ * recorded demand call carries exactly `pieces`, bounded well above the test
+ * hold.
+ *
+ * `clock.tick` rather than a wall-clock sleep: the package's fake clock freezes
+ * a positive-delay timer armed from a `test/` file (see
+ * `test/clock-preload.ts`), so a real sleep deadlocks here. The gate's own hold
+ * timer is armed from `src/`, so advancing logical time is what releases it. */
 async function expectEventualDemand(
   calls: DemandCall[],
   pieces: readonly string[],
 ): Promise<void> {
   const expected = [...pieces].sort();
-  const deadline = Date.now() + 2_000;
   const matches = () => {
     const last = calls.at(-1);
     return last !== undefined &&
       [...last.pieces].sort().join("\0") === expected.join("\0");
   };
-  while (!matches() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let elapsed = 0; !matches() && elapsed < 2_000; elapsed += 5) {
+    await clock.tick(5);
   }
   expect([...(calls.at(-1)?.pieces ?? [])].sort()).toEqual(expected);
 }

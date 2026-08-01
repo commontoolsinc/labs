@@ -66,11 +66,11 @@ shared pattern documentation.
 - Multi-user tests are required when identity, `PerUser`, host/admin state, or
   cross-viewer behavior moves across a composition boundary.
 - Validate against populated existing state before deploying over a live piece.
-  Fresh local state can miss regressions involving stored images, existing
-  votes, joined identities, and SQLite-backed history.
-- After `setsrc`, verify both normal cell-backed state and non-cell-backed
-  capabilities such as SQLite query outputs. Browser console probes are useful
-  when CLI reads do not subscribe or a remote websocket is unreliable.
+  Fresh local state can miss regressions involving existing votes, joined
+  identities, and stored history.
+- After `setsrc`, verify the piece's state reads back as expected. Browser
+  console probes are useful when CLI reads do not subscribe or a remote
+  websocket is unreliable.
 
 ## Documentation
 

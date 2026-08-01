@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import { basename, join, resolve, toFileUrl } from "@std/path";
 import {
   awaitBackgroundMountStartup,
   awaitForegroundMountExit,
   buildMountStatusRows,
   childStatusPathForStatePath,
+  defaultSystemUnmount,
   formatMountStatusTable,
   fuse,
   isFuseProcessCommand,
   mountStatusHeader,
+  runUnmount,
 } from "../commands/fuse.ts";
 import {
   buildBackgroundSupervisorDenoArgs,
@@ -17,24 +20,115 @@ import {
   buildFuseBinaryArgs,
   buildFuseChildDenoArgs,
   ensureExecShim,
+  F_MNTONNAME_OFF,
   findMountForPath,
   isAlive,
+  isMountpointInTable,
   isMountStateAlive,
   mountpointHash,
+  type MountStateEntry,
+  type MountTableState,
+  parseStatfsMountpoints,
   readAllMountStates,
+  readDarwinMountpoints,
   readMountState,
+  STATFS_SIZE,
   writeMountState,
 } from "../lib/fuse.ts";
 import {
   buildFuseChildCommand,
   cleanupFuseChild,
+  fuseSupervisorOptions,
   parseSupervisorArgs,
-  recordFuseChildPid,
+  recordFuseMountState,
   runFuseSupervisor,
   supervisorHelp,
 } from "../lib/fuse-supervisor.ts";
 import { writeFailedSupervisorStartupStatus } from "../../fuse/mod.ts";
 import { withEnv } from "./utils.ts";
+
+const CHILD_PID = 321;
+
+function mountStateFixture(
+  overrides: Partial<MountStateEntry> = {},
+): MountStateEntry {
+  return {
+    pid: Deno.pid,
+    childPid: CHILD_PID,
+    mountpoint: "/tmp/test-mount",
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** One readiness report, in the form the FUSE child writes to its stdout. */
+function readinessLine(
+  state: string,
+  extra: Record<string, unknown> = {},
+): string {
+  return `${
+    JSON.stringify({
+      state,
+      pid: CHILD_PID,
+      mountpoint: "/tmp/test-mount",
+      updatedAt: "2026-03-17T00:00:00.000Z",
+      ...extra,
+    })
+  }\n`;
+}
+
+/** A channel whose writers all exit once the given chunks are through. */
+function readinessStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+}
+
+/** A channel a live mount keeps open after reporting. */
+function openReadinessStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+    },
+  });
+}
+
+/** An open channel the test pushes readiness lines into on its own schedule. */
+function controllableReadinessStream(): {
+  stream: ReadableStream<Uint8Array>;
+  push: (line: string) => void;
+} {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+  });
+  return {
+    stream,
+    push: (line: string) => controller.enqueue(encoder.encode(line)),
+  };
+}
+
+/** A supervisor that stays up: its exit never settles. */
+function liveSupervisor(): Promise<Deno.CommandStatus> {
+  return new Promise<Deno.CommandStatus>(() => {});
+}
+
+function trackRemoval(removed: string[]): (path: string) => Promise<void> {
+  return async (path: string) => {
+    removed.push(path);
+    await Deno.remove(path).catch(() => undefined);
+  };
+}
 
 describe("mountpointHash", () => {
   it("returns a 16-char hex string", async () => {
@@ -436,252 +530,274 @@ describe("mount state operations", () => {
     await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
-  it("rejects background mounts that die during startup and removes their state file", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: 1073741824,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
+  it("returns once the child reports mounted and both processes are alive", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const alive: number[] = [];
 
-    const removed: string[] = [];
     await expect(
-      awaitBackgroundMountStartup(
-        1073741824,
-        statePath,
-        {
-          attempts: 1,
-          isAlive: () => false,
-          removeStateFile: async (path: string) => {
-            removed.push(path);
-            await Deno.remove(path);
-          },
-          sleep: () => Promise.resolve(),
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([readinessLine("mounted")]),
+        isAlive: (pid) => {
+          alive.push(pid);
+          return true;
         },
-      ),
+      }),
+    ).resolves.toBeUndefined();
+
+    // Both the supervisor and the FUSE child are confirmed, in that order.
+    expect(alive).toEqual([CHILD_PID, Deno.pid]);
+    await expect(Deno.stat(statePath)).resolves.toBeDefined();
+  });
+
+  it("returns while the mount still holds the readiness channel open", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+
+    // A live mount never closes the channel, so the wait has to settle on the
+    // readiness line rather than on end of stream.
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: openReadinessStream([readinessLine("mounted")]),
+        isAlive: () => true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("puts no deadline on readiness, however much time passes", async () => {
+    // Nothing about the readiness wait is time-based, so no count of events can
+    // show the absence of a deadline. A wall clock can: an hour of virtual time
+    // passes with the child still starting, and the wait must survive it and
+    // then settle on the report that finally arrives. A reintroduced deadline
+    // would fire during the tick and fail this test.
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const channel = controllableReadinessStream();
+    const time = new FakeTime();
+
+    try {
+      const startup = awaitBackgroundMountStartup(Deno.pid, statePath, {
+        readiness: channel.stream,
+        supervisorExit: liveSupervisor(),
+        isAlive: () => true,
+      });
+      let ended = false;
+      startup.then(() => ended = true, () => ended = true);
+
+      await time.tickAsync(60 * 60 * 1000);
+      expect(ended).toBe(false);
+
+      channel.push(readinessLine("mounted"));
+      await expect(startup).resolves.toBeUndefined();
+    } finally {
+      time.restore();
+    }
+  });
+
+  it("reads past a starting report to the mounted report", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([
+          readinessLine("starting"),
+          readinessLine("mounted"),
+        ]),
+        isAlive: () => true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("reassembles a readiness report split across reads", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const line = readinessLine("mounted");
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([
+          line.slice(0, 12),
+          line.slice(12, 30),
+          line.slice(30),
+        ]),
+        isAlive: () => true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("reassembles a report whose multi-byte characters are split across reads", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    // A mountpoint name can be non-ASCII, and a pipe splits writes wherever it
+    // likes, including through a character.
+    const line = `${
+      JSON.stringify({
+        state: "mounted",
+        pid: CHILD_PID,
+        mountpoint: "/tmp/montaña-café-\u{1F600}",
+      })
+    }\n`;
+    const bytes = new TextEncoder().encode(line);
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i < bytes.length; i += 3) {
+      chunks.push(bytes.slice(i, i + 3));
+    }
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(chunk);
+            controller.close();
+          },
+        }),
+        isAlive: () => true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores unparseable output and settles on the report that follows", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream(["{not-json\n", readinessLine("mounted")]),
+        isAlive: () => true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects background mounts whose channel ends without a report", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const childStatusPath = childStatusPathForStatePath(statePath);
+    await Deno.writeTextFile(childStatusPath, readinessLine("starting"));
+    const removed: string[] = [];
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([]),
+        childStatusPath,
+        isAlive: () => true,
+        removeStateFile: trackRemoval(removed),
+      }),
     ).rejects.toThrow(/Background FUSE process exited during startup/i);
+
+    expect(removed).toEqual([statePath, childStatusPath]);
+    await expect(Deno.stat(statePath)).rejects.toThrow();
+    await expect(Deno.stat(childStatusPath)).rejects.toThrow();
+  });
+
+  it("rejects background mounts when the supervisor exits before any report", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const removed: string[] = [];
+
+    // An orphaned FUSE child inherits the write end and holds the channel open,
+    // so end of stream never comes and the supervisor's exit is the only signal
+    // that no report is coming.
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        readiness: openReadinessStream([]),
+        supervisorExit: Promise.resolve(
+          { success: false, code: 1, signal: null } as Deno.CommandStatus,
+        ),
+        isAlive: () => true,
+        removeStateFile: trackRemoval(removed),
+      }),
+    ).rejects.toThrow(/Background FUSE process exited during startup/i);
+
+    expect(removed).toEqual([statePath]);
+  });
+
+  it("rejects background mounts when the child reports startup failure", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const childStatusPath = childStatusPathForStatePath(statePath);
+    const removed: string[] = [];
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([
+          readinessLine("failed", { error: "fuse_session_mount failed" }),
+        ]),
+        childStatusPath,
+        isAlive: () => true,
+        removeStateFile: trackRemoval(removed),
+      }),
+    ).rejects.toThrow(/fuse_session_mount failed/);
+
+    expect(removed).toEqual([statePath, childStatusPath]);
+    await expect(Deno.stat(statePath)).rejects.toThrow();
+  });
+
+  it("rejects background mounts when the child reports exiting during startup", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const removed: string[] = [];
+
+    await expect(
+      awaitBackgroundMountStartup(Deno.pid, statePath, {
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([readinessLine("exiting")]),
+        isAlive: () => true,
+        removeStateFile: trackRemoval(removed),
+      }),
+    ).rejects.toThrow(/child reported exiting/i);
 
     expect(removed).toEqual([statePath]);
     await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
-  it("allows background mounts that stay alive through the startup window", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-
-    let checks = 0;
-    await expect(
-      awaitBackgroundMountStartup(
-        Deno.pid,
-        statePath,
-        {
-          attempts: 3,
-          isAlive: () => {
-            checks++;
-            return true;
-          },
-          sleep: () => Promise.resolve(),
-        },
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(checks).toBe(3);
-    await expect(Deno.stat(statePath)).resolves.toBeDefined();
-  });
-
-  it("waits for explicit child mounted status when available", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-    const childStatusPath = childStatusPathForStatePath(statePath);
-    let reads = 0;
-
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 3,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () => {
-          reads++;
-          return Promise.resolve(JSON.stringify({
-            state: reads === 1 ? "starting" : "mounted",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          }));
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(reads).toBe(3);
-    await expect(Deno.stat(statePath)).resolves.toBeDefined();
-  });
-
-  it("rejects background mounts when child exits after reporting mounted", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
+  it("rejects background mounts when the child dies after reporting mounted", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
     const childStatusPath = childStatusPathForStatePath(statePath);
     const removed: string[] = [];
 
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 2,
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([readinessLine("mounted")]),
         childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: (pid) => pid !== 321,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "mounted",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path).catch(() => undefined);
-        },
-        sleep: () => Promise.resolve(),
+        isAlive: (pid) => pid !== CHILD_PID,
+        removeStateFile: trackRemoval(removed),
       }),
     ).rejects.toThrow(/child exited after reporting mounted/i);
 
     expect(removed).toEqual([statePath, childStatusPath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
-  it("rejects background mounts when mounted status is followed by exiting", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-    const childStatusPath = childStatusPathForStatePath(statePath);
-    const removed: string[] = [];
-    let reads = 0;
-
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 2,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () => {
-          reads++;
-          return Promise.resolve(JSON.stringify({
-            state: reads === 1 ? "mounted" : "exiting",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          }));
-        },
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path).catch(() => undefined);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/child reported exiting/i);
-
-    expect(reads).toBe(2);
-    expect(removed).toEqual([statePath, childStatusPath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
-  });
-
-  it("ignores mounted child status from a different startup attempt", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-    const childStatusPath = childStatusPathForStatePath(statePath);
+  it("rejects background mounts when the supervisor dies after the child reports mounted", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
     const removed: string[] = [];
 
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "mounted",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "stale-token",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path);
-        },
-        sleep: () => Promise.resolve(),
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([readinessLine("mounted")]),
+        isAlive: (pid) => pid !== Deno.pid,
+        removeStateFile: trackRemoval(removed),
       }),
-    ).rejects.toThrow(/did not report mount readiness/i);
+    ).rejects.toThrow(/Background FUSE process exited during startup/i);
 
     expect(removed).toEqual([statePath]);
   });
 
-  it("cleans up malformed child status sidecars after readiness timeout", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-    const childStatusPath = childStatusPathForStatePath(statePath);
+  it("rejects a mounted report that carries no child pid", async () => {
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
     const removed: string[] = [];
 
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
+        supervisorExit: liveSupervisor(),
+        readiness: readinessStream([
+          `${JSON.stringify({ state: "mounted" })}\n`,
+        ]),
         isAlive: () => true,
-        readTextFile: () => Promise.resolve("{not-json"),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path).catch(() => undefined);
-        },
-        sleep: () => Promise.resolve(),
+        removeStateFile: trackRemoval(removed),
       }),
-    ).rejects.toThrow(/did not report mount readiness/i);
+    ).rejects.toThrow(/child exited after reporting mounted/i);
 
-    expect(removed).toEqual([statePath, childStatusPath]);
+    expect(removed).toEqual([statePath]);
   });
 
   it("does not read child status sidecars as mount state entries", async () => {
@@ -741,6 +857,7 @@ describe("mount state operations", () => {
 
     const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
       isMountStateAlive: () => true,
+      isMountpointInTable: () => Promise.resolve("present"),
     });
 
     expect(formatMountStatusTable(rows)).toBe([
@@ -758,7 +875,9 @@ describe("mount state operations", () => {
     expect((await Deno.stat(statePath)).isFile).toBe(true);
   });
 
-  it("formats empty status after removing stale mount entries", async () => {
+  it("sweeps a dead-PID entry only when the mount is also absent", async () => {
+    // The one truly-stale case: no process AND no kernel mount. Only here is it
+    // safe to remove the state file and show nothing.
     const statePath = await writeMountState(tmpDir, {
       pid: 123,
       mountpoint: "/tmp/test-mount",
@@ -770,6 +889,7 @@ describe("mount state operations", () => {
 
     const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
       isMountStateAlive: () => false,
+      isMountpointInTable: () => Promise.resolve("absent"),
       removeMountStateFile: async (path) => {
         removed.push(path);
         await Deno.remove(path);
@@ -782,122 +902,127 @@ describe("mount state operations", () => {
     await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
-  it("rejects background mounts when child reports startup failure", async () => {
+  it("shows a dead-PID mount still present in the table as dead and keeps it", async () => {
+    // The whole point of the trio: a severed mount whose daemon already died.
+    // The table is consulted BEFORE the PID, so this surfaces one row (not the
+    // old "No active FUSE mounts.") and the state file is NOT swept.
     const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
+      pid: 123,
+      childPid: 456,
       mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
+      apiUrl: "",
+      identity: "",
       startedAt: "2026-03-17T00:00:00.000Z",
     });
-    const childStatusPath = childStatusPathForStatePath(statePath);
     const removed: string[] = [];
 
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "failed",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-            error: "fuse_session_mount failed",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/fuse_session_mount failed/);
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => false,
+      isMountpointInTable: () => Promise.resolve("present"),
+      removeMountStateFile: (path) => {
+        removed.push(path);
+        return Promise.resolve();
+      },
+    });
 
-    expect(removed).toEqual([statePath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
+    expect(rows).toHaveLength(1);
+    expect(rows[0][0]).toBe("/tmp/test-mount");
+    expect(rows[0][3]).toBe("dead");
+    expect(removed).toEqual([]);
+    expect((await Deno.stat(statePath)).isFile).toBe(true);
   });
 
-  it("rejects background mounts when child exits during startup", async () => {
+  it("shows a dead-PID mount with an unknown table probe as unknown and keeps it", async () => {
+    // An unreadable table is never treated as proof the mount is gone. Even a
+    // dead PID must not destroy the evidence: show the row, keep the file.
     const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
+      pid: 123,
+      childPid: 456,
       mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
+      apiUrl: "",
+      identity: "",
       startedAt: "2026-03-17T00:00:00.000Z",
     });
-    const childStatusPath = childStatusPathForStatePath(statePath);
     const removed: string[] = [];
 
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "exiting",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/child reported exiting/);
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => false,
+      isMountpointInTable: () => Promise.resolve("unknown"),
+      removeMountStateFile: (path) => {
+        removed.push(path);
+        return Promise.resolve();
+      },
+    });
 
-    expect(removed).toEqual([statePath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
+    expect(rows).toHaveLength(1);
+    expect(rows[0][3]).toBe("unknown");
+    expect(removed).toEqual([]);
+    expect((await Deno.stat(statePath)).isFile).toBe(true);
   });
 
-  it("rejects background mounts when child readiness times out", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
+  it("reports a live mount whose entry is in the mount table as mounted", async () => {
+    await writeMountState(tmpDir, {
+      pid: 123,
+      childPid: 456,
       mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
+      apiUrl: "",
+      identity: "",
       startedAt: "2026-03-17T00:00:00.000Z",
     });
-    const childStatusPath = childStatusPathForStatePath(statePath);
+
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => true,
+      isMountpointInTable: () => Promise.resolve("present"),
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0][3]).toBe("running");
+  });
+
+  it("reports an alive-PID mount absent from the table as dead", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: 123,
+      childPid: 456,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
     const removed: string[] = [];
 
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "starting",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/did not report mount readiness/i);
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => true,
+      isMountpointInTable: () => Promise.resolve("absent"),
+      removeMountStateFile: (path) => {
+        removed.push(path);
+        return Promise.resolve();
+      },
+    });
 
-    expect(removed).toEqual([statePath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
+    expect(rows).toHaveLength(1);
+    expect(rows[0][3]).toBe("dead");
+    // A dead mount is surfaced, not swept: the state file must remain.
+    expect(removed).toEqual([]);
+    expect((await Deno.stat(statePath)).isFile).toBe(true);
+  });
+
+  it("reports an alive-PID mount with an unknown table probe as unknown", async () => {
+    await writeMountState(tmpDir, {
+      pid: 123,
+      childPid: 456,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => true,
+      isMountpointInTable: () => Promise.resolve("unknown"),
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0][3]).toBe("unknown");
   });
 });
 
@@ -985,6 +1110,7 @@ describe("buildDenoArgs", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cf-writeback.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
     expect(args).toContain("--allow-other");
     expect(args).toContain("--cfc-mode");
@@ -995,6 +1121,7 @@ describe("buildDenoArgs", () => {
     expect(args).toContain("--cfc-writeback-xattrs");
     expect(args).toContain("--cfc-writeback-state");
     expect(args).toContain("/tmp/cf-writeback.json");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("passes noattrcache through to the daemon", () => {
@@ -1097,6 +1224,50 @@ describe("FUSE supervisor command construction", () => {
       state: "failed",
       extra: { error: "Error: connectSpace failed" },
     }]);
+
+    await expect(writeFailedSupervisorStartupStatus(
+      new Error("status path unavailable"),
+      () => Promise.reject(new Error("write failed")),
+    )).resolves.toBeUndefined();
+  });
+
+  it("maps CLI options into the supervisor contract", () => {
+    expect(fuseSupervisorOptions({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      space: ["home", "work"],
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "2",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatus: "/tmp/status.json",
+    }, "/mnt")).toEqual({
+      mountpoint: "/mnt",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      spaces: ["home", "work"],
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "2",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatusPath: "/tmp/status.json",
+    });
   });
 
   it("builds a background supervisor invocation that does not load libfuse", () => {
@@ -1110,7 +1281,6 @@ describe("FUSE supervisor command construction", () => {
       spaces: ["home", "work"],
       statePath: "/tmp/cf-state.json",
       supervisorStatusPath: "/tmp/cf-state.json.child-status",
-      supervisorToken: "token-1",
       allowOther: true,
       noattrcache: true,
       cfcMode: "observe",
@@ -1118,13 +1288,16 @@ describe("FUSE supervisor command construction", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(args.slice(0, 2)).toEqual(["run", "--allow-run"]);
     expect(args).not.toContain("--allow-read");
     expect(args).not.toContain("--allow-write");
-    expect(args).toContain("--allow-read=/tmp/cf-state.json");
+    // The supervisor writes the mount state and reads nothing, so it is granted
+    // write access to that one file and no read access at all.
     expect(args).toContain("--allow-write=/tmp/cf-state.json");
+    expect(args.some((arg) => arg.startsWith("--allow-read"))).toBe(false);
     expect(args).not.toContain("--allow-env");
     expect(args).not.toContain("--allow-net");
     expect(args).not.toContain("--unstable-ffi");
@@ -1139,9 +1312,8 @@ describe("FUSE supervisor command construction", () => {
     expect(args).toContain("/tmp/cf-state.json");
     expect(args).toContain("--supervisor-status");
     expect(args).toContain("/tmp/cf-state.json.child-status");
-    expect(args).toContain("--supervisor-token");
-    expect(args).toContain("token-1");
     expect(args).toContain("--noattrcache");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
     expect(args.filter((arg) => arg === "--space").length).toBe(2);
   });
 
@@ -1155,7 +1327,6 @@ describe("FUSE supervisor command construction", () => {
       logFile: "/tmp/cf-fuse-mnt.log",
       spaces: [],
       supervisorStatusPath: "/tmp/cf-status.json",
-      supervisorToken: "token-1",
     });
     const childArgs = buildFuseChildDenoArgs({
       modPath: "/repo/packages/fuse/mod.ts",
@@ -1166,7 +1337,6 @@ describe("FUSE supervisor command construction", () => {
       logFile: "/tmp/cf-fuse-mnt.log",
       spaces: [],
       supervisorStatusPath: "/tmp/cf-status.json",
-      supervisorToken: "token-1",
     });
 
     expect(childArgs).not.toEqual(supervisorArgs);
@@ -1175,8 +1345,6 @@ describe("FUSE supervisor command construction", () => {
     expect(childArgs).toContain("/repo/packages/fuse/mod.ts");
     expect(childArgs).toContain("--supervisor-status");
     expect(childArgs).toContain("/tmp/cf-status.json");
-    expect(childArgs).toContain("--supervisor-token");
-    expect(childArgs).toContain("token-1");
     expect(childArgs).not.toContain(
       "/repo/packages/cli/lib/fuse-supervisor.ts",
     );
@@ -1203,7 +1371,7 @@ describe("FUSE supervisor command construction", () => {
     expect(child.args).not.toContain("/repo/packages/cli/mod.ts");
   });
 
-  it("represents the compiled supervisor-spawned FUSE child as a hidden subcommand", () => {
+  it("represents the compiled supervisor-spawned FUSE child as a direct subcommand", () => {
     const child = buildFuseChildCommand({
       mountpoint: "/mnt",
       apiUrl: "http://localhost:8000",
@@ -1213,19 +1381,18 @@ describe("FUSE supervisor command construction", () => {
       spaces: ["home"],
       execPath: "/usr/local/bin/cf",
       supervisorStatusPath: "/tmp/cf-status",
-      supervisorToken: "token-1",
       attrcacheTimeout: "2",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(child.command).toBe("/usr/local/bin/cf");
     expect(child.args).toContain("fuse-daemon");
     expect(child.args).toContain("--supervisor-status");
     expect(child.args).toContain("/tmp/cf-status");
-    expect(child.args).toContain("--supervisor-token");
-    expect(child.args).toContain("token-1");
     const flagIndex = child.args.indexOf("--attrcache-timeout");
     expect(flagIndex).toBeGreaterThan(-1);
     expect(child.args[flagIndex + 1]).toBe("2");
+    expect(child.args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("terminates the spawned FUSE child during supervisor cleanup", async () => {
@@ -1322,63 +1489,41 @@ describe("FUSE supervisor command construction", () => {
     })).toBe(true);
   });
 
-  it("records childPid only into state owned by the supervisor PID", async () => {
-    const statePath = await Deno.makeTempFile({ prefix: "cf-fuse-state-" });
+  it("writes the whole mount state without a pre-existing file", async () => {
+    const dir = await Deno.makeTempDir({ prefix: "cf-fuse-state-" });
+    const statePath = join(dir, "mount.json");
     try {
-      await Deno.writeTextFile(
+      // The mount command no longer writes this file, so the supervisor must
+      // not depend on anything already being there.
+      await recordFuseMountState({
+        mountpoint: "/tmp/test-mount",
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        execCli: "",
+        logFile: "/tmp/cf-fuse-test.log",
+        spaces: [],
         statePath,
-        JSON.stringify({
-          pid: 100,
-          mountpoint: "/tmp/test-mount",
-          apiUrl: "",
-          identity: "",
-          startedAt: "2026-03-17T00:00:00.000Z",
-        }),
-      );
-
-      const staleResult = await recordFuseChildPid({
-        statePath,
-        childPid: 300,
+        supervisorStatusPath: "/tmp/cf-fuse-test.child-status",
         supervisorPid: 200,
-        sleep: () => Promise.resolve(),
-      });
-      const staleState = JSON.parse(await Deno.readTextFile(statePath)) as {
-        childPid?: number;
-      };
+      }, 300);
 
-      expect(staleResult).toBe(false);
-      expect(staleState.childPid).toBeUndefined();
-
-      await Deno.writeTextFile(
-        statePath,
-        JSON.stringify({
-          pid: 200,
-          mountpoint: "/tmp/test-mount",
-          apiUrl: "",
-          identity: "",
-          startedAt: "2026-03-17T00:00:00.000Z",
-        }),
-      );
-
-      const matchingResult = await recordFuseChildPid({
-        statePath,
+      const state = JSON.parse(await Deno.readTextFile(statePath));
+      expect(state).toMatchObject({
+        pid: 200,
         childPid: 300,
-        supervisorPid: 200,
-        sleep: () => Promise.resolve(),
+        mountpoint: "/tmp/test-mount",
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        logFile: "/tmp/cf-fuse-test.log",
+        childStatusPath: "/tmp/cf-fuse-test.child-status",
       });
-      const matchingState = JSON.parse(await Deno.readTextFile(statePath)) as {
-        childPid?: number;
-      };
-
-      expect(matchingResult).toBe(true);
-      expect(matchingState.childPid).toBe(300);
+      expect(typeof state.startedAt).toBe("string");
     } finally {
-      await Deno.remove(statePath).catch(() => undefined);
+      await Deno.remove(dir, { recursive: true }).catch(() => undefined);
     }
   });
 
-  it("fails supervisor startup when childPid cannot be recorded", async () => {
-    const statePath = await Deno.makeTempFile({ prefix: "cf-fuse-state-" });
+  it("fails supervisor startup when the mount state cannot be written", async () => {
     const signals: Deno.Signal[] = [];
     let resolveStatus: (status: Deno.CommandStatus) => void = () => undefined;
 
@@ -1399,41 +1544,63 @@ describe("FUSE supervisor command construction", () => {
       }
     }
 
-    try {
-      await Deno.writeTextFile(
-        statePath,
-        JSON.stringify({
-          pid: 100,
-          mountpoint: "/tmp/test-mount",
-          apiUrl: "",
-          identity: "",
-          startedAt: "2026-03-17T00:00:00.000Z",
-        }),
-      );
+    await expect(runFuseSupervisor({
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      statePath: "/tmp/cf-fuse-unwritable-state.json",
+      supervisorPid: 200,
+      command: FakeCommand,
+      writeMountStateFile: () => Promise.reject(new Error("disk full")),
+      addSignalListener: () => undefined,
+      removeSignalListener: () => undefined,
+    })).rejects.toThrow(/Unable to record FUSE mount state: .*disk full/);
 
-      await expect(runFuseSupervisor({
-        mountpoint: "/tmp/test-mount",
-        apiUrl: "",
-        identity: "",
-        execCli: "",
-        logFile: "",
-        spaces: [],
-        statePath,
-        supervisorPid: 200,
-        command: FakeCommand,
-        sleep: () => Promise.resolve(),
-        addSignalListener: () => undefined,
-        removeSignalListener: () => undefined,
-      })).rejects.toThrow(/Unable to record FUSE child PID/);
-
-      expect(signals).toEqual(["SIGTERM"]);
-    } finally {
-      await Deno.remove(statePath).catch(() => undefined);
-    }
+    // The child must not outlive a supervisor that cannot record it.
+    expect(signals).toEqual(["SIGTERM"]);
   });
 
-  it("installs supervisor signal handlers before recording childPid", async () => {
-    const statePath = await Deno.makeTempFile({ prefix: "cf-fuse-state-" });
+  it("hands the child this process's stdout so readiness reaches the mount command", async () => {
+    let childOptions: Deno.CommandOptions | undefined;
+
+    class FakeCommand {
+      constructor(_command: string | URL, options: Deno.CommandOptions) {
+        childOptions = options;
+      }
+
+      spawn() {
+        return {
+          pid: 300,
+          status: Promise.resolve({ success: true, code: 0, signal: null }),
+          kill: () => undefined,
+        };
+      }
+    }
+
+    await expect(runFuseSupervisor({
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      supervisorPid: 200,
+      command: FakeCommand,
+      addSignalListener: () => undefined,
+      removeSignalListener: () => undefined,
+      exit: () => undefined,
+    })).resolves.toBeUndefined();
+
+    // The FUSE child writes its readiness to the descriptor it inherits here.
+    // Any other setting drops that report on the floor, and the mount command,
+    // which waits on it with no deadline, waits for as long as the mount is up.
+    expect(childOptions?.stdout).toBe("inherit");
+  });
+
+  it("installs supervisor signal handlers before recording mount state", async () => {
     const addedSignals: Deno.Signal[] = [];
     let handlersInstalledBeforeRecord = false;
 
@@ -1449,55 +1616,31 @@ describe("FUSE supervisor command construction", () => {
       }
     }
 
-    try {
-      await Deno.writeTextFile(
-        statePath,
-        JSON.stringify({
-          pid: 100,
-          mountpoint: "/tmp/test-mount",
-          apiUrl: "",
-          identity: "",
-          startedAt: "2026-03-17T00:00:00.000Z",
-        }),
-      );
+    await expect(runFuseSupervisor({
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      statePath: "/tmp/cf-fuse-signal-order-state.json",
+      supervisorPid: 200,
+      command: FakeCommand,
+      writeMountStateFile: () => {
+        handlersInstalledBeforeRecord = addedSignals.includes("SIGTERM") &&
+          addedSignals.includes("SIGINT");
+        return Promise.resolve();
+      },
+      addSignalListener: (signal) => {
+        addedSignals.push(signal);
+      },
+      removeSignalListener: () => undefined,
+      exit: (code: number) => {
+        throw new Error(`exit:${code}`);
+      },
+    })).rejects.toThrow(/exit:0/);
 
-      await expect(runFuseSupervisor({
-        mountpoint: "/tmp/test-mount",
-        apiUrl: "",
-        identity: "",
-        execCli: "",
-        logFile: "",
-        spaces: [],
-        statePath,
-        supervisorPid: 200,
-        command: FakeCommand,
-        sleep: async () => {
-          handlersInstalledBeforeRecord = addedSignals.includes("SIGTERM") &&
-            addedSignals.includes("SIGINT");
-          await Deno.writeTextFile(
-            statePath,
-            JSON.stringify({
-              pid: 200,
-              mountpoint: "/tmp/test-mount",
-              apiUrl: "",
-              identity: "",
-              startedAt: "2026-03-17T00:00:00.000Z",
-            }),
-          );
-        },
-        addSignalListener: (signal) => {
-          addedSignals.push(signal);
-        },
-        removeSignalListener: () => undefined,
-        exit: (code: number) => {
-          throw new Error(`exit:${code}`);
-        },
-      })).rejects.toThrow(/exit:0/);
-
-      expect(handlersInstalledBeforeRecord).toBe(true);
-    } finally {
-      await Deno.remove(statePath).catch(() => undefined);
-    }
+    expect(handlersInstalledBeforeRecord).toBe(true);
   });
 });
 
@@ -1536,7 +1679,6 @@ describe("buildFuseBinaryArgs", () => {
       logFile: "/tmp/cf-fuse.log",
       statePath: "/tmp/state.json",
       supervisorStatusPath: "/tmp/state.json.child-status",
-      supervisorToken: "token-1",
     });
 
     expect(args.slice(0, 2)).toEqual(["fuse-supervisor", "/mnt"]);
@@ -1546,8 +1688,6 @@ describe("buildFuseBinaryArgs", () => {
     expect(args[stateIndex + 1]).toBe("/tmp/state.json");
     const statusIndex = args.indexOf("--supervisor-status");
     expect(args[statusIndex + 1]).toBe("/tmp/state.json.child-status");
-    const tokenIndex = args.indexOf("--supervisor-token");
-    expect(args[tokenIndex + 1]).toBe("token-1");
   });
 
   it("omits every optional flag that was not requested", () => {
@@ -1573,6 +1713,7 @@ describe("buildFuseBinaryArgs", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(args).toContain("--allow-other");
@@ -1585,6 +1726,7 @@ describe("buildFuseBinaryArgs", () => {
     expect(args).toContain("--cfc-writeback-xattrs");
     const stateIndex = args.indexOf("--cfc-writeback-state");
     expect(args[stateIndex + 1]).toBe("/tmp/cfc.json");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("forwards an attrcache-timeout of zero", () => {
@@ -1608,6 +1750,7 @@ describe("parseSupervisorArgs", () => {
       "--api-url",
       "http://localhost:8000",
       "--noattrcache",
+      "--dangerously-allow-incompatible-schema",
       "--space",
       "home",
     ]);
@@ -1616,6 +1759,7 @@ describe("parseSupervisorArgs", () => {
     expect(options.mountpoint).toBe("/mnt");
     expect(options.apiUrl).toBe("http://localhost:8000");
     expect(options.noattrcache).toBe(true);
+    expect(options.dangerouslyAllowIncompatibleSchema).toBe(true);
     expect(options.attrcacheTimeout).toBeUndefined();
     expect(options.spaces).toEqual(["home"]);
   });
@@ -1645,6 +1789,9 @@ describe("parseSupervisorArgs", () => {
     expect(parseSupervisorArgs(["--help"]).help).toBe(true);
     expect(supervisorHelp()).toContain("--attrcache-timeout <seconds>");
     expect(supervisorHelp()).toContain("--noattrcache");
+    expect(supervisorHelp()).toContain(
+      "--dangerously-allow-incompatible-schema",
+    );
   });
 });
 
@@ -1671,5 +1818,580 @@ describe("fuse mount option validation", () => {
     expect(help).toContain("--noattrcache");
     expect(help).toContain("--attrcache-timeout");
     expect(help).toContain("Conflicts");
+    expect(help).toContain("--dangerously-allow-incompatible-schema");
+  });
+});
+
+describe("isMountpointInTable", () => {
+  it("reports present on darwin when getfsstat lists the mountpoint", async () => {
+    const state = await isMountpointInTable("/mnt", {
+      os: "darwin",
+      listDarwinMountpoints: () => ["/", "/dev", "/mnt"],
+    });
+    expect(state).toBe("present");
+  });
+
+  it("reports absent on darwin when getfsstat omits the mountpoint", async () => {
+    const state = await isMountpointInTable("/mnt", {
+      os: "darwin",
+      listDarwinMountpoints: () => ["/", "/dev"],
+    });
+    expect(state).toBe("absent");
+  });
+
+  it("reports unknown on darwin when getfsstat is unavailable (null)", async () => {
+    // A null return means the FFI probe could not run. It must never be
+    // downgraded to "absent" — an unreadable table is not proof the mount is
+    // gone, and a false "absent" hides a real (possibly stale) mount.
+    const state = await isMountpointInTable("/mnt", {
+      os: "darwin",
+      listDarwinMountpoints: () => null,
+    });
+    expect(state).toBe("unknown");
+  });
+
+  it("readDarwinMountpoints maps a native getfsstat error (-1) to null, not []", () => {
+    // getfsstat returns -1 on failure. Mapping that to [] would read as
+    // "absent" and hide a real mount — it must become null → "unknown". The
+    // injected-null test above cannot reach this: it replaces the whole lister,
+    // so it never exercises the native return-code mapping.
+    expect(readDarwinMountpoints(() => -1)).toBe(null);
+    // A zero count is a genuine (if unusual) empty table, not an error.
+    expect(readDarwinMountpoints(() => 0)).toEqual([]);
+  });
+
+  it("readDarwinMountpoints maps a negative SECOND call (post-alloc) to null", () => {
+    // The count call succeeds (1 record), but the fill call returns -1. This is
+    // the distinct `if (n < 0) return null` branch after the buffer is
+    // allocated — it must also collapse to null → "unknown", not [].
+    let call = 0;
+    const fn = () => (call++ === 0 ? 1 : -1);
+    expect(readDarwinMountpoints(fn)).toBe(null);
+  });
+
+  it("readDarwinMountpoints maps a thrown native call to null", () => {
+    // Any exception from the FFI path (e.g. a bad pointer) collapses to null →
+    // "unknown", never an empty/partial list read as "absent".
+    let call = 0;
+    const fn = () => {
+      if (call++ === 0) return 1;
+      throw new Error("boom");
+    };
+    expect(readDarwinMountpoints(fn)).toBe(null);
+  });
+
+  if (Deno.build.os !== "darwin") {
+    it("readDarwinMountpoints returns null when the getfsstat FFI is unavailable", () => {
+      // With no injected call, openGetfsstat() tries to dlopen libSystem, which
+      // only exists on darwin. On linux CI the dlopen throws → openGetfsstat
+      // returns null → readDarwinMountpoints returns null (→ "unknown").
+      expect(readDarwinMountpoints()).toBe(null);
+    });
+  }
+
+  it("parseStatfsMountpoints reads f_mntonname from each packed statfs record", () => {
+    // Hand-build a getfsstat-style buffer of two `struct statfs` records and
+    // assert the pure parse loop extracts both NUL-terminated mountpoints. This
+    // exercises the darwin FFI parse loop deterministically on any OS (linux CI
+    // never runs the syscall that would fill the buffer).
+    const enc = new TextEncoder();
+    const buf = new Uint8Array(2 * STATFS_SIZE);
+    const write = (record: number, path: string) => {
+      const bytes = enc.encode(path);
+      buf.set(bytes, record * STATFS_SIZE + F_MNTONNAME_OFF);
+      // Leave the following byte as its zero-initialized value: the NUL that
+      // terminates f_mntonname.
+    };
+    write(0, "/tmp/mnt-a");
+    write(1, "/tmp/mnt-b");
+    expect(parseStatfsMountpoints(buf, 2)).toEqual([
+      "/tmp/mnt-a",
+      "/tmp/mnt-b",
+    ]);
+  });
+
+  it("parseStatfsMountpoints clamps a NUL-less f_mntonname to its fixed length", () => {
+    // f_mntonname is a fixed 1024-byte field; a (corrupt) record with no NUL in
+    // it must be clamped to the field length rather than read past into the next
+    // record. Fill the whole field of a single record with 'a' (no terminator).
+    const F_MNTONNAME_LEN = 1024;
+    const buf = new Uint8Array(STATFS_SIZE);
+    buf.fill(0x61, F_MNTONNAME_OFF, F_MNTONNAME_OFF + F_MNTONNAME_LEN);
+    const [only] = parseStatfsMountpoints(buf, 1);
+    expect(only).toBe("a".repeat(F_MNTONNAME_LEN));
+  });
+
+  it("isMountpointInTable falls back to resolve() when the parent cannot be realPath'd", async () => {
+    // A mountpoint under a nonexistent parent makes parentCanonicalizedMountpoint
+    // realPath the parent, fail, and fall back to the resolved path — the only
+    // candidate. We prove it reached that branch by matching the resolved path
+    // in a synthetic /proc/mounts.
+    const mountpoint = "/no-such-parent-xyz-123/mnt";
+    const present = await isMountpointInTable(mountpoint, {
+      os: "linux",
+      readProcMounts: () =>
+        Promise.resolve(`fuse ${resolve(mountpoint)} fuse.cf rw 0 0\n`),
+    });
+    expect(present).toBe("present");
+    const absent = await isMountpointInTable(mountpoint, {
+      os: "linux",
+      readProcMounts: () => Promise.resolve("proc /proc proc rw 0 0\n"),
+    });
+    expect(absent).toBe("absent");
+  });
+
+  if (Deno.build.os === "darwin") {
+    it("reads the real darwin mount table over FFI and always finds root", async () => {
+      // Smoke test the real getfsstat FFI path (no injected lister). The root
+      // filesystem is always mounted, so "/" must be reported present.
+      const state = await isMountpointInTable("/", { os: "darwin" });
+      expect(state).toBe("present");
+    });
+  }
+
+  it("reports present on linux when /proc/mounts lists the mountpoint", async () => {
+    const state = await isMountpointInTable("/mnt", {
+      os: "linux",
+      readProcMounts: () =>
+        Promise.resolve(
+          "proc /proc proc rw,nosuid 0 0\nfuse /mnt fuse.cf rw 0 0\n",
+        ),
+    });
+    expect(state).toBe("present");
+  });
+
+  it("reports absent on linux when /proc/mounts omits the mountpoint", async () => {
+    const state = await isMountpointInTable("/mnt", {
+      os: "linux",
+      readProcMounts: () => Promise.resolve("proc /proc proc rw,nosuid 0 0\n"),
+    });
+    expect(state).toBe("absent");
+  });
+
+  it("decodes /proc/mounts octal escapes before comparing (space in path)", async () => {
+    // A mountpoint containing a space is written as `/tmp/a\040b` in
+    // /proc/mounts. Without decoding, that field never equals the candidate
+    // "/tmp/a b" and a live mount looks "absent" — a dangerous false negative.
+    const state = await isMountpointInTable("/tmp/a b", {
+      os: "linux",
+      readProcMounts: () =>
+        Promise.resolve(
+          "proc /proc proc rw 0 0\nfuse /tmp/a\\040b fuse.cf rw 0 0\n",
+        ),
+    });
+    expect(state).toBe("present");
+  });
+
+  it("reports unknown on linux when the /proc/mounts read fails", async () => {
+    const state = await isMountpointInTable("/mnt", {
+      os: "linux",
+      readProcMounts: () => Promise.reject(new Error("no such file")),
+    });
+    expect(state).toBe("unknown");
+  });
+});
+
+describe("fuse unmount", () => {
+  const mountpoint = "/tmp/cf-fuse-unmount-test";
+  const absMountpoint = resolve(mountpoint);
+
+  function stateFile(
+    overrides: Partial<MountStateEntry> = {},
+  ): { entry: MountStateEntry; path: string } {
+    return {
+      entry: mountStateFixture({ mountpoint: absMountpoint, ...overrides }),
+      path: "/tmp/cf-state/deadbeef.json",
+    };
+  }
+
+  it("runs the system unmount even when the daemon is already dead", async () => {
+    const systemUnmountCalls: string[] = [];
+    const tableStates: MountTableState[] = ["present", "absent"];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile()),
+      isAlive: () => false, // daemon dead: PID path is skipped entirely
+      kill: () => {},
+      isMountpointInTable: () =>
+        Promise.resolve(tableStates.shift() ?? "absent"),
+      systemUnmount: (mp) => {
+        systemUnmountCalls.push(mp);
+        return Promise.resolve({ code: 0, stderr: "" });
+      },
+      removeMountStateFile: () => Promise.resolve(),
+      verifyIsFuseProcess: () => Promise.resolve(false),
+    });
+
+    expect(systemUnmountCalls).toEqual([absMountpoint]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails when the system unmount errors and the mount survives", async () => {
+    const removed: string[] = [];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile()),
+      isAlive: () => false,
+      kill: () => {},
+      // Still present before AND after — the unmount did not take.
+      isMountpointInTable: () => Promise.resolve("present"),
+      systemUnmount: () =>
+        Promise.resolve({ code: 1, stderr: "umount: Resource busy" }),
+      removeMountStateFile: (path) => {
+        removed.push(path);
+        return Promise.resolve();
+      },
+      verifyIsFuseProcess: () => Promise.resolve(false),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("still mounted");
+    expect(result.message).toContain("sudo umount -f");
+    // The state file must survive so the stale mount stays visible.
+    expect(removed).toEqual([]);
+  });
+
+  it("succeeds and removes the state file when the mount is gone after", async () => {
+    const removed: string[] = [];
+    const tableStates: MountTableState[] = ["present", "absent"];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile()),
+      isAlive: () => false,
+      kill: () => {},
+      isMountpointInTable: () =>
+        Promise.resolve(tableStates.shift() ?? "absent"),
+      systemUnmount: () => Promise.resolve({ code: 0, stderr: "" }),
+      removeMountStateFile: (path) => {
+        removed.push(path);
+        return Promise.resolve();
+      },
+      verifyIsFuseProcess: () => Promise.resolve(false),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toBe(`Unmounted ${absMountpoint}`);
+    expect(removed).toEqual(["/tmp/cf-state/deadbeef.json"]);
+  });
+
+  it("treats an unknown table state as not-absent and does not report success", async () => {
+    const systemUnmountCalls: string[] = [];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile()),
+      isAlive: () => false,
+      kill: () => {},
+      // before="unknown" (attempt unmount) and still "unknown" after.
+      isMountpointInTable: () => Promise.resolve("unknown"),
+      systemUnmount: (mp) => {
+        systemUnmountCalls.push(mp);
+        return Promise.resolve({ code: 0, stderr: "" });
+      },
+      removeMountStateFile: () => Promise.resolve(),
+      verifyIsFuseProcess: () => Promise.resolve(false),
+    });
+
+    // unknown is not-absent, so we still attempt the system unmount...
+    expect(systemUnmountCalls).toEqual([absMountpoint]);
+    // ...but a still-unknown table cannot confirm success.
+    expect(result.ok).toBe(false);
+  });
+
+  it("finds the state file via the default enumerating lookup, never hashing the leaf", async () => {
+    // The default readMountState dep must enumerate state files and match
+    // lexically. It must NOT realPath the mountpoint leaf, which hangs on the
+    // stale mount we are unmounting. We prove the default path is used by NOT
+    // injecting readMountState and pointing at a real state dir.
+    const dir = await Deno.makeTempDir({ prefix: "cf-fuse-unmount-state-" });
+    const mp = join(dir, "mountpoint");
+    try {
+      // Write the state under an ARBITRARY filename — NOT the mountpoint hash
+      // writeMountState would use. A hashing lookup would miss this file; only
+      // an enumerating lookup finds it. This is what makes the test non-vacuous.
+      const statePath = join(dir, "not-the-mountpoint-hash.json");
+      await Deno.writeTextFile(
+        statePath,
+        JSON.stringify({
+          pid: 1073741824, // bogus, dead PID: the PID branch is skipped
+          mountpoint: mp,
+          apiUrl: "",
+          identity: "",
+          startedAt: "2026-03-17T00:00:00.000Z",
+        }),
+      );
+      const tableStates: MountTableState[] = ["present", "absent"];
+
+      const result = await runUnmount(mp, {
+        stateDir: dir,
+        // No readMountState / isAlive injected: exercise the real defaults.
+        isMountpointInTable: () =>
+          Promise.resolve(tableStates.shift() ?? "absent"),
+        systemUnmount: () => Promise.resolve({ code: 0, stderr: "" }),
+        verifyIsFuseProcess: () => Promise.resolve(false),
+      });
+
+      expect(result.ok).toBe(true);
+      // Success removes the resolved state file it found by enumeration.
+      await expect(Deno.stat(statePath)).rejects.toThrow();
+    } finally {
+      await Deno.remove(dir, { recursive: true }).catch(() => undefined);
+    }
+  });
+
+  it("succeeds despite a nonzero system-unmount exit, and logs that code", async () => {
+    // Success is gated on the mount table, not the unmount exit code: a
+    // fusermount3/umount that exits nonzero while the mount actually went away
+    // is still a success. But the nonzero code must be surfaced in a log line
+    // so the operator can see what happened.
+    const logs: string[] = [];
+    const tableStates: MountTableState[] = ["present", "absent"];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile()),
+      isAlive: () => false,
+      kill: () => {},
+      isMountpointInTable: () =>
+        Promise.resolve(tableStates.shift() ?? "absent"),
+      systemUnmount: () =>
+        Promise.resolve({ code: 17, stderr: "umount: already unmounting" }),
+      removeMountStateFile: () => Promise.resolve(),
+      verifyIsFuseProcess: () => Promise.resolve(false),
+      log: (message) => logs.push(message),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(logs.some((line) => line.includes("17"))).toBe(true);
+  });
+
+  it("bounds a wedged system unmount by the deadline so it never hangs", async () => {
+    // A real umount on a wedged mount can block in the kernel. defaultSystemUnmount
+    // spawns the child, races it against a deadline, and unrefs it on timeout, so
+    // it always returns (letting runUnmount print the sudo-umount-f hint) instead
+    // of hanging on the child. A `sleep 30` stands in for the wedged umount.
+    const start = Date.now();
+    const result = await defaultSystemUnmount("/does-not-matter", {
+      command: new Deno.Command("sleep", {
+        args: ["30"],
+        stdout: "null",
+        stderr: "piped",
+      }),
+      timeoutMs: 100,
+    });
+    const elapsed = Date.now() - start;
+    expect(result).toEqual({ code: 1, stderr: "system unmount timed out" });
+    // Returned on the ~100ms deadline, nowhere near the 30s child.
+    expect(elapsed).toBeLessThan(5000);
+  });
+
+  it("SIGTERMs a verified live FUSE process, then proceeds to the table probe", async () => {
+    // A live daemon PID that verifies as a FUSE process must be sent SIGTERM,
+    // and the flow must then poll for exit and fall through to the mount-table
+    // probe. isAlive returns true through the guard checks and the first poll
+    // iteration, then false so the poll loop exits promptly.
+    const killed: Array<[number, Deno.Signal]> = [];
+    const logs: string[] = [];
+    let aliveCalls = 0;
+    const tableStates: MountTableState[] = ["present", "absent"];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile({ pid: 4242 })),
+      // true for: pid liveness check, the `if` guard, and one poll iteration;
+      // false afterwards so the poll loop body runs exactly once and exits.
+      isAlive: () => aliveCalls++ < 3,
+      verifyIsFuseProcess: () => Promise.resolve(true),
+      kill: (pid, signal) => {
+        killed.push([pid, signal]);
+      },
+      isMountpointInTable: () =>
+        Promise.resolve(tableStates.shift() ?? "absent"),
+      systemUnmount: () => Promise.resolve({ code: 0, stderr: "" }),
+      removeMountStateFile: () => Promise.resolve(),
+      log: (message) => logs.push(message),
+    });
+
+    expect(killed).toEqual([[4242, "SIGTERM"]]);
+    expect(logs.some((line) => line.includes("SIGTERM"))).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+
+  it("skips the kill when the live PID is not a FUSE process", async () => {
+    // A stale state file can point at a PID that has been recycled to an
+    // unrelated process. When ps-verification fails, we must NOT signal it —
+    // and must log that we skipped — while still attempting the system unmount.
+    const killed: number[] = [];
+    const logs: string[] = [];
+    const tableStates: MountTableState[] = ["present", "absent"];
+
+    const result = await runUnmount(mountpoint, {
+      readMountState: () => Promise.resolve(stateFile({ pid: 4242 })),
+      isAlive: () => true, // PID is alive but (below) not a FUSE process
+      verifyIsFuseProcess: () => Promise.resolve(false),
+      kill: (pid) => {
+        killed.push(pid);
+      },
+      isMountpointInTable: () =>
+        Promise.resolve(tableStates.shift() ?? "absent"),
+      systemUnmount: () => Promise.resolve({ code: 0, stderr: "" }),
+      removeMountStateFile: () => Promise.resolve(),
+      log: (message) => logs.push(message),
+    });
+
+    expect(killed).toEqual([]);
+    expect(
+      logs.some((line) =>
+        line.includes("does not appear to be a FUSE process")
+      ),
+    ).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+
+  it("defaultSystemUnmount returns code 0 on a clean system unmount", async () => {
+    // The success path: the injected command exits 0, so the result reports
+    // code 0 and empty stderr (the branch the timeout test never reaches).
+    const result = await defaultSystemUnmount("/does-not-matter", {
+      command: new Deno.Command("sh", {
+        args: ["-c", "exit 0"],
+        stdout: "null",
+        stderr: "piped",
+      }),
+      timeoutMs: 5000,
+    });
+    expect(result).toEqual({ code: 0, stderr: "" });
+  });
+
+  it("defaultSystemUnmount surfaces a nonzero exit code and decoded stderr", async () => {
+    // A busy/failed unmount exits nonzero; the code and stderr must be reported
+    // back rather than swallowed, so runUnmount can log them.
+    const result = await defaultSystemUnmount("/does-not-matter", {
+      command: new Deno.Command("sh", {
+        args: ["-c", "echo 'device busy' >&2; exit 3"],
+        stdout: "null",
+        stderr: "piped",
+      }),
+      timeoutMs: 5000,
+    });
+    expect(result.code).toBe(3);
+    expect(result.stderr).toContain("device busy");
+  });
+
+  it("defaultSystemUnmount maps a spawn failure to a nonzero result", async () => {
+    // If the unmount binary cannot even be spawned, spawn() throws; the catch
+    // must convert that into a nonzero result so runUnmount still returns and
+    // prints its sudo-umount-f hint instead of propagating the error.
+    const result = await defaultSystemUnmount("/does-not-matter", {
+      command: new Deno.Command(
+        "/nonexistent/definitely-not-a-real-binary-xyz",
+        { stdout: "null", stderr: "piped" },
+      ),
+      timeoutMs: 5000,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr.length).toBeGreaterThan(0);
+  });
+
+  it("builds the default platform unmount command when none is injected", async () => {
+    // Exercises the real default command construction (umount on darwin,
+    // fusermount3 on linux) against a mountpoint that isn't mounted, so it
+    // fails fast — or the binary is absent and spawn() fails. Either way it
+    // returns a nonzero result rather than throwing or hanging.
+    const result = await defaultSystemUnmount(
+      "/definitely-not-mounted-cf-fuse-test",
+      { timeoutMs: 5000 },
+    );
+    expect(typeof result.code).toBe("number");
+    expect(result.code).not.toBe(0);
+  });
+});
+
+describe("debug flag forwarding", () => {
+  it("survives every forwarding layer", () => {
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      debug: true,
+    });
+    expect(args).toContain("--debug");
+
+    const binaryArgs = buildFuseBinaryArgs({
+      subcommand: "fuse-daemon",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      debug: true,
+    });
+    expect(binaryArgs).toContain("--debug");
+
+    const supervisorArgs = buildBackgroundSupervisorDenoArgs({
+      cliModPath: "/repo/packages/cli/lib/fuse-supervisor.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      debug: true,
+    });
+    expect(supervisorArgs).toContain("--debug");
+
+    const denoChild = buildFuseChildCommand({
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      execPath: "deno",
+      debug: true,
+    });
+    expect(denoChild.args).toContain("--debug");
+
+    const compiledChild = buildFuseChildCommand({
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      execPath: "/usr/local/bin/cf",
+      debug: true,
+    });
+    expect(compiledChild.args).toContain("--debug");
+
+    expect(parseSupervisorArgs(["/mnt", "--debug"]).options.debug).toBe(true);
+  });
+
+  it("omits --debug from every layer when unset", () => {
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+    });
+    expect(args).not.toContain("--debug");
+
+    const supervisorArgs = buildBackgroundSupervisorDenoArgs({
+      cliModPath: "/repo/packages/cli/lib/fuse-supervisor.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+    });
+    expect(supervisorArgs).not.toContain("--debug");
+
+    const child = buildFuseChildCommand({
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      execPath: "/usr/local/bin/cf",
+    });
+    expect(child.args).not.toContain("--debug");
+
+    expect(parseSupervisorArgs(["/mnt"]).options.debug).toBeUndefined();
   });
 });

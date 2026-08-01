@@ -1,9 +1,10 @@
-import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type FabricPlainObject,
   type FabricValue,
+  type MutableFabricPlainObjectLayer,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -296,6 +297,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
     writeIdentity: { sawWrite: false, multiple: false },
+    moduleDelegations: new Map(),
     outbox: [],
     diagnostics: [],
     unprivilegedSystemWrites: [],
@@ -337,6 +339,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // Set on the FIRST call (always the Runtime's, in edit()), regardless of
   // value.
   #cfcTrustConfigPinned = false;
+  #cfcModuleDelegationsPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -713,6 +716,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.trustConfig = config === undefined
       ? undefined
       : deepFreeze(config);
+  }
+
+  // Module-update authority is runtime-learned trust state. Snapshot and pin
+  // it once at transaction creation: later module loads affect future
+  // transactions, never an authorization decision already in flight.
+  setCfcModuleDelegations(
+    delegations: ReadonlyMap<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >,
+  ): void {
+    if (this.#cfcModuleDelegationsPinned) return;
+    this.#cfcModuleDelegationsPinned = true;
+    const snapshot = new Map<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >();
+    for (const [space, spaceDelegations] of delegations) {
+      const spaceSnapshot = new Map<string, readonly string[]>();
+      for (const [identity, predecessors] of spaceDelegations) {
+        spaceSnapshot.set(identity, [...predecessors]);
+      }
+      if (spaceSnapshot.size > 0) snapshot.set(space, spaceSnapshot);
+    }
+    this.#cfcState.moduleDelegations = snapshot;
   }
 
   markCfcRelevant(reason?: string): void {
@@ -1288,6 +1316,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
       implementationIdentity: this.#cfcState.implementationIdentity,
       trustSnapshot: this.#cfcState.trustSnapshot,
+      ...(this.#cfcState.moduleDelegations.size > 0
+        ? {
+          moduleDelegations: [...this.#cfcState.moduleDelegations]
+            .flatMap(([space, spaceDelegations]) =>
+              [...spaceDelegations].map(([
+                moduleIdentity,
+                delegatedModuleIdentities,
+              ]) => ({
+                space,
+                moduleIdentity,
+                delegatedModuleIdentities: [
+                  ...delegatedModuleIdentities,
+                ].sort(),
+              }))
+            )
+            .sort((left, right) =>
+              left.space < right.space
+                ? -1
+                : left.space > right.space
+                ? 1
+                : left.moduleIdentity < right.moduleIdentity
+                ? -1
+                : left.moduleIdentity > right.moduleIdentity
+                ? 1
+                : 0
+            ),
+        }
+        : {}),
       // Digest-only projection: the decision-relevant identity of the policy
       // set (Epic B5). The snapshot itself is frozen Runtime config; only its
       // identity needs to invalidate.
@@ -1418,11 +1474,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       reactivityLogFromActivities(this.tx.journal.activity());
   }
 
-  setSchedulerObservation(observation: unknown): void {
+  setSchedulerObservation(observation: FabricValue): void {
     this.tx.setSchedulerObservation?.(observation);
   }
 
-  getSchedulerObservation(): unknown {
+  getSchedulerObservation(): FabricValue {
     return this.tx.getSchedulerObservation?.();
   }
 
@@ -1488,7 +1544,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
     // path must not slip an unprivileged grant mutation past the gate.
     this.noteSystemWrite(address);
-    this.tx.recordMergeableOp?.(address, delta);
+    // Record a mergeable intent only when the underlying transaction can also
+    // poison it. Recording an intent that can never be poisoned would let a
+    // later reshape or mixed-op leave a stale tail op in the commit — silent
+    // corruption. When poison is unavailable the intent is simply not recorded,
+    // so the commit falls back to the plain whole-array diff already written.
+    if (this.tx.poisonMergeableOp) {
+      this.tx.recordMergeableOp?.(address, delta);
+    }
+  }
+
+  poisonMergeableOp(link: NormalizedFullLink): void {
+    this.assertWritable("poisonMergeableOp");
+    this.tx.poisonMergeableOp?.(toMemorySpaceAddress(link));
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -1562,7 +1630,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     options = this.#withAmbientReadMeta(options);
     this.prepareRead(address);
     const readResult = this.tx.read(address, options);
@@ -1583,7 +1651,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: NormalizedFullLink,
     options?: IReadOptions,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     return this.readOrThrow(toMemorySpaceAddress(address), options);
   }
 
@@ -1633,7 +1701,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // just start with {}. But if errorPath has content (e.g., ["foo"]), the
       // document exists and we need to read from lastExistingPath to preserve
       // existing fields.
-      let valueObj: FabricPlainObject;
+      let valueObj: MutableFabricPlainObjectLayer;
       if (errorPath.length === 0) {
         valueObj = {};
       } else {
@@ -1655,7 +1723,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // the shared input.
         valueObj = shallowMutableClone(
           currentValue as FabricValue,
-        ) as FabricPlainObject;
+        ) as MutableFabricPlainObjectLayer;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
@@ -1664,7 +1732,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue: FabricPlainObject = valueObj;
+      let nextValue: MutableFabricPlainObjectLayer = valueObj;
       // Create intermediate containers. The container type depends on whether
       // the NEXT key (the one that will access this container) is a valid array
       // index.
@@ -2162,11 +2230,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       reactivityLogFromActivities(this.wrapped.journal.activity());
   }
 
-  setSchedulerObservation(observation: unknown): void {
+  setSchedulerObservation(observation: FabricValue): void {
     this.wrapped.setSchedulerObservation?.(observation);
   }
 
-  getSchedulerObservation(): unknown {
+  getSchedulerObservation(): FabricValue {
     return this.wrapped.getSchedulerObservation?.();
   }
 
@@ -2197,7 +2265,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   }
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
-    this.wrapped.recordMergeableOp?.(link, delta);
+    // Only record when the wrapped transaction can also poison — see the same
+    // guard in ExtendedStorageTransaction.recordMergeableOp.
+    if (this.wrapped.poisonMergeableOp) {
+      this.wrapped.recordMergeableOp?.(link, delta);
+    }
+  }
+
+  poisonMergeableOp(link: NormalizedFullLink): void {
+    this.wrapped.poisonMergeableOp?.(link);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {

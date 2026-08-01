@@ -5,6 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import { lift } from "../src/builder/module.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 import { trustModule } from "./support/trusted-builder.ts";
@@ -95,6 +96,33 @@ describe("content-addressed action identity", () => {
     // (`fn.src` is no longer asserted here: it is lazy/debug-only and off by
     // default, and identity no longer depends on it — provenance is the source
     // of truth above.)
+  });
+
+  it("re-lifting a hardened registered implementation keeps its identity (no wrapper fork)", async () => {
+    const pattern = await setup();
+    const module = handlerModuleOf(pattern);
+    const impl = module.implementation as HarnessedFunction;
+    // Its own factory pass hardened it, and registration keyed provenance on
+    // the function OBJECT.
+    expect(Object.isExtensible(impl)).toBe(false);
+    expect(getVerifiedProvenance(impl)).toBeDefined();
+
+    // Factory re-entry with the already-built implementation (the shape the
+    // runtime list-op factories produce): the factory must reuse the object.
+    // A fresh wrapper carries no WeakMap provenance, so it would serialize
+    // body-only with no `$implRef` and re-evaluate bare-SES — module scope
+    // gone — on reload (the silent helper-unlink failure; see the
+    // helper-unlink investigation record).
+    const refactory = lift(impl as (...args: unknown[]) => unknown);
+    const reimpl = (refactory as unknown as { implementation: unknown })
+      .implementation;
+    expect(reimpl).toBe(impl);
+
+    const json =
+      (refactory as unknown as { toJSON: () => Record<string, unknown> })
+        .toJSON();
+    expect(json.$implRef).toBeDefined();
+    expect("implementation" in json).toBe(false);
   });
 
   it("serializes javascript modules with $implRef only (no legacy fields)", async () => {

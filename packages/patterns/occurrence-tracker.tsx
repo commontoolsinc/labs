@@ -13,8 +13,8 @@ import {
   lift,
   NAME,
   pattern,
-  safeDateNow,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -55,9 +55,9 @@ export interface OccurrenceTrackerInput {
 
 // ===== Helper Functions =====
 
-function formatRelativeTime(timestamp: string): string {
+function formatRelativeTime(timestamp: string, nowMs: number): string {
   if (!timestamp) return "";
-  const diffMs = safeDateNow() - new Date(timestamp).getTime();
+  const diffMs = nowMs - new Date(timestamp).getTime();
   const mins = Math.floor(diffMs / 60000);
   const hours = Math.floor(diffMs / 3600000);
   const days = Math.floor(diffMs / 86400000);
@@ -131,8 +131,8 @@ const formatFrequencyFromList = lift((list: Occurrence[]): string => {
 
 // ===== Handlers =====
 
-// TODO(future): Replace safeDateNow()/new Date() with proper time service when available.
-// safeDateNow() will be blocked in patterns in the future. The wish({ query: "#now" }) mechanism
+// TODO(future): Replace Date.now()/new Date() with proper time service when available.
+// The wish({ query: "#now" }) mechanism
 // only captures time once at pattern creation, so it doesn't work for fresh timestamps
 // in handlers. When a handler-compatible time service is available (e.g., clock builtin
 // or transaction timestamp), update these handlers to use it instead.
@@ -200,7 +200,7 @@ const handleGetStats = handler<
       lastOccurrence: lastOcc
         ? {
           timestamp: lastOcc.timestamp,
-          relativeTime: formatRelativeTime(lastOcc.timestamp),
+          relativeTime: formatRelativeTime(lastOcc.timestamp, Date.now()),
           note: lastOcc.note || null,
         }
         : null,
@@ -230,7 +230,7 @@ const handleGetOccurrences = handler<
       occurrences: limitedList.map((occ, index) => ({
         index,
         timestamp: occ.timestamp,
-        relativeTime: formatRelativeTime(occ.timestamp),
+        relativeTime: formatRelativeTime(occ.timestamp, Date.now()),
         absoluteTime: formatHistoryTime(occ.timestamp),
         note: occ.note || null,
       })),
@@ -279,6 +279,9 @@ export const OccurrenceTrackerModule = pattern<
   OccurrenceTrackerInput,
   OccurrenceTrackerInput
 >(({ label, occurrences }) => {
+  // Ticking clock for relative-time labels ("3m ago"), refreshes each minute.
+  const nowCell = wish<number>({ query: "#now/60" });
+
   // Computed: total count
   const totalCount = computed(() => (occurrences.get() || []).length);
 
@@ -358,8 +361,11 @@ export const OccurrenceTrackerModule = pattern<
                   fontWeight: "500",
                 }}
               >
-                {formatRelativeTime(last.timestamp)} ·{" "}
-                {formatAbsoluteTime(last.timestamp)}
+                {nowCell.result == null
+                  ? formatAbsoluteTime(last.timestamp)
+                  : `${formatRelativeTime(last.timestamp, nowCell.result)} · ${
+                    formatAbsoluteTime(last.timestamp)
+                  }`}
               </span>
               {/* Note for last occurrence */}
               <cf-input
@@ -469,9 +475,11 @@ export const OccurrenceTrackerModule = pattern<
                   <cf-vstack gap="0" style={{ flex: "1" }}>
                     <span style={{ fontSize: "0.875rem" }}>
                       {computed(() =>
-                        `${formatRelativeTime(occ.timestamp)} · ${
-                          formatHistoryTime(occ.timestamp)
-                        }`
+                        nowCell.result == null
+                          ? formatHistoryTime(occ.timestamp)
+                          : `${
+                            formatRelativeTime(occ.timestamp, nowCell.result)
+                          } · ${formatHistoryTime(occ.timestamp)}`
                       )}
                     </span>
                     <cf-input

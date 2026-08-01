@@ -42,7 +42,6 @@ import {
   type TraverseFixture,
 } from "../../src/traverse-recorder.ts";
 import { readMaybeGzippedText } from "./gzip.ts";
-import type { Immutable } from "../../../utils/src/types.ts";
 
 export type ReplayInvocationOracle = {
   ok: boolean;
@@ -70,7 +69,7 @@ const truncatedHash = (value: unknown): string =>
   hashStringOf(value).slice(0, 16);
 
 /**
- * Compact long ids (`data:application/json,...` URIs embed entire documents)
+ * Compact long ids (`data:` cell URIs embed entire documents)
  * to a recognizable prefix plus a structural hash, so oracle entries stay
  * cheap without losing discriminating power.
  */
@@ -172,7 +171,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // (decodeMemoryBoundary), so frozen corpus values are the faithful
       // replay shape — without this, frozen-identity fast paths in traverse
       // can never engage during replay even though they do in production.
-      value: deepFreeze(value) as Immutable<FabricValue>,
+      value: deepFreeze(value) as FabricValue,
     };
     this.attestations.set(key, attestation);
     return attestation;

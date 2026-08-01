@@ -1,0 +1,32 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "system/knowledge-graph.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": true,
+      "compoundNodes": true,
+      "edges": {
+        "items": true,
+        "type": "array"
+      },
+      "getNeighbors": true,
+      "searchGraph": true
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "edges",
+      "compoundNodes",
+      "getNeighbors",
+      "searchGraph"
+    ],
+    "type": "object"
+  }
+}

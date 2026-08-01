@@ -11,6 +11,8 @@ import {
 } from "../src/cfc/policy.ts";
 import { buildCfcTrustConfig, createTrustResolver } from "../src/cfc/trust.ts";
 import {
+  type CfcConfClause,
+  type CfcOrClause,
   clauseAlternatives,
   clausesEqual,
   normalizeClause,
@@ -68,8 +70,16 @@ const clauseSetsEqual = (
   b: readonly unknown[],
 ): boolean =>
   a.length === b.length &&
-  a.every((clause) => b.some((other) => clausesEqual(clause, other))) &&
-  b.every((clause) => a.some((other) => clausesEqual(clause, other)));
+  a.every((clause) =>
+    b.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  ) &&
+  b.every((clause) =>
+    a.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 describe("CFC exchange-rule evaluation (B4)", () => {
   describe("guarded rewrite", () => {
@@ -554,8 +564,10 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       // (ii) no clause creation or merging: counts match, index-aligned.
       expect(output.length).toBe(input.length);
       for (let i = 0; i < input.length; i++) {
-        const inputAlternatives = clauseAlternatives(input[i]);
-        const outputAlternatives = clauseAlternatives(output[i]);
+        const inputAlternatives = clauseAlternatives(input[i] as CfcConfClause);
+        const outputAlternatives = clauseAlternatives(
+          output[i] as CfcConfClause,
+        );
         for (const alternative of inputAlternatives) {
           expect(
             outputAlternatives.some((other) => deepEqual(other, alternative)),
@@ -577,10 +589,13 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       const output = result.label.confidentiality!;
       // Only the Space(X) clause fired; Space(Y) (no matching role) and the
       // owner clause are exactly their input selves.
-      expect(clausesEqual(output[0], { anyOf: [spaceX, userAlice] }))
+      expect(clausesEqual(
+        output[0] as CfcConfClause,
+        { anyOf: [spaceX, userAlice] } as CfcOrClause,
+      ))
         .toBe(true);
-      expect(clausesEqual(output[1], spaceY)).toBe(true);
-      expect(clausesEqual(output[2], userOwner)).toBe(true);
+      expect(clausesEqual(output[1] as CfcConfClause, spaceY)).toBe(true);
+      expect(clausesEqual(output[2] as CfcConfClause, userOwner)).toBe(true);
     });
 
     it("(iii) is deterministic across record/rule/clause/alternative orderings", () => {
@@ -721,7 +736,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       const evidencePool = [roleAliceX, roleAliceY, roleBobX];
 
       for (let round = 0; round < 200; round++) {
-        const clauses: unknown[] = [];
+        const clauses: CfcConfClause[] = [];
         const clauseCount = 1 + Math.floor(random() * 3);
         for (let i = 0; i < clauseCount; i++) {
           const alternativeCount = 1 + Math.floor(random() * 3);
@@ -731,8 +746,8 @@ describe("CFC exchange-rule evaluation (B4)", () => {
           );
           clauses.push(
             alternatives.length === 1
-              ? alternatives[0]
-              : { anyOf: alternatives },
+              ? alternatives[0] as CfcConfClause
+              : { anyOf: alternatives } as CfcOrClause,
           );
         }
         const rules: ExchangeRule[] = Array.from(
@@ -771,9 +786,11 @@ describe("CFC exchange-rule evaluation (B4)", () => {
         // evaluator dedups duplicate authored alternatives on ingest, A3).
         for (let i = 0; i < clauses.length; i++) {
           const inputAlternatives = clauseAlternatives(
-            normalizeClause(clauses[i]),
+            normalizeClause(clauses[i] as CfcConfClause),
           );
-          const outputAlternatives = clauseAlternatives(output[i]);
+          const outputAlternatives = clauseAlternatives(
+            output[i] as CfcConfClause,
+          );
           expect(outputAlternatives.length)
             .toBeGreaterThanOrEqual(inputAlternatives.length);
           for (const alternative of inputAlternatives) {
@@ -940,7 +957,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       for (const ref of cases) {
         const result = evaluateExchangeRules(
           {
-            confidentiality: [{ anyOf: [spaceX, ref] }],
+            confidentiality: [{ anyOf: [spaceX, ref] } as CfcOrClause],
             integrity: [roleAliceX],
           },
           other,

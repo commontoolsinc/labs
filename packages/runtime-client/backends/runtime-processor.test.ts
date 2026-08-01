@@ -5,35 +5,34 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
-  checkUpdateInBackground,
-  maybeCheckHomeUpdate,
-  postVersionSkew,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
-  versionSkewNotification,
+  shouldReconcileHomeRoot,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { runtimePresets } from "@commonfabric/runner";
+import { type RuntimeFetch, runtimePresets } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
-  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -290,6 +289,298 @@ describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
   });
 });
 
+describe("piece source state", () => {
+  it("reads the piece named by the request, in that request's space", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const synced: string[] = [];
+    const readFor: unknown[] = [];
+    const cell = {
+      space,
+      sync: () => {
+        synced.push("cell");
+        return Promise.resolve();
+      },
+      // A piece with no metadata at all: the reader's own behaviour on each
+      // field is covered in packages/piece; this asserts the addressing.
+      getMetaRaw: () => undefined,
+      getAsNormalizedFullLink: () => ({ id: "of:fid1:sourced" }),
+      asSchema: () => ({ get: () => ({}) }),
+    };
+    const processor = {
+      getSpaceCtx: (requested: string) => ({
+        pieceManager: { getSpace: () => requested },
+      }),
+      runtime: {
+        // Stands in for readPieceSourceState's reads: the handler's own job is
+        // to address the right cell and hand back what the reader produced.
+        getCellFromEntityId: (
+          requestedSpace: string,
+          entityId: unknown,
+        ) => {
+          readFor.push({ space: requestedSpace, entityId: String(entityId) });
+          return cell;
+        },
+        patternManager: {
+          getPatternSourceProgramByIdentity: () => Promise.resolve(undefined),
+        },
+        hostForSpace: () => new URL("https://toolshed.test"),
+      },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any)
+      .handlePieceGetSource.call(processor, {
+        type: RequestType.PieceGetSource,
+        space,
+        pieceId: fid("sourced-piece"),
+      });
+
+    expect(synced).toEqual(["cell"]);
+    // The handler addresses the cell by the entity id `entityIdFrom` builds
+    // from the routing form of the request's pieceId. That is a FabricHash, and
+    // its string form is the tagged hash — the `of:` scheme is added later, by
+    // the `getCellFromEntityId` this stub stands in for.
+    expect(readFor).toEqual([{
+      space,
+      entityId: String(entityIdFrom(fid("sourced-piece"))),
+    }]);
+    // The reader saw a piece with no metadata at all, which is a detached piece
+    // with no readable source — reported as such rather than as a failure.
+    expect(result.source.origin).toBeUndefined();
+    expect(result.source.files).toEqual([]);
+    expect(result.source.history).toEqual([]);
+  });
+
+  it("rejects an unknown compatibility confirmation before changing a piece", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+    };
+
+    await expect(
+      (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+        processor,
+        {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId: fid("sourced-piece"),
+          action: { kind: "restore", revisionId: "older" },
+          confirmationToken: "unknown-confirmation",
+        },
+      ),
+    ).rejects.toThrow(
+      "the piece source compatibility confirmation is no longer valid",
+    );
+  });
+
+  it("rejects empty and non-string compatibility confirmations", async () => {
+    for (const confirmationToken of ["", 42]) {
+      await expect(
+        (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+          { pieceSourceConfirmations: new Map() },
+          {
+            type: RequestType.PieceUpdateSource,
+            space: "did:key:z6Mk-runtime-processor-source",
+            pieceId: fid("sourced-piece"),
+            action: { kind: "restore", revisionId: "older" },
+            confirmationToken,
+          },
+        ),
+      ).rejects.toThrow("confirmationToken must be a non-empty string");
+    }
+  });
+
+  it("issues one-use confirmation tokens for incompatible source changes", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const pieceId = fid("sourced-piece");
+    const cell = {
+      space,
+      entityId: entityRefFrom(entityIdFrom(pieceId)),
+      sync: () => Promise.resolve(),
+      getMetaRaw: () => undefined,
+      getAsNormalizedFullLink: () => ({ id: `of:${pieceId}`, path: [] }),
+      asSchema: () => ({ get: () => ({}) }),
+    };
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+      runtime: {
+        getCellFromEntityId: () => cell,
+        patternManager: {
+          getPatternSourceProgramByIdentity: () => Promise.resolve(undefined),
+        },
+        hostForSpace: () => new URL("https://toolshed.test"),
+      },
+    };
+    const action = { kind: "restore", revisionId: "older" } as const;
+    const prepared = {
+      action,
+      expected: {
+        pattern: { identity: "current", symbol: "default" },
+        origin: null,
+        revisionId: "current",
+      },
+      candidate: { identity: "older", symbol: "default" },
+      origin: null,
+      operation: "revert",
+      baseline: { kind: "retain", revisionId: "baseline" },
+      review: { argumentEvidence: "argument", issues: { schema: "narrowed" } },
+    };
+    let receivedConfirmation: unknown;
+    let calls = 0;
+    const changeSource = PieceController.prototype.changeSource;
+    PieceController.prototype.changeSource = ((_action, options) => {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve({
+          status: "incompatible",
+          message: "result schema narrowed",
+          prepared,
+        });
+      }
+      receivedConfirmation = options?.confirmedChange;
+      return Promise.resolve({ status: "applied" });
+    }) as typeof changeSource;
+
+    try {
+      const first = await (RuntimeProcessor.prototype as any)
+        .handlePieceUpdateSource.call(processor, {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action,
+        });
+      expect(first.compatibilityWarning).toBe("result schema narrowed");
+      expect(first.confirmationToken).toBeDefined();
+      expect(processor.pieceSourceConfirmations.size).toBe(1);
+
+      const second = await (RuntimeProcessor.prototype as any)
+        .handlePieceUpdateSource.call(processor, {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action,
+          confirmationToken: first.confirmationToken,
+        });
+      expect(receivedConfirmation).toBe(prepared);
+      expect(second.compatibilityWarning).toBeUndefined();
+      expect(processor.pieceSourceConfirmations.size).toBe(0);
+
+      await expect(
+        (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+          processor,
+          {
+            type: RequestType.PieceUpdateSource,
+            space,
+            pieceId,
+            action,
+            confirmationToken: first.confirmationToken,
+          },
+        ),
+      ).rejects.toThrow(
+        "the piece source compatibility confirmation is no longer valid",
+      );
+    } finally {
+      PieceController.prototype.changeSource = changeSource;
+    }
+  });
+
+  it("does not hide a source-read failure for an incompatible change", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const pieceId = fid("sourced-piece");
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+      runtime: {
+        getCellFromEntityId: () => ({
+          space,
+          entityId: entityRefFrom(entityIdFrom(pieceId)),
+          sync: () => Promise.reject("source read failed"),
+          getMetaRaw: () => undefined,
+          getAsNormalizedFullLink: () => ({ id: `of:${pieceId}`, path: [] }),
+          asSchema: () => ({ get: () => ({}) }),
+        }),
+      },
+    };
+    const changeSource = PieceController.prototype.changeSource;
+    PieceController.prototype.changeSource = (() =>
+      Promise.resolve({
+        status: "incompatible",
+        message: "result schema narrowed",
+        prepared: {},
+      })) as unknown as typeof changeSource;
+
+    let reason: unknown;
+    try {
+      await (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+        processor,
+        {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action: { kind: "restore", revisionId: "older" },
+        },
+      );
+    } catch (error) {
+      reason = error;
+    } finally {
+      PieceController.prototype.changeSource = changeSource;
+    }
+    expect(reason).toBe("source read failed");
+  });
+
+  it("preserves an applied result when source-detail refresh fails", async () => {
+    const storageManager = StorageManager.emulate({ as: cfcSigner });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://toolshed.test"),
+      storageManager,
+    });
+    const space = cfcSigner.did();
+    const cell = runtime.getCell(space, "source-refresh-failure");
+    await cell.sync();
+    const sync = cell.sync.bind(cell);
+    cell.sync = () => Promise.reject(new Error("refresh unavailable"));
+    const getCellFromEntityId = runtime.getCellFromEntityId.bind(runtime);
+    runtime.getCellFromEntityId = (() => cell) as typeof getCellFromEntityId;
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+      runtime,
+    };
+    const changeSource = PieceController.prototype.changeSource;
+    PieceController.prototype.changeSource =
+      (() => Promise.resolve({ status: "applied" })) as typeof changeSource;
+    try {
+      const result = await (RuntimeProcessor.prototype as any)
+        .handlePieceUpdateSource.call(processor, {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId: fid("sourced-piece"),
+          action: { kind: "detach" },
+        });
+
+      expect(result.source.history).toEqual([]);
+      expect(result.executionWarning).toContain(
+        "source details could not be refreshed: refresh unavailable",
+      );
+    } finally {
+      PieceController.prototype.changeSource = changeSource;
+      cell.sync = sync;
+      runtime.getCellFromEntityId = getCellFromEntityId;
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
+
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {
     const reads: unknown[] = [];
@@ -352,6 +643,58 @@ describe("page slug metadata", () => {
 
     expect(result).toEqual({ slug: undefined });
   });
+
+  it("accepts bare and of:-schemed pageIds as the same entity", async () => {
+    // CellHandle.id() emits the full schemed URI while PageHandle.id() emits
+    // the bare routing form; the pageId intake must resolve both to the SAME
+    // entity. Without normalization, "of:fid1:H" parses as a hash whose tag
+    // is "of:fid1" and silently addresses the nonexistent of:of:fid1:H.
+    const received: string[] = [];
+    const processor = {
+      getSpaceCtx: homeSpaceCtx,
+      runtime: {
+        getCellFromEntityId: (_space: unknown, entityId: unknown) => {
+          received.push(String(entityId));
+          return {
+            sync: () => Promise.resolve(),
+            getMetaRaw: () => undefined,
+          };
+        },
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    const bare = fid("schemed-piece");
+    for (const pageId of [bare, `of:${bare}`]) {
+      await (RuntimeProcessor.prototype as any).handlePageGetSlug
+        .call(processor, { type: RequestType.PageGetSlug, pageId });
+    }
+
+    expect(received).toEqual([bare, bare]);
+  });
+
+  it("rejects computed ids as page ids", async () => {
+    const processor = {
+      getSpaceCtx: homeSpaceCtx,
+      runtime: {
+        getCellFromEntityId: () => {
+          throw new Error("computed page id reached the runtime lookup");
+        },
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    await expect(
+      (RuntimeProcessor.prototype as any).handlePageGetSlug.call(processor, {
+        type: RequestType.PageGetSlug,
+        pageId: `computed:${fid("not-a-page")}`,
+      }),
+    ).rejects.toThrow("Computed ids are not valid page ids");
+  });
 });
 
 describe("page slug redirects", () => {
@@ -399,6 +742,50 @@ describe("page slug redirects", () => {
       },
     };
   }
+
+  it("normalizes an of:-schemed id before the piece-manager lookup", async () => {
+    const bare = fid("ordinary-page");
+    const requestedRef: CellRef = {
+      id: `of:${bare}` as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const resultRef: CellRef = {
+      id: `of:${fid("ordinary-page-result")}` as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const requestedCell = mockCell(requestedRef);
+    const resultCell = mockCell(resultRef);
+    const managerCalls: unknown[][] = [];
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+        cc: {
+          manager: () => ({
+            get: (...args: unknown[]) => {
+              managerCalls.push(args);
+              return Promise.resolve(resultCell);
+            },
+          }),
+        },
+      }),
+      runtime: {
+        getCellFromEntityId: () => requestedCell,
+      },
+    };
+
+    await (RuntimeProcessor.prototype as any).handlePageGet.call(processor, {
+      type: RequestType.PageGet,
+      pageId: `of:${bare}`,
+      runIt: true,
+      space,
+    });
+
+    expect(managerCalls).toEqual([[bare, true]]);
+  });
 
   it("renders slug redirects to output cells directly", async () => {
     const targetRef: CellRef = {
@@ -998,7 +1385,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl: string | undefined;
     let requestedPayload: unknown;
-    globalThis.fetch = (input, init) => {
+    const blobFetch: RuntimeFetch = (input, init) => {
       requestedUrl = input.toString();
       requestedPayload = decodeMemoryBoundary(init?.body as string);
       return Promise.resolve(
@@ -1014,6 +1401,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
         ),
       );
     };
+    globalThis.fetch = blobFetch as typeof globalThis.fetch;
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
     const hostForSpaceCalls: string[] = [];
@@ -1056,6 +1444,16 @@ describe("RuntimeProcessor blob upload IPC", () => {
 });
 
 describe("RuntimeProcessor home pattern IPC", () => {
+  it("reconciles the home root when the update flag is enabled", () => {
+    expect(shouldReconcileHomeRoot({ experimental: {} })).toBe(false);
+    expect(shouldReconcileHomeRoot({
+      experimental: { systemPatternAutoUpdate: false },
+    })).toBe(false);
+    expect(shouldReconcileHomeRoot({
+      experimental: { systemPatternAutoUpdate: true },
+    })).toBe(true);
+  });
+
   it("uses the default-pattern metadata fast path when the home pattern is already instantiated", async () => {
     const defaultPatternRef: CellRef = {
       id: "of:default-pattern-result" as CellRef["id"],
@@ -1120,112 +1518,73 @@ describe("RuntimeProcessor home pattern IPC", () => {
     expect(idleCalled).toBe(true);
   });
 
-  it("maybeCheckHomeUpdate no-ops unless both flags are on", () => {
-    let built = false;
+  it("routes an update-enabled home root through ensure before start", async () => {
+    const defaultPatternRef: CellRef = {
+      id: "of:update-enabled-home-root" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const patternRef: CellRef = {
+      id: "of:update-enabled-home-pattern" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const defaultPatternCell = {
+      ...defaultPatternRef,
+      getAsLink: () => cellRefToSigilLink(defaultPatternRef),
+      getMetaRaw: (metaField: string) =>
+        metaField === "pattern" ? cellRefToSigilLink(patternRef) : undefined,
+      sync: () => Promise.resolve(),
+    };
+    let startedDirectly = false;
     const runtime = {
       userIdentityDID: "did:key:test-home",
-      experimental: { systemPatternAutoUpdate: true }, // home flag off
-      getHomeSpaceCell: () => {
-        built = true;
-        return { sync: () => Promise.resolve() };
-      },
-    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
-    maybeCheckHomeUpdate(cfcSigner, runtime);
-    // No controller built (the home flag gates it before any construction).
-    expect(built).toBe(false);
-  });
-
-  it("maybeCheckHomeUpdate builds a home controller and kicks a check when enabled", async () => {
-    const runtime = {
-      userIdentityDID: "did:key:test-home",
-      experimental: {
-        systemPatternAutoUpdate: true,
-        systemPatternAutoUpdateHome: true,
-      },
-      // PieceManager reads userIdentityDID + getHomeSpaceCell().sync();
-      // the update check itself is best-effort and fails closed on this mock.
+      experimental: { systemPatternAutoUpdate: true },
       getHomeSpaceCell: () => ({
         sync: () => Promise.resolve(),
-        key: () => ({ get: () => undefined }),
+        key: () => ({
+          get: () => ({ resolveAsCell: () => defaultPatternCell }),
+        }),
       }),
-    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+      storageManager: { synced: () => Promise.resolve() },
+      start: () => {
+        startedDirectly = true;
+        return Promise.resolve(true);
+      },
+    };
+    const processor = {
+      identity: cfcSigner,
+      runtime,
+    } as unknown as RuntimeProcessor;
 
-    // Constructs the home controller and kicks the background check without
-    // throwing; let the fire-and-forget check settle.
-    maybeCheckHomeUpdate(cfcSigner, runtime);
-    await new Promise((r) => setTimeout(r, 0));
+    const originalEnsure = PiecesController.prototype.ensureDefaultPattern;
+    let ensured = false;
+    PiecesController.prototype.ensureDefaultPattern = function () {
+      ensured = true;
+      return Promise.resolve({
+        getCell: () => defaultPatternCell,
+      } as unknown as Awaited<ReturnType<typeof originalEnsure>>);
+    };
+    try {
+      await expect(
+        RuntimeProcessor.prototype.handleEnsureHomePatternRunning.call(
+          processor,
+          { type: RequestType.EnsureHomePatternRunning },
+        ),
+      ).resolves.toEqual({ cell: defaultPatternRef });
+    } finally {
+      PiecesController.prototype.ensureDefaultPattern = originalEnsure;
+    }
+
+    expect(ensured).toBe(true);
+    expect(startedDirectly).toBe(false);
   });
 });
 
 describe("system-pattern update wiring", () => {
-  it("versionSkewNotification builds the worker→shell payload", () => {
-    expect(
-      versionSkewNotification({
-        space: "did:key:z6Mk",
-        clientVersion: "c",
-        toolshedVersion: "t",
-      }),
-    ).toEqual({
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk",
-      clientVersion: "c",
-      toolshedVersion: "t",
-    });
-  });
-
-  it("postVersionSkew posts the notification to the shell", () => {
-    const posted: unknown[] = [];
-    const orig = self.postMessage;
-    (self as { postMessage: unknown }).postMessage = (m: unknown) =>
-      posted.push(m);
-    try {
-      postVersionSkew({ space: "did:key:z6Mk", toolshedVersion: "t" });
-    } finally {
-      (self as { postMessage: unknown }).postMessage = orig;
-    }
-    expect(posted).toEqual([{
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk",
-      clientVersion: undefined,
-      toolshedVersion: "t",
-    }]);
-  });
-
-  it("checkUpdateInBackground logs a non-current outcome and swallows a rejection", async () => {
-    const logs: string[] = [];
-    const warns: string[] = [];
-    const origLog = console.log;
-    const origWarn = console.warn;
-    console.log = (...a: unknown[]) => logs.push(a.join(" "));
-    console.warn = (...a: unknown[]) => warns.push(a.join(" "));
-    try {
-      checkUpdateInBackground(
-        { checkAndUpdateDefaultPattern: () => Promise.resolve("updated") },
-        "did:key:a",
-      );
-      checkUpdateInBackground(
-        { checkAndUpdateDefaultPattern: () => Promise.resolve("current") },
-        "did:key:b",
-      );
-      checkUpdateInBackground(
-        {
-          checkAndUpdateDefaultPattern: () => Promise.reject(new Error("boom")),
-        },
-        "did:key:c",
-      );
-      // Let the fire-and-forget promises settle.
-      await new Promise((r) => setTimeout(r, 0));
-    } finally {
-      console.log = origLog;
-      console.warn = origWarn;
-    }
-    expect(logs.some((l) => l.includes("did:key:a") && l.includes("updated")))
-      .toBe(true);
-    expect(logs.some((l) => l.includes("did:key:b"))).toBe(false);
-    expect(warns.some((w) => w.includes("did:key:c"))).toBe(true);
-  });
-
-  it("handleGetSpaceRootPattern returns the page ref and kicks the background check", async () => {
+  it("handleGetSpaceRootPattern returns the root ensured by the controller", async () => {
     const ref: CellRef = {
       id: "of:root-result" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
@@ -1233,13 +1592,8 @@ describe("system-pattern update wiring", () => {
       path: [],
     };
     const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
-    let checked = false;
     const cc = {
       ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
-      checkAndUpdateDefaultPattern: () => {
-        checked = true;
-        return Promise.resolve("current");
-      },
     };
     const processor = {
       getSpaceCtx: () => ({ cc }),
@@ -1251,8 +1605,6 @@ describe("system-pattern update wiring", () => {
         space: "did:key:test-space",
       });
     expect(result.page.cell).toEqual(ref);
-    // The background check was kicked (fire-and-forget).
-    expect(checked).toBe(true);
   });
 });
 
@@ -1471,6 +1823,90 @@ describe("RuntimeProcessor CFC label IPC", () => {
     expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
     expect(atom.kind).toBe("derived-from");
     expect("source" in atom).toBe(false);
+  });
+
+  it("returns the read cell's schema-bearing ref when includeRef is set", () => {
+    const ref: CellRef = {
+      id: "of:include-ref-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "plain value",
+          getAsLink: () => ({
+            "/": {
+              "link@1": {
+                id: "of:include-ref-cell",
+                space: "did:key:test",
+                path: [],
+                schema: { type: "string" },
+              },
+            },
+          }),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const withRef = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+      includeRef: true,
+    });
+    expect(withRef.cell?.id).toBe("of:include-ref-cell");
+    expect(withRef.cell?.schema).toEqual({ type: "string" });
+
+    // Not requested: not returned.
+    const without = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+    });
+    expect(without.cell).toBeUndefined();
+  });
+
+  it("returns the ref alongside the CFC label when both are requested", () => {
+    const ref: CellRef = {
+      id: "of:include-ref-label-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "plain value",
+          getAsLink: () => ({
+            "/": {
+              "link@1": {
+                id: "of:include-ref-label-cell",
+                space: "did:key:test",
+                path: [],
+              },
+            },
+          }),
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({ value: "plain value" }),
+            }),
+          },
+          getAsNormalizedFullLink: () => ref,
+          getMetaRaw: () => undefined,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+      includeRef: true,
+      includeCfcLabel: true,
+    });
+    expect(response.cell?.id).toBe("of:include-ref-label-cell");
+    // The cell carries no label; the field is present-but-undefined.
+    expect(response.cfcLabel).toBeUndefined();
+    expect(response.value).toBe("plain value");
   });
 
   it("redacts Caveat.source in sigil label views inside subscription updates", async () => {
@@ -2334,6 +2770,55 @@ describe("RuntimeProcessor VDom event label-view ingress", () => {
   });
 });
 
+describe("RuntimeProcessor pattern coverage IPC", () => {
+  const report = {
+    spans: [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 1,
+      endLine: 1,
+      startColumn: 1,
+      endColumn: 2,
+    }],
+    hits: [{ fileName: "/main.tsx", id: 1, count: 3 }],
+  };
+
+  it("returns the worker collector's report", () => {
+    const processor = {
+      runtime: { patternCoverage: { toData: () => report } },
+    } as unknown as RuntimeProcessor;
+    expect(
+      RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: report });
+  });
+
+  it("reports null when the worker was built without a collector", () => {
+    const processor = { runtime: {} } as unknown as RuntimeProcessor;
+    expect(
+      RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: null });
+  });
+
+  it("routes a GetPatternCoverage request through the dispatcher", async () => {
+    const processor = {
+      runtime: { patternCoverage: { toData: () => report } },
+      // handleRequest dispatches to this.getPatternCoverage; the stub carries
+      // the real method so the routing case executes it.
+      getPatternCoverage: RuntimeProcessor.prototype.getPatternCoverage,
+    } as unknown as RuntimeProcessor;
+    expect(
+      await RuntimeProcessor.prototype.handleRequest.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: report });
+  });
+});
+
 describe("browserWorkerParamsFromInitializationData", () => {
   it("threads CFC initialization settings through the preset into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
@@ -2371,45 +2856,6 @@ describe("browserWorkerParamsFromInitializationData", () => {
     });
     // The preset pins patterns to the host's own API base.
     expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
-  });
-
-  it("threads clientVersion through to the runtime options", () => {
-    const telemetry = { marker() {} } as unknown as Parameters<
-      typeof browserWorkerParamsFromInitializationData
-    >[2];
-    const storageManager = {
-      as: { did: () => "did:key:worker" },
-    } as unknown as Parameters<
-      typeof browserWorkerParamsFromInitializationData
-    >[1];
-
-    const withVersion = runtimePresets.browserWorker(
-      browserWorkerParamsFromInitializationData(
-        {
-          apiUrl: "http://worker.test/",
-          identity: {} as never,
-          spaceDid: "did:key:space",
-          clientVersion: "build-sha-xyz",
-        },
-        storageManager,
-        telemetry,
-      ),
-    );
-    expect(withVersion.clientVersion).toBe("build-sha-xyz");
-
-    // Absent → omitted (rides the constructor default of undefined).
-    const withoutVersion = runtimePresets.browserWorker(
-      browserWorkerParamsFromInitializationData(
-        {
-          apiUrl: "http://worker.test/",
-          identity: {} as never,
-          spaceDid: "did:key:space",
-        },
-        storageManager,
-        telemetry,
-      ),
-    );
-    expect(withoutVersion.clientVersion).toBe(undefined);
   });
 
   it("falls back to the shared CFC pin when the host sends no dial", () => {
@@ -2452,6 +2898,39 @@ describe("browserWorkerParamsFromInitializationData", () => {
     expect(options.spaceHostMap).toEqual({
       "did:key:federated": "http://other-host.test/",
     });
+  });
+
+  it("builds a fresh collector only when the host asks for coverage", () => {
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[2];
+    const params = (patternCoverage: boolean | undefined) =>
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          ...(patternCoverage === undefined ? {} : { patternCoverage }),
+        },
+        storageManager,
+        telemetry,
+      );
+
+    // On → a real collector the GetPatternCoverage handler can read back.
+    const on = runtimePresets.browserWorker(params(true));
+    expect(on.patternCoverage).toBeDefined();
+    expect(typeof on.patternCoverage?.toData).toBe("function");
+
+    // Off / absent → omitted, so the worker runs uninstrumented.
+    expect(runtimePresets.browserWorker(params(false)).patternCoverage)
+      .toBeUndefined();
+    expect(runtimePresets.browserWorker(params(undefined)).patternCoverage)
+      .toBeUndefined();
   });
 });
 

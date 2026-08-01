@@ -1,4 +1,10 @@
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
+import {
+  DEEP_CLONE_CORE,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import {
   CODEC,
   type FabricCodec,
@@ -54,12 +60,12 @@ export class ProblematicValue extends ExplicitTagValue {
     return Object.isFrozen(this) && subIsDeepFrozen(this.state);
   }
 
-  /** @inheritDoc */
-  deepClone(_frozen: boolean): ProblematicValue {
+  /** @inheritDoc Not yet implemented, so `deepClone()` throws. */
+  protected [DEEP_CLONE_CORE](_frozen: boolean): ProblematicValue {
     throw new Error("Cannot yet handle deep cloning of `ProblematicValue`.");
   }
 
-  protected shallowUnfrozenClone(): ProblematicValue {
+  protected [SHALLOW_UNFROZEN_CLONE](): ProblematicValue {
     return new ProblematicValue(this.wireTypeTag, this.state, this.error);
   }
 

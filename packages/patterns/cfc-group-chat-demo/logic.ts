@@ -1,5 +1,3 @@
-import { nonPrivateRandom, safeDateNow } from "commonfabric";
-
 export type RandomSource = () => number;
 
 export const seededRandom = (seed: number): RandomSource => {
@@ -95,7 +93,7 @@ export const createSentMessageSnapshot = <ProfileRef>(
   authorName: author.name,
   authorProfile,
   body,
-  timestamp: safeDateNow(),
+  timestamp: Date.now(),
 });
 
 export const createRoomSnapshot = <Message>(
@@ -103,7 +101,7 @@ export const createRoomSnapshot = <Message>(
 ): ChatRoom<Message> => ({
   name,
   messages: [],
-  createdAt: safeDateNow(),
+  createdAt: Date.now(),
 });
 
 const createImportedClaimedMessage = <ProfileRef>(
@@ -167,7 +165,7 @@ const randomInsertTimestamp = (
 ): number => {
   const ordered = sortDisplayMessages(messages);
   if (ordered.length === 0) {
-    return safeDateNow();
+    return Date.now();
   }
 
   const slot = random() * (ordered.length + 1);
@@ -193,7 +191,7 @@ const randomInsertTimestamp = (
 export const createRandomImportedClaimedMessages = <ProfileRef>(
   existingMessages: readonly PlainChatMessage<ProfileRef>[],
   participants: readonly ParticipantClaim<ProfileRef>[],
-  random: RandomSource = nonPrivateRandom,
+  random: RandomSource = Math.random,
 ): ImportedClaimedChatMessage<ProfileRef>[] => {
   const authorPool = Array.from(participants);
   const workingMessages = sortDisplayMessages(existingMessages);

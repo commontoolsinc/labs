@@ -880,11 +880,9 @@ export class CfcWritebackStore {
   private records = new Map<string, CfcWritebackRecoveryRecord>();
   private malformedCounter = 0;
   private storagePath: string | undefined;
-  private onChange: (() => void) | undefined;
 
-  constructor(options: { storagePath?: string; onChange?: () => void } = {}) {
+  constructor(options: { storagePath?: string } = {}) {
     this.storagePath = options.storagePath;
-    this.onChange = options.onChange;
     this.load();
   }
 
@@ -1226,10 +1224,7 @@ export class CfcWritebackStore {
   }
 
   private persist(): void {
-    if (!this.storagePath) {
-      this.onChange?.();
-      return;
-    }
+    if (!this.storagePath) return;
     const slash = this.storagePath.lastIndexOf("/");
     if (slash > 0) {
       Deno.mkdirSync(this.storagePath.slice(0, slash), { recursive: true });
@@ -1241,7 +1236,6 @@ export class CfcWritebackStore {
         records: [...this.records.values()],
       }),
     );
-    this.onChange?.();
   }
 }
 

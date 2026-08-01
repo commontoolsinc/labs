@@ -9,6 +9,7 @@ import {
   isObject,
   isPlainContainer,
   isPlainObject,
+  isReadonlyRecord,
   isRecord,
   isString,
   isUnsafeObjectKey,
@@ -98,6 +99,31 @@ describe("types", () => {
 
     it("returns false for functions", () => {
       expect(isRecord(() => {})).toBe(false);
+    });
+  });
+
+  describe("isReadonlyRecord", () => {
+    it("returns true for frozen records", () => {
+      expect(isReadonlyRecord(Object.freeze({ a: 1 }))).toBe(true);
+    });
+
+    it("has the same runtime domain as isRecord", () => {
+      for (
+        const value of [
+          {},
+          [],
+          new Date(),
+          null,
+          undefined,
+          42,
+          "string",
+          true,
+          Symbol("test"),
+          () => {},
+        ]
+      ) {
+        expect(isReadonlyRecord(value)).toBe(isRecord(value));
+      }
     });
   });
 
@@ -364,6 +390,28 @@ describe("types", () => {
       expect(isUnsafeObjectKey("proto")).toBe(false);
       expect(isUnsafeObjectKey("toString")).toBe(false);
       expect(isUnsafeObjectKey("hasOwnProperty")).toBe(false);
+    });
+
+    it("is backstopped by the runtime keeping `__proto__` inert", () => {
+      // Deno neutralises `__proto__`: assigning it lands a plain own property
+      // and leaves the prototype alone. That is the layer beneath
+      // isUnsafeObjectKey(), which filters the key at trust boundaries.
+      const target: Record<string, unknown> = {};
+      const untrustedKey = "__proto__";
+      try {
+        target[untrustedKey] = { polluted: true };
+        expect(Object.hasOwn(target, untrustedKey)).toBe(true);
+        expect(Object.getPrototypeOf(target)).toBe(Object.prototype);
+      } catch (e) {
+        console.error(
+          "This runtime lets a `__proto__` assignment reach the prototype " +
+            "chain. Whoever rolled the Deno version that changed this must " +
+            "investigate the security implications: every place that copies " +
+            "untrusted keys onto an object without filtering them through " +
+            "isUnsafeObjectKey() is now open to prototype pollution.",
+        );
+        throw e;
+      }
     });
   });
 });

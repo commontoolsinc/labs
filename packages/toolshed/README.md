@@ -45,36 +45,18 @@ toolshed/
 
 ## Getting Started
 
-To get started, you'll need to clone the git repository, install a few
-dependencies, and set up your environment variables.
+Follow the repository
+[development quick start](../../README.md#quick-start-development) to clone the
+repository and install the pinned toolchain. Then configure the Toolshed
+environment.
 
-To clone the repository, you can run the following command:
+### Environment Setup
 
-```sh
-git clone git@github.com:commontoolsinc/labs.git
-cd labs/toolshed
-```
-
-### Prerequisites
-
-#### Deno
-
-Toolshed is build using Deno, so you'll need to install Deno if you want to run
-the code locally. Deno has a
-[detailed installation guide](https://deno.land/manual/getting_started/installation).
-
-The fastest path to install on MacOS and Linux is to run the following command:
-
-```shell
-curl -fsSL https://deno.land/install.sh | sh
-```
-
-#### Environment Setup
-
-To setup your environment, you'll need to create a `.env` file in the root of
+To set up your environment, you'll need to create a `.env` file in the root of
 the toolshed application. You can use the `.env.example` file as a reference.
 
 ```shell
+cd packages/toolshed
 cp .env.example .env
 ```
 
@@ -89,6 +71,26 @@ directory, and then run the following command:
 ```shell
 deno task dev
 ```
+
+### Running in the background
+
+Passing `--background` starts the server without the caller having to put it in
+the background and then wait for it to come up. The command spawns the server as
+a child, waits until it has bound its port, and only then returns. Its exit code
+reports whether the server started: zero once the server is listening, non-zero
+if the server exits before it binds. So a script can start the toolshed and move
+straight on to work that needs it, with no readiness poll of its own:
+
+```shell
+./toolshed --port=8000 --background --log-file=/tmp/toolshed.log
+```
+
+The background server sends its own output to `--log-file` (a temporary file
+when the flag is omitted); the command prints that path on success and dumps the
+file if the server exits before binding. Readiness travels from the child to the
+command over a pipe, so the wait resolves on the event rather than on a poll.
+`--background` re-runs the program, so it needs the compiled binary or a
+`deno run` launch, not `deno --watch`.
 
 To run the tests:
 

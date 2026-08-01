@@ -39,6 +39,7 @@ import {
   setServerPrimaryExecutionGraphRetirementConfig,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 // The gate ALWAYS asserts the delta direction (regression protection). It only
 // EMITS the measured counts when asked — `CF_EMIT_RETIREMENT_DELTA=1` — so the
@@ -142,7 +143,7 @@ const watchSet = (
     space,
     sessionId: harness.sessionId,
     watches,
-  }));
+  } as unknown as FabricValue));
 
 const transact = (
   harness: Harness,
@@ -156,7 +157,7 @@ const transact = (
     space,
     sessionId: harness.sessionId,
     commit,
-  }));
+  } as unknown as FabricValue));
 
 // --- The "note index" closure: an index doc linking to N pure-leaf notes. ---
 const NOTES = 8;

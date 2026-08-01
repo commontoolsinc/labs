@@ -18,6 +18,21 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
+To make source-run build metadata describe the checkout the same way compiled
+binaries do, pass the current revision into the start script:
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+```
+
+The script's children inherit the value: toolshed uses it as the source-run
+fallback for `/api/meta.gitSha`, and shell surfaces it in diagnostics. The
+source-run shell still loads its mutable worker graph from `/scripts`; only a
+deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
+descriptive metadata, not a system-pattern update gate. The updater instead
+compiles the downloaded source/import closure and requires its entry identity
+to equal `?identity` before changing the persisted root.
+
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use
 `share-pattern-via-tailscale.sh`. It starts an isolated toolshed (with
@@ -64,17 +79,27 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 - `packages/shell/local-dev-shell.log`
 - `packages/toolshed/local-dev-toolshed.log`
 
-**CLI identity for local dev:** The local toolshed uses an identity derived from
-the passphrase `"implicit trust"`. To create a key matching the local server (so
-the CLI can act as its operator/admin):
+**CLI identity for local dev:** For normal development — deploying pieces,
+pattern work, anything acting as *you* — mint a unique key:
+```bash
+mkdir -p .cf
+deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
+export CF_IDENTITY="$PWD/.cf/shared-dev.key"
+```
+The local toolshed itself runs as the identity derived from the passphrase
+`"implicit trust"`. Derive that key only when the CLI must act as the server's
+operator/admin (`add-admin-piece`, the background piece service, deploying
+system home patterns):
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
-export CF_IDENTITY=./claude.key
+export CF_IDENTITY="$PWD/claude.key"
 ```
-This is a shared, publicly-derivable key — every developer who derives it gets
-the same DID. Use it only against your own localhost. For a personal identity, or
-any shared/remote server, use `id new` instead (see
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md)).
+It is a shared, publicly-derivable key — every developer who derives it gets
+the same DID. Never use it against a server other people use, and don't deploy
+your own work as it even locally: it collapses you into the server principal
+(and into one identity for user counting — see
+[`active-user-counting.md`](./active-user-counting.md)). Full policy:
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
@@ -224,6 +249,12 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 ### UI Component Changes Not Appearing
 
 When editing `cf-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
+
+The shell's dev server watches `packages/shell/src` only, so a change anywhere
+else in the workspace — `packages/ui`, `packages/runtime-client`, and the rest —
+does not trigger a rebuild, and the browser keeps serving the previous bundle.
+Touching any file under `packages/shell/src` rebuilds everything the shell
+bundles, which is quicker than a restart.
 
 ---
 

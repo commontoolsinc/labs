@@ -3,7 +3,9 @@
 > For how a patch operation is put together across the codebase — the registries
 > that define each op once and how to add a new one — see
 > [patch-operations.md](./patch-operations.md). This note covers *why* the
-> mergeable ops exist.
+> mergeable ops exist. For how to change an existing handler over to them, and
+> the mistakes that make a migration look finished while it is not, see
+> [migrating-collection-writes.md](./migrating-collection-writes.md).
 
 ## The problem
 
@@ -97,11 +99,13 @@ no read dependency on the array, and dropping the array read from the conflict
 set loses no necessary safety.
 
 The limitation: an append whose decision depends on the current contents — for
-example "append only if the list has fewer than N elements" — is not expressible
-as a pure append, because the conditional read is dropped from conflict
-detection. Such a write should continue to use a read-modify-write `set`, which
-keeps its read in the conflict set. `Cell.push` is unconditional, so it qualifies
-for the mergeable path.
+example "append only if the list has fewer than N elements" — cannot both merge
+and stay correct. Its read is *kept* in the conflict set (the narrowing below
+drops only the op's own incidental reads, and the array's `length` child is
+explicitly kept), so a concurrent append makes the commit conflict and retry
+rather than merge — correct, but at the cost of the mergeability the op exists
+for. See the *Read-set builder* and *Conditional pushes stay protected* sections
+for exactly which reads are kept. `Cell.push` is unconditional, so it merges.
 
 ## Mechanics
 
@@ -121,7 +125,9 @@ The same machinery carries three mergeable ops. `append` is described below;
 - **Transaction (`packages/runner/src/storage/v2-transaction.ts`)** —
   `recordMergeableOp(address, { op: "append", count })` records, per document and
   path, a mergeable intent (`mergeableOps` on the writable entry). At commit:
-  - The op builder emits an `append` op for each recorded array path. With a
+  - The op builder emits an `append` op for each recorded array path whose
+    recorded tail still describes the local value (see "Mixed ops on one path
+    fall back to the whole-array diff" below for when it does not). With a
     base present, only `count` tail elements are the append; with the array
     absent from the base (a fresh or not-yet-loaded entity) the whole working
     array is the append, so a stale-empty base does not drop locally created
@@ -141,7 +147,40 @@ The same machinery carries three mergeable ops. `append` is described below;
   itself*: the read the op's `Cell` method marks as its own (`mergeableOpRead`),
   a read marked as an attempted write, the `["cfc"]` write-policy label, and any
   strict descendant of an op path (the link-resolution sub-reads the write makes
-  beneath the value). A handler's *own* explicit `.get()` of the list is not
+  beneath the value). The one strict descendant that is *not* dropped is the
+  array's own `length` child (`[...opPath, "length"]`): a read of it is the
+  handler depending on the element count, which a mergeable append / add-unique /
+  remove-by-value changes, and the op itself never reads `length`. So a push
+  whose new element's index, id, or position came from the length conflicts
+  against a concurrent append instead of merging with a stale index. This is
+  precise: the `length` read conflicts with a change to the element count, not
+  with an edit to an existing element (whose path is a different descendant and
+  leaves the length unchanged). The carve-out rescues the length reads recorded
+  *only* at this child path — a `for...of`/spread over the array (the proxy
+  iterator reads `[...opPath, "length"]`) and a `key("length")` read. The other
+  ways to observe the count read the whole array and are already kept: a bare
+  `.length` on the query-result proxy, `.get()`, and the read-only array methods
+  (`.map`/`.filter`/`.some`/…) all record a *recursive* read AT the op path,
+  which is the handler's explicit read (below).
+
+  Key enumeration and index probing are a stronger case than the length: an array
+  here can be **sparse** (holes below `length`), and filling or punching a hole
+  changes the present-key set with no `length` write (a write at `[...opPath, i]`
+  only). `Object.keys`/`values`/`entries`/spread/`for...in` (the `ownKeys` trap)
+  and `n in arr` (the `has` trap) observe that present-key set, so a length read
+  — or a nonRecursive shape read at the array path, which the engine does not
+  conflict against a same-length element-slot write — would miss a concurrent
+  hole edit and let an enumeration-derived push merge on a stale key set. Those
+  two traps instead record a **recursive** read of the array, the one kept read a
+  hole edit invalidates, marked `ignoreReadForScheduling` so it adds only the
+  conflict dependency (reactivity stays on the nonRecursive shape read). It is
+  gated to arrays, so object enumeration keeps the shape-only conflict granularity
+  of the conflict-granularity work. The carve-out applies to every
+  mergeable op: a length read before an `addUnique` or `removeByValue` likewise
+  conflicts with a concurrent count-changing op, so a transaction that
+  gratuitously reads the length forfeits that op's distinct-element merge — the
+  same tradeoff as any explicit read kept in the conflict set. A handler's *own*
+  explicit `.get()` of the list is not
   marked, so it is kept — which is what makes a conditional push or keyed write
   still conflict-and-retry (see "Danger" below). This is narrower than the
   earlier path-level exclusion, which dropped any read overlapping the array path
@@ -172,10 +211,11 @@ optimistic-replay switch cases — differing only in the op they emit and how it
 applies:
 
 - **`add-unique`** (`{ op: "add-unique"; path; values }`, `addUniqueAtPath`) —
-  appends each value only if no existing element equals it by stored-value deep
-  equality, creating the array if absent. `Cell.addUnique(...)` does the same
-  dedup locally (against its possibly-incomplete view) and records the count it
-  added; the server re-dedups against durable state. Suppression is identical to
+  appends each value only if no existing element equals it by stored-value
+  content equality (`valueEqual`), creating the array if absent.
+  `Cell.addUnique(...)` does the same dedup locally (against its
+  possibly-incomplete view) and records the count it added; the server re-dedups
+  against durable state. Suppression is identical to
   `append` (the added elements are at the tail). A `Cell` argument dedups by its
   link rather than by value (see below), so re-adding the same entity is a no-op.
 
@@ -192,18 +232,22 @@ applies:
 
 - **`remove-by-value`** (`{ op: "remove-by-value"; path; value }`,
   `removeByValueAtPath`) — removes every element of the array at `path` that
-  equals `value` by stored-value deep equality; absent or non-array is a no-op.
-  `Cell.removeByValue(ref)` matches by link when `ref` is a `Cell` and by value
-  otherwise, filters the matches locally, and records one op per removed element,
-  carrying the element's stored representation so the server matches the durable
-  element exactly. Because it identifies what to remove by value rather than by
-  position, concurrent removes of distinct entries merge instead of clobbering
-  through a whole-array rewrite. Suppression drops the whole subtree at the array
-  path that the local positional removal produced.
+  equals `value` by stored-value content equality (`valueEqual`); absent or
+  non-array is a no-op. `Cell.removeByValue(ref)` matches by link when `ref` is a
+  `Cell` and by value otherwise, filters the matches locally, and records one op
+  per removed element, carrying the element's stored representation so the server
+  matches the durable element exactly. Because it identifies what to remove by
+  value rather than by position, concurrent removes of distinct entries merge
+  instead of clobbering through a whole-array rewrite. Suppression drops the
+  whole subtree at the array path that the local positional removal produced,
+  which makes the op the commit's only carrier for that array — so it is emitted
+  only when it fully accounts for the local value (see the removal-check bullet
+  below).
 
-`add-unique` and `remove-by-value` compare by stored-value deep equality. For an
-element that is a separate entity, that stored value is a link, so the comparison
-is by same-target — identity, not deep content. `Cell.addUnique`/`removeByValue`
+`add-unique` and `remove-by-value` compare by stored-value content equality. For
+an element that is a separate entity, that stored value is a link, so the
+comparison is by same-target — identity, not deep content.
+`Cell.addUnique`/`removeByValue`
 accept either a plain value (compared by content) or a `Cell` (compared by its
 link); passing the cell returned by `elementById` is how a handler adds or
 removes a keyed element by identity (see `keyed-collection-writes.md`). Because a
@@ -234,10 +278,150 @@ first, since the op carries only the delta.
   predetermined order. Code must not assume a specific interleaving of
   independently-issued appends.
 
-- **Mixed whole-array reshape.** A transaction that both pushes and reshapes the
-  whole array in another way (sort, reverse, splice-out) in the same commit
-  emits the append and may drop the whole-array reshape op. Reshapes should be
-  committed separately from a push.
+- **Mixed ops on one path fall back to the whole-array diff.** A tail-relative
+  intent can only carry the change it recorded. When one transaction records more
+  than one kind of mergeable op at the same array path (an `addUnique` and a
+  `push`, a `removeByValue` and an `addUnique` — the "remove the old value, add
+  the new" idiom), or reshapes the array with an in-place mutator after a push
+  (`sort`, `reverse`, `splice`, `unshift`, `fill`), the recorded tail no longer
+  identifies what the op should carry. The path is *poisoned*: its mergeable
+  intent is dropped and the commit emits the whole-array diff, which reflects the
+  correct combined local value. That transaction's write to that path forfeits
+  merge-friendliness (it commits as a value diff, so it can false-conflict under
+  contention) rather than being silently corrupted. Read that as a description of
+  the poisoned path, not as a closed-class guarantee for every op: what makes it
+  hold is the list of commit-time checks below, each of which had to be found.
+  The rule is that every whole-value write poisons the ops it
+  covers, so the sites to keep in step are every path that performs one:
+  `Cell.set`, `Cell.setRawUntyped`, the query-result proxy's in-place mutators,
+  and the proxy's property-assignment trap — the last two being separate code
+  paths for the same reshape. Plus `recordMergeableOp` itself, on a second,
+  different op kind at one path. `poisonMergeableOp` is what they all call, and
+  it acts on every intent at *or beneath* the path written — a
+  write to an enclosing object (`doc.set({rows})`) reshapes the array inside it
+  just as surely as a write to the array itself — and on nothing above it. So a
+  same-kind repeat (two `push`es, two `increment`s) still folds into one op, an
+  element edit (`cell.key(i).set(...)`, which writes *beneath* the array and
+  carries no intent of its own) still composes with a push, and a write to a
+  sibling field leaves the push mergeable.
+
+  Reaching descendants is what catches the sequence the length check below
+  cannot: a `push`, an ancestor reshape, then a second `push`. The two pushes
+  sum to a `count` that spans the reshape, so the recorded tail lands back on
+  the base length while covering an element the reshape supplied rather than one
+  an op appended.
+
+- **A reshape the surviving diff cannot express falls back too.** The poison
+  sites all fire at the moment of the write, so they see only a reshape that
+  lands *after* an op was recorded. A reshape that lands *before* the op —
+  `rows.set([])` and then `addUnique`, the clear-and-reseed idiom — is invisible
+  to them. The tail op's builder therefore re-checks, at commit, the invariant
+  its suppression rests on.
+
+  The suppression drops the whole-array candidate at the op's path outright,
+  plus every element candidate at or past the tail start. What is left to carry
+  the prefix is only the diff's *per-index* candidates — so the op is honest
+  only while the diff actually decomposes the prefix that way.
+  `buildArrayPatchCandidates` gives up and emits a whole-array replacement in
+  three situations, and each one abandons the op instead:
+
+  1. **the prefix changed length** — the base array's length no longer equals
+     the tail start, `max(0, working.length - count)`. This is what keeps a
+     clear-and-reseed honest: a tail op cannot express "and remove everything
+     that was here", and its suppression covers the very candidates that would
+     have carried the removal, so without the check the store keeps the old
+     elements and appends the new ones on top — a silently doubled list, with
+     the writing session's own local value showing the correct one.
+  2. **the prefix's hole layout changed** — a hole punched or filled without a
+     length change. Presence is not expressible per index, and sparse arrays are
+     preserved elsewhere in the runner, so this must not be flattened away.
+  3. **the payload is sparse.** Unlike the other two this needs no base to
+     compare against, and must be checked whether or not one exists: the payload
+     is `array.slice(start)` either way, and with no base that slice is the whole
+     working array — so a hole anywhere in a freshly created sparse array is a
+     hole in the payload. The wire op rebuilds its payload elementwise and cannot
+     carry one.
+
+  Abandoning is the same fallback the poison sites produce, decided at commit
+  rather than at the write.
+
+  A *dense* same-length replacement (`rows.set(["x","y","z"])` and then a
+  `push`) does *not* need the fallback and keeps its op: it diffs into per-index
+  candidates below the tail, which survive the suppression and commit alongside
+  the append. Value changes are fine; length and presence changes are not.
+
+  Abandoning at build time drops the intent from the transaction rather than
+  merely skipping the op: a live intent still narrows reads out of the commit's
+  conflict set (see below) on behalf of an op that is no longer being sent, and
+  the whole-value diff replacing it is entitled to those reads.
+  `buildMergeableOps` deletes and poisons the path, and it runs inside
+  `getNativeCommit`, ahead of the narrowing, so both sides see the same intents.
+
+  In every case reachable today the reshaping write also leaves an unmarked read
+  at the path, which keeps it in the conflict set regardless — so the delete is
+  belt and braces rather than a demonstrated behaviour change, and no test
+  asserts a conflict outcome that depends on it. It is kept because the
+  guarantee should not rest on that coincidence: nothing obliges a reshape to
+  read what it overwrites.
+
+- **A `removeByValue` that does not account for the whole local array falls back
+  too.** Its suppression is `subtree: true` — the array path and everything under
+  it — so unlike a tail op it leaves *nothing* to carry the array, not even the
+  per-index candidates. That is a stronger claim, and it is checked against the
+  whole value rather than a prefix: applying the recorded removals to the base
+  array (every occurrence of each value, exactly as the store applies the wire
+  op) must reproduce the working array. The comparison is `valueEqual`, so hole
+  layout counts too. Anything else the transaction changed on that array breaks
+  the equality and abandons the intent, and the whole-array diff commits the
+  local value instead.
+
+  Two ordinary shapes need it, and neither is caught earlier. An element edit —
+  the "edit one row and delete another in the same handler" shape — writes
+  *beneath* the array and so deliberately does not poison the intent, yet the
+  subtree suppression discards its per-index candidate; a tail op survives that
+  composition, a removal cannot. And a whole-value `set` landing *before* the
+  removal (at this path or at a parent) has no intent to poison yet. In both
+  cases the store would otherwise apply the removals to an untouched base and
+  drop everything else, while the writing session's own value shows the change.
+
+  A transaction that creates the array and removes from it in one go has no base
+  array to check against, and abandons for that reason: the removals say nothing
+  about the elements the transaction created, so with the diff suppressed the
+  entity would never be written at all.
+
+  A removal that is the transaction's only change to the array — including
+  alongside a write to a *sibling* field, which is not that array — reproduces
+  the working array exactly and keeps its op, so concurrent removals of distinct
+  entries still merge.
+
+- **An op inside another op's payload falls back.** A tail op's payload is
+  `array.slice(tailStart)` — live values lifted out of the working document at
+  commit — so it carries whatever those elements contain, however deep. Push a
+  new inner list onto an outer list and then push into that inner list, and the
+  outer append's payload already holds the inner list *including* the element the
+  inner append would add: the store applies the outer op, then the inner op adds
+  its element a second time. Each array is individually dense and its own length
+  arithmetic individually consistent, so none of the checks above sees it — they
+  each judge one intent against the base, and this is a relationship *between*
+  two intents.
+
+  So an intent whose path lies inside another op's payload is abandoned, and the
+  containing op carries the combined value — its suppression already covers the
+  region, so the diff candidates the abandoned intent leaves behind are dropped
+  with it. The *contained* intent is the one abandoned: the containing op is the
+  one that can still carry both changes, and keeping it is what preserves the
+  outer list's merge-friendliness. Containment is judged on what each intent
+  recorded, not on which ops survived, so an intent inside an op that is itself
+  abandoned falls back with it and the whole-value diff is the only thing
+  carrying that region.
+
+  Only the tail ops carry live values this way. An `increment` sends a number and
+  a `removeByValue` sends the elements it removes, so neither contains another
+  intent's target, and a nested push landing *before* the outer tail
+  (`outer.key(0).push(...)` alongside `outer.push(...)`) is in no payload and
+  stays mergeable. `mergeableOpPayloadContains` is where an op declares what its
+  payload holds; `buildMergeableOps` is where the sibling intents on one document
+  are compared, since no single builder can see them.
 
 ## Conditional pushes stay protected: the read-set narrowing
 

@@ -44,10 +44,10 @@ describe("logger", () => {
     color: string,
     level: string,
   ) {
-    expect(calls[index][0]).toMatch(
+    expect(calls[index]![0]).toMatch(
       new RegExp(`^%c\\[${level}\\]\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]$`),
     );
-    expect(calls[index][1]).toBe(color);
+    expect(calls[index]![1]).toBe(color);
   }
 
   // Helper to check styled module::timestamp format
@@ -61,8 +61,8 @@ describe("logger", () => {
     const pattern = new RegExp(
       `^%c\\[${level}\\]\\[${module}::\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]$`,
     );
-    expect(calls[index][0]).toMatch(pattern);
-    expect(calls[index][1]).toBe(color);
+    expect(calls[index]![0]).toMatch(pattern);
+    expect(calls[index]![1]).toBe(color);
   }
 
   // Helper to capture console output
@@ -101,7 +101,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual(["test-key", "hello", "world"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "hello", "world"]);
     });
 
     it("should handle multiple arguments", () => {
@@ -111,7 +111,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual(["test-key", "a", 1, true, {
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "a", 1, true, {
         key: "value",
       }]);
     });
@@ -130,7 +130,7 @@ describe("logger", () => {
       expect(evaluated).toBe(true);
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual(["test-key", "static", "lazy value"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "static", "lazy value"]);
     });
 
     it("should handle mixed static and lazy messages", () => {
@@ -147,7 +147,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual([
+      expect(calls[0]!.slice(2)).toEqual([
         "test-key",
         "start",
         "lazy1",
@@ -169,7 +169,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual([
+      expect(calls[0]!.slice(2)).toEqual([
         "test-key",
         "prefix",
         "array",
@@ -189,7 +189,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.debug, "DEBUG");
-      expect(calls[0].slice(2)).toEqual(["test-key", "debug message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "debug message"]);
     });
 
     it("should log info messages", () => {
@@ -199,7 +199,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual(["test-key", "info message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "info message"]);
     });
 
     it("should log warning messages", () => {
@@ -209,7 +209,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.warn, "WARN");
-      expect(calls[0].slice(2)).toEqual(["test-key", "warning message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "warning message"]);
     });
 
     it("should log error messages", () => {
@@ -219,7 +219,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.error, "ERROR");
-      expect(calls[0].slice(2)).toEqual(["test-key", "error message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "error message"]);
     });
 
     it("should default to info level when using log.info()", () => {
@@ -229,7 +229,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual(["test-key", "default message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "default message"]);
     });
 
     it("should support log.log() as alias for info", () => {
@@ -239,7 +239,7 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
-      expect(calls[0].slice(2)).toEqual(["test-key", "message via log()"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "message via log()"]);
     });
   });
 
@@ -264,10 +264,10 @@ describe("logger", () => {
         log.error("test-key", lazyError);
       });
 
-      expect(debugCalls[0].slice(2)).toEqual(["test-key", "lazy debug"]);
-      expect(infoCalls[0].slice(2)).toEqual(["test-key", "lazy info"]);
-      expect(warnCalls[0].slice(2)).toEqual(["test-key", "lazy warn"]);
-      expect(errorCalls[0].slice(2)).toEqual(["test-key", "lazy error"]);
+      expect(debugCalls[0]!.slice(2)).toEqual(["test-key", "lazy debug"]);
+      expect(infoCalls[0]!.slice(2)).toEqual(["test-key", "lazy info"]);
+      expect(warnCalls[0]!.slice(2)).toEqual(["test-key", "lazy warn"]);
+      expect(errorCalls[0]!.slice(2)).toEqual(["test-key", "lazy error"]);
     });
 
     it("should not evaluate lazy functions when disabled", () => {
@@ -386,7 +386,7 @@ describe("logger", () => {
         LOG_COLORS.taggedInfo,
         "INFO",
       );
-      expect(calls[0].slice(2)).toEqual(["test-key", "test message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "test message"]);
     });
 
     it("should support log() method as alias for info()", () => {
@@ -403,7 +403,10 @@ describe("logger", () => {
         LOG_COLORS.taggedInfo,
         "INFO",
       );
-      expect(calls[0].slice(2)).toEqual(["test-key", "test message via log()"]);
+      expect(calls[0]!.slice(2)).toEqual([
+        "test-key",
+        "test message via log()",
+      ]);
     });
 
     it("should support all log levels in tagged logger", () => {
@@ -501,7 +504,7 @@ describe("logger", () => {
         LOG_COLORS.taggedInfo,
         "INFO",
       );
-      expect(calls[0].slice(2)).toEqual(["test-key", "lazy tagged message"]);
+      expect(calls[0]!.slice(2)).toEqual(["test-key", "lazy tagged message"]);
     });
 
     it("should support disabled state in tagged logger", () => {
@@ -572,16 +575,16 @@ describe("logger", () => {
       expect(taggedCalls).toHaveLength(1);
 
       // Global should not have module name
-      expect(globalCalls[0][0]).toMatch(
+      expect(globalCalls[0]![0]).toMatch(
         /^%c\[INFO\]\[\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
       );
-      expect(globalCalls[0][1]).toBe(LOG_COLORS.info);
+      expect(globalCalls[0]![1]).toBe(LOG_COLORS.info);
 
       // Tagged should have module name
-      expect(taggedCalls[0][0]).toMatch(
+      expect(taggedCalls[0]![0]).toMatch(
         /^%c\[INFO\]\[test-module::\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
       );
-      expect(taggedCalls[0][1]).toBe(LOG_COLORS.taggedInfo);
+      expect(taggedCalls[0]![1]).toBe(LOG_COLORS.taggedInfo);
     });
 
     it("should have independent log levels", () => {
@@ -953,9 +956,9 @@ describe("logger", () => {
       const breakdown = getLoggerCountsBreakdown();
 
       // Now returns nested structure with message keys
-      expect(breakdown["breakdown-test-1"].total).toBe(2);
-      expect(breakdown["breakdown-test-2"].total).toBe(3);
-      expect(breakdown["breakdown-test-3"].total).toBe(1);
+      expect(breakdown["breakdown-test-1"]!.total).toBe(2);
+      expect(breakdown["breakdown-test-2"]!.total).toBe(3);
+      expect(breakdown["breakdown-test-3"]!.total).toBe(1);
       expect(breakdown.total).toBe(6);
     });
 
@@ -977,13 +980,13 @@ describe("logger", () => {
       const logger = getLogger("breakdown-update-test");
 
       let breakdown = getLoggerCountsBreakdown();
-      expect(breakdown["breakdown-update-test"].total).toBe(0);
+      expect(breakdown["breakdown-update-test"]!.total).toBe(0);
       expect(breakdown.total).toBe(0);
 
       captureConsole("log", () => logger.info("test-key", "test"));
 
       breakdown = getLoggerCountsBreakdown();
-      expect(breakdown["breakdown-update-test"].total).toBe(1);
+      expect(breakdown["breakdown-update-test"]!.total).toBe(1);
       expect(breakdown.total).toBe(1);
     });
 
@@ -998,15 +1001,15 @@ describe("logger", () => {
       });
 
       let breakdown = getLoggerCountsBreakdown();
-      expect(breakdown["breakdown-reset-1"].total).toBe(1);
-      expect(breakdown["breakdown-reset-2"].total).toBe(2);
+      expect(breakdown["breakdown-reset-1"]!.total).toBe(1);
+      expect(breakdown["breakdown-reset-2"]!.total).toBe(2);
       expect(breakdown.total).toBe(3);
 
       resetAllLoggerCounts();
 
       breakdown = getLoggerCountsBreakdown();
-      expect(breakdown["breakdown-reset-1"].total).toBe(0);
-      expect(breakdown["breakdown-reset-2"].total).toBe(0);
+      expect(breakdown["breakdown-reset-1"]!.total).toBe(0);
+      expect(breakdown["breakdown-reset-2"]!.total).toBe(0);
       expect(breakdown.total).toBe(0);
     });
 
@@ -1045,7 +1048,7 @@ describe("logger", () => {
         call.some((arg) => String(arg).includes("100 log calls made"))
       );
       expect(summaryLogs).toHaveLength(1);
-      expect(summaryLogs[0].some((arg) => String(arg).includes("info: 100")))
+      expect(summaryLogs[0]!.some((arg) => String(arg).includes("info: 100")))
         .toBe(true);
     });
 
@@ -1109,13 +1112,19 @@ describe("logger", () => {
 
       // Check each threshold
       expect(
-        summaryLogs[0].some((arg) => String(arg).includes("25 log calls made")),
+        summaryLogs[0]!.some((arg) =>
+          String(arg).includes("25 log calls made")
+        ),
       ).toBe(true);
       expect(
-        summaryLogs[1].some((arg) => String(arg).includes("50 log calls made")),
+        summaryLogs[1]!.some((arg) =>
+          String(arg).includes("50 log calls made")
+        ),
       ).toBe(true);
       expect(
-        summaryLogs[2].some((arg) => String(arg).includes("75 log calls made")),
+        summaryLogs[2]!.some((arg) =>
+          String(arg).includes("75 log calls made")
+        ),
       ).toBe(true);
     });
 
@@ -1162,7 +1171,7 @@ describe("logger", () => {
       expect(summaryLogs).toHaveLength(1);
 
       // Check breakdown
-      const summaryText = summaryLogs[0].join(" ");
+      const summaryText = summaryLogs[0]!.join(" ");
       expect(summaryText).toContain("debug: 2");
       expect(summaryText).toContain("info: 3");
       expect(summaryText).toContain("warn: 2");
@@ -1245,14 +1254,14 @@ describe("logger", () => {
 
       const byKey = logger.countsByKey;
 
-      expect(byKey["user-login"].debug).toBe(2);
-      expect(byKey["user-login"].info).toBe(1);
-      expect(byKey["user-login"].warn).toBe(1);
-      expect(byKey["user-login"].error).toBe(0);
-      expect(byKey["user-login"].total).toBe(4);
+      expect(byKey["user-login"]!.debug).toBe(2);
+      expect(byKey["user-login"]!.info).toBe(1);
+      expect(byKey["user-login"]!.warn).toBe(1);
+      expect(byKey["user-login"]!.error).toBe(0);
+      expect(byKey["user-login"]!.total).toBe(4);
 
-      expect(byKey["data-fetch"].info).toBe(1);
-      expect(byKey["data-fetch"].total).toBe(1);
+      expect(byKey["data-fetch"]!.info).toBe(1);
+      expect(byKey["data-fetch"]!.total).toBe(1);
     });
 
     it("should track different keys independently", () => {
@@ -1266,9 +1275,9 @@ describe("logger", () => {
       });
 
       const byKey = logger.countsByKey;
-      expect(byKey["key-a"].total).toBe(2);
-      expect(byKey["key-b"].total).toBe(1);
-      expect(byKey["key-c"].total).toBe(1);
+      expect(byKey["key-a"]!.total).toBe(2);
+      expect(byKey["key-b"]!.total).toBe(1);
+      expect(byKey["key-c"]!.total).toBe(1);
     });
 
     it("should reset countsByKey when resetCounts is called", () => {
@@ -1279,8 +1288,8 @@ describe("logger", () => {
         logger.info("key-2", "Message 2");
       });
 
-      expect(logger.countsByKey["key-1"].total).toBe(1);
-      expect(logger.countsByKey["key-2"].total).toBe(1);
+      expect(logger.countsByKey["key-1"]!.total).toBe(1);
+      expect(logger.countsByKey["key-2"]!.total).toBe(1);
 
       logger.resetCounts();
 
@@ -1295,7 +1304,7 @@ describe("logger", () => {
         logger.info("key-disabled", "Should count again");
       });
 
-      expect(logger.countsByKey["key-disabled"].total).toBe(2);
+      expect(logger.countsByKey["key-disabled"]!.total).toBe(2);
     });
   });
 
@@ -1316,13 +1325,13 @@ describe("logger", () => {
       const breakdown = getLoggerCountsBreakdown();
 
       // Check logger1 breakdown
-      expect(breakdown["breakdown-keys-1"]["login"].total).toBe(2);
-      expect(breakdown["breakdown-keys-1"]["logout"].total).toBe(1);
-      expect(breakdown["breakdown-keys-1"].total).toBe(3);
+      expect(breakdown["breakdown-keys-1"]!["login"]!.total).toBe(2);
+      expect(breakdown["breakdown-keys-1"]!["logout"]!.total).toBe(1);
+      expect(breakdown["breakdown-keys-1"]!.total).toBe(3);
 
       // Check logger2 breakdown
-      expect(breakdown["breakdown-keys-2"]["fetch"].total).toBe(3);
-      expect(breakdown["breakdown-keys-2"].total).toBe(3);
+      expect(breakdown["breakdown-keys-2"]!["fetch"]!.total).toBe(3);
+      expect(breakdown["breakdown-keys-2"]!.total).toBe(3);
 
       // Check global total
       expect(breakdown.total).toBe(6);
@@ -1348,7 +1357,7 @@ describe("logger", () => {
       });
 
       const breakdown = getLoggerCountsBreakdown();
-      const testOp = breakdown["breakdown-levels"]["test-op"];
+      const testOp = breakdown["breakdown-levels"]!["test-op"]!;
 
       expect(testOp.debug).toBe(2);
       expect(testOp.info).toBe(1);
@@ -1370,10 +1379,10 @@ describe("logger", () => {
 
       const breakdown = getLoggerCountsBreakdown();
 
-      expect(breakdown["multi-1"]["action-a"].total).toBe(1);
-      expect(breakdown["multi-1"]["action-b"].total).toBe(1);
-      expect(breakdown["multi-2"]["action-a"].total).toBe(1);
-      expect(breakdown["multi-2"]["action-c"].total).toBe(1);
+      expect(breakdown["multi-1"]!["action-a"]!.total).toBe(1);
+      expect(breakdown["multi-1"]!["action-b"]!.total).toBe(1);
+      expect(breakdown["multi-2"]!["action-a"]!.total).toBe(1);
+      expect(breakdown["multi-2"]!["action-c"]!.total).toBe(1);
       expect(breakdown.total).toBe(4);
     });
   });
@@ -1463,7 +1472,7 @@ describe("logger", () => {
         ) => entry.name === "logger:timing-measure:operation");
 
         expect(measures).toHaveLength(1);
-        expect(measures[0].duration).toBe(15);
+        expect(measures[0]!.duration).toBe(15);
       });
 
       it("should not emit performance measures when timing config does not match", () => {
@@ -1495,12 +1504,12 @@ describe("logger", () => {
         });
 
         expect(calls).toHaveLength(1);
-        expect(calls[0][0]).toMatch(
+        expect(calls[0]![0]).toMatch(
           /^\%c\[TIMING\]\[timing-console::\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
         );
-        expect(calls[0][1]).toBe(LOG_COLORS.debug);
-        expect(calls[0][2]).toBe("operation");
-        expect(calls[0][3]).toBe("12.500ms");
+        expect(calls[0]![1]).toBe(LOG_COLORS.debug);
+        expect(calls[0]![2]).toBe("operation");
+        expect(calls[0]![3]).toBe("12.500ms");
       });
 
       it("should respect minimum duration threshold for timing output", () => {
@@ -1689,8 +1698,8 @@ describe("logger", () => {
 
         expect(breakdown["timing-breakdown-1"]).toBeDefined();
         expect(breakdown["timing-breakdown-2"]).toBeDefined();
-        expect(breakdown["timing-breakdown-1"]["op1"]?.count).toBe(1);
-        expect(breakdown["timing-breakdown-2"]["op2"]?.count).toBe(1);
+        expect(breakdown["timing-breakdown-1"]!["op1"]?.count).toBe(1);
+        expect(breakdown["timing-breakdown-2"]!["op2"]?.count).toBe(1);
       });
 
       it("should not include loggers with no timing data", () => {

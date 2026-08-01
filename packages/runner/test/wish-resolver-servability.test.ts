@@ -178,7 +178,10 @@ async function observeWish(query: string, label: string): Promise<{
     // The sidecar load is kicked off inside the action and settles on its own
     // continuation, so give it bounded time to reach the recorder.
     for (let i = 0; i < 50 && fetched.length === 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // `clock.tick` rather than a wall-clock sleep: the package's fake clock
+      // freezes a positive-delay timer armed from a `test/` file, so a real
+      // sleep deadlocks here (see `test/clock-preload.ts`).
+      await clock.tick(10);
     }
 
     const wishAttempts = attempts.filter((observation) =>

@@ -12,9 +12,14 @@ import { createNativeErrorBrandCheck } from "./native-error-brand.ts";
 // after a Runtime installs SES. Browsers without Error.isError retain the
 // intrinsic DOMException check and otherwise fail closed for cross-realm
 // ordinary Errors.
-const isNativeError = createNativeErrorBrandCheck(
-  typeof Error.isError === "function" ? Error.isError.bind(Error) : undefined,
-);
+//
+// Exported because `runner`'s sandbox result normalization needs the same
+// brand check; it must be THIS captured-intrinsic one and not a call-time
+// re-read of `Error.isError`, which is exactly what SES removes.
+export const isNativeError: (value: unknown) => boolean =
+  createNativeErrorBrandCheck(
+    typeof Error.isError === "function" ? Error.isError.bind(Error) : undefined,
+  );
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
@@ -132,12 +137,27 @@ export function tagFromNativeClass(
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
- * Falls back to `Error.isError()` for exotic `Error` subclasses, `Array.isArray()`
- * for cross-realm arrays, and prototype check for null-prototype objects.
+ * An array answers `Array` before anything else is consulted, `toJSON()`
+ * included. `Array.isArray()` is realm-agnostic and sees through both a
+ * subclass and a severed prototype, so every array reaches array handling and
+ * is answered by the array rule, which alone decides what an array may be.
  *
- * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
- * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
+ * A `toJSON()` method reaches an array by one of two routes, and neither may
+ * decide its fate. As an own property it is a named key, which the array rule
+ * rejects -- so honoring it would convert a value by the very property that
+ * disqualifies it. Inherited, it is not array content at all: `hasToJSON()`
+ * answers on `in`, so a single `Array.prototype.toJSON` assignment anywhere in
+ * the process would otherwise route *every* array in the system through it.
+ * Answering `Array` up front is what makes arrays immune to that.
+ *
+ * Otherwise dispatches via the value's constructor (O(1) switch in
+ * `tagFromNativeClass`, which matches `Error` subclasses via
+ * `prototype instanceof Error`), falling back to native error detection for
+ * values whose constructor is unreachable -- a severed prototype, or another
+ * realm -- and to a prototype check for null-prototype objects.
+ *
+ * For tags that have pass-through handling (`Object`) or no dedicated handler
+ * (`null`), a per-instance `hasToJSON()` check upgrades the tag to
  * `HasToJSON`. Dedicated types (`Error`, `Date`, `Map`, etc.) and `HasToJSON` from
  * `tagFromNativeClass()` are returned as-is.
  */
@@ -145,6 +165,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (value === null || typeof value !== "object") {
     return NATIVE_TAGS.Primitive;
   }
+
+  // Arrays first, and unconditionally: see above.
+  if (Array.isArray(value)) {
+    return NATIVE_TAGS.Array;
+  }
+
   // Guard: null-prototype objects or exotic objects may not have a function
   // constructor.
   const ctor = value.constructor;
@@ -170,26 +196,24 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
 
   // Fallbacks for values whose constructor wasn't recognized (tag === null).
   if (tag === null) {
-    // Exotic `Error` subclasses (e.g. `DOMException`).
+    // `Error`s with no reachable constructor -- e.g. one whose prototype has
+    // been severed, or one from another realm. An ordinary subclass (including
+    // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
+    // `prototype instanceof Error`.
     if (isNativeError(value)) return NATIVE_TAGS.Error;
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
-    // Cross-realm arrays may have a different constructor.
-    if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
-
     // Null-prototype objects (`Object.create(null)`).
-    if (tag === null) {
-      const proto = Object.getPrototypeOf(value);
-      if (proto === null) tag = NATIVE_TAGS.Object;
-    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null) tag = NATIVE_TAGS.Object;
   }
 
-  // For `Object`, `Array`, and still-null tags: a per-instance `toJSON()` method
+  // For `Object` and still-null tags: a per-instance `toJSON()` method
   // overrides to `HasToJSON`. This catches plain objects with `toJSON()` as an own
-  // property, arrays with `toJSON()` added, and unrecognized class instances
-  // whose prototype wasn't caught by `tagFromNativeClass()`.
+  // property, and unrecognized class instances whose prototype wasn't caught by
+  // `tagFromNativeClass()`.
   if (hasToJSON(value)) return NATIVE_TAGS.HasToJSON;
 
   return tag;

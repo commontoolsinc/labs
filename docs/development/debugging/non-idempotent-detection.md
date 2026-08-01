@@ -9,8 +9,10 @@ CPU usage, and the system never reaching a stable state.
 Common causes:
 
 - A `computed()` that calls `.set()` on a `Writable<>` with a value derived
-  from non-deterministic sources (e.g. `Date.now()`, `Math.random()`,
-  `crypto.randomUUID()`)
+  from a non-deterministic source such as `crypto.randomUUID()` (the ambient
+  clock and entropy — `Date.now()`, `Math.random()` — no longer reach this
+  failure mode: they throw a `TimeCapabilityError` inside a `computed()`/`lift()`
+  rather than churning)
 - Converting a `Set` to an array where iteration order varies between runs
 - Appending to an array on each execution instead of replacing it
 - Two actions forming a cycle: A writes cell X which triggers B, B writes
@@ -181,12 +183,14 @@ const uniqueTags = computed(() => {
 
 ```typescript
 // Shown inside a pattern body.
-// BAD: Different output every run
+// BAD: Date.now() in a computed() throws a TimeCapabilityError (rather than
+// churning) — the ambient clock is denied to reactive contexts
 const enriched = computed(() => {
   return items.map(i => ({ ...i, updatedAt: Date.now() }));
 });
 
-// GOOD: Use timestamps only in handlers (event-driven, not reactive)
+// GOOD: read the clock only in handlers (allowed there, coarsened to one
+// second), or read the reactive #now wish for a value that updates on its own
 const updateItem = handler<{}, { item: Item }>((_, { item }) => {
   item.updatedAt.set(Date.now());
 });

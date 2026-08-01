@@ -11,9 +11,7 @@ import {
   handler,
   NAME,
   navigateTo,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -21,9 +19,7 @@ import {
 
 // Simple random ID generator
 const generateId = () =>
-  `${safeDateNow().toString(36)}-${
-    nonPrivateRandom().toString(36).slice(2, 11)
-  }`;
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
 // Available colors for events
 const COLORS: string[] = [
@@ -224,33 +220,10 @@ const handleSetNotes = handler<
   return newNotes;
 });
 
-// Color picker handlers - must be at module scope
-const setColor0 = handler<void, { color: Writable<string> }>((_, state) =>
-  state.color.set(COLORS[0])
-);
-const setColor1 = handler<void, { color: Writable<string> }>((_, state) =>
-  state.color.set(COLORS[1])
-);
-const setColor2 = handler<void, { color: Writable<string> }>((_, state) =>
-  state.color.set(COLORS[2])
-);
-const setColor3 = handler<void, { color: Writable<string> }>((_, state) =>
-  state.color.set(COLORS[3])
-);
-const setColor4 = handler<void, { color: Writable<string> }>((_, state) =>
-  state.color.set(COLORS[4])
-);
-const setColor5 = handler<void, { color: Writable<string> }>((_, state) =>
-  state.color.set(COLORS[5])
-);
-const colorHandlers = [
-  setColor0,
-  setColor1,
-  setColor2,
-  setColor3,
-  setColor4,
-  setColor5,
-];
+const selectColor = handler<
+  void,
+  { color: Writable<string>; selectedColor: string }
+>((_, { color, selectedColor }) => color.set(selectedColor));
 
 // ============ PATTERN ============
 
@@ -382,7 +355,7 @@ const Event = pattern<Input, Output>(
             <div>
               <label style={STYLES.label}>Color</label>
               <div style={{ display: "flex", gap: "6px" }}>
-                {COLORS.map((c, idx) => (
+                {COLORS.map((c) => (
                   <div
                     style={{
                       ...STYLES.colorSwatch,
@@ -393,7 +366,7 @@ const Event = pattern<Input, Output>(
                           : "2px solid transparent"
                       ),
                     }}
-                    onClick={colorHandlers[idx]({ color })}
+                    onClick={selectColor({ color, selectedColor: c })}
                   />
                 ))}
               </div>

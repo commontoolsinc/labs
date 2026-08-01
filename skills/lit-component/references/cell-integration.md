@@ -149,9 +149,10 @@ mutateCell(myCell, (cell) => {
 ### Array Mutations
 
 ```typescript
-// Add item
+// Add item (pushed objects are anchored into documents of their own
+// automatically -- no identity annotation needed)
 mutateCell(listCell, (cell) => {
-  cell.push({ title: "New Item", [ID]: crypto.randomUUID() });
+  cell.push({ title: "New Item" });
 });
 
 // Remove item by filter

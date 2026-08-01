@@ -83,12 +83,10 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSession as _PerSession,
   type PerSpace,
   type PerUser as _PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -187,8 +185,8 @@ const _VOTE_SWATCH: Record<VoteColor, string> = {
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
 const newOptionId = () =>
-  `o_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  `o_${Date.now().toString(36)}_${
+    Math.floor(Math.random() * 1e6).toString(36)
   }`;
 
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
@@ -217,7 +215,7 @@ const joinAs = handler<JoinEvent, {
   const user: User = {
     name: trimmed,
     color: colorForIndex(existing.length),
-    joinedAt: safeDateNow(),
+    joinedAt: Date.now(),
   };
   users.push(user);
   myName.set(trimmed);

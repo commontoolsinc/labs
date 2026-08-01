@@ -120,6 +120,17 @@ describe("CodecRegistry", () => {
         expect(last.canEncodeCalled).toBe(false);
       });
     }
+
+    it("returns undefined for a null-prototype object", () => {
+      const { registry } = buildRegistry(
+        FabricRegExp,
+        new FabricRegExp(/x/) as FabricValue,
+      );
+      const nullProto = Object.create(null) as Record<string, FabricValue>;
+      nullProto.a = 1;
+
+      expect(registry.codecFromValue(nullProto)).toBeUndefined();
+    });
   });
 
   describe("registerPrimitive()", () => {

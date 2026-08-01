@@ -9,7 +9,6 @@ import {
   pattern,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -84,7 +83,7 @@ const sendMessage = handler<SendEvent, {
     author,
     avatar: (avatar ?? "").trim(),
     body,
-    sentAt: safeDateNow(),
+    sentAt: Date.now(),
   });
   draft.set("");
 });

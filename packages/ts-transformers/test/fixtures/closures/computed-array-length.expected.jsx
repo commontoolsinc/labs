@@ -11,8 +11,8 @@ import { __cfHelpers } from "commonfabric";
  * Regression test for array.length access inside computed().
  *
  * This mimics the pattern from default-app.tsx where:
- * - allPieces comes from wish<{ allPieces: MentionablePiece[] }>
- * - computed(() => allPieces.length) accesses .length on an array from wish
+ * - pieceRegistry comes from wish<{ pieceRegistry: MentionablePiece[] }>
+ * - computed(() => pieceRegistry.length) accesses .length on an array from wish
  *
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
@@ -26,13 +26,13 @@ interface Piece {
     name: string;
 }
 const __cfLift_1 = __cfHelpers.lift<{
-    allPieces: {
+    pieceRegistry: {
         length: number;
     };
-}, string>(({ allPieces }) => `Pieces (${allPieces.length})`, {
+}, string>(({ pieceRegistry }) => `Pieces (${pieceRegistry.length})`, {
     type: "object",
     properties: {
-        allPieces: {
+        pieceRegistry: {
             type: "object",
             properties: {
                 length: {
@@ -42,18 +42,18 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["length"]
         }
     },
-    required: ["allPieces"]
+    required: ["pieceRegistry"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
-    allPieces: {
+    pieceRegistry: {
         length: number;
     };
-}, number>(({ allPieces }) => allPieces.length, {
+}, number>(({ pieceRegistry }) => pieceRegistry.length, {
     type: "object",
     properties: {
-        allPieces: {
+        pieceRegistry: {
             type: "object",
             properties: {
                 length: {
@@ -63,7 +63,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["length"]
         }
     },
-    required: ["allPieces"]
+    required: ["pieceRegistry"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
@@ -115,24 +115,24 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-array-length
 // Verifies: computed(() => expr) with .length access on a Reactive<T[]> is closure-extracted
-//   computed(() => allPieces.length) → lift(({ allPieces }) => allPieces.length)({ allPieces: { length: allPieces.length } })
-//   allPieces.map(fn) → allPieces.mapWithPattern(pattern(fn, ...schemas), {})
+//   computed(() => pieceRegistry.length) → lift(({ pieceRegistry }) => pieceRegistry.length)({ pieceRegistry: { length: pieceRegistry.length } })
+//   pieceRegistry.map(fn) → pieceRegistry.mapWithPattern(pattern(fn, ...schemas), {})
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
     const __cf_destructure_1 = wish<{
-        allPieces: Piece[];
+        pieceRegistry: Piece[];
     }>({ query: "/" }, {
         type: "object",
         properties: {
-            allPieces: {
+            pieceRegistry: {
                 type: "array",
                 items: {
                     $ref: "#/$defs/Piece"
                 }
             }
         },
-        required: ["allPieces"],
+        required: ["pieceRegistry"],
         $defs: {
             Piece: {
                 type: "object",
@@ -147,17 +147,17 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema), allPieces = __cf_destructure_1.key("result", "allPieces").for("allPieces", true);
+    } as const satisfies __cfHelpers.JSONSchema), pieceRegistry = __cf_destructure_1.key("result", "pieceRegistry").for("pieceRegistry", true);
     return {
-        [NAME]: __cfLift_1({ allPieces: {
-                length: allPieces.key("length")
+        [NAME]: __cfLift_1({ pieceRegistry: {
+                length: pieceRegistry.key("length")
             } }),
         [UI]: (<div>
-        <span>Count: {__cfLift_2({ allPieces: {
-                length: allPieces.key("length")
+        <span>Count: {__cfLift_2({ pieceRegistry: {
+                length: pieceRegistry.key("length")
             } })}</span>
         <ul>
-          {allPieces.mapWithPattern(__cfPattern_1, {})}
+          {pieceRegistry.mapWithPattern(__cfPattern_1, {})}
         </ul>
       </div>),
     };

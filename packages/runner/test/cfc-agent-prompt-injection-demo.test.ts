@@ -14,6 +14,7 @@ import type {
 } from "@commonfabric/api";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 
@@ -368,29 +369,7 @@ async function setupDemoAgent(
     await storageManager.close();
   };
 
-  return { result, recipientHandle, linkPath, dispose };
-}
-
-function waitForMessages(result: any, expectedCount: number) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(
-        new Error(
-          `Timeout waiting for ${expectedCount} messages and pending=false`,
-        ),
-      );
-    }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
-      if (pending === false && messages?.length === expectedCount) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
+  return { runtime, result, recipientHandle, linkPath, dispose };
 }
 
 describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
@@ -453,7 +432,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       const addMessage = await t.result.key("addMessage").pull();
       addMessage.send({ role: "user", content: DEMO_PROMPT });
       // user + assistant(read) + tool + assistant(send) + tool + final = 6
-      await waitForMessages(t.result, 6);
+      await waitForLlmMessages(t.runtime, t.result, 6);
 
       // The central invariant: the injected recipient was never mailed.
       const emails =
@@ -549,7 +528,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       const addMessage = await t.result.key("addMessage").pull();
       addMessage.send({ role: "user", content: DEMO_PROMPT });
       // user + 3×(assistant tool-call + tool result) + final = 8
-      await waitForMessages(t.result, 8);
+      await waitForLlmMessages(t.runtime, t.result, 8);
 
       // The end-to-end by-reference contract: the reference the model passed
       // to sendMail was handed to it INSIDE the conversation — the

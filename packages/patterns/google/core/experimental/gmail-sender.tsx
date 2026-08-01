@@ -26,7 +26,6 @@ import {
   ifElse,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -134,7 +133,7 @@ const confirmAndSend = handler<
       success: true,
       messageId: response.id,
       threadId: response.threadId,
-      timestamp: new Date(safeDateNow()).toISOString(),
+      timestamp: new Date().toISOString(),
     });
 
     showConfirmation.set(false);
@@ -153,7 +152,7 @@ const confirmAndSend = handler<
     result.set({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      timestamp: new Date(safeDateNow()).toISOString(),
+      timestamp: new Date().toISOString(),
     });
   } finally {
     sending.set(false);

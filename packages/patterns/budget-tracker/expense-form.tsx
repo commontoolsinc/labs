@@ -47,14 +47,15 @@ const addExpenseHandler = handler<
   { description: string; amount: number; category?: string; date?: string },
   { expenses: Writable<Expense[]> }
 >(({ description, amount, category, date }, { expenses }) => {
-  if (!description?.trim() || typeof amount !== "number" || amount <= 0) {
+  // `NaN` passes `amount <= 0` (`NaN <= 0` is false), so gate finiteness too.
+  if (!description?.trim() || !Number.isFinite(amount) || amount <= 0) {
     return;
   }
   expenses.push({
     description: description.trim(),
     amount,
     category: category || "Other",
-    date: date || getTodayDate(),
+    date: date || getTodayDate(Date.now()),
   });
 });
 
@@ -96,8 +97,6 @@ const removeBudgetHandler = handler<
 
 // Use single type param to avoid conflict bug when composed
 export default pattern<Input>(({ expenses, budgets }) => {
-  const todayDate = getTodayDate();
-
   // Local state for form inputs
   const newDescription = new Writable("");
   const newAmount = new Writable("");
@@ -145,7 +144,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                   description: desc,
                   amount: amt,
                   category: cat,
-                  date: todayDate,
+                  date: getTodayDate(Date.now()),
                 });
                 // Clear form
                 newDescription.set("");

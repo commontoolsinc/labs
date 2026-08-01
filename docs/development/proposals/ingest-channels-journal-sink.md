@@ -4,7 +4,10 @@
 
 **Status:** proposed · **the memory ACL default is now `enforce`; Estuary must configure operator DID `did:key:z6MkjUMJxa2ra9wfFjXY1CcbxGrxGGrwSWV7bKsD7Kb5vNqq` in `MEMORY_SERVICE_DIDS` (or provision per-space grants) before relying on cross-space ingest** · **Updated:** 2026-07-10
 
-Builds directly on the landed vouched-ingest primitive (labs #4392): the runtime-minted `ExternalIngest` mark + `custodyIngest`. See `vouched-ingest-channel-mint-design.md` for the split-mint seam this stands on.
+Builds directly on the landed vouched-ingest primitive (labs #4392): the
+runtime-minted `ExternalIngest` mark + `custodyIngest`. See the
+[vouched-ingest channel mint design](vouched-ingest-channel-mint-design.md) for
+the split-mint seam this stands on.
 
 ---
 

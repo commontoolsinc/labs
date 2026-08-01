@@ -9,7 +9,7 @@ import type { Pattern } from "../src/builder/types.ts";
 import {
   patternToJSON,
   serializePatternGraph,
-  toJSONWithLegacyAliases,
+  toJSONWithAliasBindings,
 } from "../src/builder/json-utils.ts";
 import {
   resolveOpPattern,
@@ -26,7 +26,7 @@ import type { FactoryInput } from "../src/builder/types.ts";
  * session-lifetime artifact index (sync) or the storage-backed
  * `loadPatternByIdentity` (async; compiled artifacts persist in-space as part
  * of compilation). INTERNAL serialization (`serializePatternGraph`, used by
- * builder-time node serialization through `toJSONWithLegacyAliases`) stays the
+ * builder-time node serialization through `toJSONWithAliasBindings`) stays the
  * full bare graph — `Pattern.nodes` is the in-memory instantiation
  * representation, not a wire format.
  */
@@ -121,7 +121,7 @@ describe("refs-only pattern JSON at the boundary", () => {
     expect("$patternRef" in internal).toBe(false);
     expect(Array.isArray((internal as { nodes: unknown }).nodes)).toBe(true);
 
-    const viaLegacyAliases = toJSONWithLegacyAliases(
+    const viaLegacyAliases = toJSONWithAliasBindings(
       compiled as unknown as FactoryInput<unknown>,
     ) as Record<string, unknown>;
     expect("$patternRef" in viaLegacyAliases).toBe(false);

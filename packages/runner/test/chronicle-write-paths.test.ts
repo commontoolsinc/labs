@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { ISpaceReplica } from "../src/storage/interface.ts";
 import * as Chronicle from "../src/storage/transaction/chronicle.ts";
 
 const signer = await Identity.fromPassphrase("chronicle-write-paths");
@@ -125,6 +126,78 @@ describe("Chronicle write paths", () => {
     } finally {
       await storage.close();
     }
+  });
+
+  it("does not elide a root rewrite of `0` with `-0`", async () => {
+    // `0` and `-0` are distinct stored values (`valueEqual` and the content
+    // hash both distinguish them), so a `-0` root write over a `0` working
+    // copy must not be dropped as a no-op.
+    const storage = StorageManager.emulate({ as: signer });
+    try {
+      const id = "test:chronicle-negative-zero-root" as const;
+      const replica = storage.open(space).replica;
+      const address = { id, type: "application/json" as const, path: [] };
+
+      const chronicle = Chronicle.open(replica);
+      expect(chronicle.write(address, 0).error).toBeUndefined();
+      expect(chronicle.write(address, -0).error).toBeUndefined();
+
+      const read = chronicle.read(address);
+      expect(read.error).toBeUndefined();
+      expect(Object.is(read.ok?.value, -0)).toBe(true);
+    } finally {
+      await storage.close();
+    }
+  });
+
+  it("commits a primitive root change from `0` to `-0` as an assertion, not a no-change claim", () => {
+    // A memory v2 replica only stores explicit full-document (record) roots,
+    // so the primitive-root contract is pinned with a minimal replica stub:
+    // the loaded root is `0`, and the transaction writes `-0` over it. The
+    // distinction matters because `valueEqual` and the content hash both
+    // treat `0` and `-0` as different stored values.
+    const id = "test:chronicle-negative-zero-commit" as const;
+    const replica = {
+      did: () => space,
+      get: () => ({ the: "application/json", of: id, is: 0 }),
+    } as unknown as ISpaceReplica;
+
+    const chronicle = Chronicle.open(replica);
+    const result = chronicle.write(
+      { id, type: "application/json", path: [] },
+      -0,
+    );
+    expect(result.error).toBeUndefined();
+
+    const commitResult = chronicle.commit();
+    expect(commitResult.error).toBeUndefined();
+    const fact = commitResult.ok!.facts.find((f) => f.of === id);
+    expect(fact).toBeDefined();
+    expect(Object.is(fact!.is, -0)).toBe(true);
+  });
+
+  it("commits a root re-write of the loaded value as a claim, not an assertion", () => {
+    // Identity fast paths: a root write matching the loaded value is elided
+    // (the working copy is returned as-is), and commit claims the loaded
+    // fact instead of asserting a new one.
+    const id = "test:chronicle-identity-root" as const;
+    const replica = {
+      did: () => space,
+      get: () => ({ the: "application/json", of: id, is: 42 }),
+    } as unknown as ISpaceReplica;
+
+    const chronicle = Chronicle.open(replica);
+    const address = { id, type: "application/json" as const, path: [] };
+    const first = chronicle.write(address, 42);
+    expect(first.error).toBeUndefined();
+    const second = chronicle.write(address, 42);
+    expect(second.error).toBeUndefined();
+    expect(second.ok).toBe(first.ok);
+
+    const commitResult = chronicle.commit();
+    expect(commitResult.error).toBeUndefined();
+    expect(commitResult.ok!.facts.length).toBe(0);
+    expect(commitResult.ok!.claims.length).toBe(1);
   });
 
   it("treats a write of the same value as a no-op (identity returned)", async () => {

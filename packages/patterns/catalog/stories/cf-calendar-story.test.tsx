@@ -1,4 +1,4 @@
-import { computed, NAME, pattern, UI } from "commonfabric";
+import { assert, NAME, pattern, UI } from "commonfabric";
 import CalendarStory from "./cf-calendar-story.tsx";
 
 // Lane-2 pattern test (run by `cf test`): instantiating the story runs its body
@@ -15,7 +15,7 @@ import CalendarStory from "./cf-calendar-story.tsx";
 // controls JSX for coverage either way, so a `controls` assertion adds nothing.
 export default pattern(() => {
   const story = CalendarStory({});
-  const assert_story_built = computed(() =>
+  const assert_story_built = assert(() =>
     story[NAME] === "cf-calendar Story" &&
     story[UI] != null
   );

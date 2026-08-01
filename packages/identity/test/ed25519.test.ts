@@ -83,7 +83,7 @@ Deno.test("rejects did:key values with unsupported multicodec tags", () => {
 
 Deno.test("has same results in both impls when generating from noble", async () => {
   // Use @noble/ed25519 directly, otherwise the private key isn't accessible.
-  const privateKey = ed25519.utils.randomPrivateKey();
+  const privateKey = ed25519.utils.randomSecretKey();
   const noble = await NobleEd25519Signer.fromRaw(privateKey);
   const native = await NativeEd25519Signer.fromRaw(privateKey);
   const buffer = new Uint8Array(32).fill(10);

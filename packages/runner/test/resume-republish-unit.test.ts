@@ -344,16 +344,14 @@ describe("resume-republish unit", () => {
 
 // trackUntilSettled receives a fresh promise per re-await, so draining once is
 // not enough: await the current batch, then await any promises the rebuild
-// scheduled while settling, until the queue stops growing.
+// scheduled while settling, until the queue stops growing. The republisher
+// tracks a re-defer from inside the callback that resolves the promise it was
+// re-deferred from, so a batch that has settled has already pushed whatever
+// follows it.
 async function drain(tracked: Promise<unknown>[]): Promise<void> {
-  let seen = 0;
-  // A bounded number of passes; the re-defer chain here is at most a few deep.
-  for (let pass = 0; pass < 10; pass++) {
-    if (tracked.length === seen) break;
+  for (let seen = 0; seen < tracked.length;) {
     const batch = tracked.slice(seen);
     seen = tracked.length;
     await Promise.allSettled(batch);
-    // Let any microtasks the settled batch queued run before the next pass.
-    await new Promise((r) => setTimeout(r, 0));
   }
 }

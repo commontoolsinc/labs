@@ -628,7 +628,7 @@ Deno.test("executor action router carries an accepted builtin claim across async
     { disposition: "upstream" },
   );
   assertEquals(
-    (continuation.schedulerObservation as Record<string, unknown>)
+    (continuation.schedulerObservation as unknown as Record<string, unknown>)
       .executionClaimAssertion,
     {
       contextKey: "space",
@@ -728,7 +728,10 @@ Deno.test("executor action router carries an accepted builtin claim across async
     },
   );
   assertEquals(
-    (permanentlyUnserved.schedulerObservation as Record<string, unknown>)
+    (permanentlyUnserved.schedulerObservation as unknown as Record<
+      string,
+      unknown
+    >)
       .executionClaimAssertion,
     {
       contextKey: "space",

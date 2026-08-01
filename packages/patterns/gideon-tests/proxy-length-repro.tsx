@@ -34,7 +34,8 @@ export interface Output {
 
 export default pattern<Input, Output>(({ items }) => {
   const addItem = action(() => {
-    items.push({ name: `Item ${items.get().length + 1}` });
+    const current = items.get();
+    items.set([...current, { name: `Item ${current.length + 1}` }]);
   });
 
   // Computed array derived from the input

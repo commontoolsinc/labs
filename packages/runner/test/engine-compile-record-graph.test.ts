@@ -255,22 +255,21 @@ describe("Engine.compileToRecordGraph()", () => {
     expect(main?.default).toBe("Open");
   });
 
-  it("preserves explicit SES-safe snapshot helpers in CTS modules", async () => {
+  it("preserves the gated ambient clock/entropy intrinsics in CTS modules", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
         {
           name: "/main.ts",
           contents: [
-            'import { nonPrivateRandom, safeDateNow } from "commonfabric";',
-            "const startedAt = safeDateNow();",
-            "const seed = nonPrivateRandom();",
             "export default function probe() {",
+            "  const startedAt = Date.now();",
+            "  const seed = Math.random();",
             "  return {",
             "    startedAt,",
             "    seed,",
-            "    now: safeDateNow(),",
-            "    random: nonPrivateRandom(),",
+            "    now: Date.now(),",
+            "    random: Math.random(),",
             "  };",
             "}",
           ].join("\n"),
@@ -282,10 +281,8 @@ describe("Engine.compileToRecordGraph()", () => {
       program,
     );
     const bodies = joinedBodies(graph);
-    expect(bodies).toContain("safeDateNow");
-    expect(bodies).toContain("nonPrivateRandom");
-    expect(bodies).not.toContain("__cfHelpers.safeDateNow");
-    expect(bodies).not.toContain("__cfHelpers.nonPrivateRandom");
+    expect(bodies).toContain("Date.now");
+    expect(bodies).toContain("Math.random");
 
     const { main } = engine.evaluateRecordGraph(
       id,
@@ -293,11 +290,13 @@ describe("Engine.compileToRecordGraph()", () => {
       mainSpecifier,
       program.files,
     );
-    const result = main?.default();
 
-    expect(typeof result?.startedAt).toBe("number");
-    expect(typeof result?.now).toBe("number");
-    expect(typeof result?.seed).toBe("number");
-    expect(typeof result?.random).toBe("number");
+    // The compiled body wired up the gated ambient intrinsics, not the real
+    // clock/entropy: invoking them outside a handler trips the time/entropy
+    // capability gate. (This test runs inside a runtime pattern frame, so
+    // probe() is a non-handler context.)
+    expect(() => main?.default()).toThrow(
+      "ambient clock",
+    );
   });
 });

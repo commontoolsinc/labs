@@ -21,14 +21,12 @@ import {
   isPendingWritesNotification,
   isTelemetryNotification,
   isVDomBatchNotification,
-  isVersionSkewNotification,
   NavigateRequestNotification,
   NotificationType,
   PendingWritesNotification,
   RequestType,
   TelemetryNotification,
   VDomBatchNotification,
-  VersionSkewNotification,
 } from "../protocol/mod.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
@@ -114,7 +112,6 @@ export type RuntimeConnectionEvents = {
   telemetry: [TelemetryNotification];
   vdombatch: [VDomBatchNotification];
   pendingwriteschange: [PendingWritesNotification];
-  versionskew: [VersionSkewNotification];
 };
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
@@ -509,8 +506,6 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         this.emit("vdombatch", message);
       } else if (isPendingWritesNotification(message)) {
         this.emit("pendingwriteschange", message);
-      } else if (isVersionSkewNotification(message)) {
-        this.emit("versionskew", message);
       } else {
         console.warn(`Unknown notification: ${JSON.stringify(message)}`);
       }

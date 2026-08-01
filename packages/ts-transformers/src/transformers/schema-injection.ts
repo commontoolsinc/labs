@@ -25,6 +25,7 @@ import {
   isCellLikeType,
   isFunctionLikeExpression,
   isUnresolvedSchemaType,
+  preserveSourceMapRange,
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
@@ -998,13 +999,18 @@ function maybeApplyFactoryContextualScope(
   const scope = scopedFactoryContextualScope(node, checker);
   if (!scope) return undefined;
 
-  const scopedFactory = factory.createCallExpression(
-    factory.createPropertyAccessExpression(
-      node.expression,
-      factory.createIdentifier("asScope"),
+  // smr only (see prependSchemaArguments): the `.asScope(scope)` callee wrapper
+  // reifies node.expression scoped, so it carries that expression's position.
+  const scopedFactory = preserveSourceMapRange(
+    factory.createCallExpression(
+      factory.createPropertyAccessExpression(
+        node.expression,
+        factory.createIdentifier("asScope"),
+      ),
+      undefined,
+      [factory.createStringLiteral(scope)],
     ),
-    undefined,
-    [factory.createStringLiteral(scope)],
+    node.expression,
   );
   return factory.updateCallExpression(
     node,
@@ -1593,10 +1599,14 @@ function visitPrependedWidenedSchemaCall(
     createRegisteredWidenedSchemaCall(type, context, checker, typeRegistry)
   );
 
-  const updated = context.factory.createCallExpression(
-    node.expression,
-    undefined,
-    [...schemas, ...args],
+  // smr only (see prependSchemaArguments for the rationale).
+  const updated = preserveSourceMapRange(
+    context.factory.createCallExpression(
+      node.expression,
+      undefined,
+      [...schemas, ...args],
+    ),
+    node,
   );
 
   context.markSchemaInjected(updated);
@@ -2488,6 +2498,17 @@ function prependSchemaArguments(
     // form `lift(cb, false)()`: `false` argument schema (matching computed's
     // runtime semantics — keeps the no-arg application valid) and no outer
     // input. We deliberately omit the result schema, again matching computed.
+    // Each rebuild carries the sourceMapRange of the node it REPLACES (inner
+    // lift call / outer applied call), so the hoisting stage — SchemaInjection
+    // is its immediate predecessor and used to strip everything — can still
+    // recover where the builder call was authored (CT-1868). smr ONLY, not
+    // `factory.update*` or setTextRange/setOriginalNode: textRange feeds the
+    // printer's layout decisions (real positions inside synthesized containers
+    // reflow JSX/ternaries) and original feeds getOriginalNode fallbacks
+    // (typeRegistry/type resolution, marker registries), both of which
+    // observably change emitted output; sourceMapRange is emit-map metadata
+    // read by neither. (For an authored `node`, getSourceMapRange(node)
+    // returns the node itself, so its own range is what gets carried.)
     if (isSingleEmptyObjectInput(node.arguments)) {
       // W2.13 capture-freeness (FB2): "zero captures reified" is
       // ClosureTransformer's notion of capture, which excludes module-scope
@@ -2513,27 +2534,33 @@ function prependSchemaArguments(
             ),
           ], false)
         : context.factory.createIdentifier("undefined");
-      const rebuiltInner = context.factory.createCallExpression(
-        innerLiftCall.expression,
-        innerLiftCall.typeArguments,
-        [
-          ...calleeArgs,
-          context.factory.createFalse(),
-          // Keep the trusted scheduler options in lift's fourth parameter;
-          // the no-input form intentionally has no result schema.
-          context.factory.createIdentifier("undefined"),
-          completeSchedulerScopeSummary,
-          ...trailingInnerArgs,
-        ],
+      const rebuiltInner = preserveSourceMapRange(
+        context.factory.createCallExpression(
+          innerLiftCall.expression,
+          innerLiftCall.typeArguments,
+          [
+            ...calleeArgs,
+            context.factory.createFalse(),
+            // Keep the trusted scheduler options in lift's fourth parameter;
+            // the no-input form intentionally has no result schema.
+            context.factory.createIdentifier("undefined"),
+            completeSchedulerScopeSummary,
+            ...trailingInnerArgs,
+          ],
+        ),
+        innerLiftCall,
       );
       // The inner lift is fully schema-injected now; mark it so the re-descent
       // (which re-enters the rebuilt tree to reach the callback body) self-skips
       // the builder-lift branch instead of injecting a second schema pair.
       context.markSchemaInjected(rebuiltInner);
-      return context.factory.createCallExpression(
-        rebuiltInner,
-        undefined,
-        [],
+      return preserveSourceMapRange(
+        context.factory.createCallExpression(
+          rebuiltInner,
+          undefined,
+          [],
+        ),
+        node,
       );
     }
 
@@ -2546,30 +2573,44 @@ function prependSchemaArguments(
       : schedulerOptions
       ? [schedulerOptions]
       : [];
-    const rebuiltInner = context.factory.createCallExpression(
-      innerLiftCall.expression,
-      innerLiftCall.typeArguments,
-      [...calleeArgs, argSchemaCall, resSchemaCall, ...liftAppliedTrailingArgs],
+    const rebuiltInner = preserveSourceMapRange(
+      context.factory.createCallExpression(
+        innerLiftCall.expression,
+        innerLiftCall.typeArguments,
+        [
+          ...calleeArgs,
+          argSchemaCall,
+          resSchemaCall,
+          ...liftAppliedTrailingArgs,
+        ],
+      ),
+      innerLiftCall,
     );
     // The inner lift is fully schema-injected now; mark it so the re-descent
     // does not re-enter the builder-lift branch and inject a second pair.
     context.markSchemaInjected(rebuiltInner);
-    return context.factory.createCallExpression(
-      rebuiltInner,
-      undefined,
-      node.arguments,
+    return preserveSourceMapRange(
+      context.factory.createCallExpression(
+        rebuiltInner,
+        undefined,
+        node.arguments,
+      ),
+      node,
     );
   }
 
-  return context.factory.createCallExpression(
-    node.expression,
-    undefined,
-    [
-      ...node.arguments,
-      argSchemaCall,
-      resSchemaCall,
-      ...(schedulerOptions ? [schedulerOptions] : []),
-    ],
+  return preserveSourceMapRange(
+    context.factory.createCallExpression(
+      node.expression,
+      undefined,
+      [
+        ...node.arguments,
+        argSchemaCall,
+        resSchemaCall,
+        ...(schedulerOptions ? [schedulerOptions] : []),
+      ],
+    ),
+    node,
   );
 }
 
@@ -2880,11 +2921,15 @@ function handlePatternSchemaInjection(
     inputSchema: ts.Expression,
     resultSchema: ts.Expression,
   ): ts.CallExpression => {
-    return factory.createCallExpression(node.expression, undefined, [
-      builderFunctionArg.expression,
-      inputSchema,
-      resultSchema,
-    ]);
+    // smr only (see prependSchemaArguments for the rationale).
+    return preserveSourceMapRange(
+      factory.createCallExpression(node.expression, undefined, [
+        builderFunctionArg.expression,
+        inputSchema,
+        resultSchema,
+      ]),
+      node,
+    );
   };
 
   // Determine input and result schema TypeNodes based on type arguments
@@ -3342,10 +3387,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             typeRegistry,
           );
 
-          const updated = factory.createCallExpression(
-            node.expression,
-            undefined,
-            [toSchemaEvent, toSchemaState, ...node.arguments],
+          // smr only (see prependSchemaArguments for the rationale).
+          const updated = preserveSourceMapRange(
+            factory.createCallExpression(
+              node.expression,
+              undefined,
+              [toSchemaEvent, toSchemaState, ...node.arguments],
+            ),
+            node,
           );
 
           context.markSchemaInjected(updated);
@@ -3441,10 +3490,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               typeRegistry,
             );
 
-            const updated = factory.createCallExpression(
-              node.expression,
-              undefined,
-              [toSchemaEvent, toSchemaState, handlerCandidate],
+            // smr only (see prependSchemaArguments for the rationale).
+            const updated = preserveSourceMapRange(
+              factory.createCallExpression(
+                node.expression,
+                undefined,
+                [toSchemaEvent, toSchemaState, handlerCandidate],
+              ),
+              node,
             );
 
             context.markSchemaInjected(updated);
@@ -3672,10 +3725,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             if (narrowedArgumentTypeValue && typeRegistry) {
               typeRegistry.set(inputSchema, narrowedArgumentTypeValue);
             }
-            const updated = factory.createCallExpression(
-              node.expression,
-              node.typeArguments,
-              [inputSchema, ...node.arguments.slice(1)],
+            // smr only (see prependSchemaArguments for the rationale).
+            const updated = preserveSourceMapRange(
+              factory.createCallExpression(
+                node.expression,
+                node.typeArguments,
+                [inputSchema, ...node.arguments.slice(1)],
+              ),
+              node,
             );
             // Mark so the re-descent below does NOT re-enter this branch and
             // re-process the synthetic `inputSchema` wrapper.
@@ -3881,10 +3938,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             ? [factory.createIdentifier("undefined"), schemaCall]
             : [...args, schemaCall];
 
-          const updated = factory.createCallExpression(
-            node.expression,
-            node.typeArguments,
-            newArgs,
+          // smr only (see prependSchemaArguments for the rationale).
+          const updated = preserveSourceMapRange(
+            factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              newArgs,
+            ),
+            node,
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
@@ -3934,10 +3995,15 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             visitedNode,
             factory.createIdentifier("asSchema"),
           );
-          const updated = factory.createCallExpression(
-            asSchema,
-            undefined,
-            [schemaCall],
+          // smr only (see prependSchemaArguments): the `.asSchema(...)` wrapper
+          // replaces the cell-for call at its site, so it carries its position.
+          const updated = preserveSourceMapRange(
+            factory.createCallExpression(
+              asSchema,
+              undefined,
+              [schemaCall],
+            ),
+            node,
           );
           // Return updated directly to avoid re-visiting the inner CallExpression which would trigger infinite recursion
           return updated;
@@ -3970,10 +4036,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         );
 
         if (schemaCall) {
-          const updated = factory.createCallExpression(
-            node.expression,
-            node.typeArguments,
-            [...args, schemaCall],
+          // smr only (see prependSchemaArguments for the rationale).
+          const updated = preserveSourceMapRange(
+            factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              [...args, schemaCall],
+            ),
+            node,
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
@@ -4047,10 +4117,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             );
           }
 
-          const updated = factory.createCallExpression(
-            node.expression,
-            node.typeArguments,
-            [newOptions, ...args.slice(1)],
+          // smr only (see prependSchemaArguments for the rationale).
+          const updated = preserveSourceMapRange(
+            factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              [newOptions, ...args.slice(1)],
+            ),
+            node,
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
@@ -4137,14 +4211,18 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             );
           }
 
-          const updated = factory.createCallExpression(
-            node.expression,
-            node.typeArguments,
-            [
-              ...args.slice(0, optIdx),
-              newOptions,
-              ...args.slice(optIdx + 1),
-            ],
+          // smr only (see prependSchemaArguments for the rationale).
+          const updated = preserveSourceMapRange(
+            factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              [
+                ...args.slice(0, optIdx),
+                newOptions,
+                ...args.slice(optIdx + 1),
+              ],
+            ),
+            node,
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
@@ -4232,10 +4310,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 );
               }
 
-              const updated = factory.createCallExpression(
-                node.expression,
-                node.typeArguments,
-                [newParams, ...args.slice(1)],
+              // smr only (see prependSchemaArguments for the rationale).
+              const updated = preserveSourceMapRange(
+                factory.createCallExpression(
+                  node.expression,
+                  node.typeArguments,
+                  [newParams, ...args.slice(1)],
+                ),
+                node,
               );
               context.markSchemaInjected(updated);
               return ts.visitEachChild(updated, visit, transformation);

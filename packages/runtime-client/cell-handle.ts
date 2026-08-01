@@ -4,7 +4,6 @@
 
 import {
   type Cancel,
-  isLegacyAlias,
   isSigilLink,
   type JSONSchema,
   linkRefFrom,
@@ -95,9 +94,16 @@ export class CellHandle<T = unknown> {
     return this.#ref.space;
   }
 
+  /**
+   * The FULL schemed id — identical to `ref().id` and safe to use as
+   * identity (keys, equality, round-trips). The hash preimage is kind-free,
+   * so the URI scheme is the only thing distinguishing a computed doc from
+   * a state sibling of the same cause; this accessor never strips it. For
+   * the piece-root routing/display form (bare, `of:`-stripped), use
+   * `PageHandle.id()` — see docs/specs/computed-cell-identity.md.
+   */
   id(): string {
-    const id = this.#ref.id;
-    return (id && id.startsWith("of:")) ? id.substring(3) : id;
+    return this.#ref.id;
   }
 
   /**
@@ -434,8 +440,10 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Recursively hydrate any object, converting any links (SigilLink,
-   * LegacyAlias) into CellHandle instances.
+   * Recursively hydrate any object, converting any sigil links into
+   * CellHandle instances. Legacy `$alias` records are plain data — they are
+   * only meaningful as bindings inside Pattern objects, which the client
+   * never interprets.
    */
   static deserialize<T>(
     base: CellHandle<T>,
@@ -563,6 +571,7 @@ function applyValue(
 function cellRefsEqual(a: CellRef, b: CellRef): boolean {
   if (a.id !== b.id) return false;
   if (a.space !== b.space) return false;
+  if ((a.scope ?? "space") !== (b.scope ?? "space")) return false;
   if (a.path.length !== b.path.length) return false;
   for (let i = 0; i < a.path.length; i++) {
     if (a.path[i] !== b.path[i]) return false;
@@ -576,7 +585,10 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
  * Handles primitives, arrays, objects, and CellHandles.
  */
 function valuesEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
+  // `Object.is`, not `===`: an unchanged `NaN` leaf must compare equal (else
+  // every delivery of a NaN-bearing value re-notifies all subscribers), and a
+  // `0` -> `-0` change must compare unequal (else the update is dropped).
+  if (Object.is(a, b)) return true;
   if (a == null || b == null) return a === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
@@ -633,19 +645,6 @@ function parseAsCellRef(
         cfcLabelView: (linkData as { cfcLabelView?: CfcLabelView })
           .cfcLabelView,
       }),
-    };
-  } else if (isLegacyAlias(value)) {
-    const alias = value.$alias;
-    const aliasPath = alias.path.map((p) => String(p));
-
-    // Named-cell/partialCause aliases carry no absolute id of their own;
-    // resolve to the base cell's document.
-    return {
-      id: from.id,
-      space: from.space,
-      scope: from.scope,
-      path: aliasPath,
-      ...(alias.schema !== undefined && { schema: alias.schema }),
     };
   }
 }

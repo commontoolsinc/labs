@@ -5,7 +5,7 @@
  */
 
 export {
-  isLegacyAlias,
+  isAliasBinding,
   isSigilLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
@@ -28,7 +28,6 @@ export {
 } from "./sigil-types.ts";
 export {
   CHIP_UI,
-  ID,
   type JSONSchema,
   type JSONValue,
   NAME,
@@ -70,3 +69,10 @@ export type {
   ExecutionRoutingDiagnosticsQuery,
   ExecutionRoutingSettlementCounts,
 } from "./storage/interface.ts";
+// Type-only: the plain-JSON shape the worker returns for a pattern-coverage
+// dump. No runtime import (the module's value exports never load here).
+export type {
+  PatternCoverageData,
+  PatternCoverageKind,
+  PatternCoverageSpan,
+} from "./pattern-coverage.ts";

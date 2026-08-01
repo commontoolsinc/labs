@@ -5,7 +5,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -113,7 +112,7 @@ const addFavorite = handler<
     // Add journal entry for the favorite action
     const snapshot = captureSnapshot(piece, hashTags.join(" "));
     journal.push({
-      timestamp: safeDateNow(),
+      timestamp: Date.now(),
       eventType: "piece:favorited",
       subject: piece,
       snapshot,
@@ -141,7 +140,7 @@ const removeFavorite = handler<
 
     // Add journal entry for the unfavorite action
     journal.push({
-      timestamp: safeDateNow(),
+      timestamp: Date.now(),
       eventType: "piece:unfavorited",
       subject: piece,
       snapshot,
@@ -238,7 +237,6 @@ Write in past tense, personal style. Focus on:
     }),
     system:
       "You analyze user activity and content to understand their interests. The piece content is provided in the context. Look at the actual data/content, not just titles. Extract meaningful insights about what they care about, work on, or are interested in.",
-    model: "anthropic:claude-sonnet-4-5",
     // Pass the subject cell as context - system will serialize it properly
     context: computed(() => {
       const entry = pendingEntry;

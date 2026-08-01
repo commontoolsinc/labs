@@ -1,12 +1,17 @@
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricBytes,
+  FabricValue,
+  NonNullableFabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 /**
  * Some principal identified via DID identifier.
  */
-export interface Principal<ID extends DID = DID> {
+export type Principal<ID extends DID = DID> = {
   did(): ID;
-}
+};
 
 export interface Verifier<ID extends DID = DID> extends Principal<ID> {
   verify(authorization: {
@@ -41,9 +46,9 @@ export type UCAN<Command extends Invocation> = {
 /**
  * Proof of authorization for a given access.
  */
-export interface Proof<Access extends FabricValue = FabricValue> {
+export type Proof<Access extends FabricValue = FabricValue> = {
   [link: AsString<FabricHash>]: Unit;
-}
+};
 
 /**
  * Represents a verifiable authorization issued by specific {@link Authority}.
@@ -61,19 +66,19 @@ export interface AuthorizationError extends Error {
 export type Command<
   Ability extends string = The,
   Of extends DID = DID,
-  In extends NonNullable<unknown> = NonNullable<unknown>,
+  In extends NonNullableFabricValue = NonNullableFabricValue,
 > = {
   cmd: Ability;
   sub: Of;
   args: In;
   meta?: Meta;
-  nonce?: Uint8Array;
+  nonce?: FabricBytes;
 };
 
 export type Invocation<
   Ability extends string = The,
   Of extends DID = DID,
-  In extends NonNullable<unknown> = NonNullable<unknown>,
+  In extends NonNullableFabricValue = NonNullableFabricValue,
 > = {
   iss: DID;
   aud?: DID;
@@ -81,7 +86,7 @@ export type Invocation<
   sub: Of;
   args: In;
   meta?: Meta;
-  nonce?: Uint8Array;
+  nonce?: FabricBytes;
   exp?: UTCUnixTimestampInSeconds;
   iat?: UTCUnixTimestampInSeconds;
   prf: Delegation[];
@@ -158,7 +163,7 @@ export type InferProtoMethods<
   Prefix extends string = "",
 > = {
   [Name in keyof Methods & string]: Methods[Name] extends (
-    input: infer In extends NonNullable<unknown>,
+    input: infer In extends NonNullableFabricValue,
   ) => Task<infer Out extends NonNullable<unknown>, infer Effect> ?
       | {
         [The in `${Prefix}/${Name}`]: Method<
@@ -178,7 +183,9 @@ export type InferProtoMethods<
 export type Method<
   Protocol,
   Ability extends The,
-  In extends NonNullable<unknown>,
+  In extends NonNullableFabricValue,
+  // Method results may be in-process `Result` envelopes carrying raw `Error`s,
+  // so they are non-nullish but not necessarily `FabricValue`s.
   Out extends NonNullable<unknown>,
   Effect,
 > = {
@@ -195,7 +202,7 @@ export type Method<
     sub: MemorySpace;
     args: In;
     meta?: Meta;
-    nonce?: Uint8Array;
+    nonce?: FabricBytes;
   };
   ConsumerInvocation: Invocation<Ability, InferOf<Protocol>, In>;
   ProviderCommand: Receipt<
@@ -264,9 +271,37 @@ export interface InvocationView<
 
 export type Task<Return, Command = never> = Iterable<Command, Return>;
 
+/**
+ * What a provider sends back for an invocation: either the invocation's return
+ * value (`task/return`) or an effect it produced along the way
+ * (`task/effect`).
+ *
+ * `Result` is unconstrained, though what flows through it is narrower: a
+ * receipt reports an `Ok`/`Fail` outcome, possibly awaited (see
+ * `AwaitResult`). It is not a `FabricValue` -- a receipt is in-process
+ * transport rather than stored data, and a `Fail` carries an `Error`, which is
+ * a `FabricNativeObject`.
+ *
+ * The narrower constraint cannot be stated here. `ProviderCommand` reaches this
+ * parameter through inference:
+ *
+ * ```ts
+ * ProtocolMethod<Protocol> extends {
+ *   ProviderCommand: Receipt<infer Command, infer Result, infer Effect>;
+ * } ? Receipt<Command, Result, Effect> : never
+ * ```
+ *
+ * A constraint in an `infer ... extends ...` position is enforced by silent
+ * non-match rather than by a diagnostic: a method whose result does not conform
+ * drops to the `never` arm and vanishes from the protocol type, surfacing far
+ * away as member access on `never`. Unconstrained, a wrong result type is
+ * reported at the use site instead. Constraining becomes safe once the
+ * inference in `InferProtoMethods` is total -- that is, once a non-conforming
+ * method is reported rather than dropped.
+ */
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends FabricValue,
+  Result,
   Effect,
 > =
   | {
@@ -320,7 +355,7 @@ export type InvocationURL<T> = `job:${string}` & {
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
-export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
+export type Unclaimed<T extends string = MIME, Of extends string = URI> = {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
@@ -335,50 +370,50 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 
   is?: undefined;
   cause?: undefined;
-}
+};
 
 /**
  * Asserts a fact: the value MUST be an inline {@link FabricValue} as opposed to
  * a reference to one.
  */
-export interface Assertion<
+export type Assertion<
   T extends string = MIME,
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
-> {
+> = {
   the: T;
   of: Of;
   is: Is;
   cause: FabricHash;
-}
+};
 
 /**
  * Represents retracted {@link Assertion}. It is effectively a tombstone
  * denoting assertion that no longer hold and is a fact in itself.
  */
-export interface Retraction<
+export type Retraction<
   T extends string = MIME,
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
-> {
+> = {
   the: T;
   of: Of;
   is?: undefined;
   cause: FabricHash;
-}
+};
 
-export interface Invariant<
+export type Invariant<
   T extends string = MIME,
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
-> {
+> = {
   the: T;
   of: Of;
   fact: FabricHash;
 
   is?: undefined;
   cause?: undefined;
-}
+};
 
 /**
  * Facts represent a memory in the replica. They are either current and
@@ -595,21 +630,21 @@ export type Result<T extends Unit = Unit, E extends Error = Error> =
   | Ok<T>
   | Fail<E>;
 
-export interface Ok<T extends Unit> {
+export type Ok<T extends Unit> = {
   ok: T;
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
   error?: undefined;
-}
+};
 
-export interface Fail<E extends Error> {
+export type Fail<E extends Error> = {
   error: E;
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
   ok?: undefined;
-}
+};
 
 export type Conflict = {
   /**

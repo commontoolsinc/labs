@@ -13,15 +13,15 @@ const defaultPatternProgram: RuntimeProgram = {
       name: "/main.tsx",
       contents: [
         "import { handler, pattern, type Writable } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { allPieces: Writable<unknown[]> }>(",
-        "  ({ piece }, { allPieces }) => {",
-        "    allPieces.push(piece);",
+        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Writable<unknown[]> }>(",
+        "  ({ piece }, { pieceRegistry }) => {",
+        "    pieceRegistry.push(piece);",
         "  },",
         "  { proxy: true },",
         ");",
-        "export default pattern<{ allPieces: unknown[] }>(({ allPieces }) => ({",
-        "  allPieces,",
-        "  addPiece: addPiece({ allPieces }),",
+        "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+        "  pieceRegistry,",
+        "  addPiece: addPiece({ pieceRegistry }),",
         "}));",
       ].join("\n"),
     },
@@ -66,7 +66,7 @@ async function createSeed(): Promise<Seed> {
   );
   const defaultPatternPiece = await manager.runPersistent(
     compiledDefaultPattern,
-    { allPieces: [] },
+    { pieceRegistry: [] },
     "piece-cold-runtime-default-pattern",
   );
   await manager.linkDefaultPattern(defaultPatternPiece);
@@ -159,7 +159,7 @@ Deno.bench({
         );
       const defaultPatternPiece = await seedManager.runPersistent(
         compiledDefaultPattern,
-        { allPieces: [] },
+        { pieceRegistry: [] },
         "piece-cold-runtime-default-pattern",
       );
       await seedManager.linkDefaultPattern(defaultPatternPiece);

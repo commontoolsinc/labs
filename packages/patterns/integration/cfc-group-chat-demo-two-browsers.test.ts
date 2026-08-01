@@ -164,9 +164,7 @@ describe(
           "runtime idle (all)",
           () =>
             Promise.all(
-              pages.map((page) =>
-                waitForRuntimeIdle(page, { timeout: PROPAGATION_TIMEOUT })
-              ),
+              pages.map((page) => waitForRuntimeIdle(page)),
             ),
         );
         await timer.run(
@@ -174,9 +172,7 @@ describe(
           () =>
             Promise.all(
               pages.map((page) =>
-                waitForText(page, "#group-chat-manager-chip", "No profile", {
-                  timeout: PROPAGATION_TIMEOUT,
-                })
+                waitForText(page, "#group-chat-manager-chip", "No profile")
               ),
             ),
         );
@@ -185,9 +181,7 @@ describe(
         // browser's input — the profile draft is per-user state.
         await fillCfInput(pages[0], "#trusted-profile-name", userNames[0]);
         await Promise.all(
-          pages.map((page) =>
-            waitForRuntimeIdle(page, { timeout: PROPAGATION_TIMEOUT })
-          ),
+          pages.map((page) => waitForRuntimeIdle(page)),
         );
         for (let index = 1; index < pages.length; index++) {
           assertEquals(
@@ -215,9 +209,7 @@ describe(
             ),
         );
         await Promise.all(
-          pages.map((page) =>
-            waitForRuntimeIdle(page, { timeout: PROPAGATION_TIMEOUT })
-          ),
+          pages.map((page) => waitForRuntimeIdle(page)),
         );
         for (let index = 1; index < pages.length; index++) {
           await waitForText(
@@ -242,12 +234,9 @@ describe(
                 pages[index],
                 "#trusted-admin-user-list",
                 userNames[index - 1],
-                { timeout: PROPAGATION_TIMEOUT },
               ),
           );
-          await waitForRuntimeIdle(pages[index], {
-            timeout: PROPAGATION_TIMEOUT,
-          });
+          await waitForRuntimeIdle(pages[index]);
           await fillCfInput(
             pages[index],
             "#trusted-profile-name",
@@ -281,14 +270,12 @@ describe(
                   page,
                   "#trusted-admin-user-list",
                   userNames[other],
-                  { timeout: PROPAGATION_TIMEOUT },
                 );
               }
               await waitForText(
                 page,
                 "#trusted-profile-status",
                 userNames[index],
-                { timeout: PROPAGATION_TIMEOUT },
               );
             })),
         );
@@ -308,7 +295,6 @@ describe(
                   page,
                   "#trusted-conversation-preview",
                   helloMessage,
-                  { timeout: PROPAGATION_TIMEOUT },
                 )
               ),
             ),
@@ -354,9 +340,7 @@ describe(
             await clickCfButton(pages[from], "#trusted-send-button");
             await Promise.all(
               others(from).map((page) =>
-                waitForText(page, "#trusted-conversation-preview", body, {
-                  timeout: PROPAGATION_TIMEOUT,
-                })
+                waitForText(page, "#trusted-conversation-preview", body)
               ),
             );
             propagation.push({
@@ -379,7 +363,6 @@ describe(
           pages[0],
           "#group-chat-manager-chip",
           "Can manage admins",
-          { timeout: PROPAGATION_TIMEOUT },
         );
         await timer.run(
           "lockdown propagation (first -> others)",
@@ -390,7 +373,6 @@ describe(
                   page,
                   "#trusted-room-admin-hint",
                   "Ask an admin manager to make you an admin",
-                  { timeout: PROPAGATION_TIMEOUT },
                 )
               ),
             ),
@@ -413,7 +395,6 @@ describe(
               pages[0],
               "#trusted-conversation-preview",
               lockdownMessage,
-              { timeout: PROPAGATION_TIMEOUT },
             ),
         );
 
@@ -426,11 +407,7 @@ describe(
           "room propagation (first -> all)",
           () =>
             Promise.all(
-              others(0).map((page) =>
-                waitForText(page, "#rooms-panel", "Ops", {
-                  timeout: PROPAGATION_TIMEOUT,
-                })
-              ),
+              others(0).map((page) => waitForText(page, "#rooms-panel", "Ops")),
             ),
         );
       } finally {

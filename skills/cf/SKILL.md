@@ -18,6 +18,54 @@ deno task cf piece --help     # Piece operations
 deno task cf check --help     # Type checking
 ```
 
+## Invocation Paths
+
+Three ways to run the CLI, in order of preference. All run from source, so they
+always match the working tree:
+
+1. **`cf` (via `bin/cf`)** — a plain `cf` backed by source. Already on PATH
+   under mise; otherwise `deno task install-cf`. Works from any cwd, and shell
+   completion requires a `cf` on PATH. It runs whichever checkout you are
+   standing in (nearest one walking up, or a host's `vendor/labs`), not the one
+   it was installed from — set `CF_LABS_ROOT` to override when your cwd cannot
+   say what you mean, and run `cf which` to see which CLI would run and why. See
+   "Which checkout runs" in `packages/cli/README.md`.
+
+2. **`deno task cf ...`** — works from any directory inside the repo (the
+   launcher resolves the repo root itself and runs the CLI from your invoking
+   cwd). Deno prints a one-line `Task cf ...` echo to stderr; silence it with
+   `deno -q task cf ...`. stdout stays clean, so redirection is safe.
+
+3. **`deno run -q -A packages/cli/mod.ts ...`** — repo-root-relative; only works
+   with the repo root as cwd. The `-q` suppresses Deno's own warnings (e.g. the
+   npm "Ignored build scripts" banner).
+
+**Do not put `dist/cf` on your PATH.** `deno task build-binaries cf` still
+produces it, and CI uses it (a CI run never edits the source it was built from),
+but there is no invalidation story for a working tree you are actively editing:
+nothing compares the binary against its sources, so it silently serves stale
+behavior after a `git pull` or a local edit. See "Why not `dist/cf`" in
+`packages/cli/README.md`, and the "FUSE mount wrapper mismatch" entry below for
+what this looks like when it bites.
+
+## Output Conventions (scripts & agents)
+
+- stdout carries command output only; hints, tips and diagnostics go to stderr.
+  `piece get` prints JSON, with no ANSI to strip, and represents an absent value
+  as `null`.
+- ANSI colors are emitted only when stdout is a TTY. Force off with `--no-color`
+  or `NO_COLOR=1`; force on (e.g. through a pager) with `FORCE_COLOR=1`.
+  (`cf view` keeps its own `--color` flag.)
+- `-q/--quiet` (on `piece`/`wish` subcommands) suppresses hints and next-step
+  blocks on stderr. To also drop runtime warnings, add `--log-level error` (`-q`
+  deliberately leaves the log floor alone — scripts parse those warnings).
+- `piece call` payloads: inline JSON argument, `-` to read stdin
+  (`echo '{...}' | cf piece call ... handler -`), a bare pipe with no payload
+  argument, or schema-derived flags after `--`. Empty stdin fails loudly.
+- A `piece get` path that doesn't resolve is a data error: one-line message on
+  stderr, exit 1 (no usage screen). A `piece link` that fails validation
+  (missing source/target piece or path) reports the same way.
+
 ## Environment Setup
 
 **Identity key** (required for most operations):
@@ -52,9 +100,9 @@ different derivations and produce different DIDs from the same text. Use
 `from-mnemonic` to match browser mnemonic login; see
 `docs/development/SHARED_IDENTITY.md`.
 
-**IMPORTANT:** Do NOT use `deno task cf id new > file` — the `deno task` wrapper
-prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
-`deno run -A packages/cli/mod.ts` when redirecting output.
+Redirecting stdout (as above) is safe through any invocation path: the
+`deno task` echo and all Deno/CLI diagnostics go to stderr, so
+`deno task cf id new > cf.key` produces a clean key file.
 
 **Environment variables** (avoid repeating flags):
 
@@ -77,18 +125,21 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 ## Quick Command Reference
 
-| Operation         | Command                                                                   |
-| ----------------- | ------------------------------------------------------------------------- |
-| Type check        | `deno task cf check pattern.tsx --no-run`                                 |
-| Deploy new        | `deno task cf piece new pattern.tsx -i key -a url -s space`               |
-| Update existing   | `deno task cf piece setsrc pattern.tsx --piece ID -i key -a url -s space` |
-| Inspect state     | `deno task cf piece inspect --piece ID ...`                               |
-| Get field         | `deno task cf piece get --piece ID fieldPath ...`                         |
-| Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`       |
-| Call handler      | `deno task cf piece call --piece ID handlerName ...`                      |
-| Trigger recompute | `deno task cf piece step --piece ID ...`                                  |
-| List pieces       | `deno task cf piece ls -i key -a url -s space`                            |
-| Visualize         | `deno task cf piece map ...`                                              |
+| Operation          | Command                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| Type check         | `deno task cf check pattern.tsx --no-run`                                                            |
+| Deploy new         | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
+| Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
+| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
+| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
+| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
+| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
+| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                     |
+| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                             |
+| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                       |
+| Visualize          | `deno task cf piece map ...`                                                                         |
+| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)              |
 
 ## Check Command Flags
 
@@ -98,12 +149,16 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | ---------------------- | -------------------------------------------------- |
 | `--no-run`             | Type check only, don't execute                     |
 | `--no-check`           | Execute without type checking                      |
+| `--json`               | Compile without evaluating; print compiled JSON    |
 | `--show-transformed`   | Show the transformed TypeScript after compilation  |
 | `--verbose-errors`     | Show original TS errors alongside simplified hints |
 | `--pattern-json`       | Print the evaluated pattern export as JSON         |
 | `--output <path>`      | Store compiled JS to a file                        |
 | `--main-export <name>` | Select non-default export (default: `"default"`)   |
-| `--filename <name>`    | Override filename for source maps                  |
+
+`--json`, `--show-transformed`, and `--pattern-json` are mutually exclusive.
+Each mode waits for every input to succeed before it writes to stdout. Errors go
+to stderr and leave stdout empty.
 
 Common usage:
 
@@ -111,6 +166,7 @@ Common usage:
 deno task cf check pattern.tsx              # Compile + execute (quiet on success)
 deno task cf check pattern.tsx --no-run     # Type check only (fast)
 deno task cf check pattern.tsx --no-check   # Skip types, just execute
+deno task cf check pattern.tsx --json       # Structured compiled output
 deno task cf check pattern.tsx --show-transformed  # Debug compiler transforms
 deno task cf check pattern.tsx --verbose-errors     # Detailed error context
 ```
@@ -130,6 +186,27 @@ deno task cf piece setsrc pattern.tsx --piece bafyreia... ...
 
 **Why:** `new` creates duplicate pieces. `setsrc` updates in-place.
 
+`setsrc` normally rejects incompatible argument/result schema changes and
+retained links whose durable contracts no longer fit. For an intentional
+breaking migration, `--dangerously-allow-incompatible-schema` bypasses those
+compatibility proofs. `new` accepts the same flag for deploy-script symmetry,
+though a fresh piece has no predecessor schema to compare.
+
+Source-file writes through `cf fuse mount` hit the same update gate. Mount with
+`--dangerously-allow-incompatible-schema` when those writes are part of the same
+intentional breaking migration.
+
+### Source location metadata
+
+The local-source deployment commands `piece new`, `piece setsrc`, and custom
+`piece set-home` accept `--root` plus `--repository`. Use the repository
+checkout root for `--root`; this preserves `source.entry` as a path inside the
+repository. `--repository` is stored exactly as supplied in `source.repository`
+and is never inferred from Git configuration. On `setsrc`, omitting
+`--repository` preserves the existing value; supplying it replaces the value.
+`piece inspect --json` and `piece ls --json` expose the resulting structured
+source locator.
+
 ## JSON Input Format
 
 All values to `set` and `call` must be valid JSON:
@@ -145,10 +222,40 @@ echo '42' | deno task cf piece set ... count
 echo '{"name": "John"}' | deno task cf piece set ... user
 ```
 
+`piece get` and `wish` always print JSON. Both accept a redundant `--json` so
+callers can request the format explicitly.
+
+For `piece call`, options before the callable name configure `piece call`.
+Arguments after the callable name configure the invoked handler or tool. The
+JSON forms match `cf exec`:
+
+```bash
+# Complete input as an inline JSON value
+deno task cf piece call --piece ID search --json '{"query":"milk"}'
+
+# Complete input from stdin
+printf '%s' '{"query":"milk"}' |
+  deno task cf piece call --piece ID search --json
+
+# Machine-readable callable schema
+deno task cf piece call --piece ID search --help --json
+
+# Schema-derived input flags
+deno task cf piece call --piece ID search -- --query milk
+```
+
+A single positional JSON value after the callable is also accepted. Use
+`-- --json-file <path>` to read JSON from a file. Handler confirmations move to
+stderr when JSON input is selected, so stdout remains available for JSON tool
+results. Errors always go to stderr.
+
 ## Gotcha: Always `step` After `set` or `call`
 
 Neither `piece set` nor `piece call` triggers recomputation automatically. You
-**must** run `piece step` after either one to get fresh computed values.
+**must** run `piece step` after either one to get fresh computed values. When
+the value is session-scoped, use `piece get --step` so recomputation and the
+read happen in the same CLI session; a separate `piece step` process cannot
+carry session-local materialization into the following `piece get` process.
 
 ```bash
 # After setting data:
@@ -156,6 +263,16 @@ echo '[...]' | deno task cf piece set --piece ID expenses ...
 deno task cf piece step --piece ID ...  # Required!
 deno task cf piece get --piece ID totalSpent ...
 
+# Equivalent one-session read (required for session-scoped computed output):
+deno task cf piece get --piece ID totalSpent --step ...
+```
+
+A path-less `piece get` (whole result) degrades outputs it cannot reach — values
+living in another session's/user's scope are simply absent from the returned
+object rather than voiding the whole read. Use `--step` when you need those
+members materialized in your own session.
+
+```bash
 # After calling a handler:
 deno task cf piece call --piece ID addItem '{"title": "Test"}'
 deno task cf piece step --piece ID ...  # Required!
@@ -201,8 +318,9 @@ cf fuse mount /tmp/cf -s my-space
 # error: Unknown option "-s"
 ```
 
-**Fix:** use the source CLI through the repo task wrapper instead (cd to the
-labs repo root first):
+**Fix:** rebuild the binary (`deno task build-binaries --cli-only`), or use the
+source CLI through the repo task wrapper (works from any directory inside the
+repo):
 
 ```bash
 export CF_IDENTITY=./cf.key
@@ -216,7 +334,7 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
-- `packages/patterns/system/default-app.tsx` - System pieces (allPieces list
+- `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
   lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing
 - `docs/development/debugging/cli-debugging.md` - CLI debugging

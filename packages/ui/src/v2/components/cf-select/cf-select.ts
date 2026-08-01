@@ -512,12 +512,12 @@ export class CFSelect extends BaseElement {
       const values = (currentValue as unknown[] | undefined) ?? [];
       Array.from(this._select.options).forEach((opt) => {
         const item = this._keyMap.get(opt.value);
-        opt.selected = item ? values.some((v) => item.value === v) : false;
+        opt.selected = !!item && values.some((v) => Object.is(item.value, v));
       });
     } else {
       const val = currentValue;
       const matchKey = [...this._keyMap.entries()].find(
-        ([, item]) => item.value === val,
+        ([, item]) => Object.is(item.value, val),
       )?.[0];
 
       this._select.value = matchKey ?? "";

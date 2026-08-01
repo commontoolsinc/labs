@@ -5,6 +5,7 @@ import {
   $onCellUpdate,
   CellHandle,
   type CellRef,
+  isCellHandle,
   RequestType,
   type RuntimeClient,
 } from "./mod.ts";
@@ -229,6 +230,61 @@ describe("CellHandle CFC label IPC", () => {
     expect(cellRefToKey(first)).not.toEqual(cellRefToKey(second));
   });
 
+  it("keys on the full schemed id; id() strips of: only", () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const refFor = (id: string): CellRef => ({
+      id: id as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    });
+
+    // Keys carry the FULL schemed id: the hash preimage is kind-free, so
+    // of:fid1:H and computed:fid1:H can be two distinct docs for one cause —
+    // their subscriptions must not conflate.
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey(refFor("computed:fid1:abc")),
+    );
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey(refFor("fid1:abc")),
+    );
+
+    // Scope is part of the address: equal space/id/path values in different
+    // scopes refer to different documents and need independent subscriptions.
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "user" }),
+    );
+    expect(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "user" }),
+    ).not.toEqual(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "session" }),
+    );
+
+    // Paths are JSON-encoded in keys: a "." join would conflate ["."] with
+    // ["", ""].
+    const withPath = (path: string[]): CellRef => ({
+      ...refFor("of:fid1:abc"),
+      path,
+    });
+    expect(cellRefToKey(withPath(["."]))).not.toEqual(
+      cellRefToKey(withPath(["", ""])),
+    );
+
+    // CellHandle.id() is the FULL schemed id — a true identity accessor.
+    // The routing/display strip lives on PageHandle.id().
+    expect(new CellHandle(runtime, refFor("of:fid1:abc")).id())
+      .toBe("of:fid1:abc");
+    expect(new CellHandle(runtime, refFor("computed:fid1:abc")).id())
+      .toBe("computed:fid1:abc");
+    expect(new CellHandle(runtime, refFor("fid1:abc")).id()).toBe("fid1:abc");
+  });
+
   it("refreshes reused cell refs when carried label views change", async () => {
     const requests: unknown[] = [];
     const runtime = {
@@ -408,6 +464,182 @@ describe("CellHandle reactive CFC label delivery", () => {
     expect(cell.wantsCfcLabel).toBe(true);
     await Promise.resolve(); // let the unsubscribe().finally(subscribe) settle
     expect(events).toEqual(["subscribe", "unsubscribe", "subscribe"]);
+  });
+});
+
+describe("CellHandle $alias records stay plain data", () => {
+  // `$alias` records are Pattern-binding vocabulary, only meaningful inside
+  // Pattern objects the client never interprets. In data they are inert plain
+  // values: hydration must not turn them into CellHandles (PR #4895).
+  const makeRuntime = () =>
+    ({
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    }) as unknown as RuntimeClient;
+  const ref: CellRef = {
+    id: "of:alias-plain-data-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+  // A genuine sigil link in the same payload — the positive control that the
+  // hydration path is actually exercised.
+  const sigilLink = {
+    "/": {
+      "link@1": {
+        id: "of:linked-cell",
+        space: "did:key:test",
+        scope: "space",
+        path: ["item"],
+      },
+    },
+  };
+  const payload = {
+    binding: { $alias: { path: ["foo"] } },
+    nested: { deeper: { $alias: { path: ["foo", "bar"] } } },
+    link: sigilLink,
+  };
+
+  it("deserialize keeps $alias records plain while sigil links hydrate", () => {
+    const base = new CellHandle(makeRuntime(), ref);
+
+    const result = CellHandle.deserialize(base, payload) as Record<
+      string,
+      unknown
+    >;
+
+    // Positive control: the sigil link DOES become a CellHandle.
+    expect(isCellHandle(result.link)).toBe(true);
+    // The $alias records do not — they stay deep-equal plain data, at the top
+    // level and nested.
+    expect(isCellHandle(result.binding)).toBe(false);
+    expect(result.binding).toEqual({ $alias: { path: ["foo"] } });
+    expect(result.nested).toEqual({
+      deeper: { $alias: { path: ["foo", "bar"] } },
+    });
+  });
+
+  it("update delivery keeps $alias records plain while sigil links hydrate", () => {
+    const cell = new CellHandle<{
+      binding: unknown;
+      nested: unknown;
+      link: unknown;
+    }>(makeRuntime(), ref);
+
+    cell[$onCellUpdate](payload);
+    const value = cell.get()!;
+
+    // Positive control: the sigil link DOES become a CellHandle.
+    expect(isCellHandle(value.link)).toBe(true);
+    // The $alias records remain inert plain data.
+    expect(isCellHandle(value.binding)).toBe(false);
+    expect(value.binding).toEqual({ $alias: { path: ["foo"] } });
+    expect(value.nested).toEqual({
+      deeper: { $alias: { path: ["foo", "bar"] } },
+    });
+  });
+});
+
+describe("CellHandle update change detection", () => {
+  const makeRuntime = () =>
+    ({
+      [$conn]: () => ({
+        request: () => Promise.resolve({ value: undefined }),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    }) as unknown as RuntimeClient;
+  const ref: CellRef = {
+    id: "of:change-detection-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  it("does not re-notify on an unchanged NaN value", () => {
+    // Value equality is `Object.is`-based: `NaN` equals itself, so a
+    // delivery repeating a NaN-bearing value is not a change.
+    const cell = new CellHandle<number>(makeRuntime(), ref);
+    const calls: Array<number | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate](NaN);
+    const after = calls.length;
+    cell[$onCellUpdate](NaN);
+    expect(calls.length).toBe(after);
+  });
+
+  it("does not re-notify on an unchanged NaN-bearing record", () => {
+    const cell = new CellHandle<{ x: number }>(makeRuntime(), ref);
+    const calls: Array<unknown> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate]({ x: NaN });
+    const after = calls.length;
+    cell[$onCellUpdate]({ x: NaN });
+    expect(calls.length).toBe(after);
+  });
+
+  it("notifies on a 0 -> -0 change", () => {
+    // `0` and `-0` are distinct stored values (the content hash
+    // distinguishes them); the update must not be dropped.
+    const cell = new CellHandle<number>(makeRuntime(), ref);
+    const calls: Array<number | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate](0);
+    cell[$onCellUpdate](-0);
+    expect(Object.is(calls.at(-1), -0)).toBe(true);
+  });
+
+  it("notifies when a linked cell changes scope", () => {
+    const cell = new CellHandle<unknown>(makeRuntime(), ref);
+    const calls: CellHandle[] = [];
+    cell.subscribe((value) => {
+      if (isCellHandle(value)) calls.push(value);
+    });
+    const link = (scope: "space" | "user") => ({
+      "/": {
+        "link@1": {
+          id: "of:scoped-target",
+          space: "did:key:test",
+          scope,
+          path: [],
+        },
+      },
+    });
+
+    cell[$onCellUpdate](link("space"));
+    const spaceTarget = cell.get();
+    cell[$onCellUpdate](link("user"));
+    const userTarget = cell.get();
+
+    expect(isCellHandle(spaceTarget)).toBe(true);
+    expect(isCellHandle(userTarget)).toBe(true);
+    expect(userTarget).not.toBe(spaceTarget);
+    expect((userTarget as CellHandle).ref().scope).toBe("user");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("treats omitted scope as the default space scope", () => {
+    const runtime = makeRuntime();
+    const unscoped = new CellHandle(runtime, {
+      ...ref,
+      scope: undefined,
+    } as unknown as CellRef);
+    const spaceScoped = new CellHandle(runtime, ref);
+
+    expect(unscoped.equals(spaceScoped)).toBe(true);
+    expect(spaceScoped.equals(unscoped)).toBe(true);
   });
 });
 

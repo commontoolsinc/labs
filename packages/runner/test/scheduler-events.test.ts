@@ -23,6 +23,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -31,7 +32,6 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -125,7 +125,7 @@ describe("event handling", () => {
     runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
       const handlerTx = originalEdit(...args);
       const originalSet = handlerTx.setSchedulerObservation?.bind(handlerTx);
-      handlerTx.setSchedulerObservation = (observation: unknown) => {
+      handlerTx.setSchedulerObservation = (observation: FabricValue) => {
         schedulerObservationWrites++;
         originalSet?.(observation);
       };
@@ -199,7 +199,7 @@ describe("event handling", () => {
 
     // Give the scheduler a chance to dispatch; the handler must not run while
     // presync is pending.
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await clock.settle();
     expect(order).toEqual(["presync:7"]);
 
     releasePresync();
@@ -1108,7 +1108,6 @@ describe("event handling", () => {
 
       await runtime.idle();
       // Give any erroneous retry a chance to run, then confirm none did.
-      await new Promise((resolve) => setTimeout(resolve, 20));
       await runtime.idle();
 
       expect(attempts).toBe(1);
@@ -1159,7 +1158,6 @@ describe("event handling", () => {
 
       await runtime.idle();
       // Give any erroneous re-run a chance to run, then confirm none did.
-      await new Promise((resolve) => setTimeout(resolve, 20));
       await runtime.idle();
 
       // The one-shot ran once and dropped without re-running to resolve names.

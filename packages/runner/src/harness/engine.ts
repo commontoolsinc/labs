@@ -21,6 +21,7 @@ import type {
 import { InMemoryProgram } from "@commonfabric/js-compiler/program";
 import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
 import {
+  findFirstContentLineIndex,
   PATTERN_COVERAGE_GLOBAL,
   sourceDisablesCfTransform,
 } from "@commonfabric/ts-transformers/runtime-contract";
@@ -419,6 +420,10 @@ export class Engine extends EventTarget implements Harness {
               .CommonFabricTransformerPipeline)({
               patternCoverage,
               moduleIdentities: identityByPath,
+              // Writer identities record authored paths: unmap the engine's
+              // per-load `/<id>` prefix (and mount paths) before spelling.
+              canonicalWriterIdentityFile: (name) =>
+                storedFilenameFor(name, id, mounts),
             });
             return {
               factories: pipeline.toFactories(program),
@@ -641,8 +646,10 @@ export class Engine extends EventTarget implements Harness {
     const runTransform = options.transform ?? true;
     const unioned = new Map<string, Source>();
     const mains: string[] = [];
+    const batchIds: string[] = [];
     for (const program of programs) {
       const id = computeId(program);
+      batchIds.push(id);
       const mapped = pretransformProgramForModules(program, id);
       const resolver = new EngineProgramResolver(
         mapped,
@@ -670,7 +677,18 @@ export class Engine extends EventTarget implements Harness {
               [...unioned.keys()].map((name) => [name, `check:${name}`]),
             );
             const pipeline = new (compilerStack()
-              .CommonFabricTransformerPipeline)({ moduleIdentities });
+              .CommonFabricTransformerPipeline)({
+              moduleIdentities,
+              // The union carries a different `/<id>` prefix per batched
+              // program; strip whichever one matches.
+              canonicalWriterIdentityFile: (name) => {
+                for (const batchId of batchIds) {
+                  const stripped = stripModuleIdPrefix(name, batchId);
+                  if (stripped !== name) return stripped;
+                }
+                return name;
+              },
+            });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -732,6 +750,7 @@ export class Engine extends EventTarget implements Harness {
     entryFilename: string,
     options: {
       fabricImports?: TypeScriptHarnessProcessOptions["fabricImports"];
+      patternCoverage?: PatternCoverageCollector;
     } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
     const { compiler } = await this.getCompilerInternals();
@@ -798,13 +817,34 @@ export class Engine extends EventTarget implements Harness {
       mounts,
     );
 
+    // Instrumenting does not disturb the identity check below: identity hashes
+    // the authored source, not the emitted JS. The paths here are prefix-free,
+    // so coverage names them without an `/<id>` prefix to strip.
+    const patternCoverage = patternCoverageOptionsForCompile(
+      options.patternCoverage,
+      {
+        id: undefined,
+        mounts,
+        sourceFiles: pristineModuleFiles,
+      },
+    );
+
     const emitted = compiler.compileToModules(resolvedForCompile, {
       runtimeModules: Engine.runtimeModuleNames(),
       specifierAliases,
+      // These bytes are durable stored source nobody can re-author;
+      // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
+      // not brick the reload (CT-1916).
+      storedSource: true,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()
           .CommonFabricTransformerPipeline)({
+          patternCoverage,
           moduleIdentities: identityByPath,
+          // Names on this path are already stored-shaped (no `/<id>` prefix);
+          // only mount paths need unmapping to authored spellings.
+          canonicalWriterIdentityFile: (name) =>
+            storedFilenameFor(name, undefined, mounts),
         });
         return {
           factories: pipeline.toFactories(program),
@@ -828,6 +868,11 @@ export class Engine extends EventTarget implements Harness {
     const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
       const out = emitted.get(file.name)!;
       const identity = identityByPath.get(file.name)!;
+      const patternCoverageSpans = patternCoverage === undefined
+        ? undefined
+        : options.patternCoverage?.spansForFile(
+          coverageFilenameFor(file.name, undefined, mounts),
+        );
       const imports = cacheableImportsFor(
         file.name,
         importEdges,
@@ -844,6 +889,7 @@ export class Engine extends EventTarget implements Harness {
         source: file.contents,
         js: out.js,
         ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        ...(patternCoverageSpans === undefined ? {} : { patternCoverageSpans }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
       };
@@ -1112,16 +1158,20 @@ export class Engine extends EventTarget implements Harness {
       // Per-module namespaces keyed by content identity (stripped from the
       // `cf:module/<identity>` specifier) for the in-memory identity cache.
       const exportsByIdentity = new Map<string, Exports>();
+      // Where each module came from, keyed the same way. A pattern loaded BY
+      // IDENTITY carries no program (see `patternFromMain`), so without this
+      // its source location is unrecoverable at the point of use — the
+      // information exists right here and was simply not written down.
+      const sourcePathByIdentity = new Map<string, string>();
       const MODULE_SPECIFIER_PREFIX = "cf:module/";
       for (const [path, specifier] of graph.specifierByPath) {
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
         if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
-          exportsByIdentity.set(
-            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
-            namespace,
-          );
+          const identity = specifier.slice(MODULE_SPECIFIER_PREFIX.length);
+          exportsByIdentity.set(identity, namespace);
+          sourcePathByIdentity.set(identity, fileName);
         }
         for (const [exportName, value] of Object.entries(namespace)) {
           // Only object/function exports are sub-pattern candidates. Skip the
@@ -1164,6 +1214,7 @@ export class Engine extends EventTarget implements Harness {
         main,
         exportMap,
         exportsByIdentity,
+        sourcePathByIdentity,
         registrationsByIdentity: graph.registrationSink,
       };
     } finally {
@@ -1247,7 +1298,11 @@ export class Engine extends EventTarget implements Harness {
   async evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
-    options: { sourceFiles?: Source[]; trustedBodies?: boolean } = {},
+    options: {
+      sourceFiles?: Source[];
+      trustedBodies?: boolean;
+      patternCoverage?: PatternCoverageCollector;
+    } = {},
   ): Promise<EvaluateResult> {
     await this.getRuntimeInternals();
     const { runtimeExports } = await this.getRuntimeInternals();
@@ -1277,6 +1332,21 @@ export class Engine extends EventTarget implements Harness {
     const graph = buildRecordsFromCompiled(modules, {
       runtimeModules: runtimeModulesOption,
     });
+
+    // The cached bodies carry the coverage probes from the compile that emitted
+    // them, and the spans that name the lines those probes stand for. Register
+    // both against this graph so `evaluateGraph` installs the collector as the
+    // sandbox global. The spans are what map a probe's `(fileName, id)` back to
+    // source lines; a graph registered without them reports nothing for its
+    // hits.
+    if (options.patternCoverage !== undefined) {
+      for (const module of modules) {
+        options.patternCoverage.registerSpans(
+          module.patternCoverageSpans ?? [],
+        );
+      }
+      this.patternCoverageByGraph.set(graph, options.patternCoverage);
+    }
 
     // Register runtime-module records so cf:runtime/* imports resolve.
     const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
@@ -1632,15 +1702,33 @@ function injectMountSources(files: readonly Source[]): Source[] {
   });
 }
 
+// The line shift `transformInjectHelperModule` applies to a file's authored
+// content, mirroring its decision order. Injection puts the one-line helper
+// import ahead of the first content line and appends an `h` shim after the last
+// (packages/ts-transformers/src/core/cf-helpers.ts); only the leading import
+// moves the authored lines, so an injected file shifts by exactly one line.
+// Three kinds of file reach the compiler unchanged and keep their authored
+// lines: a stored legacy envelope, whose authored bytes already carry the
+// helper import (tolerated only on the storage-fed paths — `checkCFHelperVar`
+// rejects those bytes on every authoring path); a file with no content line to
+// inject ahead of; and a file that disables the transform, whose directive line
+// is blanked in place rather than removed.
+export function helperInjectionLineOffset(contents: string): number {
+  const { isLegacyInjectedEnvelope } = compilerStack();
+  if (isLegacyInjectedEnvelope(contents)) return 0;
+  if (findFirstContentLineIndex(contents.split("\n")) === null) return 0;
+  if (sourceDisablesCfTransform(contents)) return 0;
+  return -1;
+}
+
 // Pattern coverage runs after helper injection. This maps spans back to the
 // authored file and skips spans from helper code added around the source.
-// The normal line offset depends on the one-line helper import from
-// packages/ts-transformers/src/core/cf-helpers.ts.
 function patternCoverageOptionsForCompile(
   collector: PatternCoverageCollector | undefined,
   params: {
-    id: string;
+    id: string | undefined;
     mounts: readonly FabricMount[];
+    // The AUTHORED bytes per file — what the offsets are measured against.
     sourceFiles: readonly Source[];
   },
 ): PatternCoverageOptions | undefined {
@@ -1650,8 +1738,8 @@ function patternCoverageOptionsForCompile(
     params.sourceFiles.map((file) => [
       coverageFilenameFor(file.name, params.id, params.mounts),
       {
-        lineOffset: sourceDisablesCfTransform(file.contents) ? 0 : -1,
-        lineCount: file.contents.split(/\r\n|\r|\n/).length,
+        lineOffset: helperInjectionLineOffset(file.contents),
+        lineCount: lineCountOf(file.contents),
       },
     ]),
   );
@@ -1688,9 +1776,13 @@ function cachedArtifactsIncludePatternCoverage(
   return true;
 }
 
+function lineCountOf(source: string): number {
+  return source.split(/\r\n|\r|\n/).length;
+}
+
 function coverageFilenameFor(
   name: string,
-  id: string,
+  id: string | undefined,
   mounts: readonly FabricMount[],
 ): string {
   // Mount paths carry the imported module identity. The coverage collector keys

@@ -1157,6 +1157,169 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
   }
 });
 
+// CT-1872 1c parity for observations: an observation's pending read carries
+// the same array dependency set as an ordinary commit read — every element
+// must resolve (else the observation drops), and staleness runs from the
+// basis §3.6.3 selects, exactly as in resolvePendingReads. A LEGACY read (no
+// basisSeq) is based at the HIGHEST element, so a foreign write before the
+// top layer's resolution does not drop it — the CT-1910 over-advance,
+// retained for that shape. A read declaring `basisSeq` scans the full
+// interval with predecessor-only own-session exclusion: the same foreign
+// write now drops the observation, while own predecessor layers do not.
+Deno.test("memory v2 scheduler observations resolve array pending reads at the highest layer", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:scheduler-array-reads";
+
+  try {
+    // Layer 1 (accepted): creates the doc the observation read sits on.
+    applyCommit(engine, {
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:sched-doc",
+          value: { value: { x: 1 } },
+        }],
+      },
+    });
+
+    // Foreign write between the layers: inside layer 1's scan interval,
+    // outside layer 2's.
+    applyCommit(engine, {
+      sessionId: "session:scheduler-array-foreign",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:sched-doc",
+          value: { value: { x: 2 } },
+        }],
+      },
+    });
+
+    // Layer 2 (accepted, blind): the session's top-of-stack for the doc.
+    applyCommit(engine, {
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:sched-doc",
+          patches: [{ op: "add", path: "/value/y", value: 3 }],
+        }],
+      },
+    });
+
+    const result = applyCommit(engine, {
+      sessionId,
+      commit: {
+        localSeq: 100,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservationBatch: [
+          {
+            // Array read via [1, 2]: kept — element 1 resolves, staleness
+            // scans after layer 2's resolution, past the foreign write.
+            localSeq: 101,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1, 2],
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:kept",
+            ),
+          },
+          {
+            // An unresolved element drops the observation, exactly like the
+            // ordinary-commit resolution requirement.
+            localSeq: 102,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1, 99],
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:unresolved",
+            ),
+          },
+          {
+            // CT-1910 repaired shape: the same read as 101 but declaring its
+            // true basis. The scan now covers (0, head] and reaches the
+            // foreign x = 2 the legacy basis skipped — dropped.
+            localSeq: 103,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1, 2],
+                basisSeq: 0,
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:true-basis-stale",
+            ),
+          },
+          {
+            // Repaired shape, coherent: basis 2 reflects the foreign write;
+            // the only writes above it are the session's own predecessor
+            // layers (localSeq 1 and 2, both below 104), excluded — kept.
+            localSeq: 104,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1, 2],
+                basisSeq: 2,
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:true-basis-kept",
+            ),
+          },
+        ],
+      },
+    });
+
+    assertEquals(
+      result.schedulerObservationResults?.map((entry) => ({
+        localSeq: entry.localSeq,
+        status: entry.status,
+        reason: entry.reason,
+      })),
+      [
+        { localSeq: 101, status: "kept", reason: undefined },
+        {
+          localSeq: 102,
+          status: "dropped",
+          reason: "pending-read-missing",
+        },
+        {
+          localSeq: 103,
+          status: "dropped",
+          reason: "stale-pending-read",
+        },
+        { localSeq: 104, status: "kept", reason: undefined },
+      ],
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 namespaces scheduler mirrors by owner space", async () => {
   const { engine, path } = await createEngine();
   const ownerA = "did:key:scheduler-owner-a";

@@ -71,5 +71,6 @@ export function buildNodeStat(
     size: nodeSize(node),
     uid: options.ownership.uid,
     gid: options.ownership.gid,
+    mtime: node.mtime,
   };
 }

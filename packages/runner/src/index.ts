@@ -1,13 +1,15 @@
 export { Runtime } from "./runtime.ts";
 export type {
   ConsoleHandler,
+  ConsoleHandlerOutput,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
+  PatternInstantiation,
+  PatternInstantiationObserver,
+  RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
-  VersionSkewHandler,
-  VersionSkewInfo,
 } from "./runtime.ts";
 export {
   type BrowserWorkerPresetParams,
@@ -51,13 +53,22 @@ export type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
+export type {
+  EntityIdListOptions,
+  EntityIdListResult,
+} from "@commonfabric/memory/v2";
 export {
   debugTransactionWrites,
   formatTransactionSummary,
   summarizeTransaction,
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
-export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
+export {
+  convertCellsToLinks,
+  isCell,
+  isReadableCell,
+  isStream,
+} from "./cell.ts";
 export {
   getCellOrThrow,
   isCellResult,
@@ -66,19 +77,20 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
-  buildsMatch,
   computeEntryIdentity,
   Console,
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
-  fetchToolshedGitSha,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export {
+  PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
+  PATTERN_COVERAGE_TEST_NAME,
   PatternCoverageCollector,
+  type PatternCoverageData,
   type PatternCoverageFileReport,
   type PatternCoverageKind,
   patternCoverageOutputPath,
@@ -88,9 +100,10 @@ export {
   type PatternCoverageSpan,
   writePatternCoverageLcov,
 } from "./pattern-coverage.ts";
-export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
+  isRendererInputTx,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
@@ -105,14 +118,45 @@ export {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
+  normalizePatternSource,
+  PATTERNS_ROUTE_PREFIX,
+  resolveSystemPatternSource,
+  SYSTEM_PATTERN_SOURCE_SCHEME,
+  systemPatternSource,
+  systemPatternSourceForModuleName,
+} from "./pattern-source-scheme.ts";
+export {
+  type PatternUpdateOutcome,
+  PatternUpdater,
+} from "./pattern-updater.ts";
+export {
+  applyPieceSourceTransition,
   asPatternIdentityRef,
+  extractDefaultValues,
   getPatternIdentityRef,
+  getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
+  getPieceSourceSnapshot,
+  isStoredArgumentSchemaRefusal,
+  mergeSchemaDefaults,
   patternIdentityKey,
+  type PieceSourceRevision,
+  type PieceSourceRevisionOperation,
+  type PieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
+  setPatternRepository,
   setPatternSource,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)
@@ -146,18 +190,16 @@ export {
   FS,
   type FsProjection,
   type HandlerFactory,
-  ID,
-  ID_FIELD,
   isModule,
   isPattern,
   isReactive,
   isStreamValue,
   type JSONObject,
   type JSONSchema,
-  type JSONSchemaObjMutable,
   type JSONValue,
   type Module,
   type ModuleFactory,
+  type MutableJSONSchemaObj,
   NAME,
   type NodeFactory,
   OAuth2TokenSchema,
@@ -220,6 +262,7 @@ export { ACLManager } from "./acl-manager.ts";
 export {
   cellEntityIdString,
   type CellPath,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,
@@ -242,6 +285,7 @@ export {
 export {
   type FabricRef,
   FabricRefError,
+  formatFabricRef,
   isFabricImportSpecifier,
   parseFabricRef,
 } from "./sandbox/fabric-import-specifier.ts";

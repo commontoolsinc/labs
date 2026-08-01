@@ -17,6 +17,7 @@ import { expect } from "@std/expect";
 const components: Array<{ tag: string; path: string }> = [
   { tag: "cf-render", path: "./cf-render/index.ts" },
   { tag: "cf-cell-link", path: "./cf-cell-link/index.ts" },
+  { tag: "cf-piece-menu", path: "./cf-piece-menu/index.ts" },
   { tag: "cf-profile-badge", path: "./cf-profile-badge/index.ts" },
   { tag: "cf-toolbar", path: "./cf-toolbar/index.ts" },
 ];

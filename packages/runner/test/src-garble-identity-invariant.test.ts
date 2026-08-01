@@ -132,7 +132,6 @@ async function runAndCollect(
     });
     return await collectIdentities(runtime);
   } finally {
-    runtime.scheduler.dispose();
     await runtime.dispose();
   }
 }
@@ -189,8 +188,9 @@ Deno.test(
   () => {
     // Part B (workstream C prerequisite) re-rooted CFC verified-source identity
     // OFF `.src`: the WeakMap provenance lookup IS the anti-spoof proof, and every
-    // field the `writeAuthorizedBy` arm checks (moduleIdentity / sourceFile /
-    // bindingPath) is provenance-derived. So garbling or REMOVING `.src` must NOT
+    // policy-facing identity field is provenance-derived. `writeAuthorizedBy`
+    // verifies moduleIdentity + bindingPath; sourceFile is diagnostic there. So
+    // garbling or REMOVING `.src` must NOT
     // change the resolved identity — that is exactly what makes lazy/debug-only
     // `.src` (skipped at boot) safe for authorized writes. If a future change
     // re-introduces a `.src` dependency in CFC identity, this test trips.
@@ -267,7 +267,6 @@ async function runMultiAndCollect(
     expect(resultCell.getAsQueryResult()).toEqual({ da: 10, db: 18 });
     return await collectIdentities(runtime);
   } finally {
-    runtime.scheduler.dispose();
     await runtime.dispose();
   }
 }

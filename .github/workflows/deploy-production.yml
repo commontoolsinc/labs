@@ -13,7 +13,7 @@ on:
 jobs:
   deploy-estuary:
     name: "Deploy to Estuary (Production)"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: estuary # Protection rules configured in GitHub repo settings
 
     steps:

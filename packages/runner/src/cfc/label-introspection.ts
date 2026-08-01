@@ -1,4 +1,5 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import type { CfcConfClause } from "./clause.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
@@ -118,7 +119,7 @@ export const CONF_LABEL_NOT_AVAILABLE: InspectConfLabelResult = Object.freeze({
  */
 export type ConfLabelConsumedObservation = {
   path: readonly string[];
-  confidentiality: readonly unknown[];
+  confidentiality: readonly CfcConfClause[];
 };
 
 export type ConfLabelQueryEvaluation = {
@@ -130,7 +131,7 @@ export type ConfLabelQueryEvaluation = {
    * hidden arms are value-independent of protected fields (the response is
    * the shared constant), so nothing protected flowed to the caller.
    */
-  consumedConfidentiality: readonly unknown[];
+  consumedConfidentiality: readonly CfcConfClause[];
   /**
    * The same consumption, one record per consulted concrete metadata path
    * (paths are unique by construction — clause/alternative indices plus
@@ -469,7 +470,7 @@ export const evaluateConfLabelQuery = (
       continue;
     }
     for (const clause of entry.label.confidentiality ?? []) {
-      const alternatives = clauseAlternatives(clause);
+      const alternatives = clauseAlternatives(clause as CfcConfClause);
       for (
         let alternativeIndex = 0;
         alternativeIndex < alternatives.length;

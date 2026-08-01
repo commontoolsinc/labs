@@ -1,0 +1,161 @@
+name: Dashboard
+
+on:
+  workflow_dispatch: {} # Publish a main commit the path filter below misses
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile.dashboard"
+      - "packages/dashboard/**"
+      - "scripts/ci-gantt.ts"
+      - "deno.jsonc"
+      - "deno.lock"
+      - ".dockerignore"
+      - ".github/actions/deno-setup/**"
+      - ".github/actions/deno-install/**"
+      - ".github/workflows/dashboard-image.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      # A manual run can name any ref. Publishing moves the `latest` tag that
+      # the deployment follows, so a run on another ref stops here, before
+      # anything from that ref is checked out or run.
+      - name: Verify the run is on main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "The dashboard image publishes only from main; this run is on ${GITHUB_REF}." >&2
+          exit 1
+
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: Install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: Test dashboard
+        working-directory: packages/dashboard
+        run: deno task test
+
+  publish:
+    name: Publish image
+    needs: [tests]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: commontools-core
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: Login to Artifact Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: us-central1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
+
+      - name: Resolve existing immutable image
+        id: existing
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          result=$(curl --silent --show-error --output /dev/null --head \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            --write-out '%header{docker-content-digest}\n%{http_code}' \
+            "https://us-central1-docker.pkg.dev/v2/commontools-core/containers/dev-dashboard/manifests/${GITHUB_SHA}")
+          digest=${result%%$'\n'*}
+          status=${result##*$'\n'}
+
+          case "$status" in
+            200)
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "digest=$digest" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Artifact Registry manifest lookup failed with HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Build and push dashboard image
+        id: build
+        if: ${{ steps.existing.outputs.exists != 'true' }}
+        uses: useblacksmith/build-push-action@v2
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            DASHBOARD_GIT_COMMIT=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Promote existing image to latest
+        if: ${{ steps.existing.outputs.exists == 'true' }}
+        env:
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+        run: docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}@${EXISTING_DIGEST}"
+
+      - name: Resolve published digest
+        id: result
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+        shell: bash
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Report immutable image reference
+        env:
+          DIGEST: ${{ steps.result.outputs.digest }}
+        run: |
+          {
+            echo "### Dashboard image published"
+            echo
+            echo "- Tag: \`${IMAGE}:${GITHUB_SHA}\`"
+            echo "- Digest: \`${IMAGE}@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

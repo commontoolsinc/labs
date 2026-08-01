@@ -39,12 +39,23 @@ function parseCliTestShard(): { index: number; count: number } {
 const SERIAL_TESTS = [
   "test/fuse.test.ts",
   "test/inspect-remote.test.ts",
+  "test/json-command.test.ts",
   "test/log-level.test.ts",
   "test/main-command.test.ts",
+  "test/runtime-creation.test.ts",
   "test/test-runner-compile-byte-cache.test.ts",
   "test/test-runner-pattern-coverage.test.ts",
+  "test/view-commitmsg.test.ts",
   "test/view-mod-gate.test.ts",
   "test/view-pager-pty.test.ts",
+];
+
+// Tests that need a live toolshed named by API_URL. This runner excludes
+// them: its --allow-net=127.0.0.1 grant cannot reach an arbitrary API_URL.
+// The CI cli-integration-test job runs them against its toolshed; each
+// file's header documents the direct local invocation.
+const INTEGRATION_TESTS = [
+  "test/piece-integration.test.ts",
 ];
 
 function slashPath(path: string): string {
@@ -99,8 +110,22 @@ if (missingSerialTests.length > 0) {
   Deno.exit(1);
 }
 
+const integration = new Set(INTEGRATION_TESTS);
+const missingIntegrationTests = INTEGRATION_TESTS.filter((test) =>
+  !allTests.includes(test)
+);
+if (missingIntegrationTests.length > 0) {
+  console.error(
+    `Integration CLI test file(s) not found: ${
+      missingIntegrationTests.join(", ")
+    }`,
+  );
+  Deno.exit(1);
+}
+const unitTests = allTests.filter((test) => !integration.has(test));
+
 const shard = parseCliTestShard();
-const tests = allTests.filter((_, i) => i % shard.count === shard.index);
+const tests = unitTests.filter((_, i) => i % shard.count === shard.index);
 
 const parallelTests = tests.filter((test) => !serial.has(test));
 const serialTests = tests.filter((test) => serial.has(test));

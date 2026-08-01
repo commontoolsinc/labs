@@ -1,6 +1,7 @@
 {
   "name": "@commonfabric/leb128",
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./src/"
   },
   "exports": {

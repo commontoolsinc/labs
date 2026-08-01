@@ -387,6 +387,87 @@ Deno.test("memory v2 runner does not resend prior pending watches in later batch
   }
 });
 
+Deno.test("memory v2 runner coalesces refreshes queued during an in-flight watch add", async () => {
+  const docA = `of:watch-next-batch-a-${crypto.randomUUID()}` as URI;
+  const docB = `of:watch-next-batch-b-${crypto.randomUUID()}` as URI;
+  const docC = `of:watch-next-batch-c-${crypto.randomUUID()}` as URI;
+  const transport = new DelayedWatchAddTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-add-next-batch"),
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+  let inlineSyncs = 0;
+  const subscription = {
+    next(notification: { type: string }) {
+      if (notification.type === "pull") {
+        inlineSyncs += 1;
+      }
+      return undefined;
+    },
+  };
+
+  try {
+    storageManager.subscribe(subscription);
+    const firstSync = provider.sync(docA, { path: [], schema: false });
+    await transport.firstWatchAddSent.promise;
+
+    const secondSync = provider.sync(docB, { path: [], schema: false });
+    await Promise.resolve();
+    const thirdSync = provider.sync(docC, { path: [], schema: false });
+    transport.releaseFirstWatchAdd.resolve({ value: { label: docA } });
+
+    await Promise.all([firstSync, secondSync, thirdSync]);
+
+    assertEquals(transport.watchAddCount, 2);
+    assertEquals(transport.rootCounts, [1, 2]);
+    assertEquals(inlineSyncs, 2);
+    assertEquals(getObjectValue(provider, docA), { label: docA });
+    assertEquals(getObjectValue(provider, docB), { label: docB });
+    assertEquals(getObjectValue(provider, docC), { label: docC });
+  } finally {
+    storageManager.unsubscribe(subscription);
+    await storageManager.close();
+  }
+});
+
+Deno.test("memory v2 runner cancels a retained watch-refresh batch on close", async () => {
+  const docA = `of:watch-close-batch-a-${crypto.randomUUID()}` as URI;
+  const docB = `of:watch-close-batch-b-${crypto.randomUUID()}` as URI;
+  const docC = `of:watch-close-batch-c-${crypto.randomUUID()}` as URI;
+  const transport = new DelayedWatchAddTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-close-batch"),
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+
+  const firstSync = provider.sync(docA, { path: [], schema: false });
+  await transport.firstWatchAddSent.promise;
+  const secondSync = provider.sync(docB, { path: [], schema: false });
+  const thirdSync = provider.sync(docC, { path: [], schema: false });
+
+  const [secondResult, thirdResult] = await Promise.all([
+    secondSync,
+    thirdSync,
+    storageManager.close(),
+    firstSync,
+  ]);
+
+  assertEquals(
+    (secondResult as { error?: Error }).error?.message,
+    "memory replica closed",
+  );
+  assertEquals(
+    (thirdResult as { error?: Error }).error?.message,
+    "memory replica closed",
+  );
+  assertEquals(transport.watchAddCount, 1);
+  assertEquals(transport.rootCounts, [1]);
+});
+
 Deno.test("memory v2 runner resolves synced on a microtask when idle", async () => {
   const transport = new CountingWatchSetTransport();
   const sessionFactory = new SingleSessionFactory(transport);

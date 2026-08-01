@@ -8,7 +8,7 @@ import type {
   StructureNode,
   TokenClass,
 } from "../lib/view/model.ts";
-import type { DefTarget, Semantics } from "../lib/view/semantics.ts";
+import type { DefTarget, Semantics } from "../lib/view/languages/language.ts";
 
 function infoText(doc: Document, node: StructureNode, semantics?: Semantics) {
   return buildPeekCard(doc, node, semantics).info.map((l) => l.text).join("\n");
@@ -214,6 +214,29 @@ Deno.test("card: an outline past the cap shows a trailing 'N more' line", () => 
   assert(text.includes("2 more"), `overflow line present: ${text}`);
 });
 
+Deno.test("card: the 'N more' line is a selectable expand target; expanding shows all", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 16; i++) src += `const v${i} = ${i};\n`;
+  const doc = parseDocument(src);
+  const section = doc.flatStructure.find((n) => n.kind === "section")!;
+  const card = buildPeekCard(doc, section);
+  // The "… 2 more" line is a target, flagged expand, pointing at its own line.
+  const moreLine = card.info.findIndex((l) => l.text.includes("2 more"));
+  const expandTarget = card.targets.find((t) => t.expand);
+  assert(expandTarget, "the more line is a target");
+  assertEquals(expandTarget!.cardLine, moreLine, "it points at the more line");
+  // Rebuilding expanded lists every child and drops the more line (and its
+  // expand target).
+  const full = buildPeekCard(doc, section, undefined, true);
+  const fullText = full.info.map((l) => l.text).join("\n");
+  assert(
+    !fullText.includes("more"),
+    `no overflow line when expanded: ${fullText}`,
+  );
+  assert(fullText.includes("v15"), "the last child is now listed");
+  assert(!full.targets.some((t) => t.expand), "no expand target when expanded");
+});
+
 Deno.test("card: the outline picks a glyph for each child kind", () => {
   // A synthetic parent whose children span the glyph cases reachable from the
   // outline (which hoists through, and so never lists, generic node/comment
@@ -373,6 +396,164 @@ function fakeSemantics(
     prewarm: () => {},
   };
 }
+
+Deno.test("card: deferred semantic dependencies remain in the folded count", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 41; i++) src += `const dep${i} = ${i};\n`;
+  src += "function consumer() {\n  return " +
+    Array.from({ length: 41 }, (_, i) => `dep${i}`).join(" + ") + ";\n}\n";
+  const doc = parseDocument(src);
+  const consumer = doc.flatStructure.find((n) => n.name === "consumer")!;
+  const first = doc.flatStructure.find((n) => n.name === "dep0")!;
+  let definitionCalls = 0;
+  const semantics = fakeSemantics(() => {
+    definitionCalls++;
+    return [{
+      name: "dep0",
+      blobOffset: first.startOffset,
+      line: first.startLine,
+      preview: "const dep0 = 0;",
+    }];
+  });
+
+  const text = infoText(doc, consumer, semantics);
+  assertEquals(
+    definitionCalls,
+    40,
+    "the collapsed card keeps semantic lookup within its prefix",
+  );
+  assert(
+    text.includes("30 more"),
+    `all resolved folded dependencies are counted: ${text}`,
+  );
+  assert(
+    text.includes("1 possible dependency"),
+    `the unresolved dependency is counted without a speculative row: ${text}`,
+  );
+  assert(
+    text.includes("1 remaining use"),
+    `the deferred semantic use can still be expanded: ${text}`,
+  );
+});
+
+Deno.test("card: a deferred dependency does not use a same-named local jump", () => {
+  let src = "// transformed: /app.ts\nconst ext = 1;\n";
+  src += "function consumer() {\n";
+  for (let i = 0; i < 40; i++) src += `  unknown${i};\n`;
+  src += "  return ext();\n}\n";
+  const doc = parseDocument(src);
+  const consumer = doc.flatStructure.find((n) => n.name === "consumer")!;
+  const localExt = doc.flatStructure.find((n) => n.name === "ext")!;
+  const semantics = fakeSemantics((offset) =>
+    doc.text.slice(offset, offset + 3) === "ext"
+      ? [{
+        name: "ext",
+        filePath: "/workspace/external.ts",
+        fileOffset: 0,
+        line: 0,
+        col: 0,
+        preview: "export function ext() {}",
+      }]
+      : []
+  );
+
+  const collapsed = buildPeekCard(doc, consumer, semantics);
+  const collapsedText = collapsed.info.map((line) => line.text).join("\n");
+  assert(
+    !collapsedText.split("\n").some((line) => line.startsWith("  ext  ")),
+    `the deferred use has no speculative local row: ${collapsedText}`,
+  );
+  assert(
+    !collapsed.targets.some((target) =>
+      target.defOffset === localExt.startOffset
+    ),
+    `the deferred use has no speculative local jump: ${collapsedText}`,
+  );
+  assert(
+    collapsedText.includes("1 remaining use"),
+    `the unresolved use can be expanded: ${collapsedText}`,
+  );
+  assert(
+    collapsedText.includes("1 possible dependency"),
+    `the syntactic match is labelled as unresolved: ${collapsedText}`,
+  );
+
+  const expanded = buildPeekCard(doc, consumer, semantics, true);
+  const expandedText = expanded.info.map((line) => line.text).join("\n");
+  assert(
+    expandedText.includes("  ext  external.ts:1"),
+    `expansion shows the semantic external target: ${expandedText}`,
+  );
+  assert(
+    expanded.targets.some((target) =>
+      target.filePath === "/workspace/external.ts"
+    ),
+    "the expanded row jumps to the external definition",
+  );
+});
+
+Deno.test("card: a call target defined inside the selected node is not a dependency", () => {
+  const doc = parseDocument(`// transformed: /app.ts
+function consumer() {
+  const worker = { run(): void {} };
+  worker.run();
+}
+`);
+  const consumer = doc.flatStructure.find((n) => n.name === "consumer")!;
+  const method = doc.flatStructure.find((n) =>
+    n.kind === "method" && n.name === "run"
+  )!;
+  let resolvedCalls = 0;
+  const semantics = fakeSemantics((offset) => {
+    if (doc.text.slice(offset, offset + 3) !== "run") return [];
+    resolvedCalls++;
+    return [{
+      name: "run",
+      blobOffset: method.startOffset,
+      line: method.startLine,
+      preview: method.label,
+    }];
+  });
+
+  const text = infoText(doc, consumer, semantics);
+  assert(resolvedCalls > 0, "the call target is resolved");
+  assert(
+    !text.includes("DEPENDS ON"),
+    `a definition inside the selected function is omitted: ${text}`,
+  );
+});
+
+Deno.test("card: repeated calls to one target produce one dependency", () => {
+  const doc = parseDocument(`// transformed: /app.ts
+const worker = { run(): void {} };
+[worker.run(), worker.run()];
+`);
+  const statement = doc.flatStructure.find((n) =>
+    n.kind === "statement" && n.startLine === 2
+  )!;
+  const worker = doc.flatStructure.find((n) => n.name === "worker")!;
+  const method = doc.flatStructure.find((n) =>
+    n.kind === "method" && n.name === "run"
+  )!;
+  const semantics = fakeSemantics((offset) => {
+    const target = doc.text.slice(offset, offset + 3) === "run"
+      ? method
+      : worker;
+    return [{
+      name: target.name!,
+      blobOffset: target.startOffset,
+      line: target.startLine,
+      preview: target.label,
+    }];
+  });
+
+  const text = infoText(doc, statement, semantics);
+  assertEquals(
+    text.split("\n").filter((line) => line.startsWith("  run  ")).length,
+    1,
+    `the repeated target has one row: ${text}`,
+  );
+});
 
 Deno.test("card: a dependency that resolves in-blob jumps to its enclosing node", () => {
   const doc = parseDocument(`// transformed: /app.ts

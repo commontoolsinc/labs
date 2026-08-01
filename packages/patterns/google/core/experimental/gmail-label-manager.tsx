@@ -29,7 +29,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -224,7 +223,7 @@ const confirmOperation = handler<
       result.set({
         success: true,
         messageCount: op.messageIds.length,
-        timestamp: new Date(safeDateNow()).toISOString(),
+        timestamp: new Date().toISOString(),
       });
 
       pendingOp.set(null);
@@ -237,7 +236,7 @@ const confirmOperation = handler<
         success: false,
         messageCount: op.messageIds.length,
         error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date(safeDateNow()).toISOString(),
+        timestamp: new Date().toISOString(),
       });
     } finally {
       processing.set(false);
@@ -257,7 +256,7 @@ const reportApplyAuthNotReady = handler<
     success: false,
     messageCount: op?.messageIds.length ?? 0,
     error: "Connect Google before applying label changes.",
-    timestamp: new Date(safeDateNow()).toISOString(),
+    timestamp: new Date().toISOString(),
   });
 });
 

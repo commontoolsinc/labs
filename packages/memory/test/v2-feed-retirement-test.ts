@@ -14,6 +14,7 @@ import {
   setServerPrimaryExecutionGraphRetirementConfig,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 // --- F5 (FW5 redesign after FB9): retire per-session schema-graph
 // re-evaluation where the watch surface is doc-set. The per-space dial's
@@ -133,7 +134,7 @@ const docsWatchSet = (
     space,
     sessionId: harness.sessionId,
     watches,
-  }));
+  } as unknown as FabricValue));
 
 const transact = (
   harness: Harness,
@@ -147,7 +148,7 @@ const transact = (
     space,
     sessionId: harness.sessionId,
     commit,
-  }));
+  } as unknown as FabricValue));
 
 Deno.test("F5: a fully-doc-set eligible session retires its graph refresh and is counted (FA13)", async () => {
   const space = "did:key:z6Mk-feed-retire-fully";

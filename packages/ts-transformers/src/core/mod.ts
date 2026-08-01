@@ -226,10 +226,8 @@ export {
 } from "./transformers.ts";
 export * from "./common-fabric-symbols.ts";
 export {
-  CF_DATA_HELPER_IDENTIFIER,
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
-  injectCfDataHelper,
   injectCfHelpers,
   isLegacyInjectedEnvelope,
   sourceDisablesCfTransform,

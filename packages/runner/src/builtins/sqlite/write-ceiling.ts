@@ -9,6 +9,7 @@
 // without a ceiling are unaffected (zero behavior change until `ifc` is used).
 
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
+import type { CfcConfClause } from "../../cfc/clause.ts";
 import {
   blankWriteSql,
   parseWriteParamColumns,
@@ -16,8 +17,8 @@ import {
 } from "@commonfabric/memory/sqlite/write-targets";
 
 interface ColumnIfc {
-  maxConfidentiality?: readonly unknown[];
-  confidentiality?: readonly unknown[];
+  maxConfidentiality?: readonly CfcConfClause[];
+  confidentiality?: readonly CfcConfClause[];
 }
 type Tables = Record<
   string,
@@ -145,7 +146,7 @@ export function checkSqliteWriteCeiling(
   // case; the declared property keys may differ in case from the SQL).
   const resolveCeiling = (
     col: string,
-  ): { found: boolean; ceiling?: readonly unknown[] } => {
+  ): { found: boolean; ceiling?: readonly CfcConfClause[] } => {
     if (table === undefined) return { found: false };
     const props = tables[table]?.properties;
     if (!props) return { found: false };
@@ -158,7 +159,7 @@ export function checkSqliteWriteCeiling(
   // Check one labeled value against its (named) target column. Fails closed when
   // the column can't be positively resolved.
   const checkLabeled = (
-    conf: readonly unknown[],
+    conf: readonly CfcConfClause[],
     col: string,
   ): string | undefined => {
     const r = resolveCeiling(col);
@@ -177,7 +178,7 @@ export function checkSqliteWriteCeiling(
       if (cols === undefined) return UNRESOLVED; // unattributable shape
       const col = cols[i];
       if (col === null) continue; // a filter param (WHERE), not stored
-      const v = checkLabeled(conf, col);
+      const v = checkLabeled(conf as readonly CfcConfClause[], col);
       if (v) return v;
     }
     return undefined;

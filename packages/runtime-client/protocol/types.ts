@@ -5,6 +5,7 @@ import type {
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
+  PatternCoverageData,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
   SettleStats,
@@ -60,6 +61,7 @@ export enum RequestType {
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   GetExecutionRoutingDiagnostics = "runtime:getExecutionRoutingDiagnostics",
   GetLoggerCounts = "runtime:getLoggerCounts",
+  GetPatternCoverage = "runtime:getPatternCoverage",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
@@ -90,6 +92,8 @@ export enum RequestType {
   PageStop = "page:stop",
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
+  PieceGetSource = "piece:getSource",
+  PieceUpdateSource = "piece:updateSource",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -112,7 +116,6 @@ export enum NotificationType {
   Telemetry = "callback:telemetry",
   VDomBatch = "vdom:batch",
   PendingWritesChanged = "callback:pending-writes",
-  VersionSkew = "callback:versionskew",
 }
 
 export interface IPCClientMessage {
@@ -159,11 +162,6 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
-  // This client build's git sha (the shell's COMMIT_SHA). Threaded to the
-  // worker runtime as `clientVersion` for the system-pattern auto-update
-  // version-skew gate (compared to a space's toolshed /api/meta gitSha).
-  // Absent (dev / unknown) ⇒ never auto-update.
-  clientVersion?: string;
   // Experimental space-model feature flags.
   experimental?: {
     modernCellRep?: boolean;
@@ -179,10 +177,9 @@ export interface InitializationData {
     // makes this realm's memory `hello` offer context-scoped claim delivery.
     serverPrimaryExecutionContextLatticeClaims?: boolean;
     eagerSourceAnnotation?: boolean;
-    // Roll a space's system root pattern forward in place when its toolshed
-    // serves a newer identity. Default off; home held behind the second flag.
+    // Roll a space's system root pattern (home included) forward in place
+    // when its toolshed serves a newer identity. Default off.
     systemPatternAutoUpdate?: boolean;
-    systemPatternAutoUpdateHome?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -223,6 +220,18 @@ export interface InitializationData {
   // integration-test console capture. Off by default: each forwarded call
   // costs one postMessage, so it is enabled only for diagnostic runs.
   forwardWorkerConsole?: boolean;
+  // When true, the worker runtime instruments every pattern compile for
+  // statement coverage and accumulates hits, which the integration harness
+  // pulls at teardown via GetPatternCoverage. Test/CI only (the coverage shell
+  // build sets it); off by default. See docs/development/COVERAGE.md.
+  patternCoverage?: boolean;
+  // When true, the worker's remote storage overlaps watch-refresh round trips
+  // up to a bounded window instead of the default strict single-flight
+  // (`experimentalConcurrentWatchRefresh`, docs/development/EXPERIMENTAL_OPTIONS.md).
+  // Fixed at StorageManager.open time, so like the render ceiling it takes
+  // effect on the next runtime (reload), not live. Off by default; the shell
+  // dogfood toggle `commonfabric.concurrentWatchRefresh()` sets it.
+  concurrentWatchRefresh?: boolean;
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -242,6 +251,12 @@ export interface CellGetRequest extends BaseRequest {
   // so a caller that needs both pays one round-trip instead of a separate
   // CellGetCfcLabel request.
   includeCfcLabel?: boolean;
+  // Opt in to having the read cell's own schema-bearing ref returned. Useful
+  // when `meta` names a link field (pattern/argument/result): the resolved
+  // cell's ref lets the caller subscribe to it or read it again directly,
+  // and its schema carries the declarations (e.g. stream fields) that the
+  // value alone does not.
+  includeRef?: boolean;
 }
 
 export interface CellSetRequest extends BaseRequest {
@@ -368,6 +383,10 @@ export interface GetExecutionRoutingDiagnosticsRequest extends BaseRequest {
 
 export interface GetLoggerCountsRequest extends BaseRequest {
   type: RequestType.GetLoggerCounts;
+}
+
+export interface GetPatternCoverageRequest extends BaseRequest {
+  type: RequestType.GetPatternCoverage;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -634,6 +653,90 @@ export interface PageSyncedRequest extends BaseRequest {
   space: DID;
 }
 
+/**
+ * Read one piece's source state: the pattern it runs, the origin it tracks, the
+ * history metadata it carries, and its authored source files. See
+ * `docs/specs/piece-source-lifecycle.md`.
+ */
+export interface PieceGetSourceRequest extends BaseRequest {
+  type: RequestType.PieceGetSource;
+  space: DID;
+  pieceId: string;
+}
+
+/** How a piece's origin URL resolves. */
+export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+
+export interface PieceOriginView {
+  url: string;
+  kind: PieceOriginKind;
+  /** The URL as recorded on the piece, when normalization changed it. */
+  recorded?: string;
+}
+
+export interface PiecePatternRefView {
+  identity: string;
+  symbol: string;
+}
+
+export type PieceSourceRevisionOperation =
+  | "baseline"
+  | "create"
+  | "edit"
+  | "origin-update"
+  | "detach"
+  | "revert"
+  | "follow"
+  | "repoint";
+
+export interface PieceSourceRevisionView {
+  revisionId: string;
+  timestamp: number;
+  pattern: PiecePatternRefView;
+  origin?: PieceOriginView;
+  operation: PieceSourceRevisionOperation;
+  selectedRevisionId?: string;
+}
+
+export interface PieceSourceView {
+  space: DID;
+  pieceId: string;
+  name?: string;
+  pattern?: PiecePatternRefView;
+  setupPattern?: PiecePatternRefView;
+  displacedPattern?: PiecePatternRefView & { displacedAt?: number };
+  origin?: PieceOriginView;
+  repository?: string;
+  entry?: string;
+  files: PatternSourceFile[];
+  history: PieceSourceRevisionView[];
+  currentRevisionId?: string;
+}
+
+export interface PieceSourceResponse {
+  source: PieceSourceView;
+}
+
+export type PieceSourceAction =
+  | { kind: "detach" }
+  | { kind: "restore"; revisionId: string }
+  | { kind: "follow"; revisionId: string };
+
+export interface PieceUpdateSourceRequest extends BaseRequest {
+  type: RequestType.PieceUpdateSource;
+  space: DID;
+  pieceId: string;
+  action: PieceSourceAction;
+  /** Opaque token returned with an incompatibility warning. */
+  confirmationToken?: string;
+}
+
+export interface PieceUpdateSourceResponse extends PieceSourceResponse {
+  compatibilityWarning?: string;
+  confirmationToken?: string;
+  executionWarning?: string;
+}
+
 /** Common shape for one-way main -> worker notifications. */
 export interface BaseClientNotification {
   type: ClientNotificationType;
@@ -758,6 +861,7 @@ export type IPCClientRequest =
   | GetGraphSnapshotRequest
   | GetExecutionRoutingDiagnosticsRequest
   | GetLoggerCountsRequest
+  | GetPatternCoverageRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
@@ -784,6 +888,8 @@ export type IPCClientRequest =
   | PageStopRequest
   | PageGetAllRequest
   | PageSyncedRequest
+  | PieceGetSourceRequest
+  | PieceUpdateSourceRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -810,6 +916,9 @@ export interface CellGetResponse extends JSONValueResponse {
   // Present only when the request set `includeCfcLabel`. `undefined` is a valid
   // value (the cell carries no label); the field is omitted when not requested.
   cfcLabel?: CfcLabelView | undefined;
+  // Present only when the request set `includeRef` and the read resolved to a
+  // cell (a raw-metadata read has no cell to reference).
+  cell?: CellRef;
 }
 
 export interface CellResponse {
@@ -845,6 +954,17 @@ export interface LoggerCountsResponse {
   metadata: LoggerMetadata;
   timing: LoggerTimingData;
   flags: LoggerFlagsData;
+}
+
+export interface PatternCoverageResponse {
+  /**
+   * The worker collector's spans and hit counts, or `null` when this worker was
+   * built without a collector. Null and empty are kept apart on purpose: a
+   * worker that never had coverage on and one that had it on but ran nothing
+   * instrumented are different failures, and reporting both as an empty report
+   * makes the first invisible.
+   */
+  data: PatternCoverageData | null;
 }
 
 export interface CellUpdateNotification {
@@ -883,20 +1003,6 @@ export interface ErrorNotification {
 export interface TelemetryNotification {
   type: NotificationType.Telemetry;
   marker: RuntimeTelemetryMarkerResult;
-}
-
-/**
- * Worker→shell signal that a space's toolshed build differs from this client
- * build, so the system-pattern auto-update check was skipped for that space
- * (the light `?identity` is only comparable within a build). The shell surfaces
- * a non-blocking "newer version available — reload" affordance. Versions are
- * git shas; either may be absent when a side's build sha is unknown.
- */
-export interface VersionSkewNotification {
-  type: NotificationType.VersionSkew;
-  space: string;
-  clientVersion?: string;
-  toolshedVersion?: string;
 }
 
 /**
@@ -963,12 +1069,15 @@ export type RemoteResponse =
   | GraphSnapshotResponse
   | ExecutionRoutingDiagnosticsResponse
   | LoggerCountsResponse
+  | PatternCoverageResponse
   | SettleStatsResponse
   | SettleStatsHistoryResponse
   | ActionRunTraceResponse
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PageResponse
+  | PieceSourceResponse
+  | PieceUpdateSourceResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -982,8 +1091,7 @@ export type IPCRemoteNotification =
   | NavigateRequestNotification
   | ErrorNotification
   | VDomBatchNotification
-  | PendingWritesNotification
-  | VersionSkewNotification;
+  | PendingWritesNotification;
 
 export type Commands = {
   // Runtime requests
@@ -1026,6 +1134,10 @@ export type Commands = {
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;
     response: LoggerCountsResponse;
+  };
+  [RequestType.GetPatternCoverage]: {
+    request: GetPatternCoverageRequest;
+    response: PatternCoverageResponse;
   };
   [RequestType.SetLoggerLevel]: {
     request: SetLoggerLevelRequest;
@@ -1160,6 +1272,14 @@ export type Commands = {
   [RequestType.PageGetAll]: {
     request: PageGetAllRequest;
     response: CellResponse;
+  };
+  [RequestType.PieceGetSource]: {
+    request: PieceGetSourceRequest;
+    response: PieceSourceResponse;
+  };
+  [RequestType.PieceUpdateSource]: {
+    request: PieceUpdateSourceRequest;
+    response: PieceUpdateSourceResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

@@ -4,10 +4,17 @@
 built as a general Common Fabric agent runtime, with Loom as the first target
 use case.
 
-The package is intentionally early and experimental. It already has a real
-execution core, a bounded prompt/tool loop, persistence, resumability, a thin
-operator CLI, explicit Agent Skills preload, and the first pass of CFC-aware
+The package is experimental but already integrated into Loom and Pattern
+Factory. It has a real execution core, bounded batch and interactive prompt/tool
+loops, durable artifacts and resumability, an operator CLI, explicit Agent
+Skills support, constrained delegation profiles, and CFC-aware mediation and
 deny/recovery shaping.
+
+For a concise status and lifecycle-aware documentation map, start with
+[docs/README.md](docs/README.md) and
+[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md). The package's draft conformance
+claim is in [docs/IMPLEMENTATION_PROFILE.md](docs/IMPLEMENTATION_PROFILE.md);
+remaining work is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why This Exists
 
@@ -53,7 +60,8 @@ What works today:
   local/private target blocking, extracted text/links, and raw bounded response
   retention in tool-output artifacts; `web_fetch` is intentionally not part of
   the default parent tool surface
-- bounded OpenAI-compatible prompt/tool loop
+- provider-neutral bounded prompt/tool loop with OpenAI-compatible gateway and
+  opt-in ChatGPT/Codex subscription transports
 - interactive chat NDJSON stdio transport with opt-in SQLite session, turn, and
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
@@ -65,9 +73,16 @@ What works today:
 - persisted run state, transcript, run reports, Loom run manifests, capability
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
-- run-report gateway attempt diagnostics with chat-completion request size,
-  timing, HTTP status, selected response headers/request IDs, and non-OK
-  response body excerpts
+- provider-neutral run-report model-attempt diagnostics; the compatibility
+  gateway retains its existing gateway-attempt records
+- provider-reported per-turn token usage in run reports, with aggregate input,
+  cached-input, cache-write, output, reasoning, and total tokens surfaced in
+  operator and batch results
+- GPT-5.6 gateway cost estimates when the provider returns complete cache usage
+  detail; estimates use the public OpenAI token schedule and are kept distinct
+  from provider-reported cost
+- stable prompt-cache affinity across an interactive session, plus opt-in
+  reasoning effort and GPT-5.6 gateway implicit/explicit cache-mode controls
 - transcript-based resumability
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
@@ -97,6 +112,9 @@ network confinement model.
 - configurable gateway auth mode:
   - `bearer`
   - `none`
+- explicit `openai-codex` subscription provider with browser PKCE and headless
+  device login, refresh-token rotation, live model discovery, resume, and
+  owner-bound Loom integration
 
 What is not done yet:
 
@@ -119,6 +137,10 @@ What is not done yet:
   - core execution engine, run state, tool execution
 - [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
+- [src/model/](src/model)
+  - provider-neutral model client, gateway adapter, and Codex Responses adapter
+- [src/auth/](src/auth)
+  - owner-keyed credential store and OpenAI Codex OAuth flows
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/interactive-chat-stdio.ts](src/interactive-chat-stdio.ts)
@@ -137,6 +159,9 @@ What is not done yet:
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
   - staged Agent Skills support design
+- [../../docs/plans/cf-harness-codex-subscription-auth.md](../../docs/plans/cf-harness-codex-subscription-auth.md)
+  - researched implementation plan for opt-in local and Loom Codex subscription
+    auth with per-user credential ownership
 
 ## Commands
 
@@ -170,6 +195,125 @@ deno task run -- \
   --print-transcript
 ```
 
+GPT-5.6 cache experiment:
+
+```bash
+cd packages/cf-harness
+CF_HARNESS_API_KEY=... deno task run -- \
+  --workspace ../.. \
+  --model gpt-5.6-terra \
+  --reasoning-effort low \
+  --prompt-cache-mode explicit \
+  --prompt "Inspect the cf-harness package and summarize its model adapters."
+```
+
+Operator output includes one aggregate `usage:` line covering the parent and
+completed descendant runs. The persisted `run-report.json` keeps `usage` and
+`modelUsage` for the direct run, plus `totalUsage` including completed
+descendants. The batch result JSON carries that total usage object. `costUsd`,
+when present, came from the provider; `estimatedCostUsd` is an estimate based on
+the public OpenAI GPT-5.6 price schedule and is not an invoice or a subscription
+quota conversion.
+
+The API gateway's default cache mode remains the provider's implicit mode.
+Explicit mode pins a breakpoint to the first user-message prefix, which is
+stable while the harness appends assistant and tool messages. Use identical
+prompts and tool surfaces when comparing modes, since exact prefix identity is
+required for a cache hit. The ChatGPT/Codex subscription backend rejects the API
+`prompt_cache_options` field, so `--prompt-cache-mode` is not supported with
+`--model-provider openai-codex`; that provider continues to use implicit caching
+with stable affinity and reports the resulting cache usage. OpenAI documents the
+current cache fields and semantics in its
+[prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching).
+
+ChatGPT/Codex subscription mode is a separate, explicit provider. It does not
+use an OpenAI Platform API key:
+
+```bash
+cd packages/cf-harness
+
+# Browser PKCE login (default) or headless device login.
+deno task run -- auth login openai-codex
+deno task run -- auth login openai-codex --device
+
+# Inspect local credential status and the live, subscription-scoped model catalog.
+deno task run -- auth status openai-codex
+deno task run -- models openai-codex
+
+# Run through the same bounded loop and CFC mediation as the gateway provider.
+deno task run -- \
+  --workspace ../.. \
+  --model-provider openai-codex \
+  --model gpt-5.5 \
+  --prompt "Summarize the cf-harness package structure."
+
+deno task run -- auth logout openai-codex
+```
+
+Local credentials live under `CF_HARNESS_HOME` (by default
+`~/.cf-harness/auth.json`). The directory and file are created with modes `0700`
+and `0600`, and updates replace the file atomically. `cf-harness` never imports
+or shares `~/.codex/auth.json`. A failed refresh does not fall back to
+`OPENAI_API_KEY`, the Common Tools gateway, or unauthenticated mode.
+
+Resume a root run with `--resume-run <run-root-or-run-state.json>`. Codex resume
+keeps the recorded provider, model, exact credential owner, and encrypted
+provider continuation; requesting another model is rejected before credentials
+or provider traffic. Child runs are recorded with their root/parent lineage and
+cannot be resumed directly as top-level runs—resume the root run instead.
+Library callers receive the same guards: `runTranscript()` binds the first
+selected Codex model into run state and cannot override a resumed binding, while
+a whole-tree restorer must supply a matching typed `subagentResumeContext` when
+it reconstructs a child beneath its trusted root/parent session.
+
+The gateway and subscription routes have different billing, workspace policy,
+retention, and model availability. The model catalog is read live from the
+selected subscription; an explicit unavailable model fails instead of being
+silently substituted.
+
+### Loom subscription binding
+
+Loom support uses the same `openai-codex` protocol and model client, but never
+the local filesystem credential store. A trusted Loom host must:
+
+- require the initiating user to connect ChatGPT/Codex explicitly;
+- put `modelProvider: "openai-codex"` and a `cf-harness.credential-owner-ref` in
+  the Loom run manifest;
+- resolve that opaque owner in Loom's encrypted secret backend and inject an
+  owner-bound credential resolver/model client into `cf-harness`;
+- create one interactive service instance per authenticated credential owner; do
+  not multiplex owners through one service process;
+- apply the same host-verified binding to batch dispatch before enabling Loom.
+
+Tokens and account ids must not be placed in manifests, Cells, Spaces, stdio
+messages, session databases, command lines, or artifacts. A Loom Codex run
+without an authenticated owner reference or injected resolver fails closed. For
+interactive service processes, inject the owner-bound client through
+`basePromptLoopOptions` and its matching full owner reference through
+`credentialOwner`. The service constructor rejects Codex without this fixed
+process owner. Do not accept an owner or token through the NDJSON request.
+
+This package provides the Loom integration seam; the Loom host still must
+authenticate the initiating principal, enforce workspace policy, and prove
+cross-user isolation before product rollout.
+
+The manifest-side, non-secret selection looks like:
+
+```json
+{
+  "type": "cf-harness.loom-run-manifest",
+  "version": 1,
+  "source": "loom",
+  "modelProvider": "openai-codex",
+  "credentialOwner": {
+    "type": "cf-harness.credential-owner-ref",
+    "version": 1,
+    "ownerKey": "loom:principal-opaque-id",
+    "tenantKey": "loom:tenant-opaque-id"
+  }
+}
+```
+
 Local open-weight model via any OpenAI-compatible server (llama.cpp shown; LM
 Studio, vLLM, and Ollama's `/v1` endpoint work the same way):
 
@@ -196,9 +340,9 @@ export CF_HARNESS_GATEWAY_AUTH_MODE=none
 export CF_HARNESS_MODEL=gpt-oss-120b
 ```
 
-CLI flags take precedence over these variables; `CF_HARNESS_MODEL` is ignored on
-`--resume-run` (the resumed run keeps its recorded model unless `--model` is
-passed explicitly).
+CLI flags take precedence over these variables. `CF_HARNESS_MODEL` is ignored on
+`--resume-run`; an explicitly different `--model` is also rejected for Codex
+runs because its encrypted continuation is model-bound.
 
 On hosts without the `runsc-cfc` Docker runtime (or where the installed CFC
 policy does not label the workspace mount, which makes in-sandbox file reads
@@ -569,7 +713,11 @@ export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc
 
 ## Related Docs
 
-- [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
-- [LOOM_MIGRATION_NOTES.md](docs/LOOM_MIGRATION_NOTES.md)
+- [cf-harness documentation map](docs/README.md)
+- [current implementation state](docs/CURRENT_STATE.md)
+- [Agent Harness implementation profile](docs/IMPLEMENTATION_PROFILE.md)
+- [roadmap](docs/ROADMAP.md)
+- [skills support design and contract](docs/SKILLS_SUPPORT_SPEC.md)
 - [runner README](../runner/README.md)
+- `specs/agent-harness/` in the sibling `specs` repo
 - `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

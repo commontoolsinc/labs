@@ -149,7 +149,7 @@ export const searchGraphPattern = pattern<
   return { edges: filteredEdges, compoundNodes: filteredNodes };
 });
 
-/** Pattern tool: lists all pieces with their summaries. */
+/** Pattern tool: lists the supplied pieces with their summaries. */
 const listPiecesPattern = pattern<
   {
     entries: Array<
@@ -259,7 +259,6 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
         edges: allEdgesFromBase,
       }),
     },
-    model: "anthropic:claude-sonnet-4-5" as const,
     builtinTools: false,
     resultSchema: toSchema<GraphAnnotations>(),
   };

@@ -10,7 +10,7 @@ import {
 import { NativeEd25519Signer, NativeEd25519Verifier } from "./native.ts";
 import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import * as bip39 from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import {
   ed25519RawToPkcs8,
   fromPEM,
@@ -70,6 +70,23 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     }
     throw new Error(
       'Cannot convert identity to PKCS8 format: requires "noble" implementation.',
+    );
+  }
+
+  // The raw 32-byte ed25519 seed. Like toPkcs8, only "noble" implementations
+  // expose the private material; WebCrypto (native) hides it, so this throws.
+  // Returns a COPY — serialize() hands back the live internal buffer, and a
+  // caller mutating it would corrupt this signer.
+  toRaw(): Uint8Array {
+    const serialized = this.serialize();
+    if (
+      "privateKey" in serialized &&
+      serialized.privateKey instanceof Uint8Array
+    ) {
+      return new Uint8Array(serialized.privateKey);
+    }
+    throw new Error(
+      'Cannot export raw key material: requires "noble" implementation.',
     );
   }
 

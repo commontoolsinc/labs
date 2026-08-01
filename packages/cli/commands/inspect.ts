@@ -2,19 +2,22 @@
 //
 // Thin CLI surface over @commonfabric/state-inspector. Reads the durable SQLite
 // store the server already wrote (no live runtime, no capture) and answers
-// who/what/when + cross-space convergence questions. Every command takes --json.
+// who/what/when + cross-space convergence questions. Data commands take --json;
+// the HTML renderer rejects it.
 //
 // Space DBs are auto-discovered (no need to pass absolute paths): pass a DID,
 // DID-prefix, a space NAME (resolved the same way the runtime derives it), or a
 // file path as <space>. `cf inspect spaces` lists what's found.
 
-import { Command } from "@cliffy/command";
+import { Command, ValidationError } from "@cliffy/command";
 import { Table } from "@cliffy/table";
 import {
   annotate,
   buildCrossSpaceLinkIndex,
   buildInspectorBundle,
   buildSpaceGraph,
+  commitChurn,
+  commitsPerMinute,
   contendedEntities,
   convergence,
   type ConvergenceResult,
@@ -59,6 +62,7 @@ import {
 } from "@commonfabric/state-inspector";
 import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
 import { loadIdentity } from "../lib/identity.ts";
+import { hasJsonArgument } from "../lib/json-output.ts";
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -244,7 +248,12 @@ export const inspect = new Command()
   .description(
     "Offline autopsy of local memory v2 space DBs (state, history, convergence).",
   )
-  .default("help")
+  .error((error, command) => {
+    const args = command.getMainCommand().getRawArgs();
+    if (hasJsonArgument(args)) {
+      throw error;
+    }
+  })
   .globalOption("--json", "Output machine-readable JSON.")
   .globalOption(
     "--remote [url:string]",
@@ -255,6 +264,14 @@ export const inspect = new Command()
     "--identity <path:string>",
     "Identity keyfile used to sign --remote dump requests (default CF_IDENTITY).",
   )
+  .action(function (options) {
+    if (options.json) {
+      throw new ValidationError(
+        'Option "--json" requires an inspect data subcommand.',
+      );
+    }
+    this.showHelp();
+  })
   /* inspect spaces */
   .command(
     "spaces",
@@ -658,6 +675,87 @@ export const inspect = new Command()
       s.close();
     }
   })
+  /* inspect churn */
+  .command(
+    "churn <space:string>",
+    "Write rate over time: commits/revisions per bucket, and what drove the " +
+      "busiest one. The storm-and-settle view `hot` cannot give.",
+  )
+  .option("--bucket <seconds:number>", "Bucket width in seconds.", {
+    default: 60,
+  })
+  .option(
+    "--since <time:string>",
+    "Lower bound on commit time (inclusive). Also widens the curve to cover " +
+      "the whole window asked for.",
+  )
+  .option(
+    "--until <time:string>",
+    "Upper bound on commit time (exclusive). This is the observation " +
+      "boundary: pass the moment you stopped watching and the trailing quiet " +
+      "buckets are reported, which is what shows a storm SETTLED rather than " +
+      "merely ended at the last write.",
+  )
+  .option("--top <n:number>", "Entities to attribute the peak bucket to.", {
+    default: 10,
+  })
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
+    try {
+      const report = commitChurn(s, {
+        branch: options.branch,
+        bucketSeconds: options.bucket,
+        since: options.since,
+        until: options.until,
+        top: options.top,
+      });
+      out(!!options.json, report, () => {
+        if (report.peak === null) {
+          console.log("no timed commits in window");
+        } else {
+          const width = String(
+            Math.max(...report.buckets.map((b) => b.commits)),
+          ).length;
+          for (const b of report.buckets) {
+            const peak = b.startEpoch === report.peak.startEpoch
+              ? " ←peak"
+              : "";
+            console.log(
+              `${b.start}\t${String(b.commits).padStart(width)} commits\t` +
+                `${b.revisions} revisions${peak}`,
+            );
+          }
+          console.log(
+            `\n${report.totals.commits} commits / ${report.totals.revisions} ` +
+              `revisions over ${report.buckets.length} × ${report.bucketSeconds}s` +
+              `\npeak ${report.peak.start}: ${
+                commitsPerMinute(report.peak, report.bucketSeconds).toFixed(1)
+              } commits/min` +
+              // Where writing stopped, against where watching stopped. A curve
+              // that merely ran out of data ends on its last write; one that
+              // was observed through a quiet period ends after it. Only the
+              // second is evidence of a settle, and they render identically
+              // without both numbers.
+              `\nlast commit ${report.lastCommit}, observed through ${report.to}`,
+          );
+          for (const e of report.peakEntities) {
+            console.log(
+              `  ${e.writes}\twrites\t${e.sessions} sessions\t${e.id}\t(${e.scope})`,
+            );
+          }
+        }
+        if (report.untimedCommits > 0) {
+          console.log(
+            `\nnote: ${report.untimedCommits} commit(s) have unparseable ` +
+              `created_at and are absent from every bucket.`,
+          );
+        }
+      });
+    } finally {
+      s.close();
+    }
+  })
   /* inspect conflicts */
   .command(
     "conflicts <space:string> [entity:string]",
@@ -869,7 +967,9 @@ export const inspect = new Command()
   .option("--root <entity:string>", "Restrict to one entity's neighborhood.")
   .option("--depth <n:number>", "Hops around --root.", { default: 2 })
   .option("--no-links", "Omit data-link edges (keep structural edges only).")
-  .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).")
+  .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).", {
+    conflicts: ["json"],
+  })
   .option("--limit <n:number>", "Max entities to reconstruct.", {
     default: 5000,
   })
@@ -966,6 +1066,11 @@ export const inspect = new Command()
     "Live shell base origin for deep links (e.g. https://host).",
   )
   .action(async (options, space) => {
+    if (options.json) {
+      throw new ValidationError(
+        'Option "--json" and the "html" command are mutually exclusive.',
+      );
+    }
     const s = await openByToken(space, options);
     try {
       const bundle = buildInspectorBundle(s, {

@@ -9,13 +9,15 @@ import {
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-llm-derived-stamp");
 
@@ -124,10 +126,11 @@ describe("CFC LlmDerived stamping mechanism", () => {
     }
   });
 
-  it("stamps an [ID]-split element on its own doc", async () => {
-    // Real dialog messages carry an [ID] sigil and split into their own
-    // entity docs; the stamp must land on the split doc and surface through
-    // the element's label view.
+  it("stamps a split element on its own doc", async () => {
+    // Exercises the generic split mechanism directly, via frame anchoring.
+    // Dialog messages reach the same shape by a different route -- the dialog
+    // creates each message's document explicitly -- and either way the stamp
+    // must land on the split doc and surface through the element's label view.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -140,17 +143,25 @@ describe("CFC LlmDerived stamping mechanism", () => {
         kind: "builtin",
         builtinId: "llm-dialog",
       });
-      const stamping = runtime.getCell(
-        signer.did(),
-        "llm-derived-id-split",
-        stampingMessagesSchema,
-        modelTx,
-      );
-      stamping.push({
-        [ID]: { llmDialog: { message: "m", id: "id-split-1" } },
-        role: "assistant",
-        content: "model bytes",
-      } as unknown as { role: string; content: string });
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "llm-derived-id-split",
+        reactives: new Set(),
+      });
+      try {
+        const stamping = runtime.getCell(
+          signer.did(),
+          "llm-derived-id-split",
+          stampingMessagesSchema,
+          modelTx,
+        );
+        stamping.push({
+          role: "assistant",
+          content: "model bytes",
+        } as unknown as { role: string; content: string });
+      } finally {
+        popFrame(frame);
+      }
       modelTx.prepareCfc();
       expect((await modelTx.commit()).ok).toBeDefined();
 
@@ -284,28 +295,10 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       const addMessage = await result.key("addMessage").pull();
       addMessage.send({ role: "user", content: "Hello" });
 
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timeout waiting for assistant reply")),
-          5000,
-        );
-        const cancel = result.sink(
-          ({ pending, messages }: {
-            pending?: boolean;
-            messages?: readonly unknown[];
-          } = {}) => {
-            if (pending === false && messages?.length === 2) {
-              clearTimeout(timeout);
-              cancel();
-              resolve();
-            }
-          },
-        );
-      });
-      await runtime.idle();
+      await waitForLlmMessages(runtime, result, 2);
 
       // The contract is the PERSISTED metadata on each message's own entity
-      // doc (messages carry [ID] and split); read it there directly — the
+      // doc (every message is its own document); read it there directly — the
       // multi-hop handle chain (result → messages link → element link) is a
       // separate label-view surfacing concern.
       const messagesCell = result.key("messages");
@@ -403,25 +396,7 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       const addMessage = await result.key("addMessage").pull();
       addMessage.send({ role: "user", content: "Hello" });
 
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => reject(new Error("Timeout waiting for assistant reply")),
-          5000,
-        );
-        const cancel = result.sink(
-          ({ pending, messages }: {
-            pending?: boolean;
-            messages?: readonly unknown[];
-          } = {}) => {
-            if (pending === false && messages?.length === 2) {
-              clearTimeout(timeout);
-              cancel();
-              resolve();
-            }
-          },
-        );
-      });
-      await runtime.idle();
+      await waitForLlmMessages(runtime, result, 2);
 
       const messagesCell = result.key("messages");
       const rtx = runtime.edit();

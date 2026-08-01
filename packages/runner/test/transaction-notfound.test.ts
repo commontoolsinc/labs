@@ -158,6 +158,23 @@ describe("Transaction NotFound Behavior", () => {
     expect(result.ok?.value).toBeUndefined();
   });
 
+  it("should not read inherited properties as stored document paths", () => {
+    const storage = new MockStorageManager();
+    const replica = storage.open(testSpace).replica as MockReplica;
+    replica.setData("doc:1", "application/json", { age: 30 });
+
+    const tx = storage.edit();
+    const result = tx.read({
+      space: testSpace,
+      id: "doc:1",
+      type: "application/json",
+      path: ["constructor"],
+    });
+
+    expect(result.ok).toBeDefined();
+    expect(result.ok?.value).toBeUndefined();
+  });
+
   it("should return TypeMismatchError when traversing through non-object", () => {
     const storage = new MockStorageManager();
     const replica = storage.open(testSpace).replica as MockReplica;

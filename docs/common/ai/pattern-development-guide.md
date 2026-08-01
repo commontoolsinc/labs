@@ -191,19 +191,25 @@ are:
   - avoid `let`, `var`, reassignment, and loop statements
   - prefer array methods, `computed()`, module-scope `lift()`, or a
     module-scope helper
-- do not rely on authored timers or proxies:
+- do not use authored timers or proxies:
   - `setTimeout()`, `setInterval()`, and `new Proxy()` are not part of the
-    authored runtime surface yet
-- use explicit time/random escape hatches only when needed:
-  - use `safeDateNow()` instead of `Date.now()`
-  - use `nonPrivateRandom()` instead of `Math.random()`
-  - prefer calling them from `action()`, `handler()`, or one-time
-    initialization rather than inside re-running computations such as
-    `computed()` or `lift()`
-
-The current exported helper names are `safeDateNow()` and
-`nonPrivateRandom()`. Older shorthand such as `dateNow` or `insecureRandom`
-does not match the current API.
+    authored runtime surface and do not compile; drive timed work through the
+    scheduler (`computed()`, handlers, streams) instead of your own clock
+- read the clock and randomness through the ordinary built-ins, only where
+  they belong:
+  - use `Date.now()` (or `new Date()`) for the clock and `Math.random()` for
+    randomness — inside a pattern these resolve to the gated sandbox
+    intrinsics, not the host ones
+  - call them from `action()`, `handler()`, or one-time initialization only.
+    In a re-running computation (`computed()` or `lift()`) they throw a
+    `TimeCapabilityError`, because an ambient clock/entropy read there would
+    break idempotency. Inside a handler the clock is coarsened to one-second
+    resolution.
+  - for a live clock a `computed()` can react to, read the interval `#now`
+    wish (`wish({ query: "#now/N" })`, N in seconds) instead. The bare `#now`
+    wish is not a clock: it durably captures the piece's first-ever load time
+    and never advances — right for a created-at stamp, wrong for anything
+    that must track the current time
 
 Locale-sensitive formatting works, with pinned defaults:
 
@@ -225,8 +231,8 @@ Locale-sensitive formatting works, with pinned defaults:
 // Shown inside a pattern body.
 const createItem = action(() => {
   items.push({
-    id: `item-${nonPrivateRandom().toString(36).slice(2, 8)}`,
-    createdAt: safeDateNow(),
+    id: `item-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: Date.now(),
     title: title.get(),
   });
 });
@@ -346,6 +352,15 @@ match exactly. There is no automatic name mapping. `chartData` and
 
 Coordinate naming across related patterns before implementation. Mismatched
 field names create silent friction later and are easy to miss during assembly.
+
+Keep the receiving side's data contract as narrow as its actual reads and
+writes. Pattern schemas select and validate runtime data and preserve requested
+live-cell/stream bindings, so importing a producer's full `Input` or `Output`
+type can fetch, bind, and migration-couple much more than the relationship
+needs. Prefer a consumer-owned structural type containing only the required
+fields. When several independent consumers share a genuine role, have the
+producer export a shallow role model rather than its full pattern schema. See
+`docs/common/patterns/composition.md#keep-external-data-contracts-narrow`.
 
 ## Workflow Guidance
 

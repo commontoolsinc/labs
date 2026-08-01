@@ -15,6 +15,13 @@ const DEFAULT_DELAY_MS = (() => {
   }
 })();
 
+// Built-in safety net for a genuinely stuck condition in waitForCondition. The
+// wait is notification-driven and resolves the instant its predicate holds, so
+// this bound is never the common-case latency; it is generous enough to cover
+// the slowest legitimate wait (a runtime resync after a reload) without capping
+// a condition that is still making progress.
+const WAIT_FOR_CONDITION_TIMEOUT = 300_000; // 5 minutes
+
 /**
  * Receives an async predicate function to executed repeatedly
  * until either the predicate returns `true`, or throws once
@@ -81,10 +88,25 @@ export const awaitViewSettled = async (page: Page): Promise<boolean> => {
 export interface ProbeApi {
   /** Every element matching `selector`, descending through shadow roots. */
   collect(selector: string): Element[];
-  /** Whether `element` is on-screen and not display/visibility hidden. */
+  /**
+   * Whether `element` is rendered: it has a non-empty layout box and is not
+   * `display:none` or `visibility:hidden`. Viewport-independent, so an element
+   * below the fold is rendered. This is the "is this control laid out yet"
+   * question a predicate asks before tagging a control it is about to click —
+   * a click scrolls the element into view itself.
+   */
+  isRendered(element: Element): boolean;
+  /** Whether `element` is rendered and also on-screen. */
   isVisible(element: Element): boolean;
   /** Visible text of `root` plus its shadow and slotted descendants. */
   deepText(root: ParentNode): string;
+  /**
+   * Add `token` to the whitespace-separated token list held in `element`'s
+   * `attribute`, keeping the tokens already there. This is how a predicate
+   * tags an element it has resolved without disturbing a tag another wait
+   * placed on the same element. Adding a token twice leaves one copy.
+   */
+  addToken(element: Element, attribute: string, token: string): void;
 }
 
 /**
@@ -118,13 +140,18 @@ function installWaiter(
   predicateSource: string,
   predicateArgs: unknown[],
 ): void {
-  type Probe = {
-    collect: (selector: string) => Element[];
-    isVisible: (element: Element) => boolean;
-    deepText: (root: ParentNode) => string;
+  const isRendered = (element: Element): boolean => {
+    const style = globalThis.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
   };
 
-  const probe: Probe = {
+  // Typed as the ProbeApi the predicates are handed, so a method added to that
+  // interface has to be implemented here too. The annotation is erased before
+  // this function is serialized into the page, so it adds no runtime reference
+  // to module scope.
+  const probe: ProbeApi = {
     collect(selector) {
       const out: Element[] = [];
       const walk = (root: Document | ShadowRoot) => {
@@ -140,14 +167,13 @@ function installWaiter(
       walk(document);
       return out;
     },
+    isRendered,
     isVisible(element) {
+      if (!isRendered(element)) return false;
       const rect = element.getBoundingClientRect();
-      const style = globalThis.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 &&
-        rect.bottom >= 0 && rect.right >= 0 &&
+      return rect.bottom >= 0 && rect.right >= 0 &&
         rect.top <= globalThis.innerHeight &&
-        rect.left <= globalThis.innerWidth &&
-        style.visibility !== "hidden" && style.display !== "none";
+        rect.left <= globalThis.innerWidth;
     },
     deepText(root) {
       const parts: string[] = [];
@@ -181,10 +207,17 @@ function installWaiter(
       visit(root);
       return parts.join(" ");
     },
+    addToken(element, attribute, token) {
+      const tokens = new Set(
+        (element.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean),
+      );
+      tokens.add(token);
+      element.setAttribute(attribute, [...tokens].join(" "));
+    },
   };
 
   const predicate = new Function("return (" + predicateSource + ")")() as (
-    probe: Probe,
+    probe: ProbeApi,
     ...args: unknown[]
   ) => unknown;
 
@@ -350,14 +383,15 @@ function installWaiter(
  * step idles until its condition is actually satisfied — like `select(2)` or
  * `wait` — and then proceeds immediately.
  *
- * On timeout it throws; callers add the context and rich probe for the failure
- * message. `timeout` is a safety net for a genuinely stuck condition, not the
- * common-case latency.
+ * On a stuck condition it throws once the built-in `WAIT_FOR_CONDITION_TIMEOUT`
+ * safety net elapses; callers add the context and rich probe for the failure
+ * message. There is no caller-supplied timeout: the wait resolves on the
+ * condition, and the safety net is not the common-case latency.
  */
 export const waitForCondition = async <A extends readonly unknown[]>(
   page: Page,
   predicate: PageCondition<A>,
-  { timeout = 60_000, args }: { timeout?: number; args?: A } = {},
+  { args }: { args?: A } = {},
 ): Promise<void> => {
   const bindingName = `__cfcWait_${crypto.randomUUID().replace(/-/g, "")}`;
   let resolveSignal!: () => void;
@@ -378,9 +412,11 @@ export const waitForCondition = async <A extends readonly unknown[]>(
       timer = setTimeout(
         () =>
           reject(
-            new Error(`waitForCondition did not resolve within ${timeout}ms`),
+            new Error(
+              `waitForCondition did not resolve within ${WAIT_FOR_CONDITION_TIMEOUT}ms`,
+            ),
           ),
-        timeout,
+        WAIT_FOR_CONDITION_TIMEOUT,
       );
     });
     await Promise.race([signalled, timedOut]);

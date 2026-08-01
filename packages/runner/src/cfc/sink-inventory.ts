@@ -1,3 +1,4 @@
+import type { CfcConfClause } from "./clause.ts";
 export type InitialSinkName =
   | "fetchBinary"
   | "fetchText"
@@ -45,7 +46,7 @@ export const isInitialSinkInventoryName = (
  * recorded `sink-request` write-policy input.
  */
 export type SinkMaxConfidentiality = Readonly<
-  Record<string, readonly unknown[]>
+  Record<string, readonly CfcConfClause[]>
 >;
 
 /**

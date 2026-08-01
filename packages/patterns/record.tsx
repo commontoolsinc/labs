@@ -12,6 +12,7 @@
  */
 
 import {
+  type Cell,
   computed,
   type Default,
   handler,
@@ -19,11 +20,12 @@ import {
   lift,
   NAME,
   pattern,
-  safeDateNow,
   SELF,
   str,
+  type Stream,
   toCompactDebugString,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -31,53 +33,14 @@ import {
   getAddableTypes,
   getDefinition,
 } from "./record/registry.ts";
+import { getNextUnusedLabel } from "./record/standard-labels.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
-import Note from "./notes/note.tsx";
+import Note, { type NoteOutput } from "./notes/note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
-import { TypePickerModule } from "./type-picker.tsx";
+import { TypePickerModule, type TypePickerOutput } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
-import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
-
-// ===== Standard Labels for Smart Defaults =====
-// When adding a second module of same type, pick next unused standard label
-const STANDARD_LABELS: Record<string, string[]> = {
-  email: ["Personal", "Work", "School", "Other"],
-  phone: ["Mobile", "Home", "Work", "Other"],
-  address: ["Home", "Work", "Billing", "Shipping", "Other"],
-};
-
-// Helper to get next unused standard label for a module type
-function getNextUnusedLabel(
-  type: string,
-  existingPieces: readonly SubPieceEntry[],
-): string | undefined {
-  const standards = STANDARD_LABELS[type];
-  if (!standards || standards.length === 0) return undefined;
-
-  // Collect labels already used by modules of this type
-  const usedLabels = new Set<string>();
-  for (const entry of existingPieces) {
-    if (entry.type === type) {
-      try {
-        // Access the label field from the piece pattern output
-        // Property access is reactive - framework handles Cell unwrapping
-        // deno-lint-ignore no-explicit-any
-        const piece = entry.piece as any;
-        const labelValue = piece?.label;
-        if (typeof labelValue === "string" && labelValue) {
-          usedLabels.add(labelValue);
-        }
-      } catch {
-        // Ignore errors from pieces without label field
-      }
-    }
-  }
-
-  // Return first unused standard label (or undefined if all used)
-  return standards.find((label) => !usedLabels.has(label));
-}
 
 // ===== Types =====
 
@@ -88,97 +51,122 @@ interface RecordInput {
 }
 
 export interface RecordOutput {
+  [NAME]?: string;
+  [UI]?: VNode;
   title?: string | Default<"">;
   subPieces?: SubPieceEntry[] | Default<[]>;
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
   /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
+  /** Adds a module of the named type to this record's sub-pieces. */
+  addModule?: Stream<{
+    type: string;
+    initialData?: Record<string, unknown>;
+    result?: Writable<unknown>;
+  }>;
+  /** Writes a structured summary of every module into the result cell. */
+  getSummary?: Stream<{ result?: Writable<unknown> }>;
+  /** Sets a directly-settable field on the module at the given index. */
+  updateModule?: Stream<{
+    index: number;
+    field: string;
+    value: unknown;
+    result?: Writable<unknown>;
+  }>;
+  /** Moves the module at the given index to the trash. */
+  removeModule?: Stream<{ index: number; result?: Writable<unknown> }>;
+  /** Sets this record's title. */
+  setTitle?: Stream<{ newTitle: string; result?: Writable<unknown> }>;
+  /** Writes the list of addable module types into the result cell. */
+  listModuleTypes?: Stream<{ result?: Writable<unknown> }>;
 }
 
-// ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
-// Based on chatbot-list-view.tsx pattern:
-// - Outer lift creates the pieces and calls inner lift
-// - Inner lift receives pieces as input and stores them
-// This works because the inner lift provides proper cause context
-//
-// TypePicker is a "controller module" - it receives parent Cells as input
-// so it can modify the parent's subPieces list when a template is selected.
-
-// Inner lift: stores the initial pieces (receives pieces as input)
-const storeInitialPieces = lift<{
-  notesPiece: any;
-  notesSchema: any;
-  typePickerPiece: any;
-  typePickerSchema: any;
+// ===== Auto-initialize Notes + TypePicker =====
+// Seed an empty Record with a pinned Notes module and a TypePicker module. The
+// two pieces and their schemas are built in the pattern body, which supplies
+// their durable identity, and passed in; this lift writes them into `subPieces`
+// when the Record is empty. It runs when something reads its result, which the
+// body does in `allEntriesWithIndex`, so the seed happens the first time the
+// module list is rendered. `isInitialized` latches on the first run whether or
+// not it seeded, so the seed happens at most once and a Record that is later
+// emptied is not re-seeded.
+const seedRecord = lift<{
+  currentPieces: SubPieceEntry[]; // Unwrapped value, used only for the guard
   subPieces: Writable<SubPieceEntry[]>;
+  // The pieces the seeder stores on the entries. Typed as cells so the handle
+  // survives the lift boundary; a plain `unknown` is read back as undefined and
+  // the module is lost.
+  notesPiece: Cell<NoteOutput>;
+  typePickerPiece: Cell<TypePickerOutput>;
   isInitialized: Writable<boolean>;
-}>(({
-  notesPiece,
-  notesSchema,
-  typePickerPiece,
-  typePickerSchema,
+  // The result type is declared rather than inferred. The body reads this
+  // lift's result to demand the seed, and a capture the schema generator leaves
+  // out of the reading lift's input schema is dropped on read: the read came
+  // back undefined, the guard on it treated a seeded Record as unseeded, and
+  // the module list rendered empty.
+}, boolean>(({
+  currentPieces,
   subPieces,
+  notesPiece,
+  typePickerPiece,
   isInitialized,
 }) => {
   if (!isInitialized.get()) {
-    subPieces.set([
-      { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
-      {
-        type: "type-picker",
-        pinned: false,
-        piece: typePickerPiece,
-        schema: typePickerSchema,
-      },
-    ]);
+    if ((currentPieces || []).length === 0) {
+      subPieces.set([
+        {
+          type: "notes",
+          pinned: true,
+          piece: notesPiece,
+        },
+        {
+          type: "type-picker",
+          pinned: false,
+          piece: typePickerPiece,
+        },
+      ]);
+    }
     isInitialized.set(true);
-    return notesPiece; // Return notes piece as primary reference
   }
+
+  // A stable, readable result so the pattern body can put this lift in the
+  // Record UI's demand graph.
+  return true;
 });
 
-// Outer lift: checks if empty, creates pieces, calls inner lift
-// TypePicker uses ContainerCoordinationContext protocol for parent access
-// Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
-const initializeRecord = lift<{
-  currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
-  subPieces: Writable<SubPieceEntry[]>;
-  trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
-  isInitialized: Writable<boolean>;
-  recordPatternJson: string; // Computed that returns Record JSON string
-}>(({
-  currentPieces,
-  subPieces,
-  trashedSubPieces,
-  isInitialized,
-  recordPatternJson,
-}) => {
-  if ((currentPieces || []).length === 0) {
-    // Create Note as default module (rendered via cf-render variant="tile" → its [TILE_UI])
-    // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
-    const notesPiece = Note({ linkPattern: recordPatternJson });
+// ===== Reading a sub-piece's own fields =====
+//
+// SubPieceEntry.piece is typed `unknown`, which lowers to `{ type: "unknown" }`,
+// and an object read under that schema comes back as undefined rather than
+// materialized. So `entry.piece.label` and its siblings read as undefined
+// wherever the entry carries its declared schema. What materializes a read is
+// the schema of the operand it is read into, so the lifts below name the fields
+// they want: the read then follows the entry's link into the sub-piece and
+// materializes them, and re-runs when the sub-piece changes them. The call sites
+// cast the `unknown` handle to the operand's shape; the cell is the same either
+// way.
 
-    // Capture schema for dynamic discovery
-    const notesSchema = getResultSchema(notesPiece);
+/** What the Record's own chrome displays about a module it holds. */
+interface SubPieceDisplayFields {
+  /** The module type, carried through so a reader can pick modules by it. */
+  type: string;
+  /** Instance label, e.g. the email module's "Personal" or "Work". */
+  label?: string;
+  /** Icon chosen in a record-icon module. */
+  icon?: string;
+  /** Alias held by a nickname module. */
+  nickname?: string;
+}
 
-    // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
-    // NOTE: Cells must be top-level, not nested in a context object!
-    const typePickerPiece = TypePickerModule({
-      entries: subPieces,
-      trashedEntries: trashedSubPieces,
-    });
-
-    // Capture schema for dynamic discovery
-    const typePickerSchema = getResultSchema(typePickerPiece);
-
-    return storeInitialPieces({
-      notesPiece,
-      notesSchema,
-      typePickerPiece,
-      typePickerSchema,
-      subPieces,
-      isInitialized,
-    });
-  }
-});
+const readDisplayFields = lift<
+  { type: string; piece: Omit<SubPieceDisplayFields, "type"> },
+  SubPieceDisplayFields
+>(({ type, piece }) => ({
+  type,
+  label: piece?.label,
+  icon: piece?.icon,
+  nickname: piece?.nickname,
+}));
 
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(
@@ -188,6 +176,41 @@ const moduleHasSettings = lift(
     return !!piece?.settingsUI;
   },
 );
+
+// The settings UI exported by the module at `index`, or null when no module is
+// selected or the module exports none. Naming `piece` on the operand is what
+// makes the read follow the link: an operand that only says the entries are
+// permissive leaves each element resolving against its own declared schema,
+// with `piece: unknown` still in it. The settings node itself is left
+// permissive, which keeps it a reference to the sub-piece's own UI rather than
+// a copy, so the controls in it stay bound to the sub-piece.
+const readSettingsUI = lift(
+  ({ entries, index }: {
+    // deno-lint-ignore no-explicit-any
+    entries?: { piece: any }[];
+    index?: number;
+  }) => {
+    if (index === undefined || index === null) return null;
+    return entries?.[index]?.piece?.settingsUI ?? null;
+  },
+);
+
+// The same field reads inside a handler go through a live Cell rather than a
+// declared operand shape: a handler receives the entry list as a value, so the
+// piece has to survive the boundary as a handle it can call `get()` on. A
+// handler that reads or writes a module's fields takes this view of the same
+// `subPieces` cell, and the call site casts to bridge the two views.
+type SubPieceEntryHandle =
+  & Omit<SubPieceEntry, "piece">
+  & { piece: Cell<Record<string, unknown>> };
+
+// Trashing a module and restoring it moves the module's piece from the active
+// list into the trash and back. The move reads the piece across a handler
+// boundary, so a trashed entry types its piece as a live Cell too, the same way
+// the active list's handle does.
+type TrashedSubPieceEntryHandle =
+  & Omit<TrashedSubPieceEntry, "piece">
+  & { piece: Cell<Record<string, unknown>> };
 
 // ===== Module-Scope Handlers (avoid closures, use references not indices) =====
 
@@ -288,14 +311,17 @@ const addSubPiece = handler<
     } as any)
     : createSubPiece(type, initialValues);
 
-  // Capture schema at creation time for dynamic discovery
-  const schema = getResultSchema(piece);
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
-    schema,
+    // Omitted rather than stored as undefined when the type has no standard
+    // labels: the field is declared a string, and a write of the whole list
+    // through the piece API validates a present-but-undefined property against
+    // that declaration and rejects the write ("subPieces: N: label: value does
+    // not match type string").
+    ...(nextLabel ? { label: nextLabel } : {}),
   }]);
   sat.set("");
 });
@@ -305,8 +331,8 @@ const addSubPiece = handler<
 const trashSubPiece = handler<
   unknown,
   {
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntryHandle[]>;
     expandedIndex: Writable<number | undefined>;
     settingsModuleIndex: Writable<number | undefined>;
     index: number;
@@ -326,7 +352,7 @@ const trashSubPiece = handler<
   if (!entry) return;
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date(safeDateNow()).toISOString() });
+  trash.push({ ...entry, trashedAt: new Date().toISOString() });
 
   // Remove from active using splice
   const updated = [...current];
@@ -362,8 +388,8 @@ const trashSubPiece = handler<
 const restoreSubPiece = handler<
   unknown,
   {
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntryHandle[]>;
     trashIndex: number;
   }
 >((_event, { subPieces: sc, trashedSubPieces: trash, trashIndex }) => {
@@ -497,7 +523,7 @@ const handleGetSummary = handler<
   { result?: Writable<unknown> },
   {
     title: Writable<string>;
-    subPieces: Writable<SubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
   }
 >(({ result }, { title, subPieces }) => {
   const modules = subPieces.get() || [];
@@ -506,38 +532,20 @@ const handleGetSummary = handler<
     moduleCount: modules.length,
     modules: modules.map((entry, index) => {
       const def = getDefinition(entry.type);
-      // Extract data from piece - access common fields reactively
-      // deno-lint-ignore no-explicit-any
-      const piece = entry.piece as any;
+      // Read the piece's current field values. The piece is a live Cell here,
+      // so `get()` resolves the whole module value; a plain read off the
+      // `unknown`-typed handle would come back undefined. Every own field is
+      // reported except callable outputs (streams); a module whose value cannot
+      // be resolved contributes empty data rather than failing the whole
+      // summary.
       const moduleData: Record<string, unknown> = {};
-
-      // Try to extract common fields based on module type
       try {
-        // Most modules have a primary value field
-        if (piece?.label !== undefined) moduleData.label = piece.label;
-        if (piece?.value !== undefined) moduleData.value = piece.value;
-        if (piece?.content !== undefined) moduleData.content = piece.content;
-        if (piece?.address !== undefined) moduleData.address = piece.address;
-        if (piece?.email !== undefined) moduleData.email = piece.email;
-        if (piece?.phone !== undefined) moduleData.phone = piece.phone;
-        if (piece?.rating !== undefined) moduleData.rating = piece.rating;
-        if (piece?.tags !== undefined) moduleData.tags = piece.tags;
-        if (piece?.status !== undefined) moduleData.status = piece.status;
-        if (piece?.nickname !== undefined) moduleData.nickname = piece.nickname;
-        if (piece?.icon !== undefined) moduleData.icon = piece.icon;
-        if (piece?.birthDate !== undefined) {
-          moduleData.birthDate = piece.birthDate;
-        }
-        if (piece?.birthYear !== undefined) {
-          moduleData.birthYear = piece.birthYear;
-        }
-        if (piece?.url !== undefined) moduleData.url = piece.url;
-        if (piece?.notes !== undefined) moduleData.notes = piece.notes;
-        if (piece?.occurrences !== undefined) {
-          moduleData.occurrences = piece.occurrences;
+        const pieceValue = entry.piece?.get() ?? {};
+        for (const [key, fieldValue] of Object.entries(pieceValue)) {
+          if (typeof fieldValue !== "function") moduleData[key] = fieldValue;
         }
       } catch {
-        // Ignore errors from pieces without expected fields
+        // A module whose value cannot be resolved contributes no data.
       }
 
       return {
@@ -549,7 +557,6 @@ const handleGetSummary = handler<
         collapsed: entry.collapsed || false,
         note: entry.note,
         data: moduleData,
-        schema: entry.schema,
       };
     }),
   };
@@ -597,12 +604,17 @@ const handleAddModule = handler<
 
   const current = sc.get() || [];
 
-  // Get smart default label for modules that support it
+  // Get smart default label for modules that support it. initialData may carry
+  // an explicit label that overrides the smart default; record the effective
+  // label on the entry so the next add can see it.
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = {
     ...(nextLabel ? { label: nextLabel } : {}),
     ...initialData,
   };
+  const entryLabel = typeof initialValues.label === "string"
+    ? initialValues.label
+    : undefined;
 
   // Create the module - special cases handled
   let piece: unknown;
@@ -626,16 +638,13 @@ const handleAddModule = handler<
     piece = createSubPiece(type, initialValues);
   }
 
-  // Capture schema at creation time
-  const schema = getResultSchema(piece);
-
-  sc.push({
+  sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
-    schema,
-  });
+    ...(entryLabel ? { label: entryLabel } : {}),
+  }]);
 
   if (result) {
     result.set({
@@ -653,7 +662,7 @@ const handleAddModule = handler<
 // value: new value
 const handleUpdateModule = handler<
   { index: number; field: string; value: unknown; result?: Writable<unknown> },
-  { subPieces: Writable<SubPieceEntry[]> }
+  { subPieces: Writable<SubPieceEntryHandle[]> }
 >(({ index, field, value, result }, { subPieces: sc }) => {
   const current = sc.get() || [];
 
@@ -670,42 +679,40 @@ const handleUpdateModule = handler<
   }
 
   const entry = current[index];
-  // deno-lint-ignore no-explicit-any
-  const piece = entry.piece as any;
+  const piece = entry.piece;
 
   if (!piece) {
     if (result) result.set({ success: false, error: "Module piece not found" });
     return;
   }
 
+  // Only the piece's own, non-callable fields may be written. A path write
+  // through `piece.key(field)` would otherwise create whatever field it is
+  // handed; `Object.hasOwn` keeps a caller to the module's real fields (an `in`
+  // test would also admit inherited names like `constructor`), and the callable
+  // check keeps it off the module's streams.
+  const pieceValue = piece.get();
+  if (
+    !pieceValue || !Object.hasOwn(pieceValue, field) ||
+    typeof pieceValue[field] === "function"
+  ) {
+    if (result) {
+      result.set({
+        success: false,
+        error:
+          `Field ${field} is not a settable field on module type ${entry.type}`,
+      });
+    }
+    return;
+  }
+
   try {
-    // Try to access the field as a Cell and set it
-    const fieldCell = piece[field];
-    if (fieldCell && typeof fieldCell.set === "function") {
-      fieldCell.set(value);
-      if (result) {
-        result.set({
-          success: true,
-          message: `Updated ${field} to ${toCompactDebugString(value)}`,
-        });
-      }
-    } else if (fieldCell && typeof fieldCell.key === "function") {
-      // It might be a nested cell - try setting via parent
-      if (result) {
-        result.set({
-          success: false,
-          error:
-            `Field ${field} exists but is not directly settable. Try a more specific path.`,
-        });
-      }
-    } else {
-      if (result) {
-        result.set({
-          success: false,
-          error:
-            `Field ${field} not found or not a Cell on module type ${entry.type}`,
-        });
-      }
+    piece.key(field).set(value);
+    if (result) {
+      result.set({
+        success: true,
+        message: `Updated ${field} to ${toCompactDebugString(value)}`,
+      });
     }
   } catch (err) {
     if (result) {
@@ -718,8 +725,8 @@ const handleUpdateModule = handler<
 const handleRemoveModule = handler<
   { index: number; result?: Writable<unknown> },
   {
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntryHandle[]>;
   }
 >(({ index, result }, { subPieces: sc, trashedSubPieces: trash }) => {
   const current = sc.get() || [];
@@ -740,7 +747,7 @@ const handleRemoveModule = handler<
   const def = getDefinition(entry.type);
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date(safeDateNow()).toISOString() });
+  trash.push({ ...entry, trashedAt: new Date().toISOString() });
 
   // Remove from active
   const updated = [...current];
@@ -810,6 +817,7 @@ const createSibling = handler<
     pinned: false,
     collapsed: false,
     piece,
+    ...(nextLabel ? { label: nextLabel } : {}),
   });
   sc.set(updated);
 });
@@ -856,25 +864,69 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Settings modal state - tracks which module's settings are being edited
     const settingsModuleIndex = new Writable<number | undefined>();
 
+    // Handle views of the two lists for the handlers that read or move a
+    // module's piece. The piece is declared `unknown` on the entry, which reads
+    // back across a handler boundary as undefined; typing it as a live Cell
+    // keeps the handle. getSummary and updateModule read the active list this
+    // way, and trashSubPiece, removeModule and restoreSubPiece carry a piece
+    // into the trash and back through both. The cast only bridges the declared
+    // list type to that view; the cell is the same either way.
+    // deno-lint-ignore no-explicit-any
+    const subPiecesHandle: Writable<SubPieceEntryHandle[]> = subPieces as any;
+    const trashedHandle: Writable<TrashedSubPieceEntryHandle[]> =
+      // deno-lint-ignore no-explicit-any
+      trashedSubPieces as any;
+
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
     const recordPatternJson = computed(() => JSON.stringify(Record));
 
     // ===== Auto-initialize Notes + TypePicker =====
-    // Capture return value to force lift execution (fixes wiki-link creation)
+    // Build the two default modules in the pattern body, which supplies their
+    // durable identity. The Note carries recordPatternJson so its [[wiki-links]]
+    // resolve to Record pieces rather than Note pieces; the TypePicker gets the
+    // parent list cells so it can rewrite them when the user picks a template.
+    // `seedRecord` writes these into an empty Record, and reading its result (in
+    // `allEntriesWithIndex`) is what demands the seed.
     const isInitialized = new Writable(false);
-    const _initialized = initializeRecord({
+    const seedNotesPiece = Note({ linkPattern: recordPatternJson });
+    const seedTypePickerPiece = TypePickerModule({
+      entries: subPieces,
+      trashedEntries: trashedSubPieces,
+    });
+    const recordSeeded = seedRecord({
       currentPieces: subPieces,
       subPieces,
-      trashedSubPieces,
+      notesPiece: seedNotesPiece,
+      typePickerPiece: seedTypePickerPiece,
       isInitialized,
-      recordPatternJson,
     });
 
     // ===== Computed Values =====
 
     // Display name with fallback
     const displayName = computed(() => title?.trim() || "(Untitled Record)");
+
+    // Each module's own label, icon and nickname, in list order. The reads live
+    // here rather than inside the computeds below because a `.map()` at pattern
+    // scope keeps each element a link, so `readDisplayFields` is applied to the
+    // entry's piece itself; the same `.map()` inside a `computed()` would run
+    // over the already-materialized list, where the piece is undefined. Each
+    // element carries its module type, so a reader that wants one kind of
+    // module picks it out of this list rather than pairing it with `subPieces`
+    // by position.
+    const displayFields = subPieces.map((entry) =>
+      readDisplayFields({
+        type: entry.type,
+        piece: entry.piece as Omit<SubPieceDisplayFields, "type">,
+      })
+    );
+    const trashedDisplayFields = trashedSubPieces.map((entry) =>
+      readDisplayFields({
+        type: entry.type,
+        piece: entry.piece as Omit<SubPieceDisplayFields, "type">,
+      })
+    );
 
     // Entry with index for rendering - preserves piece references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
@@ -894,14 +946,17 @@ const Record = pattern<RecordInput, RecordOutput>(
     // IMPORTANT: displayInfo uses getDisplayInfo (plain helper) - this works because
     //   computed() transforms .map() callbacks to properly unwrap reactive values
     const allEntriesWithIndex = computed(() => {
+      // Reading `recordSeeded` puts `seedRecord` in this UI's demand graph, so a
+      // fresh Record fills in its Notes + TypePicker modules the first time it
+      // is rendered; there is nothing to list until the seeder has run.
+      if (!recordSeeded) return [];
       const expandedIdx = expandedIndex.get();
       return subPieces.map((entry, index) => {
         // Get display info using plain helper function
         // This works because CTS transforms .map() to properly unwrap reactive values
         const displayInfo = getDisplayInfo(
           entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.piece as any)?.label,
+          displayFields[index]?.label,
         );
         return {
           entry,
@@ -971,11 +1026,10 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Check for manual icon override from record-icon module
     const manualIcon = computed(() => {
-      const iconModule = subPieces.find((e) => e?.type === "record-icon");
-      if (!iconModule) return null;
-      // deno-lint-ignore no-explicit-any
-      const iconValue = (iconModule.piece as any)?.icon;
-      if (!iconValue) return null;
+      const iconModule = (displayFields || []).find((fields) =>
+        fields?.type === "record-icon"
+      );
+      const iconValue = iconModule?.icon;
       return typeof iconValue === "string" && iconValue.trim()
         ? iconValue.trim()
         : null;
@@ -990,17 +1044,12 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Extract nicknames from nickname modules for display in NAME
     const nicknamesList = computed(() => {
-      const nicknameModules = subPieces.filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
-      for (const mod of nicknameModules) {
-        try {
-          // deno-lint-ignore no-explicit-any
-          const nicknameValue = (mod.piece as any)?.nickname;
-          if (typeof nicknameValue === "string" && nicknameValue.trim()) {
-            nicknames.push(nicknameValue.trim());
-          }
-        } catch {
-          // Ignore errors
+      for (const fields of displayFields || []) {
+        if (fields?.type !== "nickname") continue;
+        const nicknameValue = fields.nickname;
+        if (typeof nicknameValue === "string" && nicknameValue.trim()) {
+          nicknames.push(nicknameValue.trim());
         }
       }
       return nicknames;
@@ -1023,8 +1072,7 @@ const Record = pattern<RecordInput, RecordOutput>(
         // Get display info using plain helper function
         const displayInfo = getDisplayInfo(
           entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.piece as any)?.label,
+          trashedDisplayFields[trashIndex]?.label,
         );
         return { entry, trashIndex, displayInfo };
       });
@@ -1039,13 +1087,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     // ===== Settings Modal Computed Values =====
 
     // Get the settings UI for the currently selected module (if any)
-    const currentSettingsUI = computed(() => {
-      const idx = settingsModuleIndex.get();
-      if (idx === undefined) return null;
-      const entry = subPieces[idx];
-      if (!entry) return null;
-      // deno-lint-ignore no-explicit-any
-      return (entry.piece as any)?.settingsUI || null;
+    const currentSettingsUI = readSettingsUI({
+      entries: subPieces,
+      index: settingsModuleIndex,
     });
 
     // Get display info for the module whose settings are open
@@ -1055,11 +1099,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       const entry = subPieces[idx];
       if (!entry) return { icon: "", label: "Settings" };
       // Use plain helper function to get display info
-      return getDisplayInfo(
-        entry.type,
-        // deno-lint-ignore no-explicit-any
-        (entry.piece as any)?.label,
-      );
+      return getDisplayInfo(entry.type, displayFields[idx]?.label);
     });
 
     // ===== Main UI =====
@@ -1352,8 +1392,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   <button
                                     type="button"
                                     onClick={trashSubPiece({
-                                      subPieces,
-                                      trashedSubPieces,
+                                      subPieces: subPiecesHandle,
+                                      trashedSubPieces: trashedHandle,
                                       expandedIndex,
                                       settingsModuleIndex,
                                       index,
@@ -1644,8 +1684,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     <button
                                       type="button"
                                       onClick={trashSubPiece({
-                                        subPieces,
-                                        trashedSubPieces,
+                                        subPieces: subPiecesHandle,
+                                        trashedSubPieces: trashedHandle,
                                         expandedIndex,
                                         settingsModuleIndex,
                                         index,
@@ -1929,8 +1969,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 <button
                                   type="button"
                                   onClick={trashSubPiece({
-                                    subPieces,
-                                    trashedSubPieces,
+                                    subPieces: subPiecesHandle,
+                                    trashedSubPieces: trashedHandle,
                                     expandedIndex,
                                     settingsModuleIndex,
                                     index,
@@ -2054,8 +2094,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={restoreSubPiece({
-                                  subPieces,
-                                  trashedSubPieces,
+                                  subPieces: subPiecesHandle,
+                                  trashedSubPieces: trashedHandle,
                                   trashIndex,
                                 })}
                                 style={{
@@ -2247,10 +2287,16 @@ const Record = pattern<RecordInput, RecordOutput>(
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
-      getSummary: handleGetSummary({ title, subPieces }),
+      // getSummary, updateModule and removeModule reach the piece handles the
+      // lists hold, so they take the handle views (`subPiecesHandle`,
+      // `trashedHandle`) that type the piece as a live Cell.
+      getSummary: handleGetSummary({ title, subPieces: subPiecesHandle }),
       addModule: handleAddModule({ subPieces, trashedSubPieces, title }),
-      updateModule: handleUpdateModule({ subPieces }),
-      removeModule: handleRemoveModule({ subPieces, trashedSubPieces }),
+      updateModule: handleUpdateModule({ subPieces: subPiecesHandle }),
+      removeModule: handleRemoveModule({
+        subPieces: subPiecesHandle,
+        trashedSubPieces: trashedHandle,
+      }),
       setTitle: handleSetTitle({ title }),
       listModuleTypes: handleListModuleTypes({}),
     };

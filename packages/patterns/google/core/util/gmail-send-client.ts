@@ -183,22 +183,8 @@ export interface GmailLabel {
  */
 const MAX_RETRY_ATTEMPTS = 2;
 
-/**
- * Base delay in ms for exponential backoff between retries.
- * Actual delay = BASE_RETRY_DELAY_MS * 2^retryCount (100ms, 200ms, 400ms...)
- */
-const BASE_RETRY_DELAY_MS = 100;
-
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[GmailSendClient]", ...args);
-}
-
-/**
- * Sleep for exponential backoff delay based on retry count.
- */
-async function retryDelay(retryCount: number): Promise<void> {
-  const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
-  await new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 /**
@@ -373,7 +359,7 @@ export const GmailSendClient = (function (
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
+    // Handle 401 (token expired) - refresh the token and retry
     if (res.status === 401) {
       debugLog(
         debugMode,
@@ -389,7 +375,6 @@ export const GmailSendClient = (function (
         );
       }
       await refreshAuth();
-      await retryDelay(retryCount);
       return sendEmail(params, retryCount + 1);
     }
 
@@ -447,7 +432,7 @@ export const GmailSendClient = (function (
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
+    // Handle 401 (token expired) - refresh the token and retry
     if (res.status === 401) {
       debugLog(
         debugMode,
@@ -463,7 +448,6 @@ export const GmailSendClient = (function (
         );
       }
       await refreshAuth();
-      await retryDelay(retryCount);
       return modifyLabels(messageId, params, retryCount + 1);
     }
 
@@ -532,7 +516,7 @@ export const GmailSendClient = (function (
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
+    // Handle 401 (token expired) - refresh the token and retry
     if (res.status === 401) {
       debugLog(
         debugMode,
@@ -548,7 +532,6 @@ export const GmailSendClient = (function (
         );
       }
       await refreshAuth();
-      await retryDelay(retryCount);
       return batchModifyLabels(messageIds, params, retryCount + 1);
     }
 
@@ -593,7 +576,7 @@ export const GmailSendClient = (function (
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
+    // Handle 401 (token expired) - refresh the token and retry
     if (res.status === 401) {
       debugLog(
         debugMode,
@@ -609,7 +592,6 @@ export const GmailSendClient = (function (
         );
       }
       await refreshAuth();
-      await retryDelay(retryCount);
       return listLabels(retryCount + 1);
     }
 

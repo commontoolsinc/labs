@@ -69,7 +69,7 @@ expect.extend({
 
     // Implement partial matching logic similar to toMatchObject
     const matches = (obj: unknown, subset: unknown): boolean => {
-      if (subset === obj) return true;
+      if (Object.is(subset, obj)) return true;
       if (
         typeof subset !== "object" || subset === null ||
         typeof obj !== "object" || obj === null
@@ -78,9 +78,8 @@ expect.extend({
       }
 
       for (const key in subset) {
-        if (!(key in subset)) return false;
         if (!(key in obj)) return false;
-        const objValue = (subset as Record<string, unknown>)[key] as unknown;
+        const objValue = (obj as Record<string, unknown>)[key] as unknown;
         const subsetValue = (subset as Record<string, unknown>)[key] as unknown;
         if (!context.equal(objValue, subsetValue)) {
           // For nested objects, apply partial matching

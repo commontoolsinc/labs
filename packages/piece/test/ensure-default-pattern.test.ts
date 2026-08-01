@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { NAME, Runtime } from "@commonfabric/runner";
+import {
+  getPatternRepository,
+  getPatternSource,
+  NAME,
+  Runtime,
+} from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -17,15 +22,15 @@ const defaultPatternProgram: RuntimeProgram = {
       contents: [
         "/// <cf-disable-transform />",
         "import { handler, pattern } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
-        "  ({ piece }, { allPieces }) => {",
-        "    allPieces.push(piece);",
+        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+        "  ({ piece }, { pieceRegistry }) => {",
+        "    pieceRegistry.push(piece);",
         "  },",
         "  { proxy: true },",
         ");",
-        "export default pattern<{ allPieces: unknown[] }>(({ allPieces }) => ({",
-        "  allPieces,",
-        "  addPiece: addPiece({ allPieces }),",
+        "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+        "  pieceRegistry,",
+        "  addPiece: addPiece({ pieceRegistry }),",
         "}));",
       ].join("\n"),
     },
@@ -105,6 +110,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
     // The cell should have a reference linked
     const value = defaultPatternCell.get();
     expect(value).toBeDefined();
+    expect(
+      defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+    ).toBe("MockDefaultPattern");
   });
 
   it("should find defaultPattern when its untyped schema view is undefined", async () => {
@@ -174,6 +182,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
       const defaultPatternCell = spaceCell.key("defaultPattern");
       const value = defaultPatternCell.get();
       expect(value).toBeDefined();
+      expect(
+        defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("MockDefaultPattern");
     });
 
     it("should replace existing pattern when linking a different one", async () => {
@@ -200,6 +211,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
       const defaultPatternCell = spaceCell.key("defaultPattern");
       const firstValue = defaultPatternCell.get();
       expect(firstValue).toBeDefined();
+      expect(
+        defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("MockDefaultPattern1");
       const firstJson = JSON.stringify(firstValue);
 
       // Link second pattern (replacing first)
@@ -208,6 +222,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
       // Verify second pattern is now linked
       const secondValue = defaultPatternCell.get();
       expect(secondValue).toBeDefined();
+      expect(
+        defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("MockDefaultPattern2");
       const secondJson = JSON.stringify(secondValue);
 
       // The links should be different (different patterns)
@@ -337,5 +354,37 @@ describe("PiecesController.recreateDefaultPattern", () => {
     } finally {
       runtime.editWithRetry = originalEditWithRetry;
     }
+  });
+
+  it("stores an explicitly supplied repository for a custom root", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: defaultPatternProgram,
+      repository,
+    });
+
+    expect(getPatternRepository(piece.getCell())).toBe(repository);
+    expect((await piece.getPatternRef())?.source.repository).toBe(repository);
+    // The repository locator is the custom root's provenance; patternSource
+    // stays absent (there is no URL the auto-updater could re-fetch).
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+  });
+
+  it("rejects a repository locator without a custom root program", async () => {
+    await expect(controller.recreateDefaultPattern({
+      repository: "https://github.com/commontoolsinc/labs",
+    })).rejects.toThrow(/only be supplied with a custom program/);
+  });
+
+  it("does not stamp patternSource for a custom root without a repository", async () => {
+    // A custom program has no URL the auto-updater could re-fetch, and there
+    // is no locator to record. Stamping the "custom" placeholder would poison
+    // the updater's URL resolution, so the root intentionally stays
+    // unstamped (CT-1890).
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: defaultPatternProgram,
+    });
+
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
   });
 });

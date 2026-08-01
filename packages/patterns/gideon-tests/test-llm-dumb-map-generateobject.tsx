@@ -35,9 +35,7 @@ import {
   generateObject,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -66,9 +64,7 @@ const addItem = handler<
     if (!content) return;
 
     items.push({
-      id: `item-${safeDateNow()}-${
-        nonPrivateRandom().toString(36).slice(2, 9)
-      }`,
+      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       content,
     });
   },
@@ -94,7 +90,6 @@ export default pattern<Input>(({ items }) => {
       system:
         "Analyze the sentiment of the following text. Return positive, neutral, or negative sentiment with confidence 0-1 and relevant keywords.",
       prompt: item.content,
-      model: "anthropic:claude-sonnet-4-5",
     }),
   }));
 

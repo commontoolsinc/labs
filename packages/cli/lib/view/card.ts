@@ -18,15 +18,15 @@ import type {
 } from "./model.ts";
 import {
   ancestorsOf,
-  collectIdentUses,
+  collectIdentUsesBounded,
   type Dependency,
   findDependencies,
   findReferences,
+  type IdentUse,
 } from "./references.ts";
 import { basename } from "@std/path";
 import { cpLen } from "./ansi.ts";
-import { describeSynthetic } from "./vocab.ts";
-import type { Semantics } from "./semantics.ts";
+import type { Semantics } from "./languages/language.ts";
 
 /** A selectable cross-reference line that jumps the main view when invoked. */
 export interface CardTarget {
@@ -43,6 +43,9 @@ export interface CardTarget {
   /** External file to open, when the definition lives outside the blob; with
    * `destLine` the line within that file. */
   readonly filePath?: string;
+  /** A "… N more" line: selecting it and pressing Enter rebuilds the card with
+   * every truncated list shown in full, rather than navigating anywhere. */
+  readonly expand?: boolean;
 }
 
 /** A target relative to a section's own line array (offset into the card later). */
@@ -53,6 +56,7 @@ interface TargetRel {
   readonly defOffset?: number;
   readonly defEndOffset?: number;
   readonly filePath?: string;
+  readonly expand?: boolean;
 }
 
 interface Section {
@@ -70,11 +74,13 @@ export interface PeekCard {
 const MAX_CHILDREN = 14;
 const MAX_USES = 10;
 const MAX_DEPS = 10;
+const MAX_SEMANTIC_USES = 40;
 
 export function buildPeekCard(
   doc: Document,
   node: StructureNode,
   semantics?: Semantics,
+  expanded = false,
 ): PeekCard {
   const info: Line[] = [];
   const targets: CardTarget[] = [];
@@ -91,6 +97,18 @@ export function buildPeekCard(
     ? node.meta.typeText
     : undefined;
   const typeText = inferredType ?? syntacticType;
+  const collectedIdentUses = semantics
+    ? collectIdentUsesBounded(
+      doc,
+      node,
+      expanded ? Number.POSITIVE_INFINITY : MAX_SEMANTIC_USES,
+    )
+    : { uses: [], total: 0 };
+  const identUses = collectedIdentUses.uses;
+  const deferredIdentUses = collectedIdentUses.total - identUses.length;
+  const definitionOf = semantics
+    ? cachedDefinitionLookup(semantics)
+    : undefined;
 
   const append = (section: Section) => {
     if (section.lines.length === 0) return;
@@ -103,6 +121,7 @@ export function buildPeekCard(
         defOffset: t.defOffset,
         defEndOffset: t.defEndOffset,
         filePath: t.filePath,
+        expand: t.expand,
       });
     }
     info.push(...section.lines, BLANK);
@@ -128,10 +147,23 @@ export function buildPeekCard(
   const detail = detailSection(doc, node);
   if (detail.length > 0) info.push(...detail, BLANK);
 
-  append(outlineSection(node));
-  append(usesSection(doc, node));
-  append(depsSection(doc, node, semantics));
-  append(externalSection(doc, node, semantics));
+  append(outlineSection(node, expanded));
+  append(usesSection(doc, node, expanded));
+  const dependencies = depsSection(
+    doc,
+    node,
+    definitionOf,
+    identUses,
+    expanded,
+  );
+  append(dependencies);
+  append(externalSection(definitionOf, identUses, expanded));
+  append(
+    deferredDefinitionsSection(
+      deferredIdentUses,
+      dependencies.deferredDependencies,
+    ),
+  );
 
   // Drop a trailing blank for tidiness.
   while (info.length > 0 && info[info.length - 1].text === "") info.pop();
@@ -167,20 +199,17 @@ function metaLine(node: StructureNode): Line {
 }
 
 /**
- * An origin line, but only for nodes whose name (or builder) matches the
- * transformer's own vocabulary — those are certainly generated. Everything else
- * gets no line: with no source map back to the original, authored-vs-generated
- * cannot be confirmed, so we make no claim.
+ * An origin line, present only for nodes a language marked as machine-generated
+ * (its {@link StructureNode.generatedOrigin}). Everything else gets no line:
+ * with no source map back to the original, authored-vs-generated cannot be
+ * confirmed, so no claim is made.
  */
 function originLine(node: StructureNode): Line | null {
-  const probe = node.name ??
-    (node.meta?.kind === "contract" ? node.meta.builder : undefined);
-  const generated = probe ? describeSynthetic(probe) : null;
-  if (!generated) return null;
+  if (!node.generatedOrigin) return null;
   return row(
     ["origin  ", "comment"],
     ["transformer-generated", "cfHelper"],
-    [` · ${generated}`, "comment"],
+    [` · ${node.generatedOrigin}`, "comment"],
   );
 }
 
@@ -394,12 +423,23 @@ function outlineChildren(node: StructureNode): StructureNode[] {
   return out;
 }
 
-function outlineSection(node: StructureNode): Section {
+/** Append a "… N more" line and mark it a selectable expand target. */
+function pushMore(lines: Line[], targets: TargetRel[], n: number): void {
+  targets.push({
+    relLine: lines.length,
+    destLine: 0,
+    destCol: 0,
+    expand: true,
+  });
+  lines.push(row(["  … ", "comment"], [`${n} more`, "comment"]));
+}
+
+function outlineSection(node: StructureNode, expanded: boolean): Section {
   const children = outlineChildren(node);
   if (children.length === 0) return { lines: [], targets: [] };
   const lines: Line[] = [heading(`outline · ${children.length}`)];
   const targets: TargetRel[] = [];
-  const shown = children.slice(0, MAX_CHILDREN);
+  const shown = expanded ? children : children.slice(0, MAX_CHILDREN);
   for (const child of shown) {
     const g = glyph(child.kind);
     // Avoid doubling up when the label already starts with the glyph (e.g. λ).
@@ -419,15 +459,16 @@ function outlineSection(node: StructureNode): Section {
     ));
   }
   if (children.length > shown.length) {
-    lines.push(row(["  … ", "comment"], [
-      `${children.length - shown.length} more`,
-      "comment",
-    ]));
+    pushMore(lines, targets, children.length - shown.length);
   }
   return { lines, targets };
 }
 
-function usesSection(doc: Document, node: StructureNode): Section {
+function usesSection(
+  doc: Document,
+  node: StructureNode,
+  expanded: boolean,
+): Section {
   if (!node.name) return { lines: [], targets: [] };
   const refs = findReferences(doc, node.name, node);
   // In a diff view, occurrences on removed lines are the OLD side of the same
@@ -444,7 +485,8 @@ function usesSection(doc: Document, node: StructureNode): Section {
       row(["  declared  ", "comment"], [`line ${declared.line + 1}`, "number"]),
     );
   }
-  for (const u of uses.slice(0, MAX_USES)) {
+  const limit = expanded ? uses.length : MAX_USES;
+  for (const u of uses.slice(0, limit)) {
     targets.push({ relLine: lines.length, destLine: u.line, destCol: u.col });
     lines.push(row(
       ["  line ", "comment"],
@@ -453,10 +495,8 @@ function usesSection(doc: Document, node: StructureNode): Section {
       [trimContext(u.lineText), "identifier"],
     ));
   }
-  if (uses.length > MAX_USES) {
-    lines.push(
-      row(["  … ", "comment"], [`${uses.length - MAX_USES} more`, "comment"]),
-    );
+  if (uses.length > limit) {
+    pushMore(lines, targets, uses.length - limit);
   }
   return { lines, targets };
 }
@@ -464,41 +504,131 @@ function usesSection(doc: Document, node: StructureNode): Section {
 function depsSection(
   doc: Document,
   node: StructureNode,
-  semantics?: Semantics,
-): Section {
+  definitionOf: DefinitionLookup | undefined,
+  identUses: readonly IdentUse[],
+  expanded: boolean,
+): Section & { deferredDependencies: number } {
   const deps = findDependencies(doc, node);
-  const rows: Line[] = [];
-  const targets: TargetRel[] = [];
-  let more = 0;
+  const processedOffsets = definitionOf
+    ? new Set(identUses.map((use) => use.useOffset))
+    : undefined;
+  const candidates: {
+    useOffset: number;
+    name: string;
+    displayName: string;
+    kind: StructureNode["kind"];
+    destLine: number;
+    destCol: number;
+    defOffset: number;
+    defEndOffset?: number;
+    definitionOffset: number;
+  }[] = [];
+  let deferredDependencies = 0;
   for (const d of deps) {
-    const jump = dependencyJump(doc, d, semantics);
-    if (jump.external) continue; // a same-named external def; in "defined elsewhere"
-    if (rows.length >= MAX_DEPS) {
-      more++;
+    if (processedOffsets && !processedOffsets.has(d.useOffset)) {
+      deferredDependencies++;
       continue;
     }
-    targets.push({
-      relLine: rows.length + 1, // +1 for the heading prepended below
+    const jump = dependencyJump(doc, d, definitionOf);
+    if (jump.external) continue; // a same-named external def; in "defined elsewhere"
+    candidates.push({
+      useOffset: d.useOffset,
+      name: d.name,
+      displayName: d.name,
+      kind: d.kind,
       destLine: jump.destLine,
       destCol: 0,
       defOffset: jump.defOffset,
       defEndOffset: jump.defEndOffset,
+      definitionOffset: jump.defOffset,
+    });
+  }
+
+  if (definitionOf) {
+    for (const use of identUses) {
+      if (!use.exactDefinitionOnly) continue;
+      const inBlob = definitionOf(use.useOffset).find((target) =>
+        target.blobOffset !== undefined
+      );
+      if (inBlob?.blobOffset === undefined) continue;
+      if (
+        inBlob.blobOffset >= node.startOffset &&
+        inBlob.blobOffset < node.endOffset
+      ) {
+        continue;
+      }
+      const targetNode = enclosingNode(doc, inBlob.blobOffset);
+      candidates.push({
+        useOffset: use.useOffset,
+        name: use.name,
+        displayName: use.displayName ?? use.name,
+        kind: targetNode?.kind ?? "node",
+        destLine: inBlob.line,
+        destCol: inBlob.col ?? targetNode?.startCol ?? 0,
+        defOffset: targetNode?.startOffset ?? inBlob.blobOffset,
+        defEndOffset: targetNode?.endOffset,
+        definitionOffset: inBlob.blobOffset,
+      });
+    }
+  }
+  candidates.sort((a, b) => a.useOffset - b.useOffset);
+
+  const rows: Line[] = [];
+  const targets: TargetRel[] = [];
+  const seenTargets = new Set<string>();
+  let more = 0;
+  const add = (
+    name: string,
+    displayName: string,
+    kind: StructureNode["kind"],
+    destLine: number,
+    destCol: number,
+    defOffset: number,
+    defEndOffset?: number,
+    definitionOffset = defOffset,
+  ) => {
+    const key = `${name}\0${definitionOffset}`;
+    if (seenTargets.has(key)) return;
+    seenTargets.add(key);
+    if (!expanded && rows.length >= MAX_DEPS) {
+      more++;
+      return;
+    }
+    targets.push({
+      relLine: rows.length + 1,
+      destLine,
+      destCol,
+      defOffset,
+      defEndOffset,
     });
     rows.push(row(
       ["  ", "plain"],
-      [d.name, "callName"],
+      [displayName, "callName"],
       ["  ", "plain"],
-      [`${d.kind}`, "comment"],
+      [kind, "comment"],
       ["  line ", "comment"],
-      [`${jump.destLine + 1}`, "number"],
+      [`${destLine + 1}`, "number"],
     ));
+  };
+
+  for (const candidate of candidates) {
+    add(
+      candidate.name,
+      candidate.displayName,
+      candidate.kind,
+      candidate.destLine,
+      candidate.destCol,
+      candidate.defOffset,
+      candidate.defEndOffset,
+      candidate.definitionOffset,
+    );
   }
-  if (rows.length === 0) return { lines: [], targets: [] };
+  if (rows.length === 0) {
+    return { lines: [], targets: [], deferredDependencies };
+  }
   const lines: Line[] = [heading(`depends on · ${rows.length}`), ...rows];
-  if (more > 0) {
-    lines.push(row(["  … ", "comment"], [`${more} more`, "comment"]));
-  }
-  return { lines, targets };
+  if (more > 0) pushMore(lines, targets, more);
+  return { lines, targets, deferredDependencies };
 }
 
 /**
@@ -512,15 +642,15 @@ function depsSection(
 function dependencyJump(
   doc: Document,
   dep: Dependency,
-  semantics?: Semantics,
+  definitionOf?: DefinitionLookup,
 ): {
   destLine: number;
   defOffset: number;
   defEndOffset?: number;
   external: boolean;
 } {
-  if (semantics) {
-    const defs = semantics.definitionOf(dep.useOffset);
+  if (definitionOf) {
+    const defs = definitionOf(dep.useOffset);
     const inBlob = defs.find((t) => t.blobOffset !== undefined);
     if (inBlob?.blobOffset !== undefined) {
       const node = enclosingNode(doc, inBlob.blobOffset);
@@ -554,32 +684,38 @@ const MAX_EXTERNAL = 8;
  * that file at the definition.
  */
 function externalSection(
-  doc: Document,
-  node: StructureNode,
-  semantics?: Semantics,
+  definitionOf: DefinitionLookup | undefined,
+  identUses: readonly IdentUse[],
+  expanded: boolean,
 ): Section {
-  if (!semantics) return { lines: [], targets: [] };
+  if (!definitionOf) return { lines: [], targets: [] };
   const rows: Line[] = [];
   const targets: TargetRel[] = [];
+  const seenTargets = new Set<string>();
   let more = 0;
-  for (const use of collectIdentUses(doc, node)) {
-    const defs = semantics.definitionOf(use.useOffset);
+  for (const use of identUses) {
+    const defs = definitionOf(use.useOffset);
     if (defs.some((t) => t.blobOffset !== undefined)) continue; // in-blob → deps
     const ext = defs.find((t) => t.filePath);
     if (!ext) continue;
-    if (rows.length >= MAX_EXTERNAL) {
+    const targetKey = `${use.name}\0${ext.filePath}\0${
+      ext.fileOffset ?? `line:${ext.line}:col:${ext.col ?? 0}`
+    }`;
+    if (seenTargets.has(targetKey)) continue;
+    seenTargets.add(targetKey);
+    if (!expanded && rows.length >= MAX_EXTERNAL) {
       more++;
       continue;
     }
     targets.push({
       relLine: rows.length + 1, // +1 for the heading prepended below
       destLine: ext.line,
-      destCol: 0,
+      destCol: ext.col ?? 0,
       filePath: ext.filePath,
     });
     rows.push(row(
       ["  ", "plain"],
-      [use.name, "callName"],
+      [use.displayName ?? use.name, "callName"],
       ["  ", "comment"],
       [basename(ext.filePath!), "typeName"],
       [`:${ext.line + 1}`, "number"],
@@ -590,10 +726,55 @@ function externalSection(
     heading(`defined elsewhere · ${rows.length}`),
     ...rows,
   ];
-  if (more > 0) {
-    lines.push(row(["  … ", "comment"], [`${more} more`, "comment"]));
-  }
+  if (more > 0) pushMore(lines, targets, more);
   return { lines, targets };
+}
+
+type DefinitionLookup = Semantics["definitionOf"];
+
+/** Share position-based definition results across the card's local and external
+ * sections, including semantic implementations that do no caching themselves. */
+function cachedDefinitionLookup(semantics: Semantics): DefinitionLookup {
+  const cache = new Map<number, ReturnType<DefinitionLookup>>();
+  return (offset) => {
+    const cached = cache.get(offset);
+    if (cached) return cached;
+    const definitions = semantics.definitionOf(offset);
+    cache.set(offset, definitions);
+    return definitions;
+  };
+}
+
+/** A collapsed card resolves a bounded prefix of symbol uses. This selectable
+ * row rebuilds the card with every remaining position resolved. */
+function deferredDefinitionsSection(
+  count: number,
+  possibleDependencies: number,
+): Section {
+  if (count === 0) return { lines: [], targets: [] };
+  const possible = possibleDependencies === 0
+    ? ""
+    : ` · ${possibleDependencies} possible ${
+      possibleDependencies === 1 ? "dependency" : "dependencies"
+    }`;
+  return {
+    lines: [
+      heading("definition lookup"),
+      row(
+        ["  … inspect ", "comment"],
+        [
+          `${count} remaining use${count === 1 ? "" : "s"}${possible}`,
+          "comment",
+        ],
+      ),
+    ],
+    targets: [{
+      relLine: 1,
+      destLine: 0,
+      destCol: 0,
+      expand: true,
+    }],
+  };
 }
 
 /**

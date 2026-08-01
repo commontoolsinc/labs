@@ -187,4 +187,118 @@ describe("CFC labelMap component origins", () => {
       await storageManager.close();
     }
   });
+
+  it("mints declared entries for tuple (prefixItems) slots at their index", async () => {
+    // CT-1895: walkIfcSchema never descended prefixItems, so an ifc on a
+    // tuple slot minted no labelMap entry — tuple data under-tainted.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            pair: {
+              type: "array",
+              // The negated branch is deliberately NOT minted (its ifc must
+              // not label real data); walking past it is pinned here.
+              not: { type: "string", ifc: { confidentiality: ["negated"] } },
+              prefixItems: [
+                { type: "string", ifc: { confidentiality: ["secret"] } },
+                { type: "number" },
+              ],
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-components-tuple-slot",
+        guarded.schema,
+        tx,
+      );
+      cell.set({ pair: ["hush", 7] });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = replicaEntries(storageManager, persistedId);
+      // The slot label lands at its concrete index, not a `*` wildcard.
+      const slot = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "pair" && e.path[1] === "0"
+      );
+      expect(slot).toBeDefined();
+      expect(slot!.origin).toBe("declared");
+      expect(slot!.label.confidentiality).toEqual(["secret"]);
+      // The unlabeled slot mints nothing.
+      expect(entries.some((e) => e.path[1] === "1")).toBe(false);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("a labeled items rest schema beside prefixItems keeps its wildcard entry", async () => {
+    // PR #4969 review: dropping the `*` entry for the mixed tuple-plus-rest
+    // shape silently dropped the tail elements' declared labels (fail-open).
+    // The `*` stays — it over-taints the slots with the rest labels, the
+    // fail-safe direction — and the slots still mint at their index.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            pair: {
+              type: "array",
+              prefixItems: [
+                { type: "string", ifc: { confidentiality: ["secret"] } },
+              ],
+              items: { type: "number", ifc: { confidentiality: ["rest"] } },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-components-tuple-rest",
+        guarded.schema,
+        tx,
+      );
+      cell.set({ pair: ["hush", 7] });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = replicaEntries(storageManager, persistedId);
+      const slot = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "pair" && e.path[1] === "0"
+      );
+      expect(slot).toBeDefined();
+      expect(slot!.label.confidentiality).toEqual(["secret"]);
+      const wildcard = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "pair" && e.path[1] === "*"
+      );
+      expect(wildcard).toBeDefined();
+      expect(wildcard!.label.confidentiality).toEqual(["rest"]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

@@ -3,7 +3,13 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  PieceController,
+  PiecesController,
+  type PreparedPieceSourceChange,
+  readPieceSourceMetadata,
+  readPieceSourceState,
+} from "@commonfabric/piece/ops";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -23,7 +29,9 @@ import {
   getPatternIdentityRef,
   isCell,
   isCellResult,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
+  PatternCoverageCollector,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
@@ -32,7 +40,6 @@ import {
   setPatternEnvironment,
   type SigilLink,
   unmarkUiInputBlindWriteTx,
-  type VersionSkewInfo,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
@@ -46,7 +53,10 @@ import {
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "../../runner/src/storage/cache.ts";
+import {
+  defaultSettings,
+  StorageManager,
+} from "../../runner/src/storage/cache.ts";
 import {
   getMetaLink,
   KeepAsCell,
@@ -78,6 +88,7 @@ import {
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
+  type GetPatternCoverageRequest,
   type GetPatternSourcesRequest,
   type GetSettleStatsHistoryRequest,
   type GetSettleStatsRequest,
@@ -101,7 +112,12 @@ import {
   type PageStartRequest,
   type PageStopRequest,
   type PageSyncedRequest,
+  type PatternCoverageResponse,
   type PatternSourcesResponse,
+  type PieceGetSourceRequest,
+  type PieceSourceResponse,
+  type PieceUpdateSourceRequest,
+  type PieceUpdateSourceResponse,
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
@@ -126,7 +142,6 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
-  type VersionSkewNotification,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -169,72 +184,34 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   level: "error",
 });
 
+/**
+ * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
+ * routing form `PageHandle.id()` emits) and the `of:`-schemed URI
+ * (`CellHandle.id()` emits the full schemed id). Without the strip, a
+ * schemed pageId would silently parse as a hash whose TAG is `of:fid1`
+ * and address the nonexistent entity `of:of:fid1:<hash>` — no error,
+ * just a page that never resolves. `computed:` ids are deliberately NOT
+ * accepted: pages are pieces (result cells, always `of:`-schemed), and
+ * the scheme is part of the identity, so stripping `computed:` would
+ * silently alias a different entity.
+ */
+function pageIdForRouting(pageId: string): string {
+  if (pageId.startsWith("computed:")) {
+    throw new Error("Computed ids are not valid page ids.");
+  }
+  return pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId;
+}
+
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
   return new URL(url, spaceBaseUrl).href;
 }
 
-/** The worker→shell versionSkew IPC payload for a build-mismatch skip. */
-export function versionSkewNotification(
-  info: VersionSkewInfo,
-): VersionSkewNotification {
-  return {
-    type: NotificationType.VersionSkew,
-    space: info.space,
-    clientVersion: info.clientVersion,
-    toolshedVersion: info.toolshedVersion,
-  };
-}
-
-/** Post the versionSkew notification to the shell. Exported for testing. */
-export function postVersionSkew(info: VersionSkewInfo): void {
-  self.postMessage(versionSkewNotification(info));
-}
-
-/**
- * Best-effort, non-blocking system-pattern update check for a space open. The
- * check itself never throws (it is internally best-effort); this only logs a
- * non-current outcome and defends against an unexpected rejection. Exported for
- * testing.
- */
-export function checkUpdateInBackground(
-  cc: Pick<PiecesController, "checkAndUpdateDefaultPattern">,
-  space: string,
-): void {
-  cc.checkAndUpdateDefaultPattern()
-    .then((outcome) => {
-      if (outcome === "updated" || outcome === "skipped-skew") {
-        console.log(`[space-root] update check for ${space}: ${outcome}`);
-      }
-    })
-    .catch((error) => {
-      console.warn(`[space-root] update check for ${space} threw`, error);
-    });
-}
-
-/**
- * Best-effort update check for the HOME root, gated behind its own flag
- * (pending the stable-addressing audit). No-ops unless both auto-update flags
- * are on — so the hot home fast path pays nothing when disabled — otherwise
- * builds a home PiecesController and kicks a non-blocking check. Exported for
- * testing.
- */
-export function maybeCheckHomeUpdate(
-  identity: Identity,
-  runtime: Runtime,
-): void {
-  if (
-    !runtime.experimental?.systemPatternAutoUpdate ||
-    !runtime.experimental?.systemPatternAutoUpdateHome
-  ) {
-    return;
-  }
-  const homeSession: Session = {
-    as: identity,
-    space: runtime.userIdentityDID,
-  };
-  const homeCC = new PiecesController(new PieceManager(homeSession, runtime));
-  void checkUpdateInBackground(homeCC, runtime.userIdentityDID);
+/** Whether the home root must take the reconcile-before-start path. */
+export function shouldReconcileHomeRoot(
+  runtime: Pick<Runtime, "experimental">,
+): boolean {
+  return runtime.experimental?.systemPatternAutoUpdate === true;
 }
 
 /**
@@ -250,9 +227,6 @@ export function browserWorkerParamsFromInitializationData(
 ): BrowserWorkerPresetParams {
   return {
     apiUrl: new URL(data.apiUrl),
-    ...(data.clientVersion !== undefined
-      ? { clientVersion: data.clientVersion }
-      : {}),
     storageManager,
     // The host decides the flags (shell build-time defines); absent ⇒ runtime
     // defaults.
@@ -269,6 +243,11 @@ export function browserWorkerParamsFromInitializationData(
       : {}),
     ...(data.trustSnapshot
       ? { trustSnapshotProvider: () => data.trustSnapshot }
+      : {}),
+    // The worker owns its collector so the GetPatternCoverage handler can read
+    // it back through `runtime.patternCoverage`; the harness pulls it at teardown.
+    ...(data.patternCoverage
+      ? { patternCoverage: new PatternCoverageCollector() }
       : {}),
   };
 }
@@ -485,6 +464,10 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  private pieceSourceConfirmations = new Map<
+    string,
+    { token: string; prepared: PreparedPieceSourceChange }
+  >();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
 
@@ -552,6 +535,14 @@ export class RuntimeProcessor {
       spaceIdentity: spaceIdentity,
       memoryHost: apiUrlObj,
       spaceHostMap: data.spaceHostMap,
+      // Host dogfood toggle (commonfabric.concurrentWatchRefresh): overlap
+      // watch-refresh round trips up to a bounded window. Off unless the host
+      // set it; the default is strict single-flight.
+      settings: {
+        ...defaultSettings,
+        experimentalConcurrentWatchRefresh:
+          data.concurrentWatchRefresh === true,
+      },
     });
 
     // Mirror the durability barrier to the page: `pending` is true while any
@@ -598,7 +589,6 @@ export class RuntimeProcessor {
       },
 
       errorHandlers: [postContextualRuntimeError],
-      onVersionSkew: postVersionSkew,
     }));
 
     if (!await runtime.healthCheck()) {
@@ -749,6 +739,7 @@ export class RuntimeProcessor {
           cancel();
         }
         this.subscriptions.clear();
+        this.pieceSourceConfirmations.clear();
 
         // Clean up VDOM mounts
         for (const { reconciler, cancel } of this.vdomMounts.values()) {
@@ -868,14 +859,19 @@ export class RuntimeProcessor {
         includeCfcLabelView: true,
       }),
     ) as JSONValue | undefined;
+    // The resolved cell's own schema-bearing ref, when asked for — for a meta
+    // link read this addresses the linked cell itself, so the caller can
+    // subscribe to it or consult its schema's declarations.
+    const refField = request.includeRef ? { cell: createCellRef(cell) } : {};
     if (!request.includeCfcLabel) {
-      return { value: converted };
+      return { value: converted, ...refField };
     }
     // Same display-label read as handleCellGetCfcLabel: pure store read, then
     // redact Caveat.source for display (audit 28b). One round-trip for both.
     const cfcLabel = cfcLabelViewForCell(cell);
     return {
       value: converted,
+      ...refField,
       cfcLabel: cfcLabel === undefined
         ? undefined
         : redactCaveatSourcesForDisplay(cfcLabel),
@@ -917,6 +913,10 @@ export class RuntimeProcessor {
     const value = mapCellRefsToSigilLinks(request.value);
     if (blind) {
       markUiInputBlindWriteTx(tx);
+      // Renderer-input provenance that survives to commit, so the scheduler can
+      // shape the resulting subscriber wake (timing side-channel mitigation,
+      // channels 4/5). A `blind` write is exactly a renderer `$value` input write.
+      markRendererInputTx(tx);
       // The resolved storage address of the write target; its parent is the
       // structural existence/shape precondition for the blind write.
       const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
@@ -1085,22 +1085,24 @@ export class RuntimeProcessor {
       .resolveAsCell();
     await defaultPatternCell.sync();
 
-    // Fast path: pattern already exists
+    // Fast path: pattern already exists. When home auto-update is enabled,
+    // deliberately fall through to PiecesController.ensureDefaultPattern():
+    // it reconciles the persisted identity before starting the root. Starting
+    // here first would recreate the stale-root bootstrap dependency.
     // (Value is a Cell itself, and pattern metadata means it's instantiated)
     // We've followed all the links from "defaultPattern", so our cell should
     // be the result cell for the default pattern.
-    if (getMetaLink(defaultPatternCell, "pattern")) {
+    const reconcileHome = shouldReconcileHomeRoot(this.runtime);
+    if (getMetaLink(defaultPatternCell, "pattern") && !reconcileHome) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
-      // The home root is held behind its own flag (pending the stable-addressing
-      // audit); the helper no-ops on this hot fast path unless enabled.
-      maybeCheckHomeUpdate(this.identity, this.runtime);
       return {
         cell: createCellRef(defaultPatternCell),
       };
     }
 
-    // Pattern doesn't exist - create it via home space PieceController
+    // Pattern is absent, or update-enabled and must be reconciled before start:
+    // use the home-space PiecesController for the complete ensure sequence.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
@@ -1139,9 +1141,15 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     let program: Program | undefined;
+    let origin: string | undefined;
     if ("url" in request.source && request.source.url) {
+      const sourceUrl = new URL(request.source.url);
+      if (sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:") {
+        throw new Error("Piece source URL must use HTTP or HTTPS.");
+      }
+      origin = sourceUrl.href;
       program = await cc.manager().runtime.harness.resolve(
-        new HttpProgramResolver(request.source.url),
+        new HttpProgramResolver(sourceUrl),
       );
     } else if ("program" in request.source) {
       program = request.source.program;
@@ -1151,6 +1159,7 @@ export class RuntimeProcessor {
 
     const piece = await cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
+      origin,
       start: request.run ?? true,
     }, request.cause);
     return {
@@ -1163,10 +1172,6 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
-    // Best-effort, non-blocking: roll the root forward if its toolshed serves a
-    // newer identity. The watcher re-instantiates in place; a failed check
-    // never breaks space open, and we never block the response on it.
-    void checkUpdateInBackground(cc, request.space);
     return {
       page: createPageRef(piece.getCell()),
     };
@@ -1188,9 +1193,10 @@ export class RuntimeProcessor {
     request: PageGetRequest,
   ): Promise<PageResponse> {
     const { pieceManager, cc } = this.getSpaceCtx(request.space);
+    const pageId = pageIdForRouting(request.pageId);
     const requestedCell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      entityIdFrom(request.pageId),
+      entityIdFrom(pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -1227,7 +1233,7 @@ export class RuntimeProcessor {
     }
 
     const cell = await cc.manager().get(
-      request.pageId,
+      pageId,
       request.runIt ?? false,
     );
 
@@ -1242,7 +1248,7 @@ export class RuntimeProcessor {
     const { pieceManager } = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      entityIdFrom(request.pageId),
+      entityIdFrom(pageIdForRouting(request.pageId)),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");
@@ -1278,7 +1284,7 @@ export class RuntimeProcessor {
 
   async handlePageGetAll(request: PageGetAllRequest): Promise<CellResponse> {
     const { pieceManager } = this.getSpaceCtx(request.space);
-    const piecesCell = await pieceManager.getPieces();
+    const piecesCell = await pieceManager.getPieceRegistry();
     return {
       cell: createCellRef(piecesCell),
     };
@@ -1287,6 +1293,99 @@ export class RuntimeProcessor {
   async handlePageSynced(request: PageSyncedRequest): Promise<void> {
     const { pieceManager } = this.getSpaceCtx(request.space);
     await pieceManager.synced();
+  }
+
+  async handlePieceGetSource(
+    request: PieceGetSourceRequest,
+  ): Promise<PieceSourceResponse> {
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    // The reader syncs the piece itself, as its first step.
+    const cell = this.runtime.getCellFromEntityId(
+      pieceManager.getSpace(),
+      entityIdFrom(pageIdForRouting(request.pieceId)),
+    );
+    const state = await readPieceSourceState(this.runtime, cell);
+    return { source: { ...state, space: state.space as DID } };
+  }
+
+  async handlePieceUpdateSource(
+    request: PieceUpdateSourceRequest,
+  ): Promise<PieceUpdateSourceResponse> {
+    if (
+      request.confirmationToken !== undefined &&
+      (typeof request.confirmationToken !== "string" ||
+        request.confirmationToken.length === 0)
+    ) {
+      throw new Error("confirmationToken must be a non-empty string");
+    }
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    const confirmationKey = `${request.space}\u0000${
+      pageIdForRouting(request.pieceId)
+    }`;
+    let confirmedChange: PreparedPieceSourceChange | undefined;
+    if (request.confirmationToken === undefined) {
+      this.pieceSourceConfirmations.delete(confirmationKey);
+    } else {
+      const pending = this.pieceSourceConfirmations.get(confirmationKey);
+      this.pieceSourceConfirmations.delete(confirmationKey);
+      if (
+        pending === undefined ||
+        pending.token !== request.confirmationToken
+      ) {
+        throw new Error(
+          "the piece source compatibility confirmation is no longer valid",
+        );
+      }
+      confirmedChange = pending.prepared;
+    }
+    const cell = this.runtime.getCellFromEntityId(
+      pieceManager.getSpace(),
+      entityIdFrom(pageIdForRouting(request.pieceId)),
+    );
+    const controller = new PieceController(pieceManager, cell);
+    const result = await controller.changeSource(request.action, {
+      confirmedChange,
+    });
+    let confirmationToken: string | undefined;
+    if (result.status === "incompatible") {
+      confirmationToken = crypto.randomUUID();
+      this.pieceSourceConfirmations.set(confirmationKey, {
+        token: confirmationToken,
+        prepared: result.prepared,
+      });
+    }
+    const appliedState = result.status === "applied"
+      ? readPieceSourceMetadata(this.runtime, cell)
+      : undefined;
+    let state;
+    let sourceReadWarning: string | undefined;
+    try {
+      state = await readPieceSourceState(this.runtime, cell);
+    } catch (error) {
+      if (result.status !== "applied") throw error;
+      state = appliedState!;
+      sourceReadWarning = `source details could not be refreshed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+    const executionWarning = result.status === "applied"
+      ? [result.executionWarning, sourceReadWarning]
+        .filter((message): message is string => message !== undefined)
+        .join("; ") || undefined
+      : undefined;
+    const executionResponse = executionWarning === undefined
+      ? {}
+      : { executionWarning };
+    return {
+      source: { ...state, space: state.space as DID },
+      ...executionResponse,
+      ...(result.status === "incompatible"
+        ? {
+          compatibilityWarning: result.message,
+          confirmationToken,
+        }
+        : {}),
+    };
   }
 
   handleRegisterSpaceHost(
@@ -1485,6 +1584,10 @@ export class RuntimeProcessor {
     return { result };
   }
 
+  getPatternCoverage(_: GetPatternCoverageRequest): PatternCoverageResponse {
+    return { data: this.runtime.patternCoverage?.toData() ?? null };
+  }
+
   getSettleStats(
     _request: GetSettleStatsRequest,
   ): SettleStatsResponse {
@@ -1605,6 +1708,10 @@ export class RuntimeProcessor {
         return await this.handlePageStop(request);
       case RequestType.PageGetAll:
         return await this.handlePageGetAll(request);
+      case RequestType.PieceGetSource:
+        return await this.handlePieceGetSource(request);
+      case RequestType.PieceUpdateSource:
+        return await this.handlePieceUpdateSource(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
@@ -1619,6 +1726,8 @@ export class RuntimeProcessor {
         return this.getExecutionRoutingDiagnostics(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
+      case RequestType.GetPatternCoverage:
+        return this.getPatternCoverage(request);
       case RequestType.SetLoggerLevel:
         return this.setLoggerLevel(request);
       case RequestType.SetLoggerEnabled:

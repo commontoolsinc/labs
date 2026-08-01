@@ -62,21 +62,18 @@ const AIRTABLE_AUTH_SOURCE = `import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   Stream,
   TILE_UI,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
 type Secret<T> = T;
 
 import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
-import {
-  REFRESH_THRESHOLD_MS,
-  startReactiveClock,
-} from "../../auth/auth-reactive.ts";
+import { REFRESH_THRESHOLD_MS } from "../../auth/auth-reactive.ts";
 import type { AuthStatus } from "../../auth/auth-types.ts";
 import {
   formatTokenExpiry,
@@ -123,10 +120,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // safeDateNow() capture is intentional — createPreviewUI produces a static
+  // Date.now() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = safeDateNow();
+  const now = Date.now();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -343,7 +340,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - safeDateNow();
+    const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -411,17 +408,20 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = new Writable(safeDateNow());
-    startReactiveClock(now);
+    // Reactive clock for token-expiry display; ticks each minute so the
+    // "Expires in" countdown refreshes. Coarsened to 1s and cached.
+    const now = wish<number>({ query: "#now/60" });
 
     const isTokenExpired = computed(() => {
       if (!authValue?.accessToken || !authValue?.expiresAt) return false;
-      return authValue.expiresAt < now.get();
+      if (now.result == null) return false;
+      return authValue.expiresAt < now.result;
     });
 
-    const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
-    );
+    const tokenExpiryDisplay = computed(() => {
+      if (now.result == null) return "";
+      return formatTokenExpiry(authValue?.expiresAt || 0, now.result);
+    });
 
     const checkboxesDisabled = computed(() => !!authValue?.accessToken);
 
@@ -439,11 +439,12 @@ export default pattern<Input, Output>(
       const email = authValue?.user?.email || "";
       const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = safeDateNow();
+      const nowMs = now.result ?? 0;
       const expiresAt = authValue?.expiresAt || 0;
-      const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+      const isExpired = isAuthenticated && expiresAt > 0 && nowMs > 0 &&
+        expiresAt < nowMs;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
-        expiresAt - now < 10 * 60 * 1000;
+        nowMs > 0 && expiresAt - nowMs < 10 * 60 * 1000;
       const status: AuthStatus = !isAuthenticated
         ? "needs-login"
         : isExpired
@@ -1237,8 +1238,8 @@ import type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
 // ============================================================================
 
 export interface AirtableClientConfig {
+  /** How many times to refresh an expired token and retry before giving up. */
   retries?: number;
-  delay?: number;
   debugMode?: boolean;
   /** External refresh callback for cross-piece token refresh */
   onRefresh?: () => Promise<void>;
@@ -1285,8 +1286,6 @@ export interface ListRecordsOptions {
 // HELPERS
 // ============================================================================
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[AirtableClient]", ...args);
 }
@@ -1313,7 +1312,6 @@ export function AirtableClient(
   config: AirtableClientConfig = {},
 ): AirtableClient {
   const retries = config.retries ?? 2;
-  const delay = config.delay ?? 1000;
   const debugMode = config.debugMode ?? false;
   const onRefresh = config.onRefresh;
 
@@ -1323,70 +1321,62 @@ export function AirtableClient(
   }
 
   /**
-   * Make an authenticated API request with retry and token refresh.
+   * Make an authenticated API request. A 401 refreshes the token and retries,
+   * up to \`retries\` times; every other failure — including a 429 rate limit —
+   * is thrown. A compartment has no timers to back off with, so the reactive
+   * layer re-drives the work rather than the client sleeping between attempts.
+   *
+   * Call this only from handler code: the sandbox fetch is handler-only (it
+   * throws in a lift/computed or the pattern body) and its settlement is
+   * coarsened to one-second resolution.
    */
   async function request<T>(
     url: string,
     options: RequestInit = {},
   ): Promise<T> {
-    let lastError: Error | null = null;
-
     for (let attempt = 0; attempt <= retries; attempt++) {
       const token = getToken();
       if (!token) {
         throw new Error("No access token available");
       }
 
-      try {
-        const response = await fetch(url, {
-          ...options,
-          headers: {
-            Authorization: \`Bearer \${token}\`,
-            "Content-Type": "application/json",
-            ...options.headers,
-          },
-        });
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: \`Bearer \${token}\`,
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
 
-        if (response.status === 401) {
-          debugLog(debugMode, "Got 401, attempting token refresh...");
-          await refreshToken();
-          continue;
-        }
-
-        if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
-          const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
-          const waitMs = !isNaN(parsed) ? parsed * 1000 : delay * (attempt + 1);
-          debugLog(
-            debugMode,
-            \`Rate limited, waiting \${waitMs}ms...\`,
-          );
-          await sleep(waitMs);
-          continue;
-        }
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          throw new Error(
-            \`Airtable API error \${response.status}: \${errorBody}\`,
-          );
-        }
-
-        return (await response.json()) as T;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        if (attempt < retries) {
-          debugLog(
-            debugMode,
-            \`Request failed (attempt \${attempt + 1}/\${retries + 1}):\`,
-            lastError.message,
-          );
-          await sleep(delay);
-        }
+      if (response.status === 401 && attempt < retries) {
+        debugLog(debugMode, "Got 401, attempting token refresh...");
+        await refreshToken();
+        continue;
       }
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        throw new Error(
+          retryAfter
+            ? \`Airtable rate limited; retry after \${retryAfter}s\`
+            : "Airtable rate limited",
+        );
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          \`Airtable API error \${response.status}: \${errorBody}\`,
+        );
+      }
+
+      return (await response.json()) as T;
     }
 
-    throw lastError || new Error("Request failed after retries");
+    // The loop returns or throws on every attempt; a final 401 falls through to
+    // the error above rather than retrying.
+    throw new Error("Airtable request did not complete");
   }
 
   /**
@@ -2292,7 +2282,7 @@ All patterns start with:
 import {
   computed, Default, handler, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
-  safeDateNow, nonPrivateRandom, TILE_UI, CHIP_UI, uiVariant,
+  TILE_UI, CHIP_UI, uiVariant,
 } from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
@@ -2603,7 +2593,7 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
-- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable, safeDateNow, nonPrivateRandom (only when needed)
+- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable (only when needed)
 - Import the auth manager and client
 - Import \`authIsReady\` from \`"../auth/auth-types.ts"\` if the importer needs a shared readiness boolean
 - Define module-scope \`handler()\` functions for each API call:

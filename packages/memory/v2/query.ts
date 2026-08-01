@@ -17,7 +17,7 @@ import {
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
-import { type Immutable, isObject } from "@commonfabric/utils/types";
+import { isObject } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
@@ -33,15 +33,15 @@ const DEFAULT_SCOPE: CellScope = "space";
 
 export type QueryDocKey = `${string}/${CellScope}/${string}`;
 
-export interface TrackedGraphState {
+export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: ReturnType<typeof createSchemaMemo>;
   manager: EngineObjectManager;
-}
+};
 
-export interface QueryTraversalStats {
+export type QueryTraversalStats = {
   managerReads: number;
   coveredSelectorSkips: number;
   schemaTraversals: number;
@@ -51,7 +51,7 @@ export interface QueryTraversalStats {
   dagTraversals: number;
   getDocAtPathCalls: number;
   schemaMemoHits: number;
-}
+};
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
@@ -142,7 +142,7 @@ export class EngineObjectManager implements ObjectStorageManager {
         type: type as MIME,
         path: [],
       },
-      value: state.document as unknown as Immutable<FabricValue>,
+      value: state.document as unknown as FabricValue,
     };
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
@@ -199,9 +199,9 @@ export class EngineObjectManager implements ObjectStorageManager {
   }
 }
 
-export interface QueryGraphReuseContext {
+export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
-}
+};
 
 /** P1 covered growth pulls (client-passivity §0 step 1): the caller's live
  * tracked watch surface. Seeding the query traversal's schema tracker with
@@ -213,11 +213,11 @@ export interface QueryGraphCoverage {
   covered: MapSetStringToPathSelectors;
 }
 
-export interface TrackGraphOptions {
+export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
-}
+};
 
 export const cloneTrackedGraphState = (
   engine: Engine.Engine,
@@ -335,7 +335,7 @@ export const trackGraph = (
     reuse?.managers?.set(managerKey, manager);
   }
   const tracker = new CompoundCycleTracker<
-    Immutable<FabricValue>,
+    FabricValue,
     JSONSchema | undefined
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
@@ -724,7 +724,7 @@ const evaluateTrackedDocument = (
     return;
   }
   const tracker = new CompoundCycleTracker<
-    Immutable<FabricValue>,
+    FabricValue,
     JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();

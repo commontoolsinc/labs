@@ -1,0 +1,94 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "title": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Voice Note",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "notes/voice-note.tsx",
+  "resultSchema": {
+    "$defs": {
+      "TranscriptionChunk": {
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "timestamp": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "timestamp",
+          "text"
+        ],
+        "type": "object"
+      },
+      "TranscriptionData": {
+        "properties": {
+          "audioData": {
+            "type": "string"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/$defs/TranscriptionChunk"
+            },
+            "type": "array"
+          },
+          "duration": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "duration",
+          "timestamp"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "notes": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TranscriptionData"
+        },
+        "type": "array"
+      },
+      "transcription": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/TranscriptionData"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "transcription",
+      "notes"
+    ],
+    "type": "object"
+  }
+}

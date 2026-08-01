@@ -1096,8 +1096,9 @@ doc-keyed observations are persisted — an action registered without
 rehydration identity (session-scoped effects such as sinks or `pull`) writes no
 rows. Builtins whose run starts child runs (map/filter/flatMap) never rehydrate
 clean: their reconcile re-attaches the children, which then rehydrate
-individually. See `docs/specs/scheduler-v2/per-doc-rehydration.md` for the full
-design.
+individually. See
+[Per-doc scheduler-state restore](scheduler-v2/per-doc-rehydration.md) for the
+full design.
 
 Snapshot listing has no correctness timeout. A request failure degrades the
 whole boot to synced fresh registration; lifecycle epochs prevent late results

@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -36,7 +37,7 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
   const seedLabeledDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     atom: string,
   ): Promise<string> => {
     const seed = rt.edit();

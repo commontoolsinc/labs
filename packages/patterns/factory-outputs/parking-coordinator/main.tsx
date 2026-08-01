@@ -5,11 +5,9 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSpace,
   type RequiresIntegrity,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -249,7 +247,7 @@ const formatDateDisplay = (dateStr: string): string => {
 };
 
 const genId = (): string =>
-  `req-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 10)}`;
+  `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 const parsePreferences = (s: string | null | undefined): string[] =>
   (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
@@ -432,15 +430,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     >(null);
 
     const nowTimestamp = wish<number>({ query: "#now" });
-    const todayStr = computed(() =>
-      toLocalDateStr(nowTimestamp.result || safeDateNow())
-    );
+    const todayStr = computed(() => {
+      const nowMs = nowTimestamp.result;
+      return nowMs != null ? toLocalDateStr(nowMs) : "";
+    });
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // User/session UI state
     const selectedPersonName = new Writable.perUser("");
     const adminMode = new Writable.perSession(false);
-    const requestDate = new Writable.perSession(toLocalDateStr(safeDateNow()));
+    // Seed empty and fill from #now once it resolves, so the request-date input
+    // defaults to today without reading the ambient clock at pattern body.
+    const requestDate = new Writable.perSession("");
+    computed(() => {
+      const nowMs = nowTimestamp.result;
+      if (nowMs != null && requestDate.get() === "") {
+        requestDate.set(toLocalDateStr(nowMs));
+      }
+    });
     const requestResult = new Writable.perSession("");
 
     // Admin form state

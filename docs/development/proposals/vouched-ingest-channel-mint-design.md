@@ -3,6 +3,9 @@
 **Status:** implementation note · **For:** Berni's review (companion to
 `vouched-ingest-channel.md` / loom PR #3330) · **Updated:** 2026-06-26
 
+The [ingest channels and journal sink proposal](ingest-channels-journal-sink.md)
+builds on this split-mint seam.
+
 ## Why this note exists
 
 The proposal says the `ExternalIngest` mark is minted by "a NEW builtin-authored

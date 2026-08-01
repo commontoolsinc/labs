@@ -168,10 +168,10 @@ const commitWrite = async (
  * tests seed stored ["cfc"] metadata via an ungated path-[] full-document
  * write (the shape hydration delivers), and a doc that already carries
  * metadata trips the missing-schema-input reason on enforcing runtimes.
- * The caller owns the seeder runtime and must dispose it only AFTER its last
- * read of the doc — disposing a runtime tears down subscription state shared
- * through the storage manager, and the doc becomes unreadable from the other
- * runtime (verified empirically while pinning this suite).
+ * The caller owns the seeder runtime, and both runtimes here share one
+ * caller-owned StorageManager: each is torn down with
+ * `dispose({ closeStorage: false })` so neither closes the store the other is
+ * still reading through, and the test closes it once itself.
  */
 const rewriteStoredEntries = async (
   seeder: Runtime,
@@ -238,7 +238,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A, CLAUSE_B]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -266,7 +266,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           "confidentiality cannot be weakened",
         );
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -303,7 +303,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(after?.label.integrity).toEqual([ATOM_X, ATOM_Y]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -332,7 +332,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -387,8 +387,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         // CLAUSE_B silently dropped: the non-monotone declared re-mint.
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A]);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -443,8 +443,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           expect.arrayContaining([CLAUSE_A, CLAUSE_B]),
         );
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -473,7 +473,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(tx.getCfcState().declaredMonotonicityMode).toBe("enforce");
         await tx.commit();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -504,7 +504,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         ).toBe(true);
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -533,7 +533,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -552,7 +552,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -581,7 +581,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -608,7 +608,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         ).toThrow(/already set/);
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -638,7 +638,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -670,7 +670,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         ).toBe(true);
         tx.abort();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -739,8 +739,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         prepare: tx.getCfcState().prepare,
       };
     } finally {
-      await runtime.dispose();
-      await seeder.dispose();
+      await runtime.dispose({ closeStorage: false });
+      await seeder.dispose({ closeStorage: false });
       await opts.storageManager.close();
     }
   };
@@ -850,8 +850,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A, CLAUSE_B]);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -934,8 +934,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           ),
         ).toBe(true);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -975,7 +975,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.integrity).toEqual([ATOM_X]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1014,7 +1014,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           expect.arrayContaining([CLAUSE_A, CLAUSE_B]),
         );
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1100,8 +1100,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         );
         expect(entry?.label.integrity).toEqual([ATOM_X]);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1159,8 +1159,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(message).toContain(JSON.stringify("integrity-z"));
         expect(message).not.toContain(`atom ${JSON.stringify(ATOM_X)} added`);
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1193,7 +1193,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(entry?.label.confidentiality).toEqual([CLAUSE_A]);
         expect(entry?.label.integrity).toEqual([ATOM_X]);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1322,7 +1322,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           ),
         ).toBe(true);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1361,7 +1361,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
             `dial=${dial}`,
           ).toBe(false);
         } finally {
-          await runtime.dispose();
+          await runtime.dispose({ closeStorage: false });
           await storageManager.close();
         }
       }
@@ -1511,8 +1511,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         expect(message).toContain("at /aux");
         expect(message).not.toContain("at /out");
       } finally {
-        await runtime.dispose();
-        await seeder.dispose();
+        await runtime.dispose({ closeStorage: false });
+        await seeder.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1546,7 +1546,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           String((result.error as Error | undefined)?.message),
         ).toContain("declared-monotonicity integrity");
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -1656,8 +1656,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           tx.abort();
           return consumed;
         } finally {
-          await runtime.dispose();
-          await seeder.dispose();
+          await runtime.dispose({ closeStorage: false });
+          await seeder.dispose({ closeStorage: false });
           await storageManager.close();
         }
       };

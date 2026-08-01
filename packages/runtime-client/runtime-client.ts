@@ -11,6 +11,7 @@ import type {
   ExecutionRoutingDiagnostics,
   ExecutionRoutingDiagnosticsQuery,
   JSONSchema,
+  PatternCoverageData,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
@@ -36,10 +37,12 @@ import {
   NavigateRequestNotification,
   type PatternSourcesResponse,
   PendingWritesNotification,
+  type PieceSourceAction,
+  type PieceSourceView,
+  type PieceUpdateSourceResponse,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
-  VersionSkewNotification,
 } from "./protocol/mod.ts";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -67,7 +70,6 @@ export type RuntimeClientEvents = {
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
   pendingwriteschange: [{ pending: boolean }];
-  versionskew: [VersionSkewNotification];
 };
 
 export const $conn = Symbol("$request");
@@ -90,7 +92,6 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
-    this.#conn.on("versionskew", this._onVersionSkew);
   }
 
   /**
@@ -135,7 +136,6 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
-      clientVersion: options.clientVersion,
       identity: options.identity.serialize(),
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
@@ -147,6 +147,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
       forwardWorkerConsole: options.forwardWorkerConsole,
+      patternCoverage: options.patternCoverage,
+      concurrentWatchRefresh: options.concurrentWatchRefresh,
     });
     return new RuntimeClient(initialized, options);
   }
@@ -303,6 +305,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
+  /**
+   * Read a piece's source state: the pattern it runs, the origin it tracks, the
+   * history metadata it carries, and its authored source files.
+   */
+  async getPieceSource(
+    pieceId: string,
+    space: DID,
+  ): Promise<PieceSourceView> {
+    const response = await this.#conn.request<RequestType.PieceGetSource>({
+      type: RequestType.PieceGetSource,
+      pieceId,
+      space,
+    });
+    return response.source;
+  }
+
+  /**
+   * Change a piece's source lifecycle state and return the resulting source
+   * view. An incompatible candidate is returned as a warning without mutation.
+   */
+  async updatePieceSource(
+    pieceId: string,
+    space: DID,
+    action: PieceSourceAction,
+    options: { confirmationToken?: string } = {},
+  ): Promise<PieceUpdateSourceResponse> {
+    return await this.#conn.request<RequestType.PieceUpdateSource>({
+      type: RequestType.PieceUpdateSource,
+      pieceId,
+      space,
+      action,
+      ...(options.confirmationToken === undefined
+        ? {}
+        : { confirmationToken: options.confirmationToken }),
+    });
+  }
+
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
     const response = await this.#conn.request<RequestType.PageGetSlug>({
       type: RequestType.PageGetSlug,
@@ -323,7 +362,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Get the pieces list cell.
-   * Subscribe to this cell to get reactive updates of all pieces in the space.
+   * Subscribe to this cell to get reactive updates of registered pieces in the
+   * space. This is not a storage-wide piece listing.
    */
   async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
@@ -438,6 +478,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       timing: res.timing,
       flags: res.flags,
     };
+  }
+
+  /**
+   * Pull the worker runtime's accumulated pattern-coverage spans and hit counts,
+   * or `null` when this worker was not started with coverage on. The integration
+   * harness calls this once at teardown (through `commonfabric.rt`) and merges
+   * the result with the other realms' coverage. See docs/development/COVERAGE.md.
+   */
+  async getPatternCoverage(): Promise<PatternCoverageData | null> {
+    const res = await this.#conn.request<RequestType.GetPatternCoverage>({
+      type: RequestType.GetPatternCoverage,
+    });
+    return res.data;
   }
 
   /**
@@ -679,9 +732,5 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   ): void => {
     this.#pendingWrites = data.pending;
     this.emit("pendingwriteschange", { pending: data.pending });
-  };
-
-  private _onVersionSkew = (data: VersionSkewNotification): void => {
-    this.emit("versionskew", data);
   };
 }

@@ -43,9 +43,43 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
   });
 
   it("exposes addPiece as a Stream — the sanctioned headless pin path", () => {
+    // Required in the PRODUCER type on purpose: ProfileHomeOutput describes a
+    // RUNNING profile, which always binds every stream. Stored-doc tolerance
+    // lives in BackwardsCompatibleProfile (pinned below), not here.
     expect(home).toContain("addPiece: Stream<MutateProfileElementsEvent>");
     // The stream is bound to mutateElements in the "addPiece" mode.
     expect(home).toContain('mode: "addPiece"');
+  });
+
+  it("exports BackwardsCompatibleProfile with every post-genesis stream optional", () => {
+    // The consumer-side seam of the 2026-07-22 fleet heal (#4901): consumers
+    // of STORED profiles must take this weakened view, where streams added
+    // after profile genesis are optional — a required stream in a consumer
+    // schema bricks every doc predating the field at argument validation.
+    // A stream missing from this union re-bricks old docs; removing the type
+    // re-bricks everything. Red here = that regression.
+    expect(home).toContain(
+      "export type BackwardsCompatibleProfile = PartialBy<",
+    );
+    for (
+      const lateStream of [
+        "setBio",
+        "addExternalLink",
+        "removeExternalLink",
+        "publishVerifiedIdentities",
+        "revokeVerifiedIdentities",
+        "addPiece",
+        "toggleEditing",
+      ]
+    ) {
+      expect(home).toContain(`| "${lateStream}"`);
+    }
+    // The two post-genesis DATA fields ride Default<> instead (validation
+    // fills absent keys on old docs) — the data-vs-affordance split.
+    expect(home).toContain(
+      'bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">',
+    );
+    expect(home).toContain("isEditing: Default<boolean, false>");
   });
 
   it("recognizes every one of the viewer's profiles as owner-editable", () => {

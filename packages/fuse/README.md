@@ -38,7 +38,7 @@ cf fuse unmount /tmp/cf
 ```
 /tmp/cf/                              # mount root
   home/                               # space (connected on demand)
-    pieces/
+    pieces/                            # named projections load on first access
       todo-app/                       # piece directory
         result.json                   # full result cell as JSON
         result/                       # exploded JSON tree
@@ -58,9 +58,10 @@ cf fuse unmount /tmp/cf
         input/                        # exploded input tree
           submit.handler              # handlers/tools can exist under input too
           search.tool
-        meta.json                     # piece ID, entity, pattern name
+        meta.json                     # piece ID, entity, running pattern ref
       .index.json                     # piece name → entity ID mapping
-    entities/                         # access cells by entity ID
+      pieces.json                     # discovery manifest with pattern refs
+    entities/                         # all live space entities, loaded lazily by ID
     space.json                        # { did, name }
   .spaces.json                        # known space name → DID mapping
 ```
@@ -86,7 +87,7 @@ returns the subtree as JSON. Top-level callable children under `input/` and
 ### Reading
 
 ```bash
-# List all pieces in a space
+# List registered pieces in a space
 ls home/pieces/
 
 # Read the full result cell as JSON (pipe to jq for pretty printing)
@@ -109,7 +110,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 
 # View piece metadata
 cat home/pieces/todo-app/meta.json
-# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app"}
+# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app","patternRef":{"identity":"<hash>","symbol":"default","source":{"ref":"cf:pattern:<hash>","repository":"https://github.com/commontoolsinc/labs","entry":"/packages/patterns/todo-app.tsx"}}}
 
 # Mounted callables are executable and start with a cf exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
@@ -120,6 +121,21 @@ cat home/pieces/todo-app/result.json | jq '.addItem, .search'
 # => {"/handler":"addItem"}
 # => {"/tool":"search"}
 ```
+
+The named directories under `pieces/` come from the space's piece registry. They
+do not include unregistered or orphan pieces. The `entities/` directory can
+enumerate live entity IDs when the server supports identifier listing, but it
+does not identify which entities are piece roots. See
+[Finding Pieces](../../docs/common/concepts/piece-discovery.md).
+
+The prefix-free `patternRef.identity` + `patternRef.symbol` are the
+authoritative reference to the artifact currently running the piece
+(`cf:module/<identity>#<symbol>` in display form). `patternRef.source.ref` is
+the immutable in-fabric source reference. Optional `source.repository` records
+the explicitly supplied repository locator, `source.entry` preserves the
+authored path within the compilation root, and `source.origin` carries the
+piece's update provenance. The same object appears in `pieces/pieces.json` for
+bulk discovery.
 
 ### Writing
 
@@ -154,6 +170,11 @@ cf exec home/pieces/todo-app/result/search.tool --help
 # The same callable paths also exist under entities/<piece-id>/
 cf exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
 ```
+
+Source-file writes normally preserve the same schema-compatibility guarantees as
+`cf piece setsrc`. For an intentional breaking migration, mount with
+`--dangerously-allow-incompatible-schema`; source writes through that mount then
+bypass the old-to-new pattern and retained-link compatibility proofs.
 
 ### Creating and Deleting
 
@@ -247,6 +268,18 @@ a readiness sidecar before the mount command reports success. The child writes
 heartbeat; startup succeeds only when the status matches the current mount
 attempt and recorded child PID.
 
+The `STATUS` column is no longer taken from the heartbeat/child-status sidecar
+alone — it is now gated on the OS mount table (`getfsstat` on darwin,
+`/proc/mounts` on linux), the kernel's own ground truth. A wedged daemon keeps
+answering liveness probes and its sidecar keeps saying `mounted`, so the sidecar
+by itself can lie. Two consequences: a PID-alive entry whose mountpoint is
+absent from the table is reported `dead` (the daemon outlived its mount), and a
+dead-PID entry still present in the table is shown as `dead` and kept (not
+swept) so the stale kernel mount stays visible for cleanup. Only an entry that
+is both absent from the table and has no live process is swept. If the table
+cannot be read, the row is reported `unknown` and preserved rather than
+destroyed.
+
 ### Linux: Docker / other-user access
 
 If you need Docker or another user to traverse a Linux FUSE mount, mount with:
@@ -264,8 +297,10 @@ Handlers remain writable through the mounted `.handler` file. Both mounted
 ### macOS: NFS client cache tuning
 
 FUSE-T serves the mount through the macOS NFS client, which caches attributes,
-negative name lookups, and directory listings on the client side. FUSE-T ignores
-the cache timeouts the filesystem implementation returns, so without tuning the
+negative name lookups, and directory listings on the client side. Neither lever
+a FUSE filesystem normally has reaches that cache: FUSE-T ignores the cache
+timeouts the filesystem implementation returns, and it returns success for the
+invalidation notifications without acting on them. So without tuning, the
 client's age-based 5-60 second defaults apply: a name that was once looked up
 and not found can keep reporting `NotFound` for up to a minute after the file
 appears daemon-side, and a directory listing can be served stale for tens of
@@ -354,13 +389,64 @@ independently from libfuse. FUSE callbacks are registered via
 `Deno.UnsafeCallback` with `nonblocking: true` on the session loop, so WebSocket
 subscriptions and FUSE requests run concurrently on Deno's event loop.
 
-Cell data is cached in an in-memory tree (`FsTree`). Subscriptions rebuild
-affected subtrees on cell changes and invalidate the kernel cache via
-`fuse_lowlevel_notify_inval_entry`.
+Cell data is cached in an in-memory tree (`FsTree`). On a cell change the
+affected piece property is rebuilt by reconciling a freshly built subtree onto
+the live one in place, so a path that still exists keeps its inode across the
+rebuild. The rebuild then asks the kernel to drop only what actually went stale,
+naming the changed directory entries with `fuse_lowlevel_notify_inval_entry` and
+the inodes whose content changed with `fuse_lowlevel_notify_inval_inode`; caches
+for unchanged paths are left intact.
+
+Those notifications reach the kernel on Linux. FUSE-T returns success for both
+calls but its NFS backend does not act on either, so a rebuilt subtree stays
+cached on macOS until the NFS client's attribute cache expires. That is what the
+mount's attribute-cache bound is for; see
+[macOS: NFS client cache tuning](#macos-nfs-client-cache-tuning).
 
 Writes are fire-and-forget: the FUSE reply is sent before the cell write
 completes, so subscription rebuilds don't block the callback chain (required to
 avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
+
+### The `.status` file
+
+`.status` at the mount root reports the daemon's API URL, debug flag, connection
+state, per-space materialized piece counts, subtree rebuild metrics, write
+statistics, and a `cfc` section carrying writeback phase counts and recent
+diagnostics. Each space has a `piecesLoaded` flag. Its piece count remains zero
+until the named `pieces/` projection is first accessed.
+
+The file is generated rather than written. `CellBridge.initStatus` registers it
+with `FsTree.addGeneratedFile`, giving the tree a function that renders the JSON
+from the daemon's current state. Nothing on the write path refreshes it, and no
+counter has to be published before a reader can see it: a flush increments
+`writeStats.flushed` and stops there.
+
+`FsTree.refreshGenerated` runs the renderer and publishes the result as the
+node's content, and the callbacks that report the file's size call it —
+`replyEntry` and `getattr`. Reads serve the bytes that were published, never
+rendered per read. This is what keeps a reader from seeing a partial document: a
+client stops a read at the size it was last given, so bytes from a render that
+grew since then would be cut off at that size, and bytes from one that shrank
+would be padded out to it with NULs. Publishing where the size is reported keeps
+the two halves of that answer from one render.
+
+`open` then fixes those published bytes into the descriptor's handle, and every
+read on the descriptor serves them. A reader that has consumed the whole file
+issues one more read to see EOF, which a newer, longer render would otherwise
+answer with a spliced tail. A getattr carrying a descriptor reports that
+descriptor's snapshot length and its publish time both, so a stat from elsewhere
+cannot move the size or the modification time out from under a read in progress.
+
+Publishing bumps the node's mtime whenever the rendered bytes change, so a
+generated file reports when its content last changed while the rest of the mount
+reports the epoch. A status counter can change without changing the document's
+length, and a client that validates its cached copy against the timestamp and
+the size would otherwise keep serving what it holds — on macOS an NFS client
+returning a frozen `.status`, on Linux a page cache that is never invalidated.
+The moving mtime is what tells both to re-read. macOS still bounds how soon that
+happens by the mount's attribute-cache option, for the same reason rebuilt
+subtrees are; see
+[macOS: NFS client cache tuning](#macos-nfs-client-cache-tuning).
 
 See [RELIABILITY_DESIGN.md](./RELIABILITY_DESIGN.md) for the package-local plan
 to move default mutating operations toward commit-confirmed replies, bounded

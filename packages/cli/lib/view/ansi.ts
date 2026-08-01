@@ -16,10 +16,14 @@ export interface Style {
   readonly dim?: boolean;
   readonly italic?: boolean;
   readonly underline?: boolean;
+  readonly strikethrough?: boolean;
 }
 
 export const ESC = "\x1b";
 export const CSI = `${ESC}[`;
+/** Operating System Command introducer and its BEL terminator. */
+const OSC = `${ESC}]`;
+const BEL = "\x07";
 export const RESET = `${CSI}0m`;
 
 /** Build the SGR escape that turns a {@link Style} on. Empty string if no-op. */
@@ -29,6 +33,7 @@ export function sgr(style: Style): string {
   if (style.dim) codes.push(2);
   if (style.italic) codes.push(3);
   if (style.underline) codes.push(4);
+  if (style.strikethrough) codes.push(9);
   if (style.fg) codes.push(38, 2, style.fg[0], style.fg[1], style.fg[2]);
   if (style.bg) codes.push(48, 2, style.bg[0], style.bg[1], style.bg[2]);
   if (codes.length === 0) return "";
@@ -94,4 +99,14 @@ export const term = {
   moveTo(row: number, col: number): string {
     return `${CSI}${row};${col}H`;
   },
+  /** Set the terminal's default background colour (OSC 11). This is the colour
+   * the terminal fills the area outside the character grid with — the sub-cell
+   * padding below the last row and beside the last column — which no cell can
+   * reach. */
+  setDefaultBg(rgb: Rgb): string {
+    const h = rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
+    return `${OSC}11;#${h}${BEL}`;
+  },
+  /** Restore the terminal's own default background colour (OSC 111). */
+  resetDefaultBg: `${OSC}111${BEL}`,
 };

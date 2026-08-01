@@ -18,6 +18,14 @@ profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
 artifact. Most test jobs set `DENO_COVERAGE_DIR`, including both pattern
 integration jobs.
 
+Do not name a source file so that its path ends in `test.ts` (or `test.tsx`,
+`test.js`, `test.mjs`, `test.jsx`). `deno coverage` takes those for test files
+and leaves them out of the report, even though V8 records them and even if
+`--exclude` is overridden. The debt metric reads a missing report entry as a
+file no test ever loaded and charges every one of its lines, so a well-tested
+file scores as entirely uncovered. This is why the `cf test` command lives in
+`commands/test-command.ts`.
+
 ### Authored pattern code is measured by transformer instrumentation
 
 Patterns (the user programs under `packages/patterns`) are not loaded the way an
@@ -26,15 +34,24 @@ transformer pipeline and then run inside a sandbox. Deno's V8 coverage never
 sees the authored pattern statements execute, so it cannot report which lines of
 a pattern ran.
 
-To measure that, the `cf test` command can turn on a separate mechanism. When
-the `CF_PATTERN_COVERAGE_DIR` environment variable is set (or the
-`--pattern-coverage-dir` flag is passed), the `cf test` runner builds a
-`PatternCoverageCollector`. The transformer then injects a coverage "hit" call
-in front of each authored statement, and the collector writes one
-`*.pattern-coverage.lcov` file per test. The line numbers in that file point
-back at the authored pattern source.
+To measure that, a `PatternCoverageCollector` is attached to the runtime. The
+transformer then injects a coverage "hit" call in front of each authored
+statement, and the collector receives the hits; the line numbers it records
+point back at the authored pattern source. There are two ways a runtime gets a
+collector:
 
-Two properties of this mechanism are worth keeping in mind.
+- The `cf test` command builds one when the `CF_PATTERN_COVERAGE_DIR`
+  environment variable is set (or the `--pattern-coverage-dir` flag is passed)
+  and writes one `*.pattern-coverage.lcov` file per test. This is the pattern
+  unit path.
+- A runtime constructed with `RuntimeOptions.patternCoverage` set instruments
+  every compile it performs, including the content-addressed cell-cache path a
+  piece load takes. The instrumented compile is keyed as a distinct cached
+  variant, so a coverage-on runtime never serves the uninstrumented bytes an
+  ordinary compile stored. This is how the browser worker collects coverage in
+  the integration path (see below).
+
+These properties of this mechanism are worth keeping in mind:
 
 - The counters are statement based. A single statement that spans several lines
   marks its whole source range as run the moment the statement is reached. The
@@ -43,39 +60,140 @@ Two properties of this mechanism are worth keeping in mind.
 - Coverage records that a line ran. It never records that a test checked the
   result of running that line. A test that drives a pattern through a flow
   without asserting anything still marks those lines covered.
+- Handler bodies and derived expressions run only when a test drives them, and a
+  pattern unit test can drive both. A JSX handler, inline or bound, compiles to a
+  stream on the node's prop: a test walks the rendered tree to the node, reads
+  the prop, and sends it an event. A derived expression such as `{count * 2}`
+  runs when a test reads the node it builds. So UI raises the uncovered-line
+  count only until a test drives it; write that test rather than taking an
+  `ACCEPT_COVERAGE_DEBT` marker.
+  [pattern-testing.md](../common/workflows/pattern-testing.md) shows how.
 
-`CF_PATTERN_COVERAGE_DIR` is read in exactly one place: the `cf test` command in
-`packages/cli/commands/test.ts`. A job that runs patterns through a plain
-`deno test` invocation, or by talking to a running Toolshed server, does not go
-through `cf test`. Setting the variable on such a job has no effect at all.
+`CF_PATTERN_COVERAGE_DIR` names the directory the `*.pattern-coverage.lcov`
+files are written to. The `cf test` command in
+`packages/cli/commands/test-command.ts` reads it directly. The browser
+integration path does not run through `cf test`; there the integration harness
+reads the same variable to decide whether to turn worker coverage on and where to
+write the merged LCOV it pulls back from the browser (see "How the integration
+jobs collect authored-pattern coverage").
 
 ## How the two feed the coverage gate
 
-`tasks/perf-check.ts` downloads every `coverage-profile-*` artifact, joins all
-the LCOV files together, and hands them to `tasks/coverage-metrics.ts`. That
-code walks the tracked source files under `packages` and `tasks`, and for each
-file counts how many of its lines no test covered. The top-level `scripts`
-directory is excluded from this gate. The counts roll up into
+The Coverage Check job downloads every `coverage-profile-*` artifact with
+`actions/download-artifact`. The action checks each artifact's recorded digest.
+`tasks/coverage-check.ts` verifies that every expected artifact is present. It
+joins all the downloaded LCOV files together and hands them to
+`tasks/coverage-metrics.ts`. That code walks the tracked source files under
+`packages` and `tasks`. For each file, it counts how many lines no test covered.
+The top-level `scripts` directory is excluded from this gate. The counts roll up
+into
 `coverage-debt: <group> uncovered lines` metrics, for example
-`coverage-debt: packages/patterns uncovered lines`, and the performance check
+`coverage-debt: packages/patterns uncovered lines`, and the coverage check
 gates a pull request on them.
 
 Authored pattern files under `packages/patterns` are tracked source files, so
-their uncovered lines count toward `coverage-debt: packages/patterns`. The only
-job that currently feeds covered-line data for those authored files is
-`pattern-unit-test`, because it is the only job that runs patterns through
-`cf test` with `CF_PATTERN_COVERAGE_DIR` set.
+their uncovered lines count toward `coverage-debt: packages/patterns`. Every
+authored-pattern coverage stream feeds this one metric: the `pattern-unit-test`
+job's coverage (`TN:pattern-runtime`) and the integration jobs' coverage
+(`TN:pattern-runtime-integration`) both join the combined LCOV, and a line
+covered by either counts covered. Nothing in the accounting reads the test name —
+the two are kept distinct only so a reader of the combined report can tell what
+covered a line.
 
-One detail of the gate's accounting matters when reasoning about pattern
-coverage. For a tracked file that has any LCOV record, the gate counts only the
-lines named in that record that were never hit. For a tracked file with no LCOV
-record at all, every tracked line counts as uncovered. Pattern instrumentation
-emits a record line only for statements it could instrument, which is a subset
-of the file's lines. So the first time any test produces a pattern-coverage
-record for a previously unrecorded pattern file, that file's uncovered-line
-count drops both because real lines became covered and because the lines the
-instrumentation never names leave the denominator. The second effect is an
-accounting artifact, not new test strength.
+One detail of the gate's accounting is worth knowing when reasoning about
+pattern coverage. A file with no LCOV record has every tracked line counted as
+uncovered. A file with a record is scored against the lines that record names.
+For a file measured by Deno's V8 coverage that is every executable line; pattern
+instrumentation names only the statements it could instrument, so a pattern
+file's first record both covers real lines and drops the never-named lines out of
+the count.
+
+The gate absorbs that safely, because it is a ratchet: it fails a pull request
+only when a group's uncovered count *rises* above the latest `main` baseline.
+Gaining a record can only *lower* a file's count, since the record names a subset
+of the file's lines and the rest stop being counted, so it settles at a lower —
+and therefore stricter — bar rather than failing anything. The instrumented
+statements are also the only lines this mechanism can speak to: a line the
+instrumentation cannot reach is not a line a pattern test could cover.
+
+## Ratchet baselines and accepting debt
+
+The ratchet applies per source group and only to the groups a PR changes: for
+each such group the uncovered-line count must not rise above the latest non-cold
+`main` run's count. Debt in unchanged groups is still reported, but does not
+block the PR.
+
+Accept one metric's increase with the narrow per-metric marker in the PR
+description:
+
+```text
+ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
+```
+
+Use the broad reset marker only to bootstrap coverage data for the first time,
+or when the `main` baseline is known to be bogus and should be re-seeded for one
+cycle:
+
+```text
+NEW_COVERAGE_BASELINE
+```
+
+When that PR merges, the main run's coverage metrics become the new ratchet
+baseline for later PRs. The check still requires the full expected coverage
+artifact set during that reset cycle. Jobs with no reportable covered files
+upload an empty LCOV report, so a missing artifact means the report upload
+itself failed.
+
+Each run writes a per-run baseline artifact recording its coverage-debt metrics
+and its compile cache states. It is named `perf-metrics` for historical reasons
+— it once also carried CI timing metrics for the removed performance gate — and
+keeps that name so the ratchet needs no migration; a run from before the gate
+was removed reads as a valid baseline unchanged. A later PR run reads the most
+recent `main` run's `perf-metrics` artifact as its ratchet baseline; there is no
+separate history store. The workflow downloads the current run's
+`coverage-profile-*` artifacts before starting `tasks/coverage-check.ts`.
+`COVERAGE_ARTIFACTS_DIR` points the script at one subdirectory per artifact. The
+download step checks the artifact digests. The script separately checks the
+expected artifact names (`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an
+artifact containing no coverage files. A manual run without the environment
+variable uses the GitHub API download path instead.
+
+## Compile cache state and cold runs
+
+The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
+over the compiler packages. A PR that changes that fingerprint runs cold: every
+pattern compiles from scratch. A cold run covers compile branches that only
+execute on a cold cache, which lowers its coverage debt, so ratcheting a warm PR
+against a cold `main` run would fail it with phantom uncovered lines.
+
+The pattern-integration process owns one shared cache in
+`packages/patterns/integration/pieces-controller.ts`. Its controller helper and
+the capability-gate controller both inject that cache into every runtime they
+create. A custom runtime in this suite must do the same. Setting
+`CF_COMPILE_CACHE_FILE` only tells the test-support cache where to persist its
+bytes; a runtime uses those bytes only when it receives the cache through its
+`moduleByteCache` option.
+
+To tell cold from warm, each pattern job uploads a small `cache-state-*`
+artifact recording its cache restore result. The coverage check aggregates those
+into `compileCacheStates` in `perf-metrics.json`. A job family is cold when
+any of its shards had a full cache miss, detected as the cache file being absent
+after the restore step (the combined `actions/cache` action does not expose the
+matched key). A partial hit through a restore key counts as warm: both key forms
+start with the fingerprint hash, so any restore means the compiled bytes are
+current. The ratchet then uses the latest non-cold `main` sample, so a cold
+`main` run cannot lower the baseline that warm PRs are held to.
+
+A run without a recorded cache state — an artifact carrying no stamp, or a run
+whose cache-state artifact failed to upload — is retro-classified from the
+compile fingerprint (`tasks/compile-cache-state.ts` mirrors the `cc-*` key globs,
+drift-guarded by a test that parses the workflow): if the fingerprint paths
+changed against the run's predecessor, every family is treated as cold; if
+unchanged, warm. The same fingerprint inference backstops the current run when
+its cache-state artifact is missing. Fingerprint inference cannot see
+non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
+for those reasons and lacking a recorded state stays unknown, so it is treated
+as not-cold and may still be used as a baseline.
 
 ## A combined report for IDEs
 
@@ -111,12 +229,13 @@ gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>
 | Job | Runtime (V8) coverage | Authored-pattern coverage |
 | --- | --- | --- |
 | `pattern-unit-test` | yes | yes (`cf test` with `CF_PATTERN_COVERAGE_DIR`) |
-| `pattern-integration-test` | yes | no |
-| `pattern-reload-integration-test` | yes | no |
+| `pattern-integration-test` | yes | yes (browser worker collector) |
+| `pattern-reload-integration-test` | yes | yes (browser worker collector) |
 
 The pattern unit job runs each `packages/patterns/**/*.test.tsx` file through
 `cf test` in-process. The two integration jobs run browser-driven `deno test`
-files against a running Toolshed server.
+files against a running Toolshed server. Both kinds of authored-pattern coverage
+feed the same gated metric.
 
 The compile byte cache is available to `cf test` through
 `CF_COMPILE_CACHE_FILE`. Coverage and non-coverage compiles use different cache
@@ -127,72 +246,120 @@ before the cached module bytes run. The `pattern-unit-test` job wires both
 coverage-transformed module bytes between runs without mixing them with ordinary
 compiled bytes.
 
-## Why the two integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
+The persistent cell cache stores each module's span list as one JSON string.
+This keeps reporting metadata in one value instead of expanding every span
+object into its own derived storage records. Coverage caches use the
+`pattern-coverage` variant. The cell-cache reader accepts only the JSON string
+representation. A covered closure without valid JSON spans is treated as a
+cache miss, recompiled from source, and written back in the scalar format.
 
-Adding `CF_PATTERN_COVERAGE_DIR` to `pattern-integration-test` or
-`pattern-reload-integration-test` was considered and deliberately not done, for
-four reasons.
+The runner remembers persisted closures for the lifetime of the runner session.
+Each entry is identified by its space, cache variant, entry identity, and
+complete module identity set. It skips another persistence operation for the
+same closure. Concurrent requests for the same closure share one persistence
+operation.
 
-1. It would do nothing as written. Both jobs run their tests with `deno test`,
-   not `cf test`, and `CF_PATTERN_COVERAGE_DIR` is read only by `cf test`. The
-   variable would sit in the job's environment unread, which is worse than
-   absent because it suggests coverage is being collected when none is.
+## How the integration jobs collect authored-pattern coverage
 
-2. Making it work would mean crossing a process boundary. These tests run the
-   pattern inside a sandbox in a headless browser that talks to a separate
-   Toolshed server. The "hit" calls happen in that sandbox, with no in-process
-   collector to receive them and write LCOV. Collecting them would require new
-   plumbing to carry hit data back across the browser and server boundaries.
+For these jobs coverage is a runtime-level capability rather than a `cf test`
+one, so the worker never reads `CF_PATTERN_COVERAGE_DIR`. In an integration test
+the pattern's event handlers run in the browser's runtime Web Worker, and that
+worker is constructed with `RuntimeOptions.patternCoverage` on — a
+`patternCoverage` flag on the worker's `InitializationData`, which the
+integration harness sets when `CF_PATTERN_COVERAGE_DIR` is present. Every compile
+the worker performs is then instrumented, including the piece-load path through
+the content-addressed cell cache, whose instrumented variant is keyed apart from
+the ordinary one so the worker never runs uninstrumented bytes.
 
-3. It would weaken the pressure the gate puts on test quality. The coverage-debt
-   gate currently rewards focused pattern unit tests, which run in-process,
-   assert on results, and are fast. If broad end-to-end flows counted toward
-   pattern coverage, the gate could be satisfied by incidental execution in an
-   integration test that asserts little, so coverage debt would fall without the
-   matching rise in verification strength.
+Keying the variants apart means a piece an ordinary realm authored has no
+instrumented closure to warm-load. That resume falls back to cold recovery — a
+recompile from the stored source closure, which the runtime instruments like any
+other compile — so the resumed piece reports coverage for the handlers it runs
+rather than reporting nothing. The recovery writes its instrumented bodies back
+under the coverage variant, so later coverage-on sessions warm-load them instead
+of recompiling.
 
-4. It would distort the gate's numbers through the accounting artifact described
-   above. Crediting integration runs would flip many pattern files from the
-   full-file denominator to the narrower instrumented-statement denominator, so
-   reported debt would drop for reasons unrelated to new testing.
+The cache-key split has a consequence for the test process too. In a
+browser-driven test that process runs a pieces controller
+(`initializePiecesController`) that creates the space's pieces. When the run
+collects coverage, the controller has to collect it too — and this matters beyond
+its own coverage.
 
-The net effect on metric quality is that crediting integration runs would trade
-a smaller, bounded source of false negatives for a larger source of false
-positives and a less faithful, more gameable gate.
+Here is why. A coverage-on browser reads the instrumented cache variant. An
+uninstrumented controller writes the ordinary one. So if the controller does not
+instrument, every browser misses what the controller wrote and compiles each
+pattern from scratch for itself. That includes the space-root default pattern,
+which `ensureDefaultPattern` exists to compile exactly once. Each of those
+compiles is synchronous, so it wedges the worker's event loop and stalls
+unrelated IPC — the "second-boot slow window" the lunch-poll vote test describes.
+With the controller uninstrumented, that test ran for 16 minutes and never
+rendered its UI. Once it instruments, the test passes in 7 seconds.
+
+A new browser-driven suite that creates its pieces some other way should expect
+the same trap.
+
+Getting the hits back out crosses two boundaries: the worker's and the browser's.
+`PatternCoverageCollector.toData()` and `ingest()` give the spans and hit counts a
+plain-JSON form. The worker exposes them over the RuntimeClient IPC
+(`GetPatternCoverage`), and the harness pulls them with `page.evaluate` at
+teardown — one batched dump per page, not a per-hit round trip. Every realm runs
+the same instrumented bytes, so the fileName-plus-span-id keys line up: a realm
+that only warm-loaded already-instrumented bytes reports hits that merge cleanly
+against the realm that compiled them and holds the spans. The harness merges the
+realms' hits and writes one `*.pattern-coverage.lcov` tagged
+`TN:pattern-runtime-integration`, which the job uploads in its
+`coverage-profile-*` artifact.
+
+Integration coverage counts toward the gated `coverage-debt: packages/patterns`
+metric exactly like unit coverage, which means a broad end-to-end flow that runs a
+line without asserting on it lowers the debt. That trade is deliberate. Crediting
+integration coverage only in a separate, never-gated number would score whatever
+an end-to-end flow reaches — a piece assembled across several patterns, a path
+through the shell no unit test drives — as uncovered however well it is
+exercised. Coverage does not measure verification either way (see the properties
+under "Authored pattern code is measured by transformer instrumentation"), so a
+unit test that asserts on what it ran remains the better test; the gate just does
+not treat what an integration test covers as worthless.
+
+A span's file name is whatever the realm that compiled it called the module, and
+that arrives in two shapes. A pattern the controller resolved off disk is named
+relative to the patterns root (`/lunch-poll/main.tsx`), because that is the root
+the resolver was given. A pattern the worker fetched over HTTP is named by its URL
+pathname (`/api/patterns/system/default-app.tsx`), because Toolshed's pattern
+identity is computed over pathname-prefixed names. Stripping the route prefix maps
+the second shape onto the first, and both then resolve against the patterns root.
+
+That rename runs when the report is written rather than as each realm reports,
+because the realms do not all arrive the same way: the browser dumps are ingested,
+but a runtime this process runs registers its spans into the shared collector
+directly, as it compiles. Renaming on the way in silently covers only the first
+kind. A record naming a file that is not in the checkout is the failure mode to
+watch for — the gate matches records against the files it walked, so such a record
+matches nothing and drops its coverage without complaining, which looks exactly
+like a pattern nobody tested. Writing one warns.
 
 ## Known limitations and possible future work
 
-- False negatives exist today. A pattern line that only an integration test
-  exercises is counted as uncovered, because no integration job collects pattern
-  coverage. This understates true coverage for the patterns that are reachable
-  only through end-to-end flows. The trade is deliberate: the alternative above
-  inflates the numbers more than this understates them.
+- Only the browser-driven suites contribute. A pattern exercised solely through
+  the headless multi-runtime harness (`multi-runtime-harness.ts`), whose sessions
+  are Deno workers rather than pages, has nowhere for the teardown dump to run and
+  contributes nothing. Those sessions could write their own LCOV directly — they
+  are Deno realms with a filesystem — which is the natural way to extend this.
 
-- The record-versus-no-record denominator difference is a pre-existing property
-  of the gate, not specific to integration jobs. If pattern coverage is ever
-  expanded, normalizing the denominator (always scoring a pattern file against
-  the same line set whether or not it has a record) would make the numbers
-  easier to trust.
-
-- Event-handler bodies are never covered by the pattern-unit gate. A JSX handler
-  such as `onClick={() => stream.send({})}` compiles to a handler that the
-  runtime materializes as an opaque reference, not a callable function. A pattern
-  unit test can walk the rendered tree to pull reactive computeds, but it cannot
-  fire that handler, because firing needs the runtime's event dispatch and
-  `cf test` has no DOM. So the statements inside every event handler count as
-  uncovered. A change that adds UI buttons therefore raises the group's
-  uncovered-line count by an amount no unit test can bring back down. Accept that
-  rise with a `NEW_PERF_BASELINE` marker (see
-  [CI_PERFORMANCE.md](CI_PERFORMANCE.md)); do not restructure the handler to move
-  the counter, because that changes wiring no test exercises.
+- Integration coverage is not a reason to skip a unit test. A unit test can cover
+  a handler body too (see the handler bullet above) and can assert on what the
+  handler did, which coverage never checks. Integration coverage only removes the
+  case where a line no unit test happens to drive would otherwise read as
+  untested.
 
 ## Related documentation
 
 - [TESTING.md](TESTING.md) — how to run the test suites whose execution this
   coverage is measured from.
-- [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — the coverage-debt baseline and ratchet
-  markers (`NEW_PERF_BASELINE` and `NEW_COVERAGE_BASELINE`) that gate a pull
-  request on the metrics described here.
+- [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — CI wall-time optimization policy.
+- [One-line guard coverage artifact](deno-coverage-guard-line-artifact.md) —
+  why V8 can report a one-line conditional guard as uncovered when its branch
+  is not taken.
 - [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
   — writing the pattern unit tests that the `pattern-unit-test` job runs through
-  `cf test`, which is the only source of authored-pattern coverage.
+  `cf test`, the source of the gated authored-pattern coverage.

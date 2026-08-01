@@ -622,12 +622,6 @@ Deno.bench(
 
 Deno.bench(
   "Cell proxy - property writes schemaless (100x)",
-  {
-    // Schemaless cells are read-only; proxy writes require a schema with
-    // Writable<> types, so this benchmark tests intentionally unsupported
-    // behavior.
-    ignore: true,
-  },
   async () => {
     const { runtime, storageManager } = setup();
 
@@ -641,10 +635,11 @@ Deno.bench(
     cell.withTx(initTx).set({ x: 1, y: 2 });
     initTx.commit();
 
-    // Measure proxy writes
+    // Measure proxy writes; proxies are read-only by default, so request a
+    // writable view.
     for (let i = 0; i < 100; i++) {
       const tx = runtime.edit();
-      const proxy = cell.withTx(tx).getAsQueryResult();
+      const proxy = cell.withTx(tx).getAsQueryResult([], tx, true);
       proxy.x = i;
       proxy.y = i * 2;
       tx.commit();

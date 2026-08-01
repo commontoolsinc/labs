@@ -5,10 +5,9 @@ import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.
 
 // These tests guard the format-agnostic SES module-item classification rules
 // (the `classifyModuleItems` core) through the live enforcement entry point,
-// `verifyCompiledModuleBody` — the ESM module-body verifier. They were
-// originally written against the retired AMD whole-bundle verifier; each case
-// is the same compiled module body, now in compiled-CommonJS form with a
-// `require()` import preamble instead of an AMD `define` factory.
+// `verifyCompiledModuleBody` — the module-body verifier. Each case is one
+// compiled module body in compiled-CommonJS form, with a `require()` import
+// preamble ahead of the top-level items under test.
 //
 // Broad accept/reject parity cases (mutable bindings, classes, generators,
 // IIFEs, raw mutable exports, import policy) live in
@@ -261,7 +260,7 @@ exports.default = (0, commonfabric_1.lift)(() => atob("YQ=="));
     const body = `
 ${IMPORT}
 function buildYears() {
-  const currentYear = new Date((0, commonfabric_1.safeDateNow)()).getFullYear();
+  const currentYear = new Date().getFullYear();
   const years = [];
   for (let year = currentYear; year >= currentYear - 2; year--) {
     years.push(String(year));
@@ -281,8 +280,8 @@ exports.default = payload;
   it("accepts compiled nested __cfHelpers.__cf_data() runtime helper calls", () => {
     const body = `
 ${IMPORT}
-const startedAt = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.safeDateNow)());
-const seed = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.nonPrivateRandom)());
+const startedAt = commonfabric_1.__cfHelpers.__cf_data(Date.now());
+const seed = commonfabric_1.__cfHelpers.__cf_data(Math.random());
 exports.default = (0, commonfabric_1.__cf_data)({ startedAt, seed });
 `;
 

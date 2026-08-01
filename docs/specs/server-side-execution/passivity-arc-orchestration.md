@@ -793,10 +793,14 @@ reachable over the wire. Hypothesis B leaves it untouched; the rule rejected it.
   fingerprint and cannot NAME them, which hid the `map` residual for a full
   wave. **A counter that can read zero when the thing happened is worse than
   no counter.**
-- **`data-model`'s `FabricError` codec test fails at MAIN** (`aac9bd3dc`) and
-  is the only battery failure. Not this branch — `data-model` is clean and
-  imports neither `runner` nor `memory` — and it passed here earlier the same
-  day, so it is environmental. Do not attribute it to arc work.
+- ~~**`data-model`'s `FabricError` codec test fails at MAIN** (`aac9bd3dc`) and
+  is the only battery failure.~~ **CLOSED by the 2026-07-31 `origin/main`
+  merge**: `packages/data-model` runs 47 passed / 0 failed on the merged tree.
+  It was never environmental and never arc work — it was a real main-side
+  defect that main has since fixed (the data-model work between `ed46f266e`
+  and `f25518c1f`, whose tip is "an array is answered by the array rule, and
+  nothing else"). The lesson stands with its label corrected: "it passed here
+  earlier the same day" is not evidence of an environmental cause.
 
 ---
 

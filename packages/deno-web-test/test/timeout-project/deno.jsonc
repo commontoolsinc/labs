@@ -1,0 +1,9 @@
+{
+  "name": "deno-web-test-timeout-project",
+  "tasks": {
+    "test": "<@see deno-web-test/test/utils.ts#runDenoWebTest>"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  }
+}

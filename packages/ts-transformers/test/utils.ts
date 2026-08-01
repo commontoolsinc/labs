@@ -26,6 +26,8 @@ export interface TransformOptions {
   moduleIdentities?: ReadonlyMap<string, string>;
   policyManifests?: unknown[];
   state?: CrossStageState;
+  assertDiagnostics?: boolean;
+  canonicalWriterIdentityFile?: (fileName: string) => string;
 }
 
 export interface BatchTypeCheckResult {
@@ -580,6 +582,8 @@ export async function transformFiles(
     logger,
     moduleIdentities: options.moduleIdentities,
     state: options.state,
+    assertDiagnostics: options.assertDiagnostics,
+    canonicalWriterIdentityFile: options.canonicalWriterIdentityFile,
   });
 
   const out: Record<string, string> = {};
@@ -856,6 +860,8 @@ export async function validateFiles(
     logger,
     moduleIdentities: options.moduleIdentities,
     state: options.state,
+    assertDiagnostics: options.assertDiagnostics,
+    canonicalWriterIdentityFile: options.canonicalWriterIdentityFile,
   });
 
   const outputs: Record<string, string> = {};

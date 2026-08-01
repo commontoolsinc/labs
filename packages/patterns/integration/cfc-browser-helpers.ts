@@ -9,7 +9,13 @@ import {
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
-const CLICK_TARGET_ATTR = "data-cfc-click-target";
+/**
+ * Attribute a mark predicate stamps on the element it resolved, so the test can
+ * then address exactly that element. Each mark is a unique whitespace-separated
+ * token in the attribute value. Grouped clicks can therefore mark the same
+ * element more than once without losing an earlier target.
+ */
+export const CLICK_TARGET_ATTR = "data-cfc-click-target";
 
 // Predicates evaluated in the page by `waitForCondition`. Each is self-contained
 // — it closes over nothing in this module — so it can be serialized and run in
@@ -25,6 +31,27 @@ const textPresent = (
     probe.deepText(element).includes(text)
   );
 
+// Settle the view, then report whether `selector` contains `text`. Reaches the
+// same answer as `textPresent` on a page that is already up to date, and drives
+// one that is not: asking the worker whether it is idle queues runnable pull
+// work that nothing else would start, so a rendering that only the page's own
+// pending work produces arrives on a settling check and not on one that watches
+// the DOM alone.
+const settledTextPresent = async (
+  probe: ProbeApi,
+  selector: string,
+  text: string,
+): Promise<boolean> => {
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
+  return probe.collect(selector).some((element) =>
+    probe.deepText(element).includes(text)
+  );
+};
+
 const textAbsent = (
   probe: ProbeApi,
   selector: string,
@@ -34,7 +61,14 @@ const textAbsent = (
     probe.deepText(element).includes(text)
   );
 
-const buttonDisabledIs = (
+// Resolve a control's disabled state and compare it to `disabled`. An inner
+// <button> is authoritative when present: its `.disabled` DOM property is the
+// control's real state. Without one, fall back to the host — a native form
+// control exposes `.disabled`, and a custom element like cf-checkbox reflects
+// `disabled` to an attribute and also sets `aria-disabled`. A control that is
+// neither disabled nor carries the attribute resolves to enabled, so
+// `waitForDisabled(el, false)` satisfies immediately instead of hanging.
+const disabledIs = (
   probe: ProbeApi,
   selector: string,
   disabled: boolean,
@@ -44,9 +78,20 @@ const buttonDisabledIs = (
   const button = element instanceof HTMLButtonElement
     ? element
     : element.shadowRoot?.querySelector("button");
-  return button instanceof HTMLButtonElement
-    ? button.disabled === disabled
-    : false;
+  let resolved: boolean;
+  if (button instanceof HTMLButtonElement) {
+    resolved = button.disabled;
+  } else if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    resolved = element.disabled;
+  } else {
+    resolved = element.hasAttribute("disabled") ||
+      element.getAttribute("aria-disabled") === "true";
+  }
+  return resolved === disabled;
 };
 
 const runtimeIdle = async (): Promise<boolean> => {
@@ -155,12 +200,10 @@ const fillAndVerify = async (
     return false;
   }
 
-  phase("scrolling");
-  input.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
-  if (!probe.isVisible(input) || input.disabled || input.readOnly) {
+  // Rendered, not on-screen: the fill drives the field through focus and
+  // dispatched events rather than a coordinate click, so its viewport position
+  // never bears on whether the value takes.
+  if (!probe.isRendered(input) || input.disabled || input.readOnly) {
     phase("not-fillable");
     return false;
   }
@@ -208,54 +251,112 @@ const fillAndVerify = async (
   return verified;
 };
 
-// Scroll the cf-button behind `selector` into view and tag its inner click
-// target so the test can resolve and click exactly that element.
-const markForClick = async (
+// Resolve every click target before settling the view. Mark them only when the
+// same rendered elements remain afterward. The resolution is spelled out here
+// because this predicate is serialized into the page and closes over nothing
+// in this module.
+//
+// A target introduced or replaced during the settle is checked again when the
+// DOM mutation triggers the next evaluation. That evaluation gives the exact
+// element a full settle before marking it.
+//
+// The settle also drives the page forward. Asking the worker whether it is idle
+// queues runnable pull work that nothing else would start. A target reached
+// only by the page's pending work arrives on a settling check.
+const settleAndMarkClickTargets = async (
   probe: ProbeApi,
-  selector: string,
-  token: string,
+  selectors: readonly string[],
+  tokens: readonly string[],
   attr: string,
 ): Promise<boolean> => {
-  const target = probe.collect(selector)[0] as HTMLElement | undefined;
-  if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle || selectors.length !== tokens.length) return false;
+
+  const resolveClickTarget = (
+    selector: string,
+  ): HTMLElement | undefined => {
+    const target = probe.collect(selector)[0] as HTMLElement | undefined;
+    if (!target) return undefined;
+    return (target.shadowRoot?.querySelector("[data-cf-button]") as
+      | HTMLElement
+      | null) ?? target;
+  };
+  const targetsBefore = selectors.map(resolveClickTarget);
+  const renderedBefore = targetsBefore.map((target) =>
+    target !== undefined &&
+    target.isConnected &&
+    probe.isRendered(target)
   );
-  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
-    | HTMLElement
-    | null) ?? target;
-  clickTarget.setAttribute(attr, token);
+
+  await settle();
+
+  const settledTargets = selectors.map(resolveClickTarget);
+  const ready = settledTargets.every((target, index) => {
+    return renderedBefore[index] === true &&
+      target !== undefined &&
+      target === targetsBefore[index] &&
+      target.isConnected &&
+      probe.isRendered(target);
+  });
+  if (!ready) return false;
+
+  for (let index = 0; index < settledTargets.length; index++) {
+    const target = settledTargets[index];
+    const token = tokens[index];
+    if (target === undefined || token === undefined) return false;
+    probe.addToken(target, attr, token);
+  }
   return true;
 };
 
-// Tag the first visible, enabled element carrying `data-ui-action="<action>"`
+// Tag the `index`-th element matching `selector` once it is rendered. The
+// selector already resolves to clickable elements, so the match is tagged
+// directly rather than reached through a host's shadow root. The rendered check
+// is viewport-independent. The click scrolls the element into view.
+const markNthForClick = (
+  probe: ProbeApi,
+  selector: string,
+  index: number,
+  token: string,
+  attr: string,
+): boolean => {
+  const target = probe.collect(selector)[index] as HTMLElement | undefined;
+  if (!target) return false;
+  if (!target.isConnected || !probe.isRendered(target)) return false;
+  probe.addToken(target, attr, token);
+  return true;
+};
+
+// Tag the first rendered, enabled element carrying `data-ui-action="<action>"`
 // for a single trusted click, and record the next click's provenance so a
 // failure can show whether the dispatch was trusted and where it landed.
-const markTrustedAction = async (
+// Rendered-ness is asked of the resolved click target, which covers the host:
+// hiding the host reaches the inner control either way. It is asked without an
+// on-screen requirement, since the trusted click scrolls the target into view
+// before dispatching. Disabled-ness is asked of both, because a host can carry
+// an `aria-disabled` its inner control does not.
+const markTrustedAction = (
   probe: ProbeApi,
   action: string,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const isDisabled = (element: HTMLElement): boolean =>
     element.hasAttribute("disabled") ||
     element.getAttribute("aria-disabled") === "true";
 
   for (const element of probe.collect(`[data-ui-action="${action}"]`)) {
     const target = element as HTMLElement;
-    target.scrollIntoView({ block: "center", inline: "center" });
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    );
     const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
       | HTMLElement
       | null) ?? target;
     if (
-      probe.isVisible(target) && probe.isVisible(clickTarget) &&
+      probe.isRendered(clickTarget) &&
       !isDisabled(target) && !isDisabled(clickTarget)
     ) {
-      clickTarget.setAttribute(attr, token);
+      probe.addToken(clickTarget, attr, token);
       clickTarget.addEventListener(
         "click",
         (event) => {
@@ -287,12 +388,11 @@ const markTrustedAction = async (
 
 // Resolve once the shell's reactive view has caught up to runtime state and is
 // interactive, so a click lands on a bound handler. Waits for the shell to
-// expose `viewSettled` (notification-driven), then awaits the settle.
-async function settleView(
-  page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
-): Promise<void> {
-  await waitForCondition(page, viewSettledReady, { timeout });
+// expose `viewSettled` (notification-driven), then awaits the settle. Neither
+// wait takes a timeout: the readiness poll carries `waitForCondition`'s built-in
+// safety net, and the settle itself awaits a real promise.
+export async function settleView(page: Page): Promise<void> {
+  await waitForCondition(page, viewSettledReady);
   await awaitViewSettled(page);
 }
 
@@ -336,7 +436,6 @@ async function waitForTextWhileSettling(
 export async function clickTrustedAction(
   page: Page,
   action: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `trusted-action-${crypto.randomUUID()}`;
   let probe: TrustedActionProbe | undefined;
@@ -345,14 +444,9 @@ export async function clickTrustedAction(
     // click it exactly once. Marking attaches the provenance listener, so the
     // single click is the trusted dispatch we record.
     await waitForCondition(page, markTrustedAction, {
-      timeout,
       args: [action, token, CLICK_TARGET_ATTR],
     });
-    const button = await page.waitForSelector(
-      `[${CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce", timeout },
-    );
-    await button.click();
+    await clickMarked(page, token);
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
     // Indented for readable test-log output
@@ -362,8 +456,6 @@ export async function clickTrustedAction(
       }`,
       { cause },
     );
-  } finally {
-    await clearTrustedActionMark(page, token).catch(() => {});
   }
 }
 
@@ -383,12 +475,10 @@ export async function clickTrustedAction(
 export async function submitViaEnter(
   page: Page,
   inputSelector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await settleView(page, { timeout });
+  await settleView(page);
   const input = await page.waitForSelector(inputSelector, {
     strategy: "pierce",
-    timeout,
   });
   await input.focus();
   await page.keyboard.press("Enter");
@@ -401,11 +491,6 @@ export async function clickTrustedActionAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  // Single timeout budget shared across the fast path, settle, click, and the
-  // wait for the effect.
-  const deadline = Date.now() + timeout;
-  const remaining = () => Math.max(1, deadline - Date.now());
-
   let actionProbe: TrustedActionProbe | undefined;
   let textProbe: TextProbe | undefined;
 
@@ -419,8 +504,8 @@ export async function clickTrustedActionAndWaitForText(
   // trusted click lands; re-dispatching on a later tick is what double-fires
   // and corrupts the event provenance, so we never re-click.
   try {
-    await settleView(page, { timeout: remaining() });
-    await clickTrustedAction(page, action, { timeout: remaining() });
+    await settleView(page);
+    await clickTrustedAction(page, action);
   } catch (cause) {
     actionProbe = await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -439,9 +524,7 @@ export async function clickTrustedActionAndWaitForText(
   // optimistic perUser/perSpace write whose chip trails the commit is caught by
   // the same wait.
   try {
-    await waitForTextWhileSettling(page, selector, text, {
-      timeout: remaining(),
-    });
+    await waitForTextWhileSettling(page, selector, text, { timeout });
   } catch (cause) {
     actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -460,11 +543,43 @@ export async function waitForText(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, textPresent, {
-      timeout,
+      args: [selector, text],
+    });
+  } catch (cause) {
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Timed out waiting for "${selector}" to contain "${text}". Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
+  }
+}
+
+/**
+ * Wait for `selector` to contain `text`, settling `page` on each check.
+ *
+ * Reach for this rather than `waitForText` when the text is the effect of a
+ * stimulus — this page's own click, or one delivered to another browser sharing
+ * the piece. `waitForText` only watches the DOM, and an integration test holds
+ * no UI subscription, so nothing drives the page between its checks. A rendering
+ * that the page's own pending work has to produce then never arrives, and the
+ * wait runs to the stuck-condition safety net on a page that was one settle away
+ * from showing it.
+ *
+ * The settle is inside the predicate, so each re-check drives the page and reads
+ * the result of that same drive.
+ */
+export async function waitForSettledText(
+  page: Page,
+  selector: string,
+  text: string,
+) {
+  try {
+    await waitForCondition(page, settledTextPresent, {
       args: [selector, text],
     });
   } catch (cause) {
@@ -482,11 +597,9 @@ export async function waitForTextAbsent(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, textAbsent, {
-      timeout,
       args: [selector, text],
     });
   } catch (cause) {
@@ -504,15 +617,13 @@ export async function fillCfInput(
   page: Page,
   selector: string,
   value: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     const presentation = presentationInteractions(page);
     if (presentation) {
-      await presentation.typeIntoCfInput(selector, value, timeout);
+      await presentation.typeIntoCfInput(selector, value);
     } else {
       await waitForCondition(page, fillAndVerify, {
-        timeout,
         args: [selector, value],
       });
     }
@@ -535,11 +646,9 @@ export async function fillCfInput(
 export async function readCfInputValue(
   page: Page,
   selector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ): Promise<string> {
   const field = await page.waitForSelector(selector, {
     strategy: "pierce",
-    timeout,
   });
   const probe = await field.evaluate(
     (element: Element): { found: boolean; value: string } => {
@@ -559,18 +668,15 @@ export async function readCfInputValue(
 
 export async function waitForRuntimeIdle(
   page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await waitForCondition(page, runtimeIdle, { timeout });
+  await waitForCondition(page, runtimeIdle);
 }
 
 export async function waitForActiveSpaceRoot(
   page: Page,
   expectedSpace: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   await waitForCondition(page, activeSpaceRootReady, {
-    timeout,
     args: [expectedSpace],
   });
 }
@@ -579,11 +685,9 @@ export async function waitForDisabled(
   page: Page,
   selector: string,
   disabled: boolean,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
-    await waitForCondition(page, buttonDisabledIs, {
-      timeout,
+    await waitForCondition(page, disabledIs, {
       args: [selector, disabled],
     });
   } catch (cause) {
@@ -599,54 +703,185 @@ export async function waitForDisabled(
   }
 }
 
+/**
+ * Resolve once every selector identifies the same rendered target before and
+ * after one settle. Mark those exact targets for the subsequent clicks.
+ *
+ * Every target is ready before any target is marked. A grouped dispatch can
+ * therefore click all of its marks without a settle between them.
+ */
+async function settleWithClickTargets(
+  page: Page,
+  selectors: readonly string[],
+): Promise<string[]> {
+  const tokens = selectors.map(() => `cf-button-${crypto.randomUUID()}`);
+  try {
+    await waitForCondition(page, settleAndMarkClickTargets, {
+      args: [selectors, tokens, CLICK_TARGET_ATTR],
+    });
+  } catch (cause) {
+    await Promise.all(
+      tokens.map((token) => clearClickMark(page, token).catch(() => {})),
+    );
+    // Matches per selector, so the failure names which of a grouped dispatch's
+    // targets never rendered. Each match's `rect` and `visible` report whether
+    // the control was absent or present without a layout box. Every probe reads
+    // the same page, so the body text is reported once rather than once per
+    // selector.
+    const probes = await Promise.all(
+      selectors.map((selector) =>
+        readTextProbe(page, selector).catch(() => undefined)
+      ),
+    );
+    // Indented for readable test-log output
+    throw new Error(
+      `Timed out waiting for ${selectors.join(", ")} to render. Last probe: ${
+        toIndentedDebugString({
+          matches: Object.fromEntries(
+            selectors.map((selector, index) => [
+              selector,
+              probes[index]?.matches,
+            ]),
+          ),
+          bodyText: probes.find((probe) => probe !== undefined)?.bodyText,
+        })
+      }`,
+      { cause },
+    );
+  }
+  return tokens;
+}
+
 export async function clickCfButton(
   page: Page,
   selector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  const token = `cf-button-${crypto.randomUUID()}`;
+  const [token] = await settleWithClickTargets(page, [selector]);
+  if (token === undefined) {
+    throw new Error(`Unable to mark ${selector} for click.`);
+  }
+  await clickMarked(page, token);
+  await settleView(page);
+}
+
+/**
+ * Settle every target page before dispatch, with all of that page's targets
+ * already rendered. Mark every target before the first click. Dispatch every
+ * click without an intervening view settle. Settle every target page after
+ * dispatch.
+ */
+export async function clickCfButtonsConcurrently(
+  targets: readonly { page: Page; selector: string }[],
+): Promise<void> {
+  const pages = [...new Set(targets.map(({ page }) => page))];
+  const markedByPage = pages.map((page) => ({
+    page,
+    tokens: [] as string[],
+  }));
+  const markResults = await Promise.allSettled(
+    markedByPage.map(async ({ page, tokens }) => {
+      tokens.push(
+        ...await settleWithClickTargets(
+          page,
+          targets.filter((target) => target.page === page).map(
+            ({ selector }) => selector,
+          ),
+        ),
+      );
+    }),
+  );
+  const clearMarks = () =>
+    Promise.all(
+      markedByPage.flatMap(({ page, tokens }) =>
+        tokens.map((token) => clearClickMark(page, token).catch(() => {}))
+      ),
+    );
+  const markFailure = markResults.find((result) =>
+    result.status === "rejected"
+  );
+  if (markFailure) {
+    await clearMarks();
+    throw markFailure.reason;
+  }
+
+  const clickResults = await Promise.allSettled(
+    markedByPage.map(async ({ page, tokens }) => {
+      for (const token of tokens) {
+        await clickMarked(page, token);
+      }
+    }),
+  );
+  await clearMarks();
+  const clickFailure = clickResults.find((result) =>
+    result.status === "rejected"
+  );
+  const settleResults = await Promise.allSettled(
+    pages.map((page) => settleView(page)),
+  );
+  if (clickFailure) {
+    throw clickFailure.reason;
+  }
+  const settleFailure = settleResults.find((result) =>
+    result.status === "rejected"
+  );
+  if (settleFailure) {
+    throw settleFailure.reason;
+  }
+}
+
+/**
+ * Click the `index`-th element matching `selector`, where the selector already
+ * resolves to the clickable elements themselves (for example `[data-cf-button]`
+ * across a rendered piece) rather than to a host wrapping one.
+ *
+ * The wait is the mark: a `waitForCondition` predicate re-checks on each DOM
+ * mutation until the indexed element is present and visible, then tags it, and
+ * the test dispatches a single trusted click on the tagged element.
+ */
+export async function clickNthCfButton(
+  page: Page,
+  selector: string,
+  index: number,
+) {
+  const token = `cf-nth-button-${crypto.randomUUID()}`;
   try {
-    // Wait until the button exists, then mark its inner click target exactly
-    // once; the mark is the predicate, so the re-check on each DOM mutation
-    // retries finding the button without re-clicking anything.
-    await waitForCondition(page, markForClick, {
-      timeout,
-      args: [selector, token, CLICK_TARGET_ATTR],
+    await waitForCondition(page, markNthForClick, {
+      args: [selector, index, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
-    throw new Error(`Unable to mark ${selector} for click`, { cause });
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Unable to find button #${index} matching "${selector}". Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
   }
+  await clickMarked(page, token);
+}
+
+/**
+ * Resolve the element whose click marks contain `token` and click it, then
+ * clear that mark.
+ * Shared by `clickCfButton`, `clickNthCfButton`, `clickTrustedAction`, and the
+ * text-matching click helpers in `note-button-helpers.ts`: each one marks its
+ * target through its own predicate, and the resolve/click/untag tail is the
+ * same for all of them.
+ */
+export async function clickMarked(
+  page: Page,
+  token: string,
+): Promise<void> {
   try {
     const clickTarget = await page.waitForSelector(
-      `[${CLICK_TARGET_ATTR}="${token}"]`,
+      `[${CLICK_TARGET_ATTR}~="${token}"]`,
       {
         strategy: "pierce",
-        timeout,
       },
     );
     await clickTarget.click();
   } finally {
-    await page.evaluate((targetToken, targetAttr) => {
-      function collect(
-        root: Document | ShadowRoot,
-        result: Element[],
-      ): void {
-        for (const element of root.querySelectorAll("*")) {
-          if (element.getAttribute(targetAttr) === targetToken) {
-            result.push(element);
-          }
-          if (element.shadowRoot) {
-            collect(element.shadowRoot, result);
-          }
-        }
-      }
-
-      const matches: Element[] = [];
-      collect(document, matches);
-      for (const element of matches) {
-        element.removeAttribute(targetAttr);
-      }
-    }, { args: [token, CLICK_TARGET_ATTR] }).catch(() => {});
+    await clearClickMark(page, token).catch(() => {});
   }
 }
 
@@ -657,10 +892,6 @@ export async function clickCfButtonAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  // Single timeout budget shared across settle, click, and wait-for-effect.
-  const deadline = Date.now() + timeout;
-  const remaining = () => Math.max(1, deadline - Date.now());
-
   let textProbe: TextProbe | undefined;
 
   // Fast path: the effect may already be present (idempotent re-entry).
@@ -668,16 +899,10 @@ export async function clickCfButtonAndWaitForText(
     return;
   }
 
-  // Settle the view BEFORE clicking, then click exactly ONCE. settleView
-  // resolves only once the worker is idle, the vdom batch has been applied to
-  // the main thread, and Lit updates have drained — i.e. the button's handler
-  // is actually bound. A single settled click is delivered to a live handler,
-  // so we never re-click: re-clicking a freshly-rendered control is racy (it
-  // can double-fire, and against a dismissable overlay the repeat clicks
-  // dismiss it). See docs/development/UI_TESTING.md.
+  // clickCfButton settles the view before and after delivering one click to the
+  // bound handler.
   try {
-    await settleView(page, { timeout: remaining() });
-    await clickCfButton(page, buttonSelector, { timeout: remaining() });
+    await clickCfButton(page, buttonSelector);
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
@@ -693,9 +918,7 @@ export async function clickCfButtonAndWaitForText(
   // few cycles after the click — including an optimistic perUser/perSpace write
   // whose chip trails the commit — is captured without ever re-clicking.
   try {
-    await waitForTextWhileSettling(page, textSelector, text, {
-      timeout: remaining(),
-    });
+    await waitForTextWhileSettling(page, textSelector, text, { timeout });
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
@@ -709,11 +932,10 @@ export async function clickCfButtonAndWaitForText(
 
 export async function waitForRuntimeSynced(
   page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   // Quiescence isn't a per-space question: allSynced awaits every space the
   // worker has opened.
-  await waitForCondition(page, runtimeSynced, { timeout });
+  await waitForCondition(page, runtimeSynced);
 }
 
 export type SchedulerLoadSummary = {
@@ -1648,29 +1870,48 @@ async function readDisabledProbe(
     collect(document, matches);
     const element = matches[0];
     if (!element) return { selector: targetSelector, disabled: undefined };
+    // Resolve disabled the same way `disabledIs` does, so the diagnostic reports
+    // the state the wait was actually testing: an inner <button> when present,
+    // else the host's own `.disabled` (native controls) or its `disabled` /
+    // `aria-disabled` attributes (custom elements like cf-checkbox).
     const button = element instanceof HTMLButtonElement
       ? element
       : element.shadowRoot?.querySelector("button");
+    let disabled: boolean;
+    if (button instanceof HTMLButtonElement) {
+      disabled = button.disabled;
+    } else if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement
+    ) {
+      disabled = element.disabled;
+    } else {
+      disabled = element.hasAttribute("disabled") ||
+        element.getAttribute("aria-disabled") === "true";
+    }
     return {
       selector: element.tagName.toLowerCase(),
-      disabled: button instanceof HTMLButtonElement
-        ? button.disabled
-        : undefined,
+      disabled,
     };
   }, { args: [selector] });
 }
 
-async function clearTrustedActionMark(
+/** Remove the click mark carrying `token` from wherever it landed. */
+async function clearClickMark(
   page: Page,
   token: string,
 ): Promise<void> {
   await page.evaluate((targetToken, targetAttr) => {
+    const markTokens = (element: Element): string[] =>
+      (element.getAttribute(targetAttr) ?? "").split(/\s+/).filter(Boolean);
+
     function collect(
       root: Document | ShadowRoot,
       result: Element[],
     ): void {
       for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute(targetAttr) === targetToken) {
+        if (markTokens(element).includes(targetToken)) {
           result.push(element);
         }
         if (element.shadowRoot) {
@@ -1682,7 +1923,14 @@ async function clearTrustedActionMark(
     const matches: Element[] = [];
     collect(document, matches);
     for (const element of matches) {
-      element.removeAttribute(targetAttr);
+      const remaining = markTokens(element).filter((mark) =>
+        mark !== targetToken
+      );
+      if (remaining.length === 0) {
+        element.removeAttribute(targetAttr);
+      } else {
+        element.setAttribute(targetAttr, remaining.join(" "));
+      }
     }
   }, { args: [token, CLICK_TARGET_ATTR] });
 }

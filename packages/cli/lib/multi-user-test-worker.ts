@@ -273,7 +273,8 @@ const handlers: Record<
         undefined,
         setupTx,
       );
-      (defaultPatternCell as any).key("allPieces").set([]);
+      const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
+      pieceRegistry.set([]);
       (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],

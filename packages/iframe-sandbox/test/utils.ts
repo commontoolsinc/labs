@@ -1,6 +1,6 @@
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
-import { sleep } from "@commonfabric/utils/sleep";
+import { defer } from "@commonfabric/utils/defer";
 
 type Callback = (key: string, value: unknown) => void;
 interface Context {
@@ -11,11 +11,13 @@ export class ContextShim {
   data: Context;
   callbacks: [number, string, Callback][];
   receiptIds: number;
+  observers: [string, Callback][];
 
   constructor(object = {}) {
     this.data = object;
     this.callbacks = [];
     this.receiptIds = 0;
+    this.observers = [];
   }
   set(_element: CommonIframeSandboxElement, key: string, value: unknown) {
     this.data[key] = value;
@@ -25,6 +27,25 @@ export class ContextShim {
         callback(key, value);
       }
     }
+    for (const [observer_key, observer] of [...this.observers]) {
+      if (key === observer_key) {
+        observer(key, value);
+      }
+    }
+  }
+
+  // Watch writes to `key`. Observers are held apart from `subscribe`'s
+  // callbacks so that a test watching a key does not consume a receipt id,
+  // which would change the ids the guest's own subscriptions are given.
+  observe(key: string, callback: Callback): () => void {
+    const entry: [string, Callback] = [key, callback];
+    this.observers.push(entry);
+    return () => {
+      const index = this.observers.indexOf(entry);
+      if (index !== -1) {
+        this.observers.splice(index, 1);
+      }
+    };
   }
 
   get(_element: CommonIframeSandboxElement, key: string): unknown {
@@ -92,6 +113,18 @@ export function assertEquals(a: unknown, b: unknown) {
   }
 }
 
+export function deepEquals(a: unknown, b: unknown) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function assertDeepEquals(a: unknown, b: unknown) {
+  if (!deepEquals(a, b)) {
+    throw new Error(
+      `${JSON.stringify(a)} does not deep equal ${JSON.stringify(b)}.`,
+    );
+  }
+}
+
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
 export function cleanupFixtures() {
   for (const fixture of document.querySelectorAll(`[id^="${FIXTURE_ID}-"]`)) {
@@ -143,16 +176,25 @@ export function waitForEvent(
   });
 }
 
-export async function waitForCondition(
-  condition: () => boolean,
-  tries = 10,
-  timeout = 100,
-) {
-  while (tries-- > 0) {
-    if (condition()) {
-      return;
-    }
-    await sleep(timeout);
+// Resolves once `key`'s value in `context` satisfies `predicate`. A guest's
+// write reaches the context through the handler, so observing the context
+// settles the wait when the write arrives. The current value is checked first,
+// for a write that already landed before the wait began.
+export function waitForContextValue(
+  context: ContextShim,
+  element: CommonIframeSandboxElement,
+  key: string,
+  predicate: (value: unknown) => boolean,
+): Promise<void> {
+  if (predicate(context.get(element, key))) {
+    return Promise.resolve();
   }
-  throw new Error("waitForCondition tries exhausted");
+  const deferred = defer();
+  const stop = context.observe(key, (_key, value) => {
+    if (predicate(value)) {
+      stop();
+      deferred.resolve();
+    }
+  });
+  return deferred.promise;
 }

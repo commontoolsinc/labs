@@ -4,7 +4,7 @@
     "check": "deno check .",
     "just-test": {
       "description": "Run unit tests",
-      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env"
+      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --allow-run"
     },
     "test": {
       "description": "Type check & run tests",
@@ -16,6 +16,10 @@
     "bench": {
       "description": "Run memory benchmarks",
       "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env"
+    },
+    "bench:entity-id-list": {
+      "description": "Benchmark Memory v2 entity identifier listing",
+      "command": "deno bench --allow-read --allow-write --allow-ffi --allow-env test/v2-entity-id-list.bench.ts"
     }
   },
   "test": {
@@ -49,9 +53,9 @@
     "./sqlite/exec": "./v2/sqlite/exec.ts"
   },
   "imports": {
-    "@commonfabric/leb128": "jsr:@commonfabric/leb128",
-    "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
-    "@denosaurs/plug": "jsr:@denosaurs/plug@1",
-    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0"
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0",
+    "@denosaurs/plug": "jsr:@denosaurs/plug@^1.1.0",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"
   }
 }

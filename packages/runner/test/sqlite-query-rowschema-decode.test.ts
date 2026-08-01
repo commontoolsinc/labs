@@ -14,7 +14,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { table } from "@commonfabric/memory/sqlite/schema";
-import type { SqliteDbRef } from "@commonfabric/memory/v2";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -22,27 +22,7 @@ import { isCell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { encodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
-
-// deno-lint-ignore no-explicit-any
-async function waitUntil<T>(
-  runtime: Runtime,
-  cell: any,
-  pred: (v: T) => boolean,
-  iterations = 400,
-): Promise<T> {
-  const cancel = cell.sink(() => {}) as () => void;
-  try {
-    for (let i = 0; i < iterations; i++) {
-      await runtime.idle();
-      const v = cell.get() as T;
-      if (pred(v)) return v;
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    throw new Error("timeout waiting for sqlite result");
-  } finally {
-    cancel?.();
-  }
-}
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 
 type QueryState = {
   pending: boolean;
@@ -85,7 +65,7 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
   const seedSqlite = async (
     db: SqliteDbRef,
     sql: string,
-    params?: readonly unknown[],
+    params?: SqliteParamsWire,
   ): Promise<void> => {
     const seedTx = runtime.edit();
     seedTx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });
@@ -148,11 +128,12 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
     const result = runtime.run(tx2, p, {}, resultCell);
     await tx2.commit();
 
-    const v = await waitUntil<QueryState>(
+    const v = await waitForCellValue<QueryState>(
       runtime,
       result,
       (s) =>
-        s.pending === false && Array.isArray(s.result) && s.result.length === 1,
+        s?.pending === false && Array.isArray(s.result) &&
+        s.result.length === 1,
     );
     expect(v.error).toBeUndefined();
 

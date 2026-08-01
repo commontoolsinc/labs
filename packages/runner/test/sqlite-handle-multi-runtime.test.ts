@@ -1,7 +1,7 @@
 // Multi-runtime stability of the SqliteDb handle (CFC Phase 3 rule-bearing
 // dbs). A rowLabel rule's term LIST (`all(a, b, …)` — an array of objects)
 // used to split into per-element entity docs when the handle value was stored
-// (Cell.set assigns [ID] to every object-in-array). Those term docs are not
+// (Cell.set anchors every object-in-array). Those term docs are not
 // reachable through any schema-driven sync, so a SECOND runtime deep-resolved
 // the links to `null` and `sqliteQuery` hashed `allOf: [null]` while the
 // creator runtime hashed the resolved AST — two request hashes fighting over
@@ -32,6 +32,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { isSigilLink } from "../src/link-utils.ts";
 
 // Fresh identity per RUN: the server derives the on-disk cell-db file from the
@@ -187,26 +188,6 @@ function runPattern(runtime: Runtime) {
   return { resultCell, commit };
 }
 
-async function waitUntil<T>(
-  runtime: Runtime,
-  cell: { sink: (f: () => void) => () => void; get: () => unknown },
-  pred: (v: T) => boolean,
-  iterations = 400,
-): Promise<T> {
-  const cancel = cell.sink(() => {});
-  try {
-    for (let i = 0; i < iterations; i++) {
-      await runtime.idle();
-      const v = cell.get() as T;
-      if (pred(v)) return v;
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    throw new Error("timeout waiting for sqlite result");
-  } finally {
-    cancel?.();
-  }
-}
-
 /** All sigil links reachable in a RAW stored value (never descends into one). */
 function collectSigilLinks(value: unknown, out: unknown[] = []): unknown[] {
   if (isSigilLink(value)) {
@@ -254,6 +235,10 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
       Promise.allSettled([runtimeA.settled(), runtimeB?.settled()]),
       grace,
     ]);
+    // Scheduler only, not `dispose({ closeStorage: false })`: BOTH runtimes
+    // must stop before EITHER is torn down, because each can still be answering
+    // the other's shared query. A dispose call quiesces one runtime completely
+    // before the next one starts, which is the ordering this pair rules out.
     runtimeB?.scheduler.dispose();
     runtimeA.scheduler.dispose();
     await Promise.allSettled([
@@ -284,7 +269,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     expect(collectSigilLinks(raw)).toEqual([]);
 
     // db.exec's rev bump must keep it self-contained too: it writes from a
-    // handler frame, where a whole-value set would [ID]-split the term list
+    // handler frame, where a whole-value set would entity-split the term list
     // right back into linked docs. Only the `rev` leaf may change.
     await seedDbFile(runtimeA, resultCell);
     await runtimeA.idle();
@@ -299,7 +284,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     await runtimeA.idle();
     await seedDbFile(runtimeA, a.resultCell);
     const qCellA = a.resultCell.key("q").resolveAsCell();
-    const qA = await waitUntil<QueryState>(
+    const qA = await waitForCellValue<QueryState>(
       runtimeA,
       qCellA,
       (v) => v?.pending === false && v?.error === undefined,
@@ -347,7 +332,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
       qCellA.getAsNormalizedFullLink().id,
     );
 
-    const qB = await waitUntil<QueryState>(
+    const qB = await waitForCellValue<QueryState>(
       runtimeB!,
       qCellB,
       (v) => v?.pending === false && v?.requestHash === hashA,

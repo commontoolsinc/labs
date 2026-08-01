@@ -27,6 +27,7 @@ import {
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
 import { alice } from "./principal.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 const SPACE = "did:key:z6Mk-server-execution-feed-reconnect";
 const SIGNED_OPEN_NOW_SECONDS = 1_000_000;
@@ -294,7 +295,9 @@ Deno.test("unsigned execution feed cursors cannot acknowledge or filter registry
   try {
     const firstAuth = await hello(first, firstMessages);
     const firstOpen = await signedOpenRequest(firstAuth, "open-signed", {});
-    await first.receive(encodeMemoryBoundary(firstOpen));
+    await first.receive(
+      encodeMemoryBoundary(firstOpen as unknown as FabricValue),
+    );
     const opened = shiftMessage(firstMessages) as ResponseMessage<
       SessionOpenResult
     >;
@@ -337,7 +340,7 @@ Deno.test("unsigned execution feed cursors cannot acknowledge or filter registry
         ...signedResume.session,
         executionFeedSeq: feedSeqBefore,
       },
-    }));
+    } as unknown as FabricValue));
     const rejected = shiftMessage(resumedMessages) as ResponseMessage<
       SessionOpenResult
     >;
@@ -352,7 +355,9 @@ Deno.test("unsigned execution feed cursors cannot acknowledge or filter registry
       eventsBefore,
     );
 
-    await resumed.receive(encodeMemoryBoundary(signedResume));
+    await resumed.receive(
+      encodeMemoryBoundary(signedResume as unknown as FabricValue),
+    );
     const accepted = shiftMessage(resumedMessages) as ResponseMessage<
       SessionOpenResult
     >;

@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-07-10
+2026-07-17
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -40,9 +40,10 @@ hardening of module-scope definitions at load time.
 5. **Verified Module-Safe Data**: Any other top-level value must be proven to
    be a versioned, recursively inert subset of `FabricValue` and then
    hardened by a custom checker/freezer. Computing that value via an IIFE is
-   allowed only if the final result passes this verifier. Transitional explicit
-   snapshot helpers such as `safeDateNow()` and `nonPrivateRandom()` are
-   allowed as narrow exceptions and return plain data.
+   allowed only if the final result passes this verifier. The gated ambient
+   clock/entropy intrinsics (`Date.now()`, no-argument `new Date()`,
+   `Math.random()`) are allowed as narrow exceptions inside a handler and
+   return plain data.
 6. **Compiler Assists, Runner Enforces**: Transformers may annotate or rewrite
    code to reduce runtime parsing cost, but compiler output is not trusted and
    the runner must verify the final code boundary.
@@ -61,7 +62,7 @@ The current execution pipeline:
 ```
 Pattern Source (.tsx)
     ↓ ts-transformers (compile-time)
-    ↓ js-compiler (TypeScript → AMD bundle)
+    ↓ js-compiler (TypeScript → one CommonJS body per authored file)
     ↓ verified SES module Compartment
     ↓ instantiateJavaScriptNode() → fn(argument)
 ```
@@ -127,11 +128,12 @@ Pattern Source (.tsx)
     - Emit optional verification hints for top-level items
     ↓
 [2] js-compiler (existing)
-    - TypeScript → AMD bundle with per-module AMD factories intact
+    - TypeScript → one CommonJS body per authored file, plus its source map
     ↓
 [3] Runtime Verifier (TCB)
-    - Preflight the full compiled bundle before any evaluation
-    - Inspect each AMD module factory before execution
+    - Wrap each body in a record keyed by its content-addressed specifier
+    - Classify every top-level item of each module body before execution
+    - Validate the record graph's shape and wiring before anything executes
     - Require direct callbacks for trusted builders
     - Permit direct top-level functions only
     - Route all other top-level values through module-safe-data verification
@@ -355,10 +357,11 @@ accept proxy-backed host/runtime values that already exist and materialize them
 once into inert data. That is a compatibility boundary, not an authored escape
 hatch.
 
-Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
-stable SES contract. Pattern authors should call `safeDateNow()` and
-`nonPrivateRandom()` explicitly, and the verifier treats those helpers as
-explicit narrow exceptions that yield plain data snapshots.
+The sandbox replaces ambient `Date.now()` / `new Date()` / `Math.random()` with
+gated intrinsics, and those are the stable SES contract: pattern authors call
+the built-ins directly, the runtime coarsens the clock to one-second resolution
+inside a handler, and it forbids any ambient clock/entropy read in a
+lift/computed or at pattern body.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commonfabric/memory`'s `FabricValue`:
@@ -430,9 +433,9 @@ type MyType = { name: string };
 Import/export policy:
 
 - static imports are allowed only from trusted runtime modules and from other
-  modules in the same transformed-and-verified bundle
-- trusted runtime capabilities are supplied through those runtime modules and
-  the AMD `runtimeDeps` mechanism, not as ambient application globals
+  modules in the same transformed-and-verified program
+- trusted runtime capabilities are supplied through those runtime modules, as
+  records in the same module graph, not as ambient application globals
 - external third-party static imports are rejected in v1
 - exports should be normalized to simple local bindings plus explicit export
   wiring so the verifier does not need to accept the full surface of ESM export
@@ -481,14 +484,14 @@ The compiler/transformer is not in the TCB. It may assist by:
 However, the runner must still verify the code that is about to execute. The
 trusted verification boundary is two-stage:
 
-- preflight the full compiled bundle before any `compartment.evaluate(...)`
-  call, ensuring the outer wrapper contains only trusted boilerplate plus AMD
-  `define(...)` registrations in the untrusted source region
-- verify each AMD module factory before it can be required or executed
+- validate the shape and wiring of the whole module-record graph before any
+  module executes: every specifier content-addressed, every record well-formed,
+  every resolved import pointing at a record actually present in the graph
+- classify every top-level item of each module body before that body can be
+  imported or executed
 
-The AMD module factory remains the primary authored-code boundary because it
-preserves per-module top-level structure better than the fully wrapped bundle
-entrypoint.
+The per-module body is the authored-code boundary. Each module's top-level
+structure is verified on its own terms, with nothing to unwrap first.
 
 The trusted verifier should be a recognizer for the canonical emitted grammar,
 not a general JavaScript parser. It only needs to:
@@ -685,7 +688,7 @@ export const MyPattern = pattern<Input, Output>((props) => {
 The runtime uses one authoritative SES execution path for compiled pattern
 modules:
 
-- verify each AMD module factory before it can execute
+- verify each module body before it can execute
 - execute verified modules inside one Compartment per loaded pattern
 - expose only verified exported builder objects to the runner
 
@@ -694,43 +697,74 @@ fallback path described in Section 5.4. It is not the normal invocation path.
 
 ### 5.1 Lockdown Configuration
 
-The runtime uses a small `SandboxConfig` surface:
+The runtime's sandbox surface is `SESRuntimeOptions`
+(`packages/runner/src/sandbox/ses-runtime.ts`):
 
 ```typescript
-export interface SandboxConfig {
-  enabled: boolean;
-  debug: boolean;
-  console?: Console;
+export interface SESRuntimeOptions {
+  globals?: Record<string, unknown>;
+  lockdown?: boolean;
+  hideInternalStackFrames?: boolean;
 }
 ```
 
-Default config:
+`lockdown` gates `ensureSESInitialized`; `globals` supplies the compartment
+endowments of §5.3.1; `hideInternalStackFrames` gates the runner-frame collapse
+described in §8.6. All three default to off/empty at this type, and the Runtime
+threads its own defaults down through `Engine` (see
+`packages/runner/src/runtime-presets.ts` for which are core-defaulted).
 
-```typescript
-// Shown inside a pattern body.
-function getDefaultSandboxConfig(): SandboxConfig {
-  return {
-    enabled: true,
-    debug: false,
-  };
-}
-```
-
-Lockdown options are derived from `debug`:
+Lockdown options are a fixed constant, `DEFAULT_LOCKDOWN_OPTIONS`, applied
+unconditionally — they are not derived from a debug flag, and no caller varies
+them:
 
 ```typescript
 // Shown for illustration only.
-lockdown({
-  errorTaming: debug ? "unsafe" : "safe",
-  stackFiltering: debug ? "verbose" : "concise",
+const DEFAULT_LOCKDOWN_OPTIONS = {
+  errorTaming: "safe",
+  stackFiltering: "concise",
   overrideTaming: "severe",
   consoleTaming: "unsafe",
   localeTaming: "unsafe", // paired with the pre-lockdown locale sanitizer
-});
+  evalTaming: "safe-eval",
+  // …plus errorTrapping, reporting, unhandledRejectionTrapping, regExpTaming,
+  // domainTaming, overrideDebug, legacyRegeneratorRuntimeTaming, __hardenTaming__
+};
+
+sanitizeLocaleMethods(); // vetted shim; before the intrinsics freeze
+repairIntrinsics(DEFAULT_LOCKDOWN_OPTIONS);
+restoreErrorIsError(); // vetted shim; only this seam has both constructors
+hardenIntrinsics();
 ```
+
+The option *types* admit the looser values (`errorTaming: "unsafe"`,
+`stackFiltering: "verbose"`) that a debug build would want, so varying them
+remains available — but nothing does today, and `Runtime`'s own `debug` option is
+unrelated: it only gates an initialization `console.log`. Stack readability for
+pattern authors is handled after the fact instead, by the mapping and
+frame-collapse passes in §8.6.5.
 
 Notes:
 
+- `lockdown(options)` is exactly `repairIntrinsics(options)` followed by
+  `hardenIntrinsics()`. The runtime spells out the two phases because the
+  `Error.isError` shim has nowhere else to run: SES's error taming rebuilds the
+  `Error` constructor and copies forward only `length`, `prototype` and the V8
+  stack surface, so the method exists neither before the repair (the
+  constructors are not minted yet) nor after the harden (they are frozen). Every
+  `ses` release through 2.2.0 drops it, and `permits.js` listing `isError` does
+  not help — a permit lets a property survive, it never adds one. Two
+  constructors need the restoration, not one: `%InitialError%` for the host
+  realm and `%SharedError%` for compartments, the latter reachable only as
+  `Error.prototype.constructor`. See
+  `packages/runner/src/sandbox/error-taming.ts`. The phase call reveals
+  `globalThis.hardenIntrinsics`, which the runtime deletes afterwards so the
+  host realm's global surface matches the one-call form.
+- An engine that does not provide `Error.isError` before lockdown has no
+  intrinsic to restore. Native error classification falls back to
+  `instanceof Error` there. This recognizes SES errors because the repaired
+  constructors share the host error prototype hierarchy. General
+  cross-realm error recognition requires the native method.
 - `overrideTaming: "severe"` remains the compatibility default.
 - `localeTaming: "unsafe"` is load-bearing only together with the pre-lockdown
   vetted shim in `packages/runner/src/sandbox/locale-taming.ts`, which replaces
@@ -748,64 +782,97 @@ Notes:
   reintroduction of time/randomness helpers for authored code must be explicit
   and accompanied by call-site restrictions.
 
-### 5.2 Compiled Bundle Evaluation
+### 5.2 Compiled Module Evaluation
 
-The AMD bundler emits a bundle whose evaluation result is a function expecting
-runtime dependencies:
+Each authored file compiles to its own CommonJS body, which the runtime wraps in
+a module record keyed by the module's content-addressed specifier
+(`cf:module/<hash>`). A record declares what it imports, what it exports, how
+each of its import specifiers resolves, and how to execute its body:
 
 ```typescript
-type CompiledBundleEntrypoint = (
-  runtimeDeps?: Record<string, unknown>,
-) => {
-  main: Record<string, unknown>;
-  exportMap: Record<string, Record<string, unknown>>;
-};
+interface SesCompartment {
+  importNow(specifier: string): Record<string, unknown>;
+  evaluate(source: string): unknown;
+}
+
+interface VirtualModuleRecord {
+  imports: string[];
+  exports: string[];
+  resolutions?: Record<string, string>;
+  execute(
+    moduleExports: Record<string, unknown>,
+    compartment: SesCompartment,
+    resolvedImports: Record<string, string>,
+  ): void;
+}
 ```
 
-The verified runtime path evaluates that bundle inside the pattern's
-Compartment:
+Both verifications run on the **compile** path, before any module executes: each
+body is classified as it is wrapped, then the assembled graph is validated as a
+whole. Loading afterwards registers every reachable record in the pattern's
+Compartment and drives the entry synchronously:
 
 ```typescript
 // Shown for illustration only.
-preflightCompiledBundle(compiledBundle);
-const entrypoint = patternCompartment.evaluate(compiledBundle);
-const result = entrypoint(runtimeDeps);
+// Compile: classify each body, then validate the assembled graph.
+verifyCompiledModuleBody(compiledBody, filename);
+verifyModuleGraph(records, entrySpecifier);
+// Load: the graph is already verified, so the loader does not re-check it.
+const { namespace } = loadModuleGraph(entrySpecifier, {
+  records,
+  globals,
+  verify: false,
+});
 ```
 
 Important details:
 
-- the bundle itself stays in AMD form until execution
-- the runtime performs bundle preflight before any Compartment evaluation
-- `Engine.evaluate()` is the authoritative execution boundary: compile-time
-  verification may fail early, but execution must re-run verification before
-  evaluating a bundle
-- successful bundle verification may be memoized by bundle hash as a
-  performance optimization only; it must not change the execution-boundary
-  policy
-- runtime capability injection happens explicitly through trusted AMD
-  `runtimeDeps`
-- after preflight, the verifier runs at the AMD module factory boundary before
-  any factory may be required or executed
-- authored AMD factories never receive a live loader capability: the trusted
-  bundle tail may keep its internal `require`, but the authored factory
-  parameter resolves to an inert throwing stub
-- verifier rejection of direct `require()` usage is diagnostic hardening only;
-  security must not depend on syntactically detecting every obfuscated path to
-  `require`
-- the harness uses the resulting `exportMap` to associate exported runtime
-  values with their source `RuntimeProgram`
-- the runtime preserves the existing bundle ABI unless there is a deliberate
-  compiler change
+- each module body is classified before it can execute, and the record graph is
+  validated structurally before anything in it runs
+- the compile path is the authoritative verification boundary: a body reaches a
+  record only after `verifyCompiledModuleBody` has accepted it, and no graph
+  reaches a Compartment before `verifyModuleGraph` has accepted its wiring. The
+  loader's own `verify` option defaults to **on** for any other caller, so a
+  graph assembled outside the Engine cannot load unverified; the Engine passes
+  `verify: false` precisely because it has already run the check, and the warm
+  cached-module path runs it again on the graph it rebuilds
+- a warm cache hit may skip the body verifier only when the compiled bodies came
+  from an integrity-gated read; a miss or partial hit always re-verifies (see
+  the compilation-cache threat model in
+  [module-loading.md](../module-loading.md))
+- runtime capability injection happens explicitly: `commonfabric` and its
+  siblings are records under `cf:runtime/<specifier>` in the same graph
+- a module body receives a `require` bound to `compartment.importNow`. A declared
+  import specifier resolves through that record's `resolutions` map, which the
+  graph verifier has already constrained: every entry must remap an import the
+  record actually declares, every target must be a content-addressed specifier
+  present in the graph, and a trusted-runtime import must resolve to exactly its
+  matching `cf:runtime/<specifier>` record — so a declared runtime binding cannot
+  be rewired to an authored sibling. A specifier absent from the map falls through
+  to the compartment's `importNowHook`, which serves only records present in the
+  validated graph. The reachable set is therefore bounded by this load's
+  already-verified modules plus the trusted runtime records the import policy
+  admits; there is no path from `require` to an unverified module or to an
+  ungranted host capability
+- security must not depend on syntactically detecting every obfuscated path to
+  `require`; the confinement above is what bounds it, and verifier rejection of
+  unrecognized `require()` forms is defense in depth
+- the harness uses the resulting export map to associate exported runtime values
+  with their source `RuntimeProgram`
 - only verified exported builder objects are cached for later invocation
 
-The bundle preflight step MUST confirm all of the following:
+The graph validation step MUST confirm all of the following:
 
-- the outer bundle still matches the trusted bundler ABI
-- the untrusted source region contains only top-level `define(...)`
-  registrations
-- no other authored statements can execute before verified factories are
-  registered
-- the trailing return scaffolding matches the trusted bundle shape
+- the entry specifier is present in the graph
+- every specifier is content-addressed (`cf:module/…` or `cf:runtime/…`)
+- every record is well-formed: array `imports`, array `exports`, callable
+  `execute`
+- every entry in a record's `resolutions` map remaps an import that record
+  actually declares — a resolution for an undeclared specifier is a smuggled
+  edge
+- every resolved import target is content-addressed and present in the graph
+- every trusted-runtime import resolves to `cf:runtime/<specifier>` and not to
+  any other record
 
 For any cached export-based execution path, the minimal runtime-facing metadata
 shape can stay small:
@@ -855,6 +922,50 @@ Ambient globals available to authored module code in v1 MUST NOT include:
 - any host object that performs network, time, randomness, navigation, storage,
   or compilation effects immediately when called
 
+Whatever this surface ends up being, the type libraries the pattern compiler
+serves from `packages/static/assets/types` MUST NOT declare a global the
+Compartment does not install. A name the compiler declares but the sandbox
+lacks type checks, compiles and deploys, and then throws a `TypeError` in the
+user's hands, which is the one failure mode every gate lets through.
+`SANDBOX_WITHHELD_GLOBALS` in `packages/utils/src/sandbox-contract.ts` records
+the names held back and why; `deno task strip-withheld-globals` in
+`packages/static` removes their declarations, and
+`packages/runner/test/sandbox-global-contract.test.ts` checks both directions
+against a real Compartment. Endowing one of these globals means dropping it
+from that list and restoring its declaration together.
+
+Only the value declaration goes. The matching `interface` stays, so authored
+code may still name a withheld global in a type position — `let bytes:
+Float32Array` — and only the constructor is out of reach. What this does cost
+is feature detection: `typeof Proxy` no longer compiles, though coping with an
+absent global is the whole point of that idiom. Code that needs to ask must go
+through a `globalThis` record.
+
+The contract test enforces this as a zero-gap invariant: the set of globals the
+compiler declares but the Compartment lacks must be empty. A type-library change
+that reintroduces a gap fails the test until the new name is endowed or
+withheld. Withholding a `declare namespace` such as `Intl` removes only its
+value members, so its interfaces stay and authored code can still name the types
+even though it cannot construct the objects.
+
+Notably, SES stops listing `Float32Array` and `Float64Array` as universal
+globals as of version 2. A NaN carries spare mantissa bits, and storing one
+into a float typed array writes them through to the underlying buffer, where a
+second view reads them back. Lockdown repairs `DataView.prototype.setFloat*` to
+write only canonical NaNs, but a typed-array element store is not a method and
+nothing can intercept it, so endowing the constructors would reopen the channel
+the repair closes.
+
+That channel is SES's threat model rather than this one: while the `fetch` shim
+above hands every compartment the open network, a pattern that wants to move
+bits out has a far shorter path than a NaN mantissa. The constructors stay out
+because doing so matches the upstream default, is reversible, and costs
+nothing — no pattern uses them — not because it denies an attacker anything
+today. What the roll does change is honesty: the compiler stops offering
+constructors the sandbox will not supply. Modules compiled before the roll
+still carry `Float32Array` and throw at runtime regardless of what the type
+libraries say; stripping the declarations only fixes what compiles from here.
+
 When host constructors or functions from that compatibility surface are
 forwarded into a Compartment, the runtime MUST freeze the actual forwarded
 outer-realm value before installation. In particular, forwarded constructor
@@ -870,20 +981,23 @@ capabilities. While the shim exists, direct `fetch()` may still run during
 authored module assembly or `__cfHelpers.__cf_data(...)` snapshotting, in addition to
 deferred callback execution.
 
-#### 5.3.2 Trusted Runtime Modules via `runtimeDeps`
+#### 5.3.2 Trusted Runtime Modules
 
-Common Fabric capabilities are supplied as trusted AMD runtime modules registered
-through the existing `runtimeDeps` bundle ABI. This is the primary way authored
-code receives builder and graph-construction capabilities.
+Common Fabric capabilities are supplied as trusted runtime modules, registered as
+records under `cf:runtime/<specifier>` in the same content-addressed module graph
+as the authored modules. This is the primary way authored code receives builder
+and graph-construction capabilities.
 
-In the current implementation, the trusted runtime module identifiers are:
+In the current implementation, the trusted runtime module identifiers are
+(`RuntimeModuleIdentifiers`, `packages/runner/src/sandbox/runtime-module-policy.ts`):
 
 - `commonfabric`
+- `commonfabric/cfc`
 - `commonfabric/schema`
 - `turndown`
 
 Other internal `@commonfabric/*` packages exist in the monorepo, but they are
-not currently exposed to authored SES modules through `runtimeDeps`.
+not currently exposed to authored SES modules.
 
 These runtime modules may export:
 
@@ -909,18 +1023,19 @@ by trusted runtime modules, but it is only allowed inside verified pattern
 callbacks after the earlier pattern transforms. These imports are not valid
 from within `__cfHelpers.__cf_data(...)` initializers.
 
-Any shared value installed through `runtimeDeps` MUST be transitively hardened
-before Compartment evaluation begins. The shared export graph exposed by a
-trusted runtime module is reused across authored evaluations, so function
-objects, namespace objects, and reachable shared helper objects must be
-immutable at installation time. Mutable state may only be introduced through
-explicit runtime-managed authorities returned later, not by mutating the shared
-`runtimeDeps` export graph itself.
+Any shared value exposed by a trusted runtime module MUST be transitively
+hardened before Compartment evaluation begins. That export graph is reused across
+authored evaluations, so function objects, namespace objects, and reachable
+shared helper objects must be immutable when the record is built — each runtime
+record simply copies the already-frozen namespace onto its module exports.
+Mutable state may only be introduced through explicit runtime-managed
+authorities returned later, not by mutating the shared runtime-module export
+graph itself.
 
 ### 5.4 Smaller-Compartment String Rehydration
 
-Untrusted authored pattern code normally reaches execution through the compiled
-bundle preflight plus AMD-factory verification pipeline. The only exception is
+Untrusted authored pattern code normally reaches execution through
+module-graph validation plus per-module body verification. The only exception is
 the lazy rehydration of serialized nested-pattern or module implementations that
 exist only as function strings when first invoked.
 
@@ -932,7 +1047,7 @@ must execute inside a smaller Compartment with:
 - function-producing source only: the normalized source may be a direct
   function declaration/expression or a function-producing expression such as an
   IIFE, but evaluating it must yield a function before invocation proceeds
-- no AMD loader state
+- no module graph, module map, or import hooks
 - no runtime-module dependency injection
 - a direct `console` global only; internal runtime hook globals such as
   `RUNTIME_ENGINE_CONSOLE_HOOK` are not part of the authored surface
@@ -1121,8 +1236,8 @@ then hardened.
 
 #### 7.2.5 Constrained String Execution for Lazy Nested Patterns
 
-Most authored pattern code must enter through the compiled-bundle preflight plus
-AMD-factory verification pipeline. However, lazily invoked nested-pattern and
+Most authored pattern code must enter through module-graph validation plus
+per-module body verification. However, lazily invoked nested-pattern and
 module implementations may still exist only as serialized function strings at
 the point they are first called.
 
@@ -1133,9 +1248,9 @@ That secondary path is allowed only under all of the following constraints:
   the evaluation result is a function
 - it runs inside a smaller SES Compartment than the main pattern-load path
 - that smaller Compartment intentionally reuses the same compatibility-global
-  surface as the main authored module Compartment while still omitting AMD
-  loader state and runtime-module injection
-- it must not expose AMD loader hooks, runtime-module injection, or host
+  surface as the main authored module Compartment while still omitting the
+  module map and runtime-module injection
+- it must not expose module-resolution hooks, runtime-module injection, or host
   capabilities beyond the minimal callback invocation surface
 - it exposes `console` only as an approved global and does not expose internal
   runtime globals such as `RUNTIME_ENGINE_CONSOLE_HOOK`
@@ -1146,7 +1261,7 @@ That secondary path is allowed only under all of the following constraints:
 
 A fresh Compartment utility may still exist for trusted internal tooling, but
 the lazy string-backed callback path above is the only authored-code exception
-to the main verified-bundle entry rule.
+to the main verified-module entry rule.
 
 ---
 
@@ -1179,7 +1294,7 @@ Original TypeScript (MyPattern.tsx)
         ↓
     [js-compiler]      ← TypeScript → JavaScript
         ↓
-    [AMD bundling]     ← Wraps in AMD loader
+    [record wrapping]  ← Wraps each body in a module record
         ↓
 Executed in Compartment
 ```
@@ -1251,12 +1366,14 @@ Each stage produces and consumes source maps:
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ AMD Bundler                                                  │
+│ Record wrapping + source-map registration                    │
 │ Input:  MyPattern.js + sourceMap2                            │
-│ Output: bundle.js + sourceMap3 (merged)                      │
+│ Output: cf:module/<hash> record + sourceMap2, registered      │
+│         under the module's own sourceURL                      │
 │                                                              │
-│ sourceMap3: bundle line P → original line Q                  │
-│ (Merged/chained through all stages)                          │
+│ sourceMap2: module line P → original line Q                  │
+│ (Chained through the earlier stages; one map per module,      │
+│  shifted by the factory-wrapper line)                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -1266,7 +1383,8 @@ The hoisting transformer must generate accurate source maps:
 
 ```typescript
 // Shown for illustration only.
-// packages/ts-transformers/src/hoisting.ts
+// illustrative; the shipped stage is
+// packages/ts-transformers/src/transformers/builder-call-hoisting.ts
 
 class HoistingTransformer {
   private sourceMapGenerator: SourceMapGenerator;
@@ -1293,28 +1411,47 @@ class HoistingTransformer {
 
 #### 8.3.3 js-compiler Source Map Chaining
 
-The existing js-compiler already supports source maps. Ensure chaining:
+js-compiler emits one map per module, parsed alongside the body
+(`parseSourceMap`, `packages/js-compiler/typescript/compiler.ts`). The relevant
+options are in `packages/js-compiler/typescript/options.ts`:
 
 ```typescript
 // Shown for illustration only.
-// packages/js-compiler/typescript/compiler.ts
-
-const compilerOptions: ts.CompilerOptions = {
-  // ... existing options ...
-  sourceMap: true,
-  inlineSources: true,  // Include original source in map
-  inlineSourceMap: false,  // Keep separate for chaining
+const compilerOptions = {
+  sourceMap: true, // mappings are load-bearing: stack frames and CFC
+  // verified-source resolve compiled positions through them
+  inlineSources: false, // authored source is NOT embedded — see below
+  inlineSourceMap: false, // separate map, registered by filename
 };
-
-// When transformer provides input source map, chain them
-if (inputSourceMap) {
-  // Use source-map library to merge
-  const merged = await mergeSourceMaps(inputSourceMap, outputSourceMap);
-  return { js, sourceMap: merged };
-}
 ```
 
+`inlineSources` is deliberately **off**. Nothing reads `sourcesContent`: the only
+code that touches it copies it into the runtime's map registry, and the consumers
+there read mappings only, via `originalPositionFor`. No `//# sourceMappingURL` is
+emitted for a debugger to load these maps either, and the authored source is
+already persisted separately as source documents. Dropping it cuts per-module
+source-map bytes — which the compile cache stores and syncs — by roughly 65%.
+
 ### 8.4 Error Mapping Implementation
+
+**What exists today.** The shipped surface is `SESRuntime`
+(`packages/runner/src/sandbox/ses-runtime.ts`) over `SourceMapParser`
+(`packages/js-compiler/source-map.ts`): `loadSourceMap` / `loadSourceMapLazy`
+register maps by filename, `mapPosition` resolves one coordinate, `parseStack`
+rewrites a whole stack, and `mapThrownError` does that once per error —
+`materializeHostVisibleStack`, then `parseStack`, then a `markErrorStackMapped`
+marker, because `parseStack` is **not idempotent**: per-module maps are
+registered under the same module path that mapped frames carry as their source,
+so re-parsing an already-mapped stack would look the now-authored coordinates up
+again and corrupt them. `Engine` re-exports `parseStack` / `mapPosition`, and the
+scheduler's diagnostics share the same marker helpers.
+
+§8.4.1 describes the interface shape that surface already satisfies. The
+`ErrorMappingOptions` / `MappedError` / execution-wrapper designs in §8.4.2–§8.4.3
+and the display and classifier designs in §8.5–§8.6.1/§8.6.3 are **target design,
+not built** — the modules their code blocks name do not exist in the tree, and
+§8.8 tracks them as outstanding work. §8.6.5 records the filtering that is
+actually implemented.
 
 #### 8.4.1 Shared Source-Map State
 
@@ -1473,11 +1610,13 @@ Original source (MyPattern.tsx:23):
   24 │   return { doubled };
 ```
 
-#### 8.5.2 Enhanced Error Display
+#### 8.5.2 Enhanced Error Display — target design
+
+Not built; the module below is a proposed one.
 
 ```typescript
 // Shown for illustration only.
-// packages/runner/src/sandbox/error-display.ts
+// proposed: packages/runner/src/sandbox/error-display.ts
 
 interface ErrorDisplayOptions {
   readonly verbose?: boolean;
@@ -1527,10 +1666,13 @@ The key insight is that **pattern authors and runtime developers have different 
 - **Pattern authors** need to see their code, but runtime internals are noise
 - **Runtime developers** need to see everything when debugging the runtime itself
 
-#### 8.6.1 Frame Classification
+#### 8.6.1 Frame Classification — target design
+
+Not built; §8.6.5 records what the runtime does instead. The module below is a
+proposed one.
 
 ```typescript
-// packages/runner/src/sandbox/frame-classifier.ts
+// proposed: packages/runner/src/sandbox/frame-classifier.ts
 
 type FrameType = "pattern" | "runtime" | "external" | "ses";
 
@@ -1548,7 +1690,6 @@ const RUNTIME_PATTERNS = [
   /\/runner\/src\//,
   /\/harness\//,
   /\/scheduler\//,
-  /AMDLoader/,
   /<CF_INTERNAL>/,
   /\beval\b/,
 ];
@@ -1617,11 +1758,13 @@ TypeError: Cannot read property 'map' of undefined
 Pattern: my-pattern-id
 ```
 
-#### 8.6.3 Implementation
+#### 8.6.3 Implementation — target design
+
+Not built; see §8.6.5. The module below is a proposed one.
 
 ```typescript
 // Shown at module scope.
-// packages/runner/src/sandbox/stack-filter.ts
+// proposed: packages/runner/src/sandbox/stack-filter.ts
 
 interface StackFilterOptions {
   showRuntimeFrames: boolean;  // false for pattern authors, true for runtime devs
@@ -1723,45 +1866,68 @@ export function formatFilteredStack(
 
 #### 8.6.4 Sandbox Configuration
 
-```typescript
-// packages/runner/src/sandbox/types.ts
+Filtering is configured through `SESRuntimeOptions.hideInternalStackFrames`
+(§5.1), not a separate stack-filter option object. It is core-defaulted in every
+runtime preset. Lockdown's own `errorTaming` / `stackFiltering` verbosity is a
+separate axis, set at `ensureSESInitialized` time (§5.1).
 
-export interface SandboxConfig {
-  enabled: boolean;
-  debug: boolean;
-  console?: Console;
-}
-```
+#### 8.6.5 The filtering that is implemented
 
-The `debug` field controls both lockdown configuration (see Section 5.1) and
-stack trace verbosity. When `debug` is true, full stack traces including runtime
-and SES frames are shown.
+Two passes run in sequence over a thrown error's stack, each replacing a whole
+frame line with a marker rather than classifying it into a type:
+
+1. **Source-map rewrite** — `SourceMapParser.parse` walks the stack line by line
+   and hands each recognized frame to `mapFrame`. A frame whose filename has a
+   registered map and whose position resolves is rewritten to authored
+   coordinates (`at <name> (<source>:<line>:<col>)`). A frame whose position does
+   **not** resolve becomes `    at <CF_INTERNAL>` when its function name is
+   `eval` or empty — the compiled-wrapper frames — and `    at <UNMAPPED>`
+   otherwise. A frame with no registered map for its filename is left verbatim,
+   which is what keeps host and external frames intact.
+2. **Runner-frame collapse** — when `hideInternalStackFrames` is set,
+   `sanitizeInternalFrames` (`ses-runtime.ts`) replaces any remaining frame whose
+   path lies under `packages/runner/src/` with `    at <CF_INTERNAL>`.
+
+So the layering goal of §8.6 is met, by marker substitution rather than by a
+`FrameType` union: authored frames survive with authored coordinates, runtime and
+compiled-wrapper frames collapse to `<CF_INTERNAL>`, frames that should have
+mapped but did not are called out as `<UNMAPPED>` rather than silently dropped,
+and nothing is removed from the stack — every line is preserved or replaced in
+place, so frame counts stay comparable.
 
 ### 8.7 Configuration Summary
 
-| Audience | `debug` | Runtime Frames | Source Context |
-|----------|---------|----------------|----------------|
-| Pattern Author | `false` | Hidden | Pattern source shown |
-| Runtime Developer | `true` | Visible (marked) | All source shown |
-| Production (logging) | `false` | Hidden | Included in logs |
+| Audience | `hideInternalStackFrames` | Runner frames | Authored frames |
+|----------|--------------------------|---------------|-----------------|
+| Pattern author | `true` | Collapsed to `<CF_INTERNAL>` | Authored coordinates |
+| Runtime developer | `false` | Left as-is | Authored coordinates |
+| Production (logging) | `true` | Collapsed to `<CF_INTERNAL>` | Authored coordinates, included in logs |
+
+Authored frames map to authored coordinates on every row: the source-map pass of
+§8.6.5 is unconditional, and only the runner-frame collapse is switched. The
+lockdown verbosity knobs are not part of this table — they are constants (§5.1).
 
 ### 8.8 Implementation Checklist
 
-Unless noted otherwise, `packages/runner/src/sandbox/*` paths referenced below
-are target modules in the new sandbox subsystem and may not yet exist in the
-current tree.
+Done:
 
-| Task | Priority | Files |
-|------|----------|-------|
-| Transformer source map generation | High | `ts-transformers/src/hoisting.ts` |
-| Source map chaining in js-compiler | High | `js-compiler/typescript/compiler.ts` |
-| Reuse shared `SourceMapParser` lifecycle in SES runtime | High | `runner/src/harness/*`, `runner/src/sandbox/error-mapping.ts` |
-| Error mapping utility over shared mapper state | High | `runner/src/sandbox/error-mapping.ts` |
-| Execution wrapper with mapping | High | `runner/src/sandbox/execution-wrapper.ts` |
-| Frame classification and filtering | High | `runner/src/sandbox/frame-classifier.ts` |
-| Enhanced error display | Medium | `runner/src/sandbox/error-display.ts` |
-| Structured error report formatting | Medium | `runner/src/sandbox/error-display.ts` |
-| Configuration options | Low | `runner/src/sandbox/types.ts` |
+| Task | Where it landed |
+|------|-----------------|
+| Transformer source map generation | the transformer pipeline emits per-module maps under `sourceMap: true` (`js-compiler/typescript/options.ts`); the hoisting stage is `ts-transformers/src/transformers/builder-call-hoisting.ts` |
+| Source map chaining in js-compiler | `js-compiler/typescript/compiler.ts` (`parseSourceMap` per emitted module) |
+| Shared `SourceMapParser` lifecycle in the SES runtime | `SESInternals` / `SESRuntime` (`runner/src/sandbox/ses-runtime.ts`), re-exported by `Engine`; per-module and composed registration in `runner/src/harness/engine.ts` |
+| Map a thrown error's stack exactly once | `SESRuntime.mapThrownError` plus the `markErrorStackMapped` marker, shared with `runner/src/scheduler/diagnostics.ts` |
+| Collapse runner-internal frames | `sanitizeInternalFrames`, gated on `hideInternalStackFrames` (§8.6.5) |
+| Configuration options | `SESRuntimeOptions` (§5.1), core-defaulted in `runner/src/runtime-presets.ts` |
+
+Outstanding. None of the modules below exist; the paths are proposals:
+
+| Task | Priority | Proposed files |
+|------|----------|----------------|
+| `MappedError` / `ErrorMappingOptions` formatter over shared mapper state (§8.4.2) | Medium | `runner/src/sandbox/error-mapping.ts` |
+| Execution wrappers (§8.4.3) | Medium | `runner/src/sandbox/execution-wrapper.ts` |
+| Frame classification into a `FrameType` union (§8.6.1, §8.6.3) | Low — §8.6.5 already meets the layering goal by marker substitution | `runner/src/sandbox/frame-classifier.ts`, `runner/src/sandbox/stack-filter.ts` |
+| Enhanced error display and structured error reports (§8.5.2) | Low | `runner/src/sandbox/error-display.ts` |
 
 ---
 
@@ -1813,17 +1979,19 @@ Generated `pattern(...)` forms for `*WithPattern(...)` and `patternTool(...)`
 remain inner-scope transforms in this phase rather than becoming module-level
 hoists.
 
-### Phase 2: Trusted Runtime Verification at the AMD Module Boundary
+### Phase 2: Trusted Runtime Verification at the Module Body Boundary
 
-#### 2.1 Preflight bundles and verify module factories before execution (Priority: High)
+#### 2.1 Validate the record graph and verify module bodies before execution (Priority: High)
 
 The trusted verifier should operate in two stages:
 
-- preflight the full compiled bundle before any Compartment evaluation
-- verify each AMD module factory before it can be required
+- validate the shape and wiring of the whole module-record graph before any
+  module executes
+- classify each module body before it can be imported
 
-This preserves per-module top-level structure while also preventing untrusted
-compiler output from executing statements outside `define(...)` registrations.
+Verifying a body at a time preserves per-module top-level structure, and
+validating the graph first prevents untrusted compiler output from rewiring an
+import edge to a record the verifier did not intend.
 
 The verifier must check:
 
@@ -1838,18 +2006,20 @@ needs to:
 
 - follow balanced `()`, `{}`, and `[]`
 - correctly skip over strings, comments, and template literals
-- split the factory body into top-level items
+- split the module body into top-level items
 - match those items against the small set of canonical wrapper forms
 
 If the output deviates from the canonical wrapper language, the verifier should
 fail closed.
 
-**Likely files:**
-- `packages/js-compiler/typescript/bundler/bundle.ts`
-- `packages/js-compiler/typescript/bundler/amd-loader.ts`
-- `packages/runner/src/harness/engine.ts`
-- new `packages/runner/src/sandbox/bundle-preflight.ts`
-- new `packages/runner/src/sandbox/module-verifier.ts`
+**Files:**
+- `packages/runner/src/sandbox/compiled-bundle-verifier.ts`
+  (`classifyModuleItems`, the format-agnostic classification core)
+- `packages/runner/src/sandbox/module-record-verifier.ts`
+  (`verifyCompiledModuleBody`, `verifyModuleGraph`)
+- `packages/runner/src/sandbox/compiled-js-parser.ts` (the delimiter/trivia
+  scanner the classifier is built on)
+- `packages/runner/src/harness/engine.ts` (calls the body verifier per module)
 
 #### 2.2 Add custom module-safe-data checker/freezer (Priority: High)
 
@@ -1895,10 +2065,10 @@ only execute it by re-evaluating its source inside the dedicated SES callback
 Compartment described in Section 4.2. That fallback is not a blessing path and
 must intentionally discard host closure state.
 
-The compiled-bundle verifier also treats TypeScript's canonical default-import
+The module-body verifier also treats TypeScript's canonical default-import
 normalization rebinding as part of the accepted grammar:
-`local = __importDefault(local)` when `local` is already the AMD factory's
-import binding for that dependency. This statement is a normalization step over
+`local = __importDefault(local)` when `local` is already the module's import
+binding for that dependency. This statement is a normalization step over
 an already-verified import edge, not new capability acquisition.
 
 Namespace-import normalization via `local = __importStar(local)` is
@@ -1937,16 +2107,16 @@ module fallback.
 #### 3.3 Minimal globals plus trusted runtime modules (Priority: Medium)
 
 Keep ambient Compartment globals intentionally narrow and supply Common Fabric
-capabilities through trusted runtime modules registered via `runtimeDeps`.
-Future reintroduction of time/network/randomness helpers for authored code
-remains a separate scoped decision.
+capabilities through trusted runtime modules registered as `cf:runtime/` records
+in the module graph. Future reintroduction of time/network/randomness helpers for
+authored code remains a separate scoped decision.
 
 #### 3.4 Runtime module provider and minimal globals
 
 Build a new sandbox subsystem that separates:
 
 - minimal ambient globals for Compartments
-- trusted runtime-module exports registered through `runtimeDeps`
+- trusted runtime-module exports registered as `cf:runtime/` records
 
 Initial implementation can migrate logic from the current harness runtime-module
 surface, but the target module split should live under `packages/runner/src/sandbox/`.
@@ -1995,7 +2165,7 @@ private instantiateJavaScriptNode(
 
 The runner must distinguish executable JavaScript implementations by origin:
 
-- verified callbacks: produced by compiled-bundle verification plus SES module
+- verified callbacks: produced by per-module body verification plus SES module
   evaluation
 - trusted-host callbacks: admitted explicitly through the unsafe host trust API
 - SES-rehydrated callbacks: created lazily from string source or from
@@ -2030,7 +2200,7 @@ Being created while a verified load is active is not sufficient.
 
 Some tests, legacy comparison harnesses, and other trusted in-process fixtures
 construct patterns directly with host builder functions instead of compiling
-authored source through CTS and the compiled-bundle verifier. Those fixtures are
+authored source through CTS and the module-body verifier. Those fixtures are
 outside the verified SES path and therefore must not become executable by
 default.
 
@@ -2226,18 +2396,33 @@ describe('SES Sandbox Security', () => {
     expect(() => tags.add('c')).toThrow();
   });
 
-  it('rejects bundle code outside AMD define calls', async () => {
-    const compiled = "((runtimeDeps={}) => { evil(); define('m', [], function () {}); return { main: {}, exportMap: {} }; })";
-    expect(() => preflightCompiledBundle(compiled)).toThrow();
+  it('rejects an unclassified top-level statement in a module body', async () => {
+    const compiled = "evil();\nexports.x = 1;";
+    expect(() => verifyCompiledModuleBody(compiled, '/m.ts')).toThrow();
+  });
+
+  it('rejects a record that rewires a runtime import to a sibling', async () => {
+    const records = new Map([
+      ['cf:module/a', {
+        imports: ['commonfabric'],
+        exports: [],
+        resolutions: { commonfabric: 'cf:module/b' },
+        execute() {},
+      }],
+      ['cf:module/b', { imports: [], exports: [], execute() {} }],
+    ]);
+    expect(() => verifyModuleGraph(records, 'cf:module/a')).toThrow();
   });
 });
 ```
 
-**Files to create:**
-- `packages/runner/test/sandbox/security.test.ts`
-- `packages/runner/test/sandbox/compartment.test.ts`
-- `packages/runner/test/sandbox/bundle-preflight.test.ts`
-- `packages/runner/test/sandbox/plain-data.test.ts`
+**Files:**
+- `packages/runner/test/security.test.ts`
+- `packages/runner/test/compiled-module-verifier.test.ts`
+- `packages/runner/test/esm-module-body-verifier.test.ts`
+- `packages/runner/test/esm-verifier-adversarial.test.ts`
+- `packages/runner/test/module-item-classifier.test.ts`
+- `packages/runner/test/plain-data.test.ts`
 
 #### 6.2 Performance Tests
 
@@ -2279,9 +2464,14 @@ const startTime = Date.now();  // Side effect at module scope
 **After:**
 ```typescript
 // Shown at module scope.
-import { safeDateNow } from "commonfabric";
-
-const getStartTime = lift(() => safeDateNow());
+// A lift/computed may not read the ambient clock, so capture the start time
+// inside a handler, where `Date.now()` is allowed (coarsened to one second)
+// and writes it into a cell.
+const captureStart = handler<unknown, { startTime: Writable<number> }>(
+  (_event, { startTime }) => {
+    startTime.set(Date.now());
+  },
+);
 ```
 
 #### Patterns with mutable module-scope state
@@ -2333,15 +2523,15 @@ await runner.start(resultCell);
 
 | Threat | Mitigation |
 |--------|------------|
-| Arbitrary code execution | Bundle preflight, AMD-factory verification at the execution boundary, SES Compartments, and controlled runtime-module injection |
+| Arbitrary code execution | Record-graph validation, per-module body classification before execution, SES Compartments, and controlled runtime-module injection |
 | Collusion between callbacks in the same pattern | Runtime module verifier, direct-callback enforcement, and verified module-safe-data freezing |
-| Compiler/transformer compromise | Runner-side bundle preflight plus AMD-factory verification |
-| AMD loader hook abuse | Authored `require` is inert at runtime; verifier rejection is defense in depth |
+| Compiler/transformer compromise | Runner-side record-graph validation plus per-module body verification |
+| Module-resolution abuse | `require` reaches only records present in the validated graph, so every module it can return has already passed body verification; a declared runtime import must resolve to its own `cf:runtime/` record |
 | Global pollution | Frozen intrinsics, controlled globals |
 | Internal runtime-global exposure | Only approved globals are installed; implementation hooks like `RUNTIME_ENGINE_CONSOLE_HOOK` stay hidden |
 | Prototype pollution | SES-frozen intrinsics plus explicit freezing of forwarded host constructor/prototype pairs before installation |
 | Closure-based data leakage | No surviving mutable module bindings; direct-function-only top-level forms plus function hardening |
-| State leakage via modules | Verified immutable top-level bindings, hardened shared `runtimeDeps` exports, and dynamic imports rejected in v1 |
+| State leakage via modules | Verified immutable top-level bindings, hardened shared runtime-module exports, write-once module exports, and dynamic imports rejected in v1 |
 | Resource exhaustion | Future: Add CPU/memory limits (not in this spec) |
 | Ambient network/time/random authority at module load | Narrow Compartment globals; temporary compatibility web-fetch shim only, no `Temporal`, `secureRandom`, or `randomUUID` |
 
@@ -2386,7 +2576,7 @@ Potential escape routes and their status:
 | `eval()` | Allowed inside SES compartments | Current lockdown uses `evalTaming: "safe-eval"` |
 | `Function()` | Allowed inside SES compartments | Same `safe-eval` policy as `eval()` |
 | `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
-| authored AMD `require` | Inert | Authored factories receive a throwing stub; trusted tail wiring keeps its own loader state |
+| authored `require` | Confined | Bound to `compartment.importNow`; declared specifiers resolve through the record's verifier-checked `resolutions` map and anything else falls through to the `importNowHook`, which serves only records in the validated graph — so it reaches already-verified modules of the same load and policy-admitted runtime records, never an unverified module or an ungranted host capability. A declared runtime specifier cannot be rewired to an authored sibling |
 | Prototype access | Blocked | SES freezes intrinsics, and the runtime explicitly freezes forwarded host constructors and `.prototype` objects before installation |
 | ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
 | `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings and does not expose internal console-hook globals |
@@ -2422,20 +2612,16 @@ in review or incident work should be added here with a class and a status.
 - `lavamoat` - Higher-level, more opinionated
 - QuickJS - Different approach (separate runtime)
 
-### B. AMD Loader Compatibility
-
-The existing AMD loader in `js-compiler` is compatible with SES Compartments. The loader is already:
-- Self-contained (no global access)
-- Pure (no side effects beyond module registration)
-- Configurable (accepts runtime dependencies)
-
-### C. Glossary
+### B. Glossary
 
 - **Compartment**: SES isolation boundary with its own global object
 - **Harden**: Deep freeze an object graph
 - **Lockdown**: Initialize SES, freeze all intrinsics
-- **StaticModuleRecord**: SES's representation of an ES module
-- **Import hooks**: Callbacks for resolving and loading modules
+- **Virtual module record**: SES's third-party module representation —
+  `{ imports, exports, execute }` — which the runtime uses because this `ses`
+  build exposes no `ModuleSource`/`StaticModuleRecord` constructor
+- **Import hooks**: `resolveHook` and `importNowHook`, the callbacks a
+  Compartment uses to resolve a specifier and fetch its record
 - **SESIsolate**: Runtime component that creates and manages Compartments with globals injection
 - **SESRuntime**: Runtime harness that integrates SESIsolate into the pattern execution pipeline
 

@@ -33,8 +33,12 @@ function hex(hash: Uint8Array): string {
   return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Extract the raw hash bytes from `hashOf()` for comparison. */
-function hashBytesOf(value: FabricValue): Uint8Array {
+/**
+ * Extract the raw hash bytes from `hashOf()` for comparison. Takes `unknown`,
+ * as `hashOf()` itself does: the native-instance cases below hash a native
+ * `Date` / `RegExp` / `Uint8Array`, none of which is a `FabricValue`.
+ */
+function hashBytesOf(value: unknown): Uint8Array {
   return hashOf(value).bytes;
 }
 
@@ -645,6 +649,13 @@ describe("value-hash", () => {
         const h1 = hashBytesOf({ a: 1, b: 2 });
         const h2 = hashBytesOf({ b: 2, a: 1 });
         expect(h1).toEqual(h2);
+      });
+
+      it("hashes a null-prototype object as an ordinary plain object", () => {
+        const nullProto = Object.create(null) as Record<string, FabricValue>;
+        nullProto.a = 1;
+
+        expect(hashBytesOf(nullProto)).toEqual(hashBytesOf({ a: 1 }));
       });
 
       it("matches a hand-computed byte stream for {a: 1, b: 2}", () => {

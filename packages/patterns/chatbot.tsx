@@ -226,9 +226,7 @@ export default pattern<ChatInput, ChatOutput>(
 
     const attachmentsAndTools = (
       <cf-hstack align="center" gap="1">
-        <cf-cell-context $cell={pinnedCells}>
-          <cf-attachments-bar pinnedCells={pinnedCells} />
-        </cf-cell-context>
+        <cf-attachments-bar pinnedCells={pinnedCells} />
         <cf-tools-chip $tools={flattenedTools} />
         <cf-button
           variant="pill"

@@ -5,12 +5,50 @@ inputs:
     description: "Load deno dependencies from github cache"
     default: true
   deno-version:
-    description: "Deno version to install"
-    # Keep in sync with `./tasks/check.sh` version
-    default: "2.8.1"
+    description: "Deno version to install. Defaults to the pin in mise.toml."
+    default: ""
 runs:
   using: "composite"
   steps:
+    # The repository's Deno version is pinned once, in mise.toml. This step
+    # reads it so the rest of the action (and any caller that leaves the
+    # deno-version input empty) follows the pin.
+    - name: 🔍 Resolve pinned Deno version
+      id: resolve
+      shell: bash
+      env:
+        DENO_VERSION_INPUT: ${{ inputs.deno-version }}
+      run: |
+        version="${DENO_VERSION_INPUT}"
+        if [ -z "$version" ]; then
+          if [ ! -f mise.toml ]; then
+            echo "::error::mise.toml not found; cannot resolve the Deno version. This action requires the repository to be checked out first."
+            exit 1
+          fi
+          pins="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml)"
+          # Counted rather than taking the first: TOML rejects a key defined
+          # twice, so a second pin means mise cannot load the file, and reading
+          # past it would install a version no developer actually gets.
+          count="$(printf '%s' "$pins" | grep -c . || true)"
+          if [ "$count" -gt 1 ]; then
+            echo "::error::mise.toml defines the Deno pin $count times; TOML rejects a key defined twice, so mise cannot load it."
+            exit 1
+          fi
+          version="$pins"
+        fi
+        if [ -z "$version" ]; then
+          echo "::error::No deno-version input and no Deno pin found in mise.toml."
+          exit 1
+        fi
+        # The toolchain cache below is keyed on this version, so a range would
+        # never hit: setup-deno installs under the version it resolves against
+        # deno.com, not under the range.
+        if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "::error::Deno version '$version' is not an exact MAJOR.MINOR.PATCH version."
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
     # Cache the Deno toolchain binary. denoland/setup-deno resolves the version
     # against deno.com/versions.json and downloads the binary at job time, so a
     # deno.com outage breaks every job. A cache hit installs the binary from disk
@@ -19,30 +57,36 @@ runs:
     # it to PATH is enough to run Deno. This is independent of the `cache` input
     # below (which gates the module/dependency cache) so jobs that pass
     # `cache: false` are covered too.
-    # Cache version: bump the `deno-bin-v1` token to invalidate all toolchain caches.
-    - name: 💾 Restore Deno toolchain ${{ inputs.deno-version }}
+    - name: 💾 Restore Deno toolchain ${{ steps.resolve.outputs.version }}
       id: deno-toolchain-cache
       uses: actions/cache@v6
       with:
-        path: ${{ runner.tool_cache }}/deno/${{ inputs.deno-version }}
-        key: deno-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}
+        path: ${{ runner.tool_cache }}/deno/${{ steps.resolve.outputs.version }}
+        key: deno-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}
 
-    - name: 🦕 Download Deno ${{ inputs.deno-version }}
+    - name: 🧹 Clear Deno toolchain after cache miss
+      if: steps.deno-toolchain-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TOOLCHAIN_DIR: ${{ runner.tool_cache }}/deno/${{ steps.resolve.outputs.version }}
+      run: rm -rf -- "${TOOLCHAIN_DIR:?}"
+
+    - name: 🦕 Download Deno ${{ steps.resolve.outputs.version }}
       # Cache miss: download the toolchain from upstream. setup-deno installs it
       # into the cached path above, so actions/cache saves it at job end and
       # later runs hit.
       if: steps.deno-toolchain-cache.outputs.cache-hit != 'true'
       uses: denoland/setup-deno@v2
       with:
-        deno-version: ${{ inputs.deno-version }}
+        deno-version: ${{ steps.resolve.outputs.version }}
 
-    - name: 🦕 Use cached Deno ${{ inputs.deno-version }}
+    - name: 🦕 Use cached Deno ${{ steps.resolve.outputs.version }}
       # Cache hit: add the restored binary to PATH and verify, with no deno.com
       # contact.
       if: steps.deno-toolchain-cache.outputs.cache-hit == 'true'
       shell: bash
       env:
-        TOOLCHAIN_DIR: ${{ runner.tool_cache }}/deno/${{ inputs.deno-version }}
+        TOOLCHAIN_DIR: ${{ runner.tool_cache }}/deno/${{ steps.resolve.outputs.version }}
       run: |
         # setup-deno extracts the binary into <tool_cache>/deno/<version>/<arch>/.
         # The arch subdir name comes from the runner's node arch, so find the
@@ -65,7 +109,85 @@ runs:
           ~/.deno
           ~/.cache/deno
           ~/Library/Caches/deno
-        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
+        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
         restore-keys: |
-          deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-
+          deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-
+
+    # The @db/sqlite FFI driver downloads its native library (libsqlite3) from a
+    # GitHub release the first time a process opens a database, via @denosaurs/plug.
+    # Plug caches the library under <DENO_DIR>/plug, which is ~/.cache/deno/plug on
+    # the Linux runners. Left to the deno-deps cache above, that library would be
+    # evicted on every unrelated dependency change, because that cache's key hashes
+    # the whole lockfile; each eviction re-exposes the run-time download, and a
+    # transient GitHub failure there fails the job. A separate cache keyed on only
+    # the resolved driver version survives unrelated dependency changes, so the
+    # download happens at most once per driver version.
+    #
+    # The provisioning is best-effort. The download runs in every job that opts into
+    # dependency caching, but a failure only warns, so a job that never opens a
+    # database (lint, build, deploy) is not failed by a SQLite download. The cache is
+    # saved only after `deno task initialize-db` both fetches the library and opens a
+    # database with it, and only when the library is present under a cached path — so
+    # a flaked, partial, or misplaced (custom DENO_DIR) download never persists an
+    # empty entry under the immutable version key. Restore and save are split for
+    # that reason: the combined actions/cache saves in a post-job step that runs even
+    # after the job fails.
+    #
+    # Cache version: bump the `deno-sqlite-v1` token to invalidate all SQLite caches.
+    - name: 🔍 Resolve SQLite driver version
+      id: sqlite
+      if: inputs.cache == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # deno.lock's specifiers map records the exact resolved version in a line
+        # of the form "jsr:@db/sqlite@<version>": "<version>". Take the first such
+        # mapping's value and stop there.
+        version="$(awk -F'"' '/^[[:space:]]*"jsr:@db\/sqlite@[^"]*":[[:space:]]*"[0-9]/ { print $4; exit }' deno.lock)"
+        if [ -z "$version" ]; then
+          # Degrade to the lazy run-time download rather than failing every job that
+          # uses this action.
+          echo "::warning::Could not resolve the @db/sqlite version from deno.lock; skipping the SQLite library cache."
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: 🗃️ Restore SQLite native library ${{ steps.sqlite.outputs.version }}
+      id: sqlite-cache
+      if: inputs.cache == 'true' && steps.sqlite.outputs.version != ''
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cache/deno/plug
+          ~/Library/Caches/deno/plug
+        key: deno-sqlite-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sqlite.outputs.version }}
+
+    - name: 📥 Download SQLite native library ${{ steps.sqlite.outputs.version }}
+      id: sqlite-download
+      # Open an in-memory database once so @db/sqlite fetches and exercises the
+      # native library, then confirm it landed under a cached directory. Non-fatal:
+      # on failure the library is left to be fetched lazily at run time.
+      if: inputs.cache == 'true' && steps.sqlite.outputs.version != '' && steps.sqlite-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -euo pipefail
+        deno task initialize-db
+        for dir in "$HOME/.cache/deno/plug" "$HOME/Library/Caches/deno/plug"; do
+          if [ -n "$(find "$dir" -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) 2>/dev/null)" ]; then
+            exit 0
+          fi
+        done
+        echo "::warning::SQLite library not found under the cached plug directories; skipping cache save."
+        exit 1
+
+    - name: 💾 Save SQLite native library ${{ steps.sqlite.outputs.version }}
+      # Runs only after a verified download, so a failed or misplaced download never
+      # persists an empty cache under this version's key.
+      if: inputs.cache == 'true' && steps.sqlite.outputs.version != '' && steps.sqlite-cache.outputs.cache-hit != 'true' && steps.sqlite-download.outcome == 'success'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.cache/deno/plug
+          ~/Library/Caches/deno/plug
+        key: deno-sqlite-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sqlite.outputs.version }}

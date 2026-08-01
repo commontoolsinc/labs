@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { extractHashtags } from "@commonfabric/data-model/schema-tags";
+import { extractHashtags } from "@commonfabric/utils/hashtags";
 
 /**
  * Mirror the hashtags found in a schema's description text into a structured

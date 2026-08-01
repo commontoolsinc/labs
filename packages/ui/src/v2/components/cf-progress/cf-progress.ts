@@ -110,8 +110,7 @@ export class CFProgress extends BaseElement {
           part="indicator"
           role="presentation"
           style="${styleMap(indicatorStyles)}"
-        >
-        </div>
+        ></div>
       </div>
     `;
   }

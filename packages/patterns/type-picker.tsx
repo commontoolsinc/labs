@@ -21,8 +21,8 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -57,6 +57,7 @@ interface TypePickerInput {
 
 export interface TypePickerOutput {
   dismissed?: boolean | Default<false>;
+  [UI]: VNode;
 }
 
 // ===== Handlers =====
@@ -101,7 +102,7 @@ const applyTemplate = handler<
   if (selfEntry) {
     const trashedSelf: TrashedSubPieceEntry = {
       ...selfEntry,
-      trashedAt: new Date(safeDateNow()).toISOString(),
+      trashedAt: new Date().toISOString(),
     };
     trashedEntries.push(trashedSelf);
   }
@@ -128,7 +129,7 @@ const dismiss = handler<
   // Add to trash
   const trashedSelf: TrashedSubPieceEntry = {
     ...selfEntry,
-    trashedAt: new Date(safeDateNow()).toISOString(),
+    trashedAt: new Date().toISOString(),
   };
   trashedEntries.push(trashedSelf);
 });

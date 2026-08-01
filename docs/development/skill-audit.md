@@ -1,4 +1,4 @@
-<!-- @reviewed 2026-06-04 -->
+<!-- @reviewed 2026-07-14 -->
 
 # Skill Fact Audit
 
@@ -7,11 +7,14 @@ highest-value and highest-rot content (see
 [`skill-authoring.md`](./skill-authoring.md), "facts rot — make them testable").
 Two mechanisms keep it honest, and they are complementary, not alternatives:
 
-- **Tripwire (deterministic floor).** `deno task check-skill-facts` — a cheap,
-  instant, zero-token CI gate that fails if an import specifier or repo path a
-  skill cites stops _resolving_: a bare import of a package with no root export,
-  a missing subpath, or a vanished path. Runs on every PR (the `check` job).
-  Catches resolvability rot only, and deliberately hardcodes nothing.
+- **Tripwire (deterministic floor).** `deno task check-skill-facts`
+  (`tasks/check-skill-facts.ts`) — a cheap, instant, zero-token CI gate over
+  every markdown file under `skills/`, which fails if an import specifier or repo
+  path a skill cites stops _resolving_: a bare import of a package with no root
+  export, a missing subpath, or a vanished path. Runs on every PR (the `check`
+  job). Catches resolvability rot only, and deliberately hardcodes no fact list —
+  every fact it checks is derived from the skill text itself, so a skill gains
+  coverage by being written, not by being registered anywhere.
 - **Audit (LLM ceiling).** A periodic / on-change pass that reads a skill against
   the current tree and judges the _semantic_ rot the tripwire cannot see: a
   canonical home that moved or was renamed, advice that is now wrong, a new home
@@ -22,6 +25,44 @@ Two mechanisms keep it honest, and they are complementary, not alternatives:
 The auditor is **cf-review itself** — do not build a parallel reviewer. cf-review
 already verifies a skill's facts against the tree (it did so unprompted when it
 reviewed its own PR). The audit is just cf-review pointed at a skill.
+
+## What the tripwire treats as a citation
+
+Skills use backticks for far more than paths, so the tripwire only checks a
+backticked token when it is shaped like a path and is rooted at a directory that
+really exists — either at the repo root or inside the citing skill's own
+directory. Both rootings are in use: `skills/cf` names
+`scripts/check-local-dev.sh` at the repo root, while `skills/agent-browser` names
+`scripts/form-automation.sh`, which lives in `skills/agent-browser/scripts/`.
+
+Everything else is left alone. A token with whitespace is a command line rather
+than a path. A token with no directory separator has nothing to root it. Prose
+(`async/await`), flags (`-s/--space`), module specifiers
+(`lit/directives/class-map.js`) and paths inside a mounted filesystem
+(`input/contacts.json`) do not start with a real directory, so they are skipped.
+
+The backticks are what mark a token as a citation, wherever it sits. A path
+written bare is not checked, which is why the paths in fenced code blocks mostly
+go unseen — fenced content is rarely backticked. Backtick one inside a fence and
+it is checked like any other.
+
+The rooting requirement cuts both ways: a real path written in an abbreviated
+form that omits the directory rooting it is skipped as well, so it rots unseen.
+Write paths from the repo root to get them checked.
+
+Membership comes from git rather than from the filesystem, so the question is
+"is this path part of the repo" rather than "does this path exist on this
+machine". Ignored build output never makes a citation resolve, so the check does
+not depend on whether you happen to have built, and a wrong-case citation is
+caught on a case-insensitive filesystem instead of surviving until CI. A path the
+index still holds but the working tree has lost does not count either, so a
+citation breaks as soon as its target moves away rather than lingering until the
+deletion is staged.
+
+To cite a path as an illustration rather than a real location, write it as a
+placeholder — `packages/<pkg>/mod.ts`, `cf-{name}/cf-{name}.figma.ts`,
+`packages/**`. The tripwire skips those by design, and that is the intended
+opt-out; there is no allowlist, and none of the skills has needed one.
 
 ## Triggers
 
@@ -46,11 +87,13 @@ reviewed its own PR). The audit is just cf-review pointed at a skill.
 
 ## Why this isn't all in the tripwire
 
-Deterministic extraction of "is this fact still _true_" from prose is brittle: a
-cited path may be skill-local rather than repo-root, a token may be illustrative
-(`cf-{name}.figma.ts`), and the worst case — "the home moved but both old and
-new names still exist" — is invisible to a grep. The tripwire stays narrow on
-purpose; the audit carries the judgment.
+Deterministic extraction of "is this fact still _true_" from prose is brittle, so
+the tripwire asks only the narrow question it can answer exactly: does this name
+still resolve? The rot that matters most is invisible to it. The worst case — the
+home moved, but both the old and the new name still exist — resolves perfectly
+well and is still wrong. So is advice that has quietly become bad, and so is a
+new canonical home or footgun the skill should name but doesn't. The tripwire
+stays narrow on purpose; the audit carries the judgment.
 
 One row it cannot cover by construction: the cf-review anti-dup table's
 cell↔link entry names a **bare internal symbol** (`convertCellsToLinks` in

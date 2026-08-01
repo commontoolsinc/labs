@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JSONSchemaObj } from "@commonfabric/api";
+import {
+  type AssertRawPart,
+  type AssertRecord,
+  JSONSchemaObj,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
   type Frame,
@@ -15,6 +19,9 @@ import {
 } from "../src/builder/types.ts";
 import {
   action,
+  assert,
+  assertCapture,
+  assertRenderParts,
   handler,
   isEagerSourceAnnotationEnabled,
   lift,
@@ -28,7 +35,8 @@ import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { isWriteRedirectLink } from "../src/link-utils.ts";
+import { isAliasBinding, isWriteRedirectLink } from "../src/link-utils.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
 
 type MouseEvent = {
   clientX: number;
@@ -139,6 +147,101 @@ describe("module", () => {
       expect((module.resultSchema as JSONSchemaObj).description).toBe(
         "Greeting message",
       );
+    });
+  });
+
+  describe("assert function", () => {
+    it("creates a node factory", () => {
+      const holds = assert(() => true);
+      expect(isReactive(holds)).toBe(true);
+    });
+
+    // The assert-diagnostics transformer normally rewrites an `assert` body
+    // and lowers the call to a lift, so this implementation is what runs when
+    // a source opts out of the transform. It still has to produce the record
+    // `assert` declares it returns — a body handing back a bare boolean would
+    // have the declared type and the value disagree. It records no operands,
+    // having no rewritten body to record them from.
+    it("produces the record it declares, carrying the result in `ok`", async () => {
+      const testPattern = trustPattern(
+        runtime,
+        pattern(() => {
+          const holds = assert(() => true);
+          const fails = assert(() => 1 + 2 <= 2);
+          return { holds, fails };
+        }),
+      );
+
+      const resultCell = runtime.getCell(space, "assert-runtime-instance");
+      runtime.setup(undefined, testPattern, {}, resultCell);
+      runtime.start(resultCell);
+
+      const result = await resultCell.pull() as {
+        holds: AssertRecord;
+        fails: AssertRecord;
+      };
+      expect(result.holds).toEqual({ ok: true, source: "", parts: [] });
+      expect(result.fails).toEqual({ ok: false, source: "", parts: [] });
+    });
+  });
+
+  describe("assertCapture function", () => {
+    // What the rewritten body calls for each operand. It has to hand the value
+    // back untouched, or wrapping an operand would change what the assertion
+    // computes.
+    it("returns the value it was given", () => {
+      const parts: AssertRawPart[] = [];
+      expect(assertCapture(parts, "a + b", 3)).toBe(3);
+
+      const object = { name: "Coffee" };
+      expect(assertCapture(parts, "item", object)).toBe(object);
+    });
+
+    it("records the source text and the raw value, without rendering it", () => {
+      // Rendering is deferred to `assertRenderParts`, so the value is stashed
+      // as-is here — a passing assertion never renders it.
+      const parts: AssertRawPart[] = [];
+      const object = { name: "Coffee" };
+      assertCapture(parts, "a + b", 3);
+      assertCapture(parts, "item", object);
+
+      expect(parts).toEqual([
+        { src: "a + b", value: 3 },
+        { src: "item", value: object },
+      ]);
+      // The recorded value is the object itself, not a copy or a rendering.
+      expect(parts[1]!.value).toBe(object);
+    });
+
+    it("appends in the order it is called", () => {
+      const parts: AssertRawPart[] = [];
+      assertCapture(parts, "first", 1);
+      assertCapture(parts, "second", 2);
+      expect(parts.map((part) => part.src)).toEqual(["first", "second"]);
+    });
+  });
+
+  describe("assertRenderParts function", () => {
+    // The record's `parts` runs through this. On the passing path it renders
+    // nothing — that is what keeps a passing assertion from paying to render
+    // operands it will never report.
+    it("renders nothing for a passing assertion", () => {
+      const parts: AssertRawPart[] = [
+        { src: "a + b", value: 3 },
+        { src: "items", value: [1, -2] },
+      ];
+      expect(assertRenderParts(true, parts)).toEqual([]);
+    });
+
+    it("renders each captured value for a failing assertion", () => {
+      const parts: AssertRawPart[] = [
+        { src: "a + b", value: 3 },
+        { src: "items", value: [1, -2] },
+      ];
+      expect(assertRenderParts(false, parts)).toEqual([
+        { src: "a + b", rendered: "3" },
+        { src: "items", rendered: "[1,-2]" },
+      ]);
     });
   });
 
@@ -601,7 +704,12 @@ describe("module", () => {
 
       expect(transformedPattern.nodes.length).toBe(1);
       const outputBinding = transformedPattern.nodes[0].outputs;
-      expect(isWriteRedirectLink(outputBinding)).toBe(true);
+      // `$alias` is a binding form rather than a link (#4895); the transformer
+      // emits the root output as one. Either spelling satisfies "one direct
+      // root binding" — what this pins is that it is not nested or multiplied.
+      expect(
+        isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding),
+      ).toBe(true);
       expect(Object.keys(outputBinding as Record<string, unknown>)).toEqual([
         "$alias",
       ]);

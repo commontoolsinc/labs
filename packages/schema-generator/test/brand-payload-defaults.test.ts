@@ -192,3 +192,45 @@ describe("brand-payload recovery on the expanded path (no typeNode)", () => {
     expect(schema.default).toBeUndefined();
   });
 });
+
+// The payloads above are all literal TYPES, which the checker hands over
+// directly. A `typeof SOME_CONST` payload naming an object or array cannot be
+// carried that way — the values are recovered by reading the const's
+// INITIALIZER off the AST.
+//
+// That reader's handling of numbers in their non-literal spellings is pinned by
+// the `default-typeof-const-numbers` fixture, whose golden can hold `-0`, `NaN`
+// and the infinities directly. What stays here is the one case a golden cannot
+// state: that a shadowed global is NOT folded, which is an assertion about what
+// does not happen.
+describe("defaults recovered from a `typeof CONST` initializer", () => {
+  const transformer = createSchemaTransformerV2();
+
+  async function defaultOfX(declarations: string): Promise<unknown> {
+    const { type, checker } = await getTypeFromCode(
+      `${DEFAULT_PRELUDE}\n${declarations}`,
+      "S",
+    );
+    const schema = asObjectSchema(transformer.generateSchema(type, checker));
+    return (schema.properties?.x as Record<string, unknown> | undefined)
+      ?.default;
+  }
+
+  it("declines to fold a shadowed non-finite global", async () => {
+    // `NaN` here names a local binding, not the global. Folding it to the
+    // global would be silently wrong.
+    //
+    // `export {}` makes the snippet a module, which is what pattern sources
+    // always are. Without it the snippet is a global script, where redeclaring
+    // `NaN` is an error rather than a shadowing binding and the checker hands
+    // back the library symbol — so there would be no shadowing left to test.
+    const value = await defaultOfX(`
+      export {};
+      const NaN = 111;
+      const D = { shadowed: NaN };
+      interface S { x: Default<{ shadowed: number }, typeof D>; }
+    `) as Record<string, unknown>;
+
+    expect(Number.isNaN(value.shadowed)).toBe(false);
+  });
+});

@@ -36,7 +36,7 @@ const ToolCallPartSchema = z.object({
   type: z.literal("tool-call"),
   toolCallId: z.string(),
   toolName: z.string(),
-  input: z.record(z.any()),
+  input: z.record(z.string(), z.any()),
 });
 
 const ToolResultPartSchema = z.object({
@@ -70,23 +70,26 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   messages: z.array(MessageSchema) as any, // Trust our BuiltInLLMMessage = CoreMessage alignment
   system: z.string().optional(),
   model: z.string().openapi({
-    example: "claude-sonnet-4-5",
+    example: "default",
   }),
   maxTokens: z.number().optional(),
   stop: z.string().optional(),
   stream: z.boolean().optional(),
   mode: z.enum(["json"]).optional(),
-  metadata: z.record(z.union([z.string(), z.any()])).optional(),
+  metadata: z.record(z.string(), z.union([z.string(), z.any()])).optional(),
   cache: z.boolean().default(true).optional(),
-  tools: z.record(z.object({
-    description: z.string(),
-    inputSchema: z.record(z.any()),
-    handler: z.function().optional().openapi({
-      type: "object",
-      description:
-        "Function handler for tool execution (not serialized in API)",
+  tools: z.record(
+    z.string(),
+    z.object({
+      description: z.string(),
+      inputSchema: z.record(z.string(), z.any()),
+      handler: z.function().optional().openapi({
+        type: "object",
+        description:
+          "Function handler for tool execution (not serialized in API)",
+      }),
     }),
-  })).optional(),
+  ).optional(),
   nativeModelToolIds: z.array(NativeModelToolIdSchema).optional(),
 });
 
@@ -117,25 +120,33 @@ export const ModelInfoSchema = z.object({
   aliases: z.array(z.string()),
 });
 
-export const ModelsResponseSchema = z.record(ModelInfoSchema);
+export const ModelsResponseSchema = z.record(z.string(), ModelInfoSchema);
 
-const StreamResponse = z.object({
-  type: z.literal("stream"),
-  body: z.instanceof(ReadableStream),
+// The streamed branch of this route writes one JSON event per line straight to
+// the response body, with no envelope around the sequence. The events are
+// `text-delta`, `tool-call`, `tool-result`, `finish` and `error`, each tagged by
+// its own `type` field. The body is UTF-8 text, so it is a plain string; the
+// line-delimited structure inside it is beyond what JSON Schema can state, and
+// the description carries it.
+const StreamResponse = z.string().openapi({
+  description:
+    'Newline-delimited JSON events, one per line, each tagged by a "type" ' +
+    'field: "text-delta" carries the next piece of text in "textDelta", ' +
+    '"tool-call" and "tool-result" report tool activity, "finish" ends a ' +
+    'complete response, and "error" reports a failure mid-stream.',
 });
 
-const JsonResponse = z.object({
-  type: z.literal("json"),
-  body: MessageSchema.openapi({
-    example: {
-      role: "assistant",
-      content:
-        "Arr! That be a mighty fine tongue-twister ye got there, matey! *adjusts eye patch*\n\nAs any seasoned sea dog would tell ye, a woodchuck (if the scurvy beast could chuck wood) would chuck as much wood as a woodchuck could chuck if a woodchuck could chuck wood! \n\nBut between you and me, shipmate, we pirates care more about how much booty we can plunder than how much wood them landlubbing woodchucks can chuck! Yarr har har! 🏴‍☠️",
-    },
-  }),
+// The non-streaming branch of this route answers with the model's reply message
+// written straight to the response body, with no envelope around it. The message
+// carries a `role` and its `content`, and the client parses those fields
+// directly from the body.
+const JsonResponse = MessageSchema.openapi({
+  example: {
+    role: "assistant",
+    content:
+      "Arr! That be a mighty fine tongue-twister ye got there, matey! *adjusts eye patch*\n\nAs any seasoned sea dog would tell ye, a woodchuck (if the scurvy beast could chuck wood) would chuck as much wood as a woodchuck could chuck if a woodchuck could chuck wood! \n\nBut between you and me, shipmate, we pirates care more about how much booty we can plunder than how much wood them landlubbing woodchucks can chuck! Yarr har har! 🏴‍☠️",
+  },
 });
-
-export type LLMJSONResponse = z.infer<typeof JsonResponse>;
 
 const GetModelsRouteQueryParams = z.object({
   search: z.string().optional(),
@@ -156,7 +167,7 @@ export const FeedbackSchema = z.object({
     score: z.number().optional(),
     explanation: z.string().optional(),
   }),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 // Route definitions
@@ -164,7 +175,9 @@ export const getModels = createRoute({
   path: "/api/ai/llm/models",
   method: "get",
   tags,
-  query: GetModelsRouteQueryParams,
+  request: {
+    query: GetModelsRouteQueryParams,
+  },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
       ModelsResponseSchema.openapi({
@@ -202,7 +215,7 @@ export const generateText = createRoute({
         "application/json": {
           schema: LLMRequestSchema.openapi({
             example: {
-              model: "anthropic:claude-sonnet-4-5",
+              model: "default",
               system: "You are a pirate, make sure you talk like one.",
               stream: false,
               cache: true,
@@ -230,7 +243,7 @@ export const generateText = createRoute({
         },
       },
       description:
-        "Generated text response. NOTE: If you make a request with `stream: true`, the server response will just be a stream of newline separated strings returned from the LLM, without a structured message object.",
+        "Generated text response. NOTE: If you make a request with `stream: true`, the server answers with a `text/event-stream` of newline-delimited JSON events instead of a single message object; the message is assembled from the `text-delta` events as they arrive.",
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       content: {

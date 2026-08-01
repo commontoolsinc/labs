@@ -9,9 +9,9 @@ declare global {
   var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS:
     | string
     | undefined;
+  var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
-  var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -42,6 +42,10 @@ const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_DEFINE =
       "string"
     ? $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS
     : undefined;
+const EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE =
+  typeof $EXPERIMENTAL_COMPUTED_CELL_IDS === "string"
+    ? $EXPERIMENTAL_COMPUTED_CELL_IDS
+    : undefined;
 const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
   typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
     ? $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION
@@ -49,10 +53,6 @@ const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
 const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
   typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
     ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE
-    : undefined;
-const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE =
-  typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME === "string"
-    ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -117,6 +117,10 @@ export const EXPERIMENTAL = {
     "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS",
     EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_DEFINE,
   ),
+  computedCellIds: flagValue(
+    "EXPERIMENTAL_COMPUTED_CELL_IDS",
+    EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE,
+  ),
   // Debug `.src` source annotation: ON in development builds (so per-primitive
   // source locations keep working for debugging), OFF in production (it is the
   // boot floor's largest single cost). The define overrides either way.
@@ -125,16 +129,12 @@ export const EXPERIMENTAL = {
     EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE,
   ) ??
     (ENVIRONMENT === "development"),
-  // Auto-update the NON-HOME space-root system pattern (default-app) in place.
+  // Auto-update space-root system patterns (default-app AND home) in place.
   // Default ON; a build define (`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE=false`)
-  // can force it off. The home root stays off — it carries real user data and
-  // needs the second flag, pending the stable-addressing audit.
+  // can force it off. Home state survival across an in-place roll is pinned by
+  // home-golden-replay.test.ts, so the home root no longer needs a second flag.
   systemPatternAutoUpdate: flagValue(
     "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
     EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE,
   ) ?? true,
-  systemPatternAutoUpdateHome: flagValue(
-    "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
-    EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE,
-  ),
 };

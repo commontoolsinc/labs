@@ -87,7 +87,6 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
   const generated = generateText({
     system: systemPrompt,
     prompt,
-    model: "anthropic:claude-sonnet-4-5",
   });
 
   const processedResult = computed(() => {
@@ -165,36 +164,32 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
 
         {ifElse(
           isReady,
-          <cf-cell-context $cell={compiled} label="Compiled Result">
-            <div>
-              <h3>Generated Pattern</h3>
-              <div
-                style={{
-                  border: "1px solid #ccc",
-                  borderRadius: "8px",
-                  padding: "16px",
-                  backgroundColor: "#fff",
-                }}
-              >
-                {compiled.result}
-              </div>
+          <div>
+            <h3>Generated Pattern</h3>
+            <div
+              style={{
+                border: "1px solid #ccc",
+                borderRadius: "8px",
+                padding: "16px",
+                backgroundColor: "#fff",
+              }}
+            >
+              {compiled.result}
             </div>
-          </cf-cell-context>,
+          </div>,
           <span />,
         )}
 
         {ifElse(
           hasCode,
-          <cf-cell-context $cell={generated} label="Generated Code">
-            <div>
-              <h3>Generated Code</h3>
-              <cf-code-editor
-                value={generated.result}
-                language="text/x.typescript"
-                readonly
-              />
-            </div>
-          </cf-cell-context>,
+          <div>
+            <h3>Generated Code</h3>
+            <cf-code-editor
+              value={generated.result}
+              language="text/x.typescript"
+              readonly
+            />
+          </div>,
           <span />,
         )}
       </div>

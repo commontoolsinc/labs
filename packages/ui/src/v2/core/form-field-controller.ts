@@ -312,7 +312,7 @@ export class FormFieldController<T> implements ReactiveController {
    * Simple deep equality check for comparing values
    */
   private _deepEqual(a: unknown, b: unknown): boolean {
-    if (a === b) return true;
+    if (Object.is(a, b)) return true;
     if (a === null || b === null) return false;
     if (typeof a !== typeof b) return false;
     if (typeof a !== "object") return false;

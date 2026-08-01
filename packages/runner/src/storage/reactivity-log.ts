@@ -14,14 +14,16 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
 // carries NO value-equality concurrency precondition: read() does not mark its
 // document `validated` (so the client validate()/claim() pass skips it), and
 // buildReads DOWNGRADES it — rather than dropping the read outright, it replaces
-// it with a nonRecursive existence read at the entity ROOT. Set transaction-wide
+// it with a nonRecursive existence read at the cell's PARENT path (the
+// structural target threaded from handleCellSet). Set transaction-wide
 // by the UI-input blind-leaf-write mode (see markUiInputBlindWriteTx) so a scalar
 // `$value` overwrite is a last-write-wins write on its leaf value (removing the
-// own-write-race "stale confirmed read" conflict: a deep same-leaf patch sits
-// below the root read, so TIER-2 nonRecursive overlap does not fire) while still
-// failing fast on a concurrent WHOLE-DOC delete/replace (TIER-1 set/delete is
-// path-blind, so the structural read yields a clean ConflictError instead of a
-// raw "missing path" throw at patch read-materialization). Orthogonal to
+// own-write-race "stale confirmed read" conflict: a write to the cell's own
+// value sits below the parent read, so TIER-2 nonRecursive overlap does not
+// fire) while still failing fast on a concurrent WHOLE-DOC delete/replace
+// (TIER-1 set/delete is path-blind) or a reshape of the parent or any ancestor
+// (TIER-2 fires at-or-above the read path) — a clean ConflictError instead of a
+// raw "missing path" throw at patch read-materialization. Orthogonal to
 // scheduling: reactivity/subscriptions are unaffected (only ignoreReadForScheduling
 // gates those).
 const ignoreReadForCommitMarker: unique symbol = Symbol(
@@ -134,6 +136,22 @@ export function unmarkUiInputBlindWriteTx(tx: object): void {
 }
 export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
+}
+
+// Renderer-input (user-keystroke `$value`) provenance for timing-mitigation
+// cell-flip shaping (plan B, channels 4/5). Unlike the blind-write mark above —
+// which is cleared before commit — this one must SURVIVE to commit time so the
+// scheduler can recognize a renderer-input change at the storage-notification
+// choke point (via `notification.source`) and shape the resulting subscriber
+// wake. It is a superset marker: set on the same UI-input writes, never cleared.
+// See docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+const rendererInputTxs = new WeakSet<object>();
+
+export function markRendererInputTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) rendererInputTxs.add(layer);
+}
+export function isRendererInputTx(tx: object): boolean {
+  return rendererInputTxs.has(tx);
 }
 
 // The structural existence/shape precondition for a blind UI-input write: the

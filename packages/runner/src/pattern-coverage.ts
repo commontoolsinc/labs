@@ -38,6 +38,26 @@ export interface PatternCoverageReportOptions {
   includeTestFiles?: boolean;
 }
 
+/**
+ * A collector's raw spans and per-span hit counts in a plain-JSON shape that
+ * survives serialization across a process, worker, or browser boundary. It
+ * carries the unnormalized `fileName`s the transformer baked into the compiled
+ * bytes, so a report produced in one realm (a browser worker) can be
+ * {@link PatternCoverageCollector.ingest}ed into a collector in another (the
+ * test process) with matching `(fileName, id)` keys.
+ */
+export interface PatternCoverageData {
+  spans: PatternCoverageSpan[];
+  hits: { fileName: string; id: number; count: number }[];
+}
+
+/** Default LCOV test name for pattern-coverage records (see {@link isPatternRuntimeTestName} in the gate). */
+export const PATTERN_COVERAGE_TEST_NAME = "pattern-runtime";
+
+/** LCOV test name for pattern coverage collected through the integration jobs. */
+export const PATTERN_COVERAGE_INTEGRATION_TEST_NAME =
+  "pattern-runtime-integration";
+
 export class PatternCoverageCollector {
   #spans = new Map<string, PatternCoverageSpan>();
   #hits = new Map<string, number>();
@@ -65,6 +85,39 @@ export class PatternCoverageCollector {
     return {
       hit: (fileName: string, id: number) => this.hit(fileName, id),
     };
+  }
+
+  /**
+   * Export this collector's spans and per-span hit counts as plain JSON, so a
+   * collector filled in another realm can be moved across a boundary and merged
+   * into a collector here with {@link ingest}. `fileName`s are the raw values
+   * the transformer baked into the compiled bytes — no path normalization —
+   * which is what keeps `(fileName, id)` keys aligned across realms that ran the
+   * same bytes.
+   */
+  toData(): PatternCoverageData {
+    const hits: PatternCoverageData["hits"] = [];
+    for (const [key, count] of this.#hits) {
+      const { fileName, id } = splitSpanKey(key);
+      hits.push({ fileName, id, count });
+    }
+    return { spans: [...this.#spans.values()], hits };
+  }
+
+  /**
+   * Merge another realm's {@link toData} export into this collector: register
+   * its spans (idempotent by `(fileName, id)`) and add its hit counts. A realm
+   * that only warm-loaded already-instrumented bytes reports hits with no spans
+   * of its own; the spans come from whichever realm compiled the bytes, so the
+   * union across realms carries both.
+   */
+  ingest(data: PatternCoverageData): void {
+    this.registerSpans(data.spans);
+    for (const { fileName, id, count } of data.hits) {
+      if (count === 0) continue;
+      const key = spanKey(fileName, id);
+      this.#hits.set(key, (this.#hits.get(key) ?? 0) + count);
+    }
   }
 
   report(options: PatternCoverageReportOptions = {}): PatternCoverageReport {
@@ -120,21 +173,22 @@ declare module "./harness/types.ts" {
 export async function writePatternCoverageLcov(
   collector: PatternCoverageCollector,
   outputPath: string,
-  options: PatternCoverageReportOptions = {},
+  options: PatternCoverageReportOptions & { testName?: string } = {},
 ): Promise<void> {
   await Deno.mkdir(dirname(outputPath), { recursive: true });
   await Deno.writeTextFile(
     outputPath,
-    patternCoverageReportToLcov(collector.report(options)),
+    patternCoverageReportToLcov(collector.report(options), options.testName),
   );
 }
 
 export function patternCoverageReportToLcov(
   report: PatternCoverageReport,
+  testName: string = PATTERN_COVERAGE_TEST_NAME,
 ): string {
   const lines: string[] = [];
   for (const file of report.files) {
-    lines.push("TN:pattern-runtime");
+    lines.push(`TN:${testName}`);
     lines.push(`SF:${normalizeLcovPath(file.path)}`);
 
     const hitsByLine = hitsByRuntimeLine(file.spans);
@@ -228,6 +282,14 @@ function sortedLines(lines: Set<number>): number[] {
 
 function spanKey(fileName: string, id: number): string {
   return `${fileName}\0${id}`;
+}
+
+function splitSpanKey(key: string): { fileName: string; id: number } {
+  const separator = key.lastIndexOf("\0");
+  return {
+    fileName: key.slice(0, separator),
+    id: Number(key.slice(separator + 1)),
+  };
 }
 
 function normalizeReportPath(fileName: string, root?: string): string {

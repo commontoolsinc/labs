@@ -45,8 +45,8 @@ parent passes.
 ## Pieces: patterns, deployed
 
 A **pattern** is source code — a template. A **piece** is an instance of a
-pattern living in a space. Instantiation (via `cf piece new`, the shell, or
-another piece) does roughly this (see `packages/piece/src/manager.ts`):
+pattern living in a space. Top-level deployment through `cf piece new` or the
+shell does roughly this (see `packages/piece/src/manager.ts`):
 
 1. The pattern source is compiled and registered, so the space knows the
    program (not just its output).
@@ -54,15 +54,27 @@ another piece) does roughly this (see `packages/piece/src/manager.ts`):
    **result cell** to hold what the pattern returns; metadata links the
    piece to its pattern source.
 3. The piece is added to the space's piece list (the space's default
-   pattern maintains `allPieces` and exposes an `addPiece` stream — note,
+   pattern maintains `pieceRegistry` and exposes an `addPiece` stream — note,
    even space management is "just a pattern").
 4. From then on, any runtime that opens the space can load the piece: the
    pattern graph is re-instantiated over the argument cell, and the result
    (including `[UI]`) flows from there.
 
+Instantiating a child pattern inside another piece creates its cells and
+metadata, but does not add the child to `pieceRegistry` automatically.
+
 A piece is identified by an entity id (a hash, e.g. `fid1:abc...`) and can carry
 a human **slug** for URLs. In the shell, `/{spaceName}/{pieceIdOrSlug}` shows
 a piece's UI.
+
+The registry is the root of the supported piece listings. A child piece that is
+not registered must be published through a searchable collection or remain
+reachable by following links from a known piece. An orphan piece does not
+appear in the piece-specific listings or searches. It can still be addressed
+when its exact address and scope are known. Some space-scoped roots with
+recognizable metadata can also be recovered by exhaustively inspecting
+low-level entity listings. See
+[Finding Pieces](../common/concepts/piece-discovery.md).
 
 ## Linking pieces
 

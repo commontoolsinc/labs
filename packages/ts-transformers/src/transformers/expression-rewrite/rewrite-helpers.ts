@@ -3,6 +3,7 @@ import ts from "typescript";
 import {
   detectCallKind,
   type NormalizedDataFlow,
+  preserveSourceMapRange,
   setParentPointers,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
@@ -157,12 +158,17 @@ export function createReactiveWrapperForExpression(
   // by this stage in the pipeline, so emitting computed here would leave it
   // in lowered output, defeating Phase 1's "no computed/derive in lowered
   // output" invariant.
-  const arrowFunction = factory.createArrowFunction(
-    undefined,
-    undefined,
-    [],
-    resultTypeNode,
-    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+  // Callback arrow: source-map-range only (emit-safe position carry). See
+  // preserveSourceMapRange.
+  const arrowFunction = preserveSourceMapRange(
+    factory.createArrowFunction(
+      undefined,
+      undefined,
+      [],
+      resultTypeNode,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      expression,
+    ),
     expression,
   );
   context.markAsSyntheticComputeCallback(arrowFunction);
@@ -174,10 +180,22 @@ export function createReactiveWrapperForExpression(
     [arrowFunction],
   );
   const emptyInput = factory.createObjectLiteralExpression([], false);
-  const liftAppliedCall = factory.createCallExpression(
-    innerLiftCall,
-    undefined,
-    [emptyInput],
+  // Outer wrapper call: source-map-range ONLY. This call WRAPS the authored
+  // expression rather than replacing it as the same semantic unit, so it must
+  // not claim the expression's identity: `expression` was just marked
+  // compute-owned (markSyntheticComputeOwnedSubtree above), and identity-
+  // sensitive classifiers fall back through getOriginalNode — an original
+  // pointing at the marked subtree makes the wrapper (e.g. as the receiver of
+  // a chained array method) falsely read as compute-owned and trips the
+  // array-method context invariant. smr carries the authored position without
+  // identity (CT-1868).
+  const liftAppliedCall = preserveSourceMapRange(
+    factory.createCallExpression(
+      innerLiftCall,
+      undefined,
+      [emptyInput],
+    ),
+    expression,
   );
 
   // Register types for both the TypeNode and the lift-applied CallExpression

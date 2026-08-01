@@ -11,24 +11,33 @@ const VALID_LOG_LEVELS = new Set([
 /**
  * Extract --log-level <level> from args before Cliffy sees them.
  * Returns the level (if found) and the cleaned args array.
+ *
+ * Scanning stops at the first `--`: everything after it is a payload for the
+ * target command (e.g. a schema-derived handler flag named `--log-level`),
+ * and silently eating it would drop handler input. Mirrors extractNoColor in
+ * color-mode.ts. Use `cf --log-level error <cmd> -- --log-level error` to set
+ * both.
  */
 export function extractLogLevel(
   args: string[],
 ): { level: string | undefined; args: string[] } {
+  const end = args.indexOf("--");
+  const scanned = end === -1 ? args : args.slice(0, end);
+  const passthrough = end === -1 ? [] : args.slice(end);
   const cleaned: string[] = [];
   let level: string | undefined;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--log-level" && i + 1 < args.length) {
-      const candidate = args[i + 1];
+  for (let i = 0; i < scanned.length; i++) {
+    if (scanned[i] === "--log-level" && i + 1 < scanned.length) {
+      const candidate = scanned[i + 1];
       if (VALID_LOG_LEVELS.has(candidate)) {
         level = candidate;
         i++; // skip the value
         continue;
       }
     }
-    cleaned.push(args[i]);
+    cleaned.push(scanned[i]);
   }
-  return { level, args: cleaned };
+  return { level, args: [...cleaned, ...passthrough] };
 }
 
 /**

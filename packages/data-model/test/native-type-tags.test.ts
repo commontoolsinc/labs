@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createNativeErrorBrandCheck } from "@/native-error-brand.ts";
 
 import {
+  isNativeError,
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
@@ -33,8 +34,9 @@ describe("native-type-tags", () => {
         }
       }
       const exotic = new MyFancyError("exotic");
-      // Constructor is MyFancyError, not in the switch -- falls back to
-      // Error.isError().
+      // Recognized by class: `tagFromNativeClass()` walks the prototype chain,
+      // so an `Error` subclass is tagged without reaching the value-level
+      // fallbacks below.
       expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
     });
 
@@ -111,6 +113,32 @@ describe("native-type-tags", () => {
       );
     });
 
+    it("returns `Error` tag for an `Error` whose prototype was severed", () => {
+      const severed = new Error("severed");
+      Object.setPrototypeOf(severed, null);
+
+      // No reachable constructor, so the class-level lookup yields nothing and
+      // the `Error.isError()` fallback is what recognizes it.
+      expect((severed as { constructor?: unknown }).constructor).toBe(
+        undefined,
+      );
+      expect(tagFromNativeValue(severed)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns `Array` tag for an `Array` subclass", () => {
+      class MyArray extends Array {}
+
+      expect(tagFromNativeClass(MyArray)).toBe(null);
+      expect(tagFromNativeValue(new MyArray())).toBe(NATIVE_TAGS.Array);
+    });
+
+    it("returns `Array` tag for an array whose prototype was severed", () => {
+      const severed = [1, 2];
+      Object.setPrototypeOf(severed, null);
+
+      expect(tagFromNativeValue(severed)).toBe(NATIVE_TAGS.Array);
+    });
+
     it("returns `Map` tag for `Map` instances", () => {
       expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
     });
@@ -146,15 +174,66 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
     });
 
+    it("classifies values when `Error.isError` is unavailable", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
+      Object.defineProperty(Error, "isError", {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      try {
+        expect(isNativeError(new Error("test"))).toBe(true);
+        expect(tagFromNativeValue(Object.create(null))).toBe(
+          NATIVE_TAGS.Object,
+        );
+      } finally {
+        if (descriptor) {
+          Object.defineProperty(Error, "isError", descriptor);
+        } else {
+          delete (Error as { isError?: unknown }).isError;
+        }
+      }
+    });
+
     it("returns `HasToJSON` tag for plain objects with `toJSON()`", () => {
       const obj = { toJSON: () => "converted" };
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.HasToJSON);
     });
 
-    it("returns `HasToJSON` tag for arrays with `toJSON()`", () => {
+    it("returns `Array` tag for arrays with `toJSON()`", () => {
+      // An array answers `Array` whatever it carries, so the array rule is
+      // what decides its fate. Here `toJSON` is a named own key, which that
+      // rule rejects, so routing the value by it would convert an array by the
+      // very property that disqualifies it.
       const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
       arr.toJSON = () => "custom array";
-      expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.HasToJSON);
+      expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.Array);
+    });
+
+    it("returns `Array` tag despite an inherited `toJSON()`", () => {
+      // The other route in, and the one that makes answering `Array` up front
+      // matter: `hasToJSON()` answers on `in`, so were an inherited `toJSON`
+      // consulted, one assignment to `Array.prototype` would route every array
+      // in the process through it.
+      const proto = Array.prototype as unknown as Record<string, unknown>;
+      try {
+        proto.toJSON = () => "hijacked";
+        const arr = [1, 2];
+        expect(Object.hasOwn(arr, "toJSON")).toBe(false);
+        expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.Array);
+      } finally {
+        delete proto.toJSON;
+      }
+    });
+
+    it("returns `Array` tag for an `Array` subclass carrying `toJSON()`", () => {
+      class ProtoJson extends Array {
+        toJSON(): unknown[] {
+          return [7, 8];
+        }
+      }
+      expect(tagFromNativeValue(new ProtoJson())).toBe(NATIVE_TAGS.Array);
     });
 
     it("returns `HasToJSON` tag for class instances with `toJSON()`", () => {

@@ -308,10 +308,16 @@ const openParty = async (
   return { identity, did: identity.did(), storage, runtime, taps };
 };
 
-// Barrier for observing a server PUSH: poll a condition across bounded `idle()`
-// + real-timer cycles and return the instant it holds (never a fixed sleep).
-// Deliberately avoids `synced()`/`pull()`, which fetch out-of-band and would
-// MASK a missing push — turning the very gap under test falsely green.
+// Barrier for observing a server PUSH: drive the condition across bounded
+// `idle()` + drain cycles and return the instant it holds (never a fixed
+// sleep). Deliberately avoids `synced()`/`pull()`, which fetch out-of-band and
+// would MASK a missing push — turning the very gap under test falsely green.
+//
+// `clock.tick(10)` rather than a wall-clock sleep: the package's fake clock
+// FREEZES a positive-delay timer armed from a `test/` file (see
+// `test/clock-preload.ts`), so a real sleep here deadlocks. `tick` advances
+// LOGICAL time by the same 10ms and fires the runtime's own timers in
+// lockstep, which is what the original sleep was buying.
 async function waitForPush(
   party: Party,
   until: () => boolean,
@@ -320,7 +326,7 @@ async function waitForPush(
   for (let i = 0; i < attempts; i++) {
     await party.runtime.idle();
     if (until()) return true;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await clock.tick(10);
   }
   await party.runtime.idle();
   return until();

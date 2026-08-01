@@ -1,4 +1,11 @@
 export { Browser } from "./browser.ts";
+export type {
+  ElementHandle,
+  InteractionObserver,
+  QueryStrategy,
+  ScreencastFrame,
+  SelectorOptions,
+} from "./astral-adapter.ts";
 export {
   assertCounterbalancedRendererCpu,
   type BrowserProcessMetric,

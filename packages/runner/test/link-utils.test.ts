@@ -4,32 +4,30 @@ import {
   areLinksSame,
   areNormalizedLinksSame,
   areNormalizedLinksSameIgnoringScope,
-  createDataCellURI,
   createLLMFriendlyLink,
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  isAliasBinding,
   isCellLink,
-  isLegacyAlias,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedLink,
+  parseAliasBinding,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
-import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -131,9 +129,12 @@ describe("link-utils", () => {
   });
 
   describe("isWriteRedirectLink", () => {
-    it("should identify legacy aliases as write redirect links", () => {
-      const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isWriteRedirectLink(legacyAlias)).toBe(true);
+    it("should not identify alias bindings as write redirect links", () => {
+      // `$alias` is only meaningful as a Pattern binding, not as a link in
+      // data; the binding predicate still matches it.
+      const legacyAlias = { $alias: { cell: "result", path: ["test"] } };
+      expect(isWriteRedirectLink(legacyAlias)).toBe(false);
+      expect(isAliasBinding(legacyAlias)).toBe(true);
     });
 
     it("should identify sigil links with overwrite redirect as write redirect links", () => {
@@ -160,22 +161,22 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isLegacyAlias", () => {
-    it("should identify legacy aliases", () => {
+  describe("isAliasBinding", () => {
+    it("should fail to match legacy aliases without name or cause", () => {
       const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isLegacyAlias(legacyAlias)).toBe(true);
+      expect(isAliasBinding(legacyAlias)).toBe(false);
     });
 
-    it("should identify legacy aliases with cell", () => {
+    it("should fail to match legacy aliases with cell id", () => {
       const cell = runtime.getCell(space, "test");
       const legacyAlias = { $alias: { cell: cell.entityId, path: ["test"] } };
-      expect(isLegacyAlias(legacyAlias)).toBe(true);
+      expect(isAliasBinding(legacyAlias)).toBe(false);
     });
 
     it("should not identify non-legacy aliases", () => {
-      expect(isLegacyAlias({ notAlias: "value" })).toBe(false);
-      expect(isLegacyAlias({ $alias: "not object" })).toBe(false);
-      expect(isLegacyAlias({ $alias: { notPath: "value" } })).toBe(false);
+      expect(isAliasBinding({ notAlias: "value" })).toBe(false);
+      expect(isAliasBinding({ $alias: "not object" })).toBe(false);
+      expect(isAliasBinding({ $alias: { notPath: "value" } })).toBe(false);
     });
   });
 
@@ -361,7 +362,7 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse legacy aliases to normalized links", () => {
+    it("should not parse alias bindings (those parse via parseAliasBinding)", () => {
       const cell = runtime.getCell(space, "test");
       const legacyAlias = {
         $alias: {
@@ -370,9 +371,17 @@ describe("link-utils", () => {
           schema: { type: "number" },
         },
       };
-      const result = parseLink(legacyAlias, cell);
+      // As data, `$alias` is not a link.
+      expect(parseLink(legacyAlias, cell)).toBeUndefined();
 
-      expect(result).toEqual({
+      // As a Pattern binding, it still parses via the binding-side parser
+      // (which ignores the doubly-legacy `cell` ref and resolves to base).
+      expect(
+        parseAliasBinding(
+          legacyAlias as unknown as AliasBinding,
+          cell.getAsNormalizedFullLink(),
+        ),
+      ).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
@@ -382,15 +391,22 @@ describe("link-utils", () => {
       });
     });
 
-    it("should handle legacy aliases without cell using base", () => {
+    it("should resolve named-cell alias bindings against the base", () => {
       const baseCell = runtime.getCell(space, "base");
       const legacyAlias = {
         $alias: {
+          // Only satisfies the AliasBinding constraint (name or
+          // partialCause); parseAliasBinding resolves against the base link.
+          cell: "result" as const,
           path: ["nested", "value"],
         },
       };
-      const result = parseLink(legacyAlias, baseCell);
+      expect(parseLink(legacyAlias, baseCell)).toBeUndefined();
 
+      const result = parseAliasBinding(
+        legacyAlias,
+        baseCell.getAsNormalizedFullLink(),
+      );
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
@@ -399,6 +415,49 @@ describe("link-utils", () => {
         schema: undefined,
         overwrite: "redirect",
       });
+    });
+
+    it("should resolve explicit inherit scope on alias bindings to the base's scope", () => {
+      const baseCell = runtime.getCell(space, "base-inherit-scope");
+      const base = {
+        ...baseCell.getAsNormalizedFullLink(),
+        scope: "session" as const,
+      };
+
+      // The alias types no longer admit `scope: "inherit"` (the builder never
+      // generates it), but stored pattern JSON is untyped: parsing stays
+      // defensive and resolves it to the base link's scope, like an absent
+      // scope.
+      expect(
+        parseAliasBinding(
+          {
+            $alias: { path: ["nested", "value"], scope: "inherit" },
+          } as unknown as AliasBinding,
+          base,
+        ),
+      ).toEqual({
+        id: base.id,
+        path: ["nested", "value"],
+        space: space,
+        scope: "session",
+        overwrite: "redirect",
+      });
+
+      // A partialCause alias denotes a derived internal cell — a different
+      // document minted from the result cell and the partialCause, in the
+      // alias's own scope — so it cannot be parsed against a base link.
+      expect(() =>
+        parseAliasBinding(
+          {
+            $alias: {
+              partialCause: "internal-cell",
+              path: ["nested", "value"],
+              scope: "user",
+            },
+          },
+          base,
+        )
+      ).toThrow("Cannot parse partialCause alias as link");
     });
 
     it("should return undefined for non-link values", () => {
@@ -1382,197 +1441,6 @@ describe("link-utils", () => {
       // With keepAsCell: All, it should be preserved
       const resultKept = sanitizeSchemaForLinks(schema, KeepAsCell.All);
       expect((resultKept as any).asCell).toEqual(["opaque"]);
-    });
-  });
-
-  describe("createDataCellURI", () => {
-    it("should throw on circular data", () => {
-      const circular: any = { name: "test" };
-      circular.self = circular;
-
-      expect(() => createDataCellURI(circular)).toThrow(
-        "Cycle detected when creating data URI",
-      );
-    });
-
-    it("should throw on nested circular data", () => {
-      const obj1: any = { name: "obj1" };
-      const obj2: any = { name: "obj2", ref: obj1 };
-      obj1.ref = obj2;
-
-      expect(() => createDataCellURI(obj1)).toThrow(
-        "Cycle detected when creating data URI",
-      );
-    });
-
-    it("should throw on circular data in arrays", () => {
-      const circular: any = { items: [] };
-      circular.items.push(circular);
-
-      expect(() => createDataCellURI(circular)).toThrow(
-        "Cycle detected when creating data URI",
-      );
-    });
-
-    it("should rewrite relative links with base id", () => {
-      const baseCell = runtime.getCell(space, "base", undefined, tx);
-      const baseId = baseCell.getAsNormalizedFullLink().id;
-
-      const relativeLink = {
-        "/": {
-          [LINK_V1_TAG]: {
-            path: ["nested", "value"],
-          },
-        },
-      };
-
-      const dataURI = createDataCellURI(
-        { link: relativeLink },
-        baseCell,
-      );
-
-      // Decode the data URI using getJSONFromDataURI
-      const parsed = getJSONFromDataURI(dataURI);
-
-      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
-        "nested",
-        "value",
-      ]);
-      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
-    });
-
-    it("should rewrite relative links with base scope", () => {
-      const baseCell = runtime.getCell(space, "scoped base", undefined, tx);
-      const scopedBaseCell = createCell(runtime, {
-        ...baseCell.getAsNormalizedFullLink(),
-        scope: "session",
-      }, tx);
-      const baseId = scopedBaseCell.getAsNormalizedFullLink().id;
-
-      const relativeLink = {
-        "/": {
-          [LINK_V1_TAG]: {
-            path: ["nested", "value"],
-          },
-        },
-      };
-
-      const dataURI = createDataCellURI(
-        { link: relativeLink },
-        scopedBaseCell,
-      );
-      const parsed = getJSONFromDataURI(dataURI);
-
-      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
-      expect(parsed.value.link["/"][LINK_V1_TAG].scope).toBe("session");
-    });
-
-    it("should rewrite nested relative links with base id", () => {
-      const baseCell = runtime.getCell(space, "base", undefined, tx);
-      const baseId = baseCell.getAsNormalizedFullLink().id;
-
-      const data = {
-        items: [
-          {
-            "/": {
-              [LINK_V1_TAG]: {
-                path: ["item", "0"],
-              },
-            },
-          },
-          {
-            nested: {
-              link: {
-                "/": {
-                  [LINK_V1_TAG]: {
-                    path: ["item", "1"],
-                  },
-                },
-              },
-            },
-          },
-        ],
-      };
-
-      const dataURI = createDataCellURI(data, baseCell);
-
-      // Decode the data URI using getJSONFromDataURI
-      const parsed = getJSONFromDataURI(dataURI);
-
-      expect(parsed.value.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
-      expect(parsed.value.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
-        baseId,
-      );
-    });
-
-    it("should not modify absolute links", () => {
-      const baseCell = runtime.getCell(space, "base", undefined, tx);
-      const otherCell = runtime.getCell(space, "other", undefined, tx);
-      const otherId = otherCell.getAsNormalizedFullLink().id;
-
-      const absoluteLink = {
-        "/": {
-          [LINK_V1_TAG]: {
-            id: otherId,
-            path: ["some", "path"],
-          },
-        },
-      };
-
-      const dataURI = createDataCellURI({ link: absoluteLink }, baseCell);
-
-      // Decode the data URI using getJSONFromDataURI
-      const parsed = getJSONFromDataURI(dataURI);
-
-      // Should remain unchanged
-      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(otherId);
-      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
-        "some",
-        "path",
-      ]);
-    });
-
-    it("should handle reused acyclic objects without throwing", () => {
-      const sharedObject = { value: 42 };
-      const data = {
-        first: sharedObject,
-        second: sharedObject,
-        nested: {
-          third: sharedObject,
-        },
-      };
-
-      // Should not throw even though sharedObject is referenced multiple times
-      const dataURI = createDataCellURI(data);
-
-      // Decode and verify using getJSONFromDataURI
-      const parsed = getJSONFromDataURI(dataURI);
-
-      expect(parsed.value.first.value).toBe(42);
-      expect(parsed.value.second.value).toBe(42);
-      expect(parsed.value.nested.third.value).toBe(42);
-    });
-
-    it("should handle UTF-8 characters (emojis, special characters)", () => {
-      const data = {
-        emoji: "🚀 Hello World! 🌍",
-        chinese: "你好世界",
-        arabic: "مرحبا بالعالم",
-        special: "Ñoño™©®",
-        mixed: "Test 🎉 with ñ and 中文",
-      };
-
-      // Should not throw with UTF-8 characters
-      const dataURI = createDataCellURI(data);
-
-      // Decode and verify using getJSONFromDataURI
-      const parsed = getJSONFromDataURI(dataURI);
-
-      expect(parsed.value.emoji).toBe("🚀 Hello World! 🌍");
-      expect(parsed.value.chinese).toBe("你好世界");
-      expect(parsed.value.arabic).toBe("مرحبا بالعالم");
-      expect(parsed.value.special).toBe("Ñoño™©®");
-      expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
     });
   });
 

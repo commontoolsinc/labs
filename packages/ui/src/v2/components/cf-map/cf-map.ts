@@ -8,6 +8,7 @@
 import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
+// @ts-types="@types/leaflet"
 import * as L from "leaflet";
 import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
@@ -347,8 +348,7 @@ export class CFMap extends BaseElement {
         role="application"
         aria-label="Interactive map"
         tabindex="0"
-      >
-      </div>
+      ></div>
     `;
   }
 

@@ -3,7 +3,7 @@
  * space whose DEFAULT PATTERN is stored in the pre-#4158 legacy-envelope
  * form. This is the exact field failure: the space's piece registry
  * (`allPieces`) and `addPiece` live INSIDE the default-pattern piece, so a
- * default pattern that cannot cold-load bricks `getPieces` (detached
+ * default pattern that cannot cold-load bricks `getPieceRegistry` (detached
  * "empty-pieces" placeholder) and every `cf piece new`.
  *
  * The fixture simulates the pre-#4158 writer (stored source = helper-
@@ -35,9 +35,8 @@ const signer = await Identity.fromPassphrase(
   "legacy envelope default pattern",
 );
 
-// A minimal transformed default pattern with the real default-app's export
-// surface for the piece registry: `allPieces` plus the `addPiece` handler
-// stream `PieceManager.add` sends into.
+// A minimal transformed default pattern with the retired registry export:
+// `allPieces` plus the `addPiece` handler stream `PieceManager.add` sends into.
 const defaultPatternProgram: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -151,7 +150,7 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
     await storageManager?.close();
   });
 
-  it("T7: getPieces returns the registry and add succeeds after a pin bump", async () => {
+  it("T7: getPieceRegistry returns the registry and add succeeds after a pin bump", async () => {
     const spaceName = "legacy-envelope-default-" + crypto.randomUUID();
 
     // --- Session 1: build the poisoned space. ---
@@ -226,10 +225,10 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
       const manager2 = new PieceManager(session2, runtime2);
       await manager2.synced();
 
-      // The CT-1838 headline symptom was getPieces degrading to the
+      // The CT-1838 headline symptom was getPieceRegistry degrading to the
       // detached "empty-pieces" placeholder. With tolerance, the registry
       // loads.
-      const piecesCell = await manager2.getPieces();
+      const piecesCell = await manager2.getPieceRegistry();
       const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );
@@ -251,7 +250,7 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
       await manager2.runtime.idle();
       await manager2.synced();
 
-      const afterAdd = await manager2.getPieces();
+      const afterAdd = await manager2.getPieceRegistry();
       const afterIds = afterAdd.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );

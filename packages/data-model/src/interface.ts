@@ -21,44 +21,27 @@
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
+ * exists only in the type system: `declare` emits no runtime member, and
+ * nothing ever reads the key. Without it the class is structurally empty, so
+ * *every* object satisfies `FabricSpecialObject` — which in turn makes every
+ * object satisfy `FabricValue`, since that union includes this type. The brand
+ * is what makes `FabricValue` mean anything as a static claim.
+ *
+ * It is a well-known string key rather than a `unique symbol` because that
+ * would require importing a symbol *value*, and this file is deliberately free
+ * of runtime imports (see the file header). `packages/api/index.ts` declares
+ * the identical member; the two must agree exactly, or a value branded by one
+ * will not satisfy the other.
  */
-export abstract class FabricSpecialObject {}
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 //
 // Fabric instance protocol
 //
-
-/**
- * Well-known symbol for deeply freezing a fabric instance in place. The method
- * freezes the instance's own internal slot(s) and recurses into any nested
- * `FabricValue`s via the provided `subFreeze` callback. This is an abstract
- * member of `FabricInstance`, so the generic `deepFreeze()` operates on any
- * `FabricInstance` by gating on `instanceof` against the abstract base and
- * invoking this member -- it does not enumerate concrete subclasses.
- * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
- * in place; `deepClone()` constructs a new instance.
- */
-export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
-
-/**
- * Well-known symbol for checking whether a fabric instance is already deeply
- * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
- * verifies the instance's own internal slot(s) are in canonical deep-frozen
- * form and recurses into any nested `FabricValue`s via the provided
- * `subIsDeepFrozen` callback, returning the boolean conjunction. This is an
- * abstract member of `FabricInstance`, so the generic deep-frozen type guard
- * operates on any `FabricInstance` by gating on `instanceof` against the
- * abstract base and invoking this member -- it does not enumerate concrete
- * subclasses.
- *
- * Unlike `[DEEP_FREEZE]`, this method is side-effect-free and never throws:
- * a not-in-canonical-deep-frozen-form instance answers `false`, it does not
- * crash. (`[DEEP_FREEZE]` is a mutator and uses "death before confusion" on
- * a malformed internal slot; a status check must not.)
- */
-export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
-  "common.isDeepFrozen",
-);
 
 /**
  * Abstract base class for values that participate in the fabric protocol.
@@ -70,42 +53,14 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  * than this class directly; `BaseFabricInstance` is where shared
  * template-method scaffolding (such as `shallowClone()`) lives.
  *
- * Subclasses must implement `[DEEP_FREEZE]()`, `[IS_DEEP_FROZEN]()`,
- * `deepClone()`, and `shallowClone()` (the latter is normally inherited from
- * `BaseFabricInstance`).
+ * Subclasses must implement `deepClone()` and `shallowClone()`; both are
+ * normally inherited from `BaseFabricInstance` as template methods, with the
+ * subclass supplying the symbol-keyed clone core each one calls. The
+ * freeze-protocol members `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are
+ * declared on `BaseFabricInstance`, not here: they are implementation plumbing
+ * and are kept off this pure-protocol class.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
-  /**
-   * Deeply freezes this instance in place: freezes this instance's own
-   * internal slot(s) and recurses into each nested `FabricValue` by calling
-   * the provided `subFreeze` callback on it. Implementations must NOT import
-   * or call `deepFreeze()` directly -- recursion is handed through the
-   * callback so that the freeze utility's caching / cycle-detection
-   * bookkeeping is preserved and no import cycle is introduced.
-   *
-   * Returns the (now deeply-frozen) value. Freeze-in-place implementations
-   * return `this`.
-   */
-  abstract [DEEP_FREEZE](
-    subFreeze: (value: FabricValue) => FabricValue,
-  ): FabricValue;
-
-  /**
-   * Indicates whether this instance is already deeply frozen, without
-   * mutating it. Checks this instance's own internal slot(s) are in
-   * canonical deep-frozen form and recurses into each nested `FabricValue`
-   * via the provided `subIsDeepFrozen` callback, returning the boolean
-   * conjunction. Implementations must NOT import or call the deep-frozen
-   * type guard directly -- recursion is handed through the callback,
-   * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
-   *
-   * Side-effect-free and must not throw: an instance that is not in
-   * canonical deep-frozen form returns `false`.
-   */
-  abstract [IS_DEEP_FROZEN](
-    subIsDeepFrozen: (value: FabricValue) => boolean,
-  ): boolean;
-
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
@@ -114,9 +69,11 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * produces a deeply-mutable instance with no visible shared reference
    * structure with the original.
    *
-   * TODO(danfuzz): This method should grow a base implementation on
-   * `BaseFabricInstance` which defers to a `protected abstract` sibling,
-   * mirroring the `shallowClone()`/`shallowUnfrozenClone()` split.
+   * The concrete template-method implementation lives on
+   * `BaseFabricInstance` (deferring to the `[DEEP_CLONE_CORE]` sibling,
+   * mirroring the `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this
+   * declaration just pins the protocol surface so that callers can invoke it
+   * through a `FabricInstance` reference.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 
@@ -184,6 +141,18 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * separately rejects all symbols at the entrance (relaxation deferred to a
  * follow-up); the type union admits `symbol` so the lower layers (hashing,
  * JSON encoding) can be written and tested ahead of that gate change.
+ *
+ * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
+ * state truthfully and permanently. In particular, a fabric record or array is
+ * data-only: it must not expose an own accessor (getter/setter) whose result
+ * can contradict, or change after, the value's frozen state -- once a
+ * `FabricValue` graph is deeply frozen, its contents are fixed. (For a
+ * `FabricInstance`, the analogous obligation is on its `[IS_DEEP_FROZEN]`
+ * report; see `BaseFabricInstance`.) The rest of the system -- the data model
+ * in general and `isDeepFrozen()` specifically, but also the entire codebase
+ * that _uses_ the data model -- relies on this to cache deep-frozen proofs by
+ * root identity without re-validating; a value that violates it can corrupt
+ * data-model invariants, as any broken contract can.
  */
 export type FabricValue =
   // -- Primitives --
@@ -201,8 +170,11 @@ export type FabricValue =
   // -- undefined --
   | undefined;
 
-/** Array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** A fabric value other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
+
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
  * Object/record of fabric values.
@@ -212,7 +184,8 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
  * If prototype pollution becomes a concern, add boundary validation where
  * values enter the fabric system (e.g., `fabricFromNativeValue()`).
  */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
 
 /**
  * Single "layer" of fabric conversion -- the result of shallow conversion
@@ -224,6 +197,22 @@ export type FabricValueLayer =
   | FabricValue
   | unknown[]
   | Record<string, unknown>;
+
+/** A mutable array root whose elements remain fabric values. */
+export type MutableFabricArrayLayer = FabricValue[];
+
+/** A mutable record root whose values remain fabric values. */
+export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+
+/**
+ * A fabric value with a mutable root container. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw.
+ */
+export type MutableFabricValueLayer =
+  | Exclude<FabricValue, FabricArray | FabricPlainObject>
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
 
 /**
  * Union of raw native JS **object** types that the fabric type system can
@@ -240,6 +229,12 @@ export type FabricValueLayer =
  * `isFabricCompatible()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
+ * Arrays are the exception the arm cannot state structurally: an array is
+ * decided by the array rule whatever it carries, so one bearing a `toJSON`
+ * method is rejected rather than converted, even though it satisfies this
+ * arm's shape. A type cannot say "any object with `toJSON()` except an
+ * array", so the carve-out lives here in prose.
+ *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
  */
@@ -251,3 +246,19 @@ export type FabricNativeObject =
   | RegExp
   | Uint8Array
   | { toJSON(): unknown };
+
+/**
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+ * that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()` (which fails on anything else), the result of
+ * `nativeFromFabricValue()`, and what `isFabricCompatible()` tests for.
+ *
+ * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+ * Converting a `FabricError` yields an `Error`, so an array of them is an array
+ * of natives, which has no `FabricValue` name.
+ */
+export type FabricOrConvertibleNativeValue =
+  | FabricValue
+  | FabricNativeObject
+  | readonly FabricOrConvertibleNativeValue[]
+  | { readonly [key: string]: FabricOrConvertibleNativeValue };

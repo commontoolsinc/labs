@@ -28,8 +28,9 @@ rewrite. In particular:
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
-- the public one-shot read surfaces are `graph.query` (schema traversal) and
-  `docs.read` (exact per-doc point reads, no traversal)
+- the public one-shot read surfaces are `graph.query` (schema traversal),
+  `docs.read` (exact per-doc point reads, no traversal), `entity-id.list`, and
+  `entity-id.exists`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
 - server-primary execution is an optional, default-off capability. Compatible
@@ -52,14 +53,18 @@ The client MUST declare its protocol version in the first WebSocket message:
 ```json
 {
   "type": "hello",
-  "protocol": "memory/v2",
+  "protocol": "memory",
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "schedulerWriterLookup": true,
     "serverPrimaryExecutionV1": false,
     "serverPrimaryExecutionClaimRoutingV1": false,
-    "serverPrimaryExecutionBuiltinPassivityV1": false
+    "serverPrimaryExecutionBuiltinPassivityV1": false,
+    "syncSchemaTableV2": true,
+    "entityIdListing": true,
+    "entityIdPagination": true,
+    "entityIdLookup": true
   }
 }
 ```
@@ -69,14 +74,18 @@ If the server accepts the protocol, it returns:
 ```json
 {
   "type": "hello.ok",
-  "protocol": "memory/v2",
+  "protocol": "memory",
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "schedulerWriterLookup": true,
     "serverPrimaryExecutionV1": false,
     "serverPrimaryExecutionClaimRoutingV1": false,
-    "serverPrimaryExecutionBuiltinPassivityV1": false
+    "serverPrimaryExecutionBuiltinPassivityV1": false,
+    "syncSchemaTableV2": true,
+    "entityIdListing": true,
+    "entityIdPagination": true,
+    "entityIdLookup": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -164,6 +173,22 @@ claim, and `serverPrimaryExecutionBuiltinPassivityV1` says it can keep claimed
 async builtins passive. Both are absent-false and remain false in ordinary
 builds until W2.1 and W2.3 respectively. The server only sends a claim class to
 sessions that advertised the matching promise.
+`syncSchemaTableV2` advertises support for the hash-keyed schema table described
+in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
+when absent. The server sends compact sync payloads only when both peers
+advertise the capability; otherwise it sends the historical fully expanded
+shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
+and does not enable the v2 encoding.
+
+`entityIdListing` advertises support for `entity-id.list`. It defaults to
+`false` when absent. A client must not send the request unless the server
+advertises the capability.
+
+`entityIdPagination` advertises support for the pagination fields on
+`entity-id.list`. `entityIdLookup` advertises support for
+`entity-id.exists`. Both default to `false` when absent. A client connected to
+an older server may make the historical unpaginated list request, but must not
+send continuation fields or an existence request.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -196,7 +221,7 @@ interface SessionOpenInvocation {
   sub: SpaceId;
   aud: DID;
   args: {
-    protocol: "memory/v2";
+    protocol: "memory";
     session: {
       sessionId?: SessionId;
       seenSeq?: number;
@@ -258,6 +283,16 @@ Rules:
   its catch-up are retained for that open barrier, never also pushed live
 - a `ProtocolError` reopening one space is terminal for that space session;
   unrelated compatible space sessions on the connection still restore
+- a `session.open` denied with an `AuthorizationError` the server did NOT mark
+  `retriable` is permanent: the client stops reopening that session and
+  terminates it with the real error rather than retrying the identical handshake
+  forever. A `retriable` authorization race (an expired, used, or mismatched
+  challenge; a stale signed `exp`) and every transport-level disconnect still
+  retry, so a transient blip or a fresh-challenge race heals. A permanent
+  protocol-flag mismatch at `hello` ends the whole connection the same way. See
+  [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
+  for how the client, the runner storage layer, and the CLI act on this
+  classification end to end.
 
 ## 4.2 Message Format
 
@@ -274,7 +309,7 @@ semantic commit body. Per-commit signed UCAN envelopes remain deferred.
 // Shown at module scope.
 interface HelloMessage {
   type: "hello";
-  protocol: "memory/v2";
+  protocol: "memory";
   flags: {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
@@ -282,6 +317,10 @@ interface HelloMessage {
     serverPrimaryExecutionV1?: boolean;
     serverPrimaryExecutionClaimRoutingV1?: boolean;
     serverPrimaryExecutionBuiltinPassivityV1?: boolean;
+    syncSchemaTableV2?: boolean;
+    entityIdListing?: boolean;
+    entityIdPagination?: boolean;
+    entityIdLookup?: boolean;
   };
 }
 
@@ -294,6 +333,8 @@ interface RequestMessage {
     | "scheduler.snapshot.list"
     | "scheduler.writer.list"
     | "session.execution.demand.set"
+    | "entity-id.list"
+    | "entity-id.exists"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -319,7 +360,18 @@ interface ResponseMessage<Result> {
   type: "response";
   requestId: string;
   ok?: Result;
-  error?: { name: string; message: string };
+  error?: {
+    name: string;
+    message: string;
+    // On an AuthorizationError, present and `true` when the denial is an
+    // anti-replay handshake race a fresh reconnect heals (an expired, used, or
+    // mismatched connection challenge; a stale signed `exp`). Absent marks a
+    // permanent denial — an audience or protocol mismatch, or an ACL capability
+    // shortfall — that no retry changes. The client uses it to decide whether to
+    // keep reopening a denied session or to terminate it. An older server sends
+    // no marker, so its AuthorizationError is read as permanent.
+    retriable?: boolean;
+  };
 }
 
 interface SessionEffect<Effect> {
@@ -411,6 +463,80 @@ Semantics:
 - a committed settlement's `acceptedCommitSeq` is an additional data-
   application barrier: a client buffers it until the corresponding data cursor
   has reached that sequence
+
+#### Negotiated schema-table encoding
+
+When both peers advertise `syncSchemaTableV2`, the server MAY compact a
+server-to-client `SessionSync` carried by `response.ok.sync` or
+`session/effect.effect`. For each JSON Schema attached to a modern `link@1`
+payload, it:
+
+1. computes the canonical tagged schema hash
+2. replaces the inline schema with `schema-ref@2:<tagged-hash>`
+3. adds the interned schema to a frame-local `schemaTable` keyed by that
+   hash (structurally equal to the inline schema; its serialized key order is
+   not guaranteed canonical — only the hash is)
+
+For example, the compact wire form can contain:
+
+```json
+{
+  "type": "sync",
+  "fromSeq": 10,
+  "toSeq": 11,
+  "upserts": [{
+    "branch": "",
+    "id": "of:example",
+    "seq": 11,
+    "doc": {
+      "value": {
+        "contact": {
+          "/": {
+            "link@1": {
+              "id": "of:contact",
+              "path": [],
+              "schema": "schema-ref@2:fid1:..."
+            }
+          }
+        }
+      }
+    }
+  }],
+  "removes": [],
+  "schemaTable": {
+    "fid1:...": {
+      "type": "object",
+      "properties": { "name": { "type": "string" } }
+    }
+  }
+}
+```
+
+The table is scoped to one sync payload, not to a connection or logical
+session. A client MUST resolve every `schema-ref@2:` before exposing the sync to
+the session cache. It MUST reject a reference when the table is missing the key
+or when hashing the referenced table value does not reproduce the key. It MUST
+also reject a sync whose documents still carry a reserved reference at a
+recognized schema position after expansion — a reference the client does not
+interpret must fail the frame rather than reach the session cache as data.
+After expansion, downstream consumers observe the historical `SessionSync`
+shape with inline schemas and no `schemaTable` field.
+
+Earlier revisions of this encoding also interned the `schema` field of
+`$alias` records. Those records are Pattern-binding vocabulary, not links —
+their `schema` field is binding metadata — and saved patterns continue to
+carry them, so current servers leave alias schemas inline. Clients deployed
+against the earlier revision continue to expand references at alias schema
+positions, so those positions remain covered by the reservation rule below.
+
+The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
+legacy `$alias` payloads. Link recognition follows the canonical cell-rep
+form — in the legacy representation, the single-key `{ "/": { "link@1": … } }`
+envelope — so an envelope carrying sibling keys is not a link and its contents
+are ordinary data. Memory servers MUST reject set or patch operations
+whose resulting stored document uses that prefix as an opaque schema string in
+a recognized schema position; ordinary strings in other document positions are
+unaffected.
 
 ### 4.2.4 Batching
 
@@ -557,7 +683,71 @@ point-read docs outside their registered watch/interest surface — a doc
 delivered by point read with no watch behind it has no ongoing delivery
 source (the W2.8 conflict-exhaustion class).
 
-### 4.3.4 `session.watch.set` — Replace the Session Watch Set
+### 4.3.4 Entity Identifier Discovery and Lookup
+
+#### `entity-id.list` — List Live Entity Identifiers
+
+`entity-id.list` returns the identifiers of live entities in the default branch
+and space scope. The server reads the current entity index and does not select
+or return stored entity values. The result is sorted by identifier.
+
+```typescript
+// Shown at module scope.
+interface EntityIdListRequest {
+  type: "entity-id.list";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+}
+
+interface EntityIdListResult {
+  serverSeq: number;
+  ids: EntityId[];
+  nextAfter?: EntityId;
+}
+```
+
+The command requires `READ` access to the space. Deleted entities, user-scoped
+entities, and session-scoped entities do not appear in the result.
+
+The server caps `limit` at 1,000 identifiers. `nextAfter` is present when
+another page exists. The client sends that value as `after` and sends the first
+page's `serverSeq` as `expectedServerSeq` on every continuation. If the space
+changes between pages, the server returns `SnapshotChangedError`. It does not
+silently restart the enumeration or combine pages from different snapshots.
+
+A request without pagination fields retains the original protocol behavior and
+returns the complete list. This compatibility path is for clients connected to
+servers that advertise `entityIdListing` without `entityIdPagination`.
+
+#### `entity-id.exists` — Test One Live Entity Identifier
+
+`entity-id.exists` tests the same live, default-branch, space-scoped identifier
+index without selecting an entity value.
+
+```typescript
+// Shown at module scope.
+interface EntityIdLookupRequest {
+  type: "entity-id.exists";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  id: EntityId;
+}
+
+interface EntityIdLookupResult {
+  serverSeq: number;
+  exists: boolean;
+}
+```
+
+The command requires `READ` access to the space. It does not reveal user- or
+session-scoped instances of the same identifier.
+
+### 4.3.5 `session.watch.set` — Replace the Session Watch Set
 
 The watch set defines the union of queries whose results the session wants kept
 up to date.
@@ -592,7 +782,7 @@ Semantics:
   line with the new interest set
 - later committed changes continue to arrive via `session/effect`
 
-### 4.3.5 `session.watch.add` — Extend the Session Watch Set
+### 4.3.6 `session.watch.add` — Extend the Session Watch Set
 
 `session.watch.add` incrementally adds new watch specs into the existing
 session watch set by `id`.
@@ -632,7 +822,7 @@ Semantics:
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
-### 4.3.6 Branch Lifecycle Commands
+### 4.3.7 Branch Lifecycle Commands
 
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire

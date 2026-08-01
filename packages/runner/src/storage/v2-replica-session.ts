@@ -1,5 +1,8 @@
 import type {
   ClientCommit,
+  EntityIdListOptions,
+  EntityIdListResult,
+  EntityIdLookupResult,
   ExecutionClaim,
   ExecutionControlEvent,
   GraphQuery,
@@ -114,6 +117,23 @@ export interface ReplicaSession {
     id: string,
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult>;
+  /** Value-free entity-id listing/lookup. Optional: only the remote memory
+   * session speaks the `entity-id.*` verbs; executor MessagePort sessions
+   * omit them and the replica reports `undefined` (capability absent). */
+  listEntityIds?(
+    options?: EntityIdListOptions,
+  ): Promise<EntityIdListResult | undefined>;
+  entityIdExists?(id: string): Promise<EntityIdLookupResult | undefined>;
+  /** Mirror the provider's `experimentalConcurrentWatchRefresh` setting onto
+   * the session so its watch-mutation family issues in call order while
+   * overlapping round trips. Optional: test doubles never opt in. */
+  setConcurrentWatchRefresh?(enabled: boolean): void;
+  /** The error this session was terminated with, or undefined while it is
+   * open. A permanent reopen authorization denial stores its
+   * `AuthorizationError` here so a subscriber can observe a denial that
+   * terminated the session without a fresh watch result to carry it.
+   * Optional: only the remote memory session tracks it. */
+  readonly closeError?: Error | undefined;
   listSchedulerActionSnapshots(
     query?: SchedulerActionSnapshotQuery,
     options?: ReplicaReadOptions,

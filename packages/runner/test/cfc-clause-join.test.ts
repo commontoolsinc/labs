@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { mergeCfcLabelViews, mergeLabel } from "../src/cfc/label-view-core.ts";
 import { clauseAlternatives, isOrClause } from "../src/cfc/clause.ts";
@@ -34,7 +35,8 @@ describe("CFC clause join (mergeLabel)", () => {
     // merged/unioned clause.
     expect(merged.confidentiality).toHaveLength(1);
     expect(isOrClause(merged.confidentiality![0])).toBe(true);
-    expect(clauseAlternatives(merged.confidentiality![0])).toHaveLength(2);
+    expect(clauseAlternatives(merged.confidentiality![0] as CfcConfClause))
+      .toHaveLength(2);
   });
 
   it("never merges distinct clauses or unions their alternative sets", () => {
@@ -45,7 +47,7 @@ describe("CFC clause join (mergeLabel)", () => {
     // {A∨B} and {B∨C} are DIFFERENT constraints — both survive, no {A∨B∨C}.
     expect(merged.confidentiality).toHaveLength(2);
     for (const clause of merged.confidentiality!) {
-      expect(clauseAlternatives(clause)).toHaveLength(2);
+      expect(clauseAlternatives(clause as CfcConfClause)).toHaveLength(2);
     }
   });
 

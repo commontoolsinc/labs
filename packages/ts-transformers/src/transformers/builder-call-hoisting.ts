@@ -339,8 +339,8 @@ function hoistBuilderCalls(
   }
 
   // Register every hoisted builder artifact with one trailing call. `__cfReg` is
-  // a free identifier supplied by the module wrapper (the 4th factory parameter
-  // under the ESM loader; a no-op global on the legacy/AMD path). The object uses
+  // a free identifier supplied by the module wrapper (its 4th factory parameter,
+  // which shadows a no-op compartment global). The object uses
   // shorthand so each value is the module-level `const` binding itself — the
   // registrar receives `{ symbol -> live value }` and the runtime pairs it with
   // this module's content identity. Emitted only when there is something to

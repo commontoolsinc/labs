@@ -1,0 +1,2139 @@
+// benchmark: trends one scale-invariant index of benchmark performance per
+// processor on main. Each index changes by the geometric mean of the benchmark
+// changes between consecutive runs on that processor. Every benchmark has the
+// same weight regardless of size. Only a broad move shifts an index. One slow
+// benchmark barely registers. The drill-down shows individual benchmarks.
+// Each processor has its own coloured line. The headline shows the largest
+// established trend. Orange means at least one processor trends up. Green means
+// every established processor stays flat or falls. Red means the most recent
+// run failed, or finished successfully without readable benchmark data. Deno
+// bench samples each benchmark to a fixed time budget. Performance changes the
+// per-operation times without materially changing the run's wall-clock time.
+//
+// A benchmark added or removed is absent from one side of an adjacent
+// comparison, so it does not move the index. A processor change starts another
+// line instead of connecting unlike machines. Each line's recent window
+// contains the runs in the last BENCH_TREND_MAX_AGE_DAYS or the newest
+// BENCH_TREND_MIN_RUNS, whichever is larger. The full line spans about 45 days.
+// The failed state reads the workflow-run list and the latest run's cached
+// result. It therefore works when artifacts cannot be read. Without usable
+// data, the tile reads "collecting…" during a fetch. It reads "benchmark data
+// unavailable" after an empty fetch. A failed fetch keeps the last-known
+// processor lines gray and names the reason.
+//
+// The /bench drill-down keeps the deeper picture. The benchmarks.yml job runs
+// `deno bench --json` and uploads the output as a `bench-results` artifact with
+// 90-day retention. There is no committed history. The drill-down lists recent
+// main runs and keeps one artifact per shortest-view time bucket. It unzips
+// each artifact in the process and reads every benchmark's timings and
+// processor identity. Results for a run attempt are immutable and persisted.
+// Later collections fetch only new runs and attempts. The drill-down overlays
+// one coloured line per processor for each benchmark. The CI duration and
+// Gantt views also live behind /bench. The tile's collection keeps this
+// history warm.
+import type { Ctx, Route, Status, Tile, TileView } from "../types.ts";
+import {
+  BenchmarkHistoryStore,
+  type BenchmarkRefreshResult,
+  type BenchmarkStats,
+  type CachedBenchmarkRun,
+} from "../benchmark-history-cache.ts";
+import {
+  CI_HISTORY_DAYS,
+  CI_HISTORY_MIN_DAYS,
+  CI_HISTORY_POINT_TARGET,
+  ciHistoryBucketMs,
+  ciHistoryDays,
+  ciHistorySource,
+  type CiHistorySourceKey,
+  ciJobHistoryCheckResponse,
+  ciJobHistoryProgressResponse,
+  ciJobHistoryResponse,
+} from "../ci-job-history.ts";
+import {
+  concDot,
+  durationTag,
+  escapeHtml,
+  friendlyError,
+  github,
+  githubDownload,
+  humanSpan,
+  multiSparkline,
+  performanceGithub,
+  performanceGithubDownload,
+  SPARK_FADE,
+} from "../lib.ts";
+import {
+  BENCH_TREND_MAX_AGE_DAYS,
+  BENCH_TREND_MIN_RUNS,
+  REPO,
+} from "../config.ts";
+import {
+  PERFORMANCE_CHECK_MS,
+  PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
+  PERFORMANCE_HISTORY_SCALE_TRIM,
+  PERFORMANCE_VIEW_STYLES,
+  performanceViewHref,
+  performanceViewNav,
+} from "../performance-views.ts";
+import {
+  distinctTrendDays,
+  trendPct,
+  trendPctLabel,
+  trendStatus,
+} from "../trend.ts";
+import { ciGanttPage } from "./ci-duration.ts";
+
+export { trendPct, trendStatus } from "../trend.ts";
+
+export function benchmarkTrend(
+  times: number[],
+  values: number[],
+): { pct: number; status: Status; label: string } {
+  if (distinctTrendDays(times, values) < 7) {
+    return { pct: 0, status: "unknown", label: "new" };
+  }
+  const pct = trendPct(times, values);
+  return { pct, status: trendStatus(pct), label: trendPctLabel(pct) };
+}
+
+const WORKFLOW = "benchmarks.yml";
+const ARTIFACT = "bench-results";
+const SPARK_DAYS = CI_HISTORY_DAYS;
+const COLLECTION_BUCKET_MS = ciHistoryBucketMs(CI_HISTORY_MIN_DAYS);
+const BENCHMARK_REFRESH_MS = 30 * 60_000;
+const BENCHMARK_FETCH_CONCURRENCY = 8;
+
+interface BenchmarkGitHub {
+  json<T>(path: string, token: string): Promise<T>;
+  download(path: string, token: string): Promise<Response>;
+}
+
+const ordinaryBenchmarkGitHub: BenchmarkGitHub = {
+  json: github,
+  download: githubDownload,
+};
+const performanceBenchmarkGitHub: BenchmarkGitHub = {
+  json: performanceGithub,
+  download: performanceGithubDownload,
+};
+
+// deno bench reports these seven timings per benchmark (all nanoseconds).
+type Stats = BenchmarkStats;
+// Shown as one percentile ladder: min is p0, the average stands in for p50, max is
+// p100. (avg is the mean, not a true median, but reads consistently here.)
+const STATS: { label: string; field: keyof Stats }[] = [
+  { label: "p0", field: "min" },
+  { label: "p50", field: "avg" },
+  { label: "p75", field: "p75" },
+  { label: "p99", field: "p99" },
+  { label: "p99.5", field: "p995" },
+  { label: "p99.9", field: "p999" },
+  { label: "p100", field: "max" },
+];
+const DEFAULT_LABEL = "p99";
+
+interface Run {
+  id: number;
+  run_attempt?: number;
+  status?: string;
+  created_at: string;
+  conclusion: string | null;
+}
+interface Artifact {
+  id: number;
+  name: string;
+  expired: boolean;
+}
+interface Bench {
+  origin: string;
+  group: string | null;
+  name: string;
+  results: { ok?: Partial<Stats> }[];
+}
+
+const benchmarkStore = new BenchmarkHistoryStore();
+// Assembled by collect() for the /bench drill-down: each benchmark key with its
+// processor-specific timings over the covered days (oldest -> newest).
+interface BenchmarkCpuSeries {
+  cpu: string;
+  points: {
+    runId: number;
+    runAttempt: number;
+    at: number;
+    stats: Stats;
+  }[];
+}
+
+interface BenchmarkSeries {
+  key: string;
+  cpus: BenchmarkCpuSeries[];
+}
+
+let snapshot: BenchmarkSeries[] = [];
+// The most recent benchmarks.yml run list fetched by a collection, reused to
+// render the tile's run-duration view. The drill-down's artifact refresh fills it
+// as a side effect of its own paging, so the tile costs no extra request in the
+// common case.
+let latestBenchmarkRuns: Run[] | undefined;
+
+// Notified with the run list the moment a collection has paged it — before the
+// slower per-run artifact backfill — so the tile can paint its headline early
+// instead of waiting on the drill-down's downloads.
+const benchmarkRunListListeners = new Set<(runs: Run[]) => void>();
+function notifyBenchmarkRunList(runs: Run[]): void {
+  const listeners = [...benchmarkRunListListeners];
+  benchmarkRunListListeners.clear();
+  for (const listener of listeners) {
+    try {
+      listener(runs);
+    } catch {
+      // A listener that throws is simply dropped; the tile still finalizes below.
+    }
+  }
+}
+
+export type BenchmarkFetchPhase =
+  | "discovering"
+  | "fetching"
+  | "saving"
+  | "complete"
+  | "error";
+
+export interface BenchmarkFetchProgress {
+  id: string;
+  phase: BenchmarkFetchPhase;
+  totalRuns: number;
+  cachedRuns: number;
+  requestsMade: number;
+  responsesReceived: number;
+  successfulResponses: number;
+  failedResponses: number;
+  completedRuns: number;
+  queuedRuns: number;
+  outstandingRequests: number;
+  needsReload: boolean;
+  updatedAt: number;
+  error?: string;
+}
+
+interface BenchmarkProgressRecord {
+  state: BenchmarkFetchProgress;
+  listeners: Set<(progress: BenchmarkFetchProgress) => void>;
+  baselines: Set<string>;
+}
+
+interface BenchmarkRefresh {
+  progress: BenchmarkFetchProgress | null;
+  result: Promise<BenchmarkCollectionOutcome>;
+}
+
+type BenchmarkRefreshScope = "bench" | "dashboard";
+
+const activeBenchmarkRefreshes = new Map<BenchmarkRefreshScope, {
+  progress: BenchmarkProgressRecord;
+  result: Promise<BenchmarkCollectionOutcome>;
+}>();
+let benchmarkCollectionTail: Promise<void> = Promise.resolve();
+let benchmarkProgressSequence = 0;
+let benchmarkRefreshedAt = 0;
+let benchmarkRefreshFailedAt = 0;
+let benchmarkRefreshError = "";
+let benchmarkInitialCollection = true;
+const benchmarkProgressById = new Map<string, BenchmarkProgressRecord>();
+
+function benchmarkVersion(value: BenchmarkSeries[]): string {
+  const serialized = JSON.stringify(value);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < serialized.length; index++) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+export function benchmarkSnapshotVersion(): string {
+  return benchmarkVersion(snapshot);
+}
+
+function newBenchmarkProgress(baseline?: string): BenchmarkProgressRecord {
+  for (const [id, record] of benchmarkProgressById) {
+    if (record.state.phase === "complete" || record.state.phase === "error") {
+      benchmarkProgressById.delete(id);
+    }
+  }
+  const now = Date.now();
+  const record: BenchmarkProgressRecord = {
+    state: {
+      id: `runtime-${now.toString(36)}-${++benchmarkProgressSequence}`,
+      phase: "discovering",
+      totalRuns: 0,
+      cachedRuns: 0,
+      requestsMade: 0,
+      responsesReceived: 0,
+      successfulResponses: 0,
+      failedResponses: 0,
+      completedRuns: 0,
+      queuedRuns: 0,
+      outstandingRequests: 0,
+      needsReload: false,
+      updatedAt: now,
+    },
+    listeners: new Set(),
+    baselines: new Set(baseline === undefined ? [] : [baseline]),
+  };
+  benchmarkProgressById.set(record.state.id, record);
+  return record;
+}
+
+function updateBenchmarkProgress(
+  record: BenchmarkProgressRecord,
+  update: Partial<BenchmarkFetchProgress>,
+): void {
+  Object.assign(record.state, update);
+  record.state.completedRuns = Math.min(
+    record.state.totalRuns,
+    record.state.cachedRuns + record.state.responsesReceived,
+  );
+  record.state.queuedRuns = Math.max(
+    0,
+    record.state.totalRuns - record.state.cachedRuns -
+      record.state.requestsMade,
+  );
+  record.state.outstandingRequests = Math.max(
+    0,
+    record.state.requestsMade - record.state.responsesReceived,
+  );
+  record.state.updatedAt = Date.now();
+  const value = { ...record.state };
+  for (const listener of record.listeners) {
+    try {
+      listener(value);
+    } catch {
+      record.listeners.delete(listener);
+    }
+  }
+}
+
+function benchmarkProgress(id: string): BenchmarkFetchProgress | null {
+  const record = benchmarkProgressById.get(id);
+  return record ? { ...record.state } : null;
+}
+
+export function subscribeBenchmarkProgress(
+  id: string,
+  listener: (progress: BenchmarkFetchProgress) => void,
+): (() => void) | null {
+  const record = benchmarkProgressById.get(id);
+  if (!record) return null;
+  record.listeners.add(listener);
+  try {
+    listener({ ...record.state });
+  } catch {
+    record.listeners.delete(listener);
+    return null;
+  }
+  return () => record.listeners.delete(listener);
+}
+
+const benchKey = (b: Bench): string =>
+  `${b.origin.replace(/^file:\/\/.*\/packages\//, "packages/")} > ${
+    b.group ? b.group + "/" : ""
+  }${b.name}`;
+
+const UNKNOWN_CPU = "Unknown CPU";
+
+// Wall-clock span of a series (first to last point), in milliseconds.
+const spanMs = (points: { at: number }[]): number =>
+  points.length < 2 ? 0 : points[points.length - 1].at - points[0].at;
+
+// Nanoseconds to a short human string.
+export function formatNs(ns: number): string {
+  if (!Number.isFinite(ns)) return "—";
+  if (ns < 1e3) return `${Math.round(ns)}ns`;
+  if (ns < 1e6) return `${(ns / 1e3).toFixed(ns < 1e4 ? 1 : 0)}µs`;
+  if (ns < 1e9) return `${(ns / 1e6).toFixed(ns < 1e7 ? 1 : 0)}ms`;
+  return `${(ns / 1e9).toFixed(2)}s`;
+}
+
+// deno bench --json -> processor identity plus benchmark timings. A benchmark's
+// own console output can precede the JSON report on stdout, so parse from the
+// report object.
+function parseBenchmarkReport(
+  json: string,
+): { cpu?: string; metrics: Map<string, Stats> } {
+  const at = json.match(/\{\s*"version"\s*:/);
+  const data = JSON.parse(at ? json.slice(at.index) : json) as {
+    cpu?: unknown;
+    benches?: Bench[];
+  };
+  const cpu = typeof data.cpu === "string" && data.cpu.trim().length > 0
+    ? data.cpu.trim()
+    : undefined;
+  const m = new Map<string, Stats>();
+  for (const b of data.benches ?? []) {
+    const ok = b.results?.[0]?.ok;
+    if (!ok || typeof ok.avg !== "number") continue;
+    const n = (v: number | undefined, d: number) =>
+      typeof v === "number" ? v : d;
+    m.set(benchKey(b), {
+      min: n(ok.min, ok.avg),
+      avg: ok.avg,
+      max: n(ok.max, ok.avg),
+      p75: n(ok.p75, ok.avg),
+      p99: n(ok.p99, ok.avg),
+      p995: n(ok.p995, ok.avg),
+      p999: n(ok.p999, ok.avg),
+    });
+  }
+  return { cpu, metrics: m };
+}
+
+// Inflate raw-deflate bytes (the compression zip uses) to their decompressed form.
+async function inflateRaw(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
+  const ds = new DecompressionStream("deflate-raw");
+  const collected = new Response(ds.readable).arrayBuffer(); // read as we write
+  const writer = ds.writable.getWriter();
+  await writer.write(data);
+  await writer.close();
+  return new Uint8Array(await collected);
+}
+
+// Extract the first *.json file from a zip via its central directory (which holds
+// the true sizes even when a streamed zip leaves them out of the local headers).
+export async function jsonFromZip(
+  buf: Uint8Array<ArrayBuffer>,
+): Promise<string | null> {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const u16 = (o: number) => dv.getUint16(o, true);
+  const u32 = (o: number) => dv.getUint32(o, true);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 0x10000; i--) {
+    if (u32(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  let p = u32(eocd + 16); // central directory offset
+  const count = u16(eocd + 10);
+  for (let n = 0; n < count; n++) {
+    if (u32(p) !== 0x02014b50) break; // central-directory file header signature
+    const method = u16(p + 10);
+    const compSize = u32(p + 20);
+    const nameLen = u16(p + 28),
+      extraLen = u16(p + 30),
+      commentLen = u16(p + 32);
+    const lho = u32(p + 42); // local header offset
+    const name = new TextDecoder().decode(
+      buf.subarray(p + 46, p + 46 + nameLen),
+    );
+    p += 46 + nameLen + extraLen + commentLen;
+    if (!name.endsWith(".json")) continue;
+    if (u32(lho) !== 0x04034b50) return null; // local file header signature
+    const dataStart = lho + 30 + u16(lho + 26) + u16(lho + 28);
+    const comp = buf.subarray(dataStart, dataStart + compSize);
+    const bytes = method === 0
+      ? comp
+      : method === 8
+      ? await inflateRaw(comp)
+      : null;
+    return bytes ? new TextDecoder().decode(bytes) : null;
+  }
+  return null;
+}
+
+async function fetchZip(
+  artifactId: number,
+  token: string,
+  github: BenchmarkGitHub,
+): Promise<Uint8Array<ArrayBuffer>> {
+  // GitHub 302s to a pre-signed blob URL; fetch follows it and drops the
+  // Authorization header on the cross-origin hop, which the signed URL expects.
+  const res = await github.download(
+    `repos/${REPO}/actions/artifacts/${artifactId}/zip`,
+    token,
+  );
+  if (!res.ok) throw new Error(`artifact ${artifactId}: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// The benchmarks.yml runs on main, newest first, paging back until past the
+// window (or the 12-page ceiling). The job runs on both pushes and a schedule, so
+// this is not filtered by event.
+async function pageBenchmarkRuns(
+  github: BenchmarkGitHub,
+  token: string,
+  cutoff: number,
+): Promise<Run[]> {
+  const runs: Run[] = [];
+  for (let page = 1; page <= 12; page++) {
+    const response = await github.json<{ workflow_runs?: Run[] }>(
+      `repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=main&per_page=100&page=${page}`,
+      token,
+    );
+    const batch = response.workflow_runs ?? [];
+    if (!batch.length) break;
+    runs.push(...batch);
+    if (
+      batch.length < 100 ||
+      Date.parse(batch[batch.length - 1].created_at) < cutoff
+    ) break;
+  }
+  return runs;
+}
+
+// Populate and persist one run. A response that establishes there is no usable
+// artifact is cached as an empty map. A failed read remains unknown.
+async function loadRun(
+  run: Run,
+  token: string,
+  github: BenchmarkGitHub,
+): Promise<{ cached: boolean; error?: unknown }> {
+  let cpu = UNKNOWN_CPU;
+  let metrics = new Map<string, Stats>();
+  try {
+    const arts = await github.json<{ artifacts?: Artifact[] }>(
+      `repos/${REPO}/actions/runs/${run.id}/artifacts`,
+      token,
+    );
+    const art = (arts.artifacts ?? []).find((a) =>
+      a.name === ARTIFACT && !a.expired
+    );
+    if (art) {
+      const json = await jsonFromZip(await fetchZip(art.id, token, github));
+      if (json) {
+        const report = parseBenchmarkReport(json);
+        if (report.cpu !== undefined) {
+          cpu = report.cpu;
+          metrics = report.metrics;
+        }
+      }
+    }
+  } catch (error) {
+    // The read failed, so whether this run has usable results is still unknown.
+    // Caching the empty map here would answer that question with "no" and never ask
+    // again: the run is only ever fetched once, so a single blip would drop the run
+    // from the trend for the life of the process. Record nothing and retry on the
+    // next refresh.
+    return { cached: false, error };
+  }
+  benchmarkStore.set({
+    runId: run.id,
+    runAttempt: run.run_attempt ?? 1,
+    at: Date.parse(run.created_at),
+    cpu,
+    metrics,
+  });
+  await benchmarkStore.save();
+  return { cached: true };
+}
+
+function currentBenchmarkRun(run: Run): CachedBenchmarkRun | undefined {
+  const cached = benchmarkStore.get(run.id);
+  return cached && cached.runAttempt >= (run.run_attempt ?? 1)
+    ? cached
+    : undefined;
+}
+
+function currentRunMetrics(run: Run): Map<string, Stats> | undefined {
+  const cached = currentBenchmarkRun(run);
+  return cached?.cpu === undefined ? undefined : cached.metrics;
+}
+
+function assembleBenchmarkSeries(
+  runs: CachedBenchmarkRun[],
+): BenchmarkSeries[] {
+  const byKey = new Map<
+    string,
+    Map<
+      string,
+      {
+        runId: number;
+        runAttempt: number;
+        at: number;
+        stats: Stats;
+      }[]
+    >
+  >();
+  for (const run of [...runs].sort((a, b) => a.at - b.at)) {
+    if (run.cpu === undefined) continue;
+    for (const [key, stats] of run.metrics) {
+      let byCpu = byKey.get(key);
+      if (!byCpu) {
+        byCpu = new Map();
+        byKey.set(key, byCpu);
+      }
+      let points = byCpu.get(run.cpu);
+      if (!points) {
+        points = [];
+        byCpu.set(run.cpu, points);
+      }
+      points.push({
+        runId: run.runId,
+        runAttempt: run.runAttempt,
+        at: run.at,
+        stats,
+      });
+    }
+  }
+  return [...byKey]
+    .map(([key, byCpu]) => ({
+      key,
+      cpus: [...byCpu]
+        .map(([cpu, points]) => ({ cpu, points }))
+        .filter((series) => series.points.length > 0)
+        .sort((a, b) => a.cpu.localeCompare(b.cpu)),
+    }))
+    .filter((series) => series.cpus.length > 0)
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function assembleBenchmarkSnapshot(runs: Run[]): BenchmarkSeries[] {
+  return assembleBenchmarkSeries(
+    runs.flatMap((run) => {
+      const cached = currentBenchmarkRun(run);
+      return cached?.cpu !== undefined && cached.metrics.size > 0
+        ? [cached]
+        : [];
+    }),
+  );
+}
+
+function assembleCachedBenchmarkSnapshot(
+  runs: CachedBenchmarkRun[],
+): BenchmarkSeries[] {
+  return assembleBenchmarkSeries(runs);
+}
+
+async function loadCachedBenchmarkSnapshot(now = Date.now()): Promise<void> {
+  await benchmarkStore.load();
+  if (benchmarkStore.quarantineFuture(now)) {
+    await benchmarkStore.save(now);
+  }
+  const cutoff = now - SPARK_DAYS * 86_400_000;
+  const refreshedRuns = benchmarkStore.refreshedRuns();
+  const cachedRuns = refreshedRuns ?? benchmarkStore.list(cutoff);
+  if (cachedRuns.some((run) => run.cpu === undefined)) {
+    benchmarkStore.invalidateRefresh(now);
+    await benchmarkStore.save(now);
+  }
+  benchmarkRefreshedAt = benchmarkStore.refreshedAt;
+  if (refreshedRuns === null) {
+    const available = cachedRuns.map((run) => ({
+      id: run.runId,
+      run_attempt: run.runAttempt,
+      created_at: new Date(run.at).toISOString(),
+      conclusion: "success",
+    }));
+    snapshot = assembleBenchmarkSnapshot(
+      sampleBenchmarkRuns(available, cutoff),
+    );
+  } else {
+    snapshot = assembleCachedBenchmarkSnapshot(refreshedRuns);
+  }
+}
+
+async function markBenchmarkRefreshed(
+  runs: Run[],
+  result: BenchmarkRefreshResult,
+): Promise<void> {
+  const cachedRuns = runs.map((run) => benchmarkStore.get(run.id)!);
+  const previous = benchmarkStore.markRefreshed(
+    Date.now(),
+    cachedRuns,
+    result,
+  );
+  await benchmarkStore.save().catch((error) => {
+    benchmarkStore.restoreRefresh(previous);
+    throw error;
+  });
+  const refreshedRuns = benchmarkStore.refreshedRuns();
+  if (refreshedRuns !== null) {
+    snapshot = assembleCachedBenchmarkSnapshot(refreshedRuns);
+  }
+  benchmarkRefreshedAt = benchmarkStore.refreshedAt;
+}
+
+export function sampleBenchmarkRuns<
+  T extends { created_at: string; conclusion: string | null },
+>(runs: T[], cutoff: number): T[] {
+  const perBucket = new Map<number, T>();
+  for (const run of runs) {
+    const at = Date.parse(run.created_at);
+    if (run.conclusion !== "success" || at < cutoff) continue;
+    const bucket = Math.floor(at / COLLECTION_BUCKET_MS);
+    const current = perBucket.get(bucket);
+    if (!current || at > Date.parse(current.created_at)) {
+      perBucket.set(bucket, run);
+    }
+  }
+  return [...perBucket.values()].sort((a, b) =>
+    Date.parse(a.created_at) - Date.parse(b.created_at)
+  );
+}
+
+const benchmarkDrill = {
+  href: "/bench?view=runtime&repo=labs",
+  hint: "all metrics ↗",
+};
+
+function benchmarkUnavailable(sub: string): TileView {
+  return {
+    ...benchmarkDrill,
+    label: "benchmarks",
+    status: "unknown",
+    value: "—",
+    sub,
+  };
+}
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+// The geometric mean of the per-benchmark ratios between two runs on the same
+// processor, over the benchmarks they share (each with a positive average).
+// Geometric, not arithmetic, so a benchmark that doubles and one that halves
+// cancel to no change. A benchmark in only one of the two runs is not in the
+// ratio, so adding or removing one is not a change. 1 when the runs share
+// nothing.
+function benchmarkStepRatio(
+  previous: CachedBenchmarkRun,
+  current: CachedBenchmarkRun,
+): number {
+  let logSum = 0, count = 0;
+  for (const [key, stats] of current.metrics) {
+    const before = previous.metrics.get(key);
+    if (before && before.avg > 0 && stats.avg > 0) {
+      logSum += Math.log(stats.avg / before.avg);
+      count++;
+    }
+  }
+  return count ? Math.exp(logSum / count) : 1;
+}
+
+const CPU_COLORS = [
+  "#6ea8fe",
+  "#d97757",
+  "#10a37f",
+  "#b58cf6",
+  "#e0a852",
+  "#56b6c2",
+  "#e06c9f",
+  "#9fb36b",
+  "#ff9da7",
+  "#8cd17d",
+  "#b6992d",
+  "#499894",
+  "#d37295",
+  "#fabfd2",
+  "#b07aa1",
+  "#86bcb6",
+];
+const CPU_LINE_MAX_X_GAP = 0.2;
+
+function cpuHash(cpu: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < cpu.length; index++) {
+    hash ^= cpu.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function generatedCpuColor(hash: number): string {
+  const red = 112 + (hash & 0x7f);
+  const green = 112 + ((hash >>> 7) & 0x7f);
+  const blue = 112 + ((hash >>> 14) & 0x7f);
+  return `#${((red << 16) | (green << 8) | blue).toString(16).padStart(
+    6,
+    "0",
+  )}`;
+}
+
+export function availableGeneratedCpuColor(
+  hash: number,
+  usedColors: Set<string>,
+  generateColor: (hash: number) => string = generatedCpuColor,
+): string {
+  // The color uses the low 21 hash bits. Adding an odd number visits every
+  // possible low-bit value before repeating.
+  for (let salt = 0; salt <= usedColors.size; salt++) {
+    const mixed = (hash + Math.imul(salt, 0x9e3779b9)) >>> 0;
+    const candidate = generateColor(mixed);
+    if (!usedColors.has(candidate)) return candidate;
+  }
+  throw new Error("Could not assign a distinct CPU color.");
+}
+
+function cpuColors(cpus: Iterable<string>): Map<string, string> {
+  const colors = new Map<string, string>();
+  const usedPaletteIndexes = new Set<number>();
+  const usedColors = new Set<string>();
+  const sorted = [...new Set(cpus)].sort((a, b) => a.localeCompare(b));
+  for (const [ordinal, cpu] of sorted.entries()) {
+    const hash = cpuHash(cpu);
+    let color: string;
+    if (ordinal < CPU_COLORS.length) {
+      const start = hash % CPU_COLORS.length;
+      let index = start;
+      for (let offset = 0; offset < CPU_COLORS.length; offset++) {
+        const candidate = (start + offset) % CPU_COLORS.length;
+        if (!usedPaletteIndexes.has(candidate)) {
+          index = candidate;
+          break;
+        }
+      }
+      usedPaletteIndexes.add(index);
+      color = CPU_COLORS[index];
+    } else {
+      color = availableGeneratedCpuColor(hash, usedColors);
+    }
+    usedColors.add(color);
+    colors.set(cpu, color);
+  }
+  return colors;
+}
+
+interface BenchmarkCpuIndex {
+  cpu: string;
+  color: string;
+  points: { at: number; index: number }[];
+  windowCount: number;
+  windowPoints: { at: number; index: number }[];
+  trend: ReturnType<typeof benchmarkTrend>;
+}
+
+type CpuBenchmarkRun = CachedBenchmarkRun & { cpu: string };
+
+function benchmarkCpuIndices(
+  cached: CpuBenchmarkRun[],
+  now: number,
+): BenchmarkCpuIndex[] {
+  const byCpu = new Map<string, CachedBenchmarkRun[]>();
+  for (const run of cached) {
+    const runs = byCpu.get(run.cpu);
+    if (runs) runs.push(run);
+    else byCpu.set(run.cpu, [run]);
+  }
+  const windowCutoff = now - BENCH_TREND_MAX_AGE_DAYS * 86_400_000;
+  const colors = cpuColors(byCpu.keys());
+  return [...byCpu]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([cpu, runs]) => {
+      runs.sort((a, b) => a.at - b.at);
+      const points: { at: number; index: number }[] = [];
+      let index = 1;
+      for (let run = 0; run < runs.length; run++) {
+        if (run > 0) index *= benchmarkStepRatio(runs[run - 1], runs[run]);
+        points.push({ at: runs[run].at, index });
+      }
+      const inWindow = points.filter((point) =>
+        point.at >= windowCutoff
+      ).length;
+      const windowCount = Math.min(
+        points.length,
+        Math.max(inWindow, BENCH_TREND_MIN_RUNS),
+      );
+      const windowPoints = points.slice(points.length - windowCount);
+      return {
+        cpu,
+        color: colors.get(cpu)!,
+        points,
+        windowCount,
+        windowPoints,
+        trend: benchmarkTrend(
+          windowPoints.map((point) => point.at),
+          windowPoints.map((point) => point.index),
+        ),
+      };
+    });
+}
+
+// The grid tile trends a scale-invariant benchmark index over about 45 days.
+// Each processor has its own index and line. Every index starts at one and
+// changes only between runs on that processor. Hardware changes therefore
+// never become benchmark changes. The headline shows the largest established
+// trend. Orange means any processor trends up. Red means the most recent run
+// failed or produced no readable data. `offline` names a fetch failure. The
+// tile then keeps its last-known trends gray, or shows a gray dash when no
+// history is cached.
+function benchmarkIndexView(
+  runs: Run[],
+  now: number,
+  collecting = false,
+  offline?: string,
+): TileView {
+  const cutoff = now - SPARK_DAYS * 86_400_000;
+  // The most recent completed run (the list is newest first) sets the failed
+  // state; an in-flight run at the head is skipped until it finishes. Only a
+  // genuine failure counts (concDot's red set), so a cancelled or superseded run
+  // does not raise a false alarm.
+  const latestCompleted = runs.find((run) =>
+    run.status === "completed" && run.conclusion !== null
+  );
+  const failedCi = latestCompleted !== undefined &&
+    concDot(latestCompleted.conclusion, latestCompleted.run_attempt ?? 1) ===
+      "red";
+  // A run that finished green on CI but whose artifact resolved to no readable
+  // benchmark data is as good as failed: it ran and produced nothing usable. Only
+  // a cached run with an empty result counts — a run still unread (or read-failed)
+  // stays unknown and is retried, so a transient blip does not flash red.
+  const latestResult = latestCompleted?.conclusion === "success"
+    ? benchmarkStore.get(latestCompleted.id)
+    : undefined;
+  const noData = latestResult !== undefined && latestResult.metrics.size === 0;
+  const failed = failedCi || noData;
+  const failSub = failedCi ? "last run failed" : "no benchmark data";
+  // The successful runs with processor identities and readable artifacts in the
+  // window, oldest -> newest.
+  const cached = (benchmarkStore.refreshedRuns() ?? benchmarkStore.list(cutoff))
+    .filter((run): run is CpuBenchmarkRun =>
+      run.at >= cutoff && run.cpu !== undefined && run.metrics.size > 0
+    )
+    .sort((a, b) => a.at - b.at);
+  const indices = benchmarkCpuIndices(cached, now);
+  if (!indices.length) {
+    // A fetch failure with nothing cached to stand on: a gray dash and the reason.
+    if (offline) return benchmarkUnavailable(offline);
+    if (failed) {
+      return {
+        ...benchmarkDrill,
+        label: "benchmarks",
+        status: "bad",
+        value: "—",
+        sub: failSub,
+      };
+    }
+    // No data yet: "collecting…" while a fetch is still in progress (the early paints,
+    // including the one before the run list is fetched), "benchmark data unavailable"
+    // once a fetch has finished empty, "no benchmark runs" when it found none at all.
+    if (collecting) return benchmarkUnavailable("collecting…");
+    return benchmarkUnavailable(
+      runs.length ? "benchmark data unavailable" : "no benchmark runs",
+    );
+  }
+  const established = indices.filter((series) => series.trend.label !== "new");
+  const headline = (established.length ? established : indices).reduce((
+    worst,
+    series,
+  ) => series.trend.pct > worst.trend.pct ? series : worst);
+  const rising = indices.some((series) =>
+    series.trend.status === "warn" || series.trend.status === "bad"
+  );
+  // An offline collection keeps the trend but grays it: the run list it would need
+  // to judge failed or rising could not be fetched, so it never asserts red or green.
+  const status: Status = offline
+    ? "unknown"
+    : failed
+    ? "bad"
+    : rising
+    ? "warn"
+    : "good";
+  // Headline: the window's trend.
+  const value = escapeHtml(headline.trend.label);
+  const latest = cached[cached.length - 1];
+  const count = latest.metrics.size;
+  // Name the highlighted window's span beside the count, like CI duration names its
+  // median window — in days (via humanSpan), not "runs", so it does not read as the
+  // main-CI run count. Only when a window is actually highlighted; otherwise the
+  // whole sparkline is the window and its span already sits in the corner.
+  const windowLabel = headline.windowCount < headline.points.length
+    ? ` · last ${humanSpan(spanMs(headline.windowPoints))}`
+    : "";
+  const countLine =
+    `<div style="font-size:13px;color:#9aa0ab;margin:5px 0 0">${count} benchmark${
+      count === 1 ? "" : "s"
+    }${windowLabel}</div>`;
+  const allPoints = indices.flatMap((series) => series.points);
+  const chartStart = Math.min(...allPoints.map((point) => point.at));
+  const chartEnd = Math.max(...allPoints.map((point) => point.at));
+  const chartSpan = chartEnd - chartStart;
+  const chartAxis = chartSpan || 1;
+  const chart = multiSparkline(
+    indices.map((series) => ({
+      vals: series.points.map((point) => point.index),
+      color: series.color,
+      xs: series.points.map((point) => (point.at - chartStart) / chartAxis),
+      highlightCount: series.windowCount,
+      maxXGap: CPU_LINE_MAX_X_GAP,
+      showSinglePoint: true,
+    })),
+    { fadeFrom: SPARK_FADE[status] },
+  );
+  return {
+    ...benchmarkDrill,
+    label: "benchmarks",
+    status,
+    value,
+    sub: offline ?? (failed ? failSub : undefined),
+    extra: `${countLine}${chart}`,
+    duration: chartSpan,
+  };
+}
+
+interface BenchmarkCollectionOutcome {
+  error?: unknown;
+}
+
+async function collectBenchmark(
+  token: string,
+  progress: BenchmarkProgressRecord,
+  github: BenchmarkGitHub,
+): Promise<BenchmarkCollectionOutcome> {
+  const now = Date.now();
+  const cutoff = now - SPARK_DAYS * 86_400_000;
+
+  try {
+    await benchmarkStore.load();
+    const runs = await pageBenchmarkRuns(github, token, cutoff);
+    latestBenchmarkRuns = runs;
+    notifyBenchmarkRunList(runs);
+
+    const chosen = sampleBenchmarkRuns(runs, cutoff);
+    const priorRefresh = benchmarkStore.refresh;
+    const chosenReferences = chosen.map((run) => ({
+      runId: run.id,
+      runAttempt: run.run_attempt ?? 1,
+    }));
+    if (
+      priorRefresh &&
+      JSON.stringify(priorRefresh.runs) !== JSON.stringify(chosenReferences)
+    ) {
+      benchmarkStore.invalidateRefresh(now);
+      await benchmarkStore.save(now);
+      benchmarkRefreshedAt = benchmarkStore.refreshedAt;
+    }
+    const isCached = (run: Run) => currentRunMetrics(run) !== undefined;
+    const cachedRuns = chosen.filter(isCached);
+    const missing = chosen.filter((run) => !isCached(run));
+    updateBenchmarkProgress(progress, {
+      phase: "fetching",
+      totalRuns: chosen.length,
+      cachedRuns: cachedRuns.length,
+      needsReload: missing.length > 0,
+    });
+    if (!chosen.length) {
+      snapshot = [];
+      await markBenchmarkRefreshed([], "no-runs");
+      return {};
+    }
+
+    let firstReadError: unknown;
+    for (
+      let index = 0;
+      index < missing.length;
+      index += BENCHMARK_FETCH_CONCURRENCY
+    ) {
+      const batch = missing.slice(index, index + BENCHMARK_FETCH_CONCURRENCY);
+      const outcomes = await Promise.all(batch.map(async (run) => {
+        updateBenchmarkProgress(progress, {
+          requestsMade: progress.state.requestsMade + 1,
+        });
+        let cached = false;
+        try {
+          const outcome = await loadRun(run, token, github);
+          cached = outcome.cached;
+          return outcome.error === undefined
+            ? null
+            : { readError: outcome.error };
+        } catch (error) {
+          return { persistenceError: error };
+        } finally {
+          updateBenchmarkProgress(progress, {
+            responsesReceived: progress.state.responsesReceived + 1,
+            successfulResponses: progress.state.successfulResponses +
+              (cached ? 1 : 0),
+            failedResponses: progress.state.failedResponses +
+              (cached ? 0 : 1),
+          });
+        }
+      }));
+      const persistenceFailure = outcomes.find((outcome) =>
+        outcome && "persistenceError" in outcome
+      );
+      if (persistenceFailure && "persistenceError" in persistenceFailure) {
+        throw persistenceFailure.persistenceError;
+      }
+      const readFailure = outcomes.find((outcome) =>
+        outcome && "readError" in outcome
+      );
+      if (
+        firstReadError === undefined && readFailure &&
+        "readError" in readFailure
+      ) firstReadError = readFailure.readError;
+    }
+
+    updateBenchmarkProgress(progress, { phase: "saving" });
+    await benchmarkStore.save(now);
+    const withData = chosen.filter((run) =>
+      (currentRunMetrics(run)?.size ?? 0) > 0
+    );
+    if (!withData.length) {
+      if (firstReadError === undefined) snapshot = [];
+      if (firstReadError === undefined) {
+        await markBenchmarkRefreshed(chosen, "data-unavailable");
+      }
+      return { error: firstReadError };
+    }
+    const collectedSnapshot = assembleBenchmarkSnapshot(withData);
+    if (collectedSnapshot.length || firstReadError === undefined) {
+      snapshot = collectedSnapshot;
+    }
+    if (firstReadError === undefined) {
+      await markBenchmarkRefreshed(
+        chosen,
+        collectedSnapshot.length ? "data" : "no-metric",
+      );
+    }
+    return { error: firstReadError };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function startBenchmarkRefresh(
+  ctx: Ctx,
+  baseline?: string,
+  snapshotIsFresh = false,
+  scope: BenchmarkRefreshScope = "bench",
+): BenchmarkRefresh {
+  const github = scope === "bench"
+    ? performanceBenchmarkGitHub
+    : ordinaryBenchmarkGitHub;
+  const token = (ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN"))!;
+  const activeBenchmarkRefresh = activeBenchmarkRefreshes.get(scope);
+  if (activeBenchmarkRefresh) {
+    if (baseline !== undefined) {
+      activeBenchmarkRefresh.progress.baselines.add(baseline);
+    }
+    return {
+      progress: { ...activeBenchmarkRefresh.progress.state },
+      result: activeBenchmarkRefresh.result,
+    };
+  }
+  if (snapshotIsFresh) {
+    return { progress: null, result: Promise.resolve({}) };
+  }
+
+  const progress = newBenchmarkProgress(baseline);
+  const queuedBehindOtherScope = activeBenchmarkRefreshes.size > 0;
+  const previousCollection = benchmarkCollectionTail;
+  let finishCollection!: () => void;
+  benchmarkCollectionTail = new Promise<void>((resolve) => {
+    finishCollection = resolve;
+  });
+  const collection = async (): Promise<BenchmarkCollectionOutcome> => {
+    await previousCollection;
+    if (
+      queuedBehindOtherScope && benchmarkRefreshedAt &&
+      Date.now() - benchmarkRefreshedAt >= 0 &&
+      Date.now() - benchmarkRefreshedAt < BENCHMARK_REFRESH_MS
+    ) {
+      return {};
+    }
+    return await collectBenchmark(token, progress, github);
+  };
+  let refreshFinished = false;
+  const finishRefresh = () => {
+    if (refreshFinished) return;
+    refreshFinished = true;
+    finishCollection();
+    if (activeBenchmarkRefreshes.get(scope)?.progress === progress) {
+      activeBenchmarkRefreshes.delete(scope);
+    }
+  };
+  const result = collection().then((outcome) => {
+    finishRefresh();
+    if (outcome.error) {
+      const message = outcome.error instanceof Error
+        ? outcome.error.message
+        : String(outcome.error);
+      if (scope === "bench") {
+        benchmarkRefreshFailedAt = Date.now();
+        benchmarkRefreshError = friendlyError(message);
+      }
+      const version = benchmarkSnapshotVersion();
+      updateBenchmarkProgress(progress, {
+        phase: "error",
+        error: friendlyError(message),
+        needsReload: [...progress.baselines].some((value) => value !== version),
+      });
+    } else {
+      if (scope === "bench") {
+        benchmarkRefreshFailedAt = 0;
+        benchmarkRefreshError = "";
+      }
+      benchmarkRefreshedAt = benchmarkStore.refreshedAt;
+      const version = benchmarkSnapshotVersion();
+      updateBenchmarkProgress(progress, {
+        phase: "complete",
+        needsReload: [...progress.baselines].some((value) => value !== version),
+      });
+    }
+    return outcome;
+  }).finally(finishRefresh);
+  activeBenchmarkRefreshes.set(scope, { progress, result });
+  return { progress: { ...progress.state }, result };
+}
+
+function benchmarkSnapshotIsFresh(now = Date.now()): boolean {
+  const age = now - benchmarkRefreshedAt;
+  return Boolean(
+    benchmarkRefreshedAt && age >= 0 && age < BENCHMARK_REFRESH_MS,
+  );
+}
+
+function benchmarkRefreshRecentlyFailed(now = Date.now()): boolean {
+  const age = now - benchmarkRefreshFailedAt;
+  return Boolean(
+    benchmarkRefreshFailedAt && !activeBenchmarkRefreshes.has("bench") &&
+      age >= 0 && age < BENCHMARK_REFRESH_MS,
+  );
+}
+
+function benchmarkLastRequestError(): string | null {
+  return benchmarkRefreshFailedAt
+    ? benchmarkRefreshError || "temporarily unavailable"
+    : null;
+}
+
+function benchmarkServerContext(): Ctx {
+  return {
+    runs: () => Promise.resolve([]),
+    runsFor: () => Promise.resolve([]),
+    env: (key) => Deno.env.get(key),
+  };
+}
+
+export const benchmark: Tile = {
+  id: "benchmark",
+  intervalMs: 3_600_000,
+  routes: [
+    {
+      path: "/bench",
+      handler: (_req, url) => {
+        const view = url.searchParams.get("view");
+        if (view === "ci") {
+          return ciJobHistoryResponse(url);
+        }
+        if (view === "gantt") {
+          return new Response(ciGanttPage(url), {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        }
+        if (view !== "runtime") {
+          return new Response("unknown performance view", { status: 400 });
+        }
+        return benchmarkHistoryResponse(url);
+      },
+    },
+    {
+      path: "/bench/check",
+      handler: (_req, url) => {
+        const view = url.searchParams.get("view");
+        if (view === "ci") {
+          return ciJobHistoryCheckResponse(url);
+        }
+        if (view === "runtime") return benchmarkHistoryCheckResponse();
+        return new Response("unknown performance view", { status: 400 });
+      },
+    },
+    {
+      path: "/bench/ci-progress",
+      handler: (_req, url) => ciJobHistoryProgressResponse(url),
+    },
+    {
+      path: "/bench/runtime-progress",
+      handler: (_req, url) => benchmarkHistoryProgressResponse(url),
+    },
+  ] satisfies Route[],
+  async collect(ctx, publish): Promise<TileView> {
+    const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
+    if (!token) return benchmarkUnavailable("set GH_TOKEN");
+    await loadCachedBenchmarkSnapshot();
+    const initialCollection = benchmarkInitialCollection;
+    benchmarkInitialCollection = false;
+    // Only trust the run list this collection fetches, never a prior one: a
+    // collection whose fetch fails must gray the tile rather than show stale runs.
+    latestBenchmarkRuns = undefined;
+    // Paint the headline as soon as the refresh has paged the run list, without
+    // waiting for it to backfill the drill-down's artifacts. This is a collection in
+    // progress, so with no cached data yet the tile reads "collecting…", not the
+    // finished-and-empty "benchmark data unavailable".
+    const paintEarly = (runs: Run[]) => {
+      // Registered only when publish exists, and the notifier fires each listener at
+      // most once, so this needs no re-entry guard.
+      if (publish) publish(benchmarkIndexView(runs, Date.now(), true));
+    };
+    if (publish) benchmarkRunListListeners.add(paintEarly);
+    // Paint at once, before the run list is even fetched, so a freshly loaded
+    // dashboard shows the cached headline immediately (warm) or "collecting…" (cold)
+    // rather than a blank tile while the first collection gets under way. The empty
+    // run list carries no failed state yet; paintEarly and the final return supply it.
+    if (publish) publish(benchmarkIndexView([], Date.now(), true));
+    // Drive the drill-down's artifact history (green while fresh, so its expensive
+    // artifact reads are skipped). Its collection also pages the benchmarks.yml run
+    // list into latestBenchmarkRuns, which the tile reuses. A read that only failed
+    // on the artifacts still leaves the run list, so the tile stands.
+    const outcome = await startBenchmarkRefresh(
+      ctx,
+      undefined,
+      initialCollection && benchmarkSnapshotIsFresh(),
+      "dashboard",
+    ).result;
+    benchmarkRunListListeners.delete(paintEarly);
+    const now = Date.now();
+    let runs: Run[] | undefined = latestBenchmarkRuns;
+    if (!runs) {
+      // No run list this collection: on a failed fetch keep the last-known trend
+      // grayed with the reason (benchmarkIndexView with an empty run list and an
+      // offline reason); otherwise it short-circuited on a fresh snapshot, so read
+      // the list directly for the tile.
+      if (outcome.error !== undefined) {
+        return benchmarkIndexView(
+          [],
+          now,
+          false,
+          friendlyError(errorMessage(outcome.error)),
+        );
+      }
+      let directError: unknown;
+      runs = await pageBenchmarkRuns(
+        ordinaryBenchmarkGitHub,
+        token,
+        now - SPARK_DAYS * 86_400_000,
+      ).catch((error) => {
+        directError = error;
+        return undefined;
+      });
+      if (!runs) {
+        return benchmarkIndexView(
+          [],
+          now,
+          false,
+          friendlyError(errorMessage(directError)),
+        );
+      }
+    }
+    return benchmarkIndexView(runs, now);
+  },
+};
+
+export async function benchmarkHistoryResponse(
+  url: URL,
+  ctx = benchmarkServerContext(),
+): Promise<Response> {
+  await loadCachedBenchmarkSnapshot();
+  const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
+  const baseline = benchmarkSnapshotVersion();
+  let progress: BenchmarkFetchProgress | undefined;
+  let refreshError: string | undefined;
+  if (!token) {
+    refreshError = snapshot.length
+      ? "Set GH_TOKEN to refresh runtime benchmark history."
+      : "Set GH_TOKEN to collect runtime benchmark history.";
+  }
+  if (token && !benchmarkRefreshRecentlyFailed()) {
+    const refresh = startBenchmarkRefresh(
+      ctx,
+      baseline,
+      benchmarkSnapshotIsFresh(),
+    );
+    progress = refresh.progress ?? undefined;
+    if (progress) void refresh.result;
+    else await refresh.result;
+  }
+  const lastRequestError = progress
+    ? undefined
+    : benchmarkLastRequestError() ?? undefined;
+  return new Response(
+    benchPage(
+      url.searchParams.get("stat") ?? DEFAULT_LABEL,
+      url.searchParams.get("sort") ?? "file",
+      ciHistoryDays(url.searchParams.get("days")),
+      Date.now(),
+      ciHistorySource(url.searchParams.get("repo")).key,
+      {
+        progress,
+        refreshError,
+        lastRequestError,
+        fragment: url.searchParams.get("fragment") === "range",
+      },
+    ),
+    { headers: { "content-type": "text/html; charset=utf-8" } },
+  );
+}
+
+export async function benchmarkHistoryCheckResponse(
+  ctx = benchmarkServerContext(),
+): Promise<Response> {
+  await loadCachedBenchmarkSnapshot();
+  const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
+  let progress: BenchmarkFetchProgress | null = null;
+  if (
+    token &&
+    (!benchmarkRefreshFailedAt || activeBenchmarkRefreshes.has("bench") ||
+      Date.now() - benchmarkRefreshFailedAt >= BENCHMARK_REFRESH_MS)
+  ) {
+    const refresh = startBenchmarkRefresh(
+      ctx,
+      benchmarkSnapshotVersion(),
+      benchmarkSnapshotIsFresh(),
+    );
+    progress = refresh.progress;
+    if (progress) void refresh.result;
+    else await refresh.result;
+  }
+  const lastRequestError = progress ? null : benchmarkLastRequestError();
+  return Response.json(
+    { version: benchmarkSnapshotVersion(), progress, lastRequestError },
+    { headers: { "cache-control": "no-store" } },
+  );
+}
+
+interface BenchmarkProgressProvider {
+  progress(id: string): BenchmarkFetchProgress | null;
+  subscribe(
+    id: string,
+    listener: (progress: BenchmarkFetchProgress) => void,
+  ): (() => void) | null;
+}
+
+const defaultBenchmarkProgressProvider: BenchmarkProgressProvider = {
+  progress: benchmarkProgress,
+  subscribe: subscribeBenchmarkProgress,
+};
+
+export function benchmarkHistoryProgressResponse(
+  url: URL,
+  provider = defaultBenchmarkProgressProvider,
+): Response {
+  const id = url.searchParams.get("id");
+  if (!id) return new Response("missing progress id", { status: 400 });
+  if (!provider.progress(id)) {
+    return new Response("unknown progress id", { status: 404 });
+  }
+  const encoder = new TextEncoder();
+  let unsubscribe: (() => void) | undefined;
+  let closed = false;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const send = (progress: BenchmarkFetchProgress) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(
+          `event: progress\ndata: ${JSON.stringify(progress)}\n\n`,
+        ));
+        if (progress.phase === "complete" || progress.phase === "error") {
+          closed = true;
+          controller.close();
+          unsubscribe?.();
+        }
+      };
+      unsubscribe = provider.subscribe(id, send) ?? undefined;
+      if (closed) unsubscribe?.();
+    },
+    cancel() {
+      closed = true;
+      unsubscribe?.();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+    },
+  });
+}
+
+export function pointsForWindow<T extends { at: number }>(
+  points: T[],
+  axisStart: number,
+  bucketMs: number,
+  axisEnd = Infinity,
+): T[] {
+  const buckets = new Map<number, T>();
+  for (const point of points) {
+    if (point.at < axisStart || point.at > axisEnd) continue;
+    const bucket = Math.floor(point.at / bucketMs);
+    const current = buckets.get(bucket);
+    if (!current || point.at > current.at) buckets.set(bucket, point);
+  }
+  return [...buckets.values()].sort((a, b) => a.at - b.at);
+}
+
+export function representativeBenchmarkCpu<
+  T extends { cpu: string; sampleCount: number; points: { at: number }[] },
+>(series: T[]): T | undefined {
+  let representative: T | undefined;
+  for (const candidate of series) {
+    if (!representative) {
+      representative = candidate;
+      continue;
+    }
+    const candidateLatest = candidate.points.at(-1)?.at ?? -Infinity;
+    const representativeLatest = representative.points.at(-1)?.at ?? -Infinity;
+    if (
+      candidate.sampleCount > representative.sampleCount ||
+      (candidate.sampleCount === representative.sampleCount &&
+        candidateLatest > representativeLatest) ||
+      (candidate.sampleCount === representative.sampleCount &&
+        candidateLatest === representativeLatest &&
+        candidate.cpu.localeCompare(representative.cpu) < 0)
+    ) {
+      representative = candidate;
+    }
+  }
+  return representative;
+}
+
+const dateLabel = (at: number): string =>
+  new Date(at).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+
+// The /bench drill-down: every benchmark's processor-specific lines for the
+// chosen measurement, grouped by source file.
+interface BenchmarkPageOptions {
+  progress?: BenchmarkFetchProgress;
+  refreshError?: string;
+  lastRequestError?: string;
+  fragment?: boolean;
+}
+
+export function benchPage(
+  statLabel: string,
+  sortMode: string,
+  days: number,
+  now = Date.now(),
+  repo: CiHistorySourceKey = "labs",
+  options: BenchmarkPageOptions = {},
+): string {
+  const stat = STATS.find((s) => s.label === statLabel) ??
+    STATS.find((s) => s.label === DEFAULT_LABEL)!;
+  const sort = sortMode === "trend" || sortMode === "duration"
+    ? sortMode
+    : "file";
+  const href = (st: string, so: string) =>
+    performanceViewHref("runtime", {
+      repo,
+      days,
+      sort: so,
+      stat: st,
+    });
+  const statSel = STATS.map((s) =>
+    `<a class="stat${s.label === stat.label ? " on" : ""}" href="${
+      href(s.label, sort)
+    }"${s.label === stat.label ? ' aria-current="true"' : ""}>${s.label}</a>`
+  ).join("");
+  const sortSel = (["file", "duration", "trend"] as const).map((so) =>
+    `<a class="stat${sort === so ? " on" : ""}" href="${href(stat.label, so)}"${
+      sort === so ? ' aria-current="true"' : ""
+    }>${so}</a>`
+  ).join("");
+  const viewNav = performanceViewNav("runtime", {
+    repo,
+    days,
+    sort,
+    stat: stat.label,
+  });
+  const version = benchmarkSnapshotVersion();
+  const progress = options.progress;
+  const progressIdle = !progress || progress.phase === "complete" ||
+    progress.phase === "error";
+  const lastRequestError = progress?.phase === "error"
+    ? progress.error ?? "unknown error"
+    : !progress
+    ? options.lastRequestError
+    : undefined;
+  const progressTitle = progressIdle
+    ? "Idle"
+    : progress.phase === "discovering"
+    ? "Finding benchmark runs…"
+    : `${progress.completedRuns} of ${progress.totalRuns} artifact checks complete`;
+  const progressTotal = progressIdle
+    ? "0 outstanding"
+    : `${progress.completedRuns} / ${progress.totalRuns || "?"}`;
+  const progressDetail = lastRequestError
+    ? `Last collection stopped: ${escapeHtml(lastRequestError)}`
+    : !progressIdle && progress
+    ? `${progress.cachedRuns} cached · ${progress.requestsMade} artifact checks made · ${progress.responsesReceived} responded · ${progress.outstandingRequests} outstanding · ${progress.queuedRuns} queued`
+    : "No requests in progress.";
+  const progressUrl = progress
+    ? `/bench/runtime-progress?id=${
+      escapeHtml(encodeURIComponent(progress.id))
+    }`
+    : "";
+  const progressHtml = `<section class="fetch-progress${
+    lastRequestError ? " error" : ""
+  }" id="fetch-progress" aria-live="polite" data-check-url="/bench/check?view=runtime" data-snapshot-version="${
+    escapeHtml(version)
+  }" data-refresh-on-complete="${
+    progress && !progressIdle && !snapshot.length ? "1" : "0"
+  }"${
+    lastRequestError
+      ? ` data-last-request-error="${escapeHtml(lastRequestError)}"`
+      : ""
+  }${
+    progressUrl ? ` data-progress-url="${progressUrl}"` : ""
+  }><div class="fetch-head"><strong id="fetch-title">${progressTitle}</strong><span id="fetch-total">${progressTotal}</span></div><progress id="fetch-bar" max="${
+    progressIdle ? 1 : Math.max(1, progress?.totalRuns ?? 1)
+  }"${
+    !progressIdle && progress && !progress.totalRuns
+      ? ""
+      : ` value="${progressIdle ? 0 : progress?.completedRuns ?? 0}"`
+  } aria-label="Runtime benchmark fetch progress"></progress><p id="fetch-detail">${progressDetail}</p></section>`;
+  const refreshNotice = options.refreshError && snapshot.length
+    ? `<p class="refresh-error">${escapeHtml(options.refreshError)}</p>`
+    : "";
+
+  let body: string;
+  let cpuLegend = "";
+  if (!snapshot.length) {
+    body = progress && !progressIdle ? "" : `<p class="empty">${
+      escapeHtml(
+        options.refreshError ??
+          "No runtime benchmark samples were found in the history window.",
+      )
+    }</p>`;
+  } else {
+    const axisEnd = now;
+    const axisStart = axisEnd - days * 86_400_000;
+    const axisSpan = axisEnd - axisStart || 1;
+    const bucketMs = ciHistoryBucketMs(days);
+    const colors = cpuColors(
+      snapshot.flatMap((series) => series.cpus.map((cpu) => cpu.cpu)),
+    );
+    const cpuKeys = new Map(
+      [...colors.keys()].map((cpu, index) => [
+        cpu,
+        { label: `CPU ${index + 1}`, anchor: `cpu-type-${index + 1}` },
+      ]),
+    );
+    const rows = snapshot.flatMap((s) => {
+      const visibleCpus = s.cpus.flatMap((series) => {
+        const sourcePoints = series.points.filter((point) =>
+          point.at >= axisStart && point.at <= axisEnd
+        );
+        const points = pointsForWindow(
+          sourcePoints,
+          axisStart,
+          bucketMs,
+          axisEnd,
+        );
+        if (!points.length) return [];
+        const values = points.map((point) => point.stats[stat.field]);
+        const trend = benchmarkTrend(
+          points.map((point) => point.at),
+          values,
+        );
+        return [{
+          cpu: series.cpu,
+          color: colors.get(series.cpu)!,
+          sampleCount: sourcePoints.length,
+          points,
+          values,
+          pct: trend.pct,
+          status: trend.status,
+          trend: trend.label,
+          latest: values[values.length - 1],
+        }];
+      });
+      if (!visibleCpus.length) return [];
+      const cpus = visibleCpus;
+      const representative = representativeBenchmarkCpu(cpus)!;
+      const status = representative.status;
+      const pct = representative.pct;
+      const allPoints = cpus.flatMap((series) => series.points);
+      const firstAt = Math.min(...allPoints.map((point) => point.at));
+      const lastAt = Math.max(...allPoints.map((point) => point.at));
+      const spark = multiSparkline(
+        cpus.map((series) => ({
+          vals: series.values,
+          color: series.color,
+          xs: series.points.map((point) => (point.at - axisStart) / axisSpan),
+          maxXGap: CPU_LINE_MAX_X_GAP,
+          showSinglePoint: true,
+        })),
+        {
+          fadeFrom: SPARK_FADE[status],
+          scale: {
+            trim: PERFORMANCE_HISTORY_SCALE_TRIM,
+            minValues: PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
+          },
+        },
+      );
+      return [{
+        key: s.key,
+        file: s.key.split(" > ")[0],
+        pct,
+        st: status,
+        spark,
+        dur: lastAt > firstAt ? durationTag(lastAt - firstAt) : "",
+        latest: representative.latest,
+        representative,
+        cpus,
+      }];
+    });
+    const cpuDetails = new Map<string, {
+      color: string;
+      benchmarks: number;
+      runs: Set<string>;
+      firstAt: number;
+      lastAt: number;
+    }>();
+    for (const row of rows) {
+      for (const series of row.cpus) {
+        let detail = cpuDetails.get(series.cpu);
+        if (!detail) {
+          detail = {
+            color: series.color,
+            benchmarks: 0,
+            runs: new Set(),
+            firstAt: series.points[0].at,
+            lastAt: series.points[series.points.length - 1].at,
+          };
+          cpuDetails.set(series.cpu, detail);
+        }
+        detail.benchmarks++;
+        for (const point of series.points) {
+          detail.runs.add(`${point.runId}:${point.runAttempt}`);
+          detail.firstAt = Math.min(detail.firstAt, point.at);
+          detail.lastAt = Math.max(detail.lastAt, point.at);
+        }
+      }
+    }
+    if (cpuDetails.size) {
+      cpuLegend =
+        `<section class="cpu-legend" aria-labelledby="cpu-legend-title"><h2 class="cpu-legend-title" id="cpu-legend-title">CPU types</h2><div class="cpu-keys">${
+          [...cpuDetails]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([cpu, detail]) => {
+              const benchmarks = `${detail.benchmarks} benchmark${
+                detail.benchmarks === 1 ? "" : "s"
+              }`;
+              const runs = `${detail.runs.size} run${
+                detail.runs.size === 1 ? "" : "s"
+              }`;
+              const observed = detail.firstAt === detail.lastAt
+                ? `observed ${dateLabel(detail.firstAt)}`
+                : `observed ${dateLabel(detail.firstAt)}–${
+                  dateLabel(detail.lastAt)
+                }`;
+              const { label: cpuId, anchor } = cpuKeys.get(cpu)!;
+              return `<div class="cpu-key" id="${anchor}" data-cpu-id="${cpuId}"><span class="swatch" style="background:${
+                escapeHtml(detail.color)
+              }"></span><span class="cpu-id" style="--cpu-color:${
+                escapeHtml(detail.color)
+              }">${cpuId}</span><span class="cpu-description"><span class="cpu-name">${
+                escapeHtml(cpu)
+              }</span><span class="cpu-detail">${benchmarks} · ${runs} · ${observed}</span></span></div>`;
+            }).join("")
+        }</div></section>`;
+    }
+    const rowHtml = (r: (typeof rows)[number], label: string) => {
+      const series = r.representative;
+      const { label: cpuId, anchor } = cpuKeys.get(series.cpu)!;
+      const latest = formatNs(series.latest);
+      const sampleCount = series.sampleCount;
+      const samples = `${sampleCount} sample${
+        sampleCount === 1 ? "" : "s"
+      } in the selected window`;
+      return `<div class="brow ${r.st}"><div class="bspark">${r.spark}${r.dur}</div><div class="bmeta">` +
+        `<span class="bname">${escapeHtml(label)}</span>` +
+        `<span class="bval" data-cpu-id="${cpuId}" data-sample-count="${sampleCount}" style="--cpu-color:${
+          escapeHtml(series.color)
+        }" title="${
+          escapeHtml(`${series.cpu} · ${samples}`)
+        }" aria-label="${
+          escapeHtml(
+            `Representative CPU ${series.cpu}: ${latest}, ${series.trend}; ${samples}`,
+          )
+        }"><a class="cpu-id" href="#${anchor}" aria-label="${
+          escapeHtml(`${cpuId}: ${series.cpu}; jump to CPU types legend`)
+        }">${cpuId}</a>${latest}<span class="btrend">${
+          escapeHtml(series.trend)
+        }</span></span>` +
+        `</div></div>`;
+    };
+    const axis = `<div class="axisrow"><div class="timeaxis"><span>${
+      dateLabel(axisStart)
+    }</span><span>${dateLabel(axisEnd)}</span></div></div>`;
+    if (!rows.length) {
+      body =
+        `<p class="empty">No benchmark samples were found in the selected window.</p>`;
+    } else if (sort === "trend" || sort === "duration") {
+      const sorted = [...rows].sort((a, b) => {
+        const difference = sort === "duration"
+          ? b.latest - a.latest
+          : b.pct - a.pct;
+        return difference || a.key.localeCompare(b.key);
+      });
+      body = `${axis}<div class="blist">${
+        sorted.map((r) => rowHtml(r, r.key)).join("")
+      }</div>`;
+    } else {
+      // Grouped by source file, in the snapshot's alphabetical order.
+      const groups = new Map<string, typeof rows>();
+      for (const r of rows) {
+        const arr = groups.get(r.file);
+        if (arr) arr.push(r);
+        else groups.set(r.file, [r]);
+      }
+      body = axis +
+        [...groups.entries()].map(([file, rs]) =>
+          `<section class="benchmark-group"><h2>${escapeHtml(file)}</h2><div class="blist">${
+            rs.map((r) =>
+              rowHtml(r, r.key.split(" > ").slice(1).join(" > ") || r.key)
+            ).join("")
+          }</div></section>`
+        ).join("");
+    }
+  }
+
+  const rangeContent = `<div id="range-content">
+    ${progressHtml}${refreshNotice}
+    <p class="legend">Percentile of per-op time across a run's samples — p0 = min, p50 = mean, p100 = max. Lower is faster. Each CPU has its own coloured line. The value, trend, and row colour use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
+    ${body}
+    ${cpuLegend}
+    <p class="note">Successful main runs come from the <a href="https://github.com/${REPO}/actions/workflows/${WORKFLOW}" target="_blank" rel="noopener">${WORKFLOW} runs ↗</a> (deno bench artifacts). Collection keeps enough samples for the shortest window, and charts reduce longer windows to about ${CI_HISTORY_POINT_TARGET} evenly spaced points.</p>
+  </div>`;
+  if (options.fragment) return rangeContent;
+
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Benchmarks — ${
+    escapeHtml(stat.label)
+  }</title>
+<style>
+  ${PERFORMANCE_VIEW_STYLES}
+  .bval{display:flex;align-items:baseline;min-width:0}
+  .bval .cpu-id{margin-right:7px;align-self:center}
+  .bval a.cpu-id{text-decoration:none}
+  .bval a.cpu-id:hover{border-color:#6ea8fe;color:#fff}
+  .bval a.cpu-id:focus-visible{outline:2px solid #6ea8fe;outline-offset:2px}
+  .btrend{margin-left:8px}
+  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.42)}
+  .cpu-id{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--cpu-color,#454b56);border-radius:4px;padding:1px 4px;font-size:9px;line-height:1.2;font-weight:500;color:#c7ccd4;white-space:nowrap}
+  .cpu-legend{margin-top:22px}.cpu-legend-title{margin:0 0 8px}
+  .cpu-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:7px}
+  .cpu-key{display:flex;align-items:flex-start;gap:8px;background:#16181d;border:1px solid #23262d;border-radius:8px;padding:8px 10px}
+  .cpu-key:target{border-color:#6ea8fe;box-shadow:0 0 0 1px rgba(110,168,254,.24);scroll-margin-top:16px}
+  .cpu-key>.swatch,.cpu-key>.cpu-id{margin-top:3px}.cpu-description{min-width:0}
+  .cpu-name{display:block;font-size:12px;color:#c7ccd4;overflow-wrap:anywhere}
+  .cpu-detail{display:block;font-size:10px;color:#878d97;margin-top:2px}
+  body.hide-green .brow.good{display:none}
+  body.hide-green .benchmark-group:not(:has(.brow:not(.good))){display:none}
+</style></head><body data-snapshot-version="${escapeHtml(version)}">
+  <div class="top"><a class="back" href="/">← dashboard</a><b>Performance history</b><span>${
+    escapeHtml(REPO)
+  } · ${WORKFLOW}</span></div>
+  ${viewNav}
+  <form class="controls" method="get" action="/bench"><input type="hidden" name="view" value="runtime"><input type="hidden" name="repo" value="${repo}"><input type="hidden" name="stat" value="${
+    escapeHtml(stat.label)
+  }"><input type="hidden" name="sort" value="${sort}"><label class="field" for="days">window <output id="daysv" for="days">${days} day${
+    days === 1 ? "" : "s"
+  }</output><input type="range" id="days" name="days" min="${CI_HISTORY_MIN_DAYS}" max="${CI_HISTORY_DAYS}" step="1" value="${days}"></label><nav class="choice-group" aria-label="Benchmark metric"><span class="lbl">metric</span>${statSel}</nav><nav class="choice-group" aria-label="Sort benchmarks"><span class="lbl">sort</span>${sortSel}</nav><label class="check trailing"><input type="checkbox" id="hg"> hide green</label></form>
+  ${rangeContent}
+<script>
+  const hg = document.getElementById("hg"), days = document.getElementById("days"), daysv = document.getElementById("daysv"), controls = days.form, KEY = "benchHideGreen", DEFAULT_DAYS = days.value;
+  let rangeContent = document.getElementById("range-content"), fetchProgress = document.getElementById("fetch-progress"), title = document.getElementById("fetch-title"), total = document.getElementById("fetch-total"), detail = document.getElementById("fetch-detail"), bar = document.getElementById("fetch-bar"), pageVersion = fetchProgress.dataset.snapshotVersion, appliedDays = days.value;
+  let navigating = false, pendingRefresh = false, checking = false, eventStream = null, connectedProgressUrl = "", serverVersionChanged = false, collectionFailed = false, transportFailed = false, rangeRequest = null, rangeRequestDays = "", rangeSequence = 0, viewRevision = 0;
+  const apply = () => document.body.classList.toggle("hide-green", hg.checked);
+  hg.checked = sessionStorage.getItem(KEY) === "1";
+  apply();
+  hg.addEventListener("change", () => {
+    sessionStorage.setItem(KEY, hg.checked ? "1" : "0");
+    apply();
+  });
+  const syncDayLinks = () => {
+    for (const link of document.querySelectorAll('a[href^="/bench?"]')) {
+      const target = new URL(link.href);
+      target.searchParams.set("days", days.value);
+      link.href = target.pathname + "?" + target.searchParams.toString();
+    }
+  };
+  days.addEventListener("input", () => {
+    daysv.value = days.value + (days.value === "1" ? " day" : " days");
+    syncDayLinks();
+  });
+  const applyDays = () => {
+    if (days.value !== appliedDays) {
+      if (!rangeRequest || rangeRequestDays !== days.value) void loadRange("push");
+    } else if (rangeRequest && rangeRequestDays !== days.value) {
+      void loadRange("restore");
+    } else if (pendingRefresh && !rangeRequest) {
+      pendingRefresh = false;
+      void loadRange("refresh");
+    }
+  };
+  days.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyDays();
+    }
+  });
+  days.addEventListener("change", applyDays);
+  const isSameTabLink = (event, link) =>
+    link.target !== "_blank" && event.button === 0 && !event.metaKey &&
+    !event.ctrlKey && !event.shiftKey && !event.altKey;
+  const isSameDocumentFragment = (link) => {
+    const url = new URL(link.href);
+    return url.origin === location.origin &&
+      url.pathname === location.pathname &&
+      url.search === location.search &&
+      url.hash !== "";
+  };
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest?.("a[href]");
+    if (
+      link && isSameTabLink(event, link) && !isSameDocumentFragment(link)
+    ) navigating = true;
+  }, true);
+  controls.addEventListener("submit", () => navigating = true);
+  window.addEventListener("pagehide", () => {
+    navigating = true;
+    rangeRequest?.abort();
+    eventStream?.close();
+  });
+  const renderIdle = (lastRequestError = fetchProgress.dataset.lastRequestError || "") => {
+    collectionFailed = Boolean(lastRequestError);
+    transportFailed = false;
+    if (lastRequestError) {
+      fetchProgress.dataset.lastRequestError = lastRequestError;
+    } else delete fetchProgress.dataset.lastRequestError;
+    fetchProgress.classList.toggle("error", collectionFailed);
+    title.textContent = "Idle";
+    total.textContent = "0 outstanding";
+    bar.max = 1;
+    bar.value = 0;
+    detail.textContent = lastRequestError
+      ? "Last collection stopped: " + lastRequestError
+      : "No requests in progress.";
+  };
+  const refreshRangeWhenIdle = () => {
+    if (navigating) return;
+    if (
+      days.value !== appliedDays || rangeContent.contains(document.activeElement) ||
+      rangeRequest
+    ) {
+      pendingRefresh = true;
+      return;
+    }
+    void loadRange("refresh");
+  };
+  document.addEventListener("focusout", () => {
+    requestAnimationFrame(() => {
+      if (
+        pendingRefresh && !navigating && !rangeRequest &&
+        !rangeContent.contains(document.activeElement)
+      ) {
+        pendingRefresh = false;
+        refreshRangeWhenIdle();
+      }
+    });
+  });
+  const renderProgress = (state) => {
+    collectionFailed = state.phase === "error";
+    transportFailed = false;
+    fetchProgress.classList.remove("error");
+    if (collectionFailed) {
+      fetchProgress.dataset.lastRequestError = state.error || "unknown error";
+    } else delete fetchProgress.dataset.lastRequestError;
+    if (state.phase === "discovering") {
+      title.textContent = "Finding benchmark runs…";
+      total.textContent = "starting";
+      bar.removeAttribute("value");
+    } else {
+      title.textContent = state.phase === "saving"
+        ? "Saving completed responses…"
+        : state.completedRuns + " of " + state.totalRuns + " artifact checks complete";
+      total.textContent = state.completedRuns + " / " + state.totalRuns;
+      bar.max = Math.max(1, state.totalRuns);
+      bar.value = state.completedRuns;
+    }
+    detail.textContent = state.cachedRuns + " cached · " +
+      state.requestsMade + " artifact checks made · " +
+      state.responsesReceived + " responded · " +
+      state.outstandingRequests + " outstanding · " +
+      state.queuedRuns + " queued" +
+      (state.failedResponses ? " · " + state.failedResponses + " failed" : "");
+    if (state.phase === "error") {
+      fetchProgress.classList.add("error");
+      title.textContent = "Idle";
+      total.textContent = "0 outstanding";
+      bar.max = 1;
+      bar.value = 0;
+      detail.textContent = "Last collection stopped: " +
+        fetchProgress.dataset.lastRequestError;
+      eventStream?.close();
+      eventStream = null;
+      connectedProgressUrl = "";
+    } else if (state.phase === "complete") {
+      eventStream?.close();
+      eventStream = null;
+      connectedProgressUrl = "";
+      if (state.needsReload || serverVersionChanged || fetchProgress.dataset.refreshOnComplete === "1") refreshRangeWhenIdle();
+      else renderIdle();
+    }
+  };
+  const connectProgress = (url) => {
+    if (!url || connectedProgressUrl === url) return;
+    eventStream?.close();
+    connectedProgressUrl = url;
+    const stream = new EventSource(url);
+    eventStream = stream;
+    stream.addEventListener("progress", (event) => {
+      if (eventStream !== stream) return;
+      try {
+        renderProgress(JSON.parse(event.data));
+      } catch {
+        stream.close();
+        eventStream = null;
+        connectedProgressUrl = "";
+        transportFailed = true;
+        fetchProgress.classList.add("error");
+        title.textContent = "Could not read collection progress";
+      }
+    });
+    stream.onerror = () => {
+      if (eventStream !== stream) return;
+      stream.close();
+      eventStream = null;
+      connectedProgressUrl = "";
+      transportFailed = true;
+      fetchProgress.classList.add("error");
+      title.textContent = "Progress connection closed; collection continues on the server";
+    };
+  };
+  const checkForUpdates = async () => {
+    if (checking || navigating || document.visibilityState === "hidden") return;
+    checking = true;
+    const revision = viewRevision;
+    try {
+      const response = await fetch(fetchProgress.dataset.checkUrl, { headers: { accept: "application/json" } });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const state = await response.json();
+      if (revision !== viewRevision) return;
+      serverVersionChanged ||= state.version !== pageVersion;
+      if (state.progress) {
+        connectProgress("/bench/runtime-progress?id=" + encodeURIComponent(state.progress.id));
+        renderProgress(state.progress);
+      } else if (serverVersionChanged) refreshRangeWhenIdle();
+      else if ("lastRequestError" in state) renderIdle(state.lastRequestError || "");
+      else if (!collectionFailed) renderIdle();
+    } catch {
+      if (!eventStream && !collectionFailed && !transportFailed) renderIdle();
+    } finally {
+      checking = false;
+    }
+  };
+  const bindRangeContent = () => {
+    viewRevision++;
+    fetchProgress = rangeContent.querySelector("#fetch-progress");
+    title = rangeContent.querySelector("#fetch-title");
+    total = rangeContent.querySelector("#fetch-total");
+    detail = rangeContent.querySelector("#fetch-detail");
+    bar = rangeContent.querySelector("#fetch-bar");
+    pageVersion = fetchProgress.dataset.snapshotVersion;
+    document.body.dataset.snapshotVersion = pageVersion;
+    serverVersionChanged = false;
+    collectionFailed = false;
+    transportFailed = false;
+    connectedProgressUrl = "";
+    if (fetchProgress.dataset.progressUrl) connectProgress(fetchProgress.dataset.progressUrl);
+    else renderIdle();
+  };
+  const showRangeLoading = (requestedDays) => {
+    rangeContent.setAttribute("aria-busy", "true");
+    fetchProgress.classList.remove("error");
+    title.textContent = "Loading " + requestedDays + "-day view…";
+    total.textContent = "updating";
+    bar.removeAttribute("value");
+    detail.textContent = "Reading cached history and checking for new benchmark data.";
+  };
+  const loadRange = async (mode) => {
+    if (navigating) return;
+    if (rangeRequest) {
+      if (mode === "refresh") {
+        pendingRefresh = true;
+        return;
+      }
+      rangeRequest.abort();
+    }
+    const requestedDays = days.value;
+    const url = new URL(location.href);
+    url.searchParams.set("days", requestedDays);
+    const sequence = ++rangeSequence;
+    const controller = new AbortController();
+    rangeRequest = controller;
+    rangeRequestDays = requestedDays;
+    let loaded = false;
+    showRangeLoading(requestedDays);
+    try {
+      const requestUrl = new URL(url);
+      requestUrl.searchParams.set("fragment", "range");
+      const response = await fetch(requestUrl.pathname + requestUrl.search, {
+        cache: "no-store",
+        headers: { accept: "text/html" },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const page = new DOMParser().parseFromString(await response.text(), "text/html");
+      const replacement = page.getElementById("range-content");
+      if (!replacement) throw new Error("Range content was missing from the response.");
+      if (sequence !== rangeSequence || navigating) return;
+      eventStream?.close();
+      eventStream = null;
+      connectedProgressUrl = "";
+      rangeContent.replaceWith(replacement);
+      rangeContent = replacement;
+      appliedDays = requestedDays;
+      const target = url.pathname + url.search;
+      if (mode === "push" && target !== location.pathname + location.search) {
+        history.pushState(null, "", target);
+      }
+      bindRangeContent();
+      syncDayLinks();
+      loaded = true;
+    } catch (error) {
+      if (controller.signal.aborted || sequence !== rangeSequence) return;
+      pendingRefresh = false;
+      rangeContent.removeAttribute("aria-busy");
+      fetchProgress.classList.add("error");
+      title.textContent = "Could not update the history window";
+      total.textContent = "0 outstanding";
+      bar.max = 1;
+      bar.value = 0;
+      detail.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (sequence === rangeSequence) {
+        rangeRequest = null;
+        rangeRequestDays = "";
+        if (loaded && pendingRefresh) {
+          pendingRefresh = false;
+          refreshRangeWhenIdle();
+        }
+      }
+    }
+  };
+  const daysFromLocation = () => {
+    const parameter = new URL(location.href).searchParams.get("days");
+    if (parameter === null || parameter.trim() === "") return DEFAULT_DAYS;
+    const value = Number(parameter);
+    if (!Number.isFinite(value)) return DEFAULT_DAYS;
+    return String(Math.max(Number(days.min), Math.min(Number(days.max), Math.floor(value))));
+  };
+  window.addEventListener("popstate", () => {
+    days.value = daysFromLocation();
+    daysv.value = days.value + (days.value === "1" ? " day" : " days");
+    syncDayLinks();
+    void loadRange("pop");
+  });
+  bindRangeContent();
+  setInterval(checkForUpdates, ${PERFORMANCE_CHECK_MS});
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void checkForUpdates();
+  });
+</script>
+</body></html>`;
+}

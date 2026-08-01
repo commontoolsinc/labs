@@ -74,6 +74,10 @@ export const EnvSchema = z.object({
   // traceidratio, parentbased_always_on, parentbased_always_off,
   // parentbased_traceidratio. OTEL_TRACES_SAMPLER_ARG is the ratio for the
   // *ratio variants. Defaults (always_on / 1.0) keep 100% sampling.
+  // Trace-based distinct counts depend on full sampling: the active identity
+  // count reads the user.did attribute on the memory spans, and a ratio sampler
+  // drops identities from that count instead of thinning it proportionally.
+  // See docs/development/active-user-counting.md.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
   // ===========================================================================
@@ -260,6 +264,9 @@ export const EnvSchema = z.object({
   // Git SHA of the deployed commit. Set at deploy time; takes priority over
   // the build-baked SHA (see lib/build-info.ts).
   TOOLSHED_GIT_SHA: z.string().optional(),
+  // Source-run build metadata fallback for /api/meta, mirroring the gitSha a
+  // compiled binary reads from its baked COMPILED file.
+  COMMIT_SHA: z.string().optional(),
 
   // ===========================================================================
   // Sandbox Service

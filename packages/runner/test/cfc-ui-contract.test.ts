@@ -1,11 +1,11 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ID } from "../src/builder/types.ts";
 import {
   markRendererTrustedEvent,
   recordTrustedEventPolicyInputs,
@@ -206,6 +206,74 @@ describe("CFC UI contract matching", () => {
         contract,
       ),
     ).toBe(true);
+  });
+
+  it("collects contracts declared in tuple (prefixItems) slots at their index", () => {
+    // CT-1895: contracts in tuple element schemas were never collected, so
+    // a declared UI contract on a slot went unenforced.
+    const contracts = uiContractsFromSchema({
+      type: "array",
+      prefixItems: [
+        { type: "number" },
+        trustedPatternUiActionSchema,
+      ],
+    });
+
+    expect(contracts).toEqual([{
+      path: ["1"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
+  });
+
+  it("keeps the items wildcard entry beside prefixItems", () => {
+    // PR #4969 review: dropping the `*` entry silently dropped the tail
+    // elements' declared contract (fail-open). The `*` stays — it
+    // over-enforces the rest contract on tuple slots, the fail-safe
+    // direction.
+    const contracts = uiContractsFromSchema({
+      type: "array",
+      prefixItems: [{ type: "number" }],
+      items: trustedPatternUiActionSchema,
+    });
+
+    expect(contracts).toEqual([{
+      path: ["*"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
+  });
+
+  it("does not fall back to $defs contracts for unknown-typed tuples", () => {
+    // PR #4969 review: the $defs fallback's no-children guard did not count
+    // prefixItems, so an unknown-typed tuple with one contract-bearing
+    // definition minted that contract at the array's own path — enforced
+    // for every array write instead of just the referencing slot.
+    const contracts = uiContractsFromSchema({
+      type: "unknown",
+      prefixItems: [
+        { $ref: "#/$defs/Action" },
+        { type: "number" },
+      ],
+      $defs: {
+        Action: trustedPatternUiActionSchema,
+      },
+    } as never);
+
+    // Only the referencing slot mints, at its concrete index — no
+    // root-path entry.
+    expect(contracts.map((entry) => entry.path)).toEqual([["0"]]);
+    expect((contracts[0].contract as { action?: string }).action).toBe(
+      "SubmitDirectCommand",
+    );
   });
 
   it("keeps sibling ifc metadata when resolving local $refs", () => {
@@ -564,7 +632,7 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
-  // The one deliberate `data:application/json` example: an event delivered as a
+  // The one deliberate `data:` cell URI example: an event delivered as a
   // sigil link to a data-URI envelope is the exceptional shape we verify is still
   // decoded and handled. Other event-context tests use the plain in-memory
   // envelope so they don't imply the input is always a data-URI link.
@@ -616,11 +684,7 @@ describe("CFC trusted UI event enforcement", () => {
     const eventEnvelopeLink = {
       "/": {
         [LINK_V1_TAG]: {
-          id: `data:application/json,${
-            encodeURIComponent(JSON.stringify({
-              value: { $event: rawTrustedEvent },
-            }))
-          }`,
+          id: dataUriFromValue({ $event: rawTrustedEvent }),
           path: ["$event"],
           space,
         },
@@ -1489,7 +1553,6 @@ describe("CFC trusted UI event enforcement", () => {
           bindingPath: ["commitTrustedMessageSend"],
         });
         messages.withTx(tx).push({
-          [ID]: "trusted-sent-1",
           origin: "sent",
           body: "accepted",
         } as any);
@@ -1504,7 +1567,6 @@ describe("CFC trusted UI event enforcement", () => {
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         messages.withTx(tx).push({
-          [ID]: "fake-sent-1",
           origin: "sent",
           body: "rejected",
         } as any);
@@ -1519,7 +1581,6 @@ describe("CFC trusted UI event enforcement", () => {
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         messages.withTx(tx).push({
-          [ID]: "imported-1",
           origin: "imported",
           body: "allowed",
         } as any);
@@ -1711,7 +1772,6 @@ describe("CFC trusted UI event enforcement", () => {
           bindingPath: ["commitTrustedMessageSend"],
         });
         state.withTx(tx).key("messages").push({
-          [ID]: "trusted-sent-1",
           origin: "sent",
           body: "accepted",
         } as any);
@@ -1726,7 +1786,6 @@ describe("CFC trusted UI event enforcement", () => {
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         state.withTx(tx).key("messages").push({
-          [ID]: "fake-sent-1",
           origin: "sent",
           body: "rejected",
         } as any);
@@ -1741,7 +1800,6 @@ describe("CFC trusted UI event enforcement", () => {
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         state.withTx(tx).key("messages").push({
-          [ID]: "imported-1",
           origin: "imported",
           body: "allowed",
         } as any);

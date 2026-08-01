@@ -7,7 +7,11 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricPlainObject,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -44,18 +48,18 @@ export type ValueSchemaPathSelector =
  * future use and carried as opaque payload (a document is validated merely as
  * "an object" — see {@link isEntityDocument}).
  */
-export interface EntityDocument {
+export type EntityDocument = {
   value?: FabricValue;
   source?: EntityRef;
   [key: string]: FabricValue;
-}
+};
 
-export interface Blob {
+export type Blob = {
   hash: Reference;
   value: Uint8Array;
   contentType: string;
   size: number;
-}
+};
 
 export type PatchOp =
   | { op: "replace"; path: string; value: FabricValue }
@@ -105,25 +109,25 @@ export type PatchOp =
 // over-conflicts a parent shape reader conservatively (an extra retry), never
 // missing one. See docs/specs/memory-v2/08-conflict-granularity.md.
 
-export interface SetOperation {
+export type SetOperation = {
   op: "set";
   id: EntityId;
   scope?: CellScope;
   value: EntityDocument;
-}
+};
 
-export interface PatchOperation {
+export type PatchOperation = {
   op: "patch";
   id: EntityId;
   scope?: CellScope;
   patches: PatchOp[];
-}
+};
 
-export interface DeleteOperation {
+export type DeleteOperation = {
   op: "delete";
   id: EntityId;
   scope?: CellScope;
-}
+};
 
 /**
  * A SQLite write folded into the commit, applied inside the same transaction as
@@ -131,12 +135,12 @@ export interface DeleteOperation {
  * enters the revision/head/snapshot/dirty machinery (see SqliteDbRef below /
  * docs/specs/sqlite-builtin/plans/atomic-writes.md).
  */
-export interface SqliteOperation {
+export type SqliteOperation = {
   op: "sqlite";
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
-}
+};
 
 export type Operation =
   | SetOperation
@@ -144,7 +148,7 @@ export type Operation =
   | DeleteOperation
   | SqliteOperation;
 
-export interface ConfirmedRead {
+export type ConfirmedRead = {
   id: EntityId;
   scope?: CellScope;
   branch?: BranchName;
@@ -160,25 +164,60 @@ export interface ConfirmedRead {
    * recursive read (the historical behavior).
    */
   nonRecursive?: boolean;
-}
+};
 
-export interface PendingRead {
+export type PendingRead = {
   id: EntityId;
   scope?: CellScope;
   path: ReadPath;
-  localSeq: number;
+  /**
+   * The reader's pending-stack dependency set for this document. An array
+   * lists EVERY pending layer the read's materialized view sat on; each
+   * element must have resolved to an accepted commit for this commit to be
+   * applicable, and the staleness (conflict) check runs exactly once, from
+   * the basis the server selects (03-commit-model.md §3.6.3): the declared
+   * `basisSeq` when present, else the resolution of the HIGHEST element —
+   * the document's top-of-stack layer below the reader, which the array
+   * MUST include. A scalar is the degenerate single-layer form (also what
+   * pre-`pendingReadStacks` peers emit: top-of-stack only, carrying no
+   * lower-layer dependencies).
+   */
+  localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's
+   * space-log seq space (an accepted-commit `seq`, NOT the session's
+   * localSeq space): the seq of the last accepted write to this document
+   * that the client's confirmed view reflected at build time, or 0 for a
+   * document its subscriptions never covered.
+   *
+   * When present, the staleness scan covers the FULL interval
+   * `(basisSeq, head]`, excluding only the session's own TRUE PREDECESSOR
+   * commits — those with a localSeq below the reader's, the accepted layers
+   * its materialized view included. An own write with a higher localSeq
+   * accepted first (out-of-order submission) conflicts like a foreign
+   * write, so soundness does not depend on wire-order discipline. This is
+   * the CT-1910 repair
+   * (`PendingStacks_Repaired.cfg` certifies it); when absent (a legacy
+   * client), staleness is based at the HIGHEST dependency's resolution seq,
+   * whose known unsoundness is recorded against INV-1 in
+   * docs/specs/memory-v2/09-invariants.md.
+   */
+  basisSeq?: number;
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
-}
+};
 
-export interface SchedulerObservationCommit {
+export type SchedulerObservationCommit = {
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
   };
-  schedulerObservation: unknown;
-}
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation: FabricValue;
+};
 
 export type CommitPrecondition =
   | {
@@ -199,7 +238,7 @@ export type CommitPrecondition =
     valueHash: string | null;
   };
 
-export interface ClientCommit {
+export type ClientCommit = {
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
@@ -207,7 +246,10 @@ export interface ClientCommit {
   };
   operations: Operation[];
   preconditions?: CommitPrecondition[];
-  schedulerObservation?: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation?: FabricValue;
   schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
@@ -217,22 +259,22 @@ export interface ClientCommit {
     baseBranch: BranchName;
     baseSeq: number;
   };
-}
+};
 
-export interface SessionOpenArgs {
+export type SessionOpenArgs = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
-}
+};
 
-export interface SessionOpenCommand {
+export type SessionOpenCommand = {
   cmd: "session.open";
   id: JobId;
   protocol: typeof MEMORY_PROTOCOL;
   args: SessionOpenArgs;
-}
+};
 
-export interface SessionOpenResult {
+export type SessionOpenResult = {
   sessionId: SessionId;
   sessionToken: SessionToken;
   serverSeq: number;
@@ -240,9 +282,9 @@ export interface SessionOpenResult {
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: SessionOpenAuthMetadata;
-}
+};
 
-export interface MemoryProtocolFlags {
+export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   /** Optional server-primary-execution-v1 control/feed protocol. */
@@ -299,7 +341,25 @@ export interface MemoryProtocolFlags {
    * (not configuration), so a server of this version always advertises it.
    */
   sqliteCommitRowLabelEval: boolean;
-}
+  /**
+   * Server capability (CT-1872 1c): pending reads may carry an ARRAY
+   * `localSeq` naming every pending layer the read sat on (resolution
+   * required for each element; staleness based at the highest — see
+   * `PendingRead.localSeq`). A client that sees this absent (an older
+   * server) falls back to scalar top-of-stack emission, and MUST hold each
+   * such send until every omitted lower dependency has settled — otherwise
+   * the old server could durably accept a commit the client cascade-rejects
+   * (03-commit-model.md §3.5). Inherent to the build, so a server of this
+   * version always advertises it.
+   */
+  pendingReadStacks: boolean;
+  /** The server can list live space-scoped entity identifiers without values. */
+  entityIdListing: boolean;
+  /** The server can page one stable entity-identifier snapshot. */
+  entityIdPagination: boolean;
+  /** The server can test one entity identifier without loading its value. */
+  entityIdLookup: boolean;
+};
 
 /**
  * Wire-format flags object.
@@ -318,61 +378,65 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
+  pendingReadStacks?: boolean;
+  entityIdListing?: boolean;
+  entityIdPagination?: boolean;
+  entityIdLookup?: boolean;
 };
 
-export interface HelloMessage {
+export type HelloMessage = {
   type: "hello";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
-}
+};
 
-export interface HelloOkMessage {
+export type HelloOkMessage = {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
   sessionOpen?: SessionOpenAuthMetadata;
-}
+};
 
-export interface SessionOpenChallenge {
+export type SessionOpenChallenge = {
   value: string;
   expiresAt: number;
-}
+};
 
-export interface SessionOpenAuthMetadata {
+export type SessionOpenAuthMetadata = {
   challenge: SessionOpenChallenge;
   audience: string;
-}
+};
 
-export interface SessionDescriptor {
+export type SessionDescriptor = {
   sessionId?: SessionId;
   seenSeq?: number;
   executionFeedSeq?: number;
   sessionToken?: SessionToken;
-}
+};
 
-export interface SessionOpenRequest {
+export type SessionOpenRequest = {
   type: "session.open";
   requestId: string;
   space: string;
   session: SessionDescriptor;
   invocation?: Record<string, unknown>;
   authorization?: FabricValue;
-}
+};
 
-export interface GraphQueryRoot {
+export type GraphQueryRoot = {
   id: EntityId;
   scope?: CellScope;
   selector: SchemaPathSelector;
-}
+};
 
-export interface GraphQuery {
+export type GraphQuery = {
   roots: GraphQueryRoot[];
   atSeq?: number;
   branch?: BranchName;
   excludeSent?: boolean;
-}
+};
 
-export interface EntitySnapshot {
+export type EntitySnapshot = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
@@ -382,24 +446,44 @@ export interface EntitySnapshot {
   scopeKey?: string;
   seq: number;
   document: EntityDocument | null;
-}
+};
 
-export interface GraphQueryResult {
+export type GraphQueryResult = {
   serverSeq: number;
   entities: EntitySnapshot[];
-}
+};
 
-export interface QueryWatchSpec {
+export type EntityIdListResult = {
+  serverSeq: number;
+  ids: EntityId[];
+  nextAfter?: EntityId;
+};
+
+/** Maximum number of entity identifiers carried by one protocol response. */
+export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
+
+export type EntityIdListOptions = {
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupResult = {
+  serverSeq: number;
+  exists: boolean;
+};
+
+export type QueryWatchSpec = {
   id: string;
   kind: "query";
   query: GraphQuery;
-}
+};
 
-export interface GraphWatchSpec {
+export type GraphWatchSpec = {
   id: string;
   kind: "graph";
   query: GraphQuery;
-}
+};
 
 /**
  * F3 doc-set watch kind (feed protocol): a session subscribes to an EXACT set
@@ -415,17 +499,17 @@ export interface GraphWatchSpec {
  * roots. A resolved `scopeKey` on a wire address is a protocol error (the wire
  * never carries resolved keys inbound).
  */
-export interface DocSetWatchSpec {
+export type DocSetWatchSpec = {
   id: string;
   kind: "docs";
   branch?: BranchName;
   /** Declared-address members (id + declared scope). No resolved scope key. */
   docs: DocReadAddress[];
-}
+};
 
 export type WatchSpec = QueryWatchSpec | GraphWatchSpec | DocSetWatchSpec;
 
-export interface ActionClaimKey {
+export type ActionClaimKey = {
   branch: BranchName;
   space: string;
   contextKey: SchedulerExecutionContextKey;
@@ -434,7 +518,7 @@ export interface ActionClaimKey {
   actionKind: "computation" | "effect" | "event-handler";
   implementationFingerprint: string;
   runtimeFingerprint: string;
-}
+};
 
 /** Canonical field projection shared by protocol, host, and runner maps. */
 export const canonicalActionClaimKey = (
@@ -454,7 +538,7 @@ export const canonicalActionClaimKey = (
 export const actionClaimMapKey = (claim: ActionClaimKey): string =>
   encodeMemoryBoundary(canonicalActionClaimKey(claim));
 
-export interface ExecutionClaim extends ActionClaimKey {
+export type ExecutionClaim = ActionClaimKey & {
   leaseGeneration: number;
   claimGeneration: number;
   /** Unix milliseconds assigned by the host clock. */
@@ -473,7 +557,7 @@ export interface ExecutionClaim extends ActionClaimKey {
    * keeps the claim identical to a pre-C3.6 one.
    */
   crossSpaceReadSpaces?: readonly string[];
-}
+};
 
 /** Unambiguous key for one exact lease + action claim incarnation. */
 export const executionClaimIncarnationKey = (
@@ -491,18 +575,18 @@ export const executionClaimIncarnationKey = (
  * executor session, checked against live control state, and stripped before
  * scheduler observations are persisted. It is not provenance by itself.
  */
-export interface ExecutionClaimAssertion {
+export type ExecutionClaimAssertion = {
   contextKey: SchedulerExecutionContextKey;
   leaseGeneration: number;
   claimGeneration: number;
-}
+};
 
 /**
  * Durable, single-owner authority for one server executor generation. The
  * record lives in the owning space database and is fenced by `branch` plus the
  * monotonically increasing `leaseGeneration`.
  */
-export interface ExecutionLease {
+export type ExecutionLease = {
   version: 1;
   space: string;
   branch: BranchName;
@@ -512,13 +596,13 @@ export interface ExecutionLease {
   state: "active" | "draining" | "revoked";
   /** Unix milliseconds assigned from the host-provided server clock. */
   expiresAt: number;
-}
+};
 
 /**
  * Durable reservation for the legacy Background Piece Service. While live it
  * excludes client-sponsored execution leases for the same space/branch.
  */
-export interface LegacyBackgroundExclusion {
+export type LegacyBackgroundExclusion = {
   version: 1;
   space: string;
   branch: BranchName;
@@ -527,9 +611,9 @@ export interface LegacyBackgroundExclusion {
   servicePrincipal: string;
   /** Unix milliseconds assigned from the server clock. */
   expiresAt: number;
-}
+};
 
-export interface LegacyBackgroundExclusionStatus {
+export type LegacyBackgroundExclusionStatus = {
   exclusion: LegacyBackgroundExclusion;
   /** Server wall clock sampled with the authority transaction. */
   serverTime?: number;
@@ -537,7 +621,7 @@ export interface LegacyBackgroundExclusionStatus {
   ready: boolean;
   /** Deadline of the draining client lease when `ready` is false. */
   blockedUntil?: number;
-}
+};
 
 declare const inputBasisSeqBrand: unique symbol;
 declare const acceptedCommitSeqBrand: unique symbol;
@@ -578,10 +662,10 @@ export const toAcceptedCommitSeq = (value: number): AcceptedCommitSeq => {
  * present-but-older component never covers. Merges therefore UNION components
  * and take the per-component maximum ({@link mergeInputBasisVectors}).
  */
-export interface InputBasisComponent {
+export type InputBasisComponent = {
   space: string;
   seq: InputBasisSeq;
-}
+};
 
 /**
  * C3.5: a provenance basis component — the settlement component plus the
@@ -594,9 +678,9 @@ export interface InputBasisComponent {
  * and `epoch` the MINIMUM stamped epoch, so C3.8's equality check fails if
  * ANY consumed read predates an authorization change.
  */
-export interface ProvenanceInputBasisComponent extends InputBasisComponent {
+export type ProvenanceInputBasisComponent = InputBasisComponent & {
   authorizationEpoch?: { principal: string; epoch: number };
-}
+};
 
 /**
  * Host-authored metadata for one accepted server action transaction.
@@ -614,7 +698,7 @@ export interface ProvenanceInputBasisComponent extends InputBasisComponent {
  * values — a Worker/client-supplied component is stripped exactly like the
  * asserted scalar.
  */
-export interface ActionExecutionProvenance {
+export type ActionExecutionProvenance = {
   claim: ActionClaimKey;
   onBehalfOf: string;
   leaseGeneration: number;
@@ -622,14 +706,14 @@ export interface ActionExecutionProvenance {
   causedBy: number[];
   inputBasisSeq: InputBasisSeq;
   inputBasis?: readonly ProvenanceInputBasisComponent[];
-}
+};
 
-export interface ExecutionClaimSetEvent {
+export type ExecutionClaimSetEvent = {
   type: "session.execution.claim.set";
   claim: ExecutionClaim;
-}
+};
 
-export interface ExecutionClaimRevokeEvent {
+export type ExecutionClaimRevokeEvent = {
   type: "session.execution.claim.revoke";
   branch: BranchName;
   claim: ActionClaimKey;
@@ -645,7 +729,7 @@ export interface ExecutionClaimRevokeEvent {
    * marker is present only for cross-space-read claims.
    */
   crossSpaceReadSpaces?: readonly string[];
-}
+};
 
 export type ActionSettlement =
   | {
@@ -672,10 +756,10 @@ export type ActionSettlement =
     diagnosticCode?: string;
   };
 
-export interface ExecutionSettlementEvent {
+export type ExecutionSettlementEvent = {
   type: "session.execution.settlement";
   settlement: ActionSettlement;
-}
+};
 
 /**
  * The one-shot COMMAND on an otherwise state-reconciling feed: the client half
@@ -708,7 +792,7 @@ export interface ExecutionSettlementEvent {
  * `false` reading is the "already navigated" guard), so a second event for the
  * same target lands on an already-navigated session.
  */
-export interface ExecutionNavigateEvent {
+export type ExecutionNavigateEvent = {
   type: "session.execution.navigate";
   /**
    * The navigateTo action's claim. Canonical key only — this is an addressing
@@ -730,7 +814,7 @@ export interface ExecutionNavigateEvent {
     path: readonly string[];
     scope?: CellScope;
   };
-}
+};
 
 export type ExecutionControlEvent =
   | ExecutionClaimSetEvent
@@ -738,7 +822,7 @@ export type ExecutionControlEvent =
   | ExecutionSettlementEvent
   | ExecutionNavigateEvent;
 
-export interface ExecutionClaimSnapshot {
+export type ExecutionClaimSnapshot = {
   claims: ExecutionClaim[];
   /**
    * Successful settlement summaries newer than the reconnect cursor. The
@@ -746,7 +830,7 @@ export interface ExecutionClaimSnapshot {
    * retention cannot strand speculative overlays.
    */
   settlementFrontiers?: ExecutionSettlementFrontier[];
-}
+};
 
 /**
  * Reconnect-only causal summary of successful settlements for one exact live
@@ -755,7 +839,7 @@ export interface ExecutionClaimSnapshot {
  * contributing to the summary. `throughFeedSeq` is the newest summarized
  * successful control event.
  */
-export interface ExecutionSettlementFrontier {
+export type ExecutionSettlementFrontier = {
   branch: BranchName;
   claim: ExecutionClaim;
   inputBasisSeq: InputBasisSeq;
@@ -765,7 +849,7 @@ export interface ExecutionSettlementFrontier {
   inputBasis?: readonly InputBasisComponent[];
   throughFeedSeq: number;
   requiredAcceptedCommitSeq?: AcceptedCommitSeq;
-}
+};
 
 export const actionSettlementFromFrontier = (
   frontier: ExecutionSettlementFrontier,
@@ -829,14 +913,14 @@ export const inputBasisComponentForSpace = (
 ): InputBasisComponent | undefined =>
   basis?.find((component) => component.space === space);
 
-export interface ExecutionFeedBatch {
+export type ExecutionFeedBatch = {
   fromFeedSeq: number;
   toFeedSeq: number;
   snapshot?: ExecutionClaimSnapshot;
   events: ExecutionControlEvent[];
-}
+};
 
-export interface SessionSyncUpsert {
+export type SessionSyncUpsert = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
@@ -846,9 +930,9 @@ export interface SessionSyncUpsert {
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
-}
+};
 
-export interface SessionSyncRemove {
+export type SessionSyncRemove = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
@@ -856,9 +940,9 @@ export interface SessionSyncRemove {
    * address the same per-lane instance identity the upserts established —
    * a declared-scope remove must not evict another lane's instance. */
   scopeKey?: string;
-}
+};
 
-export interface SessionSync {
+export type SessionSync = {
   type: "sync";
   fromSeq: number;
   toSeq: number;
@@ -877,76 +961,76 @@ export interface SessionSync {
   /** Ordered reconnectable server-execution control/data envelope. A
    * control-only batch leaves fromSeq/toSeq unchanged. */
   execution?: ExecutionFeedBatch;
-}
+};
 
-export interface WatchSetResult {
+export type WatchSetResult = {
   serverSeq: number;
   sync: SessionSync;
-}
+};
 
-export interface WatchAddResult {
+export type WatchAddResult = {
   serverSeq: number;
   sync: SessionSync;
-}
+};
 
-export interface SessionAckResult {
+export type SessionAckResult = {
   serverSeq: number;
-}
+};
 
 /** Coarse v1 client-read demand. It is owned by the authenticated connection;
  * callers name only the branch and piece roots, never principal/connection or
  * sponsor authority. */
-export interface ExecutionDemandSetRequest {
+export type ExecutionDemandSetRequest = {
   type: "session.execution.demand.set";
   requestId: string;
   space: string;
   sessionId: SessionId;
   branch: BranchName;
   pieces: string[];
-}
+};
 
-export interface ExecutionDemandSetResult {
+export type ExecutionDemandSetResult = {
   serverSeq: number;
   references: number;
-}
+};
 
-export interface LegacyBackgroundExclusionAcquireRequest {
+export type LegacyBackgroundExclusionAcquireRequest = {
   type: "session.execution.legacy-background.acquire";
   requestId: string;
   space: string;
   sessionId: SessionId;
   branch: BranchName;
-}
+};
 
-export interface LegacyBackgroundExclusionRenewRequest {
+export type LegacyBackgroundExclusionRenewRequest = {
   type: "session.execution.legacy-background.renew";
   requestId: string;
   space: string;
   sessionId: SessionId;
   branch: BranchName;
   exclusionGeneration: number;
-}
+};
 
-export interface LegacyBackgroundExclusionReleaseRequest {
+export type LegacyBackgroundExclusionReleaseRequest = {
   type: "session.execution.legacy-background.release";
   requestId: string;
   space: string;
   sessionId: SessionId;
   branch: BranchName;
   exclusionGeneration: number;
-}
+};
 
-export interface LegacyBackgroundExclusionStatusResult {
+export type LegacyBackgroundExclusionStatusResult = {
   serverSeq: number;
   status: LegacyBackgroundExclusionStatus | null;
-}
+};
 
-export interface LegacyBackgroundExclusionReleaseResult {
+export type LegacyBackgroundExclusionReleaseResult = {
   serverSeq: number;
   released: LegacyBackgroundExclusion | null;
-}
+};
 
-export interface TransactRequest {
+export type TransactRequest = {
   type: "transact";
   requestId: string;
   space: string;
@@ -971,7 +1055,7 @@ export interface TransactRequest {
    * Space-lane commits omit it and stay byte-identical.
    */
   actingContext?: SchedulerExecutionContextKey;
-}
+};
 
 /** F2/FA5 (FB12) trigger attribution for graph.query accounting: `"wave"` =
  * a refresh forced by an accepted-commit wave (rehydrate/wake — closure
@@ -983,7 +1067,7 @@ export interface TransactRequest {
  * attribute. */
 export type GraphQueryTrigger = "wave" | "demand";
 
-export interface GraphQueryRequest {
+export type GraphQueryRequest = {
   type: "graph.query";
   requestId: string;
   space: string;
@@ -1015,31 +1099,49 @@ export interface GraphQueryRequest {
    * undelivered doc would be omitted forever. */
   omitWatchCovered?: boolean;
   query: GraphQuery;
-}
+};
+
+export type EntityIdListRequest = {
+  type: "entity-id.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupRequest = {
+  type: "entity-id.exists";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  id: EntityId;
+};
 
 /** Address of one exact document for a point read: declared scope only —
  * resolution to a scope key happens server-side under the request's acting
  * context, exactly like graph-query roots. */
-export interface DocReadAddress {
+export type DocReadAddress = {
   id: EntityId;
   scope?: CellScope;
-}
+};
 
 /** F2 point-read batch: exact engine reads with NO schema/link traversal.
  * `atSeq` evaluates every doc at one sequence bound so a coalesced
  * accepted-commit wave reads from a single snapshot; absent means head. */
-export interface DocsReadQuery {
+export type DocsReadQuery = {
   docs: DocReadAddress[];
   atSeq?: number;
   branch?: BranchName;
-}
+};
 
-export interface DocsReadResult {
+export type DocsReadResult = {
   serverSeq: number;
   /** One snapshot per addressed doc that has a stored revision (deleted docs
    * appear with `document: null`); never-written docs are omitted. */
   entities: EntitySnapshot[];
-}
+};
 
 /**
  * C3.4: the claimed attempt an executor FOREIGN point read acts under —
@@ -1050,7 +1152,7 @@ export interface DocsReadResult {
  * absent: the host derives them from the channel's lease binding, so a
  * frame cannot point the liveness consult at another lane's claim.
  */
-export interface DocsReadExecutionClaimRef {
+export type DocsReadExecutionClaimRef = {
   contextKey: SchedulerExecutionContextKey;
   pieceId: string;
   actionId: string;
@@ -1059,12 +1161,12 @@ export interface DocsReadExecutionClaimRef {
   runtimeFingerprint: string;
   leaseGeneration: number;
   claimGeneration: number;
-}
+};
 
 /** F2 executor-feed point reads (FA5): the replica-maintenance read that
  * replaces per-wave graph re-traversal for docs the reader already holds.
  * Carries the C1.4b `actingContext` seam from day one (FA6). */
-export interface DocsReadRequest {
+export type DocsReadRequest = {
   type: "docs.read";
   requestId: string;
   space: string;
@@ -1075,12 +1177,14 @@ export interface DocsReadRequest {
    * {@link DocsReadExecutionClaimRef}. */
   executionClaim?: DocsReadExecutionClaimRef;
   query: DocsReadQuery;
-}
+};
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 /** Wire form of SQLite bind parameters. */
-export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+export type SqliteParamsWire =
+  | ReadonlyArray<FabricValue>
+  | Record<string, FabricValue>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
  *  entity id) plus the declared table schemas (for additive create/migrate).
@@ -1089,17 +1193,17 @@ export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
  *  server folds it (with the request's principal / session id) into the on-disk
  *  filename so a `user`/`session`-scoped db gets a per-user / per-session file;
  *  `space` (or absent) keeps the original unqualified name. */
-export interface SqliteDbRef {
+export type SqliteDbRef = {
   id: string;
-  tables?: Record<string, unknown>;
+  tables?: Record<string, FabricValue>;
   scope?: CellScope;
   /** The db's owner — the principal that created the SqliteDb cell. Resolves
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
   owner?: string;
-}
+};
 
-export interface SqliteQueryRequest {
+export type SqliteQueryRequest = {
   type: "sqlite.query";
   requestId: string;
   space: string;
@@ -1113,15 +1217,15 @@ export interface SqliteQueryRequest {
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
-}
+};
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
  *  (null for an expression/computed/compound column). */
-export interface SqliteResultColumn {
+export type SqliteResultColumn = {
   output: string;
   table: string | null;
   column: string | null;
-}
+};
 
 /** Whether a column's `ifc` annotation is present and non-empty — the single
  *  predicate for "this column participates in CFC labeling". Shared by the
@@ -1160,15 +1264,15 @@ export function dbNeedsColumnProvenance(
   return false;
 }
 
-export interface SqliteQueryResult {
-  rows: unknown[];
+export type SqliteQueryResult = {
+  rows: FabricPlainObject[];
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
    *  or joined column maps back to its declared `(table, column)`. Undefined
    *  otherwise, so unlabeled queries pay nothing. */
   columns?: SqliteResultColumn[];
-}
+};
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
 // fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
@@ -1180,7 +1284,7 @@ export interface SqliteQueryResult {
  * given file (read-only) for the handle id instead of the cell-derived path. The
  * descriptor is server-side state — it is NOT written into the handle cell value.
  */
-export interface SqliteRegisterDiskSourceRequest {
+export type SqliteRegisterDiskSourceRequest = {
   type: "sqlite.register-disk-source";
   requestId: string;
   space: string;
@@ -1189,13 +1293,13 @@ export interface SqliteRegisterDiskSourceRequest {
   id: string;
   /** Absolute path to the on-disk SQLite file. */
   path: string;
-}
+};
 
-export interface SqliteRegisterDiskSourceResult {
+export type SqliteRegisterDiskSourceResult = {
   registered: true;
-}
+};
 
-export interface WatchSetRequest {
+export type WatchSetRequest = {
   type: "session.watch.set";
   requestId: string;
   space: string;
@@ -1206,9 +1310,9 @@ export interface WatchSetRequest {
    * never send it. */
   actingContext?: SchedulerExecutionContextKey;
   watches: WatchSpec[];
-}
+};
 
-export interface WatchAddRequest {
+export type WatchAddRequest = {
   type: "session.watch.add";
   requestId: string;
   space: string;
@@ -1219,18 +1323,18 @@ export interface WatchAddRequest {
    * never send it. */
   actingContext?: SchedulerExecutionContextKey;
   watches: WatchSpec[];
-}
+};
 
-export interface SessionAckRequest {
+export type SessionAckRequest = {
   type: "session.ack";
   requestId: string;
   space: string;
   sessionId: SessionId;
   seenSeq: number;
   executionFeedSeq?: number;
-}
+};
 
-export interface SchedulerActionSnapshotQuery {
+export type SchedulerActionSnapshotQuery = {
   branch?: BranchName;
   ownerSpace?: string;
   pieceId?: string;
@@ -1244,13 +1348,123 @@ export interface SchedulerActionSnapshotQuery {
   throughCommitSeq?: number;
   limit?: number;
   cursor?: SchedulerActionSnapshotCursor;
-}
+};
 
 /**
  * Server-derived ownership partition for durable scheduler state. The opaque
  * principal and session components use the same encoding as resolved memory
  * scope keys; clients must never construct one to select another context.
  */
+export type SchedulerActionKind =
+  | "computation"
+  | "effect"
+  | "event-handler";
+
+export type SchedulerObservationTransactionKind =
+  | "dependency-collection"
+  | "action-run"
+  | "event-preflight";
+
+export type SchedulerObservationAddress = {
+  space: string;
+  id: EntityId;
+  scope?: CellScope;
+  path: readonly string[];
+};
+
+export type CompleteActionScopeSummary = {
+  version: 1;
+  complete: true;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  piece: SchedulerObservationAddress;
+  reads: SchedulerObservationAddress[];
+  writes: SchedulerObservationAddress[];
+  materializerWriteEnvelopes: SchedulerObservationAddress[];
+  directOutputs: SchedulerObservationAddress[];
+};
+
+/**
+ * A scheduler action observation as it is stored and carried across the memory
+ * boundary.
+ *
+ * A parallel declaration of the same concept lives in the runner, at
+ * `runner/src/scheduler/persistent-observation.ts`. The two are not the same
+ * type and differ in strictness:
+ *
+ * - addresses here are {@link SchedulerObservationAddress} (`space: string`);
+ *   the runner uses `IMemorySpaceAddress` (`space: MemorySpace`)
+ * - `branch` here is `BranchName`; the runner declares it `string`
+ *
+ * The runner produces observations and this side stores them, so this one is
+ * deliberately the wider of the pair. Nothing checks that they agree: the wire
+ * fields that carry an observation (`CommitData.schedulerObservation` and
+ * `SchedulerActionSnapshotResult.observation`) are declared `unknown`, so a
+ * change to either declaration will not surface at the seam. Keep them in sync
+ * by hand until one of them owns the shape.
+ */
+/** C3.5: one Worker-asserted foreign read stamp — see
+ * {@link SchedulerActionObservation.foreignReadStamps}. */
+export type ForeignReadStampAssertion = {
+  space: string;
+  id: EntityId;
+  /** The read space's stamped covering seq (its own domain, positive). */
+  seq: number;
+};
+
+export type SchedulerActionObservation = {
+  version: 1 | 2;
+  ownerSpace?: string;
+  branch: BranchName;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  actionKind: SchedulerActionKind;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  completeActionScopeSummary?: CompleteActionScopeSummary;
+  observedAtSeq: number;
+  /** Host-derived maximum accepted revision sequence in the commit read set. */
+  inputBasisSeq?: InputBasisSeq;
+  /** Transient exact-claim assertion; validated by the bound executor host. */
+  executionClaimAssertion?: ExecutionClaimAssertion;
+  /**
+   * C3.5: transient Worker assertion of the stamped foreign point reads the
+   * attempt consumed from its read-only mount — {space, id, seq} per read,
+   * in the READ space's seq domain. Like `executionClaimAssertion` it is a
+   * request field, never persisted: the HOST validates each stamp against
+   * its own served-point-read records (C3A13 — the engine cannot verify a
+   * foreign seq itself) and passes only host-validated components into the
+   * accept transaction; the engine strips this field from the canonical
+   * accepted observation. An asserted stamp the host never served is
+   * dropped, exactly like the asserted scalar.
+   */
+  foreignReadStamps?: readonly ForeignReadStampAssertion[];
+  /**
+   * Transient report that the host discarded a claimed action as one whole
+   * transaction. Valid only on an observation-only exact claimed attempt and
+   * stripped before scheduler state is persisted.
+   */
+  executionUnservedAttempt?: { diagnosticCode: string };
+  executionProvenance?: ActionExecutionProvenance;
+  observedAtLocalSeq?: number;
+  transactionKind: SchedulerObservationTransactionKind;
+  reads: SchedulerObservationAddress[];
+  shallowReads: SchedulerObservationAddress[];
+  actualChangedWrites: SchedulerObservationAddress[];
+  currentKnownWrites: SchedulerObservationAddress[];
+  declaredWrites?: SchedulerObservationAddress[];
+  materializerWriteEnvelopes: SchedulerObservationAddress[];
+  ignoredSchedulingWrites?: SchedulerObservationAddress[];
+  actionOptions?: {
+    debounceMs?: number;
+    noDebounce?: boolean;
+    throttleMs?: number;
+  };
+  status: "success" | "failed";
+  errorFingerprint?: string;
+};
+
 export type SchedulerExecutionContextKey =
   | "space"
   | `user:${string}`
@@ -1352,32 +1566,35 @@ export const canonicalSchedulerPieceIdForDemandRoot = (
   return `space:${root.startsWith("of:") ? root : `of:${root}`}`;
 };
 
-export interface SchedulerActionSnapshotCursor {
+export type SchedulerActionSnapshotCursor = {
   ownerSpace?: string;
   pieceId: string;
   processGeneration: number;
   actionId: string;
   executionContextKey: SchedulerExecutionContextKey;
-}
+};
 
-export interface SchedulerActionSnapshotResult {
+export type SchedulerActionSnapshotResult = {
   observationId: number;
   commitSeq: number | null;
   observedAtSeq: number;
   executionContextKey: SchedulerExecutionContextKey;
-  observation: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and the
+   *  runner owns its shape and validation. `FabricValue` says only what the
+   *  wire requires of it. */
+  observation: FabricValue;
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
-}
+};
 
-export interface SchedulerSnapshotListResult {
+export type SchedulerSnapshotListResult = {
   serverSeq: number;
   snapshots: SchedulerActionSnapshotResult[];
   nextCursor?: SchedulerActionSnapshotCursor;
-}
+};
 
-export interface SchedulerSnapshotListRequest {
+export type SchedulerSnapshotListRequest = {
   type: "scheduler.snapshot.list";
   requestId: string;
   space: string;
@@ -1388,38 +1605,38 @@ export interface SchedulerSnapshotListRequest {
    * never send it. */
   actingContext?: SchedulerExecutionContextKey;
   query: SchedulerActionSnapshotQuery;
-}
+};
 
-export interface SchedulerWriterTarget {
+export type SchedulerWriterTarget = {
   id: EntityId;
   scope?: CellScope;
   path: DocumentPath;
-}
+};
 
-export interface SchedulerWritersForTargetsQuery {
+export type SchedulerWritersForTargetsQuery = {
   branch?: BranchName;
   targets: SchedulerWriterTarget[];
-}
+};
 
 export type SchedulerWriterMatchKind =
   | "current-known"
   | "declared"
   | "materializer";
 
-export interface SchedulerResolvedWriterAddress {
+export type SchedulerResolvedWriterAddress = {
   space: string;
   id: EntityId;
   scope: CellScope;
   scopeKey: string;
   path: DocumentPath;
-}
+};
 
-export interface SchedulerWriterMatch {
+export type SchedulerWriterMatch = {
   kind: SchedulerWriterMatchKind;
   write: SchedulerResolvedWriterAddress;
-}
+};
 
-export interface SchedulerWriterCandidate {
+export type SchedulerWriterCandidate = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1438,14 +1655,14 @@ export interface SchedulerWriterCandidate {
   staleSeq?: number;
   unknownReason?: string;
   matchedWrites: SchedulerWriterMatch[];
-}
+};
 
-export interface SchedulerWritersForTargetsResult {
+export type SchedulerWritersForTargetsResult = {
   serverSeq: number;
   writers: SchedulerWriterCandidate[];
-}
+};
 
-export interface SchedulerWriterListRequest {
+export type SchedulerWriterListRequest = {
   type: "scheduler.writer.list";
   requestId: string;
   space: string;
@@ -1456,45 +1673,55 @@ export interface SchedulerWriterListRequest {
    * never send it. */
   actingContext?: SchedulerExecutionContextKey;
   query: SchedulerWritersForTargetsQuery;
-}
+};
 
-export interface ResponseMessage<Result> {
+export type ResponseMessage<Result> = {
   type: "response";
   requestId: string;
   ok?: Result;
   error?: V2Error;
-}
+};
 
-export interface SessionEffectMessage {
+export type SessionEffectMessage = {
   type: "session/effect";
   space: string;
   sessionId: SessionId;
   effect: SessionSync;
-}
+};
 
-export interface SessionRevokedMessage {
+export type SessionRevokedMessage = {
   type: "session/revoked";
   space: string;
   sessionId: SessionId;
   reason: "taken-over" | "unauthorized";
-}
+};
 
-export interface V2Error {
+export type V2Error = {
   name: string;
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
   /** Stable reason attached to a rejected server-execution action attempt. */
   diagnosticCode?: string;
-}
+  /**
+   * Present on an `AuthorizationError` that a fresh handshake can heal — the
+   * connection-challenge and invocation-freshness anti-replay races (an expired,
+   * already-used, or mismatched challenge; a stale signed `exp`). Each reconnect
+   * runs a new `hello` that issues a fresh challenge, so these do not recur. Its
+   * absence marks a permanent denial (an audience mismatch, a malformed
+   * invocation, or an ACL capability shortfall) that retrying cannot fix — the
+   * client stops reopening the session and surfaces the error instead of looping.
+   */
+  retriable?: boolean;
+};
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 
-export interface TaskReturn<Result> {
+export type TaskReturn<Result> = {
   the: "task/return";
   of: JobId;
   is: Result;
-}
+};
 
 export type Receipt<Result> = TaskReturn<Result>;
 export type LegacyClientMessage = SessionOpenCommand;
@@ -1505,6 +1732,8 @@ export type ClientMessage =
   | TransactRequest
   | GraphQueryRequest
   | DocsReadRequest
+  | EntityIdListRequest
+  | EntityIdLookupRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
@@ -1518,7 +1747,7 @@ export type ClientMessage =
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
-  | ResponseMessage<unknown>
+  | ResponseMessage<FabricValue>
   | SessionEffectMessage
   | SessionRevokedMessage;
 
@@ -1946,6 +2175,15 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // advertises the fact. Peers that see it absent (an older server) keep their
   // write gate failing closed.
   sqliteCommitRowLabelEval: true,
+  // Likewise build-inherent: this build's engine resolves array-localSeq
+  // pending reads (resolvePendingReads), so it always advertises it. Clients
+  // that see it absent scalarize to top-of-stack before sending.
+  pendingReadStacks: true,
+  // The engine answers this request from its identifier index without
+  // selecting stored entity values.
+  entityIdListing: true,
+  entityIdPagination: true,
+  entityIdLookup: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -2080,6 +2318,38 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const pendingReadStacks = value.pendingReadStacks;
+  if (
+    pendingReadStacks !== undefined &&
+    typeof pendingReadStacks !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdListing = value.entityIdListing;
+  if (
+    entityIdListing !== undefined &&
+    typeof entityIdListing !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdPagination = value.entityIdPagination;
+  if (
+    entityIdPagination !== undefined &&
+    typeof entityIdPagination !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdLookup = value.entityIdLookup;
+  if (
+    entityIdLookup !== undefined &&
+    typeof entityIdLookup !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -2107,6 +2377,12 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
+    // Absent (an older server) parses to false: clients scalarize pending
+    // reads to top-of-stack unless the array capability is advertised.
+    pendingReadStacks: pendingReadStacks === true,
+    entityIdListing: entityIdListing === true,
+    entityIdPagination: entityIdPagination === true,
+    entityIdLookup: entityIdLookup === true,
   };
 };
 
@@ -2134,8 +2410,24 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
+  pendingReadStacks: flags.pendingReadStacks,
+  entityIdListing: flags.entityIdListing,
+  entityIdPagination: flags.entityIdPagination,
+  entityIdLookup: flags.entityIdLookup,
 });
 
+/**
+ * Encodes a wire payload. The encoding embeds every string value
+ * byte-verbatim (`fvj1:` tag + canonical JSON; strings self-represent, and
+ * neither reserved schema-reference prefix contains a JSON-escapable
+ * character). Three consumers depend on that property as a cheap substring
+ * gate and must move in lockstep with any codec change (fvj2, escaping of
+ * tag-like strings): the client receive-path expansion gate (v2/client.ts),
+ * `containsReservedSchemaRefSubstring` (v2/sync-schema-ref.ts), and the
+ * engine's commit/stored-row probes (v2/engine.ts). A pinning test in
+ * test/v2-sync-schema-table-test.ts fails loudly if verbatim embedding ever
+ * stops holding.
+ */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
   jsonFromValue(value);
 

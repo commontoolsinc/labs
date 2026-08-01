@@ -7,6 +7,7 @@ import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import {
+  type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
   type MemorySpace,
@@ -32,6 +33,8 @@ import {
   type DocSetWatchSpec,
   type DocumentPath,
   type EntityDocument,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   type ExecutionClaim,
   executionClaimIncarnationKey,
   type ExecutionControlEvent,
@@ -80,7 +83,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { getJSONFromDataURI } from "../uri-utils.ts";
+import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
@@ -158,6 +161,18 @@ const isSamePath = (
   b: readonly string[],
 ): boolean =>
   a.length === b.length && a.every((segment, index) => b[index] === segment);
+
+// True when `path` is the immediate `length` child of `arrayPath` — i.e. a read
+// of that array's own element count. A mergeable append / add-unique /
+// remove-by-value changes this count, so such a read is a genuine dependency of
+// the writer, not one of the op's own incidental sub-reads.
+const isArrayLengthChildPath = (
+  arrayPath: readonly string[],
+  path: readonly string[],
+): boolean =>
+  path.length === arrayPath.length + 1 &&
+  path[arrayPath.length] === "length" &&
+  arrayPath.every((segment, index) => path[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   hasValueAtPath,
@@ -179,6 +194,7 @@ import { normalizeCellScope } from "../scope.ts";
 import type {
   ReplicaClient,
   ReplicaReadOptions,
+  ReplicaSession,
   ReplicaSessionHandle,
   ReplicaWatchView,
 } from "./v2-replica-session.ts";
@@ -471,7 +487,30 @@ type PendingCommitRead = {
   id: URI;
   scope?: CellScope;
   path: DocumentPath;
-  localSeq: number;
+  /**
+   * Every pending layer the read's materialized view sat on, as an array —
+   * each must resolve to an accepted commit (server pending-dependency
+   * check; client cascade), and the array always includes the doc's
+   * top-of-stack layer below the reader (CT-1872 1c; 03-commit-model.md
+   * §3.5), whose resolution is the LEGACY staleness basis on servers that
+   * ignore `basisSeq`. Scalarized to the top-of-stack element at send time
+   * when the server does not advertise `pendingReadStacks` — the pre-stack
+   * wire shape — and in that case the send is HELD until every omitted
+   * lower dependency settles, so the old server can never durably accept a
+   * commit the client cascade-rejects.
+   */
+  localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's seq
+   * space — the same value the confirmed branch emits as `seq`, which the
+   * pre-CT-1910 pending shape discarded. A server that understands it scans
+   * staleness over the FULL interval (basisSeq, head], excluding only the
+   * session's own predecessor commits (localSeq below the reader's),
+   * repairing the pending-read basis over-advance; older servers ignore the
+   * field and keep the max-dependency basis. See
+   * {@link PendingRead.basisSeq} (memory/v2.ts).
+   */
+  basisSeq: number;
   nonRecursive?: boolean;
 };
 
@@ -883,6 +922,15 @@ export const defaultSettings: IRemoteStorageProviderSettings = {
   connectionTimeout: 30_000,
 };
 
+/**
+ * Max concurrent watch-refresh round trips per space when
+ * `experimentalConcurrentWatchRefresh` is on. Bounds how many requests a
+ * traversal-discovered wave may have outstanding at once — high enough to hide
+ * per-request latency behind a deep waterfall, low enough to keep the server's
+ * receive queue and the client's outstanding-request set bounded.
+ */
+const CONCURRENT_WATCH_REFRESH_WINDOW = 8;
+
 const comparePath = (left: readonly string[], right: readonly string[]) => {
   if (left.length !== right.length) {
     return left.length - right.length;
@@ -897,6 +945,11 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
   }
   return 0;
 };
+
+// Canonical grouping/sort key for a pending read's dependency set: arrays
+// are ascending, so the join is order-stable per identical stack.
+const localSeqKey = (localSeq: number | number[]): string =>
+  Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
@@ -919,11 +972,12 @@ const compactCommitReads = <
       return left.seq - right.seq;
     }
 
-    if (
-      "localSeq" in left && "localSeq" in right &&
-      left.localSeq !== right.localSeq
-    ) {
-      return left.localSeq - right.localSeq;
+    if ("localSeq" in left && "localSeq" in right) {
+      const leftKey = localSeqKey(left.localSeq);
+      const rightKey = localSeqKey(right.localSeq);
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
     }
 
     if (left.nonRecursive !== right.nonRecursive) {
@@ -938,13 +992,18 @@ const compactCommitReads = <
     nonRecursiveByPath: Map<string, Read>;
   }>();
   for (const candidate of sorted) {
+    // The dependency key carries every admission-relevant field — seq for
+    // confirmed reads, the layer set AND basisSeq for pending reads — so
+    // reads with divergent bases never merge: ancestor-path compaction
+    // within a group may drop a descendant read, and a surviving ancestor
+    // must not claim a higher basis than the dropped read declared.
     const dependencyKey = "seq" in candidate
       ? `confirmed:${
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
-      : `pending:${
-        normalizeCellScope(candidate.scope)
-      }:${candidate.id}:${candidate.localSeq}`;
+      : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
+        localSeqKey(candidate.localSeq)
+      }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -1000,11 +1059,12 @@ const compactCommitReads = <
       return left.seq - right.seq;
     }
 
-    if (
-      "localSeq" in left && "localSeq" in right &&
-      left.localSeq !== right.localSeq
-    ) {
-      return left.localSeq - right.localSeq;
+    if ("localSeq" in left && "localSeq" in right) {
+      const leftKey = localSeqKey(left.localSeq);
+      const rightKey = localSeqKey(right.localSeq);
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
     }
 
     if (left.nonRecursive !== right.nonRecursive) {
@@ -1018,6 +1078,71 @@ const compactCommitReads = <
 const toCommitReadPath = (
   path: readonly (string | number)[],
 ): DocumentPath => toDocumentPath(path.map(String));
+
+// Wire-compat downgrade for servers that do not advertise the
+// `pendingReadStacks` hello flag: collapse every array dependency set —
+// including those inside batched scheduler observations — to its
+// top-of-stack element (the highest localSeq, i.e. the staleness basis).
+// The lower-layer dependency check is lost against such servers by design
+// (CT-1872 1c stays open there). pushCommit compensates by HOLDING the send
+// until every omitted lower dependency settles — without the hold, the old
+// server could durably accept a commit the client cascade-rejects (a
+// split-brain: caller sees ConflictError for a write that landed).
+const scalarizeLocalSeq = (localSeq: number | number[]): number =>
+  Array.isArray(localSeq) ? Math.max(...localSeq) : localSeq;
+
+/** Every in-flight commit a pending read's view sat on. A scalar is the
+ * single-layer form of the same thing (CT-1872 1c). */
+const pendingReadLayers = (localSeq: number | number[]): number[] =>
+  Array.isArray(localSeq) ? localSeq : [localSeq];
+
+const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
+  const hasStack = (reads: { localSeq: number | number[] }[]): boolean =>
+    reads.some((read) => Array.isArray(read.localSeq));
+  const scalarizeReads = <Read extends { localSeq: number | number[] }>(
+    reads: Read[],
+  ): Read[] =>
+    reads.map((read) =>
+      Array.isArray(read.localSeq)
+        ? { ...read, localSeq: scalarizeLocalSeq(read.localSeq) }
+        : read
+    );
+  const needsCommit = hasStack(commit.reads.pending);
+  const needsBatch =
+    commit.schedulerObservationBatch?.some((entry) =>
+      hasStack(entry.reads.pending)
+    ) === true;
+  if (!needsCommit && !needsBatch) {
+    return commit;
+  }
+  return {
+    ...commit,
+    ...(needsCommit
+      ? {
+        reads: {
+          confirmed: commit.reads.confirmed,
+          pending: scalarizeReads(commit.reads.pending),
+        },
+      }
+      : {}),
+    ...(needsBatch
+      ? {
+        schedulerObservationBatch: commit.schedulerObservationBatch!.map(
+          (entry) =>
+            hasStack(entry.reads.pending)
+              ? {
+                ...entry,
+                reads: {
+                  confirmed: entry.reads.confirmed,
+                  pending: scalarizeReads(entry.reads.pending),
+                },
+              }
+              : entry,
+        ),
+      }
+      : {}),
+  };
+};
 
 export class StorageManager implements IStorageManager {
   readonly id: string;
@@ -1570,6 +1695,18 @@ export class StorageManager implements IStorageManager {
     return promise;
   }
 
+  /**
+   * A throwable `AuthorizationError` when `space` is under a permanent
+   * authorization denial (an ACL shortfall, an audience or protocol mismatch),
+   * or undefined when it is authorized or was never opened. Scoped to one space
+   * on purpose: `synced()` stays silent so a denied cross-space link does not
+   * fail an unrelated caller, and a caller that must access a specific space
+   * reads this after `synced()` to surface the real failure.
+   */
+  authorizationError(space: MemorySpace): Error | undefined {
+    return this.#providers.get(space)?.authorizationError();
+  }
+
   trackPendingCommit(promise: Promise<unknown>): void {
     // Normalize so a rejected commit settles the barrier instead of leaking an
     // unhandled rejection; the caller keeps the original promise for results.
@@ -1691,6 +1828,11 @@ export class StorageManager implements IStorageManager {
     waiters: Set<(failure: unknown) => void>;
   }>();
   #nextPendingLoadGeneration = 1;
+  // Sync failures already logged, keyed by (space, error identity). A denied
+  // space repeats the identical failure for every doc pulled from it; one line
+  // per distinct failure keeps the surfacing readable. Bounded: at the cap the
+  // set resets, trading a repeated line for an unbounded set.
+  #loggedSyncFailures = new Set<string>();
 
   private registerPendingLoad(
     address: { space: MemorySpace; scope: CellScope; id: URI },
@@ -1714,6 +1856,32 @@ export class StorageManager implements IStorageManager {
       for (const waiter of entry.waiters) waiter(entry.failure);
       entry.waiters.clear();
     };
+  }
+
+  /** Log a sync failure that would otherwise resolve silently, once per
+   * distinct (space, error) pair. The error name and message are the wire
+   * server's own words — for an ACL denial that includes the principal and
+   * space (`Principal <did> lacks READ on space <did>`), which is exactly
+   * what a caller staring at an unexplained `undefined` needs. */
+  private logSyncLoadFailure(
+    space: MemorySpace,
+    id: URI,
+    failure: unknown,
+  ): void {
+    // Pull errors arrive as plain result objects (IConnectionError et al.),
+    // not Error instances — read the fields structurally.
+    const named = failure as { name?: unknown; message?: unknown } | undefined;
+    const name = typeof named?.name === "string" ? named.name : "Error";
+    const message = typeof named?.message === "string"
+      ? named.message
+      : String(failure);
+    const key = `${space}|${name}|${message}`;
+    if (this.#loggedSyncFailures.has(key)) return;
+    if (this.#loggedSyncFailures.size >= 256) this.#loggedSyncFailures.clear();
+    this.#loggedSyncFailures.add(key);
+    logger.error("sync-load-failure", () => [
+      `sync completed without data for ${id} in ${space}: ${name}: ${message}`,
+    ]);
   }
 
   pendingLoadAddresses(): readonly {
@@ -1807,6 +1975,14 @@ export class StorageManager implements IStorageManager {
         }).get?.(id, scope),
       );
       loadFailure ??= schemaFailure;
+      // A pull that "succeeds" while carrying an error (an ACL denial, a
+      // transport failure) otherwise resolves this sync() normally and the
+      // caller reads the doc as absent — deny, error, and absent all collapse
+      // into the same silent undefined. Surface the failure; the pending-load
+      // ledger below still carries it to scheduler waiters.
+      if (loadFailure !== undefined) {
+        this.logSyncLoadFailure(space, id, loadFailure);
+      }
       return cell;
     } catch (error) {
       loadFailure = error;
@@ -1846,6 +2022,11 @@ export class StorageManager implements IStorageManager {
     }
     return work.then(
       (result) => {
+        // Same silent-collapse hazard as syncCell: a link-target pull that
+        // resolves while carrying an error reads as an absent target.
+        if (result.error !== undefined) {
+          this.logSyncLoadFailure(address.space, address.id, result.error);
+        }
         releaseLoad(result.error);
         return result;
       },
@@ -1910,11 +2091,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
   ): Promise<Cell<T>> {
-    const json = getJSONFromDataURI(id);
-    if (!isRecord(json)) {
-      return cell;
-    }
-    let value = json["value"];
+    let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
       if (!isRecord(value) && !Array.isArray(value)) {
         return cell;
@@ -2118,6 +2295,28 @@ class Provider implements IStorageProviderWithReplica {
 
   synced(): Promise<void> {
     return this.replica.synced();
+  }
+
+  authorizationError(): Error | undefined {
+    return this.replica.authorizationError();
+  }
+
+  ensureSession(): Promise<void> {
+    return this.replica.ensureSession();
+  }
+
+  listEntityIds(): Promise<string[] | undefined> {
+    return this.replica.listEntityIds();
+  }
+
+  listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    return this.replica.listEntityIdPage(options);
+  }
+
+  entityIdExists(id: string): Promise<boolean | undefined> {
+    return this.replica.entityIdExists(id);
   }
 
   listSchedulerActionSnapshots(
@@ -2413,6 +2612,48 @@ type SchedulerObservationBatchEntry = {
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
 };
 
+/**
+ * A commit that has been issued (optimistic write applied, verdict not yet
+ * settled) and that carries PENDING reads — i.e. its read set depends on
+ * another in-flight commit's optimistic state. Tracked in `#inFlightCommits`
+ * so that when a dependency's optimistic writes are dropped (`dropPending`),
+ * the dependants can be rejected locally instead of waiting for the server's
+ * inevitable "pending dependency not resolved" (CT-1872 1b).
+ *
+ * Commits with NO pending reads are deliberately never registered: a
+ * zero-read mergeable/blind commit is DESIGNED to survive a parent drop (the
+ * server materializes its spine via createMissing — CT-1872 1a), and the
+ * scheduler-observation batch wrapper carries no reads at all. Cascading
+ * either would break intended semantics.
+ */
+type InFlightCommit = {
+  readonly localSeq: number;
+  /**
+   * The unique localSeqs named by `commit.reads.pending` — every in-flight
+   * commit this one's read view sits on (resolution-only lower-layer reads
+   * carry the same `localSeq` field, so they contribute here too).
+   */
+  readonly dependencies: ReadonlySet<number>;
+  readonly operations: NativeCommitOperation[];
+  readonly source?: IStorageTransaction;
+  readonly commit: ClientCommit;
+  /**
+   * Resolves when a rejection is fabricated locally for this commit (a
+   * pending dependency was dropped, or the replica reset). Raced against the
+   * server verdict in `pushCommit`.
+   */
+  readonly localRejection: PromiseWithResolvers<StorageTransactionRejected>;
+  /**
+   * Set synchronously BEFORE `localRejection` resolves, so `pushCommit`'s
+   * pre-send checkpoints can observe the rejection without racing the
+   * microtask queue. `undefined` means "not locally rejected".
+   */
+  localRejectionValue?: StorageTransactionRejected;
+  /** True once `pushCommit`'s finally ran — the outcome is finalized and the
+   * entry can no longer be cascaded. */
+  settled: boolean;
+};
+
 /** Memoized user-chain collapse of one session lane key (CA3): the
  * canonical `user:<principal>` member of the lane's own chain, derived from
  * the session key's principal segment through the canonical helpers only.
@@ -2612,11 +2853,34 @@ class SpaceReplica implements ISpaceReplica {
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
   #sessionClient?: ReplicaClient;
+  /** The session of the last RESOLVED handle — read synchronously so
+   *  `authorizationError()` can observe a denial that terminated the session
+   *  during reconnect, which closes its watch view without a fresh watch result
+   *  to record. */
+  #sessionSession?: ReplicaSession;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
     Promise<Result<Unit, StorageTransactionRejected>>
   >();
+  // Issued-but-unsettled commits that carry pending reads, keyed by localSeq.
+  // Scanned by cascadeDroppedDependency when a dependency's optimistic writes
+  // are dropped. See the InFlightCommit doc for why zero-pending-read commits
+  // are never registered.
+  readonly #inFlightCommits = new Map<number, InFlightCommit>();
+  // Every unsettled commit's outcome promise, keyed by localSeq (a superset
+  // of #inFlightCommits: zero-read commits appear here too). The old-server
+  // scalarization hold awaits these for the OMITTED lower dependencies —
+  // entries are removed on settlement, so an absent key means "settled".
+  readonly #commitOutcomeBySeq = new Map<
+    number,
+    Promise<unknown>
+  >();
+  // Server verdict promises superseded by a local rejection. Kept OUT of
+  // #commitPromises so synced() never blocks on a verdict the server may
+  // withhold indefinitely; close()/closeNow() drain the set after client
+  // teardown rejects every in-flight request.
+  readonly #suppressedVerdicts = new Set<Promise<void>>();
   readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
   #schedulerObservationFlushScheduled = false;
   #schedulerObservationFlushPromise:
@@ -2659,6 +2923,11 @@ class SpaceReplica implements ISpaceReplica {
     SchedulerExecutionContextKey,
     WatchRefreshBatch
   >();
+  /** Lanes whose queued batch already has a flush microtask pending. Same role
+   * as the pre-lane `#queuedWatchRefreshScheduled` boolean, per lane. */
+  readonly #scheduledWatchRefreshLanes = new Set<
+    SchedulerExecutionContextKey
+  >();
   /** FB13 lane-drain coverage lifecycle: the (address, selector) pairs a
    * non-space lane registered under a PER-LANE selector-tracker key (scoped
    * roots — `laneScopeKey` differs from the declared scope). When the lane
@@ -2674,6 +2943,21 @@ class SpaceReplica implements ISpaceReplica {
       selector: SchemaPathSelector;
     }[]
   >();
+  // Number of watch-refresh round trips currently awaiting a response. Capped
+  // at `#maxWatchRefreshInFlight()` (1 = single-flight; the concurrent window
+  // otherwise) so a large incrementally-discovered wave cannot put an unbounded
+  // number of requests on the wire.
+  #watchRefreshInFlight = 0;
+  // The current PERMANENT authorization denial for this space (an ACL shortfall,
+  // an audience or protocol mismatch), or null when the space is authorized. A
+  // non-retriable AuthorizationError from a watch refresh sets it; a successful
+  // refresh clears it; a retriable auth race and a transient transport error
+  // leave it untouched, so a blip or token-refresh window does not register as a
+  // denial. `authorizationError()` reports it as a throwable error; `synced()`
+  // stays silent so a denied cross-space link remains a silent absent read.
+  #lastAuthorizationError: IAuthorizationError | null = null;
+
+  #settings: IRemoteStorageProviderSettings;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2690,6 +2974,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#onSourceCommitConfirmed = options.onSourceCommitConfirmed;
     this.#onExecutionNavigate = options.onExecutionNavigate;
     this.#executionLaneForAction = options.executionLaneForAction;
+    this.#settings = options.settings;
   }
 
   did(): MemorySpace {
@@ -2886,6 +3171,64 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
+  /**
+   * A real, throwable `AuthorizationError` when this space is under a permanent
+   * authorization denial, or undefined when it is authorized. `synced()`
+   * deliberately does NOT throw this: a denied cross-space link must stay a
+   * silent absent read (the sync-load-failure surfacing contract), and the
+   * global sync barrier aggregates every space, so throwing there would fail a
+   * whole runtime settle on an incidental unauthorized link. A caller that cares
+   * about a SPECIFIC space — the CLI, opening the space it was asked to act on —
+   * reads this after `synced()` and surfaces it deliberately.
+   *
+   * A watch refresh records the denial in most cases. A permanent denial during
+   * RECONNECT is the exception: the memory client terminates the session and
+   * closes its watch view without another refresh result (see the client's
+   * `SpaceSession.restore`), so `#lastAuthorizationError` never captures it and a
+   * caller that only reaches `synced()` without a further pull would see the
+   * space as authorized. Consult the terminated session directly for that case.
+   */
+  authorizationError(): Error | undefined {
+    if (this.#lastAuthorizationError !== null) {
+      return authorizationErrorToThrow(this.#lastAuthorizationError);
+    }
+    // `terminateSession` stores a permanent AuthorizationError as the session's
+    // close error; a graceful close ("memory session closed") or a takeover
+    // revocation (SessionRevokedError) carries a different name and is not an
+    // authorization denial for this space, so only the AuthorizationError is
+    // surfaced here.
+    const closeError = this.#sessionSession?.closeError;
+    if (closeError !== undefined && closeError.name === "AuthorizationError") {
+      return closeError;
+    }
+    return undefined;
+  }
+
+  /**
+   * Record the authorization status a watch refresh result implies. A permanent
+   * (non-retriable) AuthorizationError becomes the sticky failure
+   * `authorizationError()` reports; a successful refresh proves the session is
+   * authorized and clears it. A transient connection error or a retriable auth
+   * race leaves the last known status unchanged, so a blip does not mask or
+   * manufacture a denial.
+   */
+  private noteAuthorizationStatus(result: Result<Unit, PullError>): void {
+    if (result.error) {
+      if (
+        result.error.name === "AuthorizationError" &&
+        (result.error as { retriable?: unknown }).retriable !== true
+      ) {
+        this.#lastAuthorizationError = result.error as IAuthorizationError;
+      }
+      return;
+    }
+    this.#lastAuthorizationError = null;
+  }
+
+  async ensureSession(): Promise<void> {
+    await this.sessionHandle();
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -2928,6 +3271,52 @@ class SpaceReplica implements ISpaceReplica {
       branch,
       exclusionGeneration,
     );
+  }
+
+  async listEntityIds(): Promise<string[] | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    if (client.serverFlags.entityIdPagination !== true) {
+      return (await session.listEntityIds?.())?.ids;
+    }
+
+    const ids: string[] = [];
+    let after: string | undefined;
+    let expectedServerSeq: number | undefined;
+    for (;;) {
+      const page = await session.listEntityIds?.({
+        ...(after === undefined ? {} : { after }),
+        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+      });
+      if (page === undefined) return undefined;
+      expectedServerSeq ??= page.serverSeq;
+      ids.push(...page.ids);
+      if (page.nextAfter === undefined) return ids;
+      after = page.nextAfter;
+    }
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (
+      client.serverFlags?.entityIdListing !== true ||
+      client.serverFlags.entityIdPagination !== true
+    ) {
+      return undefined;
+    }
+    return await session.listEntityIds?.(options);
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    return (await session.entityIdExists?.(id))?.exists;
   }
 
   /**
@@ -3245,10 +3634,12 @@ class SpaceReplica implements ISpaceReplica {
     // With the client closed, every in-flight commit and read/watch pull has
     // been rejected and now settles promptly. Awaiting them here can no longer
     // hang and guarantees no transport promise is left pending when close()
-    // resolves.
+    // resolves. Suppressed verdicts (server responses superseded by a local
+    // rejection) live outside #commitPromises and join the same drain.
     await Promise.allSettled([
       ...(observationFlush ? [observationFlush] : []),
       ...this.#commitPromises,
+      ...this.#suppressedVerdicts,
     ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
@@ -3327,9 +3718,11 @@ class SpaceReplica implements ISpaceReplica {
       });
     }
     // The fire-and-forget client.close() above rejects in-flight requests; drain
-    // their read pulls too so no transport promise is left pending.
+    // their read pulls too so no transport promise is left pending. Suppressed
+    // verdicts settle off the same teardown rejection.
     void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
+    void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
@@ -3568,6 +3961,17 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   reset(): void {
+    // Every unsettled in-flight commit's optimistic pending write is about to
+    // be wiped by #docs.clear(); locally reject each so its pushCommit
+    // finalizes promptly instead of waiting on a server verdict for state
+    // that no longer exists. readyToRetry resolves immediately (nothing to
+    // repair — the replica is being rebuilt from scratch).
+    for (const entry of [...this.#inFlightCommits.values()]) {
+      this.rejectInFlightCommitLocally(
+        entry,
+        this.makeLocalRejection(entry.commit, "memory replica reset"),
+      );
+    }
     this.#docs.clear();
     this.#watchedIds.clear();
     this.resetConflictAdmissionState();
@@ -3614,6 +4018,14 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
+      // Per-session (no global): mirror the storage setting onto the session so
+      // its watch-mutation family (set + add) uses the ordered-issue concurrent
+      // path. Idempotent; cheap to re-assert each refresh. Optional-chained so
+      // lightweight session doubles in tests (which never opt into concurrency)
+      // are unaffected.
+      session.setConcurrentWatchRefresh?.(
+        this.#settings.experimentalConcurrentWatchRefresh === true,
+      );
       const rawEntries = [...entries];
       const watchEntries = compactWatchEntries(rawEntries);
       if (watchEntries.length === 0) {
@@ -3679,7 +4091,7 @@ class SpaceReplica implements ISpaceReplica {
       if (lane === "space") this.scheduleSpaceDocSetReconcile();
       return { ok: {} };
     } catch (error) {
-      return { error: toConnectionError(error) };
+      return { error: toPullError(error) };
     }
   }
 
@@ -3930,33 +4342,93 @@ class SpaceReplica implements ISpaceReplica {
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
     this.#queuedWatchRefreshes.set(lane, batch);
-    queueMicrotask(() => {
-      if (this.#queuedWatchRefreshes.get(lane) !== batch) {
+    this.scheduleWatchRefreshFlush(lane);
+    return batch.pending.promise;
+  }
+
+  /**
+   * Max watch-refresh round trips allowed in flight at once. 1 preserves the
+   * historical strict single-flight behavior; with
+   * `experimentalConcurrentWatchRefresh` on, refreshes overlap up to a bounded
+   * window so traversal-discovered waves fan out WITHOUT an unbounded number of
+   * outstanding requests (backpressure).
+   *
+   * The window is per PROVIDER, not per lane: it exists to bound requests on
+   * the wire, and every lane's refresh rides the same connection.
+   */
+  #maxWatchRefreshInFlight(): number {
+    return this.#settings.experimentalConcurrentWatchRefresh === true
+      ? CONCURRENT_WATCH_REFRESH_WINDOW
+      : 1;
+  }
+
+  /**
+   * Flush queued batches while slots are free. Same-tick coalescing (the
+   * per-lane scheduled set plus the merge in `enqueueWatchRefresh`) is
+   * unchanged; the window bounds cross-RTT concurrency (1 = single-flight).
+   * With `lane` given only that lane is considered; without it every queued
+   * lane is, which is how the flush's `finally` drains the backlog.
+   */
+  private scheduleWatchRefreshFlush(
+    lane?: SchedulerExecutionContextKey,
+  ): void {
+    const lanes = lane === undefined
+      ? [...this.#queuedWatchRefreshes.keys()]
+      : [lane];
+    for (const candidate of lanes) {
+      if (
+        !this.#queuedWatchRefreshes.has(candidate) ||
+        this.#scheduledWatchRefreshLanes.has(candidate)
+      ) {
+        continue;
+      }
+      if (this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()) {
         return;
       }
-      this.#queuedWatchRefreshes.delete(lane);
-      void this.flushWatchRefreshBatch(batch);
-    });
-    return batch.pending.promise;
+      this.#scheduledWatchRefreshLanes.add(candidate);
+      queueMicrotask(() => {
+        this.#scheduledWatchRefreshLanes.delete(candidate);
+        const batch = this.#queuedWatchRefreshes.get(candidate);
+        if (
+          batch === undefined ||
+          this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
+        ) {
+          return;
+        }
+        this.#queuedWatchRefreshes.delete(candidate);
+        this.#watchRefreshInFlight += 1;
+        void this.flushWatchRefreshBatch(batch);
+        // If the window admits more and another batch has already coalesced,
+        // schedule it now; otherwise the flush's `finally` re-schedules as
+        // slots free.
+        this.scheduleWatchRefreshFlush();
+      });
+    }
   }
 
   private async flushWatchRefreshBatch(
     batch: WatchRefreshBatch,
   ): Promise<void> {
     try {
-      batch.pending.resolve(
-        await this.refreshWatchSet(
-          batch.entries.values(),
-          batch.type,
-          batch.lane,
-        ),
+      const result = await this.refreshWatchSet(
+        batch.entries.values(),
+        batch.type,
+        batch.lane,
       );
+      this.noteAuthorizationStatus(result);
+      batch.pending.resolve(result);
     } catch (error) {
-      batch.pending.resolve({ error: toConnectionError(error) });
+      const result: Result<Unit, PullError> = { error: toPullError(error) };
+      this.noteAuthorizationStatus(result);
+      batch.pending.resolve(result);
+    } finally {
+      this.#watchRefreshInFlight -= 1;
+      this.scheduleWatchRefreshFlush();
     }
   }
 
   private cancelQueuedWatchRefresh(): void {
+    this.#scheduledWatchRefreshLanes.clear();
     for (const [lane, batch] of this.#queuedWatchRefreshes) {
       batch.pending.resolve({
         error: toConnectionError(new Error("memory replica closed")),
@@ -3978,7 +4450,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private enqueueSchedulerObservationCommit(
-    schedulerObservation: unknown,
+    schedulerObservation: FabricValue,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     if (!getPersistentSchedulerStateConfig()) {
@@ -4094,7 +4566,36 @@ class SpaceReplica implements ISpaceReplica {
       if (client.serverFlags?.persistentSchedulerState !== true) {
         return { ok: {} };
       }
-      return await this.pushCommit(localSeq, [], commit, undefined);
+      // Same fail-closed degradation for the OTHER capability gap: against a
+      // server without `pendingReadStacks`, an observation whose read sat on
+      // MORE than one pending layer cannot be expressed soundly — the scalar
+      // wire would omit lower layers, and the old server could persist an
+      // observation that observed a dropped write (data commits get the
+      // pushCommit hold instead; observations are droppable bookkeeping, so
+      // dropping beats holding — a held envelope would chain verdict latency
+      // into every semantic commit awaiting this flush). Resolve the dropped
+      // entries {ok} and send the rest.
+      let wireEntries = entries;
+      if (client.serverFlags?.pendingReadStacks !== true) {
+        const expressible = (entry: SchedulerObservationBatchEntry): boolean =>
+          entry.commit.reads.pending.every((read) =>
+            !Array.isArray(read.localSeq) || read.localSeq.length <= 1
+          );
+        wireEntries = entries.filter(expressible);
+        for (const entry of entries) {
+          if (!expressible(entry)) {
+            entry.pending.resolve({ ok: {} });
+          }
+        }
+        if (wireEntries.length === 0) {
+          return { ok: {} };
+        }
+      }
+      const wireBatch: ClientCommit = wireEntries === entries ? commit : {
+        ...commit,
+        schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
+      };
+      return await this.pushCommit(localSeq, [], wireBatch, undefined);
     })()
       .then((result) => {
         for (const entry of entries) {
@@ -4123,7 +4624,7 @@ class SpaceReplica implements ISpaceReplica {
   private async commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
-    schedulerObservation?: unknown,
+    schedulerObservation?: FabricValue,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
@@ -4367,9 +4868,122 @@ class SpaceReplica implements ISpaceReplica {
         ),
     );
     this.#commitPromises.add(promise);
+    // Keyed registration for the old-server scalarization hold: a later
+    // stacked commit awaits its omitted lower dependencies' outcomes here.
+    // Removed on settlement (absent key = settled); the .catch keeps the
+    // tracking copy from surfacing as an unhandled rejection.
+    this.#commitOutcomeBySeq.set(
+      localSeq,
+      promise.catch(() => {}).finally(() => {
+        this.#commitOutcomeBySeq.delete(localSeq);
+      }),
+    );
     const result = await promise;
     this.#commitPromises.delete(promise);
     return result;
+  }
+
+  /**
+   * Register a commit in `#inFlightCommits` so a dropped dependency can
+   * reject it locally. Returns undefined — no registration — when the commit
+   * has no pending reads: with nothing read from another commit's optimistic
+   * state there is no dependency to cascade on, and this is the natural
+   * exemption for zero-read/mergeable/blind commits and the
+   * scheduler-observation batch wrapper (all DESIGNED to survive a parent
+   * drop; see the InFlightCommit doc).
+   */
+  private registerInFlightCommit(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    commit: ClientCommit,
+    source?: IStorageTransaction,
+  ): InFlightCommit | undefined {
+    if (commit.reads.pending.length === 0) {
+      return undefined;
+    }
+    const dependencies = new Set<number>();
+    for (const read of commit.reads.pending) {
+      if (Array.isArray(read.localSeq)) {
+        for (const layer of read.localSeq) {
+          dependencies.add(layer);
+        }
+      } else {
+        dependencies.add(read.localSeq);
+      }
+    }
+    const entry: InFlightCommit = {
+      localSeq,
+      dependencies,
+      operations,
+      source,
+      commit,
+      localRejection: Promise.withResolvers<StorageTransactionRejected>(),
+      settled: false,
+    };
+    this.#inFlightCommits.set(localSeq, entry);
+    return entry;
+  }
+
+  /**
+   * Mark a commit's outcome as finalized and remove it from the cascade scan
+   * set. Idempotent — pushCommit's finally may run after reset() already
+   * signalled a local rejection for the same entry.
+   */
+  private settleInFlightCommit(localSeq: number): void {
+    const entry = this.#inFlightCommits.get(localSeq);
+    if (entry === undefined) {
+      return;
+    }
+    entry.settled = true;
+    this.#inFlightCommits.delete(localSeq);
+  }
+
+  /**
+   * Signal a locally-fabricated rejection for an in-flight commit. Invariant
+   * holder: `localRejectionValue` must be observable synchronously BEFORE
+   * `localRejection` resolves — pushCommit's pre-send checkpoints read the
+   * field directly; the promise only feeds the transact race.
+   */
+  private rejectInFlightCommitLocally(
+    entry: InFlightCommit,
+    rejection: StorageTransactionRejected,
+  ): void {
+    if (entry.settled || entry.localRejectionValue !== undefined) {
+      return;
+    }
+    entry.localRejectionValue = rejection;
+    entry.localRejection.resolve(rejection);
+  }
+
+  /**
+   * A server verdict superseded by a local rejection: consume it off the
+   * books. Late reject is the expected outcome (the server eventually agrees
+   * the dependency never resolved) and is swallowed. Late ACCEPT is
+   * deterministically impossible once resolution-only pending reads are
+   * emitted — the server cannot accept a commit whose pending dependency has
+   * no commit row — so it warns to flag a bug; the write is NOT promoted
+   * (its pending entries were already dropped by finalizeRejection).
+   */
+  private suppressLateVerdict(
+    verdict: Promise<AppliedCommit>,
+    localSeq: number,
+  ): void {
+    const settled = verdict.then(() => {
+      logger.warn("cascade-late-accept", () => [
+        "server accepted a commit after its local rejection; write not promoted",
+        { localSeq },
+      ]);
+    }, (error) => {
+      logger.debug("cascade-late-reject", () => [
+        `late server verdict after local rejection: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { localSeq },
+      ]);
+    }).finally(() => {
+      this.#suppressedVerdicts.delete(settled);
+    });
+    this.#suppressedVerdicts.add(settled);
   }
 
   private async routeActionTransaction(
@@ -4581,13 +5195,30 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
     route?: Extract<ActionTransactionRoute, { disposition: "upstream" }>,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const result = await this.pushCommitAttempt(
+    // Register BEFORE any await: commitOperations calls pushCommit
+    // synchronously after applyPending, so registration is atomic with the
+    // optimistic write — a dependency drop can never slip between the two.
+    // Registering here rather than inside pushCommitAttempt keeps the
+    // settlement paired with the whole attempt, route callback included.
+    const inFlight = this.registerInFlightCommit(
       localSeq,
       operations,
       commit,
       source,
-      route,
     );
+    let result: Result<Unit, StorageTransactionRejected>;
+    try {
+      result = await this.pushCommitAttempt(
+        localSeq,
+        operations,
+        commit,
+        source,
+        route,
+        inFlight,
+      );
+    } finally {
+      this.settleInFlightCommit(localSeq);
+    }
     if (route?.onCommitSettled !== undefined) {
       try {
         route.onCommitSettled(result);
@@ -4607,6 +5238,7 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     source?: IStorageTransaction,
     route?: Extract<ActionTransactionRoute, { disposition: "upstream" }>,
+    inFlight?: InFlightCommit,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     // Strategy 1: a commit whose read set lands on a still-catching-up id.
     const admissionMode = conflictAdmissionMode();
@@ -4629,6 +5261,16 @@ class SpaceReplica implements ISpaceReplica {
               operations,
               source,
               rejection,
+            );
+          }
+          if (inFlight?.localRejectionValue !== undefined) {
+            // A pending dependency was dropped while we held for catch-up;
+            // the commit is provably doomed — finalize without sending.
+            return await this.finalizeRejection(
+              localSeq,
+              operations,
+              source,
+              inFlight.localRejectionValue,
             );
           }
           if (!this.#closed && this.commitReadsStaleLocally(commit)) {
@@ -4690,17 +5332,104 @@ class SpaceReplica implements ISpaceReplica {
           throw error;
         }
       }
-      const { session } = await this.sessionHandle();
+      const { client, session } = await this.sessionHandle();
       // A rejection or claimed-overlay recording during the awaits above may
       // have doomed a localSeq this commit's pending reads still name.
       this.rebaseUnresolvablePendingReads(commit);
-      const applied = await session.transact(
-        commit,
-        this.commitActingContext(commit.localSeq),
-      );
-      this.confirmPending(localSeq, operations, applied);
-      this.noteSourceCommitConfirmed(localSeq, applied.seq);
-      session.noteAppliedCommit?.(applied.seq);
+      // Wire-compat: only a server advertising `pendingReadStacks` can
+      // resolve array dependency sets — otherwise collapse each to its
+      // top-of-stack element before sending.
+      const wireCommit = client.serverFlags?.pendingReadStacks === true
+        ? commit
+        : scalarizePendingReadStacks(commit);
+      if (wireCommit !== commit && inFlight !== undefined) {
+        // Old-server hold (split-brain guard): the scalarized wire omits
+        // the lower layers, so the server could durably ACCEPT a commit
+        // this client is about to cascade-reject — the caller would see a
+        // ConflictError for a write that landed. Do not send until every
+        // omitted dependency settles: a dropped one trips the doom
+        // checkpoint below before anything reaches the wire, and
+        // all-accepted makes the scalar shape sound (their resolution is
+        // already durable). Verdicts arrive in submission order, so this
+        // adds at most roughly one verdict round-trip, only against
+        // pre-`pendingReadStacks` servers, only for stacked commits.
+        const waits: Promise<unknown>[] = [];
+        for (const read of commit.reads.pending) {
+          if (!Array.isArray(read.localSeq)) continue;
+          const top = scalarizeLocalSeq(read.localSeq);
+          for (const layer of read.localSeq) {
+            if (layer === top) continue;
+            const outcome = this.#commitOutcomeBySeq.get(layer);
+            if (outcome !== undefined) {
+              waits.push(outcome);
+            }
+          }
+        }
+        if (waits.length > 0) {
+          await Promise.all(waits);
+        }
+      }
+      if (inFlight?.localRejectionValue !== undefined) {
+        // A pending dependency was dropped while we awaited the scheduler
+        // batch flush or the session handshake — do not send a commit whose
+        // doom is already provable.
+        telemetry?.submit({
+          type: "storage.push.error",
+          id: pushOpId,
+          sessionId: session.sessionId,
+          error: inFlight.localRejectionValue.name ?? "TransactionError",
+        });
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          inFlight.localRejectionValue,
+        );
+      }
+      const actingContext = this.commitActingContext(commit.localSeq);
+      if (inFlight === undefined) {
+        // No pending reads → no dependency that can be dropped from under
+        // this commit; keep the direct await.
+        const applied = await session.transact(wireCommit, actingContext);
+        this.confirmPending(localSeq, operations, applied);
+        this.noteSourceCommitConfirmed(localSeq, applied.seq);
+        session.noteAppliedCommit?.(applied.seq);
+        telemetry?.submit({
+          type: "storage.push.complete",
+          id: pushOpId,
+          sessionId: session.sessionId,
+        });
+        return { ok: {} };
+      }
+      // Race the server verdict against a locally-fabricated rejection (a
+      // dependency dropped mid-flight, or a replica reset). A server
+      // rejection wins the race by REJECTING it, landing in the catch below.
+      const verdict = session.transact(wireCommit, actingContext);
+      const outcome = await Promise.race([
+        verdict.then((applied) => ({ applied })),
+        inFlight.localRejection.promise.then((rejection) => ({ rejection })),
+      ]);
+      if ("rejection" in outcome) {
+        // Local rejection won: the eventual server verdict is moot. Do NOT
+        // recordStaleFloor — a locally fabricated rejection carries no server
+        // catch-up point (parity with the preempt path above).
+        this.suppressLateVerdict(verdict, localSeq);
+        telemetry?.submit({
+          type: "storage.push.error",
+          id: pushOpId,
+          sessionId: session.sessionId,
+          error: outcome.rejection.name ?? "TransactionError",
+        });
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          outcome.rejection,
+        );
+      }
+      this.confirmPending(localSeq, operations, outcome.applied);
+      this.noteSourceCommitConfirmed(localSeq, outcome.applied.seq);
+      session.noteAppliedCommit?.(outcome.applied.seq);
       telemetry?.submit({
         type: "storage.push.complete",
         id: pushOpId,
@@ -4789,6 +5518,11 @@ class SpaceReplica implements ISpaceReplica {
     await this.waitForConflictReadRepair(rejection);
     this.dropPending(localSeq);
     this.noteSourceCommitRejected(localSeq);
+    // Every drop funnels through here (server conflict, preempt, cascade,
+    // reset — this is dropPending's only call site), so scanning right after
+    // the drop catches every dependant; transitivity emerges from recursion
+    // (a victim's own finalizeRejection lands back here with its localSeq).
+    this.cascadeDroppedDependency(localSeq);
     if (before !== undefined) {
       const changes = this.runWithExecutionLane(
         lane,
@@ -4854,17 +5588,41 @@ class SpaceReplica implements ISpaceReplica {
       confirmedSeq?: number,
     ) => {
       const record = this.#docs.get(docKey(id, scope, lane));
+      // The read's materialized view sat on EVERY lower pending layer, not
+      // just the nearest one: name them ALL (ascending; the last element is
+      // the doc's top-of-stack below this commit) so a dropped deeper layer
+      // still dooms this commit (server: pending-dependency resolution;
+      // client: cascade). Servers that honor `basisSeq` scan staleness from
+      // it with predecessor-only own-session exclusion (CT-1910); legacy
+      // servers base staleness at the highest element only — a lower-layer
+      // basis WITHOUT that exclusion would false-conflict with the
+      // session's own later stacked writes (CT-1872 1c).
+      //
       // A16: a commit baselines only against its OWN lane's in-flight
       // versions. Another lane's pending version is invisible to this
       // lane's reads and host-unresolvable for its pending-read naming.
-      const pendingLocalSeq = record?.pending
-        .filter((version) =>
-          version.localSeq < localSeq && pendingVersionLane(version) === lane
-        )
-        .at(-1)?.localSeq;
+      const layers = [
+        ...new Set(
+          record?.pending
+            .filter((version) =>
+              version.localSeq < localSeq &&
+              pendingVersionLane(version) === lane
+            )
+            .map((version) => version.localSeq) ?? [],
+        ),
+      ].sort((left, right) => left - right);
       const shape = nonRecursive ? { nonRecursive: true } : {};
-      if (pendingLocalSeq !== undefined) {
-        pending.push({ id, scope, path, localSeq: pendingLocalSeq, ...shape });
+      if (layers.length > 0) {
+        pending.push({
+          id,
+          scope,
+          path,
+          localSeq: layers.length === 1 ? layers[0] : layers,
+          // The true confirmed basis this doc's view sat on — the same value
+          // the confirmed branch below emits (CT-1910).
+          basisSeq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          ...shape,
+        });
       } else {
         confirmed.push({
           id,
@@ -4928,8 +5686,17 @@ class SpaceReplica implements ISpaceReplica {
       const scope = normalizeCellScope(read.scope);
 
       const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      // A read of the op array's own `length` is the handler depending on the
+      // element count, which a mergeable append / add-unique / remove-by-value
+      // changes. The op itself never reads `length` (it reads the array value
+      // and its new-element slots), so this read is a genuine dependency and is
+      // kept from every drop below: a push whose new element's index or id came
+      // from the length conflicts and retries against a concurrent append.
+      const readsMergeableOpArrayLength = opPaths !== undefined &&
+        opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
       if (
         opPaths !== undefined &&
+        !readsMergeableOpArrayLength &&
         (isMergeableOpRead(read.meta) ||
           isReadMarkedAsAttemptedWrite(read.meta) ||
           isCfcLabelPath(read.path) ||
@@ -5321,6 +6088,84 @@ class SpaceReplica implements ISpaceReplica {
       // to wrap, so we do NOT call attachProviderReadyToRetry here).
       readyToRetry: () => this.waitForCaughtUpLocalSeq(threshold),
     };
+  }
+
+  // Locally-fabricated rejection for a commit whose doom is provable
+  // client-side (dropped pending dependency, or replica reset). Modeled on
+  // makePreemptRejection. readyToRetry resolves immediately: the PRIMARY
+  // rejection's finalizeRejection already awaited its read repair (or reset
+  // wiped the replica outright), so a cascaded victim adds no wait of its own.
+  private makeLocalRejection(
+    commit: ClientCommit,
+    message: string,
+  ): StorageTransactionRejected {
+    let firstId: URI | undefined;
+    for (const operation of commit.operations) {
+      if (operation.op !== "sqlite") {
+        firstId = operation.id as URI;
+        break;
+      }
+    }
+    return {
+      name: "ConflictError",
+      message,
+      transaction: commit as unknown as Transaction,
+      conflict: {
+        space: this.#space,
+        the: DOCUMENT_MIME,
+        of: firstId ?? "of:unknown",
+        expected: null,
+        actual: null,
+        existsInHistory: false,
+        history: [],
+      },
+      readyToRetry: () => Promise.resolve(),
+    };
+  }
+
+  private makeCascadeRejection(
+    entry: InFlightCommit,
+    droppedLocalSeq: number,
+  ): StorageTransactionRejected {
+    return this.makeLocalRejection(
+      entry.commit,
+      `pending dependency dropped locally: localSeq=${droppedLocalSeq}`,
+    );
+  }
+
+  /**
+   * CT-1872 1b: when a commit's optimistic writes are dropped, every
+   * in-flight commit whose pending reads name that localSeq is provably
+   * doomed — the dropped commit will never gain a commit row in the
+   * per-session commit table, so the server would reject each dependant with
+   * "pending dependency not resolved" only after a full round trip (a window
+   * of up to 30s+ per commit). Fabricate that rejection locally instead.
+   *
+   * Commits with no pending reads never enter `#inFlightCommits`, so
+   * zero-read mergeable/blind commits are structurally exempt — they are
+   * DESIGNED to survive a parent drop (the server materializes their spine
+   * via createMissing). Resolving the promises here queues the victims'
+   * continuations on later microtasks; each victim snapshots its own revert
+   * Differential before its own drop, so the scan itself never re-enters.
+   */
+  private cascadeDroppedDependency(droppedLocalSeq: number): void {
+    for (const entry of [...this.#inFlightCommits.values()]) {
+      if (
+        entry.settled ||
+        entry.localRejectionValue !== undefined ||
+        !entry.dependencies.has(droppedLocalSeq)
+      ) {
+        continue;
+      }
+      this.rejectInFlightCommitLocally(
+        entry,
+        this.makeCascadeRejection(entry, droppedLocalSeq),
+      );
+      logger.debug("commit-cascade-rejected", () => [
+        `commit locally rejected: pending dependency localSeq=${droppedLocalSeq} was dropped`,
+        { localSeq: entry.localSeq, operations: entry.operations.length },
+      ]);
+    }
   }
 
   private attachProviderReadyToRetry(
@@ -5953,10 +6798,14 @@ class SpaceReplica implements ISpaceReplica {
     const retained: PendingRead[] = [];
     let rebased = 0;
     for (const read of commit.reads.pending) {
+      // Every named layer must be host-resolvable and on this lane: one
+      // unresolvable layer dooms the whole read, so rebase it onto confirmed.
       if (
-        !this.#shadowLocalSeqs.has(read.localSeq) &&
-        !this.#claimedOverlays.has(read.localSeq) &&
-        (this.#localSeqLanes.get(read.localSeq) ?? "space") === commitLane
+        pendingReadLayers(read.localSeq).every((layer) =>
+          !this.#shadowLocalSeqs.has(layer) &&
+          !this.#claimedOverlays.has(layer) &&
+          (this.#localSeqLanes.get(layer) ?? "space") === commitLane
+        )
       ) {
         retained.push(read);
         continue;
@@ -5996,25 +6845,28 @@ class SpaceReplica implements ISpaceReplica {
     );
     const unresolvedBasisLocalSeqs = new Set<number>();
     for (const read of commit.reads.pending) {
-      if (this.#claimedOverlays.has(read.localSeq)) {
-        // A claimed-overlay dependency never receives a confirmation-assigned
-        // sequence of its own. Settlement basis is deliberately direct (not a
-        // transitive causal frontier), so retain only the confirmed base that
-        // the server can read beneath that overlay. Importing the upstream
-        // overlay's source dependencies would make chained overlays wait
-        // forever and would exceed the v1 scalar-basis contract.
-        basisSeq = Math.max(
-          basisSeq,
-          this.#docs.get(docKey(read.id as URI, read.scope, lane))?.confirmed
-            .seq ?? 0,
-        );
-        continue;
-      }
-      const confirmed = this.#confirmedSeqByLocalSeq.get(read.localSeq);
-      if (confirmed === undefined) {
-        unresolvedBasisLocalSeqs.add(read.localSeq);
-      } else {
-        basisSeq = Math.max(basisSeq, confirmed);
+      for (const layer of pendingReadLayers(read.localSeq)) {
+        if (this.#claimedOverlays.has(layer)) {
+          // A claimed-overlay dependency never receives a
+          // confirmation-assigned sequence of its own. Settlement basis is
+          // deliberately direct (not a transitive causal frontier), so retain
+          // only the confirmed base that the server can read beneath that
+          // overlay. Importing the upstream overlay's source dependencies
+          // would make chained overlays wait forever and would exceed the v1
+          // scalar-basis contract.
+          basisSeq = Math.max(
+            basisSeq,
+            this.#docs.get(docKey(read.id as URI, read.scope, lane))?.confirmed
+              .seq ?? 0,
+          );
+          continue;
+        }
+        const confirmed = this.#confirmedSeqByLocalSeq.get(layer);
+        if (confirmed === undefined) {
+          unresolvedBasisLocalSeqs.add(layer);
+        } else {
+          basisSeq = Math.max(basisSeq, confirmed);
+        }
       }
     }
     const { foreignBasis, unresolvedForeignBasis } = this
@@ -6773,6 +7625,7 @@ class SpaceReplica implements ISpaceReplica {
       const handle = Promise.resolve().then(() => this.#createSession()).then(
         (resolved) => {
           this.#sessionClient = resolved.client;
+          this.#sessionSession = resolved.session;
           this.initializeClientExecutionControl(resolved);
           return resolved;
         },
@@ -6831,6 +7684,26 @@ const executionFirewallRejection = (
     cause: { name: "SystemError", message, code: 500 },
     transaction: commit as Transaction,
   }) as unknown as StorageTransactionRejected;
+
+// Preserve a real AuthorizationError (name, message, and the server's retriable
+// marker) instead of flattening it to a generic ConnectionError, so a caller can
+// tell an authorization denial apart from a transport failure. Everything else
+// remains a ConnectionError.
+const toPullError = (error: unknown): PullError =>
+  error instanceof Error && error.name === "AuthorizationError"
+    ? ({
+      name: "AuthorizationError",
+      message: error.message,
+      ...((error as { retriable?: unknown }).retriable === true
+        ? { retriable: true }
+        : {}),
+    }) as unknown as IAuthorizationError
+    : toConnectionError(error);
+
+// Rebuild a throwable Error from a stored AuthorizationError result so `synced()`
+// rejects with a proper Error instance a caller can match on by name.
+const authorizationErrorToThrow = (error: IAuthorizationError): Error =>
+  Object.assign(new Error(error.message), { name: "AuthorizationError" });
 
 const toRejectedError = (
   error: unknown,

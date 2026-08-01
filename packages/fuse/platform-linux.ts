@@ -11,6 +11,7 @@ import {
   type FusePlatform,
   makeWriteEntryParam,
   type MountHandle,
+  msToTimespec,
   type StatOpts,
 } from "./platform.ts";
 
@@ -67,6 +68,11 @@ type LinuxLib = Deno.DynamicLibrary<typeof LINUX_SYMBOLS>;
 
 const STAT_SIZE = 144;
 const STAT_ST_SIZE_OFFSET = 48;
+// struct timespec members (Linux x86_64):
+//   st_atim @ 72 (tv_sec @ 72, tv_nsec @ 80)
+//   st_mtim @ 88 (tv_sec @ 88, tv_nsec @ 96)
+//   st_ctim @ 104 (tv_sec @ 104, tv_nsec @ 112)
+const STAT_ST_MTIM_OFFSET = 88;
 
 function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   const view = new DataView(buf);
@@ -77,6 +83,11 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   view.setUint32(28, opts.uid ?? 0, true); // st_uid @ 28
   view.setUint32(32, opts.gid ?? 0, true); // st_gid @ 32
   view.setBigInt64(48, BigInt(opts.size), true); // st_size @ 48
+  const { sec, nsec } = msToTimespec(opts.mtime);
+  for (const secOffset of [72, 88, 104]) { // st_atim/st_mtim/st_ctim
+    view.setBigInt64(secOffset, sec, true);
+    view.setBigInt64(secOffset + 8, nsec, true);
+  }
 }
 
 // --- fuse_entry_param ---
@@ -219,6 +230,7 @@ const linuxPlatform: FusePlatform = {
   OPS_OFFSETS,
   FUSE_ARGS_STRUCT_SIZE,
   STAT_ST_SIZE_OFFSET,
+  STAT_ST_MTIM_OFFSET,
 
   writeStat,
   writeEntryParam,

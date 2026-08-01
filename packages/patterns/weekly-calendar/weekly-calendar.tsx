@@ -23,9 +23,9 @@ import {
   NAME,
   navigateTo,
   pattern,
-  safeDateNow,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -34,7 +34,7 @@ import Event, { COLORS, generateId } from "./event.tsx";
 
 // ============ TYPES ============
 
-type EventPiece = {
+export type EventPiece = {
   [NAME]?: string;
   title?: string;
   date?: string;
@@ -66,6 +66,7 @@ interface Input {
 }
 
 export interface Output {
+  [UI]: VNode;
   title: string;
   events: EventPiece[];
   mentionable: EventPiece[];
@@ -142,7 +143,9 @@ const STYLES = {
 const formatDatePST = (d: Date): string =>
   d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-const getTodayDate = (): string => formatDatePST(new Date());
+// `nowMs` is the current time in epoch milliseconds (the caller reads #now in a
+// lift, or Date.now() in a handler/action).
+const getTodayDate = (nowMs: number): string => formatDatePST(new Date(nowMs));
 
 const getWeekStart = (date: string): string => {
   const d = new Date(date + "T12:00:00-08:00");
@@ -226,7 +229,7 @@ const showNewEventModal = handler<
 >((_, { showNewEventPrompt }) => showNewEventPrompt.set(true));
 
 // Handler to create event and close modal (stays on calendar)
-const createEventHandler = handler<
+export const createEventHandler = handler<
   void,
   {
     newEventTitle: Writable<string>;
@@ -236,7 +239,7 @@ const createEventHandler = handler<
     newEventColor: Writable<string>;
     showNewEventPrompt: Writable<boolean>;
     events: Writable<EventPiece[]>;
-    allPieces: Writable<EventPiece[]>;
+    pieceRegistry: Writable<EventPiece[]>;
   }
 >((
   _,
@@ -248,7 +251,7 @@ const createEventHandler = handler<
     newEventColor,
     showNewEventPrompt,
     events,
-    allPieces,
+    pieceRegistry,
   },
 ) => {
   const title = newEventTitle.get() || "New Event";
@@ -262,7 +265,7 @@ const createEventHandler = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
 
   // Reset modal state and stay on calendar
@@ -271,7 +274,7 @@ const createEventHandler = handler<
 });
 
 // Handler to create event and stay in modal
-const createEventAndContinue = handler<
+export const createEventAndContinue = handler<
   void,
   {
     newEventTitle: Writable<string>;
@@ -280,7 +283,7 @@ const createEventAndContinue = handler<
     newEventEndTime: Writable<string>;
     newEventColor: Writable<string>;
     events: Writable<EventPiece[]>;
-    allPieces: Writable<EventPiece[]>;
+    pieceRegistry: Writable<EventPiece[]>;
     usedCreateAnother: Writable<boolean>;
   }
 >((
@@ -292,7 +295,7 @@ const createEventAndContinue = handler<
     newEventEndTime,
     newEventColor,
     events,
-    allPieces,
+    pieceRegistry,
     usedCreateAnother,
   },
 ) => {
@@ -307,7 +310,7 @@ const createEventAndContinue = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
   usedCreateAnother.set(true);
   newEventTitle.set("");
@@ -334,10 +337,10 @@ const handleBacklinkClick = handler<
 >((_, { piece }) => navigateTo(piece));
 
 // LLM-callable handler: Create a single event
-const handleCreateEvent = handler<
+export const handleCreateEvent = handler<
   { title: string; date: string; startTime: string; endTime: string },
-  { events: Writable<EventPiece[]>; allPieces: Writable<EventPiece[]> }
->(({ title, date, startTime, endTime }, { events, allPieces }) => {
+  { events: Writable<EventPiece[]>; pieceRegistry: Writable<EventPiece[]> }
+>(({ title, date, startTime, endTime }, { events, pieceRegistry }) => {
   const newEvent = Event({
     title,
     date,
@@ -348,7 +351,7 @@ const handleCreateEvent = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
   return newEvent;
 });
@@ -366,18 +369,34 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allPieces } = wish<{ allPieces: EventPiece[] }>({
-      query: "#default",
+    const pieceRegistry = wish<EventPiece[]>({
+      query: "#pieceRegistry",
     }).result!;
 
+    // Reactive #now for date defaults (filled once it resolves; the ambient
+    // clock is not available at pattern body).
+    const nowCell = wish<number>({ query: "#now" });
+
     // Navigation State
-    const startDate = new Cell(getWeekStart(getTodayDate()));
+    const startDate = new Cell("");
+    computed(() => {
+      const nowMs = nowCell.result;
+      if (nowMs != null && startDate.get() === "") {
+        startDate.set(getWeekStart(getTodayDate(nowMs)));
+      }
+    });
     const visibleDays = new Cell(7);
 
     // Create Form State
     const showNewEventPrompt = new Writable<boolean>(false);
     const newEventTitle = new Writable<string>("");
-    const newEventDate = new Writable<string>(getTodayDate());
+    const newEventDate = new Writable<string>("");
+    computed(() => {
+      const nowMs = nowCell.result;
+      if (nowMs != null && newEventDate.get() === "") {
+        newEventDate.set(getTodayDate(nowMs));
+      }
+    });
     const newEventStartTime = new Writable<string>("09:00");
     const newEventEndTime = new Writable<string>("10:00");
     const newEventColor = new Writable<string>(COLORS[0]);
@@ -392,8 +411,11 @@ const WeeklyCalendar = pattern<Input, Output>(
     const editEventEndTime = new Writable<string>("10:00");
     const editEventColor = new Writable<string>(COLORS[0]);
 
-    // Track last drop time to prevent click firing after drag
-    const lastDropTime = new Cell(0);
+    // A drag-drop's pointer-up also synthesizes a click on the drop target;
+    // this flag lets the next click after a drop be swallowed. A time-window
+    // guard is not usable here: the in-handler clock is coarsened to one second,
+    // so a millisecond-scale "just dropped" window cannot be measured.
+    const suppressNextClick = new Cell(false);
 
     // Backlinks
     const backlinks = new Writable<MentionablePiece[]>([]);
@@ -406,8 +428,14 @@ const WeeklyCalendar = pattern<Input, Output>(
         .join(", ");
     });
     const hours = buildHours();
-    const weekDates = computed(() => getWeekDates(startDate.get(), 7));
-    const todayDate = getTodayDate();
+    const weekDates = computed(() => {
+      const s = startDate.get();
+      return s === "" ? [] : getWeekDates(s, 7);
+    });
+    const todayDate = computed(() => {
+      const nowMs = nowCell.result;
+      return nowMs != null ? getTodayDate(nowMs) : "";
+    });
 
     // Navigation Actions (using action for internal logic)
     const goPrev = action(() => {
@@ -419,7 +447,7 @@ const WeeklyCalendar = pattern<Input, Output>(
     });
 
     const goToday = action(() => {
-      const today = getTodayDate();
+      const today = getTodayDate(Date.now());
       startDate.set(visibleDays.get() === 1 ? today : getWeekStart(today));
     });
 
@@ -697,7 +725,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventEndTime,
                     newEventColor,
                     events,
-                    allPieces,
+                    pieceRegistry,
                     usedCreateAnother,
                   })}
                 >
@@ -714,7 +742,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventColor,
                     showNewEventPrompt,
                     events,
-                    allPieces,
+                    pieceRegistry,
                   })}
                 >
                   Create
@@ -968,13 +996,16 @@ const WeeklyCalendar = pattern<Input, Output>(
                           .set(addMinutesToTime(newTime, duration));
                       }
 
-                      lastDropTime.set(safeDateNow());
+                      suppressNextClick.set(true);
                     });
 
                     // Click handlers for creating events at specific hours (using action)
                     const hourClickActions = hours.map((hour) =>
                       action(() => {
-                        if (safeDateNow() - lastDropTime.get() < 300) return;
+                        if (suppressNextClick.get()) {
+                          suppressNextClick.set(false);
+                          return;
+                        }
                         newEventTitle.set("");
                         newEventDate.set(columnDate);
                         newEventStartTime.set(hour.startTime);
@@ -1103,7 +1134,10 @@ const WeeklyCalendar = pattern<Input, Output>(
 
                     // Click action to open edit modal
                     const openEvent = action(() => {
-                      if (safeDateNow() - lastDropTime.get() < 300) return;
+                      if (suppressNextClick.get()) {
+                        suppressNextClick.set(false);
+                        return;
+                      }
                       // Populate edit form with event data
                       editingEventIndex.set(evtIndex);
                       editEventTitle.set(evt.title || "");
@@ -1280,7 +1314,7 @@ const WeeklyCalendar = pattern<Input, Output>(
       isHidden,
       backlinks,
       // LLM-callable streams
-      createEvent: handleCreateEvent({ events, allPieces }),
+      createEvent: handleCreateEvent({ events, pieceRegistry }),
       setTitle: handleSetTitle({ title }),
     };
   },

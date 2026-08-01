@@ -449,7 +449,7 @@ async function waitForAuthoritativePreflightSettlement(
         return settlement.acceptedCommitSeq === undefined ||
           diagnostics.executionAppliedSeq >= settlement.acceptedCommitSeq;
       },
-      { timeout: TIMEOUT, args: [query, key] },
+      { args: [query, key] },
     );
   } catch (cause) {
     const latest = await executionRoutingDiagnostics(page, query).catch(
@@ -540,7 +540,7 @@ async function waitForExactRoutingPhase(
               successfulSettlements <= expectedEvents) &&
           action.basisCoveredOverlayDrops === expectedEvents;
       },
-      { timeout: TIMEOUT, args: [query, key, events] },
+      { args: [query, key, events] },
     );
   } catch (cause) {
     const latest = await executionRoutingDiagnostics(page, query).catch(
@@ -648,7 +648,7 @@ async function cancelLazyFinalObserver(page: Page): Promise<void> {
 
 async function lazySyncedIdleBarrier(page: Page): Promise<void> {
   await runtimeAllSynced(page);
-  await waitForRuntimeIdle(page, { timeout: TIMEOUT });
+  await waitForRuntimeIdle(page);
   await runtimeAllSynced(page);
 }
 
@@ -756,8 +756,8 @@ const assertRendererCountersContinue = (
         }),
       ]);
       await Promise.all([
-        waitForRuntimeIdle(actorPage, { timeout: TIMEOUT }),
-        waitForRuntimeIdle(lazyPage, { timeout: TIMEOUT }),
+        waitForRuntimeIdle(actorPage),
+        waitForRuntimeIdle(lazyPage),
       ]);
       await Promise.all([
         waitForText(actorPage, "#rollout-doubled", "doubled:0"),
@@ -772,9 +772,8 @@ const assertRendererCountersContinue = (
           actorPage,
           "#rollout-doubled",
           `doubled:${expectedCount * 2}`,
-          { timeout: TIMEOUT },
         );
-        await waitForRuntimeIdle(actorPage, { timeout: TIMEOUT });
+        await waitForRuntimeIdle(actorPage);
         await runtimeAllSynced(actorPage);
       };
 
@@ -834,7 +833,7 @@ const assertRendererCountersContinue = (
               return !diagnostics.snapshotRequired && claims.length === 1 &&
                 actions.length === 1;
             },
-            { timeout: 5_000, args: [scopedQuery, doubledEntityId] },
+            { args: [scopedQuery, doubledEntityId] },
           ).catch(() => {});
           const [trace, diagnostics] = await Promise.all([
             actionTrace(actorPage),
@@ -881,7 +880,6 @@ const assertRendererCountersContinue = (
               lazyPage,
               "#rollout-doubled",
               `doubled:${expectedCount * 2}`,
-              { timeout: TIMEOUT },
             );
             await lazySyncedIdleBarrier(lazyPage);
             return { discovered, trace };

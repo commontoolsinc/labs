@@ -2,7 +2,6 @@ import {
   action,
   computed,
   type Default,
-  entityRefToString,
   equals,
   FS,
   type FsProjection,
@@ -32,6 +31,23 @@ import {
 } from "./schemas.tsx";
 
 export { NotePiece };
+
+/**
+ * The bare id embedded in wiki-link text (`[[Name (<id>)]]`). Mirrors
+ * mentionIdFromCellId in packages/ui (not importable from a pattern): `of:`
+ * strips — the renderer (note-md) re-adds it — and `computed:` is REJECTED,
+ * because the bare embed format cannot carry the scheme and the scheme is
+ * part of the identity (a computed cell's bare hash names its of: sibling).
+ * Mentionables are pieces (always of:) today, so the throw is a tripwire —
+ * if it ever fires, the embed format must learn to carry the scheme.
+ * Exported so the pattern test can pin the tripwire.
+ */
+export const bareMentionId = (uri: string): string => {
+  if (uri.startsWith("computed:")) {
+    throw new Error(`cannot embed a computed: cell in a wiki-link: ${uri}`);
+  }
+  return uri.replace(/^of:/, "");
+};
 
 // ===== Output Type =====
 
@@ -69,7 +85,7 @@ export interface NoteOutput extends NotePiece {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in cf-code-editor - binds mentionable and allPieces
+// Used in cf-code-editor - binds mentionable and pieceRegistry
 const handleNewBacklink = handler<
   {
     detail: {
@@ -79,11 +95,11 @@ const handleNewBacklink = handler<
   },
   {
     mentionable: Writable<MentionablePiece[]>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
   }
->(({ detail }, { mentionable, allPieces }) => {
-  // Push to allPieces so it appears in default-app
-  allPieces.push(detail.piece);
+>(({ detail }, { mentionable, pieceRegistry }) => {
+  // Register the piece so it appears in default-app.
+  pieceRegistry.push(detail.piece);
 
   if (detail.navigate) {
     return navigateTo(detail.piece);
@@ -169,10 +185,11 @@ const Note = pattern<NoteInput, NoteOutput>(
     const notebooks = notebookWish.candidates;
     const allNotesPiece = allNotesWish.result;
 
-    // Still need allPieces for write operations (push new notes, push backlinks)
-    const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
-      { query: "#default", headless: true },
-    ).result!;
+    // The registry is writable for creating notes and backlinks.
+    const pieceRegistry = wish<Writable<MinimalPiece[]>>({
+      query: "#pieceRegistry",
+      headless: true,
+    }).result!;
     const mentionable = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     ).result;
@@ -239,7 +256,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       );
     });
 
-    // Create new note action - closes over allPieces and parentNotebook
+    // Create new note action - closes over the registry and parentNotebook
     const createNewNote = action(() => {
       const notebook = parentNotebook.get();
 
@@ -256,7 +273,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           isHidden: !!notebook,
           parentNotebook: notebook,
         });
-        allPieces.push(note as any);
+        pieceRegistry.push(note as any);
         return navigateTo(note);
       }
     });
@@ -296,8 +313,11 @@ const Note = pattern<NoteInput, NoteOutput>(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
         const resolved = (piece as any).resolveAsCell();
-        const ref = resolved?.entityId;
-        const entityId = ref ? entityRefToString(ref) : undefined;
+        // Derive the embed id from the scheme-PRESERVING sourceURI (the bare
+        // entityId would silently alias a computed: cell to its of: sibling)
+        // and let bareMentionId enforce the embed contract.
+        const uri: string | undefined = resolved?.sourceURI;
+        const entityId = uri ? bareMentionId(uri) : undefined;
         if (!name || !entityId) return;
 
         const link = `[[${name} (${entityId})]]`;
@@ -377,7 +397,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({
           mentionable: mentionable!,
-          allPieces,
+          pieceRegistry,
         })}
         language="text/markdown"
         mode="prose"

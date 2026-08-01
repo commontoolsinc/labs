@@ -120,11 +120,18 @@ cells its context schema names — with write handles only where the schema
 says `asCell` — rather than ambient access to the space.
 
 **Ring 2 — SES.** Compiled pattern code executes inside SES (Secure
-ECMAScript) compartments: hardened intrinsics, no ambient authority. This
-is why authored code has no `Date.now()`, `Math.random()`, `setTimeout`, or
-`new Proxy()` (Chapter 3) — nondeterminism and timing channels are denied
-at the platform layer, and the blessed substitutes (`safeDateNow()`,
-`nonPrivateRandom()`) are injected capabilities rather than globals.
+ECMAScript) compartments: hardened intrinsics, no ambient authority.
+Nondeterminism and timing channels are denied at the platform layer, so the
+ambient clock and entropy intrinsics — `Date.now()`, no-argument
+`new Date()`, and `Math.random()` — are gated rather than freely available.
+Inside a handler the runtime allows them (the clock coarsened to one-second
+resolution, entropy passed through); in a `lift`/`computed` or at pattern-body
+level they throw a `TimeCapabilityError`. Authored code calls these built-ins
+directly; the former `safeDateNow()`/`nonPrivateRandom()` helpers that used to
+wrap them are now removed. To read a live clock reactively in a computed, use
+the `#now` wish. `fetch()` follows the same rule: it works only inside a
+handler (elsewhere it throws), and its completion is coarsened to one-second
+resolution so a network round trip cannot serve as a fine clock.
 
 **Ring 3 — the iframe sandbox.** For fully untrusted rendered content,
 `packages/iframe-sandbox` adds a process-level browser boundary with a

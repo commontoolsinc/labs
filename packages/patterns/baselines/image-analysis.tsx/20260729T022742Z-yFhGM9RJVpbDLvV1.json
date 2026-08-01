@@ -1,0 +1,150 @@
+{
+  "argumentSchema": {
+    "description": "Image Chat - Simple image upload with LLM analysis",
+    "properties": {
+      "model": {
+        "type": "string"
+      },
+      "systemPrompt": {
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "image-analysis.tsx",
+  "resultSchema": {
+    "$defs": {
+      "ImageData": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "exif": {
+            "properties": {
+              "dateTime": {
+                "type": "string"
+              },
+              "exposureTime": {
+                "type": "string"
+              },
+              "fNumber": {
+                "type": "number"
+              },
+              "focalLength": {
+                "type": "number"
+              },
+              "gpsAltitude": {
+                "type": "number"
+              },
+              "gpsLatitude": {
+                "type": "number"
+              },
+              "gpsLongitude": {
+                "type": "number"
+              },
+              "iso": {
+                "type": "number"
+              },
+              "make": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "orientation": {
+                "type": "number"
+              },
+              "pixelXDimension": {
+                "type": "number"
+              },
+              "pixelYDimension": {
+                "type": "number"
+              },
+              "raw": {
+                "additionalProperties": true,
+                "properties": {},
+                "type": "object"
+              },
+              "software": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "height": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "width": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "data",
+          "timestamp",
+          "size",
+          "type"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "images": {
+        "items": {
+          "$ref": "#/$defs/ImageData"
+        },
+        "type": "array"
+      },
+      "pending": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "response": {
+        "type": [
+          "string",
+          "undefined"
+        ]
+      },
+      "ui": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "images",
+      "prompt",
+      "response",
+      "pending",
+      "ui"
+    ],
+    "type": "object"
+  }
+}

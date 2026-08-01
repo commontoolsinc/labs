@@ -2,7 +2,34 @@
 
 # Development Guide
 
-This guide covers coding standards, design principles, and build/test workflows for Common Fabric development.
+This guide covers coding standards, design principles, and build/test workflows
+for Common Fabric development.
+
+Dependency declarations, version rolls, and dependency troubleshooting are
+covered in [Dependencies](DEPENDENCIES.md).
+
+## Focused guides and design material
+
+- [Engineering priorities](ENGINEERING_PRIORITIES.md) defines how product
+  evidence selects work across correctness, speed, security, and other
+  dimensions.
+- [Performance program](PERFORMANCE_PROGRAM.md) turns the speed priority into
+  measurements and candidate projects.
+- [Committed-write backpressure](committed-write-backpressure.md) explains how
+  the scheduler surfaces or retries a committed write that the server rejects
+  under contention.
+- [Code coverage in CI](COVERAGE.md) explains the runtime and authored-pattern
+  coverage mechanisms. Its
+  [one-line guard note](deno-coverage-guard-line-artifact.md) explains a V8
+  branch-coverage reporting artifact.
+- [Invoking handlers from outside a pattern](handlers/invocation-outside-pattern.md)
+  covers programmatic handler-stream invocation through `RuntimeProcessor`.
+- [Bidirectional sync with an external canonical source](importers/bidirectional_sync.md)
+  covers identity, reconciliation, and write-back for importers.
+- [Ingest channels and the journal sink](proposals/ingest-channels-journal-sink.md)
+  proposes a durable append-only endpoint for external sources.
+- [Vouched ingest channel minting](proposals/vouched-ingest-channel-mint-design.md)
+  records the split-mint seam that the ingest-channel proposal builds on.
 
 ## Style & Conventions
 
@@ -77,11 +104,13 @@ We execute our JavaScript modules in many different environments:
 - Deno Workers
 - Deno workers (eval'd patterns)
 
+For import-map placement and dependency boundaries, follow
+[Adding dependencies](DEPENDENCIES.md#adding-dependencies).
+
 > **❌ Avoid**
 
 - Modules depending on each other
 - Large quantity of module exports
-- Adding module-specific dependencies to workspace deno.jsonc
 - Non-standard JS (env vars, vite-isms): All of our different invocation
   mechanisms/environments need to handle these
 
@@ -97,8 +126,6 @@ We execute our JavaScript modules in many different environments:
   dependencies, external or otherwise.
 - Clean separation of public and private facing interfaces: only export what's
   needed.
-- Add module-specific dependencies to that module's dependencies, not the entire
-  workspace. We don't need `vite` in a deno server.
 
 ### Avoid Ambiguous Types
 
@@ -351,45 +378,6 @@ export const set = (cache: Cache, key: string, value: string) =>
 
 ## Build & Test
 
-### Environment Setup
-
-#### Installing Deno
-
-If Deno is not installed, install it using the official installer:
-
-```bash
-curl -fsSL https://deno.land/install.sh | sh
-```
-
-This installs Deno to `~/.deno/bin/deno`. Add it to your PATH:
-
-```bash
-export PATH="$HOME/.deno/bin:$PATH"
-```
-
-For persistent configuration, add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
-
-#### SSL Certificate Issues
-
-In some CI/test environments, you may encounter SSL certificate errors when Deno downloads npm packages:
-
-```
-error: Failed caching npm package: invalid peer certificate: UnknownIssuer
-```
-
-This occurs when the system's CA (Certificate Authority) certificate bundle is missing or outdated. Install/update CA certificates on your system:
-
-```bash
-# Debian/Ubuntu
-sudo apt-get update && sudo apt-get install -y ca-certificates
-
-# Alpine Linux (common in Docker containers)
-apk add --no-cache ca-certificates
-
-# Update certificate store
-sudo update-ca-certificates
-```
-
 ### Running Tests
 
 > **Note:** CI enforces that `main` always type-checks and all tests pass, so
@@ -435,6 +423,8 @@ suite will break.
    ```
 
 See `packages/utils` and `packages/leb128` for real examples.
+If the new package needs registry dependencies, follow
+[Adding dependencies](DEPENDENCIES.md#adding-dependencies).
 
 ### Running Integration Tests
 

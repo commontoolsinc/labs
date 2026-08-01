@@ -152,7 +152,24 @@ interface ConfirmedRead {
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
-  localSeq: number;
+  // The dependency set: every pending layer the read's materialized view
+  // sat on. Each element must have resolved to an ACCEPTED commit for this
+  // commit to be applicable; the staleness check (§3.6.1) runs once per
+  // read, from the basis §3.6.3 selects. A scalar is the single-layer
+  // form, and the only form a client may send to a server that has not
+  // advertised the `pendingReadStacks` capability in the hello exchange.
+  localSeq: number | number[];
+  // The reader's confirmed basis for THIS document, in the SERVER's seq
+  // space: the seq of the last accepted write to the document that the
+  // client's confirmed view reflected at build time (0 for a document its
+  // subscriptions never covered). When present, the staleness check scans
+  // the FULL interval from this basis, excluding the session's own accepted
+  // commits (§3.6.3) — the CT-1910 repair. When absent (a legacy client),
+  // staleness is based at the resolution of the HIGHEST localSeq element —
+  // the document's top-of-stack layer below the reader, which the array
+  // MUST include (§3.5). Servers ignore unknown fields, so clients attach
+  // this unconditionally; older servers keep the legacy basis.
+  basisSeq?: number;
 }
 ```
 
@@ -178,6 +195,48 @@ If `C1` is later confirmed, the server resolves `C2`'s pending read to that
 confirmed commit. If `C1` is rejected, `C2` is invalid and must be rejected as
 well. Rejection therefore cascades through the stack of dependent pending
 commits.
+
+The cascade cannot rely on each pending layer reading the layer beneath it:
+zero-read operations (mergeable collection writes) legally interleave into a
+stack without any read edge. A commit that reads through a pending stack
+therefore records its FULL dependency set directly: the read's `localSeq`
+array names every pending layer of the document below the reader, in
+ascending order. Each element imposes a resolution requirement; the highest
+element — the document's top-of-stack layer — is the legacy staleness basis
+when no `basisSeq` is declared (§3.6.3). The
+client mirrors the server cascade at drop time: when a pending commit's
+optimistic writes are dropped, every queued or in-flight commit whose
+recorded dependency set names the dropped `localSeq` is locally rejected
+without waiting for the server's per-commit verdict.
+
+The dependency array MUST include the document's top-of-stack pending layer
+below the reader. For a read that declares no `basisSeq`, the staleness
+basis is the stack top (implicitly, the array's highest element), and basing
+the scan at a lower layer is unsound, not merely conservative: the session's
+own newer stacked commits then land inside the scan interval, where the
+path-blind set/delete check false-conflicts with the reader's own stack. A
+read that declares `basisSeq` does not have this constraint on its basis —
+own-session exclusion (§3.6.3) removes the self-conflict, which is exactly
+what lets the scan start at the true confirmed basis — but the top-of-stack
+element remains REQUIRED in the array for its resolution edge. Any narrowing
+of the dependency set (for example, pruning layers whose write footprint
+provably cannot influence the read path) may drop only NON-top layers.
+
+The array form is a negotiated capability (`pendingReadStacks` in the hello
+flags). Toward a server that does not advertise it, the client MUST send
+scalar reads, collapsing each array to its top-of-stack element — the
+pre-capability wire shape. Because the omitted lower layers are then
+invisible to the server, the client MUST NOT send such a commit while any
+omitted dependency is unsettled: the server could durably accept a commit
+the client is about to cascade-reject, and the caller would observe a
+conflict for a write that landed. The client holds the send until every
+omitted dependency settles — a dropped one dooms the commit locally before
+it reaches the wire, and all-accepted makes the scalar shape sound (each
+omitted layer's resolution is already durable). Scheduler observations,
+being droppable bookkeeping, degrade instead of holding: an observation
+whose read sat on more than one pending layer is dropped client-side
+(flag-off semantics — the resume re-runs fresh) rather than delaying the
+flush that semantic commits await.
 
 ## 3.6 Server Validation
 
@@ -222,14 +281,24 @@ function validatePendingReads(
   serverState: ServerState,
 ): ValidationResult {
   for (const read of commit.reads.pending) {
-    const resolution = serverState.resolveLocalSeq(sessionId, read.localSeq);
+    const layers = Array.isArray(read.localSeq)
+      ? read.localSeq
+      : [read.localSeq];
 
-    if (resolution === null) {
-      return pendingDependency(read.localSeq);
-    }
+    // Every listed layer must resolve to an ACCEPTED commit. The staleness
+    // check (§3.6.1/§3.6.2) then runs once per read, from the basis this
+    // section selects below (declared `basisSeq`, or the legacy highest
+    // element's resolution).
+    for (const localSeq of layers) {
+      const resolution = serverState.resolveLocalSeq(sessionId, localSeq);
 
-    if (resolution.rejected) {
-      return cascadedRejection(read.localSeq);
+      if (resolution === null) {
+        return pendingDependency(localSeq);
+      }
+
+      if (resolution.rejected) {
+        return cascadedRejection(localSeq);
+      }
     }
   }
 
@@ -240,6 +309,44 @@ function validatePendingReads(
 If a referenced `localSeq` is not resolved yet, the server MAY hold the commit
 in the session queue until the dependency resolves. If the dependency resolves
 to rejection, the queued commit is rejected immediately.
+
+Holding is queueing, not reordering: within a logical session, commits are
+resolved (accepted or rejected) in increasing `localSeq` order, and a held
+commit MUST NOT be leapfrogged by a later same-session commit. A commit's
+resolution seq is therefore monotonic in its `localSeq` within a session —
+the property that makes the top-of-stack pending read a sound LEGACY
+staleness basis (§3.5): every own-session layer below the reader resolves at
+or before the basis layer's seq, so the scan interval past the basis
+contains no own-session commits. (The current implementation rejects rather
+than holds, which preserves this ordering trivially.) A `basisSeq` read does
+NOT lean on this ordering: its own-session exclusion checks each excluded
+commit's `localSeq` directly, so an own commit admitted out of submission
+order simply conflicts.
+
+Every element of an array `localSeq` participates in this resolution
+requirement — one unresolved or rejected element rejects the commit. The
+staleness scan (§3.6.1/§3.6.2) then runs once per read, from a basis chosen
+by the read's shape:
+
+- **True basis (`basisSeq` present).** The scan covers the full interval
+  `(basisSeq, head]` and excludes only the reader's own session's TRUE
+  PREDECESSOR commits — those with `localSeq` below the reader's, the
+  accepted layers its materialized view included. The exclusion is what
+  makes the true basis sound, and its predecessor restriction is what keeps
+  it sound without trusting wire order: an own write with a higher
+  `localSeq` that was admitted first (an out-of-order submission) was not
+  in the reader's view and conflicts exactly like a foreign write. Foreign
+  writes in the interval conflict — including those between the reader's
+  confirmed basis and the top layer's resolution seq, which the legacy
+  basis never scanned. A `basisSeq` greater than the server's current head
+  is a protocol error; values at or below head are trusted, like a
+  confirmed read's `seq` (lying corrupts only the session's own data).
+- **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
+  element's resolution seq. Writes landing between the reader's confirmed
+  basis and that seq are not scanned — the pending-read basis over-advance
+  (CT-1910), retained verbatim for old clients and recorded as an INV-1
+  known deviation in `09-invariants.md`. The deviation retires when clients
+  that omit `basisSeq` do.
 
 ### 3.6.4 Conflict Response
 

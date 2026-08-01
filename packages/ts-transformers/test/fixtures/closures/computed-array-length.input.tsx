@@ -2,8 +2,8 @@
  * Regression test for array.length access inside computed().
  *
  * This mimics the pattern from default-app.tsx where:
- * - allPieces comes from wish<{ allPieces: MentionablePiece[] }>
- * - computed(() => allPieces.length) accesses .length on an array from wish
+ * - pieceRegistry comes from wish<{ pieceRegistry: MentionablePiece[] }>
+ * - computed(() => pieceRegistry.length) accesses .length on an array from wish
  *
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
@@ -17,20 +17,20 @@ interface Piece {
 
 // FIXTURE: computed-array-length
 // Verifies: computed(() => expr) with .length access on a Reactive<T[]> is closure-extracted
-//   computed(() => allPieces.length) → lift(({ allPieces }) => allPieces.length)({ allPieces: { length: allPieces.length } })
-//   allPieces.map(fn) → allPieces.mapWithPattern(pattern(fn, ...schemas), {})
+//   computed(() => pieceRegistry.length) → lift(({ pieceRegistry }) => pieceRegistry.length)({ pieceRegistry: { length: pieceRegistry.length } })
+//   pieceRegistry.map(fn) → pieceRegistry.mapWithPattern(pattern(fn, ...schemas), {})
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
-  const { allPieces } = wish<{ allPieces: Piece[] }>({ query: "/" }).result!;
+  const { pieceRegistry } = wish<{ pieceRegistry: Piece[] }>({ query: "/" }).result!;
 
   return {
-    [NAME]: computed(() => `Pieces (${allPieces.length})`),
+    [NAME]: computed(() => `Pieces (${pieceRegistry.length})`),
     [UI]: (
       <div>
-        <span>Count: {computed(() => allPieces.length)}</span>
+        <span>Count: {computed(() => pieceRegistry.length)}</span>
         <ul>
-          {allPieces.map((piece) => (
+          {pieceRegistry.map((piece) => (
             <li>{piece.name}</li>
           ))}
         </ul>

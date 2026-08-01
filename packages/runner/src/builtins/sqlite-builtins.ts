@@ -20,6 +20,8 @@
 // this read path.
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
 import {
   computeRowLabelRead,
@@ -47,38 +49,29 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
+import { stripEntityUriScheme } from "../entity-kind.ts";
 import {
   columnDeclaresIfc,
   parseSessionExecutionContextKey,
   principalOfUserContextKey,
   type SchedulerExecutionContextKey,
+  type SqliteDbRef as WireSqliteDbRef,
+  type SqliteParamsWire,
 } from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
-type SqliteDbRef = {
-  id: string;
-  tables?: Record<string, unknown>;
-  // The author-declared scope of the SqliteDb cell (space/user/session). The
-  // server folds this into the on-disk filename so user/session-scoped dbs get
-  // a per-user / per-session file. Absent ⇒ "space" (the default, unqualified).
-  scope?: CellScope;
-  // The db's owner — the principal that created the SqliteDb cell, captured
-  // once at handle creation (CFC Phase 3: resolves the row rule's dbOwner()
-  // and the ceiling's __ctDbOwner placeholder; never the acting reader).
-  owner?: string;
+// The wire shape (`id`, `tables`, `scope`, `owner`) is the memory protocol's
+// own `SqliteDbRef`; only `rev` is added here.
+type SqliteDbRef = WireSqliteDbRef & {
   // db.exec's optimistic-concurrency revision (bumped per write, cell.ts). A
   // handle re-derivation must carry it forward: deleting it changes the handle
   // value, which every consumer hashing the handle (e.g. sqliteQuery's
   // reactOn) sees as "new inputs".
   rev?: number;
 };
-type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
+type WireParams = SqliteParamsWire | undefined;
 
 const errMsg = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -208,7 +201,7 @@ function readDbRef(value: unknown): SqliteDbRef {
         ? cloneIfNecessary(
           ref.tables as Parameters<typeof cloneIfNecessary>[0],
           { frozen: false },
-        ) as Record<string, unknown>
+        ) as SqliteDbRef["tables"]
         : undefined,
       // Validate at the boundary: an invalid scope value must not flow into
       // query execution / on-disk filename derivation.
@@ -231,7 +224,7 @@ function readDbRef(value: unknown): SqliteDbRef {
  * probe: a resolved rule always validates; a null-riddled one never does.
  */
 function dbTablesResolved(
-  tables: Record<string, unknown> | undefined,
+  tables: SqliteDbRef["tables"],
 ): boolean {
   if (tables === undefined) return true;
   for (const t of Object.values(tables)) {
@@ -251,16 +244,16 @@ function dbTablesResolved(
  *  admit them too. */
 function staticConfidentialityOf(
   labelSchema: Record<string, unknown> | undefined,
-): unknown[] {
+): CfcConfClause[] {
   const props = (labelSchema as {
     properties?: {
       result?: { items?: { properties?: Record<string, unknown> } };
     };
   })?.properties?.result?.items?.properties;
   if (!props) return [];
-  const out: unknown[] = [];
+  const out: CfcConfClause[] = [];
   for (const p of Object.values(props)) {
-    const conf = (p as { ifc?: { confidentiality?: unknown[] } })?.ifc
+    const conf = (p as { ifc?: { confidentiality?: CfcConfClause[] } })?.ifc
       ?.confidentiality;
     if (Array.isArray(conf)) out.push(...conf);
   }
@@ -376,16 +369,16 @@ function deriveNullOriginIfc(
 }
 
 type ColumnIfc = {
-  confidentiality?: unknown[];
-  integrity?: unknown[];
-  maxConfidentiality?: unknown[];
+  confidentiality?: CfcConfClause[];
+  integrity?: CfcAtom[];
+  maxConfidentiality?: CfcConfClause[];
 };
 
 const unionAtoms = (
-  a: unknown[] | undefined,
-  b: unknown[] | undefined,
-): unknown[] | undefined => {
-  const out: unknown[] = [...(a ?? [])];
+  a: CfcConfClause[] | undefined,
+  b: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
+  const out: CfcConfClause[] = [...(a ?? [])];
   for (const atom of b ?? []) {
     if (!out.some((existing) => deepEqual(existing, atom))) out.push(atom);
   }
@@ -398,9 +391,9 @@ const unionAtoms = (
 // An EMPTY intersection stays `[]`, which the verifier reads as "public only"
 // (the tightest ceiling) — collapsing it to undefined would forge "no ceiling".
 const tightenCeiling = (
-  prior: unknown[] | undefined,
-  next: unknown[] | undefined,
-): unknown[] | undefined => {
+  prior: CfcConfClause[] | undefined,
+  next: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
   if (prior === undefined) return next;
   if (next === undefined) return prior;
   return prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
@@ -415,9 +408,9 @@ const tightenCeiling = (
 // Identical to `tightenCeiling` EXCEPT the prior-absent case yields undefined
 // (no prior trust to inherit) rather than adopting `next` wholesale.
 const clampIntegrity = (
-  prior: unknown[] | undefined,
-  next: unknown[] | undefined,
-): unknown[] | undefined => {
+  prior: CfcAtom[] | undefined,
+  next: CfcAtom[] | undefined,
+): CfcAtom[] | undefined => {
   if (prior === undefined) return undefined;
   if (next === undefined) return prior;
   const kept = prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
@@ -618,10 +611,16 @@ export function sqliteDatabase(
         scope,
       );
       const options = inputsCell.withTx(tx).get() as
-        | { tables?: Record<string, unknown> }
+        | { tables?: SqliteDbRef["tables"] }
         | undefined;
-      const id = (isEntityRef(handle.entityId)
-        ? entityRefToString(handle.entityId)
+      // `handle` is a builtin RESULT cell (makeResultCell), and result cells
+      // are always `of:`-schemed — the computed kind applies only to derived
+      // internal cells — so stripping the entity scheme yields the handle's
+      // stable, historical key form. Deriving from the scheme-preserving
+      // sourceURI through the canonical helper keeps that assumption
+      // explicit and in one place.
+      const id = (typeof handle.sourceURI === "string"
+        ? stripEntityUriScheme(handle.sourceURI)
         : undefined) ?? JSON.stringify(handle.getAsLink());
       // Grow-only merge the per-column `ifc` against any prior committed handle
       // value at this (causally-stable) id: the store's effective label is
@@ -653,7 +652,7 @@ export function sqliteDatabase(
         ? cloneIfNecessary(
           merged as Parameters<typeof cloneIfNecessary>[0],
           { frozen: false },
-        ) as Record<string, unknown>
+        ) as SqliteDbRef["tables"]
         : undefined;
       // Fail closed on an UNRESOLVED materialization (this runtime loaded the
       // pattern but not every linked doc under `tables`): writing it would
@@ -661,7 +660,7 @@ export function sqliteDatabase(
       // that resolves fully (the creator, at least) writes the inline form.
       if (prior === undefined || dbTablesResolved(tables)) {
         // RAW write, not `.set()`: this first action run can execute inside
-        // the pattern's builder frame, where `set` [ID]-anchors every object
+        // the pattern's builder frame, where `set` anchors every object
         // in an array — splitting a rule's term list into per-element entity
         // docs (the very shape the materialization above exists to avoid).
         // The raw write stores the subtree verbatim; `onlyIfDifferent` keeps
@@ -739,7 +738,7 @@ export function sqliteQuery(
       // CFC Phase 3: declared output ceiling + what to do when a row's label
       // exceeds it ("fail" default | "skip"). The typed alternative is
       // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
-      maxConfidentiality?: unknown[];
+      maxConfidentiality?: CfcConfClause[];
       onExceed?: unknown;
       // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
       // acting reader may read (a declared existence release). Requires the
@@ -921,7 +920,7 @@ export function sqliteQuery(
           // row, and decides fail/skip under the ceiling — every unresolvable
           // case refuses the query (fail closed), never under-labels.
           const rowSchemaCeiling = (inputs.rowSchema as {
-            ifc?: { maxConfidentiality?: unknown[] };
+            ifc?: { maxConfidentiality?: CfcConfClause[] };
           } | undefined)?.ifc?.maxConfidentiality;
           if (
             inputs.maxConfidentiality !== undefined &&

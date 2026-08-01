@@ -5,7 +5,9 @@ import {
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -18,6 +20,7 @@ import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import Notebook from "../notes/notebook.tsx";
 import PieceGrid from "./piece-grid.tsx";
+import { migratePieceRegistry } from "./piece-registry-migration.ts";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -29,10 +32,16 @@ type PiecesListInput = void;
 // Pattern returns only UI, no data outputs (only symbol properties)
 export interface PiecesListOutput {
   [key: string]: unknown;
+  [UI]: VNode;
   backlinksIndex: {
     mentionable: MentionablePiece[] | undefined;
   };
   sidebarUI?: unknown;
+  // Declared (not just index-signature) so the schema surfaces them to
+  // external callers and tests: the runtime reads outputs through the
+  // declared type.
+  pieceRegistry: MentionablePiece[];
+  addPiece: Stream<{ piece: Writable<MentionablePiece> }>;
 }
 
 const _visit = handler<
@@ -49,20 +58,20 @@ const removePiece = handler<
   Record<string, never>,
   {
     piece: Writable<MinimalPiece>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
   }
 >((_, state) => {
-  const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex(
+  const registeredPieces = state.pieceRegistry.get();
+  const index = registeredPieces.findIndex(
     (c: any) => c && state.piece.equals(c),
   );
 
   if (index !== -1) {
-    const pieceListCopy = [...allPiecesValue];
+    const pieceListCopy = [...registeredPieces];
     console.log("pieceListCopy before", pieceListCopy.length);
     pieceListCopy.splice(index, 1);
     console.log("pieceListCopy after", pieceListCopy.length);
-    state.allPieces.set(pieceListCopy);
+    state.pieceRegistry.set(pieceListCopy);
   }
 });
 
@@ -72,18 +81,15 @@ const dropOntoNotebook = handler<
   { notebook: Writable<{ notes?: NotePiece[] }> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
-  const notesCell = notebook.key("notes");
-  const notesList = notesCell.get() ?? [];
 
-  // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n));
-  if (alreadyExists) return;
-
-  // Hide from Patterns list
+  // Hide from Patterns list. Idempotent on a re-drop: a note already in the
+  // notebook is already hidden.
   sourceCell.key("isHidden").set(true);
 
-  // Add to notebook - push cell reference, not value, to maintain piece identity
-  notesCell.push(sourceCell);
+  // Add to notebook by piece identity. addUnique compares a cell argument by
+  // link, so re-dropping the same note resolves to one membership entry and
+  // drops of distinct notes merge, without reading the whole list.
+  notebook.key("notes").addUnique(sourceCell);
 });
 
 // Toggle dropdown menu
@@ -117,17 +123,18 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   },
 );
 
-// Handler: Add piece to allPieces if not already present
+// Handler: Add a piece to the registry if not already present. The event field
+// is declared as a cell so it arrives as one (the shell sends a piece cell);
+// addUnique then dedups by link, so concurrent registrations of the same
+// piece resolve to one entry and adds of distinct pieces merge, without
+// reading the whole list.
 const addPiece = handler<
-  { piece: MentionablePiece },
-  { allPieces: Writable<MentionablePiece[]> }
->((event, { allPieces }) => {
+  { piece: Writable<MentionablePiece> },
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>((event, { pieceRegistry }) => {
   const piece = event?.piece;
   if (!piece) return;
-  const current = allPieces.get();
-  if (!current.some((c) => equals(c, piece))) {
-    allPieces.push(piece);
-  }
+  pieceRegistry.addUnique(piece);
 });
 
 // Handler: Track piece as recently used (add to front, maintain max)
@@ -145,8 +152,26 @@ const trackRecent = handler<
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allPieces = new Writable<MentionablePiece[]>([]);
+  const legacyPieceRegistry = new Writable<MentionablePiece[]>([]).for(
+    "allPieces",
+  );
+  const pieceRegistry = new Writable<MentionablePiece[]>([]);
+  // TODO(2026-08-21): Remove the retired allPieces cell and
+  // pieceRegistryMigrationComplete state.
+  const pieceRegistryMigrationComplete = new Writable(false).for(
+    "pieceRegistryMigrationComplete",
+  );
   const recentPieces = new Writable<MentionablePiece[]>([]);
+
+  // Copy the retired owned cell into the new registry once. Existing canonical
+  // state wins when both cells contain data.
+  computed(() => {
+    migratePieceRegistry(
+      legacyPieceRegistry,
+      pieceRegistry,
+      pieceRegistryMigrationComplete,
+    );
+  });
 
   // Dropdown menu state
   const menuOpen = new Writable(false);
@@ -155,7 +180,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // (prevents transient hash-only pills during reactive updates)
   // NOTE: Use truthy check, not === true, because piece.isHidden is a proxy object
   const visiblePieces = computed(() =>
-    allPieces.get().filter((piece) => {
+    pieceRegistry.get().filter((piece) => {
       if (!piece) return false;
       if (piece.isHidden) return false;
       const name = piece?.[NAME];
@@ -163,7 +188,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({ allPieces });
+  const index = BacklinksIndex({ pieceRegistry });
   const summaryIdx = SummaryIndex({});
 
   const gridView = PieceGrid({ pieces: visiblePieces });
@@ -284,9 +309,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       {recentPieces.map((piece: any) => (
                         <tr>
                           <td>
-                            <cf-cell-context $cell={piece}>
-                              <cf-render variant="chip" $cell={piece} />
-                            </cf-cell-context>
+                            <cf-render variant="chip" $cell={piece} />
                           </td>
                         </tr>
                       ))}
@@ -314,9 +337,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
                     const link = (
                       <cf-drag-source $cell={piece} type="note">
-                        <cf-cell-context $cell={piece}>
-                          <cf-render variant="chip" $cell={piece} />
-                        </cf-cell-context>
+                        <cf-render variant="chip" $cell={piece} />
                       </cf-drag-source>
                     );
 
@@ -340,7 +361,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                           <cf-button
                             size="sm"
                             variant="ghost"
-                            onClick={removePiece({ piece, allPieces })}
+                            onClick={removePiece({ piece, pieceRegistry })}
                           >
                             🗑️
                           </cf-button>
@@ -356,10 +377,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       </cf-screen>
     ),
     // Exported data
-    allPieces,
+    pieceRegistry,
     recentPieces,
     // Exported handlers (bound to state cells for external callers)
-    addPiece: addPiece({ allPieces }),
+    addPiece: addPiece({ pieceRegistry }),
     trackRecent: trackRecent({ recentPieces }),
   };
 });

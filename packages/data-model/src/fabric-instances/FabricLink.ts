@@ -4,15 +4,16 @@ import type {
 } from "@commonfabric/api";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
+import type { FabricPlainObject, FabricValue } from "@/interface.ts";
 import {
+  BaseFabricInstance,
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
-  type FabricPlainObject,
-  type FabricValue,
   IS_DEEP_FROZEN,
-} from "@/interface.ts";
-import { BaseFabricInstance } from "./BaseFabricInstance.ts";
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
@@ -88,20 +89,19 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): FabricLink {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricLink {
     return new FabricLink(this.#payload);
   }
 
   /** @inheritDoc */
-  override deepClone(frozen: boolean): FabricLink {
-    if (frozen && isDeepFrozen(this)) return this;
+  protected [DEEP_CLONE_CORE](frozen: boolean): FabricLink {
     // Deep-clone the payload to the requested frozenness (no shared mutable
-    // structure with the original; already-deep-frozen subtrees are shared).
+    // structure with the original; already-deep-frozen subtrees are shared
+    // when `frozen` is `true`).
     const payload = cloneIfNecessary(this.#payload, {
       frozen,
     }) as FabricPlainObject;
-    const result = new FabricLink(payload);
-    return frozen ? deepFreeze(result) as FabricLink : result;
+    return new FabricLink(payload);
   }
 
   //

@@ -7,21 +7,21 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   highlightMarkdownLines,
-  isMarkdownPath,
   markdownDocument,
-} from "../lib/view/markdown.ts";
-import { parseDocument } from "../lib/view/parse.ts";
+} from "../lib/view/languages/markdown/markdown.ts";
+import { languageForFile } from "../lib/view/languages/language.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
+import { spanStyle } from "../lib/view/highlight.ts";
 
-Deno.test("markdown: isMarkdownPath recognises markdown extensions", () => {
-  assert(isMarkdownPath("README.md"));
-  assert(isMarkdownPath("/a/b/AGENTS.markdown"));
-  assert(isMarkdownPath("notes.MD"));
-  assert(!isMarkdownPath("foo.ts"));
-  assert(!isMarkdownPath("foo.tsx"));
-  assert(!isMarkdownPath(undefined));
+Deno.test("markdown: language metadata recognises markdown extensions", () => {
+  assertEquals(languageForFile("README.md").id, "markdown");
+  assertEquals(languageForFile("/a/b/AGENTS.markdown").id, "markdown");
+  assertEquals(languageForFile("notes.MD").id, "markdown");
+  assertEquals(languageForFile("foo.ts").id, "typescript");
+  assertEquals(languageForFile("foo.tsx").id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
 Deno.test("markdown: headings, code, lists, quotes and prose get distinct, non-TS colours", () => {
@@ -57,8 +57,9 @@ deno task cf
   assertEquals(lines[3].spans.map((s) => s.cls), ["punctuation"]); // ```bash
   assertEquals(lines[4].spans.map((s) => s.cls), ["string"]); // deno task cf
   assertEquals(lines[5].spans.map((s) => s.cls), ["punctuation"]); // ```
-  // A block quote is a comment.
-  assertEquals(lines[6].spans.map((s) => s.cls), ["comment"]);
+  // A block quote has its own muted style, separate from source comments.
+  assertEquals(lines[6].spans.map((s) => s.cls), ["markdownQuote"]);
+  assertEquals(spanStyle(lines[6].spans[0]).fg, [92, 99, 112]);
 });
 
 Deno.test("markdown: a link's URL is a string, brackets/parens punctuation", () => {
@@ -108,11 +109,17 @@ Deno.test("markdown: heading-like lines inside fenced code blocks are not nav no
   ]);
 });
 
-Deno.test("markdown: parseDocument dispatches on a .md filename", () => {
-  const doc = parseDocument("# Heading\n\nplain prose\n", "notes.md");
+Deno.test("markdown: languageForFile dispatches on a .md filename", () => {
+  const doc = languageForFile("notes.md").parseDocument(
+    "# Heading\n\nplain prose\n",
+    "notes.md",
+  );
   assertEquals(doc.lines[0].spans.map((s) => s.cls), ["sectionHeader"]);
   // The same text as TypeScript would tokenise the prose into identifiers.
-  const asTs = parseDocument("# Heading\n\nplain prose\n", "notes.ts");
+  const asTs = languageForFile("notes.ts").parseDocument(
+    "# Heading\n\nplain prose\n",
+    "notes.ts",
+  );
   assert(
     asTs.lines[2].spans.some((s) => s.cls === "identifier"),
     "the .ts path still tokenises prose as code",

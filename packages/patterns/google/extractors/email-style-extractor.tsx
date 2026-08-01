@@ -23,9 +23,9 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 import GmailExtractor from "../core/gmail-extractor.tsx";
@@ -136,7 +136,7 @@ const triggerReanalyze = handler<
   unknown,
   { reanalyzeFlag: Writable<number> }
 >((_event, { reanalyzeFlag }) => {
-  reanalyzeFlag.set(safeDateNow());
+  reanalyzeFlag.set(Date.now());
 });
 
 // =============================================================================
@@ -164,6 +164,8 @@ export default pattern<Record<PropertyKey, never>, PatternOutput>(
     const lastAnalyzedAt = new Writable("").for("lastAnalyzedAt");
     const emailsAnalyzedCount = new Writable(0).for("emailsAnalyzedCount");
     const reanalyzeFlag = new Writable(0).for("reanalyzeFlag");
+
+    const nowCell = wish<number>({ query: "#now" });
 
     // ========================================================================
     // AUTH
@@ -238,7 +240,6 @@ Extract the writing style patterns from these emails.`;
       schema: STYLE_SCHEMA,
       system:
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
-      model: "anthropic:claude-sonnet-4-5",
     });
 
     // Auto-save LLM result to persistent Writable
@@ -249,8 +250,10 @@ Extract the writing style patterns from these emails.`;
 
       if (!isPending && result && result !== currentSavedStyle) {
         savedStyle.set(result as EmailStyle);
-        const now = new Date(safeDateNow()).toISOString();
-        lastAnalyzedAt.set(now);
+        const nowMs = nowCell.result;
+        if (nowMs != null) {
+          lastAnalyzedAt.set(new Date(nowMs).toISOString());
+        }
         const emails = allEmails || [];
         emailsAnalyzedCount.set(Number(emails.length) || 0);
       }

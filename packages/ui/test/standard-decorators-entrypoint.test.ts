@@ -13,16 +13,8 @@ function decode(bytes: Uint8Array): string {
 
 Deno.test("ui entrypoint type-checks under standard decorators", async () => {
   const rootConfig = await readDenoConfig(join(ROOT, "deno.jsonc"));
-  const packageConfig = await readDenoConfig(
-    join(ROOT, "packages", "ui", "deno.jsonc"),
-  );
-
   rootConfig.compilerOptions ??= {};
   rootConfig.compilerOptions.experimentalDecorators = false;
-  rootConfig.imports = {
-    ...(rootConfig.imports ?? {}),
-    ...(packageConfig.imports ?? {}),
-  };
 
   const output = await runDenoCheckWithTemporaryConfig({
     root: ROOT,

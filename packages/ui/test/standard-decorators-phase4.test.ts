@@ -22,7 +22,6 @@ Deno.test("transitive ui slice type-checks under standard decorators", async () 
     "packages/ui/src/v2/components/cf-audio-visualizer/cf-audio-visualizer.ts",
     "packages/ui/src/v2/components/cf-autocomplete/cf-autocomplete.ts",
     "packages/ui/src/v2/components/cf-button/cf-button.ts",
-    "packages/ui/src/v2/components/cf-cell-context/cf-cell-context.ts",
     "packages/ui/src/v2/components/cf-tools-chip/cf-tools-chip.ts",
     "packages/ui/src/v2/components/cf-voice-input/cf-voice-input.ts",
     "packages/ui/src/v2/components/form/cf-form.ts",

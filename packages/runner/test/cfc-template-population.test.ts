@@ -1,5 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -26,7 +28,7 @@ const foreignSpace = foreignSigner.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
   observes?: string;
 };
@@ -71,7 +73,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();
@@ -558,7 +560,7 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();
@@ -775,7 +777,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();
@@ -1056,7 +1058,7 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
     rt: Runtime,
     cause: string,
     schema: JSONSchema,
-    value: unknown,
+    value: FabricValue,
   ): Promise<string> => {
     const interned = internSchema(schema, true);
     const tx = rt.edit();

@@ -107,11 +107,10 @@ export function transformProgramWithPrefix(
   };
 }
 
-// ESM variant: inject the helper import and prefix files with `id` (so source
-// locations / identity match the AMD path), but DO NOT add the synthetic
-// `/index.ts` re-export. That index exists only to defeat `outFile` prefix
-// flattening in the AMD bundler; a per-module ESM graph has no bundle, so the
-// program entry is simply the prefixed main module.
+// Module-graph variant: inject the helper import and prefix files with `id` to
+// namespace this load's source-map and diagnostic coordinates, but DO NOT add a
+// synthetic `/index.ts` re-export. A per-module graph has no bundle entrypoint
+// to re-export through, so the program entry is simply the prefixed main module.
 export function pretransformProgramForModules(
   program: RuntimeProgram,
   id: string,

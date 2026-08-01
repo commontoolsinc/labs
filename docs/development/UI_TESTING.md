@@ -149,7 +149,6 @@ const path = ["x-root", "#shadow-root", "cf-input", "#shadow-root", "input"];
 ```typescript
 // Shown at module scope.
 import {
-  awaitViewSettled,
   env,
   waitForCondition,
 } from "@commonfabric/integration";
@@ -157,6 +156,10 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  clickCfButton,
+  fillCfInput,
+} from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -193,15 +196,8 @@ describe("shadow DOM component test", () => {
       identity,
     });
 
-    // Settle the view so each control's handler is bound before acting (see
-    // "Waiting Until the UI Is Interactive" below), then act once.
-    await awaitViewSettled(page);
-    const input = await page.waitForSelector("cf-input[role='textbox']");
-    await input.type("Hello World");
-
-    await awaitViewSettled(page);
-    const button = await page.waitForSelector("cf-button[role='button']");
-    await button.click();
+    await fillCfInput(page, "cf-input[role='textbox']", "Hello World");
+    await clickCfButton(page, "cf-button[role='button']");
 
     // Verify the effect event-drivenly: waitForCondition resolves the instant
     // the result text appears, with no test-side poll.
@@ -231,39 +227,42 @@ Only stage 1 is visible through the runtime idle signal, so an element can exist
 in the DOM, be found by a selector, and still drop a click because its handler
 is not bound yet.
 
-**Use `awaitViewSettled(page)`** from `@commonfabric/integration` before issuing
-the first click or keystroke after navigation or any state change. It resolves
-once all three stages are done, so a single click then lands on a bound handler:
+Settling first also keeps a trusted click from missing its target. A trusted
+click resolves the element's layout box and then dispatches the mouse events at
+that point. On a cold load the page keeps reflowing for a few frames as content
+above the control fills in — a topic's markdown body renders, a form or card
+below it appears — so a control that has just become rendered is still moving.
+If the box moves between when the click resolves it and when the mouse events
+fire, the click lands on whatever shifted into that spot instead of the control,
+and nothing happens. Settling the view drains the pending reflow so the target
+is stationary when it is clicked.
+
+**Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
+lower-level wait after navigation or a state change. When the next step
+clicks a control, use `clickCfButton` instead. It resolves, settles, and marks
+the exact click target in one page-side predicate:
 
 ```typescript
 // Shown at module scope.
-import {
-  awaitViewSettled,
-  waitForCondition,
-} from "@commonfabric/integration";
+import { waitForCondition } from "@commonfabric/integration";
+import { clickCfButton } from "./cfc-browser-helpers.ts";
 
-// Before interacting: wait until the shell has exposed its settle hook, then
-// settle the view so the click lands on a bound handler.
-await waitForCondition(page, () =>
-  typeof (globalThis as {
-    commonfabric?: { viewSettled?: unknown };
-  }).commonfabric?.viewSettled === "function");
-await awaitViewSettled(page);
-const button = await page.waitForSelector("cf-button[role='button']");
-await button.click(); // delivered to a bound handler
+await clickCfButton(page, "cf-button[role='button']");
 
-// After interacting: settle once, then wait for the click's specific effect
-// event-drivenly. The modal opening is a DOM mutation, so waitForCondition's
-// in-page waiter resolves the instant it appears.
-await awaitViewSettled(page);
+// Wait for the click's specific effect. The modal opening is a DOM mutation, so
+// the in-page waiter resolves when it appears.
 await waitForCondition(page, (probe) =>
   probe.collect("cf-modal[open]").length > 0);
 ```
 
-Pattern integration tests can reach for the higher-level wrappers in
+Pattern integration tests can use the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
-"settle the view, act once, wait for the effect" on top of these primitives.
+the common waiting and interaction sequences. `clickCfButton` proceeds only
+when the same target remains rendered before and after a settle. It marks that
+target inside the successful predicate. See
+`docs/development/waiting-in-tests.md` for why that ordering is the load-bearing
+part, and for which helpers do not yet have it.
 
 ### Do not reach for these instead
 
@@ -288,14 +287,15 @@ Each of the following is what `awaitViewSettled` replaces. They are either racy
   `waitForSelector` is itself a tight CDP poll, and a present element is not a
   ready one.
 
-The shape is always: settle the view, click once, then wait for the effect —
-never poll-and-pray, and never re-click.
+The shape is always: resolve the target, prove that exact rendered element
+survives a settle, and mark it. Then click once and wait for the effect.
 
 A CI check enforces this for the polling `waitFor`: `deno task check-no-waitfor`
-fails when an integration test imports `waitFor` from
-`@commonfabric/integration`. See
-[`waiting-in-tests.md`](./waiting-in-tests.md) for the rationale, the full
-event-driven toolkit, and the allowlist of intentional exceptions.
+fails when an integration test imports `waitFor` as a value from
+`@commonfabric/integration`, whether through the bare specifier or a relative
+path to the package. See [`waiting-in-tests.md`](./waiting-in-tests.md) for the
+rationale, the full event-driven toolkit, and the allowlist of intentional
+exceptions.
 
 ## Best Practices
 

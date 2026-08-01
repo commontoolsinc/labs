@@ -27,7 +27,6 @@
  */
 import {
   type Cell,
-  ID,
   type JSONSchema,
   type MemorySpace,
   type Runtime,
@@ -103,8 +102,11 @@ export async function setBGPiece({
   if (existingPieceIndex === -1) {
     logger.info("Adding piece to BGUpdater pieces cell");
     runtime.editWithRetry((tx) => {
+      // The `[ID]` write directive was retired upstream (#5242): element
+      // identity now comes from the frame anchoring `push` already applies.
+      // Duplicate registration is prevented by the index lookup above, which
+      // is what this entry's identity was ever load-bearing for.
       piecesCell.withTx(tx).push({
-        [ID]: `${space}/${pieceId}`,
         space,
         pieceId,
         integration,

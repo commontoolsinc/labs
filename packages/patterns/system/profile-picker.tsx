@@ -15,7 +15,7 @@ import ProfileCreate, {
   TRUSTED_PROFILE_SET_DEFAULT_ACTION,
   TRUSTED_PROFILE_SET_MRU_ACTION,
 } from "./profile-create.tsx";
-import type { ProfileHomeOutput } from "./profile-home.tsx";
+import type { BackwardsCompatibleProfile } from "./profile-home.tsx";
 
 // The profile picker rendered as the `[UI]` of a #profile wish when the user
 // has 2+ profiles and no valid default. It renders each profile natively
@@ -35,9 +35,9 @@ import type { ProfileHomeOutput } from "./profile-home.tsx";
 // computeds were vestigial after CT-1829 (#4512) and are removed (CT-1843).
 
 type ProfilePickerInput = {
-  profiles: Writable<ProfileHomeOutput[]>;
-  defaultProfile: Writable<ProfileHomeOutput | undefined>;
-  mru: Writable<ProfileHomeOutput[]>;
+  profiles: Writable<BackwardsCompatibleProfile[]>;
+  defaultProfile: Writable<BackwardsCompatibleProfile | undefined>;
+  mru: Writable<BackwardsCompatibleProfile[]>;
 };
 
 // Whether two profile cells name the SAME profile — compared by the profile's

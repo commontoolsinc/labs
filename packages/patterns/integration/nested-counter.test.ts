@@ -1,11 +1,6 @@
-import {
-  env,
-  Page,
-  type ProbeApi,
-  waitForCondition,
-} from "@commonfabric/integration";
+import { env, Page, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { waitForText } from "./cfc-browser-helpers.ts";
+import { clickNthCfButton, waitForText } from "./cfc-browser-helpers.ts";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
@@ -108,7 +103,7 @@ describe("nested counter integration test", () => {
     const page = shell.page();
 
     // Click increment button (second button - first is decrement)
-    await clickNthButton(page, "[data-cf-button]", 1);
+    await clickNthCfButton(page, "[data-cf-button]", 1);
 
     // Wait for the piece result to reflect the increment.
     await awaitResultValue(1);
@@ -155,63 +150,4 @@ describe("nested counter integration test", () => {
 
 async function waitForCounter(page: Page, text: string) {
   await waitForText(page, "#counter-result", text);
-}
-
-// Clicks the nth button matching selector: wait until that button is present
-// and interactive (scrolled into view with a stable box model), then dispatch a
-// single trusted click on it. The wait re-checks on each DOM mutation while the
-// page settles (re-renders, layout shifts, hydration) rather than re-clicking.
-const NTH_BUTTON_CLICK_TARGET_ATTR = "data-cfc-nth-button-target";
-
-async function clickNthButton(
-  page: Page,
-  selector: string,
-  index: number,
-): Promise<void> {
-  const token = `cfc-nth-button-${crypto.randomUUID()}`;
-  try {
-    await waitForCondition(page, async (
-      probe: ProbeApi,
-      sel: string,
-      idx: number,
-      tok: string,
-      attr: string,
-    ) => {
-      const target = probe.collect(sel)[idx];
-      if (!target) return false;
-      target.scrollIntoView({ block: "center", inline: "center" });
-      await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      );
-      if (!probe.isVisible(target)) return false;
-      target.setAttribute(attr, tok);
-      return true;
-    }, { args: [selector, index, token, NTH_BUTTON_CLICK_TARGET_ATTR] });
-  } catch (cause) {
-    throw new Error(
-      `Unable to find button #${index} matching "${selector}"`,
-      { cause },
-    );
-  }
-  try {
-    const clickTarget = await page.waitForSelector(
-      `[${NTH_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce" },
-    );
-    await clickTarget.click();
-  } finally {
-    await page.evaluate((targetToken, targetAttr) => {
-      function collect(root: Document | ShadowRoot, result: Element[]): void {
-        for (const element of root.querySelectorAll("*")) {
-          if (element.getAttribute(targetAttr) === targetToken) {
-            result.push(element);
-          }
-          if (element.shadowRoot) collect(element.shadowRoot, result);
-        }
-      }
-      const matches: Element[] = [];
-      collect(document, matches);
-      for (const element of matches) element.removeAttribute(targetAttr);
-    }, { args: [token, NTH_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
-  }
 }

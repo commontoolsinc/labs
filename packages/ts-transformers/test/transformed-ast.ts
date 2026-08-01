@@ -256,3 +256,34 @@ export function extractedCallbackBody(
   }
   return firstArg.body;
 }
+
+/** One operand recorded by an emitted `assertCapture(parts, src, value)`. */
+export interface AssertCapture {
+  /** The authored source text the operand was labelled with. */
+  src: string;
+  /** The printed value expression the recording wraps. */
+  value: string;
+}
+
+/**
+ * Every operand recording the assert-diagnostics stage emitted, in source
+ * order. `src` is the label argument; `value` is the wrapped expression, so a
+ * test can check that the recording returns the operand rather than replacing
+ * it.
+ *
+ * Source order is outermost-first: a recording that wraps another precedes the
+ * one inside it. That is the reverse of the order they run in, since the inner
+ * recording is an argument of the outer one and so evaluates first.
+ */
+export function assertCaptures(root: ts.SourceFile): AssertCapture[] {
+  return callsNamed(root, "assertCapture").flatMap((call) => {
+    const [, src, value] = call.arguments;
+    if (!src || !value || !ts.isStringLiteral(src)) return [];
+    return [{ src: src.text, value: value.getText(root) }];
+  });
+}
+
+/** The `src` label of every emitted operand recording, in source order. */
+export function assertCaptureLabels(root: ts.SourceFile): string[] {
+  return assertCaptures(root).map((capture) => capture.src);
+}

@@ -4,13 +4,18 @@ import {
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
-import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
+import {
+  createSchemaTransformerV2,
+  type SchemaGenerationOptions,
+} from "@commonfabric/schema-generator";
+import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
 import {
   getNodeText,
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
+import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
@@ -20,6 +25,22 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
     const { logger, state } = context.options;
     const typeRegistry = state?.typeRegistry;
     const schemaHints = state?.schemaHints;
+    const writerIdentityForSourceFile = (fileName: string) => {
+      const moduleIdentities = context.options.moduleIdentities;
+      const moduleIdentity = moduleIdentities?.get(fileName);
+      if (moduleIdentities && moduleIdentity === undefined) {
+        throw new Error(
+          `Cannot mint WriteAuthorizedBy claim: no module identity for defining source '${fileName}'`,
+        );
+      }
+      return {
+        file: normalizeWriterIdentityFile(
+          fileName,
+          context.options.canonicalWriterIdentityFile,
+        ),
+        ...(moduleIdentity !== undefined ? { moduleIdentity } : {}),
+      };
+    };
 
     const visit: ts.Visitor = (node) => {
       if (isToSchemaNode(node)) {
@@ -27,9 +48,16 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         const typeArguments = ts.isTypeReferenceNode(typeArg)
           ? typeArg.typeArguments
           : undefined;
+        // Mint-time identity binding: when the compiler knows module
+        // identities (the engine computes them from pristine source BEFORE
+        // the TS compile), this direct-root claim is born stamped with its own
+        // module's content identity. General nested claims use the same
+        // resolver from inside the schema-generator and resolve imported
+        // bindings against their defining source.
         const writeAuthorizedByIdentity = extractWriteAuthorizedByIdentity(
           typeArg,
           sourceFile.fileName,
+          writerIdentityForSourceFile,
         );
         let schemaTypeArg: ts.TypeNode = typeArg;
         if (
@@ -78,9 +106,14 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         }
 
         // Build options for schema generation
-        const generationOptions = widenLiterals !== undefined
-          ? { widenLiterals }
-          : undefined;
+        const generationOptions: SchemaGenerationOptions = {
+          ...(widenLiterals !== undefined ? { widenLiterals } : {}),
+          // The schema-generator owns the general/nested CFC alias path. Give
+          // it the same spelling and stamp source used by the direct
+          // WriteAuthorizedBy special case below, including for bindings
+          // declared in imported authored modules.
+          writerIdentityForSourceFile,
+        };
 
         // If Type resolved to 'any' or the synthetic TypeNode intentionally
         // contains unknown, use the synthetic-node generator so the checker
@@ -99,6 +132,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             typeRegistry,
             schemaHints,
             sourceFile,
+            generationOptions,
           );
         } else {
           // Normal Type path
@@ -196,7 +230,10 @@ function resolvePolicyOfMarkers(
     const normalizedSourceEntries = file === undefined
       ? []
       : identityEntries.filter(([sourceName]) =>
-        normalizeSourceFilePath(sourceName) === file
+        normalizeWriterIdentityFile(
+          sourceName,
+          context.options.canonicalWriterIdentityFile,
+        ) === file
       );
     const sourceEntry = exactSourceEntry ??
       (normalizedSourceEntries.length === 1
@@ -248,11 +285,6 @@ function resolvePolicyOfMarkers(
       resolvePolicyOfMarkers(entry, context, diagnosticNode),
     ]),
   );
-}
-
-function normalizeSourceFilePath(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, "/");
-  return normalized.match(/^\/[^/]+(\/.+)$/)?.[1] ?? normalized;
 }
 
 function createSchemaAst(
@@ -317,7 +349,7 @@ function createNumericAst(
 
 function attachWriteAuthorizedByMarker(
   schema: boolean | Record<string, unknown>,
-  identity: { file: string; path: string[] },
+  identity: { file: string; path: string[]; moduleIdentity?: string },
 ): boolean | Record<string, unknown> {
   if (typeof schema === "boolean") return schema;
   const ifc = schema.ifc && typeof schema.ifc === "object"
@@ -439,7 +471,11 @@ function attachUiContractToSchemaRecord(
 function extractWriteAuthorizedByIdentity(
   typeNode: ts.TypeNode,
   sourceFileName: string,
-): { file: string; path: string[] } | undefined {
+  writerIdentityForSourceFile: (fileName: string) => {
+    file: string;
+    moduleIdentity?: string;
+  },
+): { file: string; path: string[]; moduleIdentity?: string } | undefined {
   if (!isWriteAuthorizedByType(typeNode)) {
     return undefined;
   }
@@ -451,7 +487,7 @@ function extractWriteAuthorizedByIdentity(
     return undefined;
   }
   return {
-    file: normalizeSourceFilePath(sourceFileName),
+    ...writerIdentityForSourceFile(sourceFileName),
     path: [bindingNode.exprName.text],
   };
 }
@@ -489,25 +525,40 @@ function isWriterIdentityPayload(
 }
 
 function createWriteAuthorizedByMarkerAst(
-  schema: { __ctWriterIdentityOf: { file: string; path: string[] } },
+  schema: {
+    __ctWriterIdentityOf: {
+      file: string;
+      path: string[];
+      moduleIdentity?: string;
+    };
+  },
   factory: ts.NodeFactory,
 ): ts.Expression {
+  const identity = schema.__ctWriterIdentityOf;
   return factory.createObjectLiteralExpression([
     factory.createPropertyAssignment(
       createPropertyName("__ctWriterIdentityOf", factory),
       factory.createObjectLiteralExpression([
         factory.createPropertyAssignment(
           createPropertyName("file", factory),
-          factory.createStringLiteral(schema.__ctWriterIdentityOf.file),
+          factory.createStringLiteral(identity.file),
         ),
         factory.createPropertyAssignment(
           createPropertyName("path", factory),
           factory.createArrayLiteralExpression(
-            schema.__ctWriterIdentityOf.path.map((segment) =>
+            identity.path.map((segment) =>
               factory.createStringLiteral(segment)
             ),
           ),
         ),
+        ...(typeof identity.moduleIdentity === "string"
+          ? [
+            factory.createPropertyAssignment(
+              createPropertyName("moduleIdentity", factory),
+              factory.createStringLiteral(identity.moduleIdentity),
+            ),
+          ]
+          : []),
       ], true),
     ),
   ], true);
@@ -543,8 +594,20 @@ function evaluateExpression(
   node: ts.Expression,
   checker: ts.TypeChecker,
 ): unknown {
+  // Wrappers that do not change the value: parentheses, and the type-only
+  // assertion forms. Without this every parenthesized option is dropped, of
+  // whatever type -- `("text")` as surely as `(-1)`. The schema-generator side
+  // of this pair has always unwrapped them.
+  if (
+    ts.isParenthesizedExpression(node) || ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
+  ) {
+    return evaluateExpression(node.expression, checker);
+  }
+
   if (ts.isStringLiteral(node)) return node.text;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
+  const numeric = numberFromExpression(node, checker);
+  if (numeric !== undefined) return numeric;
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
   if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
   if (node.kind === ts.SyntaxKind.NullKeyword) return null;

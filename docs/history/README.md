@@ -87,6 +87,15 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
+  — active-repository syntax inventory and `cf view` support snapshot, July
+  2026.
+- [cf-view-rendered-markdown-impact-2026-07.md](packages/cli/cf-view-rendered-markdown-impact-2026-07.md)
+  — source/rendered pager and Markdown feature impact report, July 2026.
+- [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
+  — command-by-command audit of `cf --json` behavior, July 2026.
+- [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
+  ts-transformers/schema-generator documentation audit, July 2026.
 - [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
   packages/runner implementation, June 2026.
 - [invalid-state-representations-report.md](future-tasks/code-quality-tasks/invalid-state-representations-report.md)
@@ -97,16 +106,41 @@ One line per archived document; each document's header carries the fuller
   — the v1 scheduler's mechanisms and their v2 dispositions, June 2026.
 - [PREEXISTING_BUGS.md](packages/patterns/PREEXISTING_BUGS.md) — pattern
   runtime bug survey, December 2025.
+- [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
+  — why the CLI tool-result poll was replaced event-driven and why the
+  piece-start and sync bounds could not be removed at the CLI layer, July 2026.
+- [2026-07-27-session-paging-out-of-memory.md](packages/patterns/agent-sessions-debug/2026-07-27-session-paging-out-of-memory.md)
+  — paging the agent-sessions debug table exhausts the browser runtime's heap,
+  July 2026.
+- [2026-07-28-list-window-child-retention.md](packages/runner/2026-07-28-list-window-child-retention.md)
+  — why a moving list window retained every child run it started, and what the
+  fix covered, July 2026.
+- [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
+  — a completed transaction kept the activity of everything it read, and the
+  unbounded document cache that still exhausts a browser tab, July 2026.
+- [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
+  — why the open-argument update class went unvalidated on the repair path, and
+  the correction of an earlier measurement that named the wrong mechanism,
+  July 2026.
 
 ### Executed plans and work orders
 
+- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+  — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
+  operand reporting for pattern-test assertions, with the compile-time
+  constraints that shaped it, executed 2026-07.
 - [cfc-future-work-implementation.md](plans/cfc-future-work-implementation.md)
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),
   executed 2026-07.
+- [retiring-llm-tool-call-deadlines.md](development/proposals/retiring-llm-tool-call-deadlines.md)
+  — replacing the LLM tool-call deadline with a run-scoped quiescence barrier,
+  and narrowing the dialog message-drop heuristic the deadline's argument did
+  not reach, executed 2026-07.
 - [STANDARD_DECORATORS_MIGRATION_PLAN.md](development/STANDARD_DECORATORS_MIGRATION_PLAN.md)
   — the cutover to standard decorators.
 - [content-addressed-action-identity-implementation-plan.md](specs/content-addressed-action-identity-implementation-plan.md)
@@ -161,6 +195,9 @@ One line per archived document; each document's header carries the fuller
   — trusted-agent tool-input integrity scoping.
 - [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
   compilation cache.
+- [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
+  — the removed AMD bundle pipeline and the bundle-grained identity defect that
+  motivated content-addressed module loading.
 - [module-loading-verifier-and-engine-design.md](specs/module-loading-verifier-and-engine-design.md)
   — verifier port and engine integration.
 - [capability-wrappers.md](specs/pattern-construction/capability-wrappers.md)
@@ -181,11 +218,36 @@ One line per archived document; each document's header carries the fuller
   migration.
 - [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
   DocImpl-era storage-unification plan, superseded by the v2 stack.
+- [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)
+  — hierarchical-capture implementation rationale, superseded by the behavior
+  spec.
+- [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) —
+  reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ### Investigations, journals, and working notes
 
+- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
+- [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
+  — verification that the December 2025 survey's Bug 3 (Counter values
+  rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)
+  does not reproduce; the dynamically-compiled render path resolves reactive and
+  computed values correctly, July 2026.
+- [reverse-invalidation-deadlock.md](packages/fuse/reverse-invalidation-deadlock.md)
+  — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
+  suite: synchronous reverse invalidation deadlocking the request thread,
+  July 2026.
+- [2026-07-fuse-t-integration-flake-accumulated-nfs-state.md](packages/fuse/2026-07-fuse-t-integration-flake-accumulated-nfs-state.md)
+  — a FUSE-T integration-suite failure that looked like a #4811 daemon
+  regression but was accumulated stale kernel NFS mounts from SIGKILL churn;
+  directory visibility works via mtime plus the NFS attribute-cache bound, not
+  `notify_inval_entry`, July 2026.
 - [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
   — March 2026 settle-wave measurements.
+- [2026-07-cf-profile-capture-exit-130.md](development/debugging/2026-07-cf-profile-capture-exit-130.md)
+  — root cause of the cf-profile capture exit-130 CI flake, July 2026.
+- [2026-07-group-chat-idempotency-false-positive.md](development/debugging/2026-07-group-chat-idempotency-false-positive.md)
+  — root cause of the group-chat idempotency false-positive CI flake, July 2026.
 - [default-app-note-create.md](development/performance/default-app-note-create.md),
   [two-browsers-cold-start.md](development/performance/two-browsers-cold-start.md),
   and
@@ -195,6 +257,15 @@ One line per archived document; each document's header carries the fuller
   — initial Phase 2 browser CPU and authority-rollout measurement, July 2026.
 - [server-primary-rollout-2026-07-13.md](development/performance/server-primary-rollout-2026-07-13.md)
   — accepted 500-event Phase 2 browser CPU and authority-rollout measurement.
+- [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
+  — root cause of the July 2026 labs CI duration increase: two unsharded
+  pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.
+- [2026-07-ci-duration-profile.md](development/performance/2026-07-ci-duration-profile.md)
+  — July 2026 Deno Workflow profile, including compile-cache validation,
+  duplicate work, workspace shard balance, and follow-up experiments.
+- [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
+  — binary artifact file and byte transfer snapshot before the per-binary
+  workflow split, July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

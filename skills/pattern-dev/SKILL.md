@@ -119,10 +119,14 @@ source with `--show-transformed` rather than guessing.
 
 Pay special attention to the SES authoring section of
 `docs/common/ai/pattern-development-guide.md` before adding module-scope setup,
-timers, or time/random helpers. The current authored escape hatches are
-`safeDateNow()` and `nonPrivateRandom()`. Also follow its binding guidance: when
-a control is already bound to a cell, usually via `$value` or `$checked`, do not
-add a handler that simply writes the same value back into that same cell.
+timers, or reads of the clock or entropy. Authors call `Date.now()` (or
+`new Date()`) and `Math.random()` directly — they are built-ins, nothing to
+import. Inside the sandbox these are gated: allowed only in a handler (the clock
+coarsened to one-second resolution), and throwing in a lift, computed, or the
+pattern body. To read a live clock in a computed, use the reactive `#now` wish.
+Also follow its binding guidance: when a control is already bound to a cell,
+usually via `$value` or `$checked`, do not add a handler that simply writes the
+same value back into that same cell.
 
 Runtime notes:
 

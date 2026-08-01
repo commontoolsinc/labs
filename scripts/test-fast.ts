@@ -7,4 +7,5 @@ const FAST_DISABLED = [
   "deno-web-test",
 ];
 
-await runTests(FAST_DISABLED);
+const passed = await runTests(FAST_DISABLED);
+if (!passed) Deno.exit(1);

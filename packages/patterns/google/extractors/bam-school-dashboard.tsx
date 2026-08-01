@@ -25,9 +25,9 @@ import {
   NAME,
   pattern,
   type PatternFactory,
-  safeDateNow,
   TILE_UI,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -380,6 +380,11 @@ export interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({ settings, dismissedIds, overrideAuth }) => {
+    // Reactive clock for countdown labels and urgency colors. Ticks every
+    // minute so relative-time labels ("Today", "In 3 days") refresh across day
+    // boundaries.
+    const nowCell = wish<number>({ query: "#now/60" });
+
     // Build Gmail query to find BAM school emails
     // Excludes fundraising emails (schoolsfund.berkeley.net)
     const gmailQuery =
@@ -453,7 +458,8 @@ export default pattern<PatternInput, PatternOutput>(
       }
 
       // Sort by: urgent first, then by date (soonest first), then by source priority
-      const today = new Date(safeDateNow());
+      if (nowCell.result == null) return events;
+      const today = new Date(nowCell.result);
       today.setHours(0, 0, 0, 0);
 
       return events.sort((a, b) => {
@@ -475,11 +481,11 @@ export default pattern<PatternInput, PatternOutput>(
 
     // Filter events by category/criteria
     const urgentEvents = computed(() => {
-      const today = new Date(safeDateNow());
-      today.setHours(0, 0, 0, 0);
+      const today = nowCell.result == null ? null : new Date(nowCell.result);
+      today?.setHours(0, 0, 0, 0);
 
       return allEvents.filter((e) => {
-        const days = daysUntil(e.date, today);
+        const days = today == null ? 999 : daysUntil(e.date, today);
         // Urgent if: marked urgent, has action required, or is within 7 days
         return (
           e.isUrgent ||
@@ -492,7 +498,8 @@ export default pattern<PatternInput, PatternOutput>(
     });
 
     const upcomingEvents = computed(() => {
-      const today = new Date(safeDateNow());
+      if (nowCell.result == null) return [];
+      const today = new Date(nowCell.result);
       today.setHours(0, 0, 0, 0);
 
       return allEvents
@@ -771,7 +778,10 @@ export default pattern<PatternInput, PatternOutput>(
                               style={{
                                 padding: "4px 10px",
                                 backgroundColor: computed(() => {
-                                  const today = new Date(safeDateNow());
+                                  if (nowCell.result == null) {
+                                    return getUrgencyColor(999, event.isUrgent);
+                                  }
+                                  const today = new Date(nowCell.result);
                                   today.setHours(0, 0, 0, 0);
                                   return getUrgencyColor(
                                     daysUntil(event.date, today),
@@ -785,7 +795,8 @@ export default pattern<PatternInput, PatternOutput>(
                               }}
                             >
                               {computed(() => {
-                                const today = new Date(safeDateNow());
+                                if (nowCell.result == null) return "";
+                                const today = new Date(nowCell.result);
                                 today.setHours(0, 0, 0, 0);
                                 return getDateLabel(
                                   daysUntil(event.date, today),
@@ -1038,7 +1049,10 @@ export default pattern<PatternInput, PatternOutput>(
                           textAlign: "center",
                           padding: "8px",
                           backgroundColor: computed(() => {
-                            const today = new Date(safeDateNow());
+                            if (nowCell.result == null) {
+                              return getUrgencyColor(999, event.isUrgent);
+                            }
+                            const today = new Date(nowCell.result);
                             today.setHours(0, 0, 0, 0);
                             return getUrgencyColor(
                               daysUntil(event.date, today),
@@ -1057,7 +1071,8 @@ export default pattern<PatternInput, PatternOutput>(
                           }}
                         >
                           {computed(() => {
-                            const today = new Date(safeDateNow());
+                            if (nowCell.result == null) return "";
+                            const today = new Date(nowCell.result);
                             today.setHours(0, 0, 0, 0);
                             return getDateLabel(daysUntil(event.date, today));
                           })}

@@ -97,11 +97,32 @@ instead of hiding it in module-scoped mutable variables.
 - Keep the handler callback direct and readable. If the body becomes too
   imperative, push complex logic into a helper and keep the bound state
   explicit.
-- Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient
-  `Date.now()` and `Math.random()` when a handler needs a timestamp or random
-  ID.
-- Timers are not exposed inside authored modules yet, so do not rely on
-  `setTimeout()` or `setInterval()` in handler code.
+- Call `Date.now()` and `Math.random()` directly when a handler needs a
+  timestamp or random ID. Inside a handler these built-ins are allowed (the
+  clock is coarsened to one-second resolution); in a lift/computed or at
+  pattern-body level they throw a `TimeCapabilityError`. For reactive time in a
+  computed, read the interval `#now/N` wish (bare `#now` is a frozen
+  first-load capture, not a clock).
+- Timers are not part of the authored surface and do not compile, so drive
+  timed work through the scheduler rather than reaching for `setTimeout()` or
+  `setInterval()` in handler code.
+
+## Input Delivery Is Rate-Shaped
+
+User input reaching your handlers is delivered in realtime during normal
+interaction, including quick bursts of clicks. Sustained high-frequency input
+(a held key's autorepeat, scripted rapid-fire events) is throttled to about one
+delivery per second per pattern. Nothing is dropped: every event still arrives,
+so a counter that counts clicks counts every click — the overflow just arrives
+batched. There is intentionally no opt-out; the shaping is a security measure
+that denies sandboxed patterns a fine-grained clock (see
+[Timing side-channel mitigations](../../specs/sandboxing/TIMING_SIDE_CHANNELS.md)).
+
+Continuous-motion gestures — drawing, or drag-tracking with a handler per
+pointer-move — are out of scope for per-event handlers. Build continuous
+controls on `$value`-style bidirectional bindings instead: those coalesce to
+the latest value, so the bound cell always ends at the current state without
+needing every intermediate event.
 
 ## Exporting Handlers as Streams
 
@@ -165,6 +186,8 @@ deno task cf piece inspect --piece <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.
+Runtime code that needs to invoke a handler stream directly should follow
+[Invoking Handlers from Outside a Pattern](../../development/handlers/invocation-outside-pattern.md).
 
 ## Summary
 

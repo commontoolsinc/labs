@@ -22,9 +22,7 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -106,8 +104,8 @@ const submitQuery = handler<
   }
 
   // Create new query entry and push to array
-  const queryId = `query-${safeDateNow()}-${
-    nonPrivateRandom().toString(36).slice(2, 8)
+  const queryId = `query-${Date.now()}-${
+    Math.random().toString(36).slice(2, 8)
   }`;
   state.queries.push({
     id: queryId,
@@ -115,7 +113,7 @@ const submitQuery = handler<
     query: input.query,
     description: input.description || "",
     submittedBy: input.submittedBy || "",
-    submittedAt: safeDateNow(),
+    submittedAt: Date.now(),
     upvotes: 0,
     downvotes: 0,
     lastValidated: 0,
@@ -137,7 +135,7 @@ const upvoteQuery = handler<
   const updatedQuery = {
     ...allQueries[queryIdx],
     upvotes: allQueries[queryIdx].upvotes + 1,
-    lastValidated: safeDateNow(),
+    lastValidated: Date.now(),
   };
 
   state.queries.set([

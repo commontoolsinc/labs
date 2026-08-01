@@ -1,6 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { ActionClaimKey } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
+import { getTopFrame } from "../builder/pattern.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import type {
   ConsoleHandler,
@@ -8,7 +9,10 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
-import { type NormalizedFullLink } from "../link-utils.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "../link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -21,6 +25,7 @@ import type {
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
+  isRendererInputTx,
   markReadAsAttemptedWrite,
 } from "../storage/reactivity-log.ts";
 import type {
@@ -61,6 +66,15 @@ import {
   updateDependentEdgesForLog,
 } from "./dependency-graph.ts";
 import { SchedulerMaterializers } from "./materializers.ts";
+import {
+  CELL_GROUP_PREFIX,
+  type DeliverFn,
+  holdShapedCell,
+  holdShapedEvent,
+  shaperInstanceGroupKey,
+  shouldShapeDelivery,
+  WakeShaper,
+} from "./wake-shaping.ts";
 import { type DependencyUpdateState } from "./dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduling-writes.ts";
 import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
@@ -312,6 +326,13 @@ type SchedulerRegisterOptions = {
   // from a snapshot: the flag-off resume path, and the flag-on degrade path
   // (snapshot miss/mismatch, or an "always-run" action). See runner.ts.
   awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
+  // Tag the action with its owning pattern instance without rehydrating from
+  // storage. Pattern readers then always carry a pieceId, used to group shaped
+  // cell-flip wakes by instance and to distinguish pattern readers from
+  // internal machinery (plan B).
+  observationIdentity?: SchedulerObservationIdentity & {
+    space?: MemorySpace;
+  };
   // "always-run": never rehydrate this action clean on resume — its run has
   // instantiation side effects (starting child runs) that a clean skip would
   // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
@@ -431,6 +452,7 @@ export class Scheduler {
    * conflictStreakBackoffMs in run.ts); cleared on any successful
    * commit. */
   private conflictStreaks = new WeakMap<Action, number>();
+  private offBudgetRetries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -552,6 +574,14 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  // The single wake-shaping choke point (plan C): holds renderer-originated
+  // input events out of the event queue (W3) and shapable cell-flip wakes out
+  // of the reactive-notification path (plan B), coarsening the cadence a
+  // pattern can observe. Fed via queueEvent's shaping interception and
+  // holdShapedCellNotification() from the invalidation.ts routing of renderer
+  // $value writes and server pushes. See
+  // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+  private wakeShaper = new WakeShaper();
   // Head event parked on in-flight document loads (CT-1795). Keyed by event
   // id; released by loadsSettled, which either re-queues execution on success
   // or drops the at-most-once event on an explicit load failure.
@@ -630,7 +660,9 @@ export class Scheduler {
       const { method, args } = e as ConsoleEvent;
       const metadata = getPieceMetadataFromFrame();
       const result = this.consoleHandler({ metadata, method, args });
-      console[method].apply(console, result);
+      const output = Array.isArray(result) ? { method, args: result } : result;
+      const target = output.target ?? console;
+      target[output.method].apply(target, output.args);
     });
   }
 
@@ -757,8 +789,15 @@ export class Scheduler {
     const { rehydrateFromStorage } = options;
     const previousObservationIdentityKey = this
       .observationIdentityKeyForAction(action);
+    // Tag the action with its owning pattern instance. rehydrateFromStorage
+    // carries this only under persistent scheduler state; observationIdentity
+    // is set unconditionally so pattern readers always carry a pieceId (used to
+    // group shaped cell-flip wakes by instance and to distinguish pattern
+    // readers from internal machinery — plan B).
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
+    } else if (options.observationIdentity) {
+      this.setActionObservationIdentity(action, options.observationIdentity);
     }
     const observationIdentityKey = this.observationIdentityKeyForAction(action);
     if (
@@ -1348,6 +1387,13 @@ export class Scheduler {
         // Async scheduler work, such as event-triggered auto-start, is still in
         // flight. Wait for it to settle and then re-check the scheduler state.
         Promise.allSettled([...this.backgroundTasks]).then(recheck);
+      } else if (this.wakeShaper.hasPending()) {
+        // Input events (W3) or cell-flip notifications (plan B) are being held
+        // for wake shaping. Wait for them to release (which re-queues the
+        // events and delivers the notifications) and then re-check. Draining
+        // before the pending-commit branch means idleWithPendingCommits()
+        // releases the held wakes first, then awaits the commits they produce.
+        this.wakeShaper.whenDrained().then(recheck);
       } else if (
         awaitPendingCommits && this.runtime.storageManager.hasPendingCommits()
       ) {
@@ -1355,6 +1401,27 @@ export class Scheduler {
         // terminal failure) and then re-check: a landed commit can dirty
         // readers and re-trigger scheduler work.
         this.runtime.storageManager.pendingCommitsSettled().then(recheck);
+      } else if (this.disposed) {
+        // Every branch below parks on `idlePromises`, which only the execute
+        // loop drains — and `execute()` returns immediately once disposed. So
+        // parking here would park FOREVER, which is how a caller that disposed
+        // the scheduler by hand made `Runtime.dispose()` hang: its teardown
+        // awaits `scheduler.idle()`. A disposed scheduler will never run
+        // anything again, so quiescence is already final and resolving is the
+        // honest answer rather than the convenient one.
+        //
+        // Below the branches with a wake source of their own, deliberately: a
+        // running execute, background tasks, held wakes and in-flight commits
+        // all resolve off their own promise and re-check, so they still settle
+        // on a disposed scheduler and this cannot cut them short.
+        //
+        // Note this covers the parking branches WHOLESALE rather than fixing
+        // the reachable one. Clearing `scheduled` in dispose() would let the
+        // "nothing scheduled" branch resolve most of these, but only while
+        // `hasRunnablePullWork()` is false — that branch re-queues execution
+        // and parks when it is true, so the hang would come back for a
+        // scheduler disposed with pull work outstanding.
+        resolve();
       } else if (
         this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
@@ -1418,8 +1485,42 @@ export class Scheduler {
     // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
-    opts: { eventId?: string; originTx?: IExtendedStorageTransaction } = {},
+    opts: {
+      eventId?: string;
+      originTx?: IExtendedStorageTransaction;
+      time?: number;
+    } = {},
   ): void {
+    // Bind the event's wall-clock time at its causal origin. A pre-supplied time
+    // (a shaper release re-queueing a held event, a piece-load re-queue) is kept
+    // as-is so the instant is captured once at the original send. A send from
+    // INSIDE a handler carries that handler's frozen instant forward, so a whole
+    // cascade from one gesture shares one time — the handler frame always has an
+    // instant (createPatternFrame sets it), so this branch never falls through
+    // to the clock. Only a root/renderer send, outside any handler frame, reads
+    // the wall clock here to birth a fresh instant. This raw value is never
+    // exposed to a pattern un-coarsened: the dispatching handler reads it only
+    // through sandboxDateNow, which floors it to one second.
+    const frame = getTopFrame();
+    const time = opts.time ??
+      (frame?.inHandler === true ? frame.eventTime : undefined) ??
+      Date.now();
+    // Coarsen the delivery cadence of user-input events (W3). The piece-loading
+    // re-queue (doNotLoadPieceIfNotRunning) is an internal retry, not fresh
+    // input, so it is never reshaped.
+    if (!doNotLoadPieceIfNotRunning && shouldShapeDelivery(event)) {
+      holdShapedEvent(
+        this.wakeShaper,
+        this.shapedEventDeliver,
+        this.pieceIdForEventLink(eventLink),
+        eventLink,
+        event,
+        retries,
+        onCommit,
+        { eventId: opts.eventId, originTx: opts.originTx, time },
+      );
+      return;
+    }
     queueSchedulerEvent(this.eventQueueState, {
       eventLink,
       event,
@@ -1428,7 +1529,97 @@ export class Scheduler {
       doNotLoadPieceIfNotRunning,
       eventId: opts.eventId,
       originTx: opts.originTx,
+      time,
     });
+  }
+
+  // A released shaped event re-enters the ordinary queue path; the shaper reads
+  // eventQueueState at release time, so it stays correct across state re-init.
+  private shapedEventDeliver: DeliverFn = (
+    eventLink,
+    event,
+    retries,
+    onCommit,
+    opts,
+  ) =>
+    queueSchedulerEvent(this.eventQueueState, {
+      eventLink,
+      event,
+      retries,
+      onCommit,
+      doNotLoadPieceIfNotRunning: false,
+      eventId: opts.eventId,
+      originTx: opts.originTx,
+      time: opts.time,
+    });
+
+  // The owning pattern instance for an input stream, used to group a pattern's
+  // input across its several streams into one delivery-shaping window (per-pattern
+  // coalescing, W3). The wake shaper's hold() runs before the handler is
+  // resolved, so we find it here from the registered handlers; undefined when none
+  // is registered yet (the shaper then falls back to per-stream grouping). The key
+  // includes the owning space so two instances of one pattern in different spaces
+  // (same content-addressed pieceId) do not share a bucket (see
+  // shaperInstanceGroupKey).
+  private pieceIdForEventLink(
+    eventLink: NormalizedFullLink,
+  ): string | undefined {
+    for (const [link, handler] of this.eventHandlers) {
+      if (areNormalizedLinksSame(link, eventLink)) {
+        return shaperInstanceGroupKey(
+          (handler as {
+            schedulerObservationIdentity?: SchedulerObservationIdentity;
+          }).schedulerObservationIdentity,
+        );
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Plan B seam: hold a shapable cell-flip notification so a watching lift/sink
+   * observes it coalesced and jittered rather than at the instant the cell
+   * changed. `groupKey` must identify the observing pattern instance (so all of
+   * one pattern's shaped cell flips share a release window — the property that
+   * defeats the over-sampling attack); `itemKey` identifies the changed cell
+   * within the group (the coalescing unit); `deliver` performs the already
+   * committed notification (never holds a transaction). Only real-world-timing
+   * notifications may be routed here — never ordinary internal computation, or
+   * all reactivity would stall.
+   *
+   * The shaper is owned and its lifecycle wired (idle-drain, dispose). Its two
+   * high-value sources ARE routed here, at the invalidation.ts per-change
+   * loop via shapableWakeGroupKey: renderer `$value` keystroke writes (a commit
+   * whose transaction carries the renderer-input mark set by markRendererInputTx
+   * in storage/reactivity-log.ts, stamped from runtime-client's blind CellSet)
+   * and server pushes (notification.type "pull"/"integrate"). Each is coalesced
+   * PER CELL (last-wins) so distinct cells are never dropped, and interactive
+   * input and passive pushes use separate per-pattern buckets so background
+   * chatter cannot drain the interactive burst. Only real-world-timing
+   * notifications are routed — never ordinary internal computation.
+   *
+   * Deferred / open sources:
+   * TODO(timing/plan-B/now): channel 4. `#now` ticks (builtins/wish.ts, a
+   *   wall-clock-boundary interval timer) are deliberately NOT routed here — the
+   *   value is already >=1s and grid-aligned and W1 denies the fine clock needed
+   *   to read its phase, so the ~1s latency it would add to every clock read is
+   *   not worth it. To wire it, recognize the `#now` cell link-keys at the
+   *   notification point (its URI is a content hash, so intent is otherwise lost).
+   */
+  holdShapedCellNotification(
+    groupKey: string,
+    itemKey: string,
+    chargeKey: object,
+    deliver: () => void,
+  ): void {
+    holdShapedCell(this.wakeShaper, groupKey, itemKey, chargeKey, deliver);
+  }
+
+  // Whether any shapable cell-flip wake is currently held out of the scheduler
+  // (plan B). Exposed for tests that need to observe that a change was routed
+  // through the wake shaper's cell path before idle() drains it.
+  hasPendingShapedCellNotifications(): boolean {
+    return this.wakeShaper.hasPending(CELL_GROUP_PREFIX);
   }
 
   addEventHandler(
@@ -1810,6 +2001,31 @@ export class Scheduler {
       this.pendingQueueTaskTimer = null;
     }
     this.triggerIndex.clear();
+    this.wakeShaper.dispose();
+    // Release waiters already parked when dispose arrived. The branch in
+    // waitForQuiescence covers idle() calls made AFTER this point; it cannot
+    // reach these, and nothing else will — `execute()` is the only other drain
+    // and it is now a no-op. Same contract the wake shaper's own dispose keeps
+    // for its drain waiters, one line up. Drained in place rather than by
+    // reassigning the field: createExecuteContinuationState() hands this exact
+    // array out, so a swap would leave any live continuation state draining the
+    // detached one.
+    //
+    // Routed back through waitForQuiescence rather than resolved here, because
+    // dispose does NOT cancel a run already under way — `execute()` tests
+    // `disposed` only on entry. Every parking branch is reached with
+    // `runningPromise` unset, so a waiter parked while execution was merely
+    // SCHEDULED is still parked once the run begins; resolving it directly
+    // would report quiescence with an action, and its commit, still going. The
+    // re-check waits on that promise and only then takes the disposed branch,
+    // which is exactly the guarantee the branch documents. It cannot re-park:
+    // the disposed branch sits above every push to this list.
+    const parked = this.idlePromises.splice(0);
+    if (parked.length > 0) {
+      this.waitForQuiescence(false).then(() => {
+        for (const resolve of parked) resolve();
+      });
+    }
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);
@@ -2168,6 +2384,10 @@ export class Scheduler {
       isInvalid: (target) => this.isInvalidAction(target),
       materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
+      isRendererInputSource: (source) =>
+        source !== undefined && isRendererInputTx(source),
+      holdShapedNotification: (groupKey, itemKey, chargeKey, deliver) =>
+        this.holdShapedCellNotification(groupKey, itemKey, chargeKey, deliver),
     };
   }
 
@@ -2518,6 +2738,7 @@ export class Scheduler {
       actionTimingState: this.actionTimingState,
       retries: this.retries,
       conflictStreaks: this.conflictStreaks,
+      offBudgetRetries: this.offBudgetRetries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
       nodes: this.nodes,

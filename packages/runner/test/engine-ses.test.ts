@@ -149,8 +149,12 @@ describe("Engine in SES mode", () => {
       ],
     };
 
+    // The type libraries no longer declare `Proxy`, so this is now turned away
+    // at type check rather than by the snapshot verifier behind it. Either
+    // rejection keeps proxy-backed data out of a top-level snapshot; naming the
+    // constructor simply stops being expressible first.
     await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
-      /Mutable top-level data must be wrapped in __cf_data|Only verified plain data|Only trusted builder calls/,
+      /Cannot find name 'Proxy'|Mutable top-level data must be wrapped in __cf_data|Only verified plain data|Only trusted builder calls/,
     );
   });
 
@@ -226,9 +230,8 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            'import { safeDateNow } from "commonfabric";',
             "function buildYears() {",
-            "  const currentYear = new Date(safeDateNow()).getFullYear();",
+            "  const currentYear = 2024;",
             "  const years: string[] = [];",
             "  for (let year = currentYear; year >= currentYear - 2; year--) {",
             "    years.push(String(year));",

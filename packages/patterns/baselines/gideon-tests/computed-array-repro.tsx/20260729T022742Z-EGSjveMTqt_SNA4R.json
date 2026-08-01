@@ -1,0 +1,86 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Item": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/Status"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "type": "object"
+      },
+      "Status": {
+        "enum": [
+          "pending",
+          "done"
+        ]
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "gideon-tests/computed-array-repro.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Item": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/Status"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "type": "object"
+      },
+      "Status": {
+        "enum": [
+          "pending",
+          "done"
+        ]
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "items",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

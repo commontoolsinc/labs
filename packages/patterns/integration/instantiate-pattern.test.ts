@@ -1,5 +1,9 @@
-import { env } from "@commonfabric/integration";
-import { sleep } from "@commonfabric/utils/sleep";
+import {
+  awaitViewSettled,
+  env,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -9,11 +13,14 @@ import {
   initializePiecesController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { clickCfButton } from "./cfc-browser-helpers.ts";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-// TODO(CT-1101) Need to re-enable these tests to make them more robust
-const ignore = true;
+// In-page predicate: the page has soft-navigated away from `urlBefore`.
+const urlChangedFrom = (_probe: ProbeApi, urlBefore: string): boolean =>
+  globalThis.location.href !== urlBefore;
 
 describe("instantiate-pattern integration test", () => {
   const shell = new ShellIntegration();
@@ -39,7 +46,7 @@ describe("instantiate-pattern integration test", () => {
           "instantiate-pattern.tsx",
         ),
       ),
-      { start: false },
+      { start: true },
     );
     pieceId = piece.id;
   });
@@ -48,65 +55,66 @@ describe("instantiate-pattern integration test", () => {
     if (cc) await cc.dispose();
   });
 
-  it({
-    name: "should deploy pattern, click button, and navigate to counter",
-    ignore,
-    fn: async () => {
-      const page = shell.page();
+  it("should deploy pattern, click button, and navigate to counter", async () => {
+    const page = shell.page();
 
-      await shell.goto({
-        frontendUrl: FRONTEND_URL,
-        view: {
-          spaceName: SPACE_NAME,
-          pieceId,
-        },
-        identity,
-      });
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId,
+      },
+      identity,
+    });
 
-      // Wait for piece to load by waiting for first interactive element
-      await page.waitForSelector("[data-cf-input]", { strategy: "pierce" });
+    // Wait for piece to load by waiting for first interactive element
+    await page.waitForSelector("[data-cf-input]", { strategy: "pierce" });
 
-      // Store the current URL before any action
-      const urlBefore = await page.evaluate(() => globalThis.location.href);
-      console.log("URL before action:", urlBefore);
+    // Store the current URL before any action
+    const urlBefore = await page.evaluate(() => globalThis.location.href);
 
-      const input = await page.waitForSelector("[data-cf-input]", {
-        strategy: "pierce",
-      });
+    // Type into the factory's message input with real key events, then press
+    // its Add button; the handler instantiates a counter piece and navigates
+    // to it. The view is settled before the click so the send handler is
+    // bound when the single click lands.
+    const input = await page.waitForSelector("[data-cf-input]", {
+      strategy: "pierce",
+    });
+    await input.type("New counter");
+    await awaitViewSettled(page);
+    await clickCfButton(page, "[data-cf-button]");
 
-      await input.type("New counter");
-
-      // Quick wait for input processing
-      await sleep(100);
-
-      const button = await page.waitForSelector("[data-cf-button]", {
-        strategy: "pierce",
-      });
-
-      await button.click();
-
-      // Wait for page to soft navigate
-      await page.waitForFunction((urlBefore) => {
-        return globalThis.location.href !== urlBefore;
-      }, { args: [urlBefore] });
-
-      const urlAfter = await page.evaluate(() => globalThis.location.href);
-      console.log("URL after clicking:", urlAfter);
-
-      // Verify navigation happened (URL should have changed)
-      assert(
-        urlBefore !== urlAfter,
-        "Should navigate to a new URL after clicking Add button",
+    // Wait for the page to soft navigate
+    try {
+      await waitForCondition(page, urlChangedFrom, { args: [urlBefore] });
+    } catch (cause) {
+      const seen = await page.evaluate(() => ({
+        url: globalThis.location.href,
+        bodyText: (document.body?.innerText ?? "").slice(0, 400),
+      })).catch(() => undefined);
+      throw new Error(
+        `Clicking Add did not navigate away from ${urlBefore}. Last probe: ${
+          toIndentedDebugString(seen)
+        }`,
+        { cause },
       );
+    }
 
-      // Verify we're now on a counter page by checking for counter-specific elements
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      assert(
-        counterResult,
-        "Should find counter-result element after navigation",
-      );
-    },
+    const urlAfter = await page.evaluate(() => globalThis.location.href);
+
+    // Verify navigation happened (URL should have changed)
+    assert(
+      urlBefore !== urlAfter,
+      "Should navigate to a new URL after clicking Add button",
+    );
+
+    // Verify we're now on a counter page by checking for counter-specific elements
+    const counterResult = await page.waitForSelector("#counter-result", {
+      strategy: "pierce",
+    });
+    assert(
+      counterResult,
+      "Should find counter-result element after navigation",
+    );
   });
 });

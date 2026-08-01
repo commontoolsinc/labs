@@ -1,10 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { generateETag } from "@commonfabric/static/etag";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/patterns/patterns.index.ts";
 import { PatternsServer } from "@/routes/patterns/patterns-server.ts";
-import { classifyPatternError } from "@/routes/patterns/patterns.handlers.ts";
+import {
+  classifyPatternError,
+  patternResponseHeaders,
+} from "@/routes/patterns/patterns.handlers.ts";
 
 const IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -131,6 +135,36 @@ describe("Patterns API", () => {
       expect(identity).toMatch(IDENTITY_RE);
     });
 
+    it("serves identity with a strong closure-checksum ETag and requires revalidation", async () => {
+      const first = await app.request(
+        "/api/patterns/system/default-app.tsx?identity",
+      );
+      const identity = (await first.text()).trim();
+      const etag = first.headers.get("ETag");
+
+      expect(etag).toBe(`"${identity}"`);
+      expect(first.headers.get("Cache-Control")).toBe("public, no-cache");
+
+      const revalidated = await app.request(
+        "/api/patterns/system/default-app.tsx?identity",
+        { headers: { "If-None-Match": etag! } },
+      );
+      expect(revalidated.status).toBe(304);
+      expect(revalidated.headers.get("ETag")).toBe(etag);
+      expect(revalidated.headers.get("Cache-Control")).toBe(
+        "public, no-cache",
+      );
+      expect(await revalidated.text()).toBe("");
+    });
+
+    it("allows cross-origin identity fetches", () => {
+      const headers = new Headers(
+        patternResponseHeaders("text/plain; charset=utf-8", '"test"'),
+      );
+      expect(headers.get("Access-Control-Allow-Origin")).toBe("*");
+      expect(headers.get("Access-Control-Expose-Headers")).toContain("ETag");
+    });
+
     it("matches the shared resolveEntryIdentity over the real closure (HTTP-boundary drift guard)", async () => {
       const response = await app.request(
         "/api/patterns/system/default-app.tsx?identity",
@@ -171,6 +205,40 @@ describe("Patterns API", () => {
       expect(response.headers.get("Content-Type")).toContain(
         "text/typescript-jsx",
       );
+      expect(await response.text()).toContain("export default pattern");
+    });
+
+    it("serves source with a content-checksum ETag and requires revalidation", async () => {
+      const first = await app.request(
+        "/api/patterns/system/default-app.tsx",
+      );
+      const source = await first.text();
+      const etag = first.headers.get("ETag");
+
+      expect(etag).toBe(
+        await generateETag(new TextEncoder().encode(source)),
+      );
+      expect(first.headers.get("Cache-Control")).toBe("public, no-cache");
+
+      const revalidated = await app.request(
+        "/api/patterns/system/default-app.tsx",
+        { headers: { "If-None-Match": etag! } },
+      );
+      expect(revalidated.status).toBe(304);
+      expect(revalidated.headers.get("ETag")).toBe(etag);
+      expect(revalidated.headers.get("Cache-Control")).toBe(
+        "public, no-cache",
+      );
+      expect(await revalidated.text()).toBe("");
+    });
+
+    it("returns source when the cached checksum does not match", async () => {
+      const response = await app.request(
+        "/api/patterns/system/default-app.tsx",
+        { headers: { "If-None-Match": '"stale"' } },
+      );
+
+      expect(response.status).toBe(200);
       expect(await response.text()).toContain("export default pattern");
     });
 

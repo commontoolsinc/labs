@@ -3,22 +3,19 @@
  *
  * These tests exercise the CFHelpers class's import-scanning constructor and its
  * expression/qualified-name factory methods, plus the module-level import-shape
- * recognizers `getCFHelpersIdentifier` / `getCFDataHelperIdentifier` (reached
- * indirectly through the constructor and `sourceHasHelpers` /
- * `sourceHasDataHelper`).
+ * recognizer `getCFHelpersIdentifier` (reached indirectly through the
+ * constructor and `sourceHasHelpers`).
  *
- * The recognizers accept only a named import of `__cfHelpers` (or `__cf_data`
- * aliased to `__cfDataHelper`) from the "commonfabric" module specifier. Each
- * test pins one gate of that shape by feeding a source whose import differs in
- * exactly one respect and asserting whether the helper is detected.
+ * The recognizer accepts only a named import of `__cfHelpers` from the
+ * "commonfabric" module specifier. Each test pins one gate of that shape by
+ * feeding a source whose import differs in exactly one respect and asserting
+ * whether the helper is detected.
  */
 import ts from "typescript";
 import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 import {
-  CF_DATA_HELPER_IDENTIFIER,
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
-  injectCfDataHelper,
   injectCfHelpers,
   sourceDisablesCfTransform,
   transformCfDirective,
@@ -50,7 +47,7 @@ function printExpr(node: ts.Node, sourceFile: ts.SourceFile): string {
 }
 
 // ---------------------------------------------------------------------------
-// Constructor scanning: getCFHelpersIdentifier / getCFDataHelperIdentifier
+// Constructor scanning: getCFHelpersIdentifier
 // ---------------------------------------------------------------------------
 
 Deno.test("CFHelpers detects the __cfHelpers named import from commonfabric", () => {
@@ -58,7 +55,6 @@ Deno.test("CFHelpers detects the __cfHelpers named import from commonfabric", ()
     `import { __cfHelpers } from "commonfabric";`,
   );
   assert(helpers.sourceHasHelpers());
-  assertFalse(helpers.sourceHasDataHelper());
 });
 
 Deno.test("CFHelpers detects a renamed __cfHelpers import via its property name", () => {
@@ -122,52 +118,10 @@ Deno.test("CFHelpers ignores a bare import declaration with no import clause", (
   // `import "commonfabric"` has `importClause === undefined`.
   const helpers = helpersFor(`import "commonfabric";`);
   assertFalse(helpers.sourceHasHelpers());
-  assertFalse(helpers.sourceHasDataHelper());
-});
-
-Deno.test("CFHelpers detects the __cf_data data helper import aliased to __cfDataHelper", () => {
-  // The data helper is only recognized as `__cf_data as __cfDataHelper`.
-  const helpers = helpersFor(
-    `import { __cf_data as __cfDataHelper } from "commonfabric";`,
-  );
-  assert(helpers.sourceHasDataHelper());
-  assertFalse(helpers.sourceHasHelpers());
-});
-
-Deno.test("CFHelpers rejects a data helper import whose local name is not __cfDataHelper", () => {
-  // `element.name.text` must equal `__cfDataHelper`; here it is `other`.
-  const helpers = helpersFor(
-    `import { __cf_data as other } from "commonfabric";`,
-  );
-  assertFalse(helpers.sourceHasDataHelper());
-});
-
-Deno.test("CFHelpers rejects a data helper import whose imported name is not __cf_data", () => {
-  // Local name matches `__cfDataHelper`, but the imported (property) name is
-  // `wrong`, not `__cf_data`, so the second gate rejects it.
-  const helpers = helpersFor(
-    `import { wrong as __cfDataHelper } from "commonfabric";`,
-  );
-  assertFalse(helpers.sourceHasDataHelper());
-});
-
-Deno.test("CFHelpers ignores a data-helper-shaped import from a foreign module", () => {
-  const helpers = helpersFor(
-    `import { __cf_data as __cfDataHelper } from "other-module";`,
-  );
-  assertFalse(helpers.sourceHasDataHelper());
-});
-
-Deno.test("CFHelpers ignores a data helper default import from commonfabric", () => {
-  // Import clause present but no NamedImports binding.
-  const helpers = helpersFor(
-    `import __cfDataHelper from "commonfabric";`,
-  );
-  assertFalse(helpers.sourceHasDataHelper());
 });
 
 // ---------------------------------------------------------------------------
-// getHelperExpr / getHelperQualified / getDataHelperExpr
+// getHelperExpr / getHelperQualified
 // ---------------------------------------------------------------------------
 
 Deno.test("getHelperExpr throws when the source has no helpers import", () => {
@@ -230,46 +184,8 @@ Deno.test("getHelperQualified builds a qualified name against the helper identif
   assertEquals((qualified.left as ts.Identifier).text, CF_HELPERS_IDENTIFIER);
 });
 
-Deno.test("getDataHelperExpr throws when the source has no data helper import", () => {
-  const helpers = helpersFor(`const x = 1;`);
-  assertThrows(
-    () => helpers.getDataHelperExpr(),
-    Error,
-    "Source file does not contain __cfDataHelper.",
-  );
-});
-
-Deno.test("getDataHelperExpr without an original node returns a bare data-helper identifier", () => {
-  const source = `import { __cf_data as __cfDataHelper } from "commonfabric";`;
-  const sf = sourceFileFor(source);
-  const helpers = new CFHelpers({ sourceFile: sf, factory: ts.factory });
-  const ident = helpers.getDataHelperExpr();
-  assert(ts.isIdentifier(ident));
-  assertEquals(ident.text, CF_DATA_HELPER_IDENTIFIER);
-});
-
-Deno.test("getDataHelperExpr with an original node preserves its source map range", () => {
-  const source =
-    `import { __cf_data as __cfDataHelper } from "commonfabric";\nconst marker = 2;`;
-  const sf = sourceFileFor(source);
-  const helpers = new CFHelpers({ sourceFile: sf, factory: ts.factory });
-
-  let original: ts.Node | undefined;
-  const visit = (node: ts.Node): void => {
-    if (!original && ts.isNumericLiteral(node)) original = node;
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
-  assert(original);
-
-  const ident = helpers.getDataHelperExpr(original);
-  assert(ts.isIdentifier(ident));
-  assertEquals(ident.text, CF_DATA_HELPER_IDENTIFIER);
-  assertEquals(ts.getSourceMapRange(ident).pos, original.pos);
-});
-
 // ---------------------------------------------------------------------------
-// transformCfDirective / injectCfHelpers / injectCfDataHelper (string passes)
+// transformCfDirective / injectCfHelpers (string passes)
 // ---------------------------------------------------------------------------
 
 Deno.test("transformCfDirective returns an all-blank source unchanged", () => {
@@ -313,29 +229,10 @@ Deno.test("injectCfHelpers uses JS-only helper-shim syntax for JavaScript file n
   assertFalse(out.includes("function h(...args: any[])"));
 });
 
-Deno.test("injectCfDataHelper wraps a source with the data-helper import and keep-alive", () => {
-  const source = `const y = 2;`;
-  const out = injectCfDataHelper(source);
-  assert(
-    out.startsWith(`import { __cf_data as ${CF_DATA_HELPER_IDENTIFIER} } from`),
-  );
-  assert(out.includes(source));
-  // The keep-alive statement references the data helper so binding survives.
-  assert(out.includes(`= ${CF_DATA_HELPER_IDENTIFIER};`));
-});
-
 Deno.test("injectCfHelpers throws when the source already uses the reserved helper symbol", () => {
   assertThrows(
     () => injectCfHelpers(`const ${CF_HELPERS_IDENTIFIER} = {};`),
     Error,
     `reserved helper symbol '${CF_HELPERS_IDENTIFIER}'`,
-  );
-});
-
-Deno.test("injectCfDataHelper throws when the source already uses the reserved data-helper symbol", () => {
-  assertThrows(
-    () => injectCfDataHelper(`const ${CF_DATA_HELPER_IDENTIFIER} = {};`),
-    Error,
-    `reserved helper symbol '${CF_DATA_HELPER_IDENTIFIER}'`,
   );
 });

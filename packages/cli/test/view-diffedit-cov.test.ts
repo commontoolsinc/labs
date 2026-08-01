@@ -8,7 +8,7 @@
  * original diff, a missing workspace file, a hunk with no room to expand, the
  * read-only (no-disk) source, and the defensive guards in `save`.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
@@ -16,7 +16,12 @@ import {
   type DiffEdit,
   type DiffWorkspace,
 } from "../lib/view/diffdoc.ts";
-import { createDiffHighlighter, diffSource } from "../lib/view/diffedit.ts";
+import {
+  _internal as _de,
+  createDiffHighlighter,
+  diffSource,
+} from "../lib/view/diffedit.ts";
+import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 
 /** A workspace backed by a real temp dir. */
 function tempWs(
@@ -463,7 +468,7 @@ Deno.test("diffedit cov: dirtyLabels names a single file when a change is inside
   }
 });
 
-Deno.test("diffedit cov: dirtyLabels names every file when the changed region pins to none", () => {
+Deno.test("diffedit cov: dirtyLabels names no file when the change pins to none (e.g. a message)", () => {
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "x.ts"), "const x = 1;\nconst y = 3;\n");
@@ -479,8 +484,8 @@ Deno.test("diffedit cov: dirtyLabels names every file when the changed region pi
     };
     // A leading noise line precedes the first file. Both diffs carry it; the
     // edit only changes that leading line, which sits outside every file's
-    // header..endLine slice, so no per-file body differs and the fallback names
-    // every file.
+    // header..endLine slice, so no per-file body differs — a save writes no
+    // file, and dirtyLabels names none.
     const original = `preamble note
 diff --git a/x.ts b/x.ts
 --- a/x.ts
@@ -494,8 +499,8 @@ diff --git a/x.ts b/x.ts
     const { src } = sourceFor(original, ws);
     assertEquals(
       src.dirtyLabels!(original, current),
-      ["x.ts"],
-      "a change outside every file slice falls back to naming every file",
+      [],
+      "a change outside every file slice names no file",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -525,6 +530,170 @@ Deno.test("diffedit cov: the highlighter's lines getter returns the seeded lines
   }
 });
 
+Deno.test("diffedit cov: a partial seed falls back to rendering the edited line", () => {
+  const bodyLine = DIFF.split("\n").indexOf("+const y = 2;");
+  const partialSeed = createDiffHighlighter(DIFF).lines.slice(0, bodyLine);
+  const highlighter = createDiffHighlighter(
+    DIFF,
+    partialSeed,
+  );
+  const edited = DIFF.replace("+const y = 2;", "+const y = 20;");
+  const changed = highlighter.update(edited)[bodyLine];
+  assertEquals(changed.text, "+const y = 20;");
+  assertEquals(changed.spans[0].cls, "diffAdd");
+  assertEquals(
+    changed.spans.find((span) => span.text === "20")?.cls,
+    "number",
+  );
+});
+
+Deno.test("diffedit cov: deferred parsing selects only changed stateful files", () => {
+  const baselines = new Map([
+    ["/workspace/changed.ts", "const changed = 1;\n"],
+    ["/workspace/untouched.ts", "const untouched = 1;\n"],
+    ["/workspace/plain.txt", "plain\n"],
+  ]);
+  const edited = new Map([
+    ["/workspace/changed.ts", "const changed = 2;\n"],
+    ["/workspace/untouched.ts", "const untouched = 1;\n"],
+    ["/workspace/plain.txt", "changed plain\n"],
+  ]);
+  assertEquals(
+    [..._de.changedStatefulFileOutputs(
+      edited,
+      baselines,
+      new Set([
+        "/workspace/changed.ts",
+        "/workspace/untouched.ts",
+      ]),
+    )],
+    [["/workspace/changed.ts", "const changed = 2;\n"]],
+  );
+});
+
+Deno.test("diffedit cov: repeated non-overlapping file sections are highlighted once", () => {
+  const file = [
+    "const value = `",
+    "first",
+    "middle",
+    "second",
+    "`;",
+    "",
+  ].join("\n");
+  const firstSection = [
+    "diff --git a/template.ts b/template.ts",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -2 +2 @@",
+    "-old first",
+    "+first",
+  ].join("\n");
+  const secondSection = [
+    "diff --git a/template.ts b/template.ts",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -4 +4 @@",
+    "-old second",
+    "+second",
+  ].join("\n");
+  const diff = `${firstSection}\n${secondSection}\n`;
+  const { ws, done } = tempWs({ "template.ts": file });
+  const language = typeScriptLanguage as {
+    createHighlighter: typeof typeScriptLanguage.createHighlighter;
+  };
+  const createHighlighter = language.createHighlighter;
+  let completeCreates = 0;
+  let completeUpdates = 0;
+  language.createHighlighter = (text, fileName) => {
+    completeCreates++;
+    const highlighter = createHighlighter(text, fileName);
+    return {
+      get lines() {
+        return highlighter.lines;
+      },
+      update: (next) => {
+        completeUpdates++;
+        return highlighter.update(next);
+      },
+    };
+  };
+  try {
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff
+      .replace("+first", "+first changed")
+      .replace("+second", "+second changed");
+    const highlighted = highlighter.update(editedText);
+    for (const text of ["first changed", "second changed"]) {
+      const changed = highlighted.find((line) => line.text === `+${text}`);
+      assertEquals(
+        changed?.spans.find((span) => span.text === text)?.cls,
+        "template",
+      );
+    }
+    assertEquals(completeCreates, 1);
+    assertEquals(completeUpdates, 0);
+  } finally {
+    language.createHighlighter = createHighlighter;
+    done();
+  }
+});
+
+Deno.test("diffedit cov: deferred parsing preserves optional blob readers", () => {
+  const file = ["const value = `", "before", "`;", ""].join("\n");
+  const diff = [
+    "diff --git a/template.ts b/template.ts",
+    "index 1111111..2222222 100644",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -2 +2 @@",
+    "-old",
+    "+before",
+    "",
+  ].join("\n");
+  const { root, done } = tempWs({ "template.ts": file });
+  try {
+    for (const reader of ["readBlob", "readBlobs"] as const) {
+      let calls = 0;
+      const optionalReader: Pick<DiffWorkspace, typeof reader> =
+        reader === "readBlob"
+          ? {
+            readBlob: () => {
+              calls++;
+              return null;
+            },
+          }
+          : {
+            readBlobs: () => {
+              calls++;
+              return new Map();
+            },
+          };
+      const ws: DiffWorkspace = {
+        resolve: (path) => join(root, path),
+        read: (path) => Deno.readTextFileSync(path),
+        ...optionalReader,
+      };
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      calls = 0;
+      const editedText = diff.replace("+before", "+after");
+      const reparsed = source.parse(editedText);
+      assert(calls > 0, `${reader} was forwarded to the deferred parse`);
+      const changed = reparsed.lines.find((line) => line.text === "+after");
+      assertEquals(
+        changed?.spans.find((span) => span.text === "after")?.cls,
+        "template",
+      );
+    }
+  } finally {
+    done();
+  }
+});
+
 Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the +++ header scan", () => {
   // Seed-less so the highlighter renders every line itself, then edit a body
   // line whose nearest preceding header is `+++ b/doc.md` — exercising the
@@ -545,6 +714,69 @@ Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the 
   assertEquals(out[bodyIdx].text, "+new body text changed");
   // The marker keeps its added-line colour.
   assertEquals(out[bodyIdx].spans[0].cls, "diffAdd");
+});
+
+Deno.test("diffedit cov: a CRLF .ts header selects TypeScript for edited lines", () => {
+  const diff = [
+    "diff --git a/generic.ts b/generic.ts\r",
+    "--- a/generic.ts\r",
+    "+++ b/generic.ts\r",
+    "@@ -0,0 +1 @@\r",
+    "+const identity = <T>(value: T): T => value;\r",
+    "",
+  ].join("\n");
+  const highlighter = createDiffHighlighter(diff);
+  const raw = diff.split("\n");
+  raw[4] = raw[4].replace("value;", "value ;");
+  const line = highlighter.update(raw.join("\n"))[4];
+  assertEquals(
+    line.spans.find((span) => span.text === "value" && span.cls === "parameter")
+      ?.cls,
+    "parameter",
+  );
+});
+
+Deno.test("diffedit cov: renamed removed lines use the old extension", () => {
+  const diff = `diff --git a/generic.ts b/generic.tsx
+--- a/generic.ts
++++ b/generic.tsx
+@@ -1 +1 @@
+-const identity = <T>(value: T): T => value;
++const view = <div>ready</div>;
+`;
+  const highlighter = createDiffHighlighter(diff);
+  const raw = diff.split("\n");
+  raw[4] = raw[4].replace("value;", "value ;");
+  const line = highlighter.update(raw.join("\n"))[4];
+  assertEquals(
+    line.spans.find((span) => span.text === "value" && span.cls === "parameter")
+      ?.cls,
+    "parameter",
+  );
+});
+
+Deno.test("diffedit cov: source lines resembling file headers keep the diff path", () => {
+  const diff = `diff --git a/generic.ts b/generic.ts
+--- a/generic.ts
++++ b/generic.ts
+@@ -1 +1 @@
+--- oldValue; const before = <T>(input: T): T => input;
++++ newValue; const after = <T>(input: T): T => input;
+`;
+  const highlighter = createDiffHighlighter(diff);
+  const raw = diff.split("\n");
+  raw[4] = raw[4].replace("oldValue", "previousValue");
+  raw[5] = raw[5].replace("newValue", "nextValue");
+  const lines = highlighter.update(raw.join("\n"));
+  for (const index of [4, 5]) {
+    assertEquals(
+      lines[index].spans.find((span) =>
+        span.text === "input" && span.cls === "parameter"
+      )?.cls,
+      "parameter",
+      `line ${index + 1} uses the .ts parser`,
+    );
+  }
 });
 
 Deno.test("diffedit cov: the highlighter scans past a missing +++ to the diff --git Markdown header", () => {
@@ -585,6 +817,7 @@ Deno.test("diffedit cov: a diff matching no file on disk yields a read-only sour
   const emptyEdit: DiffEdit = {
     lines: new Map(),
     fileText: new Map(),
+    oldFileLines: [],
     hunks: [],
   };
   const ws: DiffWorkspace = { resolve: () => null, read: () => null };
@@ -599,6 +832,13 @@ Deno.test("diffedit cov: a diff matching no file on disk yields a read-only sour
     src.save("any text"),
     "Nothing to save — this diff matches no file on disk.",
   );
+  const parsed = src.parse(DIFF);
+  assertEquals(parsed.text, DIFF);
+  assert(
+    parsed.lines.some((line) =>
+      line.spans.some((span) => span.cls === "diffHunk")
+    ),
+  );
 });
 
 Deno.test("diffedit cov: save skips a verified hunk whose file was not captured and reports nothing written", () => {
@@ -610,6 +850,7 @@ Deno.test("diffedit cov: save skips a verified hunk whose file was not captured 
   const edit: DiffEdit = {
     lines: new Map([[5, { absPath: "/ghost/m.ts", newLine: 0, markerLen: 1 }]]),
     fileText: new Map(), // deliberately missing /ghost/m.ts
+    oldFileLines: [],
     hunks: [
       { absPath: "/ghost/m.ts", newStart: 1, newCount: 1, verified: true },
     ],
@@ -621,7 +862,7 @@ Deno.test("diffedit cov: save skips a verified hunk whose file was not captured 
   const text = "@@ -1,1 +1,1 @@\n+only line\n";
   assertEquals(
     src.save(text),
-    "No editable changes to save.",
+    "Saved 0 files",
     "an uncaptured file is skipped, leaving nothing written",
   );
 });
@@ -642,4 +883,363 @@ Deno.test("diffedit cov: save writes the verified hunk's new side back to the ca
   } finally {
     done();
   }
+});
+
+// --- editableStart: position/verified-aware line editability -----------------
+
+Deno.test("editableStart: a null model (buffer is not a diff) refuses every line", () => {
+  assertEquals(_de.editableStart(null, [], " some text", 0), null);
+});
+
+Deno.test("editableStart: editable only inside a verified hunk", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,2 +1,3 @@
+ keep
+-old
++new
++added
+`;
+  const model = parseDiff(diff)!;
+  const lines = diff.split("\n");
+  // One hunk, marked verified and backed by a file.
+  const verified = [{
+    absPath: "/x",
+    newStart: 1,
+    newCount: 3,
+    verified: true,
+  }];
+  // Line 4 = " keep" (ctx) → editable past the marker; 5 = "-old" (removed) →
+  // refused; 6/7 = "+new"/"+added" (add) → editable; 0 = the file header → not
+  // in any hunk, refused.
+  assertEquals(_de.editableStart(model, verified, lines[4], 4), 1, "context");
+  assertEquals(
+    _de.editableStart(model, verified, lines[5], 5),
+    null,
+    "removed",
+  );
+  assertEquals(_de.editableStart(model, verified, lines[6], 6), 1, "added");
+  assertEquals(_de.editableStart(model, verified, lines[0], 0), null, "header");
+  // The same hunk, unverified: even its context/added lines are refused.
+  const unver = [{ absPath: null, newStart: 1, newCount: 3, verified: false }];
+  assertEquals(
+    _de.editableStart(model, unver, lines[4], 4),
+    null,
+    "unverified",
+  );
+});
+
+// --- commit amend helpers ----------------------------------------------------
+
+Deno.test("pendingAmend: null when there is no editable message", () => {
+  assertEquals(
+    _de.pendingAmend(() => null, () => null, false, "a", "b"),
+    null,
+  );
+});
+
+Deno.test("pendingAmend: null when the full buffer is unchanged", () => {
+  const msg = { sha: "abcdef1", start: 0, end: 0 };
+  const both = () => msg;
+  assertEquals(_de.pendingAmend(both, both, false, "    hi", "    hi"), null);
+});
+
+Deno.test("pendingAmend: an unchanged message still amends changed commit contents", () => {
+  const msg = { sha: "abcdef1", start: 0, end: 0 };
+  const both = () => msg;
+  assertEquals(
+    _de.pendingAmend(both, both, true, "    hi\n-old", "    hi\n+new"),
+    { sha: "abcdef1", subject: "hi" },
+  );
+});
+
+Deno.test("baselineAfterSave: keeps the baseline for a changed hunk layout", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(DIFF, ws);
+    const moved = DIFF.replace("b/m.ts", "b/other.ts");
+    assertEquals(
+      src.baselineAfterSave!(DIFF, moved, { amendCommit: false }),
+      DIFF,
+    );
+
+    const extra = `${DIFF}@@ -5,0 +6,1 @@\n+extra\n`;
+    assertEquals(
+      src.baselineAfterSave!(DIFF, extra, { amendCommit: false }),
+      DIFF,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffSource: ignores commit-shaped text inside a file diff", () => {
+  const head = "1".repeat(40);
+  const embedded = "2".repeat(40);
+  const text = [
+    `From ${head} Mon Sep 17 00:00:00 2001`,
+    "From: A B <a@b.example>",
+    "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+    "Subject: [PATCH] Subject",
+    "",
+    "diff --git a/m.ts b/m.ts",
+    "index 1111..2222 100644",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -1,1 +1,1 @@",
+    "-old",
+    "+new",
+    `From ${embedded} Mon Sep 17 00:00:00 2001`,
+    "From: C D <c@d.example>",
+    "Date: Thu, 2 Jul 2026 12:00:00 -0700",
+    "Subject: embedded text",
+    "",
+  ].join("\n");
+  const { ws, done } = tempWs({ "m.ts": "new\n" });
+  const matched: string[] = [];
+  try {
+    const model = parseDiff(text)!;
+    const { edit } = buildDiffDocument(text, model, ws);
+    const src = diffSource(ws, edit, undefined, {
+      headSha: () => head,
+      fileAtCommit: () => null,
+      applyFileChanges: (committed) => committed,
+      amendCommit: () => ({ status: "unused", head }),
+      commitMatchesDiff: (commit) => {
+        matched.push(commit);
+        return commit === head;
+      },
+    });
+    const edited = text.replace("+new", "+newer");
+
+    assertEquals(src.pendingAmend!(text, edited), {
+      sha: head,
+      subject: "(empty commit message)",
+    });
+    assertEquals(matched, [head]);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("save: rejects a diff with a different hunk count", () => {
+  const { root, ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(DIFF, ws);
+    const edited = `${DIFF.replace("+const y = 2;", "+const y = 20;")}` +
+      `@@ -3,0 +4,1 @@\n+const added = true;\n`;
+
+    assertThrows(
+      () => src.save(edited, DIFF, { amendCommit: false }),
+      Error,
+      "The edited diff no longer matches its saved hunk map.",
+    );
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), FILE_TEXT);
+  } finally {
+    done();
+  }
+});
+
+// --- message-scope revert ----------------------------------------------------
+
+const SHOW_DIFF = [
+  "commit 0123456789abcdef0123456789abcdef01234567",
+  "Author: A B <a@b>",
+  "Date:   now",
+  "",
+  "    Subject",
+  "",
+  "diff --git a/m.ts b/m.ts",
+  "--- a/m.ts",
+  "+++ b/m.ts",
+  "@@ -1,2 +1,2 @@",
+  " const x = 1;",
+  "-const y = 0;",
+  "+const y = 2;",
+  " const z = 3;",
+  "",
+].join("\n");
+
+Deno.test("diffedit cov: message revert restores the message region", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(SHOW_DIFF, ws);
+    const edited = SHOW_DIFF.replace("    Subject", "    Subject CHANGED");
+    const out = src.revert!(SHOW_DIFF, edited, 4, "message")!;
+    assert(out, "reverted");
+    assertEquals(out.text.split("\n")[4], "    Subject", "message restored");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: message revert is null when the cursor is in no message", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(SHOW_DIFF, ws);
+    const edited = SHOW_DIFF.replace("    Subject", "    Subject CHANGED");
+    // Cursor on the "commit" line, outside the indented message region.
+    assertEquals(src.revert!(SHOW_DIFF, edited, 0, "message"), null);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: message revert is null when the baseline has no such region", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    // Original has no commit header; current gains one. The baseline lacks the
+    // message region the cursor is in, so the revert declines.
+    const original = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1,2 +1,2 @@",
+      " const x = 1;",
+      "-const y = 0;",
+      "+const y = 2;",
+      " const z = 3;",
+      "",
+    ].join("\n");
+    const { src } = sourceFor(original, ws);
+    assertEquals(src.revert!(original, SHOW_DIFF, 4, "message"), null);
+  } finally {
+    done();
+  }
+});
+
+// --- expandRoom and the join helpers ----------------------------------------
+
+Deno.test("diffedit cov: expandRoom is empty when the text no longer parses", () => {
+  const { ws, done } = tempWs({ "m.ts": EXPAND_FILE });
+  try {
+    const { src } = sourceFor(EXPAND_DIFF, ws);
+    // A non-diff has no hunks to report room for.
+    assertEquals(src.expandRoom!("not a diff\n").size, 0);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: expandRoom skips a hunk whose file has no new side", () => {
+  const { ws, done } = tempWs({ "m.ts": EXPAND_FILE });
+  try {
+    const { src } = sourceFor(EXPAND_DIFF, ws);
+    // A deleted file's new path is /dev/null, i.e. absent, so its hunk backs no
+    // workspace file and offers no room — hunkFooting returns null for it.
+    const del = `diff --git a/m.ts b/m.ts
+deleted file mode 100644
+--- a/m.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-alpha
+-beta
+`;
+    assertEquals(src.expandRoom!(del).size, 0);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: expandContext declines when the save map lacks the cursor's hunk", () => {
+  const { ws, done } = tempWs({ "m.ts": "a\nb\nc\nd\ne\nf\ng\nh\n" });
+  try {
+    // The source is built from a one-hunk diff, so its save map has one entry.
+    // A later `current` grows a second hunk; a cursor in it resolves to global
+    // index 1, which the save map does not have — hunkFooting finds no range.
+    const oneHunk = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,3 +1,3 @@
+ a
+-x
++b
+ c
+`;
+    const { src } = sourceFor(oneHunk, ws);
+    const current = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,3 +1,3 @@
+ a
+-x
++b
+ c
+@@ -6,3 +6,3 @@
+ f
+-y
++g
+ h
+`;
+    const cursor = current.split("\n").indexOf(" f");
+    assertEquals(src.expandContext!(current, current, cursor), null);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: dropHeaderBetween declines a non-diff and a lone hunk", () => {
+  // A non-diff has no hunks to join.
+  assertEquals(_de.dropHeaderBetween("not a diff", 0), null);
+  // A single hunk has no second one to take the header off.
+  const oneHunk = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,1 @@
+-a
++A
+`;
+  assertEquals(_de.dropHeaderBetween(oneHunk, 0), null);
+});
+
+Deno.test("diffedit cov: joinAdjacent declines when the text will not drop a header", () => {
+  // The save map claims two adjacent, verified, same-file hunks, but the text
+  // holds only one, so dropHeaderBetween finds no pair and the join backs out.
+  const oneHunk = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,1 @@
+-a
++A
+`;
+  const hunks = [
+    { absPath: "/x", newStart: 1, newCount: 1, verified: true },
+    { absPath: "/x", newStart: 2, newCount: 1, verified: true },
+  ];
+  assertEquals(_de.joinAdjacent(oneHunk, oneHunk, hunks, 0), null);
+});
+
+Deno.test("diffedit cov: joinAdjacent keeps hunks from different commits separate", () => {
+  const twoHunks = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,1 @@
+-a
++A
+@@ -2,1 +2,1 @@
+-b
++B
+`;
+  const hunks = [
+    {
+      absPath: "/x",
+      newStart: 1,
+      newCount: 1,
+      verified: true,
+      writable: true,
+      commitSha: "1111",
+    },
+    {
+      absPath: "/x",
+      newStart: 2,
+      newCount: 1,
+      verified: true,
+      writable: true,
+      commitSha: "2222",
+    },
+  ];
+
+  assertEquals(_de.joinAdjacent(twoHunks, twoHunks, hunks, 0), null);
+  assertEquals(hunks.length, 2);
 });

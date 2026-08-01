@@ -79,7 +79,7 @@ stores state, not things a model infers from the data:
   (many tabs/devices) is benign; two distinct _principals_ is real cross-user
   contention. The tool draws this line for you — trust the `multiUser` flag, not
   the raw session count.
-- **Two at-rest value formats coexist, both handled:** modern `fvj1:`-prefixed
+- **Two at-rest value formats coexist, both handled:** modern `data-model`
   codec-json (ids `of:fid1:…`) and legacy plain-JSON sigils (ids `of:baedrei…`).
   You don't route between them; just know an id's shape tells you the era.
 - **Reconstruction is engine-faithful, and proven so.** State-at-`(branch, seq)`
@@ -136,6 +136,35 @@ fixed recipe. The recurring debugging questions and where they resolve:
   who), `timeline <space> <id>` (value after each write),
   `diff <space> <id> --from --to` (what changed between two seqs),
   `value-at … --seq` (state at a point).
+- _"Is this space writing more than it should be / has it settled?"_ →
+  `churn <space>` (commits + revisions per time bucket, and the entities driving
+  the busiest one). `hot` ranks by all-time writes and so cannot separate a
+  burst from the same writes spread over a week — churn is the shape-in-time
+  view: a storm starting, and a settle completing. Use it before and after a
+  `setsrc` on a populated space; `--bucket`/`--since`/`--until` frame the
+  window. Pass `--until` with the moment you stopped watching: the curve then
+  covers the window you asked about rather than ending at the last write, which
+  is the difference between showing a storm and showing it SETTLE. It reports
+  rates and never judges them — what counts as "settled" is yours to decide.
+- _"Did a migration preserve this space's content?"_ → `cf space` (a sibling
+  command, not `inspect` — a clone exists to be written to, so it lives outside
+  inspect's read-only contract). `cf space clone <did> --from <snapshot> --to
+  <dir>` builds a writable rehearsal copy plus a manifest; `verify` reports what
+  moved against that baseline and `reset` restores it for the next attempt.
+  Two things decide whether a rehearsal means anything, and both are easy to get
+  wrong: `verify` is strict by default (any change exits nonzero, right for an
+  untouched clone, wrong after a migration — pass `--expect-migration`, which
+  gates on entities REMOVED instead), and it cannot see a clobber either way,
+  because overwriting authored content is a change rather than a removal. Stop
+  the server before `reset`: unlinking the database does not reach a process
+  holding it open, so `reset` refuses rather than let a served clone keep
+  serving the discarded attempt — a tripwire for a forgotten stop, not a
+  substitute for it. Full procedure:
+  `docs/development/space-clone-rehearsal.md`.
+  `cf space fingerprint <space>` runs the content check alone against any store.
+  Compiler-generated internal cells are excluded by default: a pattern update
+  rotates their identities on purpose, so counting them would change the
+  fingerprint on every legitimate migration.
 - _"Is this entity the same across spaces / did a replica drift?"_ →
   `converge <id>
   --all` / `converge-scan --all`, trusting the

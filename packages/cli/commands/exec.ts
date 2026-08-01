@@ -20,7 +20,6 @@ export const exec = new Command()
     "Run a mounted tool using its default verb.",
   )
   .stopEarly()
-  .useRawArgs()
   .arguments("<mountedFile:string> [tail...:string]")
   .action(async (_options, mountedFile, ...tail) => {
     try {
@@ -31,6 +30,12 @@ export const exec = new Command()
       }
       if (result.outputText) {
         console.log(result.outputText);
+        if (result.resultRef) {
+          // stderr, so stdout stays exactly the tool's JSON result.
+          console.error(
+            `Tool result cell: ${result.resultRef.id} (space ${result.resultRef.space}, scope ${result.resultRef.scope})`,
+          );
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

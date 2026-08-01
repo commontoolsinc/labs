@@ -53,7 +53,7 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   }
 
   static async generate<ID extends DIDKey>(): Promise<NobleEd25519Signer<ID>> {
-    const privateKey = ed25519.utils.randomPrivateKey();
+    const privateKey = ed25519.utils.randomSecretKey();
     return await NobleEd25519Signer.fromRaw(privateKey);
   }
 

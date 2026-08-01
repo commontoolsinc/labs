@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/gmail-importer.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, UI, Writable } from "commonfabric";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 import { hasText } from "../../test/vnode-helpers.ts";
 
@@ -71,34 +71,34 @@ export default pattern(() => {
   // ==========================================================================
 
   // Emails should start empty
-  const assert_emails_empty = computed(() => {
+  const assert_emails_empty = assert(() => {
     const emails = importer.emails;
     return Array.isArray(emails) && emails.length === 0;
   });
 
   // Email count should be 0
-  const assert_count_zero = computed(() => importer.emailCount === 0);
+  const assert_count_zero = assert(() => importer.emailCount === 0);
 
   // With custom settings - should also start empty
-  const assert_settings_emails_empty = computed(() => {
+  const assert_settings_emails_empty = assert(() => {
     const emails = importerWithSettings.emails;
     return Array.isArray(emails) && emails.length === 0;
   });
 
-  const assert_settings_count_zero = computed(
+  const assert_settings_count_zero = assert(
     () => importerWithSettings.emailCount === 0,
   );
 
   // Output structure checks
-  const assert_has_emails_property = computed(
+  const assert_has_emails_property = assert(
     () => importer.emails !== undefined,
   );
 
-  const assert_has_emailCount_property = computed(
+  const assert_has_emailCount_property = assert(
     () => importer.emailCount !== undefined,
   );
 
-  const assert_override_auth_marks_importer_ready = computed(() =>
+  const assert_override_auth_marks_importer_ready = assert(() =>
     importerWithOverrideAuth.isReady === true &&
     hasText(importerWithOverrideAuth[UI], "Fetch Emails")
   );

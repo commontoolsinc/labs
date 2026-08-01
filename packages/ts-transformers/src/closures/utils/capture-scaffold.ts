@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
+import { preserveSourceMapRange } from "../../ast/mod.ts";
 import {
   buildCapturePropertyAssignments,
   type CaptureTreeNode,
@@ -51,9 +52,17 @@ export function buildCapturedHandlerClosureCall(
     [handlerCallback],
   );
 
-  return context.factory.createCallExpression(
-    handlerCall,
-    undefined,
-    [buildCaptureParamsObject(captureTree, context.factory)],
+  // Outer applied handler call: source-map-range only, so the hoisting stage
+  // can recover the authored position (CT-1868). Not full lineage: this call
+  // survives to the printer at the original JSX site, and a real textRange
+  // there changes ternary/JSX line-break layout (setOriginalNode likewise
+  // feeds getOriginalNode fallbacks). See preserveSourceMapRange.
+  return preserveSourceMapRange(
+    context.factory.createCallExpression(
+      handlerCall,
+      undefined,
+      [buildCaptureParamsObject(captureTree, context.factory)],
+    ),
+    originalNode,
   );
 }

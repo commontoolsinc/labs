@@ -60,8 +60,60 @@ cf() {
 }
 
 PATTERN_SRC="$SCRIPT_DIR/pattern/main.tsx"
+SCHEMA_COMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-compatible.tsx"
+SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
 CUSTOM_EXPORT="customPatternExport" # for testing this feature
 SECTION="${CF_CLI_INTEGRATION_SECTION:-${1:-all}}"
+
+# A fresh invocation id. uuidgen is not present on every runner image, so this
+# falls back to Python, which the timing helper above already requires.
+new_invocation_id() {
+  if command -v uuidgen > /dev/null 2>&1; then
+    uuidgen
+  else
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  fi
+}
+
+# Kill a backgrounded `cf` invocation. `cf` is a shell function, so $! is the
+# subshell rather than the Deno process doing the work; killing only the
+# subshell would leave that child running and still able to commit. Take the
+# children first, then the subshell.
+kill_process_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_process_tree "$child"
+  done
+  kill "$pid" 2> /dev/null || true
+  wait "$pid" 2> /dev/null || true
+}
+
+# Count the messages a piece recorded. A piece that has never handled an event
+# has nothing materialized to read, which reads as zero messages rather than as
+# a failure — the same tolerance read_piece_value_or_default gives scalars.
+message_count() {
+  local piece_id="$1"
+  local raw
+  raw=$(cf piece get $SPACE_ARGS --piece "$piece_id" messages 2>/dev/null || true)
+  if [ -z "$raw" ]; then
+    printf '0\n'
+    return 0
+  fi
+  printf '%s\n' "$raw" | jq 'length'
+}
+
+# Assert a piece recorded exactly `expected` messages.
+assert_message_count() {
+  local piece_id="$1"
+  local expected="$2"
+  local message="$3"
+  local actual
+  actual=$(message_count "$piece_id")
+  if [ "$actual" != "$expected" ]; then
+    error "$message (expected $expected, got $actual)"
+  fi
+}
 
 setup_space() {
   if [ -z "$API_URL" ]; then
@@ -198,6 +250,48 @@ run_piece_values() {
     error "Retrieved source code was not modified"
   fi
 
+  echo "Testing explicitly authorized incompatible source updates."
+  local schema_piece_id schema_identity_before schema_identity_after_rejection
+  local schema_identity_after_override schema_value
+  schema_piece_id=$(cf piece new --no-start $SPACE_ARGS "$SCHEMA_COMPATIBLE_PATTERN_SRC")
+  echo '{"value":5}' | cf piece apply $SPACE_ARGS --piece "$schema_piece_id"
+  cf piece step $SPACE_ARGS --piece "$schema_piece_id"
+  schema_identity_before=$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )
+
+  if cf piece setsrc $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
+    >"$WORK_DIR/incompatible-setsrc.out" \
+    2>"$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc should fail without the dangerous override."
+  fi
+  if ! grep -q "not backward compatible" "$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc failed for an unexpected reason."
+  fi
+  schema_identity_after_rejection=$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )
+  if [ "$schema_identity_after_rejection" != "$schema_identity_before" ]; then
+    error "Rejected incompatible setsrc changed the piece source."
+  fi
+
+  cf piece setsrc --dangerously-allow-incompatible-schema $SPACE_ARGS \
+    --piece "$schema_piece_id" "$SCHEMA_INCOMPATIBLE_PATTERN_SRC"
+  schema_identity_after_override=$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )
+  if [ "$schema_identity_after_override" = "$schema_identity_before" ]; then
+    error "Dangerously authorized setsrc did not change the piece source."
+  fi
+  schema_value=$(cf piece get $SPACE_ARGS --piece "$schema_piece_id" value)
+  if [ "$schema_value" != "5" ]; then
+    error "Dangerously authorized setsrc did not preserve the valid result."
+  fi
+
   echo "Applying piece input."
 
   # Apply new input to piece
@@ -231,7 +325,29 @@ run_piece_values() {
 
   # Test input flag operations
   test_json_value "Input flag set" "userData" '{"user":{"name":"test"}}' "--input"
-  test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"' "--input"
+  test_value \
+    "Nested input path" \
+    "userData/user/name" \
+    '"piece-search-input-value-7301"' \
+    '"piece-search-input-value-7301"' \
+    "--input"
+
+  echo '"piece-search-result-value-9146"' |
+    cf piece set $SPACE_ARGS --piece $PIECE_ID stringField
+  SEARCH_INPUT=$(cf piece search $SPACE_ARGS --json "INPUT-VALUE-7301")
+  echo "$SEARCH_INPUT" | jq -e --arg id "$PIECE_ID" \
+    'length == 1 and .[0].id == $id' > /dev/null ||
+    error "Piece search should find nested input data case-insensitively"
+  SEARCH_RESULT=$(cf piece search $SPACE_ARGS --json "RESULT-VALUE-9146")
+  echo "$SEARCH_RESULT" | jq -e --arg id "$PIECE_ID" \
+    'length == 1 and .[0].id == $id' > /dev/null ||
+    error "Piece search should find nested result data case-insensitively"
+  SEARCH_NONE=$(cf piece search $SPACE_ARGS --json "piece-search-absent-5283")
+  echo "$SEARCH_NONE" | jq -e 'length == 0' > /dev/null ||
+    error "Piece search should return an empty JSON array when nothing matches"
+  SEARCH_NAME=$(cf piece search $SPACE_ARGS --json "Simple counter:")
+  echo "$SEARCH_NAME" | jq -e 'length == 0' > /dev/null ||
+    error "Piece search should not match a piece name"
 
   echo "Testing piece step..."
 
@@ -332,9 +448,23 @@ run_piece_links() {
   PIECE_ID3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
   echo "Created third piece: $PIECE_ID3"
 
-  # Linking from invented piece should fail without --allow-non-existing
-  if cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>/dev/null; then
+  # Linking from invented piece should fail without --allow-non-existing —
+  # and as a DATA error: message (with the --allow-non-existing next step) and
+  # TIP on stderr, nothing on stdout, no usage screen (regression guard for
+  # the LinkValidationError → Cliffy usage-dump path).
+  LINK_ERR_FILE=$(mktemp)
+  if LINK_OUT=$(cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>"$LINK_ERR_FILE"); then
     error "Linking from invented piece should have failed without --allow-non-existing"
+  fi
+  if [ -n "$LINK_OUT" ]; then
+    error "Link data error should print nothing to stdout, got: $LINK_OUT"
+  fi
+  grep -q -- "--allow-non-existing" "$LINK_ERR_FILE" ||
+    error "Link data error should carry the --allow-non-existing next step on stderr"
+  grep -q "TIP:" "$LINK_ERR_FILE" ||
+    error "Link data error should print the inspect hint on stderr"
+  if grep -q "Usage:" "$LINK_ERR_FILE"; then
+    error "Link data error must not dump the usage screen"
   fi
 
   # Now link with --allow-non-existing
@@ -380,15 +510,18 @@ run_piece_call() {
     error "Top-level callable help should work without the delimiter"
   echo "$CALL_HELP" | grep -q "cf piece call ... search <json>" ||
     error "Piece-call help should describe JSON input without --json"
+  echo "$CALL_HELP" | grep -q "cf piece call ... search --json \[<json>\]" ||
+    error "Piece-call help should describe explicit --json input"
 
   CALL_HELP_JSON=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
   echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
     error "Top-level --help --json should return the machine-readable schema"
 
-  # --json is now a registered no-op on cf piece call (CT-1393): agents expect
-  # it to work because it's valid on all other piece subcommands.
-  cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json < /dev/null > /dev/null 2>&1 ||
-    error "Redundant --json should be accepted (no-op) on cf piece call"
+  JSON_TOOL_RESULT=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json '{"query":"json-input"}')
+  assert_json_eq \
+    "$JSON_TOOL_RESULT" \
+    '{"query":"json-input","help":"","source":"bound-source","summary":"bound-source:json-input:"}' \
+    "Explicit inline --json should pass the complete tool input"
 
   cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
   RESULT=$(cf piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
@@ -416,6 +549,172 @@ run_piece_call() {
     "Flag-based tool call should return the tool result"
 
   echo "Successfully ran CLI piece call integration tests for ${API_URL}/${SPACE}/${CALLABLE_PIECE_ID}."
+}
+
+# Retry semantics for caller-supplied invocation ids (verb contract WS-D/D3).
+# Every scenario ends with the SAME assertion — exactly one message recorded —
+# because that is the property an agent depends on: a retry it cannot avoid
+# must never double-apply the mutation.
+run_piece_call_retry() {
+  setup_space
+
+  echo "Testing invocation-id retry semantics..."
+
+  RETRY_PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  echo "Created retry-scenario piece: $RETRY_PIECE_ID"
+
+  # --- 1. A failure before dispatch leaves nothing behind. ------------------
+  # An unreachable API cannot dispatch, so the mutation provably never
+  # happened and no invocation id was ever announced to retry with. The
+  # caller's correct move is a fresh id, and that must yield exactly one.
+  set +e
+  cf piece call --api-url="http://127.0.0.1:1" --identity="$IDENTITY" --space="$SPACE" \
+    --piece "$RETRY_PIECE_ID" --invocation "never-dispatched" \
+    recordMessage -- --message "pre-dispatch" > /dev/null 2>&1
+  PRE_DISPATCH_STATUS=$?
+  set -e
+  if [ "$PRE_DISPATCH_STATUS" -eq 0 ]; then
+    error "A call to an unreachable API should fail, not report success"
+  fi
+  assert_message_count "$RETRY_PIECE_ID" 0 \
+    "A pre-dispatch failure must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_ID" --invocation "$(new_invocation_id)" \
+    recordMessage -- --message "pre-dispatch" > /dev/null
+  assert_message_count "$RETRY_PIECE_ID" 1 \
+    "A fresh-id retry after a pre-dispatch failure should record exactly one message"
+
+  # --- 2. Dispatched, then the caller died before acknowledgement. ----------
+  # The riskiest window: the event is on its way and the caller cannot know
+  # whether it committed. The kill is triggered by the CLI's own dispatch
+  # announcement, so this lands in the window deterministically rather than
+  # by racing a clock. Either outcome (committed or not) must leave exactly
+  # one message once the same id is retried.
+  RETRY_PIECE_2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_2=$(new_invocation_id)
+  ANNOUNCE_FIFO=$(mktemp -u)
+  mkfifo "$ANNOUNCE_FIFO"
+  set +e
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
+  CALL_PID=$!
+  set -e
+  # Blocking read on the pipe — no poll, no deadline. If the process exits
+  # without announcing, the writer closes and the read ends at EOF.
+  ANNOUNCED=""
+  while IFS= read -r line; do
+    case "$line" in
+      *"invocation: $INVOCATION_2"*)
+        ANNOUNCED="yes"
+        break
+        ;;
+    esac
+  done < "$ANNOUNCE_FIFO"
+  kill_process_tree "$CALL_PID"
+  rm -f "$ANNOUNCE_FIFO"
+  if [ -z "$ANNOUNCED" ]; then
+    error "cf piece call should announce its invocation id at dispatch"
+  fi
+
+  # Whether the killed call got its commit in is genuinely racy, and both
+  # outcomes are correct — but they exercise different machinery, so record
+  # which one happened instead of letting a weak pass look like a strong one.
+  # If it committed, the retry MUST collide; if it did not, the retry must
+  # apply cleanly. Asserting only "exactly one" would also pass with
+  # --invocation ignored entirely, whenever the first commit failed to land.
+  COMMITTED_BEFORE_KILL=$(message_count "$RETRY_PIECE_2")
+  set +e
+  RETRY_2=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" 2>/dev/null)
+  RETRY_2_STATUS=$?
+  set -e
+  if [ "$RETRY_2_STATUS" -ne 0 ]; then
+    error "Retrying a killed-after-dispatch call should exit 0, got $RETRY_2_STATUS"
+  fi
+  echo "killed-after-dispatch: committed before kill = $COMMITTED_BEFORE_KILL"
+  if [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
+    echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null ||
+      error "The killed call had committed, so its retry must deduplicate, got: $RETRY_2"
+  elif echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
+    # An `x && error` here would abort under set -e on the expected path,
+    # where jq exits non-zero; an if-condition is exempt.
+    error "The killed call never committed, so its retry must not deduplicate, got: $RETRY_2"
+  fi
+  assert_message_count "$RETRY_PIECE_2" 1 \
+    "Retrying a killed-after-dispatch call with the same id should leave exactly one message"
+
+  # --- 3. The commit succeeded but the response was lost. ------------------
+  # The retry collides on the handling's receipt, settles as success (exit 0)
+  # rather than as an error, and says so with deduplicated.
+  RETRY_PIECE_3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_3=$(new_invocation_id)
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage -- --message "lost-response" > /dev/null
+
+  set +e
+  REPLAY=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage -- --message "lost-response" 2>/dev/null)
+  REPLAY_STATUS=$?
+  set -e
+  if [ "$REPLAY_STATUS" -ne 0 ]; then
+    error "A same-id retry should exit 0, got status $REPLAY_STATUS"
+  fi
+  echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
+    error "A same-id retry should report deduplicated, got: $REPLAY"
+  echo "$REPLAY" | jq -e --arg id "$INVOCATION_3" '.invocation == $id' > /dev/null ||
+    error "A same-id retry should echo the caller's invocation id, got: $REPLAY"
+  assert_message_count "$RETRY_PIECE_3" 1 \
+    "A same-id retry after a successful commit should leave exactly one message"
+
+  # --- 4. A fresh process retrying the same id reads the ORIGINAL back. ----
+  # Sending a different payload under an id that already settled must not
+  # overwrite the original: the id identifies the invocation, so the second
+  # call reports the first one's outcome rather than applying its own.
+  RETRY_PIECE_4=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_4=$(new_invocation_id)
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage -- --message "original-payload" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage -- --message "second-payload" > /dev/null
+  assert_message_count "$RETRY_PIECE_4" 1 \
+    "Reusing a settled id with a different payload should leave exactly one message"
+  LAST=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_4" lastMessage)
+  if [ "$LAST" != '"original-payload"' ]; then
+    error "The settled invocation's outcome should stand, got lastMessage: $LAST"
+  fi
+
+  # --- 5. A payload the verb cannot accept is refused, id intact. ----------
+  # The schema rejection happens before dispatch, so the id is never spent.
+  # That is the whole point: an agent that typos a field and retries under
+  # the same idempotency key must get its corrected call executed, not
+  # deduplicated against a handling that ran with no event.
+  RETRY_PIECE_5=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_5=$(new_invocation_id)
+  set +e
+  BAD_PAYLOAD=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage -- --json '{"mesage":"typo"}' 2>&1)
+  BAD_STATUS=$?
+  set -e
+  if [ "$BAD_STATUS" -eq 0 ]; then
+    error "A payload failing the verb's schema should fail, got: $BAD_PAYLOAD"
+  fi
+  case "$BAD_PAYLOAD" in
+    *'Invalid input for "recordMessage"'*) ;;
+    *) error "A schema rejection should name the verb, got: $BAD_PAYLOAD" ;;
+  esac
+  assert_message_count "$RETRY_PIECE_5" 0 \
+    "A refused payload must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage -- --message "corrected" > /dev/null
+  assert_message_count "$RETRY_PIECE_5" 1 \
+    "A refused call never spent its id, so the corrected retry should record one"
+  LAST_5=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_5" lastMessage)
+  if [ "$LAST_5" != '"corrected"' ]; then
+    error "The corrected retry's payload should stand, got lastMessage: $LAST_5"
+  fi
+
+  echo "Successfully ran CLI piece call retry integration tests for ${API_URL}."
 }
 
 run_wish() {
@@ -451,6 +750,7 @@ case "$SECTION" in
     run_piece_values
     run_piece_links
     run_piece_call
+    run_piece_call_retry
     run_wish
     ;;
   piece-basics)
@@ -465,6 +765,10 @@ case "$SECTION" in
     ;;
   piece-call)
     run_piece_call
+    run_piece_call_retry
+    ;;
+  piece-call-retry)
+    run_piece_call_retry
     ;;
   wish)
     run_wish

@@ -8,15 +8,10 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { FabricValue } from "@commonfabric/api";
-import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import {
-  type Frame,
-  ID,
-  JSONSchema,
-  type Pattern,
-} from "../src/builder/types.ts";
+import { JSONSchema, type Pattern } from "../src/builder/types.ts";
 import {
   getMetaLink,
   isPrimitiveCellLink,
@@ -66,6 +61,30 @@ describe("Cell", () => {
     );
     c.set(10);
     expect(c.get()).toBe(10);
+  });
+
+  it("delegates unrecognized symbol reads on a reactive proxy to the target", () => {
+    const c = runtime.getCell<{ a: number }>(
+      space,
+      "reactive proxy delegates unrecognized symbols",
+      undefined,
+      tx,
+    );
+    c.set({ a: 1 });
+
+    // String and number properties become nested cells, and a handful of
+    // well-known symbols get bespoke answers -- but any other symbol falls
+    // through to the proxied target itself, rather than being treated as
+    // data navigation.
+    const marked = Object.assign(() => undefined, {
+      [Symbol.for("cf.test.marker")]: "on-target",
+    });
+    const proxy = c.getAsReactiveProxy(marked) as unknown as Record<
+      symbol,
+      unknown
+    >;
+    expect(proxy[Symbol.for("cf.test.marker")]).toBe("on-target");
+    expect(proxy[Symbol.for("cf.test.absent")]).toBe(undefined);
   });
 
   it("should update cell value using send", () => {
@@ -264,88 +283,10 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (unfrozen input)", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    const interests = ["coding", "reading"];
-    const value = {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable: { nested: true },
-    };
-
-    const result = recursivelyAddIDIfNeeded(value, frame);
-
-    // The "preserve identity when nothing to do" optimization doesn't
-    // apply for unfrozen inputs; the function returns a structurally
-    // equivalent, deep-frozen tree (top-level included).
-    expect(result).not.toBe(value);
-    expect(result).toEqual(value);
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.interests)).toBe(true);
-    expect(Object.isFrozen(result.stable)).toBe(true);
-  });
-
-  it("preserves identity when input is already deep-frozen", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    // Deep-freeze before passing in. An already-frozen
-    // plain Object/Array is a valid `FabricValue` and shallow fabric
-    // conversion returns it as-is, so reference identity survives all
-    // the way out.
-    const interests = Object.freeze(["coding", "reading"]);
-    const stable = Object.freeze({ nested: true });
-    const value = Object.freeze({
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable,
-    });
-
-    const result = recursivelyAddIDIfNeeded(value, frame);
-
-    expect(result).toBe(value);
-    expect(result.interests).toBe(interests);
-    expect(result.stable).toBe(stable);
-  });
-
-  it("adds generated IDs to objects in arrays regardless of clone depth", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    const stable = { nested: true };
-    const value = {
-      stable,
-      list: [{ name: "Ada" }, "plain"],
-    };
-
-    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
-
-    // Shallow fabric conversion clones at each level, so no
-    // sub-branch is reference-preserved. The core invariants that
-    // remain: ID assignment for objects-in-arrays still fires, and
-    // primitive list elements still pass through unchanged. The
-    // returned tree is deep-frozen as a whole (top-level + sub-trees).
-    expect(result).not.toBe(value);
-    expect(result.stable).not.toBe(stable);
-    expect(result.stable).toEqual(stable);
-    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
-    expect(result.list[1]).toBe("plain");
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.list)).toBe(true);
-    expect(Object.isFrozen(result.list[0])).toBe(true);
-  });
-
-  it("should preserve holes and add IDs to objects in sparse arrays", () => {
+  it("should preserve holes and anchor objects in sparse arrays", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should preserve holes and add IDs to objects in sparse arrays",
+      "should preserve holes and anchor objects in sparse arrays",
       undefined,
       tx,
     );
@@ -369,20 +310,22 @@ describe("Cell", () => {
     expect(result.length).toBe(4);
   });
 
-  it("should call toJSON() on arrays with toJSON method during set", () => {
+  it("should reject arrays carrying a toJSON method during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should call toJSON() on arrays with toJSON method during set",
+      "should reject arrays carrying a toJSON method during set",
       undefined,
       tx,
     );
     const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
     arrWithToJSON.toJSON = () => "custom-array-value";
-    c.set({ arr: arrWithToJSON });
 
-    const result = c.get() as { arr: unknown } | undefined;
-    // toJSON() should have been called
-    expect(result?.arr).toBe("custom-array-value");
+    // An array is answered by the array rule whatever it carries, and `toJSON`
+    // is a named own property, which that rule rejects. Converting by it would
+    // mean storing an array by the very property that disqualifies it.
+    expect(() => c.set({ arr: arrWithToJSON })).toThrow(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
   });
 
   it("should create a proxy for the cell", () => {
@@ -809,7 +752,8 @@ describe("Cell circular references", () => {
       schema,
       tx,
     );
-    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+    // Anchoring turns the array element into a separate cell document.
+    const inner: any = { anchored: true };
     const outer: any = { list: [inner] };
     inner.parent = outer;
     c.set(outer);
@@ -1279,7 +1223,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 // returned from a previous shape of the storage layer. PR #2971 in
 // March 2026 wired `valueFromJson` into the storage-boundary read path
 // (`memory/space.ts`): `valueFromJson` unconditionally decodes the `is`
-// column to an object (stripping the `fvj1:` prefix) before reaching
+// column to an object (stripping the codec prefix) before reaching
 // either defensive parse. From that point on, neither guard could fire
 // through the standard public API, and the defensive parses became
 // orphaned — which is what motivated their deletion.
@@ -1315,7 +1259,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Set up a result/target pair via the standard meta-link API.
       const resultCell = runtime.getCell<{ foo: number }>(
         space,
-        "fvj1 source-cell round-trip: source",
+        "encoded source-cell round-trip: source",
         undefined,
         tx,
       );
@@ -1323,7 +1267,7 @@ describe(`Cell result-meta round-trip`, () => {
 
       const targetCell = runtime.getCell<{ bar: string }>(
         space,
-        "fvj1 source-cell round-trip: target",
+        "encoded source-cell round-trip: target",
         undefined,
         tx,
       );
@@ -1354,7 +1298,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Set up a result/target pair and commit.
       const resultCell = runtime.getCell<{ foo: number }>(
         space,
-        "fvj1 source-cell raw read: source",
+        "encoded source-cell raw read: source",
         undefined,
         tx,
       );
@@ -1362,7 +1306,7 @@ describe(`Cell result-meta round-trip`, () => {
 
       const targetCell = runtime.getCell<{ bar: string }>(
         space,
-        "fvj1 source-cell raw read: target",
+        "encoded source-cell raw read: target",
         undefined,
         tx,
       );
@@ -1456,6 +1400,61 @@ describe(
       expect(result?.pos).toBe(Infinity);
       expect(result?.neg).toBe(-Infinity);
     });
+
+    it("projects a bare NaN through a number schema", () => {
+      // Non-finite numbers are first-class stored values; the schema read
+      // projection must classify them as numbers rather than hiding them.
+      const c = runtime.getCell<number>(
+        space,
+        "schema'd bare NaN",
+        { type: "number" },
+        tx,
+      );
+      c.set(NaN);
+      expect(Number.isNaN(c.get())).toBe(true);
+    });
+
+    it("projects a NaN property through an object schema", () => {
+      const c = runtime.getCell<{ x: number }>(
+        space,
+        "schema'd NaN property",
+        { type: "object", properties: { x: { type: "number" } } },
+        tx,
+      );
+      c.set({ x: NaN });
+      expect(Number.isNaN(c.get()?.x)).toBe(true);
+    });
+
+    it("projects NaN, infinities, and -0 through an array schema", () => {
+      const c = runtime.getCell<number[]>(
+        space,
+        "schema'd weird-number array",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+      c.set([1, NaN, Infinity, -Infinity, -0, 2]);
+      const result = c.get();
+      expect(result?.length).toBe(6);
+      expect(result?.[0]).toBe(1);
+      expect(Number.isNaN(result?.[1])).toBe(true);
+      expect(result?.[2]).toBe(Infinity);
+      expect(result?.[3]).toBe(-Infinity);
+      expect(Object.is(result?.[4], -0)).toBe(true);
+      expect(result?.[5]).toBe(2);
+    });
+
+    it("does not project NaN through an integer schema", () => {
+      // `NaN` is a number but not an integer, so an `integer` schema still
+      // rejects it.
+      const c = runtime.getCell<number>(
+        space,
+        "integer schema vs NaN",
+        { type: "integer" },
+        tx,
+      );
+      c.set(NaN);
+      expect(c.get()).toBe(undefined);
+    });
   },
 );
 
@@ -1516,7 +1515,7 @@ describe(
         tx,
       );
       expect(() => c.set({ value: Symbol("nope") })).toThrow(
-        "Cannot store unique (uninterned) symbol",
+        "Not representable as a `FabricValue`: unique (uninterned) symbol",
       );
     });
   },

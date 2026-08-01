@@ -53,7 +53,7 @@ const sessionOpenFor = (id: string) => ({
 
 const handshakeTransport = (
   helloOk: FabricValue,
-  sessionOpen: unknown = undefined,
+  sessionOpen: FabricValue = undefined,
 ): Transport => {
   let receiver = (_payload: string) => {};
   return {
@@ -126,6 +126,57 @@ Deno.test("memory v2 client rejects malformed async hello session.open metadata"
     Error,
     "challenge",
   );
+});
+
+Deno.test("memory v2 client does not send a request after close begins", async () => {
+  let receiver = (_payload: string) => {};
+  let lateRequestId: string | undefined;
+  let lateRequestCount = 0;
+  const transport: Transport = {
+    send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary(HELLO_OK));
+      } else {
+        lateRequestCount++;
+        lateRequestId = message.requestId;
+      }
+      return Promise.resolve();
+    },
+    close(): Promise<void> {
+      // Keep the pre-fix failure finite: if a request escaped the client's
+      // pending-request rejection sweep, synthesize its terminal response.
+      if (lateRequestId !== undefined) {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: lateRequestId,
+          error: { name: "ConnectionError", message: "transport closed" },
+        }));
+      }
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+  const client = await connect({ transport });
+
+  const request = client.request({
+    type: "test.request",
+    requestId: "request-after-close",
+  }).then(
+    () => "resolved" as const,
+    () => "rejected" as const,
+  );
+  const close = client.close();
+
+  assertEquals(await request, "rejected");
+  await close;
+  assertEquals(lateRequestCount, 0);
 });
 
 Deno.test("memory v2 client rejects malformed hello session.open metadata", async () => {
@@ -350,6 +401,155 @@ Deno.test("memory v2 client rotates session.open challenges between protected mo
   } finally {
     await client.close();
     await server.close();
+  }
+});
+
+Deno.test("memory v2 entity identifier listing transfers identifiers without entity values", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-client-entity-identifiers"),
+  });
+  const serverPayloads: string[] = [];
+  let captureServerPayloads = false;
+  let receiver = (_payload: string) => {};
+  const connection = server.connect((message) => {
+    const payload = encodeMemoryBoundary(message);
+    if (captureServerPayloads) serverPayloads.push(payload);
+    receiver(payload);
+  });
+  const transport: Transport = {
+    async send(payload) {
+      await connection.receive(payload);
+    },
+    close() {
+      connection.close();
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+  const client = await connect({ transport });
+  const space = await client.mount(
+    "did:key:z6Mk-memory-v2-client-entity-identifiers",
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const firstPayload = "ENTITY_BYTES_FIRST_5f35ca36".repeat(20);
+  const secondPayload = "ENTITY_BYTES_SECOND_f62831b5".repeat(20);
+
+  try {
+    await space.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "of:fid1:first",
+          value: { value: { payload: firstPayload } },
+        },
+        {
+          op: "set",
+          id: "of:fid1:second",
+          value: { value: { payload: secondPayload } },
+        },
+      ],
+    });
+
+    captureServerPayloads = true;
+    const result = await space.listEntityIds();
+    captureServerPayloads = false;
+
+    assertEquals(result?.ids, ["of:fid1:first", "of:fid1:second"]);
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(firstPayload)),
+      false,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(secondPayload)),
+      false,
+    );
+    const listResponses = serverPayloads.map((payload) =>
+      decodeMemoryBoundary(payload) as {
+        ok?: Record<string, unknown>;
+      }
+    ).filter((message) => Array.isArray(message.ok?.ids));
+    assertEquals(listResponses.length, 1);
+    const response = listResponses[0];
+    assertEquals(Object.keys(response.ok ?? {}).sort(), ["ids", "serverSeq"]);
+
+    const serverFlags = client.serverFlags;
+    assertExists(serverFlags);
+    serverFlags.entityIdPagination = false;
+    const legacyResult = await space.listEntityIds();
+    assertEquals(legacyResult?.ids, ["of:fid1:first", "of:fid1:second"]);
+    assertEquals(await space.listEntityIds({ limit: 1 }), undefined);
+    serverFlags.entityIdPagination = true;
+
+    const firstPage = await space.listEntityIds({ limit: 1 });
+    assertEquals(firstPage?.ids, ["of:fid1:first"]);
+    assertEquals(firstPage?.nextAfter, "of:fid1:first");
+    const secondPage = await space.listEntityIds({
+      after: firstPage?.nextAfter,
+      limit: 1,
+      expectedServerSeq: firstPage?.serverSeq,
+    });
+    assertEquals(secondPage?.ids, ["of:fid1:second"]);
+    assertEquals(secondPage?.nextAfter, undefined);
+    await space.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:fid1:third",
+        value: { value: { payload: "third" } },
+      }],
+    });
+    await assertRejects(
+      () =>
+        space.listEntityIds({
+          after: firstPage?.nextAfter,
+          limit: 1,
+          expectedServerSeq: firstPage?.serverSeq,
+        }),
+      Error,
+      "entity identifier snapshot changed",
+    );
+    assertEquals(
+      (await space.entityIdExists("of:fid1:first"))?.exists,
+      true,
+    );
+    assertEquals(
+      (await space.entityIdExists("of:fid1:missing"))?.exists,
+      false,
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 client fails closed without entity identifier capabilities", async () => {
+  const client = await connect({
+    transport: handshakeTransport({
+      ...HELLO_OK,
+      flags: {
+        modernCellRep: getMemoryProtocolFlags().modernCellRep,
+      },
+    } as FabricValue),
+  });
+  const space = await client.mount(
+    "did:key:z6Mk-memory-v2-client-legacy-entity-identifiers",
+    {},
+    testSessionOpenAuthFactory,
+  );
+
+  try {
+    assertEquals(await space.listEntityIds(), undefined);
+    assertEquals(await space.entityIdExists("of:fid1:first"), undefined);
+  } finally {
+    await client.close();
   }
 });
 
@@ -1213,7 +1413,7 @@ class ReconnectableLoopbackTransport implements Transport {
       if (this.connectionCount >= 2) {
         this.#reconnected.resolve();
       }
-      this.#connection = this.server.connect((message: FabricValue) => {
+      this.#connection = this.server.connect((message) => {
         this.#receiver(encodeMemoryBoundary(message));
       });
     }
@@ -3004,6 +3204,7 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
   });
   try {
     assertEquals(current.serverFlags?.sqliteCommitRowLabelEval, true);
+    assertEquals(current.serverFlags?.entityIdListing, true);
   } finally {
     await current.close();
   }
@@ -3015,6 +3216,7 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
   });
   try {
     assertEquals(legacy.serverFlags?.sqliteCommitRowLabelEval, false);
+    assertEquals(legacy.serverFlags?.entityIdListing, false);
   } finally {
     await legacy.close();
   }

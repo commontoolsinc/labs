@@ -1,3 +1,4 @@
+import type { FabricValue } from "@commonfabric/api";
 import {
   createSchedulerTestRuntime as createBaseSchedulerTestRuntime,
   describe,
@@ -483,7 +484,7 @@ describe("persistent scheduler observations", () => {
         const actionTx = originalEdit(...args);
         const originalSetSchedulerObservation = actionTx
           .setSchedulerObservation?.bind(actionTx);
-        actionTx.setSchedulerObservation = (observation: unknown) => {
+        actionTx.setSchedulerObservation = (observation: FabricValue) => {
           if (isSchedulerActionObservation(observation)) {
             observations.push(observation);
           }
@@ -599,7 +600,7 @@ describe("persistent scheduler observations", () => {
         const actionTx = originalEdit(...args);
         const originalSetSchedulerObservation = actionTx
           .setSchedulerObservation?.bind(actionTx);
-        actionTx.setSchedulerObservation = (observation: unknown) => {
+        actionTx.setSchedulerObservation = (observation: FabricValue) => {
           if (isSchedulerActionObservation(observation)) {
             observations.push(observation);
           }
@@ -1677,7 +1678,7 @@ describe("persistent scheduler observations", () => {
         const actionTx = originalEdit(...args);
         const originalSetSchedulerObservation = actionTx
           .setSchedulerObservation?.bind(actionTx);
-        actionTx.setSchedulerObservation = (observation: unknown) => {
+        actionTx.setSchedulerObservation = (observation: FabricValue) => {
           if (isSchedulerActionObservation(observation)) {
             observations.push(observation);
           }
@@ -1769,9 +1770,8 @@ describe("persistent scheduler observations", () => {
         ownerSnapshots?.snapshots[0]?.executionContextKey,
       );
       expect(
-        (ownerSnapshots?.snapshots[0]?.observation as
-          & SchedulerActionObservation
-          & { ownerSpace?: string }).ownerSpace,
+        (ownerSnapshots?.snapshots[0] as SchedulerSnapshotWithObservation)
+          ?.observation.ownerSpace,
       ).toBe(ownerSpace);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
@@ -2656,7 +2656,7 @@ describe("persistent scheduler observations", () => {
       });
       expect(completeObservation?.completeActionScopeSummary?.directOutputs)
         .toHaveLength(1);
-      runtimeA.scheduler.dispose();
+      await runtimeA.dispose({ closeStorage: false });
 
       const server = (storageManager as unknown as {
         server(): WatchSetCounterServer;
@@ -2709,6 +2709,9 @@ describe("persistent scheduler observations", () => {
       );
     } finally {
       restoreEvaluateWatchSet?.();
+      // Scheduler only, and deliberately: on the success path runtime A is
+      // already fully disposed above, so this exists for the throw path —
+      // where disposeSchedulerTestRuntime below still has to commit A's tx.
       runtimeAEnv.runtime.scheduler.dispose();
       if (runtimeBEnv) {
         await disposeSchedulerTestRuntime(runtimeBEnv);

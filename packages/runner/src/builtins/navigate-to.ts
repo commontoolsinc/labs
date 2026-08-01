@@ -110,8 +110,9 @@ export function navigateTo(
         }
       });
       // Navigation is an external effect: release it only after a successful
-      // commit. The outbox promise is tracked explicitly so runtime.settled()
-      // cannot race async shell navigation.
+      // commit. The outbox promise is tracked explicitly, owned by this run, so
+      // neither runtime.settled() nor runtime.settledFor(parentCell) can race
+      // async shell navigation.
       const targetLink = resolvedTarget.getAsNormalizedFullLink();
       tx.enqueuePostCommitEffect({
         // The outbox deduplicates by id within a transaction. Encode the full
@@ -131,7 +132,7 @@ export function navigateTo(
           const work = Promise.resolve().then(() =>
             navigateCallback(resolvedTarget)
           );
-          runtime.trackAsyncWork(work);
+          runtime.trackAsyncWork(work, parentCell);
           try {
             await work;
           } catch (error) {

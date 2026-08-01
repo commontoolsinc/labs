@@ -60,6 +60,7 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 
 export interface AcceptedCommitNotice {
   space: string;
@@ -351,7 +352,9 @@ export function createHostProviderChannel(
     hostPort.postMessage(
       {
         type: "memory",
-        payload: encodeMemoryBoundary({ type: "response", requestId, ok }),
+        payload: encodeMemoryBoundary(
+          { type: "response", requestId, ok } as unknown as FabricValue,
+        ),
       } satisfies ProviderPortMessage,
     );
   };
@@ -533,7 +536,9 @@ export function createHostProviderChannel(
     }
     if (parsed.type === "session.open") {
       if (options.executionLease !== undefined) {
-        await connection.receive(encodeMemoryBoundary(parsed));
+        await connection.receive(
+          encodeMemoryBoundary(parsed as unknown as FabricValue),
+        );
         return;
       }
       if (authContext === null) {
@@ -570,10 +575,14 @@ export function createHostProviderChannel(
         authorization: auth
           .authorization as SessionOpenRequest["authorization"],
       };
-      await connection.receive(encodeMemoryBoundary(authenticated));
+      await connection.receive(
+        encodeMemoryBoundary(authenticated as unknown as FabricValue),
+      );
       return;
     }
-    await connection.receive(encodeMemoryBoundary(pinBranch(parsed, branch)));
+    await connection.receive(
+      encodeMemoryBoundary(pinBranch(parsed, branch) as unknown as FabricValue),
+    );
   };
 
   hostPort.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -2486,7 +2495,7 @@ class HostSessionFactory implements SessionFactory {
       transport,
       this.branch,
       this.supportsExecutionDemand,
-      (message) => client.request(message),
+      (message) => client.request(message as FabricPlainObject),
       this.onAcceptedCommitWillIntegrate,
       this.onAcceptedCommitIntegrated,
       this.onForeignWake,

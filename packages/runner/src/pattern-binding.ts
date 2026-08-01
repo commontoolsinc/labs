@@ -4,7 +4,12 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
+import {
+  type FabricExecValue,
+  isPattern,
+  type JSONSchema,
+  type JSONValue,
+} from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -14,8 +19,8 @@ import {
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaLink,
+  isAliasBinding,
   isCellLink,
-  isLegacyAlias,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
@@ -217,9 +222,11 @@ function sendValueToBindingInner<T>(
   if (argumentCellLink === undefined) {
     argumentCellLink = getMetaLink(cell as Cell<unknown>, "argument")!;
   }
-  // Handle both legacy $alias format and new sigil link format
-  if (isWriteRedirectLink(binding)) {
-    if (isLegacyAlias(binding)) {
+  // Handle both legacy $alias format and new sigil link format. `$alias` is
+  // only meaningful here because `binding` comes from a Pattern object;
+  // `isWriteRedirectLink` itself no longer matches it.
+  if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    if (isAliasBinding(binding)) {
       const alias = binding.$alias;
       if ((alias.defer ?? 0) > 0) {
         throw new Error(
@@ -366,7 +373,9 @@ function sendValueToBindingInner<T>(
       }
     }
   } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
-    if (binding !== value) {
+    // `Object.is`, not `===`: a constant `NaN` binding legitimately matches a
+    // produced `NaN`, and `0` vs `-0` is a genuine mismatch.
+    if (!Object.is(binding, value)) {
       throw new Error(`Got ${value} instead of ${binding}`);
     }
   }
@@ -389,7 +398,7 @@ function sendValueToBindingInner<T>(
  *
  * @param cfc - The ContextualFlowControl object, which we need to get the schema at sub-paths
  * @param binding - The binding to unwrap.
- * @param argumentCellLink - The link to the argument cell
+ * @param argumentCellLink - The link to the argument cell or undefined if not available.
  * @param resultCell - The result cell used to resolve result aliases
  * @param options - Optional configuration.
  * @param options.targetSchema - Schema for the binding being produced. Source
@@ -397,20 +406,20 @@ function sendValueToBindingInner<T>(
  *   links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoDoc<T, U>(
+export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   cfc: ContextualFlowControl,
   binding: T,
-  argumentCellLink: NormalizedFullLink,
+  argumentCellLink: NormalizedFullLink | undefined,
   resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
 
   function convert(
-    binding: unknown,
+    binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
-  ): unknown {
-    if (isLegacyAlias(binding)) {
+  ): FabricExecValue {
+    if (isAliasBinding(binding)) {
       const { defer: optDefer, ...aliasRest } = { ...binding.$alias };
       const defer = optDefer ?? 0;
       if (defer > 0) {
@@ -447,9 +456,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           ? getDerivedInternalCellLink(resultCell, descriptor)
           : getDerivedInternalCellLink(resultCell, {
             partialCause: alias.partialCause,
-            scope: alias.scope === "inherit"
-              ? resultCell.export().scope
-              : alias.scope,
+            scope: alias.scope,
           });
         const path = alias.path;
         const sourceSchema = alias.schema !== undefined
@@ -461,15 +468,16 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
           { includeSchema: true, overwrite: "redirect" },
         );
-      } else if (typeof alias.cell === "string") {
-        // Resolve the special values for "argument" and "result".
+      } else {
+        // Resolve the special values for "argument" and "result" — the only
+        // `cell` values isAliasBinding admits.
         const link = alias.cell === "argument"
           ? argumentCellLink
-          : alias.cell === "result"
-          ? resultCellLink
-          : undefined;
+          : resultCellLink;
         if (link === undefined) {
-          throw new Error("Invalid pseudo-alias cell: " + alias.cell);
+          throw new Error(
+            "Cannot bind argument alias: no argument cell link available",
+          );
         }
         const path = alias.path;
         // we might have a schema in the alias, but if not, we may have one
@@ -492,8 +500,6 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           { includeSchema: true, overwrite: "redirect" },
         );
       }
-      // TODO(@ubik2) - we may never get here -- see if this can be removed
-      return { $alias: alias };
     } else if (Array.isArray(binding)) {
       return binding.map((value, index) =>
         convert(
@@ -502,12 +508,13 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         )
       );
     } else if (isRecord(binding)) {
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
-        Object.entries(binding).map(([key, value]) => [
-          key,
-          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
-        ]),
-      );
+      const result: Record<string | symbol, FabricExecValue> = Object
+        .fromEntries(
+          Object.entries(binding).map(([key, value]) => [
+            key,
+            convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
+          ]),
+        );
       // Carry the derivation link (trust + content-addressed entry ref) onto
       // the bound copy so a pattern value re-bound here still resolves its
       // `{ identity, symbol }` and stays trusted.
@@ -571,7 +578,11 @@ export function findAllWriteRedirectCells<T>(
   // redirect-chain recursion re-base onto the resolved `linkCell` (a
   // `Cell<unknown>`) rather than the original typed base.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
-    if (isLegacyAlias(binding) && (binding.$alias.defer ?? 0) > 0) {
+    if (isAliasBinding(binding)) {
+      // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
+      // so a surviving `$alias` belongs to a nested level — it just crossed
+      // its `defer` boundary, or sits inside an embedded Pattern value —
+      // and is not part of this level's read/write surface.
       return;
     } else if (isWriteRedirectLink(binding)) {
       // Follow a *chain* of write redirects: record this redirect, then if its
@@ -584,7 +595,7 @@ export function findAllWriteRedirectCells<T>(
       // documents — and was the dominant reload instantiation cost: resolving a
       // cell + walking its entire value per link. Following only direct redirect
       // chains keeps the cases that matter without the deep dive.)
-      const link = parseLink(binding, baseCell);
+      const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
       const linkCell = baseCell.runtime.getCellFromLink(
@@ -601,6 +612,13 @@ export function findAllWriteRedirectCells<T>(
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;
+    } else if (isPattern(binding)) {
+      // Embedded Pattern values are opaque here: their `$alias` records and
+      // sigil links are the embedded pattern's own binding vocabulary,
+      // interpreted only when THAT pattern is instantiated (`defer`
+      // bookkeeping positions its aliases for that moment). Walking into them
+      // would declare reads at the wrong nesting level.
+      return;
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
@@ -616,7 +634,7 @@ export function findAllWriteRedirectCells<T>(
   }
   if (
     skipTopLevelKeys !== undefined && skipTopLevelKeys.size > 0 &&
-    isRecord(binding) && !isCellLink(binding) && !isLegacyAlias(binding)
+    isRecord(binding) && !isCellLink(binding) && !isAliasBinding(binding)
   ) {
     // Drop the named top-level argument keys (opaque forwarded references)
     // before traversing — they must not contribute to declared reads.

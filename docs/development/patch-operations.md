@@ -52,11 +52,22 @@ Take `Cell.increment(2)`:
    calling `tx.recordMergeableOp(link, { op: "increment", by: 2 })`.
 2. **Intent** — the transaction folds the delta into a per-path intent
    (`packages/runner/src/storage/mergeable-ops.ts`, `foldMergeableIntent`).
-   Repeated calls at one path combine (increments sum, tail counts sum, removed
-   values accumulate); a different op at the same path replaces the intent.
+   Repeated same-kind calls at one path combine (increments sum, tail counts sum,
+   removed values accumulate). A different op kind at the same path cannot share
+   one intent, so `recordMergeableOp` poisons the path — it drops the intent and
+   the commit falls back to the whole-array diff for that path (correct, but not
+   merge-friendly), rather than letting the second op replace and silently drop
+   the first. A foreign write that reshapes the array after an op — a proxy
+   in-place mutator (`sort`/`splice`/`unshift`/…) or a whole-value `Cell.set` —
+   poisons the same way via `poisonMergeableOp`.
 3. **Commit** — at commit the intent becomes wire ops plus the diff-suppression
    they imply (`buildMergeableIntent`), and the whole-value diff for the paths the
-   op covers is dropped. The op travels in `ClientCommit.operations`.
+   op covers is dropped. The op travels in `ClientCommit.operations`. A builder
+   that finds its intent no longer describes the local value instead *abandons*
+   it, and the commit poisons the path as above: a tail op whose prefix no longer
+   matches its base, or a `remove-by-value` whose removals applied to the base do
+   not reproduce the working array — both meaning the transaction also changed
+   that array outside the op, before it or at a parent path.
 4. **Apply** — the durable store applies the op against live state
    (`packages/memory/v2/patch.ts`, `patchOpDescriptors[op].apply`).
 5. **React** — the store computes which paths the op touched so stale reads
@@ -98,8 +109,8 @@ re-enumerating the ops:
 The runtime/commit half of a mergeable op. Each op appears once and owns:
 
 - how repeated deltas fold into one intent (`foldMergeableIntent`);
-- how an intent becomes wire ops and the diff-suppression it implies
-  (`buildMergeableIntent`).
+- how an intent becomes wire ops and the diff-suppression it implies, or is
+  abandoned in favour of the plain diff (`buildMergeableIntent`).
 
 The transaction records intent through the single
 `recordMergeableOp(address, delta)` method (a discriminated `MergeableOpDelta`),

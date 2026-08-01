@@ -1,5 +1,6 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
+  assertTaskTestsIncluded,
   initializeDb,
   parseDisabledPackageList,
   readWorkspaceMembers,
@@ -169,13 +170,21 @@ Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest",
   }
 });
 
-// Run `fn` with TEST_CONCURRENCY set (or cleared, on undefined), restoring
-// the caller's value afterwards. The CI test job itself sets the variable, so
-// tests must not read or leak the ambient value.
-async function withTestConcurrency(
+Deno.test("assertTaskTestsIncluded requires tasks in the root workspace", () => {
+  assertTaskTestsIncluded(["./packages/api", "./tasks"]);
+  assertThrows(
+    () => assertTaskTestsIncluded(["./packages/api"]),
+    Error,
+    "workspace must include tasks",
+  );
+});
+
+// Run `fn` with TEST_CONCURRENCY set or cleared, then restore the caller's
+// value. This keeps each test independent of the ambient environment.
+async function withTestConcurrency<T>(
   value: string | undefined,
-  fn: () => void | Promise<void>,
-): Promise<void> {
+  fn: () => T | Promise<T>,
+): Promise<T> {
   const saved = Deno.env.get("TEST_CONCURRENCY");
   if (value === undefined) {
     Deno.env.delete("TEST_CONCURRENCY");
@@ -183,7 +192,7 @@ async function withTestConcurrency(
     Deno.env.set("TEST_CONCURRENCY", value);
   }
   try {
-    await fn();
+    return await fn();
   } finally {
     if (saved === undefined) {
       Deno.env.delete("TEST_CONCURRENCY");
@@ -219,6 +228,49 @@ Deno.test("runTests drains every package with a concurrency limit of one", async
       assertEquals(passed, true);
     });
     assertEquals(await ranPackages(dir, ["a", "b", "c"]), ["a", "b", "c"]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests reports a failure and stops scheduling packages", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-fail-fast-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({
+        tasks: {
+          test:
+            "echo started > ran.txt && echo upstream package download failed >&2 && exit 1",
+        },
+      }),
+    );
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...values: unknown[]) => {
+      errors.push(values.map(String).join(" "));
+    };
+    let passed: boolean;
+    try {
+      passed = await withTestConcurrency(
+        "1",
+        () => runTests([], undefined, dir),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    assertEquals(passed, false);
+    assertEquals(await ranPackages(dir, ["a", "b", "c"]), ["a"]);
+    const downloadErrorIndex = errors.findIndex((message) =>
+      message.includes("upstream package download failed")
+    );
+    const summaryIndex = errors.indexOf("One or more tests failed.");
+    assertEquals(downloadErrorIndex >= 0, true);
+    assertEquals(summaryIndex >= 0, true);
+    assertEquals(downloadErrorIndex < summaryIndex, true);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

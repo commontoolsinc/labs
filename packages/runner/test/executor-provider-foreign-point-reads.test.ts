@@ -73,6 +73,7 @@ import {
 } from "../src/storage/v2-host-provider.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 import type { ClientCommit, ExecutionClaim } from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/api";
 
 const HOME = "did:key:z6Mk-xpr-foreign-home" as MemorySpace;
 const READ_SPACE = "did:key:z6Mk-xpr-foreign-read" as MemorySpace;
@@ -485,7 +486,7 @@ const rawResponses = (
       pending.set(frame.requestId as string, deferred);
       port.postMessage({
         type: "memory",
-        payload: encodeMemoryBoundary(frame),
+        payload: encodeMemoryBoundary(frame as unknown as FabricValue),
       });
       return deferred.promise;
     },

@@ -19,6 +19,7 @@ import {
   scopeNamingLinkForPath,
   SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
 } from "../v2/scope-naming-link.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 const SPACE = "did:key:z6Mk-lane-firewall-space";
 // Colon-bearing DIDs: canonical user context keys percent-encode the
@@ -194,7 +195,7 @@ const userInstanceOperation: Operation = {
   value: { value: 7 },
 };
 
-const broadLinkOperation = (link: unknown): Operation => ({
+const broadLinkOperation = (link: FabricValue): Operation => ({
   op: "set",
   id: BROAD_LINK_WRITE.id,
   value: { value: { value: link } },
@@ -813,7 +814,7 @@ Deno.test("broad scope-naming links are byte-identical across two lanes", async 
 // the fixed top-level conformance link.
 const SHARED_CHILD_ID = "of:lane-shared-child";
 const CHILD_LINK_WRITE = address("space", SHARED_CHILD_ID, ["value", "child"]);
-const childLinkOperation = (link: unknown): Operation => ({
+const childLinkOperation = (link: FabricValue): Operation => ({
   op: "set",
   id: SHARED_CHILD_ID,
   value: { value: { child: link } },

@@ -1,10 +1,10 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema } from "./builder/types.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
@@ -12,13 +12,24 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
-import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import { canFollowScopedLink } from "./scope.ts";
+import { forEachSubschema } from "./schema-walk.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -53,6 +64,10 @@ import {
 } from "./cfc/label-view-state.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { isCellScope } from "./scope.ts";
+import {
+  cfcSchemaChildRoot,
+  resolveCfcSchemaRefRoot,
+} from "./cfc/schema-refs.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -125,6 +140,26 @@ const asCellCompoundCandidates = (
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
+};
+
+/**
+ * The link a handle gets when its target is narrower than the cap its schema
+ * declares: undefined-data in place, the same shape resolveLink hands back for
+ * a blocked follow. It is still a Cell -- so a `required` container is not
+ * voided -- it reads as undefined, and it is not writable, because a data URI
+ * is a read-only address.
+ */
+const blockedHandleLink = (
+  link: NormalizedFullLink,
+  cap: SchemaScope | undefined,
+): NormalizedFullLink => {
+  logger.warn(
+    `blocked narrower-scope asCell handle: a "${cap}"-scoped read cannot ` +
+      `hold a "${link.scope}"-scoped link, so the handle reads as undefined. ` +
+      `Declare the handle's asCell scope at least as narrow as the value it ` +
+      `points at.`,
+  );
+  return undefinedDataLink(link);
 };
 
 const asCellCompoundSchemaForValue = (
@@ -283,12 +318,21 @@ const matchesConcreteValue = (
     );
   }
 
-  if (
-    Array.isArray(value) && typeof resolved.items === "object" &&
-    resolved.items !== null
-  ) {
-    const itemSchema = branchWithParentDefs(resolved, resolved.items);
-    return value.every((item) => matchesConcreteValue(itemSchema, item));
+  if (Array.isArray(value)) {
+    // Shared position rule (schema-match.ts): tuple slots match their exact
+    // position, `items` matches only the positions past them. A
+    // prefixItems-only schema previously fell through to `return true`,
+    // letting ANY array match — so the wrong anyOf/oneOf branch could be
+    // selected for tuple values.
+    return arrayMatchesPositionally(
+      resolved,
+      value,
+      (childSchema, childValue) =>
+        matchesConcreteValue(
+          branchWithParentDefs(resolved, childSchema),
+          childValue,
+        ),
+    );
   }
 
   return true;
@@ -464,6 +508,10 @@ export function resolveSchemaForValue(
 // is shallow-only.
 const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
 
+interface SchemaHasIfcContext {
+  seenByRoot: WeakMap<object, WeakSet<object>>;
+}
+
 export function schemaHasIfc(
   schema: JSONSchema | undefined,
   seen: Set<JSONSchema> = new Set(),
@@ -481,7 +529,17 @@ export function schemaHasIfc(
     const cached = _hasIfcCache.get(schema);
     if (cached !== undefined) return cached;
   }
-  const result = _schemaHasIfcUncached(schema, seen, fullSchema);
+  const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
+  if (seen.size > 0) {
+    const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
+    const rootKey = isRecord(initialRoot) ? initialRoot : schema;
+    const initialSeen = new WeakSet<object>();
+    for (const item of seen) {
+      if (isRecord(item)) initialSeen.add(item);
+    }
+    context.seenByRoot.set(rootKey, initialSeen);
+  }
+  const result = _schemaHasIfcUncached(schema, fullSchema, context);
   // Populate only under a deep-frozen guard. See the invariant comment
   // above `_hasIfcCache`.
   if (isTopLevel && isDeepFrozen(schema)) {
@@ -492,55 +550,46 @@ export function schemaHasIfc(
 
 function _schemaHasIfcUncached(
   schema: JSONSchemaObj,
-  seen: Set<JSONSchema>,
   fullSchema: JSONSchema | undefined,
+  context: SchemaHasIfcContext,
 ): boolean {
-  if (seen.has(schema)) {
-    return false;
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  let seen = context.seenByRoot.get(rootKey);
+  if (seen?.has(schema)) return false;
+  if (!seen) {
+    seen = new WeakSet();
+    context.seenByRoot.set(rootKey, seen);
   }
   seen.add(schema);
 
-  const schemaRoot = schema.$defs !== undefined ? schema : fullSchema ?? schema;
   const resolved = typeof schema.$ref === "string"
     ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
   if (resolved === true || resolved === false || !isRecord(resolved)) {
     return false;
   }
-  const childFullSchema = resolved.$defs !== undefined ? resolved : fullSchema;
+  const childFullSchema = cfcSchemaChildRoot(
+    resolved,
+    typeof schema.$ref === "string"
+      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+      : schemaRoot,
+  );
   if (resolved.ifc !== undefined) {
     return true;
   }
 
-  const compound = [
-    ...(resolved.anyOf ?? []),
-    ...(resolved.oneOf ?? []),
-    ...(resolved.allOf ?? []),
-  ];
-  if (compound.some((item) => schemaHasIfc(item, seen, childFullSchema))) {
-    return true;
-  }
-  if (
-    resolved.properties !== undefined &&
-    Object.values(resolved.properties).some((item) =>
-      schemaHasIfc(item, seen, childFullSchema)
-    )
-  ) {
-    return true;
-  }
-  if (
-    typeof resolved.additionalProperties === "object" &&
-    schemaHasIfc(resolved.additionalProperties, seen, childFullSchema)
-  ) {
-    return true;
-  }
-  if (
-    typeof resolved.items === "object" &&
-    schemaHasIfc(resolved.items, seen, childFullSchema)
-  ) {
-    return true;
-  }
-  return false;
+  // Descend every structural subschema via the shared vocabulary. Previously
+  // this hand-listed only anyOf/oneOf/allOf/properties/additionalProperties/
+  // items and silently skipped prefixItems, patternProperties, contains,
+  // if/then/else, not, propertyNames, dependentSchemas, and contentSchema — so
+  // an `ifc` in a tuple element or pattern property went undetected. `$defs`
+  // bodies are reached through `$ref` resolution above, not walked directly.
+  return forEachSubschema(
+    resolved,
+    (child) =>
+      isRecord(child) && _schemaHasIfcUncached(child, childFullSchema, context),
+  );
 }
 
 const _filterAsCellCache = new WeakMap<
@@ -665,6 +714,21 @@ export function processDefaultValue(
     }
   }
 
+  // A `FabricPrimitive` default is an opaque leaf; return it as-is ahead of
+  // the object-type rebuild below (it takes no back-to-cell annotation --
+  // see `annotateWithBackToCellSymbols`).
+  if (defaultValue instanceof FabricPrimitive) {
+    return defaultValue;
+  }
+  // TODO(danfuzz): a `FabricInstance` default is not yet handled -- it needs
+  // processing by its codec contents. Fail loudly until that exists.
+  if (defaultValue instanceof FabricInstance) {
+    throw new Error(
+      `Cannot yet handle \`${defaultValue.constructor.name}\` (a ` +
+        "`FabricInstance`) as a schema default.",
+    );
+  }
+
   // Handle object type defaults
   if (
     resolvedSchema?.type === "object" && isRecord(defaultValue) &&
@@ -774,28 +838,38 @@ export function processDefaultValue(
     );
   }
 
-  // Handle array type defaults
+  // Handle array type defaults. A tuple slot (prefixItems[i]) covers its
+  // exact index; `items` covers the indices past the slots (2020-12).
+  // prefixItems-only schemas previously skipped this branch entirely, so
+  // tuple defaults went unprocessed.
   if (
     resolvedSchema.type === "array" && Array.isArray(defaultValue) &&
-    resolvedSchema.items
+    (resolvedSchema.items !== undefined ||
+      Array.isArray(resolvedSchema.prefixItems))
   ) {
-    // TODO(@ubik2): Need to handle prefixItems
-    // Handle boolean items values
-    let itemSchema: JSONSchema;
-    if (resolvedSchema.items === true) {
-      // items: true means allow any item type
-      itemSchema = {};
-    } else if ((resolvedSchema.items as any) === false) {
-      // items: false means no additional items allowed (empty arrays only)
-      // For default value processing, we'll treat this as an error
-      throw new Error(
-        "Array schema error: items: false conflicts with non-empty default\n" +
-          "help: either allow items with valid schema, or use empty array default",
-      );
-    } else {
-      // items is a JSONSchema object
-      itemSchema = resolvedSchema.items as JSONSchema;
-    }
+    const prefixItems = Array.isArray(resolvedSchema.prefixItems)
+      ? resolvedSchema.prefixItems
+      : undefined;
+    const schemaForIndex = (i: number): JSONSchema => {
+      const covering = prefixItems !== undefined && i < prefixItems.length
+        ? prefixItems[i]
+        : resolvedSchema.items;
+      // An absent or `true` covering schema allows any item.
+      if (covering === undefined || covering === true) return {};
+      if ((covering as unknown) === false) {
+        // `false` means no value allowed at this position. For default value
+        // processing, we'll treat this as an error. (With prefixItems, an
+        // `items: false` rest schema only conflicts when the default has
+        // elements PAST the tuple slots.)
+        throw new Error(
+          "Array schema error: items: false conflicts with non-empty default\n" +
+            "help: either allow items with valid schema, or use empty array default",
+        );
+      }
+      // Thread the array schema's $defs so a $ref slot resolves during
+      // recursive default processing (PR #4969 review).
+      return branchWithParentDefs(resolvedSchema, covering as JSONSchema);
+    };
 
     const result = defaultValue.map((item, i) =>
       processDefaultValue(
@@ -803,7 +877,7 @@ export function processDefaultValue(
         tx,
         {
           ...link,
-          schema: itemSchema,
+          schema: schemaForIndex(i),
           path: [...link.path, String(i)],
         },
         item,
@@ -840,8 +914,8 @@ export function mergeDefaults(
   const base = isNontrivialSchema(schema) ? schema : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
-  const mergedDefault = base.type === "object" && isRecord(base.default) &&
-      isRecord(defaultValue)
+  const mergedDefault = base.type === "object" &&
+      isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
@@ -866,9 +940,23 @@ function annotateWithBackToCellSymbols(
   synced = false,
   cfcLabelView?: CfcLabelView,
 ) {
-  if (!isRecord(value) || isCell(value)) {
-    // We only possibly annotate objects or arrays that _aren't_ cells.
+  if (
+    !isRecord(value) || isCell(value) ||
+    value instanceof FabricPrimitive
+  ) {
+    // We only possibly annotate plain objects or arrays that _aren't_ cells.
+    // A `FabricPrimitive` passes through untouched, exactly like a plain
+    // `number` or `string` leaf.
     return value;
+  }
+  if (value instanceof FabricInstance) {
+    // TODO(danfuzz): the back-to-cell story for a `FabricInstance` (which,
+    // unlike a primitive, can have model-visible outgoing references) does
+    // not exist yet. Fail loudly until it does.
+    throw new Error(
+      `Cannot yet handle \`${value.constructor.name}\` (a ` +
+        "`FabricInstance`) in back-to-cell annotation.",
+    );
   }
 
   const extensible = Object.isExtensible(value);
@@ -1019,6 +1107,10 @@ export function validateAndTransform(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      // An asCell schema turns this link into a handle instead of following
+      // it, so resolveLink's cap check never sees this hop. Apply it here too,
+      // or reading THROUGH the handle escapes the cap the schema declared
+      // (#5230).
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
         cfcLabelViewForDereference(
@@ -1206,7 +1298,7 @@ class TransformObjectCreator
   // This controls the behavior when properties is specified, but
   // additonalProperties is not.
   addOptionalProperty(
-    _obj: Record<string, Immutable<FabricValue>>,
+    _obj: Record<string, FabricValue>,
     _key: string,
     _value: FabricValue,
   ) {
@@ -1280,15 +1372,25 @@ class TransformObjectCreator
         if (cellKind === undefined) {
           return undefined;
         }
-        // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // This is a read/materialization path: keep the link's own
         // storage-resolved scope. The asCell entry scope is honored as a
         // follow cap during link resolution, never copied onto the link here
         // (doing so would re-address the value to a different scoped instance).
+        //
+        // Minting a handle is the one place a link is NOT followed, so
+        // resolveLink's cap check never sees this hop -- and the holder reads
+        // through the handle later, which is exactly the follow the cap bounds
+        // (#5230). Every route that produces a handle lands here, including
+        // the compound anyOf/oneOf shape `getSchemaScopeCap` cannot see, so
+        // this is the one place the check belongs.
+        const followCap = ContextualFlowControl.getAsCellFollowScopeCap(schema);
+        const handleLink = canFollowScopedLink(followCap, link.scope)
+          ? link
+          : blockedHandleLink(link, followCap);
         return createCell(
           this.runtime,
           {
-            ...link,
+            ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
           getTransactionForChildCells(this.tx),

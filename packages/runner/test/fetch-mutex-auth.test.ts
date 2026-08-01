@@ -47,7 +47,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     // Mock fetch
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -59,15 +59,14 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
 
       fetchCalls.push({ url, init });
 
-      // Simulate a small delay
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      return new Response(
-        JSON.stringify({ mocked: true, url }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ mocked: true, url }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
   });
@@ -110,8 +109,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     tx.commit();
 
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await result.pull();
+    await runtime.settled();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://mock-test-server.local/api/agent-tools/web-search"
@@ -183,8 +181,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     tx.commit();
 
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await result.pull();
+    await runtime.settled();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://mock-test-server.local/api/agent-tools/web-search"
@@ -249,8 +246,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     tx.commit();
 
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await result.pull();
+    await runtime.settled();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://external.test/api/agent-tools/web-search"

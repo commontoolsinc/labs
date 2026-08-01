@@ -124,15 +124,22 @@ describe("makeMockFetch", () => {
 
   it("falls through to realFetch (with init) when nothing matches", async () => {
     let seen: { input: unknown; init: unknown } | undefined;
+    const client = {} as Deno.HttpClient;
     const realFetch = ((input: unknown, init: unknown) => {
       seen = { input, init };
       return Promise.resolve(new Response("real"));
     }) as typeof globalThis.fetch;
     const fetch = makeMockFetch(() => [{ urlIncludes: "/mock" }], realFetch);
-    const res = await fetch("https://x.test/other", { method: "POST" });
+    const res = await fetch("https://x.test/other", {
+      method: "POST",
+      client,
+    });
     expect(await res.text()).toBe("real");
     expect(seen?.input).toBe("https://x.test/other");
     expect((seen?.init as RequestInit).method).toBe("POST");
+    expect(
+      (seen?.init as RequestInit & { client?: Deno.HttpClient }).client,
+    ).toBe(client);
   });
 
   it("reads entries late-bound on each call", async () => {

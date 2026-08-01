@@ -32,13 +32,15 @@ Deno.test("OpenAICompatibleGatewayClient forwards requests through the injected 
     },
   });
 
-  await client.listModels();
+  const controller = new AbortController();
+  await client.listModels(controller.signal);
   await client.createChatCompletion({ model: "gpt-5.4", messages: [] });
 
   assertEquals(
     (calls[0].input as URL).toString(),
     "https://llm.stage.commontools.dev/v1/models",
   );
+  assertEquals(calls[0].init?.signal, controller.signal);
   assertEquals(
     (calls[1].input as URL).toString(),
     "https://llm.stage.commontools.dev/v1/chat/completions",
@@ -275,7 +277,7 @@ Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion tran
         messages: [],
       }),
     Error,
-    "chat completion transport request failed after 2 attempts",
+    "chat.completions transport request failed after 2 attempts",
   );
   assertEquals(calls, 2);
 });

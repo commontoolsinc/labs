@@ -7,6 +7,7 @@ import {
 } from "../src/builtins/llm-dialog.ts";
 import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 const {
   buildAvailableCellsDocumentation,
@@ -530,6 +531,28 @@ Deno.test("traverseAndCellify converts LLM-friendly links inside strings and obj
   assertEquals(nested.list[0].kind, "cell");
   assertEquals(nested.malformed, '{"@link":');
   assertEquals(parsedLinks.length, 2);
+});
+
+Deno.test("traverseAndCellify passes a nested FabricPrimitive through intact", () => {
+  // A `FabricBytes` (a `FabricPrimitive`) keeps its state in private fields and
+  // exposes zero enumerable own-props, so the `Object.fromEntries(Object.
+  // entries(...))` rebuild flattens it to `{}`, silently dropping its bytes. It
+  // is atomic (no link, no descent) and must pass through as the same instance,
+  // just like a string or number leaf does.
+  const runtime = {
+    getCellFromLink() {
+      throw new Error("should not be called for a FabricPrimitive");
+    },
+  };
+  const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+  const result = traverseAndCellify(
+    runtime as any,
+    "did:test:cellify",
+    { payload: bytes },
+  ) as any;
+
+  assert(result.payload === bytes, "FabricBytes instance must survive intact");
 });
 
 Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {
@@ -1081,6 +1104,81 @@ Deno.test("simplifySchemaForContext preserves items schema for arrays", () => {
   assertEquals(result.items?.type, "object");
   assertEquals(result.items?.properties?.id?.type, "number");
   assertEquals(result.items?.required, ["id"]);
+});
+
+Deno.test("simplifySchemaForContext preserves and simplifies prefixItems tuple slots", () => {
+  // CT-1895: prefixItems used to be dropped wholesale, leaving the LLM a bare
+  // { type: "array" } for tuple schemas.
+  const schema: any = {
+    type: "array",
+    prefixItems: [
+      { type: "object", properties: { id: { type: "number" } }, $UI: {} },
+      { type: "string", $ref: "#/$defs/Foo" },
+    ],
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.prefixItems?.length, 2);
+  assertEquals(result.prefixItems?.[0]?.properties?.id?.type, "number");
+  assertEquals(result.prefixItems?.[0]?.$UI, undefined);
+  assertEquals(result.prefixItems?.[1]?.type, "string");
+  assertEquals(result.prefixItems?.[1]?.$ref, undefined);
+});
+
+Deno.test("simplifySchemaForContext simplifies subschemas under not and additionalProperties", () => {
+  // Both are in the emitted keyword tier: `not` used to be dropped, and an
+  // object-valued additionalProperties used to be copied verbatim ($ref and
+  // all). Both now go through the same simplification as any subschema.
+  const schema: any = {
+    type: "object",
+    not: { type: "string", $ref: "#/$defs/Foo" },
+    additionalProperties: { type: "number", $defs: { X: {} } },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.not?.type, "string");
+  assertEquals(result.not?.$ref, undefined);
+  assertEquals(result.additionalProperties?.type, "number");
+  assertEquals(result.additionalProperties?.$defs, undefined);
+});
+
+Deno.test("simplifySchemaForContext still drops never-emitted keywords", () => {
+  // `contains`/`if`/`then`/`else` are in schema-walk's unused tier — passing
+  // them through would make those paths look supported.
+  const schema: any = {
+    type: "array",
+    contains: { type: "object" },
+    if: { type: "object" },
+    then: { type: "object" },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.contains, undefined);
+  assertEquals(result.if, undefined);
+  assertEquals(result.then, undefined);
+});
+
+Deno.test("simplifySchemaForContext applies the depth cap inside prefixItems", () => {
+  const schema: any = {
+    type: "array", // depth 0
+    prefixItems: [{
+      type: "object", // depth 1
+      properties: {
+        a: {
+          type: "object", // depth 2
+          properties: {
+            b: {
+              type: "object", // depth 3: minimal
+              asCell: ["cell"],
+              properties: { c: { type: "string" } },
+            },
+          },
+        },
+      },
+    }],
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  const capped = result.prefixItems?.[0]?.properties?.a?.properties?.b;
+  assertEquals(capped?.type, "object");
+  assertEquals(capped?.asCell, ["cell"]);
+  assertEquals(capped?.properties, undefined);
 });
 
 Deno.test("simplifySchemaForContext handles Stream with nested detail structure", () => {

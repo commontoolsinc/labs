@@ -10,9 +10,7 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   toCompactDebugString,
   toIndentedDebugString,
   UI,
@@ -37,8 +35,8 @@ const addItem = handler<
 >(
   (_, { items, log }) => {
     const newItem: Item = {
-      title: `Item-${safeDateNow()}`,
-      value: Math.floor(nonPrivateRandom() * 100),
+      title: `Item-${Date.now()}`,
+      value: Math.floor(Math.random() * 100),
     };
     items.push(newItem);
     log.push(`Added item: ${newItem.title}`);

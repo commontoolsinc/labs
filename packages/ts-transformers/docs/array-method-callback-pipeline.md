@@ -13,38 +13,45 @@ The stages relevant to array-method callbacks are:
 2.  EmptyArrayOfValidationTransformer
 3.  OpaqueGetValidationTransformer
 4.  PatternContextValidationTransformer
-5.  JsxExpressionSiteRouterTransformer
-6.  LiftLoweringTransformer
-7.  ClosureTransformer                       ← lowers .map() to .mapWithPattern()
+5.  MergeablePushValidationTransformer
+6.  CfcPolicyAuthoringTransformer
+7.  CfcPolicyOfValidationTransformer
+8.  JsxExpressionSiteRouterTransformer
+9.  AssertDiagnosticsTransformer             ← rewrites assert(...) bodies; not
+                                                array-method related
+10. LiftLoweringTransformer
+11. ClosureTransformer                       ← lowers .map() to .mapWithPattern()
                                                 + immediately runs the per-callback
                                                 expression-site lowering
-8.  PatternOwnedExpressionSiteLoweringTransformer
-9.  HelperOwnedExpressionSiteLoweringTransformer
-10. WriteAuthorizedByValidationTransformer
-11. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
+12. PatternOwnedExpressionSiteLoweringTransformer
+13. HelperOwnedExpressionSiteLoweringTransformer
+14. WriteAuthorizedByValidationTransformer
+15. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
                                                 destructuring (ONLY for destructured
                                                 first params)
-12. BuilderCallbackHoistingTransformer       ← hoists handler/pattern/patternTool
-                                                callbacks closing only over module
-                                                scope (NOT lift — see stage 14)
-13. SchemaInjectionTransformer
-14. LiftHoistingTransformer                  ← hoists each whole lift(...) call to
-                                                a module-scope const __cfLift_N
-                                                (after schema injection; CT-1644)
-15. SchemaGeneratorTransformer
-16. ReactiveVariableForTransformer
-17. ModuleScopeShadowingTransformer
-18. ModuleScopeCfDataTransformer
-19. ModuleScopeFunctionHardeningTransformer
+16. SchemaInjectionTransformer
+17. BuilderCallHoistingTransformer           ← hoists whole lift/handler calls and
+                                                argument-position pattern(...) to
+                                                module-scope consts, after schema
+                                                injection (CT-1644/CT-1655; replaced
+                                                the former BuilderCallbackHoisting +
+                                                LiftHoisting pair, #3864)
+18. SchemaGeneratorTransformer
+19. ReactiveVariableForTransformer
+20. ModuleScopeShadowingTransformer
+21. ModuleScopeCfDataTransformer
+22. PatternCoverageTransformer               ← no-op unless coverage is enabled
+23. ModuleScopeFunctionHardeningTransformer
 ```
 
-A common misconception worth flagging up front: stage 11
-(`PatternCallbackLowering`) runs _last_ among the lowering passes, not first. By
-the time it fires, expression-site lowering at stage 7 has already had its say.
-The `key()`-substitution prologue it generates is downstream of the
-analyzer-driven decisions about wrapping.
+A common misconception worth flagging up front:
+`PatternCallbackLoweringTransformer` (stage 15) runs _last_ among the lowering
+passes, not first. By the time it fires, expression-site lowering during
+`ClosureTransformer` (stage 11) has already had its say. The
+`key()`-substitution prologue it generates is downstream of the analyzer-driven
+decisions about wrapping.
 
-## What stage 7 does for `.map`s
+## What `ClosureTransformer` does for `.map`s
 
 `ClosureTransformer` walks the source tree and delegates each visited expression
 to a strategy. The relevant one is `ArrayMethodStrategy`
@@ -69,8 +76,8 @@ That function does, in order:
    `array.mapWithPattern(pattern((destructured) => …), capturesObj)`.
 6. `rewriteArrayMethodCallbackExpressionSites` (called from `createPattern…` via
    the strategy's `rewriteTransformedBody` option) runs over the transformed
-   body to decide which expressions need `derive`/`computed` wrapping and which
-   can pass through.
+   body to decide which expressions need lift-applied reactive wrapping and
+   which can pass through.
 
 The output of step 5 is a `pattern((destructured) => …)` call wrapping the
 original body. The destructured parameter is one of two shapes depending on how
@@ -80,15 +87,15 @@ step 3 decided to surface the element binding.
 
 `analyzeElementBinding` (`array-method-utils.ts`) classifies the source-level
 callback parameter into one of three shapes, with three corresponding treatments
-at stage 7. Stage 11 (`PatternCallbackLowering`) sees only the synthesized
-destructured `({element, …})` param and handles all three identically as far as
-the key-prologue is concerned.
+during `ClosureTransformer`. `PatternCallbackLoweringTransformer` sees only the
+synthesized destructured `({element, …})` param and handles all three
+identically as far as the key-prologue is concerned.
 
-| Source form                                             | Stage 7 (Closure)                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `(elem) => …elem.foo…`                                  | Identifier form. `bindingName = elem`, no aliases, body unchanged. Later passes (and our new analyzer hook) recognize `elem` as the element binding via `mapCallbackRegistry`.                                                                                                                                    |
-| `({piece, name}) => …` (plain object destructure)       | Destructure with no computed property names. `plan.aliases.length === 0`: the destructure binding passes through unchanged (no fresh `element` identifier synthesized). Stage 11 sees the destructured param and generates a `key()` prologue (`const piece = __cf_pattern_input.key("element", "piece");` etc.). |
-| `({[someKey]: alias, …}) => …` (computed property name) | Destructure with computed property names. Each computed access gets a fresh derive alias keyed off `someKey`. A new `element` identifier is synthesized and the body is rewritten to reference the aliases. This is the rare case; most source destructures are plain identifier-form.                            |
+| Source form                                             | `ClosureTransformer` (stage 11)                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `(elem) => …elem.foo…`                                  | Identifier form. `bindingName = elem`, no aliases, body unchanged. Later passes (and our new analyzer hook) recognize `elem` as the element binding via `mapCallbackRegistry`.                                                                                                                                                                |
+| `({piece, name}) => …` (plain object destructure)       | Destructure with no computed property names. `plan.aliases.length === 0`: the destructure binding passes through unchanged (no fresh `element` identifier synthesized). `PatternCallbackLoweringTransformer` sees the destructured param and generates a `key()` prologue (`const piece = __cf_pattern_input.key("element", "piece");` etc.). |
+| `({[someKey]: alias, …}) => …` (computed property name) | Destructure with computed property names. Each computed access gets a fresh lift-applied alias keyed off `someKey`. A new `element` identifier is synthesized and the body is rewritten to reference the aliases. This is the rare case; most source destructures are plain identifier-form.                                                  |
 
 In our fixture suite, identifier-form outnumbers destructured-form by roughly
 10:1. Computed-property-name destructures are rarer still. The identifier-form
@@ -98,31 +105,31 @@ path is therefore the dominant one and the one most worth understanding deeply.
 
 For the identifier-form path, the late stages handle most of the lowering:
 
-- During stage 7, the expression-site lowering decides whether each expression
-  in the body needs an early `derive`/`computed` wrap. The decision flows from
-  `analyze(expression)` reporting `containsReactive` / `requiresRewrite` /
-  `dataFlows`.
+- During `ClosureTransformer` (stage 11), expression-site lowering decides
+  whether each expression in the body needs an early lift-applied wrapper. The
+  decision flows from `analyze(expression)` reporting `containsReactive` /
+  `requiresRewrite` / `dataFlows`.
 - Most `elem.foo`-style passthrough reads (inside `{elem.foo}` JSX, inside
-  `[elem.foo]` array literals, etc.) are deliberately **not** wrapped at
-  stage 7. They flow through to stage 11.
-- During stage 11, `pattern-body-reactive-root-lowering` walks the body and
-  rewrites `elem.foo` to `elem.key("foo")` in place. This is the cheaper form —
-  it gives the runtime a fine-grained key path without pulling `elem` into a
-  `derive`'s inputs.
+  `[elem.foo]` array literals, etc.) are deliberately **not** wrapped at this
+  stage. They flow through to `PatternCallbackLoweringTransformer`.
+- During `PatternCallbackLoweringTransformer` (stage 15),
+  `pattern-body-reactive-root-lowering` walks the body and rewrites `elem.foo`
+  to `elem.key("foo")` in place. This is the cheaper form — it gives the runtime
+  a fine-grained key path without pulling `elem` into a lift's inputs.
 
-The decision at stage 7 about whether to wrap is made by a gate in
-`expression-site-lowering.ts:rewriteArrayMethodCallbackExpressionSites`:
+The decision during `ClosureTransformer` about whether to wrap is made by a gate
+in `expression-site-lowering.ts:rewriteArrayMethodCallbackExpressionSites`:
 
 - If the expression is a **passthrough container** (`PropertyAccess`,
   `ElementAccess`, `ObjectLiteral`, `ArrayLiteral`) AND every relevant dataflow
   is rooted at an array-method element binding (no captures of outer reactive
-  values like `labelPrefix` or `name`), the wrap is **skipped**. Late stage 11
-  lowering handles it in-place.
+  values like `labelPrefix` or `name`), the wrap is **skipped**. Late
+  `PatternCallbackLoweringTransformer` lowering handles it in-place.
 - Otherwise — computations like `BinaryExpression`, mixed dataflows that include
-  outer captures, etc. — the early wrap fires. The synthesized `derive` then
-  includes the element-rooted dataflows as **partial-key entries** in its inputs
-  object: `{ elem: { foo: elem.key("foo") } }`, matching the runtime's preferred
-  subscription shape.
+  outer captures, etc. — the early wrap fires. The synthesized lift-applied
+  computation then includes the element-rooted dataflows as **partial-key
+  entries** in its inputs object: `{ elem: { foo: elem.key("foo") } }`, matching
+  the runtime's preferred subscription shape.
 
 ## Why the dataflow analyzer needs an explicit signal
 
@@ -150,16 +157,17 @@ even when its TS type is plain. That signal is the
 - The analyzer's property-access branch (when the recursive analysis of the
   target returns `containsReactive: true` and the leftmost identifier is an
   element binding) records the full property access as a dataflow — not just the
-  root identifier — so derive builders can emit the partial- key inputs shape
-  `{ elem: { foo: elem.key("foo") } }`.
+  root identifier — so lift-applied input builders can emit the partial-key
+  inputs shape `{ elem: { foo: elem.key("foo") } }`.
 
 ## Cache invalidation contract
 
 The hook depends on `mapCallbackRegistry` being populated before any analyzer
-query that consults it. The pipeline guarantees this because stage 7 calls
-`markAsArrayMethodCallback(callback)` before recursing into the body. But the
-analyzer maintains a per-expression cache, and stages 5-6 can analyze
-expressions in the body before stage 7 marks the callback.
+query that consults it. The pipeline guarantees this because
+`ClosureTransformer` calls `markAsArrayMethodCallback(callback)` before
+recursing into the body. But the analyzer maintains a per-expression cache, and
+`JsxExpressionSiteRouterTransformer` / `LiftLoweringTransformer` can analyze
+expressions in the body before `ClosureTransformer` marks the callback.
 
 `TransformationContext.invalidateReactiveAnalysisCaches()` is called by each
 `mark*` method on the context. It drops three things:
@@ -173,16 +181,16 @@ See `src/core/mod.ts` for the full registry contract.
 
 ## Key code pointers
 
-| Concern                                                 | File                                                                                         |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Pipeline order                                          | `src/cf-pipeline.ts`                                                                         |
-| Closure array-method strategy entry                     | `src/closures/strategies/array-method-strategy.ts`                                           |
-| Per-callback closure transform                          | `src/closures/strategies/array-method-transform.ts`                                          |
-| Element binding analysis (identifier vs destructured)   | `src/closures/strategies/array-method-utils.ts`                                              |
-| Synthesized pattern callback's typed shape              | `src/closures/utils/schema-factory.ts`                                                       |
-| Stage 7 per-callback expression-site lowering           | `src/transformers/expression-site-lowering.ts` (`rewriteArrayMethodCallbackExpressionSites`) |
-| The defer-to-late-lowering gate                         | `src/transformers/expression-site-lowering.ts` (`shouldDeferToLateInPlaceLowering`)          |
-| Dataflow analyzer identifier + property-access branches | `src/ast/dataflow.ts` (around lines 700-900)                                                 |
-| Element-binding hook on context                         | `src/core/context.ts` (`isArrayMethodElementBindingReference`)                               |
-| Late `key()`-rewrite pass                               | `src/transformers/pattern-body-reactive-root-lowering.ts`                                    |
-| Cache invalidation contract                             | `src/core/mod.ts`                                                                            |
+| Concern                                                    | File                                                                                         |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Pipeline order                                             | `src/cf-pipeline.ts`                                                                         |
+| Closure array-method strategy entry                        | `src/closures/strategies/array-method-strategy.ts`                                           |
+| Per-callback closure transform                             | `src/closures/strategies/array-method-transform.ts`                                          |
+| Element binding analysis (identifier vs destructured)      | `src/closures/strategies/array-method-utils.ts`                                              |
+| Synthesized pattern callback's typed shape                 | `src/closures/utils/schema-factory.ts`                                                       |
+| `ClosureTransformer` per-callback expression-site lowering | `src/transformers/expression-site-lowering.ts` (`rewriteArrayMethodCallbackExpressionSites`) |
+| The defer-to-late-lowering gate                            | `src/transformers/expression-site-lowering.ts` (`shouldDeferToLateInPlaceLowering`)          |
+| Dataflow analyzer identifier + property-access branches    | `src/ast/dataflow.ts` (around lines 700-900)                                                 |
+| Element-binding hook on context                            | `src/core/context.ts` (`isArrayMethodElementBindingReference`)                               |
+| Late `key()`-rewrite pass                                  | `src/transformers/pattern-body-reactive-root-lowering.ts`                                    |
+| Cache invalidation contract                                | `src/core/mod.ts`                                                                            |

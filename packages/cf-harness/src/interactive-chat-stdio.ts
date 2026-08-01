@@ -26,6 +26,8 @@ import {
   type HarnessInteractivePromptLoopFactory,
 } from "./interactive-chat-service.ts";
 import type { HarnessChatSessionStore } from "./session-store.ts";
+import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
+import type { HarnessCredentialOwnerRef } from "./contracts/run-manifest.ts";
 
 export type HarnessInteractiveChatOutputEnvelope =
   | HarnessChatEventEnvelope
@@ -47,6 +49,10 @@ export interface RunHarnessInteractiveChatStdioOptions {
   output?: WritableStream<Uint8Array>;
   sessionDbPath?: string;
   maxInMemoryEvents?: number;
+  /** Trusted host injection point for an owner-bound provider client. */
+  basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
+  /** Single authenticated owner for an owner-bound service process. */
+  credentialOwner?: HarnessCredentialOwnerRef;
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
@@ -524,6 +530,12 @@ export const runHarnessInteractiveChatStdio = async (
         }
         const service = createHarnessInteractiveChatService({
           onEvent,
+          ...(options.basePromptLoopOptions !== undefined
+            ? { basePromptLoopOptions: options.basePromptLoopOptions }
+            : {}),
+          ...(options.credentialOwner !== undefined
+            ? { credentialOwner: options.credentialOwner }
+            : {}),
           ...(options.createPromptLoop !== undefined
             ? { createPromptLoop: options.createPromptLoop }
             : {}),

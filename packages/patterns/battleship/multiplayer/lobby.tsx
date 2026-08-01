@@ -15,7 +15,6 @@ import {
   NAME,
   pattern,
   type PerSession,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -89,7 +88,7 @@ const joinSlot = (
     avatar,
     ships: generateRandomShips(),
     color: getRandomColor(slot - 1),
-    joinedAt: safeDateNow(),
+    joinedAt: Date.now(),
   };
 
   if (slot === 1) {

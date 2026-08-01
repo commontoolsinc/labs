@@ -7,6 +7,7 @@ import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -83,6 +84,20 @@ describe("FabricEpochDays", () => {
           ) as unknown as FabricEpochDays;
           expect(decoded).toBeInstanceOf(FabricEpochDays);
           expect(decoded.value).toBe(0n);
+        });
+
+        it("decodes non-string state to a `ProblematicValue`", () => {
+          const decoded = codec.decode(expectedTag, 42, context);
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("decodes malformed base64 to a `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            expectedTag,
+            "not valid base64!!",
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
         });
       });
 

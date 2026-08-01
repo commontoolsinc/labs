@@ -1,6 +1,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
+import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import { normalize } from "@std/path/posix";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
@@ -27,8 +29,9 @@ const logger = getLogger("cell-cache");
 /**
  * Content-addressed compilation cache — document model and key scheme.
  *
- * Phase 4 of docs/specs/module-loading.md. The persistent cache is a pair of
- * per-module document sets stored as regular cells in the target space:
+ * See docs/specs/module-loading.md §"Storage model: two content-addressed
+ * document sets, per space". The persistent cache is a pair of per-module
+ * document sets stored as regular cells in the target space:
  *
  *  - **Source set** `pattern:<identity>` — authored TypeScript, keyed by the
  *    per-module Merkle identity (`computeModuleHashes`). Runtime-version
@@ -51,6 +54,28 @@ export interface ModuleImportRef {
   readonly identity: string;
 }
 
+/**
+ * Per-module update authority: a module identity maps to the predecessor
+ * identities whose writer authority it may exercise. Values are cumulative;
+ * save paths merge them with the document already stored under the
+ * content-addressed key.
+ */
+export type ModuleDelegationMap = ReadonlyMap<
+  string,
+  ReadonlySet<string>
+>;
+
+const EMPTY_MODULE_DELEGATIONS: ModuleDelegationMap = new Map();
+
+/**
+ * Runtime-minted compiler attestation. Compiled documents carry it at their
+ * root; source documents carry it only on delegation metadata, whose mutable
+ * value is otherwise excluded from the source Merkle identity.
+ */
+export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
+
+const SOURCE_DELEGATION_PATH = ["delegatedModuleIdentities"] as const;
+
 interface ModuleDocBase {
   /** Module code: authored TS (source set) or compiled JS (compiled set). */
   readonly code: string;
@@ -58,6 +83,8 @@ interface ModuleDocBase {
   readonly filename: string;
   /** Resolved internal imports; each points at another document by identity. */
   readonly imports: readonly ModuleImportRef[];
+  /** Predecessor module identities whose writer authority this module inherits. */
+  readonly delegatedModuleIdentities?: readonly string[];
 }
 
 /** A source-set document (`pattern:<identity>`). */
@@ -89,6 +116,101 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly starTargetSpecs?: readonly string[];
   readonly importSpecs?: readonly string[];
   readonly policyManifests?: readonly unknown[];
+  /**
+   * Authored-line spans for the coverage probes the transformer baked into
+   * `code`, keyed by `(fileName, id)`. Present only on documents written by a
+   * coverage-instrumented compile, which store under their own runtime-version
+   * variant (`<runtimeVersion>/pattern-coverage`), so an ordinary
+   * document never carries them. A collector maps a probe's `(fileName, id)`
+   * back to source lines through these spans; a warm load that registers none
+   * reports nothing.
+   */
+  readonly patternCoverageSpans?: readonly PatternCoverageSpan[];
+}
+
+const canonicalModuleFilename = (filename: string): string =>
+  normalize(filename.replaceAll("\\", "/"));
+
+const validDelegatedModuleIdentities = (
+  identity: string,
+  ...values: readonly unknown[]
+): string[] => {
+  const merged = new Set<string>();
+  for (const value of values) {
+    if (!Array.isArray(value)) continue;
+    for (const candidate of value) {
+      if (
+        typeof candidate === "string" && candidate.length > 0 &&
+        candidate !== identity
+      ) {
+        merged.add(candidate);
+      }
+    }
+  }
+  return [...merged].sort();
+};
+
+/**
+ * Match a previous verified source closure to a newly emitted module set by
+ * canonical full filename. Matching deliberately uses the whole normalized
+ * path, never a basename: `../shared/writer.ts` has already resolved to the
+ * stored module filename, while two different `writer.ts` files remain
+ * distinct. Ambiguous duplicate canonical names are skipped fail-closed.
+ *
+ * Each successor inherits both its direct predecessor and that predecessor's
+ * cumulative delegation list, preserving update chains across a cold reload.
+ */
+export function deriveModuleDelegations(
+  previous: ReadonlyMap<string, SourceDoc>,
+  next: readonly CacheableModule[],
+): Map<string, ReadonlySet<string>> {
+  const previousByName = new Map<
+    string,
+    { identity: string; doc: SourceDoc }[]
+  >();
+  for (const [identity, doc] of previous) {
+    const name = canonicalModuleFilename(doc.filename);
+    const entries = previousByName.get(name) ?? [];
+    entries.push({ identity, doc });
+    previousByName.set(name, entries);
+  }
+
+  const nextNameCounts = new Map<string, number>();
+  for (const module of next) {
+    const name = canonicalModuleFilename(module.filename);
+    nextNameCounts.set(name, (nextNameCounts.get(name) ?? 0) + 1);
+  }
+
+  const delegations = new Map<string, ReadonlySet<string>>();
+  for (const module of next) {
+    const name = canonicalModuleFilename(module.filename);
+    const matches = previousByName.get(name);
+    if (matches?.length !== 1 || nextNameCounts.get(name) !== 1) continue;
+    const predecessor = matches[0];
+    const inherited = validDelegatedModuleIdentities(
+      module.identity,
+      predecessor.identity === module.identity ? [] : [predecessor.identity],
+      predecessor.doc.delegatedModuleIdentities,
+    );
+    if (inherited.length > 0) {
+      delegations.set(module.identity, new Set(inherited));
+    }
+  }
+  return delegations;
+}
+
+export function moduleDelegationsFromDocs(
+  docs: ReadonlyMap<string, ModuleDocBase>,
+): Map<string, ReadonlySet<string>> {
+  const result = new Map<string, ReadonlySet<string>>();
+  for (const [identity, doc] of docs) {
+    const delegated = validDelegatedModuleIdentities(
+      identity,
+      doc.delegatedModuleIdentities,
+    );
+    if (delegated.length > 0) result.set(identity, new Set(delegated));
+  }
+  return result;
 }
 
 /**
@@ -319,10 +441,21 @@ function storedImportRefs(
 export function buildSourceDocs(
   modules: readonly CacheableModule[],
   entryIdentity: string,
+  moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
+  extraRootsOverride?: readonly string[],
 ): Map<string, SourceDoc> {
-  const extraRoots = unreachedRoots(modules, entryIdentity);
+  // `extraRootsOverride` exists for chunked (incremental) write-backs: the
+  // synthetic root links on the ENTRY doc must be computed over the FULL
+  // emitted module set, while `modules` here may be just the chunk being
+  // written in this transaction (see planCompileCacheWriteChunks).
+  const extraRoots = extraRootsOverride ??
+    unreachedRoots(modules, entryIdentity);
   const out = new Map<string, SourceDoc>();
   for (const module of modules) {
+    const delegatedModuleIdentities = validDelegatedModuleIdentities(
+      module.identity,
+      [...(moduleDelegations.get(module.identity) ?? [])],
+    );
     out.set(module.identity, {
       kind: "source",
       code: module.source,
@@ -330,6 +463,9 @@ export function buildSourceDocs(
       imports: storedImportRefs(module, entryIdentity, extraRoots, {
         includeFabricEdges: false,
       }),
+      ...(delegatedModuleIdentities.length > 0
+        ? { delegatedModuleIdentities }
+        : {}),
     });
   }
   return out;
@@ -469,6 +605,7 @@ interface StoredSourceDoc {
   code: string;
   filename: string;
   imports: { specifier: string; link: unknown }[];
+  delegatedModuleIdentities?: string[];
   // Optional product annotations — see {@link SourceDoc.annotations}. Stored
   // verbatim; never part of the content identity.
   annotations?: Record<string, unknown>;
@@ -500,6 +637,10 @@ export const SOURCE_DOC_SCHEMA = {
             },
           },
         },
+        delegatedModuleIdentities: {
+          type: "array",
+          items: { type: "string" },
+        },
         // Optional, non-normative product annotations (see SourceDoc).
         annotations: { type: "object" },
       },
@@ -507,6 +648,57 @@ export const SOURCE_DOC_SCHEMA = {
   },
   $ref: "#/$defs/sourceDoc",
 } as const satisfies JSONSchema;
+
+/**
+ * Flat source-document write schema. Only delegation metadata receives the
+ * runtime-minted compiler attestation: source code/imports remain
+ * self-verifying through their content identity, while annotations remain
+ * independently mutable.
+ */
+function sourceDocWriteSchema(): JSONSchema {
+  return {
+    type: "object",
+    properties: {
+      kind: { type: "string" },
+      identity: { type: "string" },
+      code: { type: "string" },
+      filename: { type: "string" },
+      imports: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            specifier: { type: "string" },
+            link: true,
+          },
+        },
+      },
+      delegatedModuleIdentities: {
+        type: "array",
+        items: { type: "string" },
+        ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
+      },
+      annotations: { type: "object" },
+    },
+  };
+}
+
+/** Attribute cache-document writes to the trusted compiler builtin. */
+function withCompileCacheBuiltin<T>(
+  tx: IExtendedStorageTransaction,
+  action: () => T,
+): T {
+  const priorIdentity = tx.getCfcState().implementationIdentity;
+  tx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: "compile-cache",
+  });
+  try {
+    return action();
+  } finally {
+    tx.setCfcImplementationIdentity(priorIdentity);
+  }
+}
 
 /**
  * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
@@ -528,6 +720,10 @@ export const SOURCE_DOC_SCHEMA = {
 export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
   type: "object",
   properties: {
+    delegatedModuleIdentities: {
+      type: "array",
+      items: { type: "string" },
+    },
     imports: {
       type: "array",
       items: {
@@ -545,7 +741,8 @@ export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
  * import a sigil link to its dependency cell (the entry additionally linking any
  * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
- * owns the transaction's commit.
+ * owns the transaction's commit. Returns the authenticated delegation union
+ * actually staged by this write.
  */
 export function writeSourceDocs(
   runtime: Runtime,
@@ -553,39 +750,73 @@ export function writeSourceDocs(
   modules: readonly CacheableModule[],
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
-): void {
+  moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
+  extraRootsOverride?: readonly string[],
+): ModuleDelegationMap {
   assertNoUnpinnedFabricImports(modules);
-  const docs = buildSourceDocs(modules, entryIdentity);
-  for (const [identity, doc] of docs) {
-    // Write with an untyped cell (the recursive read schema would over-constrain
-    // `set`); reads address the same entity via SOURCE_DOC_SCHEMA.
-    const cell = runtime.getCell<StoredSourceDoc>(
-      space,
-      sourceDocKey(identity),
-      undefined,
-      tx,
-    );
-    // Preserve product annotations on the entry doc only. Annotations are only
-    // written there; reading every dependency doc here turns unrelated stale
-    // cache cells into writeback conflict preconditions.
-    const existingAnnotations = identity === entryIdentity
-      ? cell.get()?.annotations
-      : undefined;
-    cell.set({
-      kind: "source",
-      identity,
-      code: doc.code,
-      filename: doc.filename,
-      imports: doc.imports.map((imp) => ({
-        specifier: imp.specifier,
-        link: runtime.getCell(space, sourceDocKey(imp.identity), undefined, tx)
-          .getAsLink(),
-      })),
-      ...(isRecord(existingAnnotations)
-        ? { annotations: existingAnnotations }
-        : {}),
-    } as StoredSourceDoc);
-  }
+  const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    moduleDelegations,
+    { source: true },
+  );
+  const docs = buildSourceDocs(
+    modules,
+    entryIdentity,
+    effectiveModuleDelegations,
+    extraRootsOverride,
+  );
+  withCompileCacheBuiltin(tx, () => {
+    for (const [identity, doc] of docs) {
+      const baseCell = runtime.getCell<StoredSourceDoc>(
+        space,
+        sourceDocKey(identity),
+        undefined,
+        tx,
+      );
+      // Preserve product annotations on the entry doc only. Annotations are
+      // only written there; reading every dependency doc here turns unrelated
+      // stale cache cells into writeback conflict preconditions.
+      const existing = baseCell.get();
+      const existingAnnotations = identity === entryIdentity
+        ? existing?.annotations
+        : undefined;
+      const delegatedModuleIdentities = [
+        ...(doc.delegatedModuleIdentities ?? []),
+      ];
+      // A source document without delegation metadata remains an ordinary,
+      // self-verifying cache write. Attaching an addIntegrity schema even when
+      // the field is absent would make every legacy/direct source-cache write
+      // CFC-relevant and require an otherwise-unnecessary prepare step.
+      const cell = delegatedModuleIdentities.length > 0
+        ? baseCell.asSchema(sourceDocWriteSchema())
+        : baseCell;
+      cell.set({
+        kind: "source",
+        identity,
+        code: doc.code,
+        filename: doc.filename,
+        imports: doc.imports.map((imp) => ({
+          specifier: imp.specifier,
+          link: runtime.getCell(
+            space,
+            sourceDocKey(imp.identity),
+            undefined,
+            tx,
+          ).getAsLink(),
+        })),
+        ...(delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {}),
+        ...(isRecord(existingAnnotations)
+          ? { annotations: existingAnnotations }
+          : {}),
+      } as StoredSourceDoc);
+    }
+  });
+  return effectiveModuleDelegations;
 }
 
 /**
@@ -596,7 +827,7 @@ export function writeSourceDocs(
  * already-loaded linked cells synchronously — no per-cell `sync()`. Returns the
  * raw documents keyed by their **stored** identity (verify with
  * {@link verifySourceDocs} before trusting). Resolves to `undefined` if the
- * entry document is absent.
+ * entry document is absent or any cache import link crosses out of `space`.
  */
 export async function loadSourceClosure(
   runtime: Runtime,
@@ -612,64 +843,93 @@ export async function loadSourceClosure(
   );
   // One sync pulls the entire link closure (recursive schema). No further syncs.
   await entry.sync();
+  return readLoadedSourceClosure(runtime, space, entryIdentity, tx);
+}
+
+/**
+ * Read a source closure that has already been synchronized into the replica.
+ *
+ * Reads remain attached to `tx`, so a later write commit conflicts if any
+ * source document changes between verification and commit.
+ */
+export function readLoadedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+): Map<string, SourceDoc> | undefined {
+  const entry = runtime.getCell(
+    space,
+    sourceDocKey(entryIdentity),
+    SOURCE_DOC_SCHEMA,
+    tx,
+  );
   const root = entry.get() as StoredSourceDoc | undefined;
   if (!root || typeof root.identity !== "string") return undefined;
 
   const out = new Map<string, SourceDoc>();
-  const queue: StoredSourceDoc[] = [root];
+  const queue: { doc: StoredSourceDoc; cell: Cell<unknown> }[] = [{
+    doc: root,
+    cell: entry,
+  }];
   while (queue.length > 0) {
-    const doc = queue.shift()!;
+    const { doc, cell } = queue.shift()!;
     if (out.has(doc.identity)) continue;
     const imports: ModuleImportRef[] = [];
-    const childDocs: StoredSourceDoc[] = [];
+    const childDocs: { doc: StoredSourceDoc; cell: Cell<unknown> }[] = [];
     for (const imp of doc.imports ?? []) {
       // `link` is already a loaded Cell (the entry sync pulled it). View it
       // under the recursive schema so its own links resolve as cells too.
       if (!isCell(imp.link)) continue;
-      const child = (imp.link as Cell<unknown>)
-        .asSchema(SOURCE_DOC_SCHEMA)
-        .get() as StoredSourceDoc | undefined;
+      const linkedCell = imp.link as Cell<unknown>;
+      // Cache attestations are space-local. A cross-space child may be validly
+      // compiler-stamped in its own space, but must never be flattened into
+      // the requested space's verified closure (and delegation registry).
+      if (linkedCell.space !== space) return undefined;
+      const childCell = linkedCell.asSchema(
+        SOURCE_DOC_SCHEMA,
+      );
+      const child = childCell.get() as StoredSourceDoc | undefined;
       if (!child || typeof child.identity !== "string") continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
-      childDocs.push(child);
+      childDocs.push({ doc: child, cell: childCell });
     }
+    const delegatedModuleIdentities = cellCarriesIntegrity(
+        cell,
+        COMPILED_INTEGRITY_ATOM,
+        tx,
+        SOURCE_DELEGATION_PATH,
+      )
+      ? validDelegatedModuleIdentities(
+        doc.identity,
+        doc.delegatedModuleIdentities,
+      )
+      : [];
     out.set(doc.identity, {
       kind: "source",
       code: doc.code,
       filename: doc.filename,
       imports,
+      ...(delegatedModuleIdentities.length > 0
+        ? { delegatedModuleIdentities }
+        : {}),
       ...(isRecord(doc.annotations) ? { annotations: doc.annotations } : {}),
     });
     for (const child of childDocs) {
-      if (!out.has(child.identity)) queue.push(child);
+      if (!out.has(child.doc.identity)) queue.push(child);
     }
   }
   return out;
 }
 
-/**
- * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
- * verify** it (step 4.3.6): recompute every module's Merkle identity from the
- * loaded source + import graph and require it to equal its document key. This is
- * the content-addressed analog of `verifyModuleGraph` — the source set is
- * self-verifying (content-addressing IS the integrity), so a tampered source, a
- * rewired link, or an incomplete closure is rejected here. Resolves to the
- * verified closure, or `undefined` if the entry is absent or verification fails.
- */
-export async function loadVerifiedSourceClosure(
+function verifyLoadedSourceClosure(
   runtime: Runtime,
   space: MemorySpace,
   entryIdentity: string,
-  tx: IExtendedStorageTransaction,
-  runtimeFingerprint = "",
-): Promise<Map<string, SourceDoc> | undefined> {
-  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  closure: Map<string, SourceDoc> | undefined,
+  runtimeFingerprint: string,
+): Map<string, SourceDoc> | undefined {
   if (closure === undefined) return undefined;
-  // Identity verification parses source (module hashing scans imports), and
-  // every source-closure consumer parses further downstream (fabric-import
-  // scans, recompiles) — this is the shared entry those flows funnel through,
-  // so load the deferred compiler stack here, once.
-  await ensureCompilerStack();
   const verification = verifySourceDocs(
     entryIdentity,
     closure,
@@ -695,21 +955,75 @@ export async function loadVerifiedSourceClosure(
     ]);
     return undefined;
   }
+  runtime.registerModuleDelegations(
+    space,
+    moduleDelegationsFromDocs(closure),
+  );
   return closure;
 }
 
-// --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
+/**
+ * Load the deferred parser used by synchronous source-closure verification.
+ */
+export async function prepareSourceClosureVerification(): Promise<void> {
+  await ensureCompilerStack();
+}
 
 /**
- * The CFC integrity atom stamped on a compiled document: the constant
- * `cf-compiled-by:cf-compiler`, attesting that the doc was emitted by the
- * system compiler. The atom covers the code that produced the doc, so every
- * member of a shared space can read the same compiled cache entry. Minting is
- * gated: prepare strips `cf-compiled-by:` atoms from any write not authored by a
- * trusted builtin, and `writeCompiledDocs` below is the legitimate minter. The
- * server-side attestation model is described in docs/specs/module-loading.md.
+ * Verify a synchronized source closure while retaining its reads in `tx`.
+ *
+ * Callers first synchronize the recursive closure and await
+ * {@link prepareSourceClosureVerification}.
  */
-export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
+export function readVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Map<string, SourceDoc> | undefined {
+  return verifyLoadedSourceClosure(
+    runtime,
+    space,
+    entryIdentity,
+    readLoadedSourceClosure(runtime, space, entryIdentity, tx),
+    runtimeFingerprint,
+  );
+}
+
+/**
+ * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
+ * verify** it (step 4.3.6): recompute every module's Merkle identity from the
+ * loaded source + import graph and require it to equal its document key. This is
+ * the content-addressed analog of `verifyModuleGraph` — the source set is
+ * self-verifying (content-addressing IS the integrity), so a tampered source, a
+ * rewired link, or an incomplete closure is rejected here. Resolves to the
+ * verified closure, or `undefined` if the entry is absent or verification fails.
+ */
+export async function loadVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Promise<Map<string, SourceDoc> | undefined> {
+  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  if (closure === undefined) return undefined;
+  // Identity verification parses source (module hashing scans imports), and
+  // every source-closure consumer parses further downstream (fabric-import
+  // scans, recompiles) — this is the shared entry those flows funnel through,
+  // so load the deferred compiler stack here, once.
+  await prepareSourceClosureVerification();
+  return verifyLoadedSourceClosure(
+    runtime,
+    space,
+    entryIdentity,
+    closure,
+    runtimeFingerprint,
+  );
+}
+
+// --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
 
 const compiledDocProperties = {
   kind: { type: "string" },
@@ -720,9 +1034,14 @@ const compiledDocProperties = {
   exportNames: { type: "array", items: { type: "string" } },
   starTargetSpecs: { type: "array", items: { type: "string" } },
   importSpecs: { type: "array", items: { type: "string" } },
+  patternCoverageSpansJson: { type: "string" },
   policyManifests: {
     type: "array",
     items: { type: "object", additionalProperties: true },
+  },
+  delegatedModuleIdentities: {
+    type: "array",
+    items: { type: "string" },
   },
   imports: {
     type: "array",
@@ -755,9 +1074,14 @@ export const COMPILED_DOC_SCHEMA = {
         exportNames: { type: "array", items: { type: "string" } },
         starTargetSpecs: { type: "array", items: { type: "string" } },
         importSpecs: { type: "array", items: { type: "string" } },
+        patternCoverageSpansJson: { type: "string" },
         policyManifests: {
           type: "array",
           items: { type: "object", additionalProperties: true },
+        },
+        delegatedModuleIdentities: {
+          type: "array",
+          items: { type: "string" },
         },
         imports: {
           type: "array",
@@ -796,15 +1120,64 @@ interface StoredCompiledDoc {
   exportNames?: readonly string[];
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
+  patternCoverageSpansJson?: string;
   policyManifests?: readonly unknown[];
+  delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
 }
 
-/** Whether a cell's persisted CFC label carries `atom` at its root path. */
+/**
+ * The coverage spans stored as scalar JSON on a compiled document, parsed and
+ * shape-checked. Yields `undefined` for a document written without spans, and
+ * for a stored value that does not match the span shape. The load then carries
+ * no spans for that module, and the collector reports no lines for it rather
+ * than reporting against malformed coordinates. Spans are a reporting aid,
+ * never an execution input, so a rejection here cannot affect what the module
+ * does.
+ */
+function storedCoverageSpans(
+  stored: unknown,
+): readonly PatternCoverageSpan[] | undefined {
+  if (typeof stored !== "string") return undefined;
+  let spans: unknown;
+  try {
+    spans = JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(spans)) return undefined;
+  const out: PatternCoverageSpan[] = [];
+  for (const span of spans) {
+    if (!isRecord(span)) return undefined;
+    const { fileName, id, kind, startLine, endLine, startColumn, endColumn } =
+      span;
+    if (
+      typeof fileName !== "string" || typeof id !== "number" ||
+      kind !== "runtime" || typeof startLine !== "number" ||
+      typeof endLine !== "number" || typeof startColumn !== "number" ||
+      typeof endColumn !== "number"
+    ) {
+      return undefined;
+    }
+    out.push({
+      fileName,
+      id,
+      kind,
+      startLine,
+      endLine,
+      startColumn,
+      endColumn,
+    });
+  }
+  return out;
+}
+
+/** Whether a cell's persisted CFC label carries `atom` at `path`. */
 function cellCarriesIntegrity(
   cell: Cell<unknown>,
   atom: string,
   tx: IExtendedStorageTransaction,
+  path: readonly (string | number)[] = [],
 ): boolean {
   const link = cell.getAsNormalizedFullLink();
   const metadata = readStoredCfcMetadata(tx, {
@@ -814,10 +1187,87 @@ function cellCarriesIntegrity(
   });
   if (metadata === undefined) return false;
   return metadata.labelMap.entries.some((entry) =>
-    entry.path.length === 0 &&
+    entry.path.length === path.length &&
+    entry.path.every((segment, index) => segment === path[index]) &&
     Array.isArray(entry.label.integrity) &&
     entry.label.integrity.some((a) => a === atom)
   );
+}
+
+/**
+ * Compute the authority that a cache write may persist. Requested delegations
+ * are unioned with only compiler-authenticated metadata already stored at the
+ * selected source/compiled targets. Combined source+compiled saves use both
+ * targets so the two document sets cannot diverge when shared successors are
+ * updated by different patterns.
+ */
+function effectiveModuleDelegationsForWrite(
+  runtime: Runtime,
+  space: MemorySpace,
+  modules: readonly CacheableModule[],
+  tx: IExtendedStorageTransaction,
+  requested: ModuleDelegationMap,
+  targets: {
+    source?: boolean;
+    compiledRuntimeVersion?: string;
+  },
+): Map<string, ReadonlySet<string>> {
+  const effective = new Map<string, ReadonlySet<string>>();
+  for (const module of modules) {
+    const candidates: unknown[] = [
+      [...(requested.get(module.identity) ?? [])],
+    ];
+    if (targets.source) {
+      const sourceCell = runtime.getCell<StoredSourceDoc>(
+        space,
+        sourceDocKey(module.identity),
+        undefined,
+        tx,
+      );
+      const existing = sourceCell.get();
+      // Mutable source metadata is authority only when the compiler attested
+      // this exact field; the source code/import graph verifies separately.
+      if (
+        cellCarriesIntegrity(
+          sourceCell,
+          COMPILED_INTEGRITY_ATOM,
+          tx,
+          SOURCE_DELEGATION_PATH,
+        )
+      ) {
+        candidates.push(existing?.delegatedModuleIdentities);
+      }
+    }
+    if (targets.compiledRuntimeVersion !== undefined) {
+      const compiledCell = runtime.getCell<StoredCompiledDoc>(
+        space,
+        compiledDocKey(
+          targets.compiledRuntimeVersion,
+          module.identity,
+        ),
+        undefined,
+        tx,
+      );
+      const existing = compiledCell.get();
+      if (
+        cellCarriesIntegrity(
+          compiledCell,
+          COMPILED_INTEGRITY_ATOM,
+          tx,
+        )
+      ) {
+        candidates.push(existing?.delegatedModuleIdentities);
+      }
+    }
+    const delegated = validDelegatedModuleIdentities(
+      module.identity,
+      ...candidates,
+    );
+    if (delegated.length > 0) {
+      effective.set(module.identity, new Set(delegated));
+    }
+  }
+  return effective;
 }
 
 /**
@@ -826,29 +1276,35 @@ function cellCarriesIntegrity(
  * compiler integrity atom, imports linked to dependency compiled cells (the
  * entry additionally linking any otherwise-unreachable module). The caller must
  * `prepareCfc()` + commit the tx under an enforcing CFC mode for the integrity
- * label to persist.
+ * label to persist. Returns the authenticated delegation union actually staged
+ * by this write.
  */
 export function writeCompiledDocs(
   runtime: Runtime,
   space: MemorySpace,
   modules: readonly CacheableModule[],
   entryIdentity: string,
-  opts: { runtimeVersion: string },
+  opts: {
+    runtimeVersion: string;
+    moduleDelegations?: ModuleDelegationMap;
+    /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
+    extraRoots?: readonly string[];
+  },
   tx: IExtendedStorageTransaction,
-): void {
+): ModuleDelegationMap {
   assertNoUnpinnedFabricImports(modules);
-  const extraRoots = unreachedRoots(modules, entryIdentity);
+  const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    opts.moduleDelegations ?? EMPTY_MODULE_DELEGATIONS,
+    { compiledRuntimeVersion: opts.runtimeVersion },
+  );
+  const extraRoots = opts.extraRoots ??
+    unreachedRoots(modules, entryIdentity);
   const schema = compiledDocWriteSchema();
-  // Attribute these writes to the compile-cache builtin for the duration of
-  // the doc writes: prepare's runtime-minted-evidence gate strips the
-  // `cf-compiled-by:` atom from any write whose recorded author is not a
-  // trusted builtin, and the author is captured per write at record time.
-  const priorIdentity = tx.getCfcState().implementationIdentity;
-  tx.setCfcImplementationIdentity({
-    kind: "builtin",
-    builtinId: "compile-cache",
-  });
-  try {
+  withCompileCacheBuiltin(tx, () => {
     for (const module of modules) {
       const cell = runtime.getCell(
         space,
@@ -859,6 +1315,10 @@ export function writeCompiledDocs(
       // Fix B: derive the record surface from the compiled body once, here, so
       // the boot-time record build reads it instead of re-parsing per load.
       const derived = deriveModuleRecordFields(module.js);
+      const delegatedModuleIdentities = validDelegatedModuleIdentities(
+        module.identity,
+        [...(effectiveModuleDelegations.get(module.identity) ?? [])],
+      );
       const policyManifests = module.policyManifests?.map((input) => {
         const artifact = validateCfcPolicyArtifactManifest(input);
         if (artifact.manifest.moduleIdentity !== module.identity) {
@@ -882,7 +1342,15 @@ export function writeCompiledDocs(
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
+        ...(module.patternCoverageSpans === undefined ? {} : {
+          patternCoverageSpansJson: JSON.stringify(
+            module.patternCoverageSpans,
+          ),
+        }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
+        ...(delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {}),
         imports: storedImportRefs(module, entryIdentity, extraRoots, {
           includeFabricEdges: true,
         }).map((ref) => ({
@@ -896,9 +1364,167 @@ export function writeCompiledDocs(
         })),
       } as StoredCompiledDoc);
     }
-  } finally {
-    tx.setCfcImplementationIdentity(priorIdentity);
+  });
+  return effectiveModuleDelegations;
+}
+
+/**
+ * Save matching source and compiled document sets with one authenticated
+ * delegation union. This is the cache write path for compilation and repair:
+ * an authority chain already present in either set is preserved in both, and
+ * the returned map is the exact committed authority the caller must install in
+ * its runtime after the transaction succeeds.
+ */
+export function writeSourceAndCompiledDocs(
+  runtime: Runtime,
+  space: MemorySpace,
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
+  opts: {
+    runtimeVersion: string;
+    moduleDelegations?: ModuleDelegationMap;
+    /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
+    extraRoots?: readonly string[];
+  },
+  tx: IExtendedStorageTransaction,
+): ModuleDelegationMap {
+  assertNoUnpinnedFabricImports(modules);
+  const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    opts.moduleDelegations ?? EMPTY_MODULE_DELEGATIONS,
+    {
+      source: true,
+      compiledRuntimeVersion: opts.runtimeVersion,
+    },
+  );
+  writeSourceDocs(
+    runtime,
+    space,
+    modules,
+    entryIdentity,
+    tx,
+    effectiveModuleDelegations,
+    opts.extraRoots,
+  );
+  writeCompiledDocs(
+    runtime,
+    space,
+    modules,
+    entryIdentity,
+    { ...opts, moduleDelegations: effectiveModuleDelegations },
+    tx,
+  );
+  return effectiveModuleDelegations;
+}
+
+/**
+ * How many modules a single compile-cache write-back transaction covers.
+ *
+ * Why not one transaction for the whole closure: the first client session
+ * over a space whose compiled refs went stale (a compiler/transformer output
+ * change, e.g. #4980) re-writes the ENTIRE closure. As one all-or-nothing
+ * commit, a session interrupted mid-write persists nothing, the next session
+ * redoes everything, and under aggressive client timeouts no session ever
+ * lands the write — the space retries forever (the estuary first-open
+ * outage). Chunked commits make that recovery durable and incremental:
+ * every committed chunk survives an interruption, re-runs re-write already
+ * durable docs as empty diffs, and a few interrupted sessions converge to
+ * the settled closure.
+ *
+ * 4 modules ≈ 8 docs per commit keeps each commit well under typical
+ * ws-message/commit-validation budgets while bounding the commit count for
+ * large closures. A closure of ≤4 modules still commits exactly once,
+ * identical to the pre-chunking behavior.
+ */
+export const COMPILE_CACHE_WRITEBACK_CHUNK_MODULES = 4;
+
+/**
+ * Plan the transaction chunks for an incremental compile-cache write-back.
+ *
+ * Ordering makes every prefix of committed chunks a maximally useful partial
+ * state: dependencies first (DFS post-order over the import graph), the
+ * ENTRY module last.
+ *
+ * What the entry-last pin actually guarantees: an interrupted write-back
+ * never persists the entry doc of a namespace that did not already have one
+ * (a fresh compiled `compileCache:<version>/` namespace, or a fresh space's
+ * source set), and an ABSENT ENTRY is exactly the miss test of both load
+ * paths (`loadCompiledClosure` returns empty; `loadSourceClosure` resolves
+ * undefined). So every partial prefix this ordering can produce reads as a
+ * plain cache miss whose already-durable docs make the next session's
+ * re-write cheaper (equal-value re-writes diff to nothing).
+ *
+ * The loaders are deliberately NOT fail-closed on missing DESCENDANTS:
+ * `loadCompiledClosure` drops an absent/unstamped child along with the edge
+ * to it (pinned by "skips compiled import links without integrity"), and the
+ * by-identity hit test is entry presence. Chunk interruption cannot create
+ * an entry-present/descendant-missing state, but should one arise out of
+ * band, it degrades to a clean RECOMPILE rather than a corrupt load: the
+ * source path rejects the partial graph in `loadVerifiedSourceClosure`
+ * (verifySourceDocs' missing-import check) and the compiled path fails
+ * cached-module evaluation, both funneling into the cold recompile fallback
+ * — pinned by the descendant-missing tests in
+ * compile-cache-incremental-writeback.test.ts.
+ *
+ * `extraRoots` is computed over the FULL module set and must be passed to
+ * each chunk's write (the entry doc's synthetic root links enumerate every
+ * module unreachable through the natural import graph; computing it over a
+ * chunk would corrupt the entry doc's link set).
+ */
+export function planCompileCacheWriteChunks(
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
+  chunkSize: number = COMPILE_CACHE_WRITEBACK_CHUNK_MODULES,
+): { chunks: CacheableModule[][]; extraRoots: readonly string[] } {
+  if (!Number.isInteger(chunkSize) || chunkSize < 1) {
+    throw new Error(`invalid compile-cache write chunk size: ${chunkSize}`);
   }
+  const extraRoots = unreachedRoots(modules, entryIdentity);
+  const byId = new Map(modules.map((m) => [m.identity, m]));
+  const ordered: CacheableModule[] = [];
+  const visited = new Set<string>();
+  // Iterative DFS post-order (import cycles are legal in ES modules; the
+  // visited set breaks them — chunking is commit batching, not a semantic
+  // ordering requirement, so any cycle cut is fine).
+  const visit = (rootId: string): void => {
+    const stack: { id: string; expanded: boolean }[] = [
+      { id: rootId, expanded: false },
+    ];
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+      const module = byId.get(frame.id);
+      if (module === undefined) continue;
+      if (frame.expanded) {
+        ordered.push(module);
+        continue;
+      }
+      if (visited.has(frame.id)) continue;
+      visited.add(frame.id);
+      stack.push({ id: frame.id, expanded: true });
+      for (const imp of module.imports) {
+        if (!visited.has(imp.targetIdentity)) {
+          stack.push({ id: imp.targetIdentity, expanded: false });
+        }
+      }
+    }
+  };
+  // Every module is either reachable from the entry or listed in extraRoots
+  // (unreachedRoots returns ALL unreachable modules), so these walks cover
+  // the full set. The entry is pinned visited during the root walks (an
+  // unreachable module may import back INTO the entry) and walked last, so
+  // the entry doc is always in the final chunk.
+  visited.add(entryIdentity);
+  for (const rootIdentity of extraRoots) visit(rootIdentity);
+  visited.delete(entryIdentity);
+  visit(entryIdentity);
+  const chunks: CacheableModule[][] = [];
+  for (let i = 0; i < ordered.length; i += chunkSize) {
+    chunks.push(ordered.slice(i, i + chunkSize));
+  }
+  return { chunks, extraRoots };
 }
 
 /**
@@ -912,10 +1538,11 @@ export function writeCompiledDocs(
  * (never re-deriving a cell from a stored `identity` field), and a cell's stored
  * doc is used only after its own persisted CFC label is confirmed to carry the
  * compiler integrity atom. So every document in the result — and every import
- * edge — came from an integrity-stamped cell that the parent's sigil link
- * actually points at; an unstamped/tampered child is dropped along with the edge
- * to it (treated as a cache miss, so the caller recompiles). The entry is the
- * one cell looked up by key, from the caller's trusted `entryIdentity`.
+ * edge — came from an integrity-stamped cell in `space` that the parent's sigil
+ * link actually points at; an unstamped/tampered child is dropped along with
+ * the edge to it (treated as a cache miss, so the caller recompiles), while a
+ * mixed-space link rejects the whole closure. The entry is the one cell looked
+ * up by key, from the caller's trusted `entryIdentity`.
  *
  * Resolves to the valid documents keyed by their stored identity (empty map if
  * the entry itself is missing/unstamped).
@@ -974,15 +1601,25 @@ export async function loadCompiledClosure(
     if (visited.has(doc.identity)) continue;
     visited.add(doc.identity);
 
+    // Detach the spans from the transaction: the callers abort their read tx
+    // before the closure is consumed, and a collector holds registered spans for
+    // the life of the process.
+    const coverageSpans = storedCoverageSpans(
+      doc.patternCoverageSpansJson,
+    );
+
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {
       if (!isCell(imp.link)) continue;
       // `link` is an already-loaded Cell (the entry sync pulled it). View it
       // under the recursive schema so its own links resolve as cells too, then
       // integrity-check + read synchronously — no re-lookup by id, no sync.
-      const child = verifiedDoc(
-        (imp.link as Cell<unknown>).asSchema(COMPILED_DOC_SCHEMA),
-      );
+      const linkedCell = imp.link as Cell<unknown>;
+      // Compiled-cache integrity and module delegation authority are attested
+      // only in the linked cell's space. Mixed-space cache graphs fail closed
+      // instead of rebasing a child space's attestation onto `space`.
+      if (linkedCell.space !== space) return new Map();
+      const child = verifiedDoc(linkedCell.asSchema(COMPILED_DOC_SCHEMA));
       if (child === undefined) continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push({ doc: child });
@@ -1001,11 +1638,24 @@ export async function loadCompiledClosure(
       ...(doc.importSpecs !== undefined
         ? { importSpecs: doc.importSpecs }
         : {}),
+      ...(coverageSpans === undefined
+        ? {}
+        : { patternCoverageSpans: coverageSpans }),
       ...(doc.policyManifests !== undefined
         ? { policyManifests: doc.policyManifests }
         : {}),
+      ...(() => {
+        const delegatedModuleIdentities = validDelegatedModuleIdentities(
+          doc.identity,
+          doc.delegatedModuleIdentities,
+        );
+        return delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {};
+      })(),
       imports,
     });
   }
+  runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
   return out;
 }

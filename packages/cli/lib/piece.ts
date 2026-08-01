@@ -1,11 +1,18 @@
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { ensureDir } from "@std/fs";
+import { caseFold } from "unicode-case-folding";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
   entityIdFrom,
   experimentalOptionsFromEnv,
+  formatFabricRef,
+  getCellOrThrow,
+  getMetaLink,
   getPatternIdentityRef,
+  isCell,
+  isCellResult,
+  isReadableCell,
   isSlugAddress,
   NAME,
   Runtime,
@@ -14,7 +21,9 @@ import {
   UI,
   VNode,
 } from "@commonfabric/runner";
-import type { CellScope } from "@commonfabric/api";
+import { validateSchemaValue } from "@commonfabric/runner/cfc";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   assignSlug,
@@ -25,22 +34,33 @@ import {
   setSlugLink,
   SlugResolutionError,
 } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  type PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
-import { isRecord } from "@commonfabric/utils/types";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell } from "../../fuse/callables.ts";
-import { awaitSyncWithTimeout } from "./utils.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
   type CallableResolution,
+  type CallableResultRef,
   CF_RUNTIME_ERROR_LOG,
   type CliRuntimeErrorRecord,
   detectCallableKind,
   executeResolvedCallable,
+  type InvocationOutcome,
+  runtimeErrorLog,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
@@ -51,10 +71,12 @@ import {
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
+import { stderrConsoleHandler } from "./json-output.ts";
 
 export interface EntryConfig {
   mainPath: string;
   mainExport?: string;
+  repository?: string;
   rootPath?: string;
 }
 
@@ -62,11 +84,67 @@ export interface SpaceConfig {
   apiUrl: string;
   space: string;
   identity: string;
+  jsonOutput?: boolean;
+  deferSpaceCellSync?: boolean;
+}
+
+/** Metadata returned for a piece whose stored data matches a search query. */
+export interface PieceSearchResult {
+  id: string;
+  name?: string;
+  patternRef?: PiecePatternRef;
 }
 
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+}
+
+export interface SetPiecePatternOptions {
+  dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
+export interface GetCellValueOptions {
+  input?: boolean;
+  step?: boolean;
+}
+
+export class PieceResultProjectionError extends Error {
+  constructor(path: readonly (string | number)[], stepped: boolean) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    const stepHint = stepped
+      ? " The piece was stepped, but the required value still did not " +
+        "materialize."
+      : " Use --step to start the piece and materialize session-scoped " +
+        "computed values before reading.";
+    super(
+      `Cannot read piece result at "${location}": stored data is present, ` +
+        `but its schema could not resolve all required values.${stepHint}`,
+    );
+    this.name = "PieceResultProjectionError";
+  }
+}
+
+async function resultProjectionFailedAtPath(
+  piece: {
+    result: { getCell(): Promise<Cell<unknown>> };
+  },
+  path: readonly (string | number)[],
+): Promise<boolean> {
+  const rootCell = await piece.result.getCell();
+  let targetCell = rootCell;
+  for (const segment of path) {
+    targetCell = targetCell.key(segment as keyof unknown) as Cell<unknown>;
+  }
+  const schema = targetCell.schema;
+  if (targetCell.getRaw() === undefined || schema === undefined) {
+    return false;
+  }
+  return validateSchemaValue(
+    schema,
+    undefined,
+    rootCell.schema ?? schema,
+  ) !== undefined;
 }
 
 export interface ResolvedPieceCallable extends CallableResolution {
@@ -90,6 +168,10 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
 export interface ExecutedPieceCallable {
   helpText?: string;
   outputText?: string;
+  /** Handler invocation outcome, passed through from ExecutedCallable. */
+  invocation?: InvocationOutcome;
+  /** Tool result cell address, passed through from ExecutedCallable. */
+  resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
   resolved: ResolvedPieceCallable;
 }
@@ -100,6 +182,18 @@ export interface PieceResolutionDeps {
     manager: PieceManager,
     token: string,
   ) => Promise<string>;
+}
+
+interface PieceOperationDependencies extends PieceResolutionDeps {
+  loadIdentity?: typeof loadIdentity;
+  getProgramFromFile?: typeof getProgramFromFile;
+  getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
+  createController?: (manager: PieceManager) => PiecesController;
+  reportSearchError?: (
+    pieceId: string,
+    source: "input data" | "result data" | "metadata",
+    error: unknown,
+  ) => void;
 }
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
@@ -198,59 +292,64 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       // Shared first-party posture for client runtimes against a deployed
       // API (CT-1814); collectors and the navigate hook are this CLI's
       // declared deltas.
-      new Runtime(runtimePresets.remoteClient({
-        apiUrl: new URL(config.apiUrl),
-        storageManager: StorageManager.open({
-          as: session.as,
-          memoryHost: new URL(config.apiUrl),
-          spaceIdentity: session.spaceIdentity,
-        }),
-        experimental: experimentalOptionsFromEnv(Deno.env.get),
-        errorHandlers: [
-          (error) => {
-            runtimeErrors.push({
-              message: error.message,
-              pieceId: error.pieceId,
-              patternId: error.patternId,
-              spellId: error.spellId,
-              space: error.space,
-              stackTrace: error.stack,
-            });
-          },
-        ],
-        navigateCallback: (target) => {
-          try {
-            const id = pieceId(target);
-            if (!id) {
-              console.error("navigateTo: target missing piece id");
-              return;
-            }
-            // Emit greppable line immediately so scripts can capture without waiting
-            console.log(`navigateTo new piece id ${id}`);
-            // Best-effort: ensure piece is present in list
-            runtime.storageManager
-              .synced()
-              .then(async () => {
-                try {
-                  const mgr = pieceManagerRef.current!;
-                  const piecesCell = await mgr.getPieces();
-                  const list = piecesCell.get();
-                  const exists = list.some((c) => pieceId(c) === id);
-                  if (!exists) {
-                    await mgr.add([target]);
-                  }
-                } catch (e) {
-                  console.error("navigateTo add error:", e);
-                }
-              })
-              .catch((_err: unknown) => {
-                // ignore; we already emitted the id
+      new Runtime({
+        ...runtimePresets.remoteClient({
+          apiUrl: new URL(config.apiUrl),
+          storageManager: StorageManager.open({
+            as: session.as,
+            memoryHost: new URL(config.apiUrl),
+            spaceIdentity: session.spaceIdentity,
+          }),
+          experimental: experimentalOptionsFromEnv(Deno.env.get),
+          errorHandlers: [
+            (error) => {
+              runtimeErrors.push({
+                message: error.message,
+                pieceId: error.pieceId,
+                patternId: error.patternId,
+                spellId: error.spellId,
+                space: error.space,
+                stackTrace: error.stack,
               });
-          } catch (e) {
-            console.error("navigateTo callback error:", e);
-          }
-        },
-      })),
+            },
+          ],
+          navigateCallback: (target) => {
+            try {
+              const id = pieceId(target);
+              if (!id) {
+                console.error("navigateTo: target missing piece id");
+                return;
+              }
+              // Emit greppable line immediately so scripts can capture without waiting
+              (config.jsonOutput ? console.error : console.log)(
+                `navigateTo new piece id ${id}`,
+              );
+              // Best-effort: ensure piece is present in list
+              runtime.storageManager
+                .synced()
+                .then(async () => {
+                  try {
+                    const mgr = pieceManagerRef.current!;
+                    const piecesCell = await mgr.getPieceRegistry();
+                    const list = piecesCell.get();
+                    const exists = list.some((c) => pieceId(c) === id);
+                    if (!exists) {
+                      await mgr.add([target]);
+                    }
+                  } catch (e) {
+                    console.error("navigateTo add error:", e);
+                  }
+                })
+                .catch((_err: unknown) => {
+                  // ignore; we already emitted the id
+                });
+            } catch (e) {
+              console.error("navigateTo callback error:", e);
+            }
+          },
+        }),
+        ...(config.jsonOutput ? { consoleHandler: stderrConsoleHandler } : {}),
+      }),
   );
   (runtime as Runtime & { [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
     CF_RUNTIME_ERROR_LOG
@@ -268,13 +367,29 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
 
     const pieceManager = await timeCliPhase(
       "loadManager.pieceManager",
-      () => new PieceManager(session, runtime),
+      () =>
+        new PieceManager(session, runtime, {
+          deferSpaceCellSync: config.deferSpaceCellSync,
+        }),
     );
     pieceManagerRef.current = pieceManager;
-    await timeCliPhase(
-      "loadManager.synced",
-      () => awaitSyncWithTimeout(pieceManager.synced()),
-    );
+    if (config.deferSpaceCellSync) {
+      await timeCliPhase(
+        "loadManager.ensureSpaceSession",
+        () => pieceManager.ensureSpaceSession(),
+      );
+    } else {
+      // `synced()` settles even when this space is permanently denied: the
+      // memory client terminates a denied session rather than retrying its
+      // reopen. It settles quietly, though — a denied cross-space link stays a
+      // silent absent read — so surface a denial on THIS space deliberately,
+      // with the server's real AuthorizationError.
+      await timeCliPhase(
+        "loadManager.synced",
+        () => pieceManager.synced(),
+      );
+    }
+    throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     return pieceManager;
   });
 }
@@ -311,22 +426,26 @@ async function getPinnedProgramFromFile(
 // Returns an array of metadata about pieces to display.
 export async function listPieces(
   config: SpaceConfig,
+  deps: PieceOperationDependencies = {},
 ): Promise<
-  { id: string; name?: string; error?: string }[]
+  { id: string; name?: string; patternRef?: PiecePatternRef; error?: string }[]
 > {
-  const manager = await loadManager(config);
-  const pieces = new PiecesController(manager);
-  const allPieces = await pieces.getAllPieces();
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const registeredPieces = await pieces.getRegisteredPieces();
   return Promise.all(
-    allPieces.map(async (piece) => {
+    registeredPieces.map(async (piece) => {
       try {
         const livePiece = await pieces.get(piece.id, true);
         const name = (await (
           livePiece.getCell().key(NAME) as Cell<unknown>
         ).pull()) as string | undefined;
+        const patternRef = await livePiece.getPatternRef();
         return {
           id: piece.id,
           name,
+          patternRef,
         };
       } catch (err) {
         return {
@@ -335,6 +454,567 @@ export async function listPieces(
         };
       }
     }),
+  );
+}
+
+const PIECE_SEARCH_CONCURRENCY = 4;
+const NO_IGNORED_ROOT_KEYS = new Set<string>();
+const RESULT_IGNORED_ROOT_KEYS = new Set([NAME]);
+const SEARCH_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
+
+function foldSearchText(value: string): string {
+  return caseFold(value.normalize("NFD")).normalize("NFD");
+}
+
+function foldedSearchTextContains(value: string, query: string): boolean {
+  const foldedSegments: string[] = [];
+  const boundaries = new Set<number>([0]);
+  let foldedLength = 0;
+
+  for (
+    const { segment } of SEARCH_GRAPHEME_SEGMENTER.segment(
+      value.normalize("NFC"),
+    )
+  ) {
+    const foldedSegment = foldSearchText(segment);
+    const segmentStart = foldedLength;
+    foldedSegments.push(foldedSegment);
+    foldedLength += foldedSegment.length;
+    boundaries.add(foldedLength);
+
+    const foldedCodePoints = Array.from(segment, foldSearchText);
+    if (foldedCodePoints.join("") === foldedSegment) {
+      let codePointBoundary = segmentStart;
+      for (let index = 0; index < foldedCodePoints.length - 1; index++) {
+        codePointBoundary += foldedCodePoints[index].length;
+        boundaries.add(codePointBoundary);
+      }
+    }
+  }
+
+  const foldedValue = foldedSegments.join("");
+  for (
+    let match = foldedValue.indexOf(query);
+    match !== -1;
+    match = foldedValue.indexOf(query, match + 1)
+  ) {
+    if (boundaries.has(match) && boundaries.has(match + query.length)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function cellTraversalKey(cell: Cell<unknown>): string {
+  const link = cell.getAsNormalizedFullLink();
+  return hashStringOf({
+    link,
+    cfcLabelView: getCarriedCfcLabelView(cell),
+  });
+}
+
+function cellDocumentTraversalKey(cell: Cell<unknown>): string {
+  const { space, id, scope } = cell.getAsNormalizedFullLink();
+  return hashStringOf({
+    link: { space, id, scope, path: [] },
+    cfcLabelView: getCarriedCfcLabelView(cell),
+  });
+}
+
+function cellValueTraversalKey(cell: Cell<unknown>): string {
+  const { space, id, scope, path } = cell.getAsNormalizedFullLink();
+  return hashStringOf({
+    link: { space, id, scope, path },
+    cfcLabelView: getCarriedCfcLabelView(cell),
+  });
+}
+
+interface PieceOwnerCache {
+  cells: Map<string, Promise<string | undefined>>;
+  documents: Map<string, string | null>;
+}
+
+async function resolveRegisteredDocumentOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+): Promise<string | undefined> {
+  let current = cell;
+  const visited = new Set<string>();
+  const traversed: string[] = [];
+
+  const finish = (owner: string | undefined): string | undefined => {
+    for (const key of traversed) {
+      ownerCache.documents.set(key, owner ?? null);
+    }
+    return owner;
+  };
+
+  while (true) {
+    const key = cellDocumentTraversalKey(current);
+    if (visited.has(key)) {
+      throw new Error(
+        `Cycle found while resolving piece ownership for ${
+          pieceId(cell) ?? "an unknown Cell"
+        }`,
+      );
+    }
+    if (ownerCache.documents.has(key)) {
+      return finish(ownerCache.documents.get(key) ?? undefined);
+    }
+    visited.add(key);
+    traversed.push(key);
+
+    const currentId = pieceId(current);
+    // Nested piece results can point to a parent result. Stop at the nearest
+    // registered result before following its parent metadata.
+    if (currentId !== undefined && registeredPieceIds.has(currentId)) {
+      return finish(currentId);
+    }
+
+    await current.sync();
+    const argumentLink = getMetaLink(current, "argument");
+    if (
+      currentId !== undefined &&
+      (getPatternIdentityRef(current) !== undefined ||
+        argumentLink !== undefined)
+    ) {
+      return finish(currentId);
+    }
+    const resultLink = getMetaLink(current, "result");
+    if (resultLink === undefined) return finish(undefined);
+
+    current = current.runtime.getCellFromLink(
+      { ...resultLink, path: [], schema: undefined },
+      undefined,
+      current.tx,
+      getCarriedCfcLabelView(current),
+    );
+  }
+}
+
+function registeredDocumentOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+): Promise<string | undefined> {
+  const key = cellDocumentTraversalKey(cell);
+  if (ownerCache.documents.has(key)) {
+    return Promise.resolve(ownerCache.documents.get(key) ?? undefined);
+  }
+  return resolveRegisteredDocumentOwner(
+    cell,
+    registeredPieceIds,
+    ownerCache,
+  );
+}
+
+async function resolveRegisteredPieceOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+  cellIsMaterialized: boolean,
+): Promise<string | undefined> {
+  if (!cellIsMaterialized) await cell.sync();
+  return registeredDocumentOwner(
+    cell.resolveAsCell(),
+    registeredPieceIds,
+    ownerCache,
+  );
+}
+
+function registeredPieceOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+  cellIsMaterialized: boolean,
+): Promise<string | undefined> {
+  const key = cellTraversalKey(cell);
+  let owner = ownerCache.cells.get(key);
+  if (owner === undefined) {
+    owner = resolveRegisteredPieceOwner(
+      cell,
+      registeredPieceIds,
+      ownerCache,
+      cellIsMaterialized,
+    );
+    ownerCache.cells.set(key, owner);
+  }
+  return owner;
+}
+
+interface SearchOwnership {
+  pieceId: string;
+  registeredPieceIds: ReadonlySet<string>;
+  ownerCache: PieceOwnerCache;
+}
+
+type SearchEntry =
+  | { key: string }
+  | {
+    value: unknown;
+    ownershipEstablished?: boolean;
+    sourceCell?: Cell<unknown>;
+    isRoot?: boolean;
+  };
+
+function* singleSearchEntry(
+  value: unknown,
+  ownershipEstablished = false,
+  sourceCell?: Cell<unknown>,
+  isRoot = false,
+): IterableIterator<SearchEntry> {
+  yield { value, ownershipEstablished, sourceCell, isRoot };
+}
+
+function* arraySearchEntries(
+  value: unknown[],
+  ignoredKeys: ReadonlySet<string>,
+  sourceCell?: Cell<unknown>,
+  reportReadError?: (error: unknown) => void,
+): IterableIterator<SearchEntry> {
+  for (const key in value) {
+    try {
+      if (!Object.hasOwn(value, key) || ignoredKeys.has(key)) continue;
+      if (isArrayIndexPropertyName(key)) {
+        const index = Number(key);
+        const nested = value[index];
+        yield { value: nested, sourceCell: sourceCell?.key(index) };
+      } else {
+        yield { key };
+        const nested = (value as unknown as Record<string, unknown>)[key];
+        yield { value: nested, sourceCell: sourceCell?.key(key) };
+      }
+    } catch (error) {
+      reportReadError?.(error);
+    }
+  }
+}
+
+function* objectSearchEntries(
+  value: object,
+  ignoredKeys: ReadonlySet<string>,
+  sourceCell?: Cell<unknown>,
+  reportReadError?: (error: unknown) => void,
+): IterableIterator<SearchEntry> {
+  const record = value as Record<string, unknown>;
+  for (const key in value) {
+    try {
+      if (!Object.hasOwn(value, key) || ignoredKeys.has(key)) continue;
+      yield { key };
+      const nested = record[key];
+      yield { value: nested, sourceCell: sourceCell?.key(key) };
+    } catch (error) {
+      reportReadError?.(error);
+    }
+  }
+}
+
+async function searchTextMatches(
+  rootCell: Cell<unknown>,
+  query: string,
+  ownership: SearchOwnership,
+  ignoredRootKeys: ReadonlySet<string> = NO_IGNORED_ROOT_KEYS,
+  reportReadError?: (error: unknown) => void,
+): Promise<boolean> {
+  if (isCell(rootCell)) {
+    const owner = await registeredPieceOwner(
+      rootCell,
+      ownership.registeredPieceIds,
+      ownership.ownerCache,
+      false,
+    );
+    if (owner !== undefined && owner !== ownership.pieceId) return false;
+  }
+
+  const value = await rootCell.pull();
+  const pending: Iterator<SearchEntry>[] = [
+    singleSearchEntry(
+      value,
+      true,
+      isCell(rootCell) ? rootCell : undefined,
+      true,
+    ),
+  ];
+  const seen = new WeakSet<object>();
+  const seenCells = new Set<string>();
+
+  while (pending.length > 0) {
+    let next: IteratorResult<SearchEntry>;
+    try {
+      next = pending[pending.length - 1].next();
+    } catch (error) {
+      pending.pop();
+      reportReadError?.(error);
+      continue;
+    }
+    if (next.done) {
+      pending.pop();
+      continue;
+    }
+
+    if ("key" in next.value) {
+      if (foldedSearchTextContains(next.value.key, query)) return true;
+      continue;
+    }
+    const current = next.value.value;
+
+    if (current !== null && typeof current === "object" && isCell(current)) {
+      if (!isReadableCell(current)) continue;
+
+      try {
+        const cellKey = cellTraversalKey(current);
+        if (seenCells.has(cellKey)) continue;
+        seenCells.add(cellKey);
+
+        if (!next.value.ownershipEstablished) {
+          const owner = await registeredPieceOwner(
+            current,
+            ownership.registeredPieceIds,
+            ownership.ownerCache,
+            false,
+          );
+          if (owner !== undefined && owner !== ownership.pieceId) continue;
+        }
+
+        const nested = await current.pull();
+        if (nested !== current) {
+          pending.push(singleSearchEntry(nested, true, current));
+        }
+      } catch (error) {
+        reportReadError?.(error);
+      }
+      continue;
+    }
+
+    let sourceCell = next.value.sourceCell;
+    let ownershipEstablished = next.value.ownershipEstablished ?? false;
+    if (sourceCell !== undefined && !ownershipEstablished) {
+      try {
+        const owner = await registeredPieceOwner(
+          sourceCell,
+          ownership.registeredPieceIds,
+          ownership.ownerCache,
+          true,
+        );
+        if (owner !== undefined && owner !== ownership.pieceId) continue;
+        ownershipEstablished = true;
+      } catch (error) {
+        reportReadError?.(error);
+        continue;
+      }
+    }
+
+    if (current === null || typeof current !== "object") {
+      if (
+        typeof current !== "function" &&
+        foldedSearchTextContains(String(current), query)
+      ) {
+        return true;
+      }
+      continue;
+    }
+
+    if (isCellResult(current)) {
+      try {
+        const backingCell = getCellOrThrow(current);
+        const valueWasPulledFromBackingCell = sourceCell !== undefined &&
+          cellValueTraversalKey(sourceCell) ===
+            cellValueTraversalKey(backingCell);
+        sourceCell = backingCell;
+        if (!ownershipEstablished) {
+          const owner = await registeredPieceOwner(
+            sourceCell,
+            ownership.registeredPieceIds,
+            ownership.ownerCache,
+            true,
+          );
+          if (owner !== undefined && owner !== ownership.pieceId) continue;
+          ownershipEstablished = true;
+        }
+
+        if (!valueWasPulledFromBackingCell) {
+          const cellKey = cellTraversalKey(sourceCell);
+          if (seenCells.has(cellKey)) continue;
+          seenCells.add(cellKey);
+
+          const materializedCell = sourceCell.asSchema(true);
+          const nested = await materializedCell.pull();
+          pending.push(singleSearchEntry(
+            nested,
+            true,
+            materializedCell,
+            next.value.isRoot,
+          ));
+          continue;
+        }
+      } catch (error) {
+        reportReadError?.(error);
+        continue;
+      }
+    }
+
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      pending.push(arraySearchEntries(
+        current,
+        next.value.isRoot ? ignoredRootKeys : NO_IGNORED_ROOT_KEYS,
+        sourceCell,
+        reportReadError,
+      ));
+      continue;
+    }
+
+    if (current instanceof FabricSpecialObject) {
+      const representations: SearchEntry[] = [];
+      if (current.toString !== Object.prototype.toString) {
+        try {
+          representations.push({ value: String(current) });
+        } catch (error) {
+          reportReadError?.(error);
+        }
+      }
+      try {
+        representations.push({ value: codecOf(current).encode(current) });
+      } catch (error) {
+        reportReadError?.(error);
+      }
+      if (representations.length > 0) {
+        pending.push(representations[Symbol.iterator]());
+      }
+      continue;
+    }
+
+    if (!isPlainObject(current)) continue;
+    pending.push(objectSearchEntries(
+      current,
+      next.value.isRoot ? ignoredRootKeys : NO_IGNORED_ROOT_KEYS,
+      sourceCell,
+      reportReadError,
+    ));
+  }
+
+  return false;
+}
+
+/**
+ * Find pieces with a full Unicode case-insensitive substring in their input or
+ * result data. Matches begin and end at canonically normalized code-point
+ * boundaries. Object keys and scalar values are searched recursively. Piece
+ * metadata is returned for matching pieces but does not participate in
+ * matching.
+ */
+export async function searchPieces(
+  config: SpaceConfig,
+  query: string,
+  deps: PieceOperationDependencies = {},
+): Promise<PieceSearchResult[]> {
+  if (query.length === 0) {
+    throw new Error("Search query must not be empty.");
+  }
+
+  const normalizedQuery = foldSearchText(query);
+  // TODO(@ianh): Add an API for clients to initiate server-side searches
+  // against a server-hosted index.
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const registeredPieces = await pieces.getRegisteredPieces();
+  const registeredPieceIds = new Set(
+    registeredPieces.map((piece) => piece.id),
+  );
+  const ownerCache: PieceOwnerCache = {
+    cells: new Map(),
+    documents: new Map(),
+  };
+  const matches: Array<PieceSearchResult | undefined> = new Array(
+    registeredPieces.length,
+  );
+  const reportSearchError = deps.reportSearchError ??
+    ((
+      pieceId: string,
+      source: "input data" | "result data" | "metadata",
+      error: unknown,
+    ) => {
+      console.warn(
+        `Warning: Could not read ${source} for piece ${pieceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  let nextPieceIndex = 0;
+
+  const searchNextPiece = async (): Promise<void> => {
+    while (nextPieceIndex < registeredPieces.length) {
+      const index = nextPieceIndex++;
+      const piece = registeredPieces[index];
+
+      let inputMatches = false;
+      try {
+        const inputCell = await piece.input.getCell();
+        inputMatches = await searchTextMatches(
+          inputCell,
+          normalizedQuery,
+          { pieceId: piece.id, registeredPieceIds, ownerCache },
+          NO_IGNORED_ROOT_KEYS,
+          (error) => reportSearchError(piece.id, "input data", error),
+        );
+      } catch (error) {
+        reportSearchError(piece.id, "input data", error);
+      }
+
+      let resultMatches = false;
+      if (!inputMatches) {
+        try {
+          const resultCell = await piece.result.getCell();
+          resultMatches = await searchTextMatches(
+            resultCell,
+            normalizedQuery,
+            { pieceId: piece.id, registeredPieceIds, ownerCache },
+            RESULT_IGNORED_ROOT_KEYS,
+            (error) => reportSearchError(piece.id, "result data", error),
+          );
+        } catch (error) {
+          reportSearchError(piece.id, "result data", error);
+        }
+      }
+
+      if (inputMatches || resultMatches) {
+        let name: string | undefined;
+        try {
+          name = piece.name();
+        } catch (error) {
+          reportSearchError(piece.id, "metadata", error);
+        }
+        let patternRef: PiecePatternRef | undefined;
+        try {
+          patternRef = await piece.getPatternRef();
+        } catch (error) {
+          reportSearchError(piece.id, "metadata", error);
+        }
+        matches[index] = { id: piece.id, name, patternRef };
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      {
+        length: Math.min(
+          PIECE_SEARCH_CONCURRENCY,
+          registeredPieces.length,
+        ),
+      },
+      searchNextPiece,
+    ),
+  );
+
+  return matches.filter((piece): piece is PieceSearchResult =>
+    piece !== undefined
   );
 }
 
@@ -393,12 +1073,14 @@ export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
   options?: { start?: boolean; slug?: string },
+  deps: PieceOperationDependencies = {},
 ): Promise<string> {
   const manager = await timeCliPhase(
     "newPiece.loadManager",
-    () => loadManager(config),
+    () => (deps.loadManager ?? loadManager)(config),
   );
-  const pieces = new PiecesController(manager);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
 
   // The default pattern is a hard requirement for this command: even when the
   // user's pattern doesn't use it, registration below (manager.add) sends an
@@ -424,19 +1106,39 @@ export async function newPiece(
 
   const program = await timeCliPhase(
     "newPiece.getProgramFromFile",
-    () => getPinnedProgramFromFile(manager, entry),
+    () =>
+      (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+        manager,
+        entry,
+      ),
   );
+  // A piece whose pattern never settles leaves `pieces.create` awaiting a
+  // scheduler `idle()` that never resolves, and the runtime surfaces no
+  // event that a start has definitively failed (a thrown pattern reports its
+  // error and still resolves; a stuck async load reports nothing). This
+  // wall-clock bound is the only thing that turns that hang into a message.
+  // When it fires, report the actual runtime error the pattern recorded while
+  // starting rather than only pointing at the server logs.
   const PIECE_START_TIMEOUT_MS = 60_000;
+  const runtimeErrors = runtimeErrorLog(manager.runtime);
+  const errorCountBefore = runtimeErrors.length;
   const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, { start: options?.start });
+    const createPromise = pieces.create(program, {
+      repository: entry.repository,
+      start: options?.start,
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
+        const recorded = runtimeErrors.slice(errorCountBefore).at(-1)?.message;
+        const detail = recorded !== undefined
+          ? `A runtime error was reported while it started: ${recorded}`
+          : `Check toolshed logs for runtime errors.`;
         reject(
           new Error(
             `Piece created but failed to start within ${
               PIECE_START_TIMEOUT_MS / 1000
-            }s. ` + `Check toolshed logs for runtime errors.`,
+            }s. ${detail}`,
           ),
         );
       }, PIECE_START_TIMEOUT_MS);
@@ -453,7 +1155,7 @@ export async function newPiece(
     );
   }
 
-  // Explicitly add the piece to the space's allPieces list
+  // Explicitly add the piece to the space's registry.
   await timeCliPhase(
     "newPiece.addToDefaultPattern",
     () => manager.add([piece.getCell()]),
@@ -515,17 +1217,35 @@ export async function setPieceSlug(
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
+  options: SetPiecePatternOptions = {},
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  await piece.setPattern(await getPinnedProgramFromFile(manager, entry));
+  await piece.setPattern(
+    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+      manager,
+      entry,
+    ),
+    {
+      repository: entry.repository,
+      ...(options.dangerouslyAllowIncompatibleSchema
+        ? { dangerouslyAllowIncompatibleSchema: true }
+        : {}),
+    },
+  );
 }
 
 export async function savePiecePattern(
@@ -631,18 +1351,30 @@ async function tryResolvePieceHandler(
     },
     required: [callableName],
   });
-  if (!isHandlerCell(streamRoot.key(callableName))) {
+  const streamCell = streamRoot.key(callableName);
+  if (!isHandlerCell(streamCell)) {
     return null;
   }
 
+  // Dispatch through the cell whose stream-ness this path just proved, not a
+  // second cell built by reading the schema back from links. Both address the
+  // same target — `getResult` is the identity on the piece cell — so they
+  // differ only in schema, and a link-derived schema is exactly what defeated
+  // the ordinary detection paths above. Sending on that cell takes `.set()`'s
+  // non-stream branch (`packages/runner/src/cell.ts:1316`) and fails with
+  // "Transaction required for .set()" instead of queueing the event, so a verb
+  // this path lists is a verb that could not be called.
   const rootCell = await piece.result.getCell();
-  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  const linkDerivedCell = rootCell.key(callableName).asSchemaFromLinks();
   return {
-    callableCell,
+    callableCell: streamCell,
     callableKind: "handler",
     cellKey: callableName,
     cellProp: "result",
-    commandSpec: callableCommandSpec(callableCell, "handler"),
+    // The link-derived cell still carries whatever payload schema the piece
+    // does publish, which the forced stream cast does not; keep using it for
+    // the command spec so `--help` and input validation are unaffected.
+    commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
     manager,
     piece,
     space,
@@ -686,11 +1418,18 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-async function resolvePieceCallable(
+/** Load the target piece and its manager for callable resolution/listing —
+ * one shared path so `cf piece call` and `cf piece verbs` always see the same
+ * piece state. */
+async function loadPieceForCallables(
   config: PieceConfig,
-  callableName: string,
   deps: PieceCallableDependencies = {},
-): Promise<ResolvedPieceCallable> {
+): Promise<{
+  manager: any;
+  piece: any;
+  space: string;
+  resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
+}> {
   const manager = await (deps.loadManager ?? loadManager)(config);
   const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
@@ -720,6 +1459,18 @@ async function resolvePieceCallable(
       resolvedConfig.pieceScope,
     ));
   const space = manager.getSpace?.() ?? config.space;
+  return { manager, piece, space, resolvedConfig };
+}
+
+async function resolvePieceCallable(
+  config: PieceConfig,
+  callableName: string,
+  deps: PieceCallableDependencies = {},
+): Promise<ResolvedPieceCallable> {
+  const { manager, piece, space, resolvedConfig } = await loadPieceForCallables(
+    config,
+    deps,
+  );
 
   const resolved = (await tryResolvePieceCallableAt(
     piece,
@@ -762,13 +1513,146 @@ async function resolvePieceCallable(
   return resolved;
 }
 
+/** `cf piece verbs` output: the deployed pattern's source identity plus one
+ * row per callable. The identity is the skew detector — a client or skill
+ * comparing it against the contract it was written for can tell it targets a
+ * newer pattern than the live piece, instead of discovering the mismatch
+ * through a silently dropped field (design: Verb discovery). */
+export interface PieceCallablesListing {
+  /** The deployed pattern's source identity; null when the piece exposes
+   * none (e.g. harness doubles). */
+  pattern: PiecePatternRef | null;
+  verbs: PieceCallableListing[];
+}
+
+/** One row of `cf piece verbs`: a callable the piece exposes. */
+export interface PieceCallableListing {
+  name: string;
+  kind: "handler" | "tool";
+  /** Which cell the callable lives on. `result` shadows `input` on a name
+   * collision, matching `cf piece call`'s resolution order. */
+  on: "result" | "input";
+  /** The verb's input schema — the same schema `call <verb> --help --json`
+   * serves. `true` means unconstrained. */
+  inputSchema: JSONSchema | true;
+  /** Tools only, until handlers gain declared results (verb contract WS-C). */
+  outputSchema?: JSONSchema;
+}
+
+/**
+ * Enumerate every callable a piece exposes (verb contract: Verb discovery,
+ * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
+ * listed — hiding is a display default that arrives with the wrapper-tier
+ * marker, never a capability boundary; until the marker exists, the list IS
+ * the full surface. Walks result then input with the same classification
+ * `cf piece call` resolves through, so the listing and the dispatcher can
+ * never disagree about what is callable.
+ */
+export async function listPieceCallables(
+  config: PieceConfig,
+  deps: PieceCallableDependencies = {},
+): Promise<PieceCallablesListing> {
+  const { piece } = await loadPieceForCallables(config, deps);
+  let pattern: PiecePatternRef | null = null;
+  if (typeof piece.getPatternRef === "function") {
+    try {
+      pattern = (await piece.getPatternRef()) ?? null;
+    } catch {
+      pattern = null; // Identity is advisory; the listing itself still holds.
+    }
+  }
+
+  const listings = new Map<string, PieceCallableListing>();
+  // Names ordinary detection rejected: candidates for the forced-stream
+  // fallback below, so the listing covers every path `cf piece call` resolves.
+  const rejected = new Set<string>();
+  let resultRoot: any;
+  for (const cellProp of ["result", "input"] as const) {
+    const rootCell = await piece[cellProp].getCell();
+    if (cellProp === "result") resultRoot = rootCell;
+    const value = rootCell.get?.();
+    const schema = rootCell.schema;
+    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
+      ? Object.keys(schema.properties)
+      : [];
+    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    for (const name of new Set([...valueKeys, ...schemaKeys])) {
+      if (listings.has(name)) continue; // result shadows input, like call
+      const callableCell = rootCell.key(name).asSchemaFromLinks();
+      const kind = detectCallableKind(
+        getCallableValue(value, name),
+        callableCell,
+      );
+      if (!kind) {
+        rejected.add(name);
+        continue;
+      }
+      rejected.delete(name);
+      const spec = callableCommandSpec(callableCell, kind);
+      listings.set(name, {
+        name,
+        kind,
+        on: cellProp,
+        inputSchema: spec.inputSchema,
+        ...(spec.outputSchemaSummary !== undefined
+          ? { outputSchema: spec.outputSchemaSummary }
+          : {}),
+      });
+    }
+  }
+
+  // Third resolution path, mirrored from resolvePieceCallable: a handler whose
+  // schema lost the stream marker still dispatches via the forced stream cast
+  // (tryResolvePieceHandler). Probe every rejected name the same way so a
+  // callable-by-name verb can never be absent from the listing.
+  const pieceCell = typeof piece.getCell === "function"
+    ? piece.getCell()
+    : undefined;
+  if (pieceCell && typeof pieceCell.asSchema === "function") {
+    const pieceValue = pieceCell.get?.();
+    if (isRecord(pieceValue)) {
+      for (const name of Object.keys(pieceValue)) {
+        if (!listings.has(name)) rejected.add(name);
+      }
+    }
+    for (const name of rejected) {
+      if (listings.has(name)) continue;
+      const streamRoot = pieceCell.asSchema({
+        type: "object",
+        properties: { [name]: { asCell: ["stream"] } },
+        required: [name],
+      });
+      if (!isHandlerCell(streamRoot.key(name))) continue;
+      const callableCell = resultRoot.key(name).asSchemaFromLinks();
+      const spec = callableCommandSpec(callableCell, "handler");
+      listings.set(name, {
+        name,
+        kind: "handler",
+        on: "result",
+        inputSchema: spec.inputSchema,
+      });
+    }
+  }
+
+  // Byte-order, not locale collation: this is a machine-readable surface and
+  // must sort identically on every host (utf8Compare is the repo comparator).
+  return {
+    pattern,
+    verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
+  };
+}
+
 export async function executePieceCallable(
   config: PieceConfig,
   callableName: string,
   rawArgs: string[],
   deps: PieceCallableDependencies = {},
 ): Promise<ExecutedPieceCallable> {
-  const resolved = await resolvePieceCallable(config, callableName, deps);
+  const resolved = await resolvePieceCallable(
+    config,
+    callableName,
+    deps,
+  );
   return await executeCallableCommand({
     resolved,
     execution: resolved,
@@ -1149,18 +2033,26 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(config: PieceConfig): Promise<{
+export async function inspectPiece(
+  config: PieceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<{
   id: string;
   name?: string;
+  patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
-  const manager = await loadManager(config);
+  const manager = await (deps.loadManager ?? loadManager)(config);
   let resolvedConfig: PieceConfig;
   try {
-    resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+    resolvedConfig = await resolvePieceConfigWithManager(
+      config,
+      manager,
+      deps.resolvePieceAddress,
+    );
   } catch (error) {
     if (
       error instanceof SlugResolutionError &&
@@ -1170,7 +2062,8 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     }
     throw error;
   }
-  const pieces = new PiecesController(manager);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1180,6 +2073,7 @@ export async function inspectPiece(config: PieceConfig): Promise<{
 
   const id = piece.id;
   const name = piece.name();
+  const patternRef = await piece.getPatternRef();
   const source = (await piece.input.get()) as Readonly<unknown>;
   const result = (await piece.result.get()) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
@@ -1194,6 +2088,7 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   return {
     id,
     name,
+    patternRef,
     source,
     result,
     readingFrom,
@@ -1207,6 +2102,7 @@ async function inspectSlugTargetCell(
 ): Promise<{
   id: string;
   name?: string;
+  patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -1218,10 +2114,26 @@ async function inspectSlugTargetCell(
   const name = isRecord(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
+  const identityRef = getPatternIdentityRef(target);
+  const patternRef: PiecePatternRef | undefined = identityRef === undefined
+    ? undefined
+    : {
+      ...identityRef,
+      source: {
+        ref: formatFabricRef({
+          ref: {
+            kind: "uri",
+            scheme: "pattern",
+            hash: identityRef.identity,
+          },
+        }),
+      },
+    };
 
   return {
     id: slug,
     name,
+    patternRef,
     result,
     readingFrom: [],
     readBy: [],
@@ -1257,21 +2169,67 @@ export function formatViewTree(view: unknown): string {
 export async function getCellValue(
   config: PieceConfig,
   path: (string | number)[],
-  options?: { input?: boolean },
+  options: GetCellValueOptions = {},
+  deps: PieceOperationDependencies = {},
 ): Promise<unknown> {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const shouldStep = options.step === true;
   const piece = await pieces.get(
     resolvedConfig.piece,
-    false,
+    shouldStep,
     undefined,
     resolvedConfig.pieceScope,
   );
-  if (options?.input) {
-    return await piece.input.get(path);
-  } else {
-    return await piece.result.get(path);
+
+  try {
+    if (shouldStep) {
+      await piece.getCell().pull();
+      const rootCell =
+        await (options.input ? piece.input.getCell() : piece.result.getCell());
+      const targetCell = rootCell.key(...path);
+      await targetCell.pull();
+      await manager.synced();
+      await manager.runtime.idle();
+      await manager.synced();
+    }
+
+    let value: unknown;
+    try {
+      const prop = options.input ? "input" : "result";
+      value = await timeCliPhase(
+        `getCellValue.${prop}.get`,
+        () => piece[prop].get(path),
+      );
+    } catch (error) {
+      if (
+        !options.input && error instanceof Error &&
+        error.message.startsWith("Cannot access path") &&
+        await resultProjectionFailedAtPath(piece, path)
+      ) {
+        throw new PieceResultProjectionError(path, shouldStep);
+      }
+      throw error;
+    }
+
+    if (
+      !options.input && value === undefined &&
+      await resultProjectionFailedAtPath(piece, path)
+    ) {
+      throw new PieceResultProjectionError(path, shouldStep);
+    }
+
+    return value;
+  } finally {
+    if (shouldStep) {
+      await pieces.stop(resolvedConfig.piece);
+    }
   }
 }
 
@@ -1394,13 +2352,21 @@ function isVNodeLike(value: unknown): value is VNode {
 export async function setHomePattern(
   config: Omit<SpaceConfig, "space">,
   entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const identity = await loadIdentity(config.identity);
+  const identity = await (deps.loadIdentity ?? loadIdentity)(config.identity);
   const homeConfig: SpaceConfig = { ...config, space: identity.did() };
-  const manager = await loadManager(homeConfig);
-  const program = await getProgramFromFile(manager, entry);
-  const pieces = new PiecesController(manager);
-  await pieces.recreateDefaultPattern({ customProgram: program });
+  const manager = await (deps.loadManager ?? loadManager)(homeConfig);
+  const program = await (deps.getProgramFromFile ?? getProgramFromFile)(
+    manager,
+    entry,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  await pieces.recreateDefaultPattern({
+    customProgram: program,
+    repository: entry.repository,
+  });
 }
 
 /**

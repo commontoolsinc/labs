@@ -15,8 +15,6 @@ import {
   AuthSchema,
   CHIP_UI,
   FS,
-  ID,
-  ID_FIELD,
   NAME,
   schema as schemaIdentity,
   SELF,
@@ -27,7 +25,16 @@ import {
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
-import { action, byRef, computed, handler, lift } from "./module.ts";
+import {
+  action,
+  assert,
+  assertCapture,
+  assertRenderParts,
+  byRef,
+  computed,
+  handler,
+  lift,
+} from "./module.ts";
 import {
   compileAndRun,
   fetchBinary,
@@ -74,18 +81,25 @@ import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricBytes,
   FabricEpochDays,
   FabricEpochNsec,
   FabricHash,
+  FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   toCompactDebugString,
   toIndentedDebugString,
 } from "@commonfabric/data-model/value-debug";
 import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
-import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
 import {
   registerUnsafeHostTrustedValue,
   type UnsafeHostTrust,
@@ -135,6 +149,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     trustValue(
       (computed as (...args: any[]) => unknown)(...args),
     )) as typeof computed;
+  const trustedAssert = ((...args: any[]) =>
+    trustValue(
+      (assert as (...args: any[]) => unknown)(...args),
+    )) as typeof assert;
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
@@ -169,6 +187,14 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     handler: trustedHandler,
     action,
     computed: trustedComputed,
+    assert: trustedAssert,
+
+    // Operand recording for transformer-instrumented `assert` bodies. Plain
+    // data in, plain data out — no builder artifact to trust. `assertCapture`
+    // stashes each operand's value; `assertRenderParts` renders them only when
+    // the assertion failed.
+    assertCapture,
+    assertRenderParts,
 
     // Built-in modules
     str: trustedStr,
@@ -239,16 +265,12 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Environment
     getPatternEnvironment,
-    nonPrivateRandom,
-    safeDateNow,
 
     // Entity utilities
     getEntityId,
     entityRefToString,
 
     // Constants
-    ID,
-    ID_FIELD,
     SELF,
     TYPE,
     NAME,
@@ -272,16 +294,26 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Fabric value classes -- runtime values backing the type declarations
     // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-    // checks in patterns.
+    // checks in patterns. `FabricSpecialObject` is abstract; it is bound for
+    // `instanceof` only. Listed in declaration order, so this list and the
+    // declarations in api/index.ts can be compared directly.
+    FabricSpecialObject,
     FabricInstance,
     FabricPrimitive,
     FabricEpochNsec,
     FabricEpochDays,
     FabricHash,
+    FabricLink,
+    FabricBytes,
+    FabricRegExp,
+    FabricError,
 
     // Debug stringifiers (helpers exposed for pattern code)
     toCompactDebugString,
     toIndentedDebugString,
+
+    // Value comparison helper exposed for pattern code
+    valueEqual,
   } as BuilderFunctionsAndConstants & {
     __cfHelpers?: BuilderFunctionsAndConstants;
   };

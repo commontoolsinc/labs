@@ -56,6 +56,10 @@ const DEFAULT_ADVERTISED_FLAGS = {
   syncSchemaTable: false,
   sqliteCommitRowLabelEval: true,
   syncSchemaTableV2: true,
+  pendingReadStacks: true,
+  entityIdListing: true,
+  entityIdPagination: true,
+  entityIdLookup: true,
 };
 
 /** Run `fn` with the named env vars set (undefined = force-unset), restoring

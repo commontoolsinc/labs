@@ -1,11 +1,12 @@
 /**
  * Record Backup Pattern - Import/Export for Records
  *
- * Exports all Records in a space to a single JSON file and imports them back.
- * Designed for data survival after server wipes.
+ * Exports registered Records in a space to one JSON file and imports them
+ * back. Records outside the piece registry are not included, so this is not a
+ * complete backup of the space's stored data.
  *
  * Features:
- * - Discovers all Records using wish({ query: "#default" })
+ * - Discovers registered Records using wish({ query: "#pieceRegistry" })
  * - Extracts module data using registry's fieldMapping
  * - Preserves wiki-links in notes as-is
  * - Includes trashed modules in export
@@ -20,8 +21,9 @@ import {
   NAME,
   navigateTo,
   pattern,
-  safeDateNow,
+  type Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -78,6 +80,8 @@ interface Input {
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   exportedJson: string;
   importJson: string;
   recordCount: number;
@@ -86,7 +90,7 @@ export interface Output {
 
 // ===== Type for Record piece =====
 
-interface RecordPiece {
+export interface RecordPiece {
   "#record"?: boolean;
   title?: string;
   subPieces?: SubPieceEntry[];
@@ -168,12 +172,17 @@ function extractModuleData(
 }
 
 /**
- * Build export data from all Records in the space
+ * Build export data from registered Records in the space.
  */
 const buildExportData = lift(
-  ({ allPieces }: { allPieces: RecordPiece[] }): ExportData => {
+  (
+    { pieceRegistry, now }: {
+      pieceRegistry: RecordPiece[];
+      now: number | undefined;
+    },
+  ): ExportData => {
     // Filter to only Record patterns
-    const records = (allPieces || []).filter(
+    const records = (pieceRegistry || []).filter(
       (piece) => piece?.["#record"] === true,
     );
 
@@ -223,7 +232,7 @@ const buildExportData = lift(
 
     return {
       version: "1.0",
-      exportDate: new Date(safeDateNow()).toISOString(),
+      exportDate: now == null ? "" : new Date(now).toISOString(),
       records: exportedRecords,
     };
   },
@@ -414,10 +423,10 @@ const importRecords = handler<
   Record<string, never>,
   {
     importJson: Writable<string>;
-    allPieces: Writable<RecordPiece[]>;
+    addPiece: Stream<{ piece: Writable<RecordPiece> }>;
     importResult: Writable<ImportResult | null>;
   }
->((_, { importJson, allPieces, importResult }) => {
+>((_, { importJson, addPiece, importResult }) => {
   const jsonText = importJson.get();
   const parseResult = parseImportJson(jsonText);
 
@@ -535,14 +544,13 @@ const importRecords = handler<
 
       // Create the Record with all its modules
       // deno-lint-ignore no-explicit-any
-      const record = (Record as any)({
+      const record: Writable<RecordPiece> = (Record as any)({
         title: recordData.title,
         subPieces: subPieces,
         trashedSubPieces: trashedSubPieces,
       });
 
-      // Push to allPieces to persist
-      allPieces.push(record as RecordPiece);
+      addPiece.send({ piece: record });
       createdRecords.push(record);
       result.imported++;
     } catch (e) {
@@ -614,14 +622,22 @@ const handleFileUpload = handler<
 
 // ===== The Pattern =====
 
-export default pattern<Input, Output>(({ importJson }) => {
-  // Get all pieces in the space
-  const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
+export default pattern<Input, Output>((input) => {
+  const { importJson } = input;
+  // Get registered pieces in the space
+  const pieceRegistry = wish<RecordPiece[]>({
+    query: "#pieceRegistry",
+  }).result!;
+  const addPiece = wish<Stream<{ piece: Writable<RecordPiece> }>>({
     query: "#default",
+    path: ["addPiece"],
   }).result!;
 
+  // Current time, sourced from the reactive #now cell (coarsened to 1s).
+  const nowCell = wish<number>({ query: "#now" });
+
   // Build export data
-  const exportData = buildExportData({ allPieces });
+  const exportData = buildExportData({ pieceRegistry, now: nowCell.result });
   const exportedJson = formatExportJson({ exportData });
   const recordCount = countRecords({ exportData });
 
@@ -675,9 +691,13 @@ export default pattern<Input, Output>(({ importJson }) => {
                 </p>
                 <cf-file-download
                   $data={exportedJson}
-                  filename={`record-backup-${
-                    new Date(safeDateNow()).toISOString().slice(0, 10)
-                  }.json`}
+                  filename={computed(() =>
+                    `record-backup-${
+                      nowCell.result == null
+                        ? ""
+                        : new Date(nowCell.result).toISOString().slice(0, 10)
+                    }.json`
+                  )}
                   mimeType="application/json"
                   variant="primary"
                   allowAutosave
@@ -734,7 +754,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <cf-button
                   onClick={importRecords({
                     importJson,
-                    allPieces,
+                    addPiece,
                     importResult,
                   })}
                   variant="primary"

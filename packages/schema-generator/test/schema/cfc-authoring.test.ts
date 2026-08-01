@@ -517,8 +517,22 @@ describe("Schema: CFC authoring aliases", () => {
       "/main.ts",
       "SchemaRoot",
     );
+    const seenWriterSources: string[] = [];
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      createSchemaTransformerV2().generateSchema(
+        type,
+        checker,
+        undefined,
+        {
+          writerIdentityForSourceFile: (fileName) => {
+            seenWriterSources.push(fileName);
+            return {
+              file: `/authored${fileName}`,
+              moduleIdentity: `identity:${fileName}`,
+            };
+          },
+        },
+      ),
     );
 
     const writeAuthorizedByClaims: unknown[] = [];
@@ -542,10 +556,12 @@ describe("Schema: CFC authoring aliases", () => {
 
     expect(writeAuthorizedByClaims).toContainEqual({
       __ctWriterIdentityOf: {
-        file: "/trusted.ts",
+        file: "/authored/trusted.ts",
         path: ["commitTrustedMessageSend"],
+        moduleIdentity: "identity:/trusted.ts",
       },
     });
+    expect(seenWriterSources).toContain("/trusted.ts");
   });
 
   it("falls back to ordinary schema generation when a canonical alias expansion cannot be resolved", async () => {

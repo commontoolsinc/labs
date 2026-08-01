@@ -1,11 +1,12 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import {
   emptySchemaObject,
   schemaForValueType,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { type LegacyAlias } from "../sigil-types.ts";
+import { type AliasBinding } from "../sigil-types.ts";
 import {
   type FactoryInput,
   isPattern,
@@ -24,7 +25,7 @@ import {
 } from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { Runtime } from "../runtime.ts";
-import { isCellLink, isLegacyAlias, parseLink } from "../link-utils.ts";
+import { isAliasBinding, isCellLink, parseLink } from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -35,9 +36,9 @@ export type CellAliasResolver = (
   cell: Reactive<any>,
   path: readonly PropertyKey[],
   ignoreSelfAliases: boolean,
-) => LegacyAlias | null | undefined;
+) => AliasBinding | null | undefined;
 
-export function toJSONWithLegacyAliases(
+export function toJSONWithAliasBindings(
   value: FactoryInput<any>,
   resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
@@ -76,8 +77,8 @@ export function toJSONWithLegacyAliases(
   }
 
   // If we encounter a link, it's from a nested pattern.
-  if (isLegacyAlias(value)) {
-    const alias = (value as LegacyAlias).$alias;
+  if (isAliasBinding(value)) {
+    const alias = (value as AliasBinding).$alias;
     // If this was a shadow ref, i.e. a nested pattern, see whether we're now at
     // the level that it should be resolved to the actual cell.
     if (alias.partialCause !== undefined) {
@@ -89,19 +90,19 @@ export function toJSONWithLegacyAliases(
           ...(alias.scope !== undefined && { scope: alias.scope }),
           ...(alias.schema !== undefined && { schema: alias.schema }),
         },
-      } satisfies LegacyAlias;
+      } satisfies AliasBinding;
     } else if (!("cell" in alias) || typeof (alias.cell) === "string") {
       // If we encounter an existing alias and it isn't an absolute reference
-      // with a cell id, then increase the nesting level.
+      // with a cell id, then increase the nesting level. (Named-cell aliases
+      // carry no scope; only partialCause aliases do.)
       return {
         $alias: {
+          cell: alias.cell,
           defer: (alias.defer ?? 0) + 1,
           path: alias.path,
-          ...(alias.scope !== undefined && { scope: alias.scope }),
           ...(alias.schema !== undefined && { schema: alias.schema }),
-          ...(alias.cell !== undefined && { cell: alias.cell }),
         },
-      } satisfies LegacyAlias;
+      } satisfies AliasBinding;
     } else {
       throw new Error(`Invalid alias cell`);
     }
@@ -110,11 +111,19 @@ export function toJSONWithLegacyAliases(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
-      toJSONWithLegacyAliases(v, resolveCellAlias, ignoreSelfAliases, [
+      toJSONWithAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,
         i,
       ], seen)
     );
+  }
+
+  // A `FabricPrimitive` is an atomic value whose state lives in private fields
+  // (zero enumerable own-props). The `for...in` copy branch below would flatten
+  // it to `{}`, so return it unchanged here — after the cell / alias / array
+  // handling above, which must still win for those forms.
+  if (value instanceof FabricPrimitive) {
+    return value as unknown as JSONValue;
   }
 
   // If this is an object or a pattern, process each key recursively.
@@ -139,13 +148,15 @@ export function toJSONWithLegacyAliases(
       : (value as Record<string, any>);
 
     const result: any = {};
-    // TODO(danfuzz): This `isRecord`-gated `for...in` walk has no
-    // `FabricSpecialObject` guard, so a `FabricPrimitive` (state in private
-    // fields, zero enumerable own-props) flattens to `{}` and a
-    // `FabricInstance` is walked by its internal slots instead of its codec
-    // contents.
+    // TODO(danfuzz): A `FabricPrimitive` is now returned atomically above, but
+    // the other special-object type, `FabricInstance` (a container), still
+    // reaches this `for...in` copy and is walked by its internal slots (zero
+    // enumerable own-props) instead of its codec contents. Unlike a primitive it
+    // *does* need descending into — but by its actual contents, which this walk
+    // won't do correctly. This site will need attention once FabricInstances see
+    // real use.
     for (const key in valueToProcess as any) {
-      const jsonValue = toJSONWithLegacyAliases(
+      const jsonValue = toJSONWithAliasBindings(
         valueToProcess[key],
         resolveCellAlias,
         ignoreSelfAliases,
@@ -219,15 +230,17 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
       // Shouldn't happen: We have a cell link but its link doesn't correspond
       // to a cell.
 
-      // TODO(danfuzz): I think the `TODO(seefeld)` below reflects the old state
-      // of `createJsonSchema()` which was defined to return a
-      // `JSONSchemaObjMutable` (which had to be an `object`) and not a
-      // `JSONSchema` (which includes `boolean`), and not some other problem
-      // with returning `true`. That said, maybe it's more appropriate to
-      // `throw` in this case? Figure out what's what, and take action as
-      // appropriate.
-
-      // TODO(seefeld): Should be `true`.
+      // Returning `true` (the JSON Schema "accept anything" literal) is now
+      // type-legal here: `analyzeType()` returns `JSONSchema`, which is
+      // `JSONSchemaObj | boolean`. The obstacle is no longer the type, it is
+      // schema IDENTITY -- `analyzeType()` results are interned, so `{}` and
+      // `true` are distinct interned schemas with distinct hashes. Swapping
+      // them changes generated schemas that reach storage, which makes it a
+      // migration rather than a cleanup.
+      //
+      // TODO(danfuzz): Decide whether this branch should `throw` instead. It is
+      // reached only when a cell link resolves to no cell, which is a
+      // "shouldn't happen" -- returning an accept-anything schema hides it.
       return emptySchemaObject();
     }
 
@@ -261,10 +274,9 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
 
   const basicSchema = schemaForValueType(value);
   if (basicSchema === undefined) {
-    // TODO(danfuzz): I think it's safe to return `true` here. (See longer
-    // related comment above.)
-
-    // Unrecognized type. Treat it as "any."
+    // Unrecognized type. Treat it as "any." (`true` would say the same thing
+    // and is type-legal; see the interning note above for why it is not a
+    // drop-in swap.)
     return finishResult(emptySchemaObject());
   }
 
@@ -309,9 +321,9 @@ function itemsSchemaFromArray(
   // No need for any fanciness for empty or single-element arrays.
   switch (value.length) {
     case 0: {
-      // TODO(danfuzz): I think it's safe to return `true` here. (See longer
-      // related comment above.)
-      // TODO(seefeld): should be `true` in this case.
+      // An empty array constrains nothing, so `items` accepts anything. (`true`
+      // would say the same thing and is type-legal; see the interning note above
+      // for why it is not a drop-in swap.)
       return emptySchemaObject();
     }
     case 1: {
@@ -335,7 +347,8 @@ export function moduleToJSON(module: Module) {
   // Destructure-and-drop the runtime-only methods that handler modules
   // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
   // They are not part of the serialized contract; left in, they would surface
-  // as `Cannot store function per se`, so they are destructured out here.
+  // as a "not representable as a `FabricValue`: function per se" rejection, so
+  // they are destructured out here.
   const {
     implementation: _implementation,
     toJSON: _toJSON,
@@ -356,7 +369,7 @@ export function moduleToJSON(module: Module) {
   // the actual pattern structure. This caused "Invalid pattern" errors at runtime
   // because isPattern() check failed on the string.
   //
-  // Why this helps: Using toJSONWithLegacyAliases ensures nested $alias bindings
+  // Why this helps: Using toJSONWithAliasBindings ensures nested $alias bindings
   // get their nesting level incremented properly. Without this, aliases could be
   // bound to a specific doc too early, causing handlers to point at stale docs
   // when the pattern is later executed in a different context.
@@ -367,7 +380,7 @@ export function moduleToJSON(module: Module) {
   if (
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
-    implementation = toJSONWithLegacyAliases(
+    implementation = toJSONWithAliasBindings(
       implementation as unknown as FactoryInput<any>,
     ) as unknown as Pattern;
     return {
@@ -447,7 +460,7 @@ export function moduleToJSON(module: Module) {
 
 // Ambient context: true while serializing the runtime-INTERNAL graph
 // representation (builder-time node serialization via
-// `toJSONWithLegacyAliases`, and through it the `$opFallback` eviction
+// `toJSONWithAliasBindings`, and through it the `$opFallback` eviction
 // fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
 // JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
 // the content-addressed `$patternRef` on top of the graph; internal
@@ -461,7 +474,7 @@ let internalGraphSerialization = false;
 /**
  * Serialize a pattern's full node-graph — the runtime-internal representation
  * (design §7: the graph is internal; the boundary speaks refs-first). Used by
- * `toJSONWithLegacyAliases` (builder-time node serialization, which the
+ * `toJSONWithAliasBindings` (builder-time node serialization, which the
  * `$opFallback` graphs descend from) and debug tooling.
  *
  * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:

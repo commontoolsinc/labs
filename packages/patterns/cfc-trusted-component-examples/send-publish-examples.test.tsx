@@ -1,4 +1,4 @@
-import { computed, handler, pattern } from "commonfabric";
+import { assert, handler, pattern } from "commonfabric";
 import {
   ChatThreadSendExample,
   DirectMessageSendExample,
@@ -45,7 +45,7 @@ export default pattern(() => {
   const lookalike = HostLookalikeControlExample({});
   const directMessage = DirectMessageSendExample({});
 
-  const assertChatThread = computed(() =>
+  const assertChatThread = assert(() =>
     chatThread.decoyResult ===
       "Host shortcut ignored; only the trusted send surface counts." &&
     chatThread.sentMessage!.includes(
@@ -53,7 +53,7 @@ export default pattern(() => {
     )
   );
 
-  const assertProjectUpdate = computed(() =>
+  const assertProjectUpdate = assert(() =>
     projectUpdate.decoyResult ===
       "Project publish banner is only decorative." &&
     projectUpdate.preparedAudiencePublish!.includes("project board") &&
@@ -61,7 +61,7 @@ export default pattern(() => {
       projectUpdate.preparedAudiencePublish
   );
 
-  const assertLookalike = computed(() =>
+  const assertLookalike = assert(() =>
     lookalike.decoyResult ===
       "Lookalike host control updated, not the protected output." &&
     directMessage.decoyResult ===
@@ -71,7 +71,7 @@ export default pattern(() => {
     directMessage.preparedBrief!.includes("Prepared outbound draft") &&
     directMessage.authorizedSend!.includes("Authorized outbound message")
   );
-  const assertGalleryRendersCatalog = computed(() =>
+  const assertGalleryRendersCatalog = assert(() =>
     SEND_PUBLISH_EXAMPLE_COUNT === 30 &&
     SEND_PUBLISH_RENDERED_EXAMPLE_COUNT === SEND_PUBLISH_EXAMPLE_COUNT
   );

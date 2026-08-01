@@ -103,7 +103,7 @@ export function listCommits(
     let ops = 0;
     let reads = 0;
     try {
-      // `original` is a ClientCommit, stored either fvj1-encoded or as plain JSON.
+      // `original` is a ClientCommit, stored either codec-encoded or plain JSON.
       const parsed = decodeStored(r.original) as {
         operations?: unknown[];
         reads?: { confirmed?: unknown[]; pending?: unknown[] };

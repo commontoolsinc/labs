@@ -6,10 +6,10 @@ import {
   NAME,
   navigateTo,
   pattern,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -34,9 +34,9 @@ export interface CalendarOutput {
   removeEvent: Stream<{ event: EventPiece }>;
 }
 
-const getTodayDate = (): string => {
-  const now = new Date(safeDateNow());
-  return now.toISOString().split("T")[0];
+// `nowMs` is the current time in epoch milliseconds (the caller reads #now).
+const getTodayDate = (nowMs: number): string => {
+  return new Date(nowMs).toISOString().split("T")[0];
 };
 
 const formatDate = (date: string): string => {
@@ -49,14 +49,27 @@ const formatDate = (date: string): string => {
   });
 };
 
-const isToday = (date: string): boolean => date === getTodayDate();
-const isPast = (date: string): boolean => date < getTodayDate();
+const isToday = (date: string, today: string): boolean => date === today;
+const isPast = (date: string, today: string): boolean =>
+  today !== "" && date < today;
 
 export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
-  const todayDate = getTodayDate();
+  const nowCell = wish<number>({ query: "#now" });
+  const todayDate = computed(() => {
+    const nowMs = nowCell.result;
+    return nowMs != null ? getTodayDate(nowMs) : "";
+  });
 
   const newTitle = new Writable("");
-  const newDate = new Writable(todayDate);
+  // Seed empty and fill from #now once it resolves, so the date input defaults
+  // to today without reading the ambient clock at pattern body.
+  const newDate = new Writable("");
+  computed(() => {
+    const nowMs = nowCell.result;
+    if (nowMs != null && newDate.get() === "") {
+      newDate.set(getTodayDate(nowMs));
+    }
+  });
   const newTime = new Writable("");
 
   const eventCount = computed(() => events.get()?.length ?? 0);
@@ -130,8 +143,8 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
 
                 if (date !== lastDate) {
                   lastDate = date;
-                  const dateIsToday = isToday(date);
-                  const dateIsPast = isPast(date);
+                  const dateIsToday = isToday(date, todayDate);
+                  const dateIsPast = isPast(date, todayDate);
                   items.push(
                     <cf-hstack gap="2" align="center">
                       <span

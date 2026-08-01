@@ -9,7 +9,7 @@ import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { areNormalizedLinksSame, isSigilLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { parseAliasBinding, parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -83,7 +83,11 @@ describe("link-resolution", () => {
         undefined,
         rawTx,
       );
-      expect(rawLinked.getRawUntyped()).toEqual(sourceCell.getAsLink());
+      // The stored link elides what it shares with the slot it sits in, so
+      // the expected form has to be taken relative to that same base.
+      expect(rawLinked.getRawUntyped()).toEqual(
+        sourceCell.getAsLink({ base: rawLinked }),
+      );
       expect(rawTx.getCfcState().dereferenceTraces).toEqual([]);
       rawTx.abort();
     });
@@ -96,11 +100,13 @@ describe("link-resolution", () => {
         tx,
       );
       testCell.set({ value: 42 });
-      const binding = { $alias: { path: ["value"] } };
+      // `cell` only satisfies the AliasBinding constraint (name or
+      // partialCause); parseAliasBinding resolves against the base link.
+      const binding = { $alias: { cell: "result" as const, path: ["value"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseLink(binding, testCell)!,
+        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
         "writeRedirect",
       );
       expect(tx.readValueOrThrow(result)).toBe(42);
@@ -123,11 +129,11 @@ describe("link-resolution", () => {
       outerCell.setRaw({
         outer: innerCell.key("inner").getAsWriteRedirectLink(),
       });
-      const binding = { $alias: { path: ["outer"] } };
+      const binding = { $alias: { cell: "result" as const, path: ["outer"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseLink(binding, outerCell)!,
+        parseAliasBinding(binding, outerCell.getAsNormalizedFullLink()),
         "writeRedirect",
       );
       expect(
@@ -148,14 +154,21 @@ describe("link-resolution", () => {
         undefined,
         tx,
       );
+      // Redirects stored in data must be sigil links; a `$alias` record in
+      // data is plain data and is no longer followed.
       testCell.setRaw({
-        a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
+        a: {
+          a: testCell.key("a").key("b").getAsWriteRedirectLink(),
+          b: { c: 1 },
+        },
       });
-      const binding = { $alias: { path: ["a", "a", "c"] } };
+      const binding = {
+        $alias: { cell: "result" as const, path: ["a", "a", "c"] },
+      };
       const result = resolveLink(
         runtime,
         tx,
-        parseLink(binding, testCell)!,
+        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
         "writeRedirect",
       );
       expect(
@@ -165,6 +178,38 @@ describe("link-resolution", () => {
         ),
       ).toBe(true);
       expect(tx.readValueOrThrow(result)).toBe(1);
+    });
+
+    it("does not follow $alias-shaped records stored in data", () => {
+      const testCell = runtime.getCell<any>(
+        space,
+        "does not follow $alias records in data 1",
+        undefined,
+        tx,
+      );
+      testCell.setRaw({
+        alias: { $alias: { path: ["value"] } },
+        value: 42,
+      });
+      const location = testCell.key("alias").getAsNormalizedFullLink();
+
+      // Resolving a link to the location holding the `$alias` record returns
+      // the location itself: the record is plain data, not a redirect.
+      const redirectResolved = resolveLink(
+        runtime,
+        tx,
+        location,
+        "writeRedirect",
+      );
+      expect(areNormalizedLinksSame(redirectResolved, location)).toBe(true);
+
+      const valueResolved = resolveLink(runtime, tx, location);
+      expect(areNormalizedLinksSame(valueResolved, location)).toBe(true);
+
+      // The value at the location is the record itself, verbatim.
+      expect(tx.readValueOrThrow(valueResolved)).toEqual({
+        $alias: { path: ["value"] },
+      });
     });
   });
 

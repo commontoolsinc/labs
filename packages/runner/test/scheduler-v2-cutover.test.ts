@@ -359,11 +359,11 @@ describe("scheduler v2 cutover fixtures", () => {
       const idleAfterRemoteInvalidation = runtime.scheduler.idle().then(() => {
         idleResolved = true;
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // `clock.tick` rather than a wall-clock sleep: a positive-delay timer
+      // armed from a `test/` file freezes under the package's fake clock.
+      await clock.tick(20);
       expect(idleResolved).toBe(false);
-      await new Promise((resolve) =>
-        setTimeout(resolve, CLAIMED_REMOTE_SPECULATION_GRACE_MS + 25)
-      );
+      await clock.tick(CLAIMED_REMOTE_SPECULATION_GRACE_MS + 25);
       await idleAfterRemoteInvalidation;
       expect(computationRuns).toBe(1);
 

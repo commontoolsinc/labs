@@ -1,19 +1,23 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
-import { toCell } from "./back-to-cell.ts";
+import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
+import { type Cell, createCell, frameAnchorIds } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
 } from "./storage/interface.ts";
-import { mergeableOpRead } from "./storage/reactivity-log.ts";
+import {
+  ignoreReadForScheduling,
+  mergeableOpRead,
+} from "./storage/reactivity-log.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type CfcLabelView,
@@ -139,10 +143,10 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * `unshift`, etc.) route through the same write-boundary normalization
  * as `Cell.set()` / `Cell.push()`.
  *
- * **Frozenness contract:** Values handed to the write-side array mutators flow
- * through `recursivelyAddIDIfNeeded()` and so plain unfrozen Object/Array
- * inputs get shallowly frozen at each visited level; already-deep- frozen valid
- * `FabricValue` inputs are accepted identity-preservingly.
+ * **Frozenness contract:** Values handed to the write-side array mutators are
+ * normalized (and frozen) level by level inside the write's diff; the caller's
+ * input objects are never mutated, and already-deep-frozen valid `FabricValue`
+ * inputs are accepted identity-preservingly.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
@@ -371,24 +375,28 @@ export function createQueryResultProxy<T>(
             // Wraps values in a proxy that remembers the original index and
             // creates cell value proxies on demand.
             let copy: any;
+            // The base array a mutator operates on. Read fresh from the
+            // transaction, not the proxy-creation-time `value`, which is stale
+            // after an earlier write in this transaction (CT-1173). Without this a
+            // `push("b")` then `sort()` sorts the stale pre-push array and drops
+            // "b" from the local result. WriteOnly and ReadWrite both read fresh;
+            // ReadWrite also unwraps against this array below.
+            const readTx = runtime.readTx(tx);
+            // For `push`, this base-array read is the op's own incidental read:
+            // mark it `mergeableOpRead` so the commit drops it from conflict
+            // detection and the tail append merges, matching `Cell.push`. The
+            // handler's own explicit `.get()` of the list stays in the conflict
+            // set. Other mutators (fill, unshift, sort, splice, ...) are not
+            // mergeable tail appends and keep their read.
+            const currentValue = readTx.readValueOrThrow(
+              link,
+              prop === "push" ? { meta: mergeableOpRead } : undefined,
+            ) as any[];
+            const base = Array.isArray(currentValue) ? currentValue : [];
             if (isReadWrite === ArrayMethodType.WriteOnly) {
-              // CT-1173: Read fresh value from transaction, not stale proxy target.
-              // The proxy target (value) is captured at proxy creation time and
-              // becomes stale after writes. We must read current state from tx.
-              const readTx = runtime.readTx(tx);
-              // For `push`, this base-array read is the op's own incidental read:
-              // mark it `mergeableOpRead` so the commit drops it from conflict
-              // detection and the tail append merges, matching `Cell.push`. The
-              // handler's own explicit `.get()` of the list stays in the conflict
-              // set. Other write-only methods (fill, unshift) are not mergeable
-              // tail appends and keep their read.
-              const currentValue = readTx.readValueOrThrow(
-                link,
-                prop === "push" ? { meta: mergeableOpRead } : undefined,
-              ) as any[];
-              copy = [...currentValue];
+              copy = [...base];
             } else {
-              copy = value.map((_, index) =>
+              copy = base.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
                   proxyTx,
@@ -413,34 +421,47 @@ export function createQueryResultProxy<T>(
             if (isReadWrite === ArrayMethodType.ReadWrite) {
               // Undo the proxy wrapping and assign original items.
               copy = copy.map((item: any) =>
-                isProxyForArrayValue(item) ? value[item[originalIndex]] : item
+                isProxyForArrayValue(item) ? base[item[originalIndex]] : item
               );
             }
 
-            // Turn any newly added elements into cells by adding [ID] symbols.
-            // This ensures objects get stored as separate entity documents
-            // rather than inline data, which is critical for persistence.
+            // The anchor id source turns any newly added objects into entity
+            // documents of their own rather than inline data, which is
+            // critical for persistence.
             const frame = getTopFrame();
 
-            const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
-
             // And if there was a change at all, update the cell.
-            diffAndUpdate(runtime, tx, link, processedCopy, {
-              parent: { id: link.id, space: link.space },
-              method: prop,
-              call: new Error().stack,
-              context: frame?.cause ?? "unknown",
-            });
+            diffAndUpdate(
+              runtime,
+              tx,
+              link,
+              copy,
+              {
+                parent: { id: link.id, space: link.space },
+                method: prop,
+                call: new Error().stack,
+                context: frame?.cause ?? "unknown",
+              },
+              undefined,
+              frameAnchorIds(frame),
+            );
 
             // A tail append records its intent so the commit emits a
             // tail-relative, mergeable operation rather than a position diffed
-            // against a possibly-stale base. Other mutators (splice, unshift,
-            // ...) are not tail appends and keep the read-modify-write path.
+            // against a possibly-stale base. Any other in-place mutator (splice,
+            // unshift, sort, reverse, fill, ...) reshapes the array: for any
+            // mergeable op recorded earlier in the transaction on this array —
+            // or on an array nested inside it, which this reshape rewrites just
+            // as surely — the recorded tail no longer identifies the appended
+            // elements, so abandon those intents and let the whole-array diff
+            // carry the reshaped result.
             if (prop === "push") {
               tx.recordMergeableOp?.(link, {
                 op: "append",
                 count: args.length,
               });
+            } else {
+              tx.poisonMergeableOp?.(link);
             }
 
             // CT-1173 FIX: Don't mutate proxy target (value) after writes.
@@ -484,6 +505,16 @@ export function createQueryResultProxy<T>(
           };
       }
 
+      // Prototype properties are JavaScript behavior, not persisted child
+      // values. Reflect them from the current container instead of issuing a
+      // storage read for an inherited path such as `constructor` or
+      // `toString`. Storage traversal deliberately considers own properties
+      // only; keeping the same boundary here also avoids recording spurious
+      // reactive dependencies for prototype members.
+      if (!Object.hasOwn(value, prop) && prop in value) {
+        return Reflect.get(value, prop, receiver);
+      }
+
       return createQueryResultProxy(
         runtime,
         proxyTx,
@@ -511,22 +542,62 @@ export function createQueryResultProxy<T>(
         );
       }
 
+      const writeLink = { ...link, path: [...link.path, String(prop)] };
       diffAndUpdate(
         runtime,
         tx,
-        { ...link, path: [...link.path, String(prop)] },
+        writeLink,
         value,
       );
+
+      // Assigning over a property is a whole-value write, the same reshape
+      // `Cell.set` performs — and it reaches this trap instead of that method.
+      // Any mergeable op recorded at or beneath the assigned property refers to
+      // a value this write just replaced, so abandon it and let the whole-value
+      // diff carry the result.
+      tx.poisonMergeableOp?.(writeLink);
 
       return true;
     },
     ownKeys: () => {
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ);
-      if (isRecord(current) || Array.isArray(current)) {
-        return Reflect.ownKeys(current);
+      const keys = isRecord(current) || Array.isArray(current)
+        ? Reflect.ownKeys(current)
+        : Reflect.ownKeys(value);
+      if (Array.isArray(proxyTarget)) {
+        if (!keys.includes("length")) {
+          // Insert `length` where a real array carries it -- after the index
+          // keys, ahead of any other name -- rather than appending it. Own-key
+          // order is load-bearing: a consumer can tell an index-only array from
+          // one carrying named properties by asking whether `length` comes
+          // last (`isArrayWithOnlyIndexProperties()` does exactly that), and
+          // appending would make a named property look like an index-only one.
+          const firstNonIndex = keys.findIndex((key) =>
+            !((typeof key === "string") && isArrayIndexPropertyName(key))
+          );
+          keys.splice(
+            (firstNonIndex === -1) ? keys.length : firstNonIndex,
+            0,
+            "length",
+          );
+        }
+        // Enumerating an array's keys (`Object.keys`/`values`/`entries`, a spread,
+        // `for...in`) observes which index keys are present. For a dense array
+        // that is its `length`, but an array here can be sparse (holes below
+        // `length`), and filling or punching a hole changes the present-key set
+        // without changing `length` — a write at `/arr/<i>` with no `/arr/length`
+        // write. The SHAPE_READ above is dropped at commit as the op's incidental
+        // container read, and neither a `length` read nor a nonRecursive shape
+        // read at the array path conflicts with a same-length element-slot write.
+        // Record a recursive (by-value) read of the array — the one read the
+        // mergeable narrowing keeps that a hole edit invalidates — so an
+        // enumeration-derived mergeable write conflicts and retries instead of
+        // merging on a stale key set. It is marked `ignoreReadForScheduling` so it
+        // adds only the conflict dependency; reactivity stays on the SHAPE_READ.
+        readTx.readValueOrThrow(link, { meta: ignoreReadForScheduling });
       }
-      return Reflect.ownKeys(value);
+      return keys;
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (Array.isArray(target) && prop === "length") {
@@ -578,6 +649,16 @@ export function createQueryResultProxy<T>(
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
+        // Probing whether a numeric index is present (`n in arr`) observes the
+        // array's key set: for a dense array the answer is `n < length`, but a
+        // sparse array has holes, so the answer depends on whether index `n` is
+        // specifically present — which a same-length hole fill or punch changes
+        // with no `length` write. Record a recursive read of the array (marked
+        // conflict-only, like ownKeys above) so an `n in arr`-derived mergeable
+        // write conflicts and retries instead of merging on a stale key set.
+        if (Array.isArray(current) && /^\d+$/.test(prop)) {
+          readTx.readValueOrThrow(link, { meta: ignoreReadForScheduling });
+        }
         return prop in current;
       }
       return prop in value;
@@ -680,7 +761,8 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isCellResult(value: any): value is CellResult<any> {
-  return isRecord(value) && typeof value[toCell] === "function";
+  return isRecord(value) &&
+    typeof (value as Partial<BackToCellInternals>)[toCell] === "function";
 }
 
 /**

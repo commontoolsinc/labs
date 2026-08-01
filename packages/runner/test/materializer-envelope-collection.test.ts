@@ -43,19 +43,19 @@ describe("materializer envelope collection", () => {
   const collect = (
     argumentSchema: unknown,
     inputs: unknown,
-    processCell: unknown,
+    resultCell: unknown,
     writeInputPaths?: readonly (readonly string[])[],
   ): NormalizedFullLink[] =>
     // deno-lint-ignore no-explicit-any
     (runtime.runner as any).collectWritableCellArgumentLinks(
       argumentSchema,
       inputs,
-      processCell,
+      resultCell,
       writeInputPaths,
     );
 
   const setup = () => {
-    const processCell = runtime.getCell(space, "envelope-process");
+    const resultCell = runtime.getCell(space, "envelope-result");
     const notifyCell = runtime.getCell(space, "envelope-notify-stream");
     const targetCell = runtime.getCell<number>(space, "envelope-target");
     const argumentSchema = {
@@ -66,15 +66,15 @@ describe("materializer envelope collection", () => {
       },
     };
     const inputs = {
-      notify: notifyCell.getAsWriteRedirectLink({ base: processCell }),
-      target: targetCell.getAsWriteRedirectLink({ base: processCell }),
+      notify: notifyCell.getAsWriteRedirectLink({ base: resultCell }),
+      target: targetCell.getAsWriteRedirectLink({ base: resultCell }),
     };
-    return { processCell, targetCell, argumentSchema, inputs };
+    return { resultCell, targetCell, argumentSchema, inputs };
   };
 
   it("collects cell-branded write paths but prunes stream-branded ones", () => {
-    const { processCell, targetCell, argumentSchema, inputs } = setup();
-    const envelopes = collect(argumentSchema, inputs, processCell, [
+    const { resultCell, targetCell, argumentSchema, inputs } = setup();
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
       ["notify"],
       ["target"],
     ]);
@@ -87,18 +87,149 @@ describe("materializer envelope collection", () => {
     // stream. The cell-branded arg does not path-match, the stream path does
     // not brand-match — "collect none" is the correct, precise result (more
     // precise than the opaque-result fallback's collect-all-writable-args).
-    const { processCell, argumentSchema, inputs } = setup();
-    const envelopes = collect(argumentSchema, inputs, processCell, [
+    const { resultCell, argumentSchema, inputs } = setup();
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
       ["notify"],
     ]);
     expect(envelopes).toEqual([]);
   });
 
   it("collects the cell-branded path when the metadata names it alone", () => {
-    const { processCell, targetCell, argumentSchema, inputs } = setup();
-    const envelopes = collect(argumentSchema, inputs, processCell, [
+    const { resultCell, targetCell, argumentSchema, inputs } = setup();
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
       ["target"],
     ]);
+    expect(envelopes.length).toBe(1);
+    expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
+  });
+
+  it("collects from undeclared keys via an additionalProperties grant", () => {
+    // The rest claim covers only keys `properties` does not declare.
+    const resultCell = runtime.getCell(space, "envelope-map-result");
+    const targetCell = runtime.getCell<number>(space, "envelope-map-target");
+    const declaredCell = runtime.getCell<number>(space, "envelope-map-decl");
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        bag: {
+          type: "object",
+          properties: { declared: { type: "number" } },
+          additionalProperties: { type: "number", asCell: ["cell"] },
+        },
+      },
+    };
+    const inputs = {
+      bag: {
+        declared: declaredCell.getAsWriteRedirectLink({ base: resultCell }),
+        extra: targetCell.getAsWriteRedirectLink({ base: resultCell }),
+      },
+    };
+    const envelopes = collect(argumentSchema, inputs, resultCell, [["bag"]]);
+    expect(envelopes.length).toBe(1);
+    expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
+  });
+
+  it("collects items-covered elements past the tuple slots at their index", () => {
+    const resultCell = runtime.getCell(space, "envelope-rest-result");
+    const targetCell = runtime.getCell<number>(space, "envelope-rest-target");
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        route: {
+          type: "array",
+          prefixItems: [{ type: "string" }],
+          items: { type: "number", asCell: ["cell"] },
+        },
+      },
+    };
+    const inputs = {
+      route: ["label", targetCell.getAsWriteRedirectLink({ base: resultCell })],
+    };
+    const envelopes = collect(argumentSchema, inputs, resultCell, [["route"]]);
+    expect(envelopes.length).toBe(1);
+    expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
+  });
+
+  it("falls back conservatively when value and schema misalign", () => {
+    // A non-array value under a tuple/items schema and a non-record value
+    // under an additionalProperties schema take the same-value/same-path
+    // conservative visits.
+    const resultCell = runtime.getCell(space, "envelope-misaligned-result");
+    const targetCell = runtime.getCell<number>(space, "envelope-mis-target");
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        route: {
+          type: "array",
+          prefixItems: [{ type: "number", asCell: ["cell"] }],
+          items: { type: "number" },
+        },
+        bag: {
+          type: "object",
+          additionalProperties: { type: "number", asCell: ["cell"] },
+        },
+      },
+    };
+    const inputs = {
+      // Misaligned: a single link where the schema says array/record.
+      route: targetCell.getAsWriteRedirectLink({ base: resultCell }),
+      bag: targetCell.getAsWriteRedirectLink({ base: resultCell }),
+    };
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
+      ["route"],
+      ["bag"],
+    ]);
+    expect(envelopes.length).toBe(1);
+    expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
+
+    // Primitive values under rest schemas take the conservative visit and
+    // collect nothing.
+    expect(collect(argumentSchema, { route: 1, bag: 2 }, resultCell, [
+      ["route"],
+      ["bag"],
+    ])).toEqual([]);
+  });
+
+  it("descends combinator branches at the same position", () => {
+    const resultCell = runtime.getCell(space, "envelope-anyof-result");
+    const targetCell = runtime.getCell<number>(space, "envelope-anyof-target");
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        target: {
+          anyOf: [
+            { type: "number" },
+            { type: "number", asCell: ["cell"] },
+          ],
+        },
+      },
+    };
+    const inputs = {
+      target: targetCell.getAsWriteRedirectLink({ base: resultCell }),
+    };
+    const envelopes = collect(argumentSchema, inputs, resultCell, [["target"]]);
+    expect(envelopes.length).toBe(1);
+    expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
+  });
+
+  it("collects cell-branded tuple (prefixItems) slot positions", () => {
+    // CT-1895: the walker never descended prefixItems, so asCell/writeonly
+    // markers in tuple slots escaped write tracking.
+    const resultCell = runtime.getCell(space, "envelope-tuple-result");
+    const targetCell = runtime.getCell<number>(space, "envelope-tuple-target");
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        route: {
+          type: "array",
+          prefixItems: [{ type: "number", asCell: ["cell"] }],
+        },
+      },
+    };
+    const inputs = {
+      route: [targetCell.getAsWriteRedirectLink({ base: resultCell })],
+    };
+    const envelopes = collect(argumentSchema, inputs, resultCell, [["route"]]);
     expect(envelopes.length).toBe(1);
     expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
   });

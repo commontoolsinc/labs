@@ -160,7 +160,6 @@ describe("Chat pattern test", () => {
       await waitForCondition(
         page,
         (probe) => probe.collect("cf-chat-message").length >= 2,
-        { timeout: 30000 },
       );
 
       // Get all chat messages using pierce strategy
@@ -228,7 +227,6 @@ describe("Chat pattern test", () => {
       await waitForCondition(
         page,
         (probe) => probe.collect("cf-chat-message").length >= 4,
-        { timeout: 60000 },
       );
 
       // Get all chat messages to verify sequence

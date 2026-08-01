@@ -43,15 +43,25 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 #### Arrays
 
-- Must be dense (no holes)
-- Must not contain `undefined` elements
-- Sparse arrays are densified during conversion (`undefined` → `null`)
-- Non-index keys (named properties) cause rejection as non-fabric
+- May be dense or sparse; holes are preserved, and are distinct from an
+  explicitly-stored `undefined`
+- Elements may be `undefined`, that being a first-class fabric value
+- Non-index keys cause rejection as non-fabric, `length` aside: named
+  (string-keyed) and symbol-keyed properties alike, whether or not they are
+  enumerable
+- Every present index must hold a *data* property; an accessor-backed
+  (getter and/or setter) index causes rejection as non-fabric
+
+See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
+authoritative statement of these rules.
 
 #### Objects
 
 - Plain objects only (no class instances)
 - Keys must be strings; symbol keys cause rejection as non-fabric
+- Every property must be an enumerable *data* property; accessor-backed
+  (getter and/or setter) and non-enumerable properties cause rejection as
+  non-fabric
 - Values must be valid fabric values
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
@@ -64,7 +74,8 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 - **Top-level**: Indicates deletion (remove the stored value)
 - **Object property**: Treated as absent (property is omitted)
-- **Array element**: Converted to `null` during storage
+- **Array element**: Stored as `undefined`, and remains distinguishable from
+  both a hole and a `null`
 
 #### Non-Fabric Types
 
@@ -83,7 +94,7 @@ Symbol handling at the fabric-value conversion gate:
   returns a string) are first-class fabric values, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
-  `"Cannot store unique (uninterned) symbol"`
+  ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
 - Round-trip via the `Symbol@1` JSON envelope (see
   `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
   byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
@@ -325,8 +336,8 @@ well-known symbols:
 ```typescript
 // Shown inside a pattern body.
 const CODEC = Symbol.for('data-model.codec');
-const DEEP_FREEZE = Symbol.for('common.deepFreeze');
-const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
+const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
+const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
 // If protocol evolution is needed: Symbol.for('data-model.codec@2')
 
 // Instance protocol: "here's how to freeze me deeply, and here's how to

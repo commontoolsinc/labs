@@ -1,0 +1,1383 @@
+/**
+ * Shared library for the CI coverage-debt gate.
+ *
+ * Used by:
+ *   - coverage-check.ts        (per-PR coverage-debt gate)
+ *   - post-coverage-comment.ts (posts the gate's coverage comment)
+ */
+
+// ---------------------------------------------------------------------------
+// Config (from environment)
+// ---------------------------------------------------------------------------
+
+export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
+export const TOKEN = Deno.env.get("GITHUB_TOKEN");
+export const WORKFLOW_FILE = "deno.yml";
+
+/**
+ * The per-run artifact and file the coverage check writes: this run's
+ * coverage-debt metrics and its per-family compile cache states, so a later PR
+ * run can read a recent main run's coverage as the ratchet baseline and know
+ * whether that run was cold. The name `perf-metrics` is historical — the
+ * artifact once also carried CI timing metrics for the removed performance gate
+ * — and is kept so the ratchet baseline needs no migration. A run from before
+ * the gate was removed recorded the same coverage metrics and cache states here
+ * in the identical JSON shape, so it reads as a valid baseline unchanged.
+ */
+export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
+export const PERF_METRICS_FILE = "perf-metrics.json";
+
+/**
+ * Prefix of the per-shard artifacts the pattern jobs upload to record whether
+ * their compile byte cache restored (e.g. `cache-state-pattern-unit-3`). Each
+ * contains one JSON file matching {@link CacheStateRecord}.
+ */
+export const CACHE_STATE_ARTIFACT_PREFIX = "cache-state-";
+export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
+export const COVERAGE_BASELINE_RESET_MARKER = "NEW_COVERAGE_BASELINE";
+
+/**
+ * Hidden marker placed at the top of the coverage-debt suggestion comment so
+ * the gate posts it at most once per PR.
+ */
+export const COVERAGE_SUGGESTION_MARKER = "<!-- coverage-debt-suggestion -->";
+
+/**
+ * Artifact and file the coverage gate writes a pending PR comment to. The gate
+ * runs on `pull_request`, where fork PRs only get a read-only token, so it
+ * cannot comment directly. A separate `workflow_run` workflow picks this file
+ * up and posts it with a write token from the base-repo context.
+ */
+export const COVERAGE_COMMENT_ARTIFACT_NAME = "coverage-comment";
+export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
+
+/**
+ * Pending coverage-debt comment handed from the gate to the posting workflow.
+ *
+ * - `state: "regressed"` carries the full comment `body`. The poster posts it as
+ *   a new comment, or updates an existing coverage comment in place.
+ * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
+ *   lines versus baseline across the changed, gated coverage groups, and
+ *   `groups`, the per-group baseline-versus-this-PR breakdown. When the gate
+ *   passed only because the debt was accepted, `overridden` is set. The poster
+ *   rebuilds an existing comment into a collapsed summary of where the PR left
+ *   coverage; it does nothing when there is no existing comment to update.
+ */
+export interface CoverageCommentPayload {
+  prNumber: number;
+  state: "regressed" | "resolved";
+  /** Present when `state` is "regressed". */
+  body?: string;
+  /** Present when `state` is "resolved". */
+  improvedLines?: number;
+  /** Present when `state` is "resolved": the changed source groups and where
+   * this PR left each one's uncovered-line count. */
+  groups?: CoverageResolvedGroup[];
+  /** Present when `state` is "resolved": true when the gate passed because a
+   * changed group's debt was accepted with a per-metric override or the reset
+   * marker, not because the new code is covered. */
+  overridden?: boolean;
+}
+
+/**
+ * Command an author (or an LLM) runs locally to reproduce the coverage gate.
+ * Collects coverage from the unit-test suites and prints the per-group
+ * uncovered-line counts as JSON. The integration suites are omitted, so the
+ * local counts are conservative: meeting the target locally also clears CI.
+ */
+export const COVERAGE_LOCAL_CHECK_COMMAND = [
+  "rm -rf coverage/raw/local",
+  'DENO_COVERAGE_DIR="$(pwd)/coverage/raw/local" deno task test',
+  "deno run --allow-read --allow-write --allow-run tasks/coverage-metrics.ts \\",
+  '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
+].join("\n");
+
+/** Concurrency limit for API calls. */
+export const API_CONCURRENCY = 5;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface WorkflowRun {
+  id: number;
+  html_url: string;
+  head_sha: string;
+  created_at: string;
+  conclusion: string;
+  event: string;
+}
+
+export interface Artifact {
+  id: number;
+  name: string;
+  size_in_bytes: number;
+  expired: boolean;
+}
+
+interface ArtifactsResponse {
+  total_count?: number;
+  artifacts: Artifact[];
+}
+
+export interface TimingSample {
+  runId: number;
+  runUrl: string;
+  sha: string;
+  createdAt: string;
+  durationSeconds: number;
+}
+
+export interface MetricRecord extends TimingSample {
+  name: string;
+}
+
+/**
+ * Job families that restore a pattern compile byte cache (`actions/cache`
+ * keyed on the compiler fingerprint). A fingerprint-changing PR runs these
+ * jobs with a cold cache, which inflates their timing metrics and shifts
+ * their coverage profiles.
+ */
+export const COMPILE_CACHE_FAMILIES = [
+  "generated-patterns",
+  "pattern-integration",
+  "pattern-unit",
+] as const;
+
+export type CompileCacheFamily = (typeof COMPILE_CACHE_FAMILIES)[number];
+
+/**
+ * Compile cache state for one job family in one run. Cold means the cache
+ * missed entirely (full recompile); warm covers both exact and restore-key
+ * hits, since any hit implies the compiler fingerprint is unchanged.
+ */
+export type CompileCacheState = "cold" | "warm";
+
+/**
+ * Per-family compile cache states for a run. An absent family is unknown (a
+ * run whose cache-state artifact never recorded or could not be read) and is
+ * treated as not-cold: it is not excluded from the coverage ratchet baseline.
+ */
+export type CompileCacheStates = Partial<
+  Record<CompileCacheFamily, CompileCacheState>
+>;
+
+/**
+ * One shard's compile-cache restore result, as recorded by the workflow's
+ * cache-state artifact. `family` is a string (not `CompileCacheFamily`) so
+ * records from unknown families survive parsing; aggregation ignores them.
+ */
+export interface CacheStateRecord {
+  family: string;
+  shard: string;
+  /** The cache key `actions/cache` restored from; empty on a full miss. */
+  matchedKey: string;
+  /** True only when the primary key matched exactly. */
+  exactHit: boolean;
+}
+
+export interface CoverageBaselineFile {
+  version: 1;
+  generatedAt: string;
+  metrics: MetricRecord[];
+  /**
+   * Per-family compile cache states for the run this file describes. Absent
+   * when no cache-state artifact recorded for the run.
+   */
+  compileCacheStates?: CompileCacheStates;
+}
+
+export interface MetricTimeline {
+  name: string;
+  samples: TimingSample[];
+}
+
+export interface PRInfo {
+  number: number;
+  title: string;
+  html_url: string;
+  body: string | null;
+  merged_at: string | null;
+}
+
+export interface PRFile {
+  filename: string;
+  /** Old path for renamed files; the fingerprint classifier needs both. */
+  previous_filename?: string;
+  /** Unified diff for this file. Absent for binary or oversized changes. */
+  patch?: string;
+}
+
+export interface IssueComment {
+  id: number;
+  body: string;
+}
+
+export interface CurrentPRBody {
+  body: string;
+  source: "live" | "event-fallback" | "empty-fallback";
+  errorMessage?: string;
+}
+
+export interface BaselineOverrides {
+  /** Coverage-debt metric name -> accepted uncovered-line count. */
+  metrics: Map<string, number>;
+  /** Reset all coverage-debt metrics at the commit carrying this marker. */
+  coverageBaselineReset: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// GitHub API helpers
+// ---------------------------------------------------------------------------
+
+function apiHeaders(): Record<string, string> {
+  return {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${TOKEN}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+const GITHUB_GET_MAX_ATTEMPTS = 4;
+const GITHUB_GET_RETRY_BASE_DELAY_MS = 250;
+const GITHUB_GET_RETRY_MAX_DELAY_MS = 5_000;
+const RETRYABLE_GITHUB_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES = new Set([
+  ...RETRYABLE_GITHUB_STATUSES,
+  403,
+  404,
+]);
+
+function retryAfterDelayMs(value: string | null): number | undefined {
+  if (value == null) return undefined;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1_000);
+  }
+
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+
+  return undefined;
+}
+
+function githubRetryDelayMs(resp: Response, attempt: number): number {
+  return Math.min(
+    retryAfterDelayMs(resp.headers.get("retry-after")) ??
+      GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+    GITHUB_GET_RETRY_MAX_DELAY_MS,
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function githubApiError(
+  resp: Response,
+  path: string,
+  method: "GET" | "POST" | "PATCH",
+): Error {
+  const statusText = resp.statusText ? ` ${resp.statusText}` : "";
+  return new Error(
+    `GitHub API ${method} ${resp.status}${statusText}: ${path}`,
+  );
+}
+
+async function cancelResponseBody(resp: Response): Promise<void> {
+  try {
+    await resp.body?.cancel();
+  } catch {
+    // The GitHub status error remains the reported failure.
+  }
+}
+
+export async function githubGet<T>(path: string): Promise<T> {
+  const url = path.startsWith("http") ? path : `https://api.github.com${path}`;
+  for (let attempt = 1; attempt <= GITHUB_GET_MAX_ATTEMPTS; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { headers: apiHeaders() });
+    } catch (error) {
+      if (attempt === GITHUB_GET_MAX_ATTEMPTS) {
+        throw error;
+      }
+      await sleep(
+        Math.min(
+          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+          GITHUB_GET_RETRY_MAX_DELAY_MS,
+        ),
+      );
+      continue;
+    }
+
+    if (resp.ok) {
+      return resp.json();
+    }
+
+    if (
+      !RETRYABLE_GITHUB_STATUSES.has(resp.status) ||
+      attempt === GITHUB_GET_MAX_ATTEMPTS
+    ) {
+      await cancelResponseBody(resp);
+      throw githubApiError(resp, path, "GET");
+    }
+
+    await cancelResponseBody(resp);
+    await sleep(githubRetryDelayMs(resp, attempt));
+  }
+
+  throw new Error(`GitHub API GET retry loop exhausted unexpectedly: ${path}`);
+}
+
+export async function githubPost<T>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const resp = await fetch(`https://api.github.com${path}`, {
+    method: "POST",
+    headers: { ...apiHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    await cancelResponseBody(resp);
+    throw githubApiError(resp, path, "POST");
+  }
+  return resp.json();
+}
+
+export async function githubPatch<T>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const resp = await fetch(`https://api.github.com${path}`, {
+    method: "PATCH",
+    headers: { ...apiHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    await cancelResponseBody(resp);
+    throw githubApiError(resp, path, "PATCH");
+  }
+  return resp.json();
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency limiter
+// ---------------------------------------------------------------------------
+
+export async function mapConcurrent<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Fetch artifacts
+// ---------------------------------------------------------------------------
+
+export async function fetchArtifactsForRun(
+  runId: number,
+): Promise<Artifact[]> {
+  const artifacts: Artifact[] = [];
+  const perPage = 100;
+
+  for (let page = 1;; page++) {
+    const data = await githubGet<ArtifactsResponse>(
+      `/repos/${REPO}/actions/runs/${runId}/artifacts?per_page=${perPage}&page=${page}`,
+    );
+    artifacts.push(...data.artifacts);
+
+    if (data.artifacts.length === 0) break;
+    if (
+      typeof data.total_count === "number" &&
+      artifacts.length >= data.total_count
+    ) {
+      break;
+    }
+    if (
+      typeof data.total_count !== "number" && data.artifacts.length < perPage
+    ) {
+      break;
+    }
+  }
+
+  return artifacts;
+}
+
+/**
+ * Newest artifact per name. Re-running a single job uploads a same-named
+ * artifact alongside the original attempt's, and the API lists newest first —
+ * naive iteration lets the stale one win. Artifact ids are monotonic.
+ */
+export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
+  const byName = new Map<string, Artifact>();
+  for (const artifact of artifacts) {
+    const existing = byName.get(artifact.name);
+    if (!existing || artifact.id > existing.id) {
+      byName.set(artifact.name, artifact);
+    }
+  }
+  return [...byName.values()];
+}
+
+export function serializeCoverageBaseline(
+  metrics: Map<string, TimingSample>,
+  compileCacheStates?: CompileCacheStates,
+): CoverageBaselineFile {
+  const file: CoverageBaselineFile = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    metrics: metricsToRecords(metrics),
+  };
+  if (compileCacheStates && Object.keys(compileCacheStates).length > 0) {
+    file.compileCacheStates = compileCacheStates;
+  }
+  return file;
+}
+
+function metricsToRecords(
+  metrics: Map<string, TimingSample>,
+): MetricRecord[] {
+  return [...metrics.entries()]
+    .map(([name, sample]) => ({ name, ...sample }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function parseCoverageBaseline(
+  content: string,
+): Map<string, TimingSample> {
+  const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
+    throw new Error("Unsupported coverage baseline file format.");
+  }
+
+  const metrics = new Map<string, TimingSample>();
+  for (const metric of parsed.metrics) {
+    if (
+      typeof metric.name !== "string" ||
+      typeof metric.runId !== "number" ||
+      typeof metric.runUrl !== "string" ||
+      typeof metric.sha !== "string" ||
+      typeof metric.createdAt !== "string" ||
+      typeof metric.durationSeconds !== "number"
+    ) {
+      throw new Error("Invalid coverage baseline metric record.");
+    }
+
+    metrics.set(metric.name, {
+      runId: metric.runId,
+      runUrl: metric.runUrl,
+      sha: metric.sha,
+      createdAt: metric.createdAt,
+      durationSeconds: metric.durationSeconds,
+    });
+  }
+  return metrics;
+}
+
+/** Parsed coverage baseline plus the run's compile cache states, when tagged. */
+export interface CoverageBaselineDetailed {
+  metrics: Map<string, TimingSample>;
+  /** Null when the file recorded no compile cache states. */
+  compileCacheStates: CompileCacheStates | null;
+}
+
+const COMPILE_CACHE_FAMILY_SET: ReadonlySet<string> = new Set(
+  COMPILE_CACHE_FAMILIES,
+);
+
+/**
+ * Parse a perf metrics file, also surfacing its optional compile cache
+ * states. Metric validation matches {@link parseCoverageBaseline}; unknown
+ * families and invalid state values are dropped rather than failing, so a
+ * malformed tag degrades to "unknown" instead of losing the run's metrics.
+ */
+export function parseCoverageBaselineDetailed(
+  content: string,
+): CoverageBaselineDetailed {
+  const metrics = parseCoverageBaseline(content);
+  const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
+
+  const rawStates = parsed.compileCacheStates;
+  if (rawStates === undefined || rawStates === null) {
+    return { metrics, compileCacheStates: null };
+  }
+
+  const compileCacheStates: CompileCacheStates = {};
+  if (typeof rawStates === "object") {
+    for (const [family, state] of Object.entries(rawStates)) {
+      if (!COMPILE_CACHE_FAMILY_SET.has(family)) continue;
+      if (state !== "cold" && state !== "warm") continue;
+      compileCacheStates[family as CompileCacheFamily] = state;
+    }
+  }
+  return { metrics, compileCacheStates };
+}
+
+export async function writeCoverageBaselineFile(
+  path: string,
+  metrics: Map<string, TimingSample>,
+  compileCacheStates?: CompileCacheStates,
+): Promise<void> {
+  await Deno.writeTextFile(
+    path,
+    `${
+      JSON.stringify(
+        serializeCoverageBaseline(metrics, compileCacheStates),
+        null,
+        2,
+      )
+    }\n`,
+  );
+}
+
+export async function downloadAndExtractArtifact(
+  artifactId: number,
+  tmpPrefix: string,
+): Promise<string | null> {
+  const artifactPath = `/repos/${REPO}/actions/artifacts/${artifactId}/zip`;
+  const url = `https://api.github.com${artifactPath}`;
+  let lastError = "unknown error";
+  const attemptErrors: string[] = [];
+
+  for (let attempt = 1; attempt <= GITHUB_GET_MAX_ATTEMPTS; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { headers: apiHeaders() });
+    } catch (error) {
+      lastError = `fetch failed: ${error}`;
+      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
+        await sleep(
+          Math.min(
+            GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+            GITHUB_GET_RETRY_MAX_DELAY_MS,
+          ),
+        );
+        continue;
+      }
+      break;
+    }
+
+    if (!resp.ok) {
+      const statusText = resp.statusText ? ` ${resp.statusText}` : "";
+      lastError =
+        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`;
+      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      await cancelResponseBody(resp);
+      if (
+        attempt < GITHUB_GET_MAX_ATTEMPTS &&
+        RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
+      ) {
+        await sleep(githubRetryDelayMs(resp, attempt));
+        continue;
+      }
+      break;
+    }
+
+    const tmpDir = await Deno.makeTempDir({ prefix: tmpPrefix });
+    const zipPath = `${tmpDir}/artifact.zip`;
+
+    try {
+      const data = new Uint8Array(await resp.arrayBuffer());
+      await Deno.writeFile(zipPath, data);
+
+      const unzip = new Deno.Command("unzip", {
+        args: ["-o", zipPath, "-d", tmpDir],
+        stdout: "null",
+        stderr: "piped",
+      });
+      const result = await unzip.output();
+      if (result.success) {
+        return tmpDir;
+      }
+
+      const stderr = new TextDecoder().decode(result.stderr).trim();
+      lastError = `unzip failed with exit code ${result.code}${
+        stderr ? `: ${stderr}` : ""
+      }`;
+    } catch (error) {
+      lastError = `${error}`;
+    }
+    attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+
+    if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
+      await sleep(
+        Math.min(
+          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+          GITHUB_GET_RETRY_MAX_DELAY_MS,
+        ),
+      );
+    }
+  }
+
+  console.warn(
+    `  Warning: could not download/extract artifact ${artifactId} (${artifactPath}) after ${GITHUB_GET_MAX_ATTEMPTS} attempt(s): ${lastError}`,
+  );
+  console.warn(
+    `  Artifact download attempts: ${attemptErrors.join(" | ")}`,
+  );
+  return null;
+}
+
+/**
+ * Download the per-run perf-metrics artifact and parse the coverage baseline it
+ * records — its coverage-debt metrics along with the run's compile cache states
+ * (null when the file recorded no cache states).
+ */
+export async function downloadAndParseCoverageBaseline(
+  artifactId: number,
+): Promise<CoverageBaselineDetailed | null> {
+  const tmpDir = await downloadAndExtractArtifact(artifactId, "perf-metrics-");
+  if (!tmpDir) return null;
+  try {
+    const content = await Deno.readTextFile(`${tmpDir}/${PERF_METRICS_FILE}`);
+    return parseCoverageBaselineDetailed(content);
+  } catch {
+    return null;
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+}
+
+export async function* walkFiles(dir: string): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(dir)) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory) yield* walkFiles(full);
+    else yield full;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Compile cache state
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the JSON contents of cache-state artifact files into records.
+ * Returns null if any entry is malformed or invalid (each warned): a shard
+ * whose record cannot be read could be the cold one, so a partial parse
+ * could mislabel its family warm — the whole collection must degrade to
+ * "unknown" instead, matching the artifact-download failure policy.
+ */
+export function parseCacheStateFiles(
+  contents: string[],
+): CacheStateRecord[] | null {
+  const records: CacheStateRecord[] = [];
+  let invalid = false;
+  for (const content of contents) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch (error) {
+      console.warn(
+        `  Warning: malformed cache-state file: ${error}`,
+      );
+      invalid = true;
+      continue;
+    }
+
+    const record = parsed as Partial<CacheStateRecord> | null;
+    if (
+      record === null || typeof record !== "object" ||
+      typeof record.family !== "string" ||
+      typeof record.shard !== "string" ||
+      typeof record.matchedKey !== "string" ||
+      typeof record.exactHit !== "boolean"
+    ) {
+      console.warn(
+        `  Warning: invalid cache-state record: ${content.trim()}`,
+      );
+      invalid = true;
+      continue;
+    }
+
+    records.push({
+      family: record.family,
+      shard: record.shard,
+      matchedKey: record.matchedKey,
+      exactHit: record.exactHit,
+    });
+  }
+  return invalid ? null : records;
+}
+
+/**
+ * Aggregate per-shard cache-state records into one state per family: any
+ * full-miss shard (`matchedKey === ""`) makes the family cold, otherwise at
+ * least one record makes it warm (restore-key hits included — any hit implies
+ * the compiler fingerprint is unchanged). Families with no records stay
+ * absent (unknown); records from unknown families are ignored.
+ */
+export function aggregateCacheStates(
+  records: CacheStateRecord[],
+): CompileCacheStates {
+  const states: CompileCacheStates = {};
+  for (const record of records) {
+    if (!COMPILE_CACHE_FAMILY_SET.has(record.family)) continue;
+    const family = record.family as CompileCacheFamily;
+    states[family] = record.matchedKey === "" ? "cold" : (
+      states[family] ?? "warm"
+    );
+  }
+  return states;
+}
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+export function isCoverageDebtMetric(name: string): boolean {
+  return name.startsWith(COVERAGE_METRIC_PREFIX);
+}
+
+export function coverageMetricGroupName(metric: string): string | null {
+  if (!isCoverageDebtMetric(metric)) return null;
+
+  const prefix = `${COVERAGE_METRIC_PREFIX} `;
+  const suffix = " uncovered lines";
+  if (!metric.startsWith(prefix) || !metric.endsWith(suffix)) return null;
+
+  return metric.slice(prefix.length, -suffix.length);
+}
+
+export function coverageGroupForChangedFile(filename: string): string | null {
+  const normalized = filename.replaceAll("\\", "/");
+  if (!/\.[jt]sx?$/.test(normalized)) return null;
+
+  const parts = normalized.split("/");
+  if (parts[0] === "packages" && parts[1]) {
+    return `packages/${parts[1]}`;
+  }
+  if (parts[0] === "tasks") {
+    return parts[0];
+  }
+  return null;
+}
+
+export function coverageGroupsForChangedFiles(
+  filenames: Iterable<string>,
+): Set<string> {
+  const groups = new Set<string>();
+  for (const filename of filenames) {
+    const group = coverageGroupForChangedFile(filename);
+    if (group) groups.add(group);
+  }
+  return groups;
+}
+
+export function shouldGateCoverageDebtMetric(
+  metric: string,
+  changedCoverageGroups: Set<string> | undefined,
+): boolean {
+  if (!isCoverageDebtMetric(metric)) return true;
+  if (!changedCoverageGroups) return true;
+
+  const group = coverageMetricGroupName(metric);
+  if (!group || group === "workspace") return false;
+  return changedCoverageGroups.has(group);
+}
+
+/**
+ * Parse a unified diff (the per-file `patch` from the GitHub PR files API) and
+ * return the lines this PR adds, keyed by their line number in the new file
+ * and mapped to the added source text (without the leading `+`).
+ */
+export function parseAddedLinesFromPatch(patch: string): Map<number, string> {
+  const added = new Map<number, string>();
+  let newLineNumber = 0;
+  let inHunk = false;
+
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@")) {
+      const match = /@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (match) {
+        newLineNumber = parseInt(match[1], 10);
+        inHunk = true;
+      }
+      continue;
+    }
+
+    // Skip the file-header section (e.g. `--- a/...`, `+++ b/...`) that precedes
+    // the first hunk. Inside a hunk every line is content, so a `+`/`-` is the
+    // diff marker and the rest — even another `+` or `-` — is source text.
+    if (!inHunk) continue;
+
+    if (line.startsWith("+")) {
+      added.set(newLineNumber, line.slice(1));
+      newLineNumber++;
+      continue;
+    }
+
+    if (line.startsWith("-")) {
+      // Deletion: present only in the old file, so the new-file cursor holds.
+      continue;
+    }
+
+    // "\ No newline at end of file" markers and the trailing empty element
+    // from splitting do not advance the new-file cursor.
+    if (line.startsWith("\\") || line === "") continue;
+
+    // Context line: present in both files.
+    newLineNumber++;
+  }
+
+  return added;
+}
+
+/** A changed source group whose uncovered-line count regressed. */
+export interface CoverageSuggestionGroup {
+  group: string;
+  /** Uncovered-line count from latest `main`; the PR must not exceed it. */
+  target: number;
+  /** Uncovered-line count this PR produced. */
+  current: number;
+}
+
+/** Count of lines a PR added that no test executes, for one file. */
+export interface CoverageSuggestionFileLines {
+  relativePath: string;
+  group: string;
+  uncoveredCount: number;
+}
+
+/** A changed source group and where this PR left its uncovered-line count. */
+export interface CoverageResolvedGroup {
+  group: string;
+  /** Uncovered-line count from latest `main`. */
+  baseline: number;
+  /** Uncovered-line count this PR produced. */
+  current: number;
+}
+
+export interface CoverageDebtSuggestionInput {
+  groups: CoverageSuggestionGroup[];
+  files: CoverageSuggestionFileLines[];
+}
+
+const MAX_SUGGESTION_FILES = 50;
+
+/**
+ * Cap the file listing so a large PR does not produce an enormous comment.
+ * Returns the files trimmed to the budget and how many were dropped.
+ */
+function limitSuggestionFiles(
+  files: CoverageSuggestionFileLines[],
+): { files: CoverageSuggestionFileLines[]; omitted: number } {
+  if (files.length <= MAX_SUGGESTION_FILES) {
+    return { files, omitted: 0 };
+  }
+  return {
+    files: files.slice(0, MAX_SUGGESTION_FILES),
+    omitted: files.length - MAX_SUGGESTION_FILES,
+  };
+}
+
+function uncoveredLineCount(count: number): string {
+  return `${count} ${count === 1 ? "line" : "lines"}`;
+}
+
+/**
+ * Render the disclosure `<summary>`, leading with the detective emoji. The
+ * regression comment wraps the line in an `<h3>` so it stands out while the
+ * details are open; the resolved comment uses `<strong>`, a quieter weight that
+ * suits a collapsed, already-handled note.
+ */
+function coverageSummary(
+  text: string,
+  emphasis: "h3" | "strong" = "h3",
+): string {
+  return `<summary><${emphasis}>🕵🏻‍♀️ ${text}</${emphasis}></summary>`;
+}
+
+function formatTargetList(groups: CoverageSuggestionGroup[]): string[] {
+  return groups.map((group) =>
+    `  ${COVERAGE_METRIC_PREFIX} ${group.group} uncovered lines  <=  ${group.target}   (this PR: ${group.current})`
+  );
+}
+
+/**
+ * Build the plain-text prompt an author can paste into an AI coding agent. It
+ * is self-contained: the files holding the new uncovered code, the command to
+ * reproduce the gate, and the target thresholds it must reach.
+ */
+function buildCoverageSuggestionPrompt(
+  input: CoverageDebtSuggestionInput,
+  limitedFiles: CoverageSuggestionFileLines[],
+  omitted: number,
+): string[] {
+  const lines: string[] = [
+    "Test coverage for this branch regressed: it adds source lines that no",
+    "test executes, and the CI coverage gate is failing. Add or extend tests so",
+    "the new code in the files below is executed. Write real tests that exercise",
+    "the code paths; do not delete assertions, mark lines ignored, or weaken the",
+    "gate.",
+    "",
+  ];
+
+  if (limitedFiles.length > 0) {
+    lines.push("Files with new uncovered lines (count in parentheses):");
+    lines.push("");
+    for (const file of limitedFiles) {
+      lines.push(`  ${file.relativePath} (${file.uncoveredCount})`);
+    }
+    if (omitted > 0) {
+      lines.push(`  ...and ${omitted} more file(s).`);
+    }
+    lines.push("");
+  } else {
+    lines.push(
+      "The uncovered lines could not be tied to specific files from the diff.",
+      "Run the command below to measure each group.",
+      "",
+    );
+  }
+
+  lines.push("After adding tests, verify from the repository root:");
+  lines.push("");
+  for (const command of COVERAGE_LOCAL_CHECK_COMMAND.split("\n")) {
+    lines.push(`  ${command}`);
+  }
+  lines.push("");
+  lines.push(
+    "That prints one JSON object of coverage-debt metrics. The gate passes when",
+    "each of these metrics is at or below its target:",
+    "",
+  );
+  lines.push(...formatTargetList(input.groups));
+  lines.push("");
+  lines.push(
+    "The local run omits the integration suites, so its counts are conservative:",
+    "if every metric meets its target locally, CI will pass too.",
+  );
+
+  return lines;
+}
+
+/**
+ * Build the Markdown body of the once-per-PR coverage-regression comment. Leads
+ * with the hidden marker so a later run can detect that it was already posted.
+ */
+export function buildCoverageDebtSuggestionComment(
+  input: CoverageDebtSuggestionInput,
+): string {
+  const { files, omitted } = limitSuggestionFiles(input.files);
+  const overBy = input.groups.reduce(
+    (sum, group) => sum + (group.current - group.target),
+    0,
+  );
+  const out: string[] = [COVERAGE_SUGGESTION_MARKER];
+
+  out.push("<details open>");
+  out.push(
+    coverageSummary(`Test coverage regressed by ${uncoveredLineCount(overBy)}`),
+  );
+  out.push("");
+  out.push(
+    "This PR adds source lines that no test exercises, so the coverage gate in " +
+      "the **Coverage Check** job is failing. The gate ratchets each changed " +
+      "source group against its uncovered-line count on `main`: the group must " +
+      "not end up with more uncovered lines than that baseline.",
+  );
+  out.push("");
+
+  out.push("| Source group | Baseline (target) | This PR | Over by |");
+  out.push("| --- | ---: | ---: | ---: |");
+  for (const group of input.groups) {
+    out.push(
+      `| \`${group.group}\` | ${group.target} | ${group.current} | +${
+        group.current - group.target
+      } |`,
+    );
+  }
+  out.push("");
+
+  out.push("### Files with new uncovered lines");
+  out.push("");
+  if (files.length > 0) {
+    for (const file of files) {
+      out.push(
+        `- \`${file.relativePath}\` — ${
+          uncoveredLineCount(file.uncoveredCount)
+        }`,
+      );
+    }
+    if (omitted > 0) {
+      out.push(`- _…and ${omitted} more file(s)._`);
+    }
+  } else {
+    out.push(
+      "Could not tie the regression to specific files from the diff (the " +
+        "uncovered code may be in modified rather than newly-added lines). " +
+        "Use the command below to measure each group.",
+    );
+  }
+  out.push("");
+
+  out.push("### Prompt for an AI coding agent");
+  out.push("");
+  out.push(
+    "Copy the block below into an AI coding agent to add the missing tests:",
+  );
+  out.push("");
+  out.push("````text");
+  out.push(...buildCoverageSuggestionPrompt(input, files, omitted));
+  out.push("````");
+  out.push("");
+  out.push("</details>");
+
+  return out.join("\n");
+}
+
+/**
+ * Describe how a group's uncovered-line count moved between its `main` baseline
+ * and this PR, for the "Change" column of the resolved comment's table.
+ */
+function coverageChangeText(baseline: number, current: number): string {
+  const delta = baseline - current;
+  if (delta === 0) return "no change";
+  const magnitude = uncoveredLineCount(Math.abs(delta));
+  return delta > 0 ? `${magnitude} fewer` : `${magnitude} more`;
+}
+
+/**
+ * Build the Markdown body of the coverage comment once the gate passes again
+ * after an earlier regression. Leads with the same hidden marker so the poster
+ * keeps finding the one comment, keeps the disclosure collapsed (no `open`), and
+ * replaces the regression body with a short summary of where the PR left
+ * coverage.
+ *
+ * `improvedLines` is the net reduction in the overall (workspace) uncovered-line
+ * count versus its `main` baseline: when positive the summary reports the
+ * reduction, otherwise it just notes the regression is resolved. `groups` lists
+ * the changed source groups the gate ratchets, each with its `main` baseline and
+ * the count this PR produced, rendered as a before-and-after table. When
+ * `overridden` is set the gate passed only because the debt was accepted with an
+ * override or the reset marker, so the summary says the metric was overridden
+ * rather than implying the new code is covered.
+ */
+export function buildCoverageResolvedComment(
+  improvedLines: number,
+  groups: CoverageResolvedGroup[],
+  overridden = false,
+): string {
+  const summary = overridden
+    ? "Code coverage debt accepted with an override."
+    : improvedLines > 0
+    ? `Code coverage debt reduced by ${uncoveredLineCount(improvedLines)}!`
+    : "Code coverage regression resolved.";
+
+  const out: string[] = [COVERAGE_SUGGESTION_MARKER];
+  out.push("<details>");
+  out.push(coverageSummary(summary, "strong"));
+  out.push("");
+  out.push(
+    overridden
+      ? "The coverage gate in the **Coverage Check** job passes because this " +
+        "PR's coverage debt was accepted with an override rather than covered " +
+        "by new tests. Here is where it left each changed source group:"
+      : improvedLines > 0
+      ? "The coverage gate in the **Coverage Check** job passes again. This " +
+        `PR now covers ${uncoveredLineCount(improvedLines)} that no test ` +
+        "reached on `main`. Here is where it left each changed source group:"
+      : "The coverage gate in the **Coverage Check** job passes again. Here " +
+        "is where this PR left each changed source group:",
+  );
+  out.push("");
+
+  if (groups.length > 0) {
+    out.push("| Source group | Baseline (`main`) | This PR | Change |");
+    out.push("| --- | ---: | ---: | ---: |");
+    for (const group of groups) {
+      out.push(
+        `| \`${group.group}\` | ${group.baseline} | ${group.current} | ${
+          coverageChangeText(group.baseline, group.current)
+        } |`,
+      );
+    }
+  } else {
+    out.push(
+      "Every changed source group is at or below its `main` baseline for " +
+        "uncovered lines.",
+    );
+  }
+  out.push("");
+  out.push("</details>");
+
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Event helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads and parses the GHA event. Returns `undefined` if it can't be done.
+ */
+export async function readAndParseEvent(
+  eventPath?: string,
+): Promise<object | undefined> {
+  eventPath ??= Deno.env.get("GITHUB_EVENT_PATH");
+
+  if (!eventPath) {
+    return undefined;
+  }
+
+  try {
+    const result = JSON.parse(await Deno.readTextFile(eventPath));
+    return (typeof result === "object") ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PR helpers
+// ---------------------------------------------------------------------------
+
+/** Fetch the full body of a PR by number. */
+export async function fetchPRBody(prNumber: number): Promise<string> {
+  const pr = await githubGet<{ body: string | null }>(
+    `/repos/${REPO}/pulls/${prNumber}`,
+  );
+  return pr.body ?? "";
+}
+
+export async function fetchPRFiles(prNumber: number): Promise<PRFile[]> {
+  const files: PRFile[] = [];
+  const perPage = 100;
+
+  for (let page = 1;; page++) {
+    const data = await githubGet<PRFile[]>(
+      `/repos/${REPO}/pulls/${prNumber}/files?per_page=${perPage}&page=${page}`,
+    );
+    files.push(...data);
+    if (data.length < perPage) break;
+  }
+
+  return files;
+}
+
+/** Fetch every issue comment on a PR (PR conversation comments). */
+export async function fetchIssueComments(
+  issueNumber: number,
+): Promise<IssueComment[]> {
+  const comments: IssueComment[] = [];
+  const perPage = 100;
+
+  for (let page = 1;; page++) {
+    const data = await githubGet<{ id: number; body: string | null }[]>(
+      `/repos/${REPO}/issues/${issueNumber}/comments?per_page=${perPage}&page=${page}`,
+    );
+    for (const comment of data) {
+      comments.push({ id: comment.id, body: comment.body ?? "" });
+    }
+    if (data.length < perPage) break;
+  }
+
+  return comments;
+}
+
+export function pullRequestBodyFromEvent(
+  event: object | undefined,
+): string | undefined {
+  const pullRequest =
+    (event as { pull_request?: { body?: unknown } } | undefined)
+      ?.pull_request;
+  if (!pullRequest || !("body" in pullRequest)) return undefined;
+  return typeof pullRequest.body === "string" ? pullRequest.body : "";
+}
+
+export async function fetchCurrentPRBody(
+  prNumber: number,
+  event: object | undefined,
+): Promise<CurrentPRBody> {
+  try {
+    return { body: await fetchPRBody(prNumber), source: "live" };
+  } catch (error) {
+    const eventBody = pullRequestBodyFromEvent(event);
+    return {
+      body: eventBody ?? "",
+      source: eventBody === undefined ? "empty-fallback" : "event-fallback",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Coverage override parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a PR body for coverage-debt overrides.
+ *
+ * Format (visible markdown, one per line):
+ *   ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
+ *   NEW_COVERAGE_BASELINE
+ *
+ * `ACCEPT_COVERAGE_DEBT` accepts one metric's uncovered-line count. Its value
+ * must use line units and its metric must be a `coverage-debt:` metric.
+ * `NEW_COVERAGE_BASELINE` is a whole-coverage ratchet reset marker; it has no
+ * value and lets the PR's/main run's coverage metrics become the next baseline.
+ *
+ * `includeLegacyCoverageAcceptance` additionally reads the marker's former name,
+ * `NEW_PERF_BASELINE: <coverage-debt metric> = N lines`. Merged PRs from before
+ * the rename accepted coverage debt that way, and their acceptance still has to
+ * truncate the baseline timeline — otherwise a previously accepted increase
+ * re-gates once its group's recent `main` runs go cold, because the ratchet
+ * reaches back past the acceptance to a lower pre-acceptance sample. It is
+ * enabled only when rebuilding merged-PR baselines, never for the current PR:
+ * new PRs must use `ACCEPT_COVERAGE_DEBT`. The timing forms `NEW_PERF_BASELINE`
+ * also carried gate nothing now, so any non-coverage-debt legacy line is
+ * ignored rather than rejected.
+ */
+export function parseBaselineOverrides(
+  body: string,
+  includeLegacyCoverageAcceptance = false,
+): BaselineOverrides {
+  const result: BaselineOverrides = {
+    metrics: new Map(),
+    coverageBaselineReset: new RegExp(
+      `^\\s*${COVERAGE_BASELINE_RESET_MARKER}(?::\\s*.*)?\\s*$`,
+      "m",
+    ).test(body),
+  };
+
+  const re = /ACCEPT_COVERAGE_DEBT:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*(lines?)/g;
+  let match;
+  while ((match = re.exec(body)) !== null) {
+    const metric = match[1].trim();
+    const value = parseFloat(match[2]);
+
+    if (!isCoverageDebtMetric(metric)) {
+      throw new Error(
+        `Invalid ACCEPT_COVERAGE_DEBT override for "${metric}": only coverage-debt metrics can be accepted.`,
+      );
+    }
+
+    result.metrics.set(metric, value);
+  }
+
+  if (includeLegacyCoverageAcceptance) {
+    const legacyRe =
+      /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*lines?\b/g;
+    let legacyMatch;
+    while ((legacyMatch = legacyRe.exec(body)) !== null) {
+      const metric = legacyMatch[1].trim();
+      if (!isCoverageDebtMetric(metric)) continue;
+      if (!result.metrics.has(metric)) {
+        result.metrics.set(metric, parseFloat(legacyMatch[2]));
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Format a coverage-debt value as a suggested override string for PR
+ * descriptions, rounded up to whole lines.
+ */
+export function formatOverrideSuggestion(value: number): string {
+  const rounded = Math.ceil(value);
+  return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
+}
+
+// ---------------------------------------------------------------------------
+// Timeline helpers
+// ---------------------------------------------------------------------------
+
+/** Add a sample to a timeline map, creating the timeline if necessary. */
+export function addSample(
+  timelines: Map<string, MetricTimeline>,
+  name: string,
+  sample: TimingSample,
+): void {
+  let timeline = timelines.get(name);
+  if (!timeline) {
+    timeline = { name, samples: [] };
+    timelines.set(name, timeline);
+  }
+  timeline.samples.push(sample);
+}
+
+/**
+ * Apply baseline overrides to timelines by truncating samples before the
+ * latest override point.
+ *
+ * `overridesBySha` maps commit SHA -> BaselineOverrides parsed from the
+ * merged PR for that commit.  When a commit has a per-metric override, or a
+ * whole-coverage reset for coverage-debt metrics, we discard all samples for
+ * the affected metrics that precede that commit (keeping the override commit's
+ * sample and everything after).
+ */
+export function applyBaselineOverrides(
+  timelines: Map<string, MetricTimeline>,
+  overridesBySha: Map<string, BaselineOverrides>,
+): void {
+  // Find the latest override commit index for each metric
+  for (const [metricName, timeline] of timelines) {
+    let latestOverrideIdx = -1;
+
+    for (let i = 0; i < timeline.samples.length; i++) {
+      const sha = timeline.samples[i].sha;
+      const overrides = overridesBySha.get(sha);
+      if (!overrides) continue;
+
+      if (
+        overrides.metrics.has(metricName) ||
+        (overrides.coverageBaselineReset &&
+          isCoverageDebtMetric(metricName))
+      ) {
+        latestOverrideIdx = i;
+      }
+    }
+
+    if (latestOverrideIdx > 0) {
+      timeline.samples = timeline.samples.slice(latestOverrideIdx);
+    }
+  }
+}
+
+/**
+ * The latest sample whose run is not known-cold, for the coverage-debt ratchet
+ * that compares against the most recent baseline. A cold main run covers
+ * cold-compile-only branches, so ratcheting against its lower debt would fail
+ * later warm PRs with phantom regressions. Falls back to the last sample when
+ * every sample is known-cold, preserving the override-truncation reset
+ * semantics of `samples.at(-1)`.
+ */
+export function latestNonColdSample(
+  samples: TimingSample[],
+  isRunCold: (runId: number) => boolean,
+): TimingSample | undefined {
+  for (let i = samples.length - 1; i >= 0; i--) {
+    if (!isRunCold(samples[i].runId)) return samples[i];
+  }
+  return samples.at(-1);
+}

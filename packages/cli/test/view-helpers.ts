@@ -2,9 +2,31 @@
  * Shared fixtures and helpers for the `cf view` test suites. Not a test file
  * itself (the test task globs `*.test.ts`), just an import.
  */
-import { parseDocument } from "../lib/view/parse.ts";
+import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
+import type { ViewState } from "../lib/view/render.ts";
+import type { Rgb } from "../lib/view/ansi.ts";
 
 export { parseDocument };
+
+/** The `48;2;r;g;b` background run for a colour, as it appears in an SGR escape;
+ * lets a test assert on a theme colour without hard-coding its hex. */
+export function bgCode(rgb: Rgb): string {
+  return `48;2;${rgb[0]};${rgb[1]};${rgb[2]}`;
+}
+
+/** The `38;2;r;g;b` foreground run for a colour. */
+export function fgCode(rgb: Rgb): string {
+  return `38;2;${rgb[0]};${rgb[1]};${rgb[2]}`;
+}
+
+/** The visible text of a modal prompt dialog — its title, body lines and button
+ * labels joined — so a test can assert on the prompt with a single `includes`.
+ * Empty string when no dialog is up. */
+export function promptText(v: ViewState): string {
+  const d = v.dialog;
+  if (!d) return "";
+  return [d.title, ...d.body, ...d.buttons.map((b) => b.label)].join(" ");
+}
 
 /**
  * A small but representative transformed blob: two sections, synthetic helpers,
@@ -44,6 +66,21 @@ type Foo = {
 };
 interface Bar {
     x: number;
+}
+`;
+
+/** Valid TypeScript that triggers a compiler crash when parsed as TSX. The
+ * generic arrow enters JSX recovery. The later private member produces a
+ * malformed private identifier. */
+export const TS_PARSER_REGRESSION =
+  `export const identity = <T>(value: T): T => {
+  return value;
+};
+class Tx {
+  #floor = 0;
+  set(mode: number): void {
+    if (mode < this.#floor) {}
+  }
 }
 `;
 

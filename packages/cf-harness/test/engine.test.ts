@@ -109,6 +109,8 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     updatedAt: "2026-04-15T19:00:00.000Z",
     cfcEnforcementMode: "enforce-explicit",
     currentDir: "/workspace",
+    modelProvider: "openai-compatible-gateway",
+    modelAuthSource: "api-key",
     policyEvents: [],
     toolOutputs: [],
     failureRecords: [],
@@ -136,6 +138,129 @@ Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", (
     cfcEnforcementMode: "enforce-strict",
   });
   assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
+});
+
+Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
+  const resumedState = (
+    modelProvider: "openai-codex" | "openai-compatible-gateway",
+  ): HarnessRunState => ({
+    runId: `resume-${modelProvider}`,
+    status: "failed",
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    model: "gpt-recorded",
+    modelProvider,
+    ...(modelProvider === "openai-codex"
+      ? { credentialOwnerKey: "local" }
+      : {}),
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  });
+
+  new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: resumedState("openai-codex"),
+    model: "gpt-recorded",
+    credentialOwnerKey: "local",
+  });
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: resumedState("openai-codex"),
+        model: "gpt-different",
+        credentialOwnerKey: "local",
+      }),
+    Error,
+    "resumed openai-codex run model gpt-recorded does not match requested model gpt-different",
+  );
+  new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: resumedState("openai-compatible-gateway"),
+    model: "gpt-different",
+    gatewayAuthMode: "none",
+  });
+});
+
+Deno.test("CfHarnessEngine rejects direct subagent resume but permits new child creation", () => {
+  const lineage = {
+    role: "subagent" as const,
+    rootRunId: "root-run",
+    parentRunId: "parent-run",
+    parentToolCallId: "call-delegate",
+    depth: 1,
+  };
+  const resumedState: HarnessRunState = {
+    runId: "child-run",
+    status: "failed",
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    model: "gpt-recorded",
+    modelProvider: "openai-codex",
+    credentialOwnerKey: "local",
+    lineage,
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  };
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: resumedState,
+        credentialOwnerKey: "local",
+      }),
+    Error,
+    "resumed subagent run child-run requires trusted parent resume context",
+  );
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: resumedState,
+        credentialOwnerKey: "local",
+        subagentResumeContext: {
+          type: "cf-harness.subagent-resume-context",
+          version: 1,
+          rootRunId: lineage.rootRunId,
+          parentRunId: "different-parent",
+          parentToolCallId: lineage.parentToolCallId,
+        },
+      }),
+    Error,
+    "does not match trusted parent resume context",
+  );
+
+  const resumedChild = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: resumedState,
+    credentialOwnerKey: "local",
+    subagentResumeContext: {
+      type: "cf-harness.subagent-resume-context",
+      version: 1,
+      rootRunId: lineage.rootRunId,
+      parentRunId: lineage.parentRunId,
+      parentToolCallId: lineage.parentToolCallId,
+    },
+  });
+  assertEquals(resumedChild.getRunState().runId, resumedState.runId);
+
+  const newChild = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "new-child-run",
+    lineage,
+    modelProvider: "openai-codex",
+    credentialOwnerKey: "local",
+    cfcEnforcementMode: "disabled",
+  });
+  assertEquals(newChild.getRunState().lineage, lineage);
 });
 
 Deno.test("CfHarnessEngine refuses to run a tool in enforce mode without CFC transports", async () => {
@@ -986,5 +1111,51 @@ Deno.test("CfHarnessEngine rejects legacy run state snapshots without currentDir
       }),
     Error,
     "older cf-harness runs cannot be resumed",
+  );
+});
+
+Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative", () => {
+  const runState: HarnessRunState = {
+    runId: "run-codex-resume-provider",
+    status: "completed",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    modelProvider: "openai-codex",
+    modelAuthSource: "owner-bound-oauth",
+    credentialOwnerKey: "loom:user-1",
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  };
+
+  const resumed = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState,
+  });
+  assertEquals(resumed.config.modelProvider, "openai-codex");
+  assertEquals(resumed.config.credentialOwnerKey, "loom:user-1");
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        modelProvider: "openai-compatible-gateway",
+      }),
+    Error,
+    "does not match requested provider",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        modelProvider: "openai-codex",
+        credentialOwnerKey: "loom:user-2",
+      }),
+    Error,
+    "credential owner does not match",
   );
 });

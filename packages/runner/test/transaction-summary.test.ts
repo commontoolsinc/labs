@@ -159,6 +159,21 @@ describe("transaction-summary", () => {
     assertEquals(formatted.includes("Object def456"), true);
   });
 
+  it("keeps the computed: scheme visible in shortened object headers", () => {
+    // `of:` drops for brevity, but `computed:` is the ONLY thing
+    // distinguishing a computed cell from a state sibling of the same cause
+    // (the hash preimage is kind-free), so the header must keep it.
+    const tx = createTestTransaction([
+      attestation("computed:fid1:AAAABBBBCCCCDDDD", ["value"], 1),
+      attestation("of:fid1:EEEEFFFFGGGGHHHH", ["value"], 2),
+    ]);
+
+    const formatted = formatTransactionSummary(tx, "did:key:test" as any);
+
+    assertEquals(formatted.includes("Object computed:fid1:AAAABBB..."), true);
+    assertEquals(formatted.includes("Object fid1:EEEEFFF..."), true);
+  });
+
   it("should handle deletions", () => {
     const tx = createTestTransaction(
       [attestation("of:abc123", ["value", "old"], undefined)],

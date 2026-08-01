@@ -50,6 +50,20 @@ Every piece command below takes `-i/--identity`, `-a/--api-url`,
 space name. (What the key actually is, and how a space name becomes a DID,
 is Chapter 10.)
 
+Worth doing once, since the rest of this chapter is a lot of typing — turn on
+tab completion:
+
+```bash
+# zsh: add to ~/.zshrc after compinit (bash: swap zsh -> bash, use ~/.bashrc)
+source <(deno run -A packages/cli/mod.ts completion zsh)
+```
+
+It completes commands and flags offline, and — once `CF_IDENTITY`/`CF_API_URL`
+are set as above — the values that are actually painful to type: piece ids
+(annotated with each piece's name), a piece's callable names, and cell paths a
+segment at a time. It completes `deno task cf ...` as well as a `cf` binary.
+See `cf completion --help`.
+
 ## Deploy and iterate
 
 ```bash
@@ -69,7 +83,8 @@ duplicates. `new` once, `setsrc` forever after.
 Everything a pattern exports (Chapter 3) is drivable without a browser:
 
 ```bash
-deno task cf piece ls -s myspace                       # list pieces
+deno task cf piece ls -s myspace                       # list registered pieces
+deno task cf piece search -s myspace "invoice"         # search registered pieces
 deno task cf piece inspect --piece <ID>                # dump structure/state
 deno task cf piece get --piece <ID> items              # read one exported field
 deno task cf piece call addItem '{"title": "Test"}' --piece <ID>   # send to a stream
@@ -131,7 +146,7 @@ deno task cf test packages/patterns/my-pattern/      # all tests in a directory
 Notice what makes the subject *testable*: dual type parameters on
 `pattern<Input, Output>()` and exported `Stream<T>` actions. That's why
 Chapter 3 insisted on them. Keep assertions deterministic — no
-`safeDateNow()` or randomness inside them. Patterns that fetch external data
+`Date.now()` or randomness inside them. Patterns that fetch external data
 (`fetchJson` and friends) can still be tested deterministically: export a
 module-scope `fetchMocks` array from the test file and the harness injects
 it as the runtime's fetch (worked examples in
@@ -162,9 +177,12 @@ failures (each links to a full writeup under
    instead of changing the selection; box it: `selected.set({ item })`.
 8. **`ifElse` on a composed pattern's cell** — hangs; bridge through a local
    `computed()`.
-9. **`Date.now()` / `Math.random()` / `setTimeout` / `new Proxy()`** — not
-   available under SES; use `safeDateNow()` / `nonPrivateRandom()` in
-   handlers or one-time initialization, never in `computed()`/`lift()`.
+9. **`Date.now()` / `Math.random()` / `setTimeout` / `new Proxy()`** — `setTimeout`
+   and `new Proxy()` are not available under SES. `Date.now()`, no-argument
+   `new Date()`, and `Math.random()` are gated: call them directly in handlers or
+   one-time initialization (the clock reads at one-second resolution there), but in
+   `computed()`/`lift()` they throw a `TimeCapabilityError`. For reactive time in a
+   `computed()`, use the `#now` wish.
 10. **Unguarded scoped-cell reads while rendering** — `PerSession` cells are
     `undefined` until first sync; guard with `?? []`.
 

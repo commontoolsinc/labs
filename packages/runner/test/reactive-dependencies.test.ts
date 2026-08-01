@@ -9,6 +9,7 @@ import {
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceScopeAndURI } from "../src/scheduler.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricMap } from "@commonfabric/data-model/fabric-instances";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -1671,9 +1672,9 @@ describe("determineTriggeredActions", () => {
 
     it("real-world case: triggers when __#0 key appears in internal", () => {
       // Simplified version of the real bug from production
-      // Action B watches a path through __#0.allPieces
+      // Action B watches a path through __#0.pieceRegistry
       // Before: internal doesn't have __#0
-      // After: internal has __#0 (but no allPieces inside)
+      // After: internal has __#0 (but no pieceRegistry inside)
       const actionA = createAction("actionA");
       const actionB = createAction("actionB");
       const actionC = createAction("actionC");
@@ -1688,13 +1689,13 @@ describe("determineTriggeredActions", () => {
         [actionB, [
           ["value", "internal", "$alias", "path"],
           ["value", "internal", "/", "link@1"],
-          ["value", "internal", "__#0", "allPieces"],
+          ["value", "internal", "__#0", "pieceRegistry"],
           ["value", "internal", "cell", "/"],
         ]],
         [actionC, [
           ["value", "internal", "$alias", "path"],
           ["value", "internal", "/", "link@1"],
-          ["value", "internal", "__#0", "allPieces"],
+          ["value", "internal", "__#0", "pieceRegistry"],
           ["value", "internal", "cell", "/"],
         ]],
       ]);
@@ -1714,7 +1715,7 @@ describe("determineTriggeredActions", () => {
           internal: {
             backlinksIndex: { "/": { "link@1": { path: [], id: "of:123" } } },
             "__#2": { "/": { "link@1": { path: [], id: "of:456" } } },
-            // __#0 now exists! (but doesn't have allPieces)
+            // __#0 now exists! (but doesn't have pieceRegistry)
             "__#0": {
               "/": {
                 "link@1": { path: [], id: "of:789", space: "did:key:abc" },
@@ -1731,7 +1732,7 @@ describe("determineTriggeredActions", () => {
       );
 
       // Action B and C should trigger because __#0 appeared,
-      // even though allPieces is still undefined in both cases
+      // even though pieceRegistry is still undefined in both cases
       expect(result).toContain(actionB);
       expect(result).toContain(actionC);
       // Action A should NOT trigger (none of its paths changed)
@@ -1963,6 +1964,32 @@ describe("determineTriggeredActions", () => {
         { nonRecursive: true },
       );
       expect(result).toEqual([action]);
+    });
+
+    // A non-recursive read compares an opaque leaf by value, and a class whose
+    // comparison is an unimplemented stub cannot answer. The failure is
+    // deliberately left to propagate rather than being caught and turned into
+    // "changed": a stub announcing itself loudly is worth more than a quiet
+    // answer derived from an unfinished class, and swallowing it would let
+    // that class shape behavior here. `FabricMap` stands in for any value
+    // whose comparison is unavailable.
+    it("propagates the failure from a value it cannot compare", () => {
+      const action = createAction("nonRecursiveUncomparableLeaf");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["k", 1]])) } };
+      const after = { value: { a: new FabricMap(new Map([["k", 2]])) } };
+
+      expect(() =>
+        determineTriggeredActions(
+          dependencies,
+          before as unknown as FabricValue,
+          after as unknown as FabricValue,
+          ["value", "a"],
+          { nonRecursive: true },
+        )
+      ).toThrow("not yet implemented");
     });
 
     it("triggers on same-path write for non-recursive reads", () => {

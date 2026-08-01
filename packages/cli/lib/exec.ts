@@ -1,5 +1,8 @@
 import type { PieceManager } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  type PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import { basename, dirname, join, relative, resolve } from "@std/path";
 import {
   type MountedCallablePath,
@@ -10,6 +13,7 @@ import {
   callableCommandSpec,
   type CallableManagerLike,
   type CallablePieceLike,
+  type CallableResultRef,
   detectCallableKind,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
@@ -30,6 +34,7 @@ export interface MountedPieceMeta {
   id: string;
   entityId?: string;
   name?: string;
+  patternRef?: PiecePatternRef;
 }
 
 export interface ResolvedMountedCallableFile {
@@ -54,12 +59,7 @@ export interface ExecDependencies {
   stat?: (path: string) => Promise<Deno.FileInfo>;
   readDir?: (path: string) => AsyncIterable<Deno.DirEntry>;
   delay?: (ms: number) => Promise<void>;
-  timeoutMs?: number;
   uuid?: () => string;
-  waitForResult?: (
-    resultCell: CallableCellLike,
-    timeoutMs: number,
-  ) => Promise<unknown>;
   invocationStyle?: "cf" | "direct";
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
@@ -70,8 +70,14 @@ export interface ExecDependencies {
 export interface ExecutedMountedCallableFile {
   helpText?: string;
   outputText?: string;
+  /** Tool result cell address, passed through from ExecutedCallable. */
+  resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
+}
+
+export interface ResolveMountedCallableOptions {
+  jsonOutput?: boolean;
 }
 
 async function defaultLoadPiece(
@@ -110,10 +116,55 @@ async function readMountedPieceMeta(
     throw new Error(`Mounted piece metadata missing id for ${absFilePath}`);
   }
 
+  const rawPatternRef = meta.patternRef;
+  const rawPatternSource = typeof rawPatternRef === "object" &&
+      rawPatternRef !== null && !Array.isArray(rawPatternRef)
+    ? (rawPatternRef as Record<string, unknown>).source
+    : undefined;
+  const patternSource = typeof rawPatternSource === "object" &&
+      rawPatternSource !== null && !Array.isArray(rawPatternSource) &&
+      typeof (rawPatternSource as Record<string, unknown>).ref === "string"
+    ? {
+      ref: (rawPatternSource as Record<string, unknown>).ref as string,
+      ...(typeof (rawPatternSource as Record<string, unknown>).repository ===
+          "string"
+        ? {
+          repository: (rawPatternSource as Record<string, unknown>)
+            .repository as string,
+        }
+        : {}),
+      ...(typeof (rawPatternSource as Record<string, unknown>).entry ===
+          "string"
+        ? {
+          entry: (rawPatternSource as Record<string, unknown>).entry as string,
+        }
+        : {}),
+      ...(typeof (rawPatternSource as Record<string, unknown>).origin ===
+          "string"
+        ? {
+          origin: (rawPatternSource as Record<string, unknown>)
+            .origin as string,
+        }
+        : {}),
+    }
+    : undefined;
+  const patternRef = typeof rawPatternRef === "object" &&
+      rawPatternRef !== null && !Array.isArray(rawPatternRef) &&
+      typeof (rawPatternRef as Record<string, unknown>).identity === "string" &&
+      typeof (rawPatternRef as Record<string, unknown>).symbol === "string" &&
+      patternSource !== undefined
+    ? {
+      identity: (rawPatternRef as Record<string, unknown>).identity as string,
+      symbol: (rawPatternRef as Record<string, unknown>).symbol as string,
+      source: patternSource,
+    }
+    : undefined;
+
   return {
     id: meta.id,
     entityId: typeof meta.entityId === "string" ? meta.entityId : undefined,
     name: typeof meta.name === "string" ? meta.name : undefined,
+    patternRef,
   };
 }
 
@@ -190,6 +241,7 @@ async function assertMountedCallableFileExists(
 export async function resolveMountedCallableFile(
   filePath: string,
   deps: ExecDependencies = {},
+  options: ResolveMountedCallableOptions = {},
 ): Promise<ResolvedMountedCallableFile> {
   const absPath = resolve(filePath);
   const mount = await findMountForPath(absPath, deps.stateDir);
@@ -219,11 +271,13 @@ export async function resolveMountedCallableFile(
       apiUrl: mount.entry.apiUrl,
       identity: mount.entry.identity,
       space: callablePath.spaceName,
+      ...(options.jsonOutput ? { jsonOutput: true } : {}),
     })
     : await loadManager({
       apiUrl: mount.entry.apiUrl,
       identity: mount.entry.identity,
       space: callablePath.spaceName,
+      ...(options.jsonOutput ? { jsonOutput: true } : {}),
     }) as unknown as CallableManagerLike;
   const piece = await (deps.loadPiece ?? defaultLoadPiece)(
     manager,
@@ -257,7 +311,9 @@ export async function executeMountedCallableFile(
   rawArgs: string[],
   deps: ExecDependencies = {},
 ): Promise<ExecutedMountedCallableFile> {
-  const resolved = await resolveMountedCallableFile(filePath, deps);
+  const resolved = await resolveMountedCallableFile(filePath, deps, {
+    jsonOutput: true,
+  });
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
   const result = await executeCallableCommand({

@@ -2,7 +2,10 @@
   "name": "@commonfabric/html",
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
-    "test": "deno test --no-check --allow-env --allow-ffi --allow-read --allow-net test/*.test.ts test/*.test.tsx",
+    // --preload runs test/clock-preload.ts before the test modules; it freezes
+    // positive-delay timers so a wall-clock sleep deadlocks. See that file and
+    // docs/development/waiting-in-tests.md.
+    "test": "deno test --no-check --preload=test/clock-preload.ts --allow-env --allow-ffi --allow-read --allow-net test/*.test.ts test/*.test.tsx",
     "bench": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check bench/*.bench.ts"
   },
   "exports": {
@@ -18,8 +21,9 @@
     "./debug": "./src/debug.ts"
   },
   "imports": {
-    "htmlparser2": "npm:htmlparser2",
-    "domhandler": "npm:domhandler",
-    "dom-serializer": "npm:dom-serializer"
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "htmlparser2": "npm:htmlparser2@12.0.0",
+    "domhandler": "npm:domhandler@6.0.1",
+    "dom-serializer": "npm:dom-serializer@3.1.1"
   }
 }

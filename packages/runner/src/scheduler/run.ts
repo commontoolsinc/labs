@@ -13,6 +13,7 @@ import {
   isConflictRejection,
   isExecutionLeaseFenceRejection,
   isPermanentRejection,
+  isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
 import { isReadIgnoredForScheduling } from "../storage/reactivity-log.ts";
@@ -21,6 +22,7 @@ import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_RETRIES_FOR_REACTIVE,
+  OFF_BUDGET_RETRY_WARN_INTERVAL,
 } from "./constants.ts";
 import {
   captureDiagnosisRecord,
@@ -145,6 +147,7 @@ export function watchReactiveActionCommit(state: {
   readonly log: ReactivityLog;
   readonly retries: WeakMap<Action, number>;
   readonly conflictStreaks?: WeakMap<Action, number>;
+  readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
@@ -155,12 +158,14 @@ export function watchReactiveActionCommit(state: {
     error: unknown,
     disposition: ActionCommitRejectionDisposition,
   ) => ActionCommitRejectionDirective;
+  readonly getActionId: (action: Action) => string;
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
       state.conflictStreaks?.delete(state.action);
+      state.offBudgetRetries.delete(state.action);
       return;
     }
 
@@ -185,14 +190,25 @@ export function watchReactiveActionCommit(state: {
       }
     };
 
-    // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
-    // means one of its inputs moved: the authoritative version is ahead of this
-    // replica, and the action's read set is stale until the replica catches up
-    // (the conflict's `readyToRetry` gates exactly that catch-up). Re-arm the
-    // subscription, wait for the catch-up, then re-run the action against the
-    // fresh state. A conflict is a WAIT, not a failure, so it does NOT consume
-    // the retry budget — otherwise sustained contention would exhaust the budget
-    // and strand the compute as a zombie against rolled-back data.
+    // A reactive compute is not a transactional retrier. A stale-basis rejection
+    // means the value the action read is no longer current, so re-running against
+    // fresh state and committing again converges. Two rejections are stale-basis.
+    // A CONFLICT is an upstream stale read: the authoritative version is ahead of
+    // this replica, and the action's read set is stale until the replica catches
+    // up (the conflict's `readyToRetry` gates exactly that catch-up). A
+    // STORAGE-TRANSACTION-INCONSISTENT is the local analogue: a value the
+    // transaction read changed on this replica between the read and the commit,
+    // which re-running against the settled replica resolves. It carries no
+    // `readyToRetry`, so the re-queue below runs it afresh once the local write
+    // completes. Wait for any catch-up, then re-queue the action to re-run
+    // against fresh state; its subscription is already live, so the steps below
+    // refresh it and restore the trigger reads the run consumed rather than
+    // establishing a subscription that was torn down. Both are a WAIT, not a
+    // failure, so neither consumes the retry budget —
+    // otherwise sustained contention would exhaust the budget and strand the
+    // compute as a zombie against rolled-back data. Only a rejection that
+    // re-running cannot resolve (transport, malformed store) takes the bounded
+    // budget below.
     //
     // Reader-dirty propagation also re-triggers the action when the catch-up
     // write lands as a fresh notification, but that does not cover every
@@ -203,10 +219,31 @@ export function watchReactiveActionCommit(state: {
     // reader-dirty is a redundant fast path (the re-dirty/pending/queue calls
     // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
     // transaction still carries their flow labels.
-    if (isConflictRejection(error)) {
+    if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
       if (reportRejection("retrying")) {
         state.retries.delete(state.action);
         return;
+      }
+      // This retry rides off the bounded budget on the assumption that the
+      // subscription eventually delivers the awaited value — true for
+      // pattern-created reactive functions, which go through the cell machinery.
+      // A bug that never closes the loop (historically a serialization
+      // round-trip that dropped a value) would re-queue forever, so surface a
+      // non-fatal diagnostic every OFF_BUDGET_RETRY_WARN_INTERVAL re-queues
+      // rather than spinning silently. The count clears on the next successful,
+      // permanent, or terminal commit.
+      const offBudgetRetries = (state.offBudgetRetries.get(state.action) ?? 0) +
+        1;
+      state.offBudgetRetries.set(state.action, offBudgetRetries);
+      if (offBudgetRetries % OFF_BUDGET_RETRY_WARN_INTERVAL === 0) {
+        logger.error(
+          "reactive-retry-not-converging",
+          () => [
+            `reactive action ${state.getActionId(state.action)} re-queued ` +
+            `${offBudgetRetries} times on a stale-basis rejection without ` +
+            `converging; its subscription may never deliver the awaited value`,
+          ],
+        );
       }
       // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
       // resubscribe) so the subscription stays fresh and a concurrent
@@ -282,15 +319,17 @@ export function watchReactiveActionCommit(state: {
     ) {
       reportRejection("abandoned");
       state.retries.delete(state.action);
+      state.offBudgetRetries.delete(state.action);
       return;
     }
 
     // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
-    // transport error, or the path-blind local StorageTransactionInconsistent
-    // guard that fires before the engine's granular matcher — so they still
-    // warrant a bounded retry. On every attempt we still resubscribe, so even
-    // after the budget is exhausted the action is re-triggered when its input
-    // data changes.
+    // transport or malformed-store error — so they still warrant a bounded
+    // retry to make progress. Unlike a stale basis (a conflict or the local
+    // same-replica-race guard, both handled off-budget above), re-running does
+    // not resolve them, so the budget bounds the wasted attempts. On every
+    // attempt we still resubscribe, so even after the budget is exhausted the
+    // action is re-triggered when its input data changes.
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
@@ -375,6 +414,7 @@ export interface SchedulerActionRunState {
   readonly actionTimingState: ActionTimingState;
   readonly retries: WeakMap<Action, number>;
   conflictStreaks: WeakMap<Action, number>;
+  readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
   readonly nodes: NodeRegistry;
@@ -683,11 +723,13 @@ function finalizeReactiveActionCommit(
     log: committedLog,
     retries: state.retries,
     conflictStreaks: state.conflictStreaks,
+    offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
     resubscribe: state.resubscribe,
     markInvalid: state.markInvalid,
     queueExecution: state.queueExecution,
+    getActionId: state.getActionId,
     restoreInvalidCauses: () => {
       const record = state.nodes.get(args.action);
       if (

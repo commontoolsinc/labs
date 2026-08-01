@@ -169,7 +169,7 @@ describe("resume owned-cell pre-sync", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("value").get()).toBe(70);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     // RESUME (runtime B): cold cache. start() walks the pattern tree and
     // pre-syncs the nested node's owned cells before instantiating.
@@ -197,8 +197,7 @@ describe("resume owned-cell pre-sync", () => {
       }
       expect(rc2.key("value").get()).toBe(70);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 
@@ -237,7 +236,7 @@ describe("resume owned-cell pre-sync", () => {
       rc1.key("y").get(),
       rc1.key("z").get(),
     ]).toEqual([10, 20, 30]);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     const rt2 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -269,8 +268,7 @@ describe("resume owned-cell pre-sync", () => {
         rc2.key("z").get(),
       ]).toEqual([10, 20, 30]);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
@@ -341,7 +339,7 @@ describe("resume owned-cell walk cycle-detection key", () => {
       mint("of:spot-a", ["other"]), // same spot id, different path
       mint("of:spot-a", ["a", "b"]), // multi-component path
       mint("of:spot-a", ["ab"]), // would join-collide with ["a","b"] under a delimiter
-      mint("of:spot-a", ["a b"]), // a path component that itself contains the delimiter
+      mint("of:spot-a", ["a\x00b"]), // a path component that itself contains the delimiter
     ];
     const keys = cells.map(cycleKey);
     expect(new Set(keys).size).toBe(cells.length); // injective: no collisions

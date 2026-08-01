@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { favoriteKey } from "@commonfabric/home-schemas";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Cell } from "../src/cell.ts";
@@ -70,16 +71,25 @@ describe("home favorites handlers", () => {
     return { piece: target.getAsLink(), id };
   }
 
-  async function readFavorites(): Promise<FavoriteEntry[]> {
-    let favorites: FavoriteEntry[] = [];
-    for (let i = 0; i < 50; i++) {
-      await runtime.idle();
-      favorites =
-        (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [];
-      if (favorites.length > 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    return favorites;
+  // Each handler send below runs through the scheduler, so the rewritten list
+  // arrives on a committed change the sink reports. The pattern starts
+  // `favorites` at an empty list, which the emptiness predicate matches, so each
+  // caller of readFavoritesUntilEmpty first establishes that the list holds an
+  // entry.
+  function readFavorites(): Promise<FavoriteEntry[]> {
+    return waitForCellValue<FavoriteEntry[]>(
+      runtime,
+      home.key("favorites"),
+      (favorites) => (favorites?.length ?? 0) > 0,
+    );
+  }
+
+  function readFavoritesUntilEmpty(): Promise<FavoriteEntry[]> {
+    return waitForCellValue<FavoriteEntry[]>(
+      runtime,
+      home.key("favorites"),
+      (favorites) => favorites?.length === 0,
+    );
   }
 
   it("stores the discovery tags it is given", async () => {
@@ -118,16 +128,7 @@ describe("home favorites handlers", () => {
 
     // Unfavoriting removes the membership entry by identity.
     home.key("removeFavorite").send({ piece, id });
-    for (let i = 0; i < 20; i++) {
-      await runtime.idle();
-      const favorites =
-        (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [];
-      if (favorites.length === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    expect(
-      (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [],
-    ).toEqual([]);
+    expect(await readFavoritesUntilEmpty()).toEqual([]);
   });
 
   it("removes a legacy favorite (no keyed entity) via the piece-cell fallback", async () => {
@@ -154,15 +155,6 @@ describe("home favorites handlers", () => {
     // The keyed removal cannot reach it, so removeFavorite falls back to
     // matching the piece cell and still deletes it.
     home.key("removeFavorite").send({ piece, id });
-    for (let i = 0; i < 20; i++) {
-      await runtime.idle();
-      const favs =
-        (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [];
-      if (favs.length === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    expect(
-      (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [],
-    ).toEqual([]);
+    expect(await readFavoritesUntilEmpty()).toEqual([]);
   });
 });

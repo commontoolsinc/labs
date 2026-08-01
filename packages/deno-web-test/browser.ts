@@ -8,8 +8,9 @@ import {
 import { Manifest } from "./manifest.ts";
 import { tsToJs } from "./utils.ts";
 import { TestResult } from "./interface.ts";
-import { extractAstralConfig } from "./config.ts";
+import { DEFAULT_TEST_TIMEOUT_MS, extractAstralConfig } from "./config.ts";
 import { sleep } from "@commonfabric/utils/sleep";
+import { closeAstralBrowser } from "@commonfabric/integration/astral-adapter";
 
 const LAUNCH_RETRY_ATTEMPTS = 5;
 const LAUNCH_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
@@ -61,8 +62,10 @@ export class BrowserController extends EventTarget {
   async load(filePath: string) {
     const rootUrl = `http://localhost:${this.serverPort}`;
     const jsTestPath = tsToJs(filePath);
-    const testUrl = `${rootUrl}/?test=/${jsTestPath}`;
     const config = this.manifest.config;
+    const testTimeout = config.testTimeout ?? DEFAULT_TEST_TIMEOUT_MS;
+    const testUrl =
+      `${rootUrl}/?test=/${jsTestPath}&testTimeout=${testTimeout}`;
 
     if (this.page) {
       await this.page.goto(testUrl);
@@ -134,7 +137,7 @@ export class BrowserController extends EventTarget {
   async close() {
     this.page = null;
     if (this.browser) {
-      await this.browser.close();
+      await closeAstralBrowser(this.browser);
     }
     this.browser = null;
   }

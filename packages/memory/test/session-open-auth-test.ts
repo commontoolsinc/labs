@@ -4,7 +4,10 @@ import { alice, bob, mallory, space } from "./principal.ts";
 import { MEMORY_PROTOCOL } from "../v2.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { verifySessionOpenAuthorization } from "../v2/session-open-auth.ts";
+import {
+  verifySessionOpenAuthorization,
+  wireAuthorizationOf,
+} from "../v2/session-open-auth.ts";
 
 const now = 1_000_000;
 const audience = bob.did();
@@ -61,6 +64,29 @@ const buildOpen = async (
     authorization: { signature: new FabricBytes(signature.ok) },
   };
 };
+
+describe("wireAuthorizationOf", () => {
+  it("narrows an authorization carrying a `FabricBytes` signature", () => {
+    const signature = new FabricBytes(new Uint8Array([1, 2, 3]));
+    assertEquals(wireAuthorizationOf({ signature }), { signature });
+  });
+
+  it("rejects a non-record authorization", () => {
+    assertEquals(wireAuthorizationOf(undefined), undefined);
+    assertEquals(wireAuthorizationOf("signed"), undefined);
+    assertEquals(wireAuthorizationOf(null), undefined);
+  });
+
+  it("rejects a signature that is not `FabricBytes`", () => {
+    // Raw bytes are what the in-process `Signature<T>` looks like; the wire
+    // form must be the fabric primitive, so this must not narrow.
+    assertEquals(
+      wireAuthorizationOf({ signature: new Uint8Array([1, 2, 3]) }),
+      undefined,
+    );
+    assertEquals(wireAuthorizationOf({}), undefined);
+  });
+});
 
 describe("verifySessionOpenAuthorization", () => {
   it("accepts a valid signed open and returns the issuer principal", async () => {

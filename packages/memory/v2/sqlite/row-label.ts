@@ -18,24 +18,27 @@
 //
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
-/** A reference to a declared column, handed to the rule as `f.<col>`. */
-export interface FieldRef {
-  field: string;
-}
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 
-export interface MatchOpts {
+/** A reference to a declared column, handed to the rule as `f.<col>`. */
+export type FieldRef = {
+  field: string;
+};
+
+export type MatchOpts = {
   /** Capture group to extract instead of the whole match. */
   group?: number;
   /** Minimum number of matches; fewer fails closed (required anchor). */
   min?: number;
-}
+};
 
 /** Serialized rule, attached to the table schema as `rowLabel`. */
-export interface RowLabelSpec {
+export type RowLabelSpec = {
   version: 1;
-  confidentiality?: unknown;
-  integrity?: unknown;
-}
+  confidentiality?: FabricValue;
+  integrity?: FabricValue;
+};
 
 /** Field handles passed to the rule: one accessor per declared column. */
 export type RowFieldHandles<C extends Record<string, unknown>> =
@@ -44,7 +47,7 @@ export type RowFieldHandles<C extends Record<string, unknown>> =
 
 export type RowLabelRule<C extends Record<string, unknown>> = (
   f: RowFieldHandles<C>,
-) => { confidentiality?: unknown; integrity?: unknown };
+) => { confidentiality?: FabricValue; integrity?: FabricValue };
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
@@ -67,11 +70,11 @@ export function match(
   field: FieldRef,
   re: RegExp,
   opts: MatchOpts = {},
-): { match: Record<string, unknown> } {
+): { match: FabricPlainObject } {
   assertField(field, "match()");
   assertRegExp(re, "match()");
   const flags = re.flags.includes("g") ? re.flags : re.flags + "g";
-  const node: Record<string, unknown> = {
+  const node: MutableFabricPlainObjectLayer = {
     field: field.field,
     source: re.source,
     flags,
@@ -91,8 +94,8 @@ export function match(
 export function whenMatches(
   field: FieldRef,
   re: RegExp,
-  then: unknown,
-): { when: unknown; then: unknown } {
+  then: FabricValue,
+): { when: FabricValue; then: FabricValue } {
   assertField(field, "whenMatches()");
   assertRegExp(re, "whenMatches()");
   return {
@@ -112,8 +115,8 @@ export function whenMatches(
  *  did:key untouched (base58 is case-sensitive), unknown protocols identity. */
 export function principal(
   protocol: string,
-  of: { match: Record<string, unknown> },
-): { principal: Record<string, unknown> } {
+  of: { match: FabricPlainObject },
+): { principal: FabricPlainObject } {
   if (typeof protocol !== "string" || !/^[a-z][a-z0-9.+-]*$/.test(protocol)) {
     throw new TypeError(
       `principal(): invalid DID protocol ${JSON.stringify(protocol)}`,
@@ -132,26 +135,28 @@ export function dbOwner(): { dbOwner: true } {
 }
 
 /** A literal atom (escape hatch). (Named `constant` — `const` is reserved.) */
-export function constant(atom: unknown): { constant: unknown } {
+export function constant(atom: FabricValue): { constant: FabricValue } {
   return { constant: atom };
 }
 
 /** Separate conjunctive clauses, one per atom — today's only confidentiality
  *  combinator (every principal an independent requirement). */
-export function all(...terms: unknown[]): { allOf: unknown[] } {
+export function all(...terms: FabricValue[]): { allOf: FabricValue[] } {
   return { allOf: terms };
 }
 
 /** ONE authored OR-clause: any alternative satisfies it (CFC spec §3.1.8).
  *  Serializes, but `table()` REJECTS it until the runtime ships the
  *  clause-aware label profile — never silently lowered to all-of. */
-export function any(...terms: unknown[]): { anyOf: unknown[] } {
+export function any(...terms: FabricValue[]): { anyOf: FabricValue[] } {
   return { anyOf: terms };
 }
 
 /** Set-intersection over integrity atom sets (the trust-floor meet).
  *  Integrity only — confidentiality combines by all()/any(). */
-export function intersect(...terms: unknown[]): { intersect: unknown[] } {
+export function intersect(
+  ...terms: FabricValue[]
+): { intersect: FabricValue[] } {
   return { intersect: terms };
 }
 
@@ -160,8 +165,8 @@ export function intersect(...terms: unknown[]): { intersect: unknown[] } {
  *  is forgeable by the row's writer, so it never lowers to the trusted
  *  `AuthoredBy` family directly (see 06-cfc.md; upgrade via provider trust). */
 export function authoredBy(
-  p: { principal: Record<string, unknown> },
-): { authoredBy: unknown } {
+  p: { principal: FabricPlainObject },
+): { authoredBy: FabricValue } {
   assertPrincipal(p, "authoredBy()");
   return { authoredBy: p };
 }
@@ -169,8 +174,8 @@ export function authoredBy(
 /** Integrity claim: endorsed by the extracted principal (same downgrade rule
  *  as `authoredBy`). */
 export function endorsedBy(
-  p: { principal: Record<string, unknown> },
-): { endorsedBy: unknown } {
+  p: { principal: FabricPlainObject },
+): { endorsedBy: FabricValue } {
   assertPrincipal(p, "endorsedBy()");
   return { endorsedBy: p };
 }

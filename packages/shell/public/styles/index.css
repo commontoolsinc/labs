@@ -1,5 +1,7 @@
 /* CSS Reset and Base Styles */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -99,7 +101,8 @@ html {
   width: 100vw;
 }
 
-body, html {
+body,
+html {
   height: 100%;
 }
 

@@ -107,13 +107,18 @@ interface CounterOutput {
 declared interface by name (`pattern<Input, Output>` produces a
 `PatternFactory<…, Output>`), a non-exported `Output` interface fails
 compilation with "Default export of the module has or is using private name
-'Output'". The result type is your public contract — export it:
+'Output'". The result type is the factory's public return contract — export it:
 
 ```tsx
 // Shown for illustration only.
 export interface CounterOutput { /* ... */ }
 export default pattern<CounterInput, CounterOutput>(/* ... */);
 ```
+
+This TypeScript visibility requirement does not make the full output type the
+right input schema for every external consumer. A consumer that needs only a
+subset should normally declare its own narrow structural projection; see
+[Keep External Data Contracts Narrow](../patterns/composition.md#keep-external-data-contracts-narrow).
 
 Consumers see exactly what the author returned — the factory's result type is
 not stripped. A consumer that receives `Writable<GameState>` reads current
@@ -125,3 +130,21 @@ values with `.get()` inside `computed()`/`lift()`/handler bodies, just like a
 const game = Battleship({});
 const phase = computed(() => game.game.get().phase); // game.game: Writable<GameState>
 ```
+
+## User-Input Updates Are Rate-Shaped
+
+Reactive updates that originate from user input — a click reaching a handler,
+a keystroke flowing through a `$value` binding into your computeds and JSX —
+are delivered in realtime during normal interaction. Under sustained
+high-frequency input (a held key, scripted rapid events), delivery is
+throttled to about one update per second per pattern. Nothing is lost: every
+handler event is still delivered (a counter counts every click), and a
+`$value`-bound cell always shows the latest value when the update arrives.
+There is intentionally no opt-out — the throttle is a security measure that
+denies sandboxed patterns a fine-grained clock; see
+[Timing side-channel mitigations](../../specs/sandboxing/TIMING_SIDE_CHANNELS.md).
+
+Continuous-motion gestures (drawing, drag-tracking with a handler per
+pointer-move) are out of scope. Build continuous controls on `$value`-style
+bindings, which coalesce to the latest value, rather than on per-move event
+handlers.

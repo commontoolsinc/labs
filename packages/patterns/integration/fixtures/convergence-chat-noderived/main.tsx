@@ -38,9 +38,9 @@ export interface StormMessage {
    * Live link to the sender's per-user profile cell (forces element→doc).
    * Declared PerUser: a user-scoped link resolves to each READER's own
    * instance (scoped-cell-instances spec), so for every non-author this
-   * field's target is absent — the read shape the B2 element grace handles.
-   * The declaration is required: the scope-isolation write guard rejects
-   * narrower-scoped links in broader slots whose schema doesn't opt in.
+   * field's target is absent. This fixture deliberately makes the property
+   * required to verify that the element and array fail for that reader. The
+   * PerUser declaration also satisfies the scope-isolation write guard.
    */
   authorProfile: PerUser<Cell<StormProfile>>;
   author: string;

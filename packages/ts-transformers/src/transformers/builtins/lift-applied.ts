@@ -3,6 +3,7 @@ import { CFHelpers } from "../../core/cf-helpers.ts";
 import {
   getExpressionText,
   getTypeAtLocationWithFallback,
+  preserveSourceMapRange,
   setParentPointers,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
@@ -221,13 +222,18 @@ export function createLiftAppliedCall(
     context.options.state?.typeRegistry,
   );
 
-  const arrowFunction = factory.createArrowFunction(
-    undefined,
-    undefined,
-    [parameter],
-    undefined,
-    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-    lambdaBody,
+  // Callback arrow: source-map-range only (emit-safe position carry). See
+  // preserveSourceMapRange.
+  const arrowFunction = preserveSourceMapRange(
+    factory.createArrowFunction(
+      undefined,
+      undefined,
+      [parameter],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    ),
+    expression,
   );
   context.markAsSyntheticComputeCallback?.(arrowFunction);
 
@@ -266,11 +272,21 @@ export function createLiftAppliedCall(
     [arrowFunction],
   );
 
-  // Outer applied call: (inputObject)
-  const liftAppliedCall = factory.createCallExpression(
-    innerLiftCall,
-    undefined,
-    [inputObject],
+  // Outer applied call: (inputObject). Source-map-range ONLY: this wrapper
+  // reifies the authored expression rather than replacing it as the same
+  // semantic unit, and `expression` was marked compute-owned above
+  // (markSyntheticComputeOwnedSubtree) — an original pointing into that marked
+  // subtree would make identity-sensitive classifiers (getOriginalNode
+  // fallbacks, e.g. the array-method compute-context invariant) falsely treat
+  // the wrapper as compute-owned. smr carries the authored position without
+  // identity (CT-1868).
+  const liftAppliedCall = preserveSourceMapRange(
+    factory.createCallExpression(
+      innerLiftCall,
+      undefined,
+      [inputObject],
+    ),
+    expression,
   );
 
   // Register the type of the call expression itself in the typeRegistry

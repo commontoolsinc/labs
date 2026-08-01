@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { EntityKind } from "../entity-kind.ts";
 import type { PatternBuilder } from "./pattern.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 
@@ -8,6 +9,9 @@ import type {
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
+  AssertCaptureFunction,
+  AssertFunction,
+  AssertRenderPartsFunction,
   AsStream,
   AsWriteonlyCell,
   ByRefFunction,
@@ -32,8 +36,6 @@ import type {
   GetPatternEnvironmentFunction,
   HandlerFunction,
   HFunction,
-  ID as IDSymbol,
-  ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   InspectConfLabelFunction,
   JSONSchema,
@@ -44,11 +46,9 @@ import type {
   LLMFunction,
   Module,
   NavigateToFunction,
-  NonPrivateRandomFunction,
   Pattern,
   PatternToolFunction,
   Reactive,
-  SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   SqliteCfLinkFunction,
@@ -76,10 +76,6 @@ import {
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
-export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
-export const ID_FIELD: typeof IDFieldSymbol = Symbol(
-  "ID_FIELD, name of sibling that contains id",
-) as any;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -111,12 +107,19 @@ export type {
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
+  AssertPart,
+  AssertRawPart,
+  AssertRecord,
   AsStream,
   AsWriteonlyCell,
   Cell,
   CellKind,
   CellScope,
   CellTypeConstructor,
+  FabricExecArray,
+  FabricExecFunction,
+  FabricExecPlainObject,
+  FabricExecValue,
   FabricValue,
   FactoryInput,
   FsProjection,
@@ -125,7 +128,6 @@ export type {
   HKT,
   ICell,
   IDerivable,
-  IDFields,
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
@@ -134,15 +136,15 @@ export type {
   JSONArray,
   JSONObject,
   JSONSchema,
-  JSONSchemaMutable,
   JSONSchemaObj,
-  JSONSchemaObjMutable,
   JSONSchemaTypes,
   JSONValue,
   KeyResultType,
   LinkScope,
   Module,
   ModuleFactory,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
   NodeFactory,
   OpaqueCell,
   Pattern,
@@ -244,6 +246,13 @@ export function isModule(value: unknown): value is Module {
   );
 }
 
+/**
+ * A node in a pattern's execution graph.
+ *
+ * This shape is de facto compatible with {@link FabricExecPlainObject}, and is
+ * intended to remain so. It deliberately does not intersect with that type,
+ * because its string index signature would allow undeclared property names.
+ */
 export type Node = {
   description?: string;
   module: Module; // TODO(seefeld): Add `Alias` here once supported
@@ -255,6 +264,14 @@ export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
   schema?: JSONSchema;
   scope?: CellScope;
+  /**
+   * Entity kind minted into the cell's id (preimage + visible tag). Set to
+   * `"computed"` only when the builder proves the cell is written solely by
+   * compute nodes. Participates in manifest matching: a kind change
+   * re-materializes the cell under a new id. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  kind?: EntityKind;
 };
 
 declare module "@commonfabric/api" {
@@ -305,6 +322,24 @@ export type Frame = {
   space?: MemorySpace;
   inHandler?: boolean;
   reactives: Set<Reactive<any>>;
+  /**
+   * Positive marker for the kind of authored pattern code running under this
+   * frame: "handler" for an event handler, "lift" for a reactive computation
+   * (lift/computed/derived/action). Absent for internal runner frames. Unlike
+   * `inHandler`, this lets a guard distinguish a pattern lift from internal code
+   * — both of which lack `inHandler` — without conflating them.
+   */
+  frameKind?: "lift" | "handler";
+  /**
+   * The wall-clock instant (ms) bound to the event that opened this handler
+   * frame. A handler's ambient clock reads this FROZEN value, coarsened, rather
+   * than the live wall clock, so time does not advance during a handler's own
+   * work — reading it before and after an `await` yields the same value, which
+   * denies a handler an intra-run clock. Events a handler emits carry this same
+   * instant forward, so a whole causal chain from one gesture shares one time.
+   * Only meaningful on handler frames.
+   */
+  eventTime?: number;
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
   /**
@@ -328,6 +363,15 @@ export interface BuilderFunctionsAndConstants {
   handler: HandlerFunction;
   action: ActionFunction;
   computed: ComputedFunction;
+  assert: AssertFunction;
+
+  // Operand recording for `assert` bodies. The assert-diagnostics transformer
+  // emits calls to these against the injected `__cfHelpers` object; they are
+  // not meant to be called from authored code. `assertCapture` stashes each
+  // operand's resolved value; `assertRenderParts` renders them into the
+  // record's `parts`, but only when the assertion failed.
+  assertCapture: AssertCaptureFunction;
+  assertRenderParts: AssertRenderPartsFunction;
 
   // Built-in modules
   str: StrFunction;
@@ -373,16 +417,12 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
-  nonPrivateRandom: NonPrivateRandomFunction;
-  safeDateNow: SafeDateNowFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;
   entityRefToString: EntityRefToStringFunction;
 
   // Constants
-  ID: typeof ID;
-  ID_FIELD: typeof ID_FIELD;
   SELF: typeof SELF;
   TYPE: typeof TYPE;
   NAME: typeof NAME;
@@ -404,7 +444,9 @@ export interface BuilderFunctionsAndConstants {
   UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
-  // Fabric value classes
+  // Fabric value classes, in the order they are declared in api/index.ts.
+  FabricSpecialObject:
+    typeof import("@commonfabric/data-model/fabric-value").FabricSpecialObject;
   FabricInstance:
     typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
   FabricPrimitive:
@@ -415,12 +457,23 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
   FabricHash:
     typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
+  FabricLink:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
+  FabricBytes:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
+  FabricRegExp:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
+  FabricError:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
 
   // Debug stringifiers
   toCompactDebugString:
     typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
   toIndentedDebugString:
     typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
+
+  // Value comparison
+  valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
 }
 
 // Runtime interface needed by createCell

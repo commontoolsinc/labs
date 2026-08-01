@@ -1,13 +1,17 @@
 import { decode } from "@commonfabric/utils/encoding";
 import { join } from "@std/path/join";
 import { toFileUrl } from "@std/path/to-file-url";
-import { resolveEntryIdentity } from "@commonfabric/runner";
+import {
+  PATTERNS_ROUTE_PREFIX,
+  resolveEntryIdentity,
+} from "@commonfabric/runner";
 
-// The URL prefix this route serves patterns under. A pattern's content identity
-// folds in each module's authored path, and the worker names modules by their
-// URL pathname (HttpProgramResolver), so the identity must be computed over
-// pathname-prefixed names to equal the worker's stored patternIdentity.
-const PATTERNS_ROUTE_PREFIX = "/api/patterns/";
+// The prefix this route serves patterns under is the runner's constant, not
+// this route's own. A pattern's content identity folds in each module's
+// authored path, and the worker names modules by their URL pathname
+// (HttpProgramResolver), so the identity must be computed over
+// pathname-prefixed names to equal the worker's stored patternIdentity — and
+// the same prefix is what a `system:` provenance ref expands to.
 
 /**
  * Simple helper for serving pattern files from the patterns directory.
@@ -72,10 +76,12 @@ export class PatternsServer {
 
   /**
    * Compute (and memoize) the content-addressed identity of a pattern entry —
-   * the same `patternIdentity.identity` the runtime would store for this source
-   * at this build. Walks the entry's authored import closure via `getText`
-   * (single-file reads only, so it works in a compiled binary) and hashes the
-   * pristine bytes; no compiler, runtime, or storage is involved.
+   * the value advertised to runtimes through `?identity`. Walks the entry's
+   * authored import closure via `getText` (single-file reads only, so it works
+   * in a compiled binary) and hashes the pristine bytes; no compiler, runtime,
+   * or storage is involved. An updater independently compiles the downloaded
+   * closure and requires its entry ref to have this identity before replacing
+   * a root.
    *
    * `filename` is the same root-relative path `getText` accepts, e.g.
    * `system/default-app.tsx`. Rejects if the closure is incomplete or reaches a

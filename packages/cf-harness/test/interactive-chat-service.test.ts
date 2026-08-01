@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   createHarnessChatEventEnvelope,
   createHarnessChatSessionStatus,
@@ -15,6 +15,7 @@ import {
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
 import type {
+  CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
@@ -56,6 +57,13 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     return {
       runTranscript: async (runOptions) => {
         const result = makeResult(runOptions, "Done.");
+        result.usage = {
+          inputTokens: 2_000,
+          cachedInputTokens: 1_500,
+          cacheWriteTokens: 0,
+          outputTokens: 100,
+          totalTokens: 2_100,
+        };
         await runOptions.onTranscriptEvent?.({
           message: result.transcript[result.transcript.length - 1],
           transcript: result.transcript,
@@ -124,10 +132,23 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     service.listEvents({ sessionId: "session-1" }).latestSequence,
     5,
   );
+  assertEquals(service.events("session-1").at(-1)?.event, {
+    kind: "turn_completed",
+    turnId: "turn-1",
+    finalText: "Done.",
+    usage: {
+      inputTokens: 2_000,
+      cachedInputTokens: 1_500,
+      cacheWriteTokens: 0,
+      outputTokens: 100,
+      totalTokens: 2_100,
+    },
+  });
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
     model: "gpt-test",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: [
       "bash",
       "read_file",
@@ -139,6 +160,138 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     ],
     allowedSubagentProfiles: ["default"],
   });
+});
+
+Deno.test("interactive service preserves an owner-bound Codex client across turns", async () => {
+  const modelClient = {
+    providerId: "openai-codex",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+      tenantKey: "loom-tenant-1",
+    },
+    complete: () => Promise.reject(new Error("unused in injected loop")),
+  } as const;
+  const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+  const service = new HarnessInteractiveChatService({
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+      tenantKey: "loom-tenant-1",
+    },
+    basePromptLoopOptions: {
+      modelProvider: "openai-codex",
+      credentialOwnerKey: "loom:user-1",
+      modelClient,
+    },
+    createPromptLoop: (options) => {
+      loopOptions.push(options);
+      return {
+        runTranscript: (runOptions) =>
+          Promise.resolve(makeResult(runOptions, "Done.")),
+      };
+    },
+    now: nextIsoNow(),
+  });
+  await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-owner-session",
+    method: "start_session",
+    params: {
+      sessionId: "session-owner",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-5.4",
+    },
+  });
+  await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-owner-turn",
+    method: "start_turn",
+    params: {
+      sessionId: "session-owner",
+      turnId: "turn-owner",
+      input: { text: "Hi" },
+    },
+  });
+  await service.waitForTurn("session-owner", "turn-owner");
+  await service.startTurn("req-owner-turn-2", {
+    sessionId: "session-owner",
+    turnId: "turn-owner-2",
+    input: { text: "Continue" },
+  });
+  await service.waitForTurn("session-owner", "turn-owner-2");
+
+  assertEquals(loopOptions[0].modelProvider, "openai-codex");
+  assertEquals(loopOptions[0].credentialOwnerKey, "loom:user-1");
+  assertEquals(loopOptions[0].modelClient, modelClient);
+  assertEquals(
+    loopOptions.map((options) => options.cacheAffinityKey),
+    ["interactive:session-owner", "interactive:session-owner"],
+  );
+});
+
+Deno.test("interactive Codex services require one matching process owner", () => {
+  const modelClient = {
+    providerId: "openai-codex",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+      tenantKey: "tenant-a",
+    },
+    complete: () => Promise.reject(new Error("unused")),
+  } as const;
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          modelProvider: "openai-codex",
+          credentialOwnerKey: "loom:user-1",
+          modelClient,
+        },
+      }),
+    Error,
+    "require one explicit authenticated credential owner",
+  );
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "loom:user-2",
+        },
+        basePromptLoopOptions: {
+          modelProvider: "openai-codex",
+          credentialOwnerKey: "loom:user-1",
+          modelClient,
+        },
+      }),
+    Error,
+    "does not match",
+  );
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "loom:user-1",
+          tenantKey: "tenant-b",
+        },
+        basePromptLoopOptions: {
+          modelProvider: "openai-codex",
+          credentialOwnerKey: "loom:user-1",
+          modelClient,
+        },
+      }),
+    Error,
+    "full owner binding",
+  );
 });
 
 Deno.test("interactive service forces comment-thread turns to read-only prompt-loop options", async () => {
@@ -184,6 +337,7 @@ Deno.test("interactive service forces comment-thread turns to read-only prompt-l
 
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
     allowedSubagentProfiles: [],
   });
@@ -230,6 +384,7 @@ Deno.test("interactive service passes Browser Access leases to browser-profile t
 
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["delegate_task"],
     allowedSubagentProfiles: ["browser"],
     browserAccess,

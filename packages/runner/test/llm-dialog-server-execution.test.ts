@@ -138,7 +138,10 @@ async function waitForMessageCount(
       );
     }
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    // `clock.tick` rather than a wall-clock sleep: the package's fake clock
+    // freezes a positive-delay timer armed from a `test/` file, so a real
+    // sleep here deadlocks (see `test/clock-preload.ts`).
+    await clock.tick(25);
   }
 }
 
@@ -320,7 +323,7 @@ describe("llmDialog server-side execution", () => {
       expect(messages[1].content).toBe("Hi there!");
       // Let the loser's conflict retry land before counting.
       await peerB.idle();
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await clock.tick(200);
       await peerA.idle();
       expect(sendRequestCalls).toBe(1);
     } finally {

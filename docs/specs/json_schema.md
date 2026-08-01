@@ -17,26 +17,41 @@ from standard implementations in several ways.
 
 ## Extensions
 
-We add several custom fields to the schema that are meaningful to our system:
+We add several custom fields to the schema that are meaningful to our system.
+The authoritative field inventory is the `JSONSchema` type in
+`packages/api/index.ts`; this section summarizes, it does not define.
 
-- **`asCell`**: Indicates that instead of storing data directly in the object,
-  the containing object will have a link to a cell, and that linked cell will
-  contain the actual data
-- **`asStream`**: Indicates that this object should be treated as a stream
-  interface for easily connecting events to their listeners, rather than as a
-  traditional cell
+- **`asCell`**: an **array** of wrapper entries describing how the value is
+  held rather than stored inline. Entries name the wrapper kind — for example
+  `asCell: ["cell"]` (a link to a cell holding the data), `asCell: ["stream"]`
+  (a stream interface for connecting events to listeners), or
+  `asCell: ["opaque"]` (pass-through-only). Nesting composes:
+  `Cell<Cell<T>>` becomes `asCell: ["cell", "cell"]`. See `AsCellType` in
+  `packages/api/index.ts` for the entry shape. (A separate boolean-style
+  `asStream` field existed historically; it is no longer part of the type and
+  is not emitted — a couple of runner utilities still tolerate it on stored
+  data.)
+- **`scope`**: storage-partition selector emitted for `PerSpace<T>` /
+  `PerUser<T>` / `PerSession<T>` wrappers.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
 
 ### IFC
 
-The `ifc` extension attaches Information Flow Control metadata to schema nodes.
-Today it is used to track `classification` tags that drive access control,
-redaction, and label propagation in higher layers.
+The `ifc` extension attaches Information Flow Control metadata to schema
+nodes. The key set is defined by the `ifc` field of the `JSONSchema` type in
+`packages/api/index.ts` — as of this writing: `confidentiality`, `integrity`,
+`addIntegrity`, `requiredIntegrity`, `maxConfidentiality`, `ownerPrincipal`,
+`writeAuthorizedBy`, `exactCopyOf`, `projection`, `observes`, and `uiContract`.
+The compile-time side (CFC authoring aliases and UI helpers
+lowering to these keys) is specified in
+`docs/specs/ts-transformer/cfc_authoring_contract.md` and
+`docs/specs/ts-transformer/cfc_ui_helper_contract.md`; the label semantics live
+in the CFC spec (specs repo, `cfc/`).
 
 ```json
 {
   "type": "string",
-  "ifc": { "classification": ["secret"] }
+  "ifc": { "confidentiality": ["secret"] }
 }
 ```
 
@@ -163,8 +178,25 @@ directly to JSON Schema.
 
 ### Handling of `void`
 
-The `void` type is only used for function return types and shouldn't appear
-where we use JSON Schema.
+`void` is primarily a function-return type, but when it does reach schema
+generation it is emitted as `{ "asCell": ["opaque"] }` — the value matches
+anything and will not be accessed.
+
+### Non-standard `type` values
+
+Two deliberate extensions beyond the 2020-12 vocabulary appear in generated
+schemas:
+
+- `{ "type": "unknown" }` — emitted for TypeScript `unknown` and for
+  unresolved/degraded generics. Distinct from `true` (which is what `any`
+  becomes): `unknown` means "shape not expressible", `any` means "accept
+  anything".
+- `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
+  `string | undefined`) so optionality survives schema round-trips.
+
+Generated schemas also hoist named types into `$defs` and reference them via
+`#/$defs/...`. The full TypeScript→schema mapping is specified in the
+schema-generator mapping spec (`docs/specs/schema-generator/`).
 
 ### Handling of `never`
 

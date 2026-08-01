@@ -40,7 +40,7 @@ export const CORE_TABLE_NAMES: readonly string[] = [
 
 export type StatementKind = "select" | "write" | "other";
 
-export interface StatementClassification {
+export type StatementClassification = {
   /** Leading-keyword classification. */
   kind: StatementKind;
   /** More than one statement (after dropping a trailing `;`). */
@@ -51,7 +51,7 @@ export interface StatementClassification {
   forbidden: boolean;
   /** References a core engine table name. */
   coreRef: boolean;
-}
+};
 
 export class GuardError extends Error {
   override name = "GuardError";

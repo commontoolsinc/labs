@@ -86,6 +86,58 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 2 (2026-07-10 phase-4 verification findings)
+
+Language deltas found by adversarial verification of the target-language
+matrix (implementation vs normative spec). Resolution status is recorded on
+each finding:
+
+- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
+  computation-feeding top-level `.get()` reads and auto-wraps the containing
+  expression lift-applied; terminal reads still reject. Golden-pinned
+  (`cell-get-binding-autowrap`, `with-reactive`;
+  `test/validation.test.ts:3179`). Matrix row still says Unsupported
+  unconditionally. Decision open: ratify a terminal-vs-computation-feeding
+  split in the matrix, or revert (breaks two goldens + one test).
+- **Optional-call accepted in JSX and compute callbacks — resolved 2026-07-23
+  by making optionality orthogonal to call support.** The earlier location
+  split was an implementation leak, and the proposed blanket rejection would
+  have removed valid authoring forms. Optional receiver and invocation forms
+  now follow the same expression-site and call-root policy as the corresponding
+  non-optional call. Supported sites lower the whole call and preserve
+  receiver binding, nullish short-circuiting, and lazy argument evaluation;
+  unsupported call roots remain unsupported for their existing reason.
+  Function-valued reactive data remains outside the storable data model whether
+  invoked with `()` or `?.()`.
+  - **Carried-forward open sub-finding: no diagnostic enforces the
+    function-valued-data boundary.** The earlier revision of this finding
+    recorded that lift lowering drops function-typed captures from input
+    schemas, so an invocation of a function value from reactive data compiles
+    without diagnostics and is dead code at runtime (current-behavior spec
+    §19.6). That behavior predates the orthogonality change for plain `()`
+    calls and now uniformly covers `?.()` forms, which previously errored at
+    top-level, statement, and collection-callback sites — as an accident of
+    the removed optional-call bucket, not as a considered rejection of the
+    callable-root family. The open decision is where enforcement belongs:
+    a call-site diagnostic for callable roots that resolve to reactive-data
+    function values (ts-transformers scope, diagnoses the symptom), a
+    declaration-site diagnostic where schema generation drops a function-typed
+    property (schema-generator scope, diagnoses the root cause and also
+    catches stored-but-never-called function values), or both. Any
+    enforcement must not fire for legal callable families: pattern factories,
+    cell/stream-branded values, registered runtime exports, and module-scope
+    captures. Decided 2026-07-23: the call-site diagnostic proceeds as
+    CT-1905 (a corpus sweep found zero authored occurrences of the family,
+    so error severity is safe); the declaration-site option stays open as a
+    schema-generator design question (no diagnostics channel exists there
+    today).
+- **Residual pass-through emits runnable-looking output alongside errors.**
+  Both documented bucket-4 forms are alive: `forEach`-in-JSX survives
+  verbatim as plain JS and promise-`.then` gets compute-island-wrapped, in
+  each case *in addition to* the reported error — a consumer that ignores
+  diagnostics inherits residual semantics. Worth deciding whether error
+  programs should emit at all.
+
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
 **Current term:** `safe context` / `safe wrapper`\
@@ -253,8 +305,9 @@ contract support).
    the analyzed function scope.
 5. Opaque path navigation lowering (`prop` / optional-chain navigation ->
    `key(...)`) is deterministic and semantics-preserving.
-6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
-   for key-lowering until modeled separately.
+6. Optional receiver and invocation forms (for example `foo?.bar()` and
+   `foo.bar?.()`) follow the underlying call-root policy; supported forms lower
+   as whole calls rather than extracting a function-valued member.
 7. ~~A feature gate exists for rollout and A/B fixture validation.~~
    (Completed: `useLegacyReactiveSemantics` gate has been removed; the single
    transform pipeline is the only path.)
@@ -299,8 +352,9 @@ contract support).
 
 **Implementation:**
 
-- `validateShrinkCoverage()` in `schema-injection.ts` runs after every shrink
-  operation (both `applyShrinkAndWrap` and the `defaults_only` branch).
+- `validateShrinkCoverage()` (`type-shrinking.ts`; called from the
+  schema-injection paths) runs after every shrink operation (both
+  `applyShrinkAndWrap` and the `defaults_only` branch).
 - `TransformationContext` and `fnNode` are threaded through
   `applyCapabilitySummaryToArgument`, `applyCapabilitySummaryToParameter`,
   `collectFunctionSchemaTypeNodes`, and `applyShrinkAndWrap`.
@@ -338,14 +392,10 @@ contract support).
   accesses, or concrete parameter with accessed `unknown`-typed property heads
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
-**Test coverage:** `test/schema-shrink-validation.test.ts` with 14 cases:
-unknown-type error, missing-property error, valid-no-error, interprocedural
-unknown-type access in lift callback, interprocedural path-not-in-type via
-as-any cast in lift callback, wildcard unknown in lift, wildcard any in lift
-(no error), wildcard concrete in lift (no error), wildcard unknown in pattern,
-type-alias parameter in handler (no false positive), `T | undefined` handler
-parameter, multi-member union handler parameter, `TypeAlias | undefined`
-handler parameter, numeric array index access in lift.
+**Test coverage:** `test/schema-shrink-validation.test.ts` — unknown-type and
+missing-property errors, interprocedural lift-callback cases, wildcard
+unknown/any/concrete splits, union and type-alias parameters, numeric array
+index access. (Case counts churn; the file is the inventory.)
 
 **Rationale:**
 
@@ -445,12 +495,14 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 ## Candidate Implementation Touchpoints
 
 - `packages/ts-transformers/src/ast/reactive-context.ts`
-- `packages/ts-transformers/src/ast/type-inference.ts`
-  (`isReactiveArrayMapCall`)
+- `packages/ts-transformers/src/ast/call-kind.ts`
+  (`classifyArrayMethodCallSite` — the former `type-inference.ts`
+  `isReactiveArrayMapCall` no longer exists)
 - `packages/ts-transformers/src/transformers/jsx-expression-site-router.ts`
 - `packages/ts-transformers/src/transformers/expression-rewrite/emitters/binary-expression.ts`
 - `packages/ts-transformers/src/transformers/expression-rewrite/emitters/conditional-expression.ts`
-- `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
+- `packages/ts-transformers/src/closures/strategies/array-method-strategy.ts`
+  (née `map-strategy.ts`; split into strategy/policy/transform/utils)
 - `packages/ts-transformers/src/ast/call-kind.ts`
 - `packages/ts-transformers/src/ast/dataflow.ts` (or successor capability graph)
 - `packages/ts-transformers/src/ast/type-inference.ts`
@@ -612,7 +664,7 @@ emitters and contextual checks.
 
 **Recommendation:** add a targeted lowering step (or utility used by emitters)
 that converts property navigation on capability-proven `OpaqueCell` receivers to
-`key(...)` chains, with explicit exclusions for optional-call.
+`key(...)` chains while routing an enclosing optional call as one semantic unit.
 
 ## S-010 Add A Shared Parameter Canonicalization Pass
 
@@ -664,7 +716,8 @@ diagnostics.
 
 **Status:** Landed
 
-1. Implement `getReactiveContextInfo(node, checker)`.
+1. Implement `getReactiveContextInfo(node, checker)`. (Landed as
+   `classifyReactiveContext`.)
 2. Re-implement old helpers as wrappers over the new classifier to preserve
    compatibility.
 3. Migrate a first consumer (`pattern-context-validation`) to classifier-first
@@ -677,7 +730,8 @@ compatibility shims.
 
 **Status:** Landed
 
-1. Implement `shouldLowerLogicalInJsx`.
+1. Implement `shouldLowerLogicalInJsx`. (Landed as the emitter + policy-module
+   split rather than under this exact name.)
 2. Refactor `emitBinaryExpression` to use policy matrix (remove expensive-RHS
    gating for policy-controlled paths).
 3. Keep semantic equivalence checks via snapshots/fixtures.
@@ -689,9 +743,11 @@ heuristics.
 
 **Status:** Landed (with standalone-function follow-up)
 
-1. Implement `classifyReceiverKind`.
-2. Refactor `shouldTransformMap` in `map-strategy.ts` to policy-driven form:
-   `{contextKind, receiverKind}`.
+1. Implement `classifyReceiverKind`. (Landed as
+   `classifyReactiveReceiverKind`, `src/policy/rewrite-policy.ts`.)
+2. Refactor `shouldTransformMap` to policy-driven form:
+   `{contextKind, receiverKind}`. (Landed as `shouldTransformArrayMethod` in
+   `array-method-strategy.ts`.)
 3. Add nested context fixtures that assert:
    - pattern-context reactive map rewrites
    - compute-context rewrite only for cell-like set
@@ -822,12 +878,14 @@ independently.
 1. Lower `foo.bar.baz` and optional-chain path navigation to `foo.key(...)` when
    receiver summary is `OpaqueCell`.
 2. Ensure optional-chain navigation lowering preserves no-throw behavior.
-3. Keep optional-call excluded and diagnosed if needed.
+3. Classify optional calls by the same call-root and expression-site policy as
+   non-optional calls, lowering supported forms as whole calls.
 4. Ensure destructured parameter lowering composes with path-navigation lowering
    without duplicate or conflicting rewrites.
 
-**Exit criteria:** snapshot parity for supported forms and explicit handling of
-unsupported optional-call cases.
+**Exit criteria:** snapshot parity for supported forms, including receiver and
+invocation optionality, and explicit diagnostics for underlying call roots that
+remain unsupported.
 
 ## Phase D7: Interprocedural Summaries (Compute Context Focus)
 
@@ -887,3 +945,8 @@ source-language policy.
 4. Tighten the compute-context interprocedural MVP scope (for example
    same-module direct calls vs broader) while keeping pattern-context legality
    intentionally direct/local.
+5. JSX / render-node schema verbosity: repeated render-node shapes and local
+   `$defs` in emitted output are semantically consistent but noisy; the open
+   question is presentation/canonicalization, not core correctness. (Folded
+   from the retired package-root `ISSUES_TO_FOLLOW_UP.md` queue, 2026-07; its
+   old test pins no longer exist.)

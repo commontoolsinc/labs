@@ -16,12 +16,10 @@ import {
   handler,
   ifElse,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSession,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   wish,
@@ -375,7 +373,7 @@ export interface GameOutput {
 
 export function createTileBag(): Letter[] {
   const bag: Letter[] = [];
-  let tileId = safeDateNow();
+  let tileId = Date.now();
   Object.entries(TILE_DISTRIBUTION).forEach(([letter, count]) => {
     Array.from({ length: count }).forEach(() => {
       const isBlank = letter === "";
@@ -388,7 +386,7 @@ export function createTileBag(): Letter[] {
     });
   });
   for (let i = bag.length - 1; i > 0; i--) {
-    const j = Math.floor(nonPrivateRandom() * (i + 1));
+    const j = Math.floor(Math.random() * (i + 1));
     const tmp = bag[i];
     bag[i] = bag[j];
     bag[j] = tmp;
@@ -700,7 +698,7 @@ function joinPlayerByName(
     ...(profile ? { profile } : {}),
     color: getRandomColor(existingPlayers.length),
     score: 0,
-    joinedAt: safeDateNow(),
+    joinedAt: Date.now(),
   };
   players.key("list").set([...existingPlayers, player]);
   myName.set(name);
@@ -708,11 +706,11 @@ function joinPlayerByName(
   placed.set([]);
   bagIndex.set(currentIndex + drawn.length);
   gameEvents.set([...gameEvents.get(), {
-    id: `event-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`,
+    id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     type: "join",
     player: name,
     details: `${name} joined`,
-    timestamp: safeDateNow(),
+    timestamp: Date.now(),
   }]);
   message.set(`Joined as ${name}.`);
   return true;
@@ -1141,11 +1139,11 @@ const submitTurn = handler<
   const words = turnScore.wordScores.map((word) => word.word).join(", ");
   const bonus = turnScore.bingoBonus ? " + bingo" : "";
   gameEvents.set([...gameEvents.get(), {
-    id: `event-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`,
+    id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     type: "word",
     player: name,
     details: `${name}: ${words} (+${turnScore.total}${bonus})`,
-    timestamp: safeDateNow(),
+    timestamp: Date.now(),
   }]);
   message.set(
     `Scored ${turnScore.total}: ${

@@ -82,7 +82,7 @@ Deno.test("runtime.dispose() resolves while a commit is withheld in flight", asy
   const writeTx = runtime.edit();
   cell.withTx(writeTx).set({ value: 1 });
   writeTx.commit().catch(() => {});
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await clock.settle();
   // Guard the precondition: if the commit is not actually in flight, dispose
   // would not exercise the deadlock and the test would pass vacuously.
   assertEquals(storageManager.hasPendingCommits(), true);

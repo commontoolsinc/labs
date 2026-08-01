@@ -6,6 +6,7 @@ import {
 } from "@commonfabric/utils/sandbox-contract";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 
 export class ModuleScopeFunctionHardeningTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
@@ -19,7 +20,10 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
     const trustedBindingNames = collectWriteAuthorizedByBindingNames(
       sourceFile,
     );
-    const sourceFileName = normalizeWriterIdentityFile(sourceFile.fileName);
+    const sourceFileName = normalizeWriterIdentityFile(
+      sourceFile.fileName,
+      context.options.canonicalWriterIdentityFile,
+    );
 
     const statements = sourceFile.statements.flatMap((statement) =>
       transformTopLevelStatement(statement, context, {
@@ -146,7 +150,6 @@ function transformFunctionDeclaration(
   }
 
   state.useHelper();
-  const defaultName = factory.createUniqueName("__cfDefaultFn");
   const fnExpr = factory.createFunctionExpression(
     retainRuntimeFunctionModifiers(statement.modifiers),
     statement.asteriskToken,
@@ -157,25 +160,14 @@ function transformFunctionDeclaration(
     statement.body,
   );
 
+  // Wrapped in place — the same shape the export-assignment branch emits for
+  // `export default <fn-expr>` — so no synthetic binding is minted whose
+  // declaration and export names would have to be kept in sync.
   return [
-    factory.createVariableStatement(
-      undefined,
-      factory.createVariableDeclarationList(
-        [
-          factory.createVariableDeclaration(
-            defaultName,
-            undefined,
-            undefined,
-            wrapWithFunctionHardener(fnExpr, factory, state.helperName),
-          ),
-        ],
-        ts.NodeFlags.Const,
-      ),
-    ),
     factory.createExportAssignment(
       undefined,
       false,
-      factory.createIdentifier(defaultName.text),
+      wrapWithFunctionHardener(fnExpr, factory, state.helperName),
     ),
   ];
 }
@@ -688,12 +680,6 @@ function collectTypeQueryIdentifiers(
     names.add(node.exprName.text);
   }
   ts.forEachChild(node, (child) => collectTypeQueryIdentifiers(child, names));
-}
-
-function normalizeWriterIdentityFile(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, "/");
-  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
-  return strippedPrefixed ?? normalized;
 }
 
 function isDirectFunctionExpression(expression: ts.Expression): boolean {

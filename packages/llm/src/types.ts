@@ -1,4 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { JSONValue } from "@commonfabric/api";
+import { isPureJson } from "@commonfabric/pure-json";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
@@ -27,10 +29,10 @@ export type LLMPrompt = LlmPrompt;
 // Use BuiltIn types directly
 export type LLMContent = BuiltInLLMContent;
 
-export interface LLMTool {
+export type LLMTool = {
   description: string;
   inputSchema: JSONSchema;
-}
+};
 
 export const GOOGLE_SEARCH_NATIVE_MODEL_TOOL = "google_search" as const;
 export const LLM_NATIVE_MODEL_TOOL_IDS = [
@@ -39,13 +41,13 @@ export const LLM_NATIVE_MODEL_TOOL_IDS = [
 
 export type LLMNativeModelToolId = typeof LLM_NATIVE_MODEL_TOOL_IDS[number];
 
-export interface LLMNativeModelToolResult {
+export type LLMNativeModelToolResult = {
   type: "cf-harness.native-model-tool-result";
   toolId: LLMNativeModelToolId;
   provider?: string;
   providerMetadata?: unknown;
   sources?: unknown;
-}
+};
 
 export function isLLMNativeModelToolId(
   input: unknown,
@@ -69,20 +71,29 @@ export function isLLMNativeModelToolResults(
   return Array.isArray(input) && input.every(isLLMNativeModelToolResult);
 }
 
-export interface LLMToolCall {
+export type LLMToolCall = {
   id: string;
   name: string;
   input: Record<string, any>;
-}
+};
 
-export interface LLMToolResult {
+export type LLMToolResult = {
   toolCallId: string;
   result: any;
   error?: string;
-}
+};
 
-export type LLMRequestMetadata = Record<string, string | undefined | object>;
-export interface LLMRequest {
+/**
+ * Request metadata. This crosses a JSON boundary to a general LLM API, so
+ * values must be values ordinary JSON serialization carries faithfully -- not
+ * merely `FabricValue`s, which admit `bigint`, interned symbols, `NaN` / `-0`,
+ * and fabric primitives that no model API can receive.
+ *
+ * `isLLMRequestMetadata()` is the authority: it checks with `isPureJson()`. An `undefined` value means "absent" -- JSON
+ * drops such a key, so it never crosses the boundary and is not checked.
+ */
+export type LLMRequestMetadata = Record<string, JSONValue | undefined>;
+export type LLMRequest = {
   cache?: boolean;
   messages: readonly BuiltInLLMMessage[];
   model: ModelName;
@@ -94,22 +105,22 @@ export interface LLMRequest {
   metadata?: LLMRequestMetadata;
   tools?: Record<string, LLMTool>;
   nativeModelToolIds?: readonly LLMNativeModelToolId[];
-}
+};
 
-export interface LLMGenerateObjectRequest {
-  schema: Record<string, unknown>;
+export type LLMGenerateObjectRequest = {
+  schema: JSONSchema;
   messages: readonly BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
   cache?: boolean;
   maxTokens?: number;
   metadata?: LLMRequestMetadata;
-}
+};
 
-export interface LLMGenerateObjectResponse {
+export type LLMGenerateObjectResponse = {
   object: Record<string, unknown>;
   id?: string;
-}
+};
 
 function isArrayOf<T>(
   callback: (data: unknown) => boolean,
@@ -122,11 +133,13 @@ function isArrayOf<T>(
 export function isLLMRequestMetadata(
   input: unknown,
 ): input is LLMRequestMetadata {
-  return isRecord(input) && !Array.isArray(input) &&
-    Object.entries(input).every(([k, v]) =>
-      typeof k === "string" &&
-      (v === undefined || typeof v === "string" || typeof v === "object")
-    );
+  if (!isRecord(input) || Array.isArray(input)) return false;
+  // An `undefined` value means "absent": JSON drops the key, so it is not part
+  // of what crosses the boundary and does not have to be pure JSON.
+  const present = Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+  return isPureJson(present);
 }
 
 // Validator functions removed - use BuiltInLLM types directly

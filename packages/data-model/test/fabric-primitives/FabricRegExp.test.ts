@@ -53,7 +53,7 @@ describe("FabricRegExp", () => {
         const original = /abc/g;
         (original as unknown as Record<string, unknown>).custom = 1;
         expect(() => new FabricRegExp(original)).toThrow(
-          "Cannot store RegExp with extra enumerable properties",
+          "Not representable as a `FabricValue`: RegExp with extra enumerable properties",
         );
       });
     });
@@ -158,6 +158,36 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(expectedTag, "nope", context);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
+
+        it("decodes an unparseable `es2025` pattern to `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            expectedTag,
+            { source: "(", flags: "" },
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("decodes bad `es2025` flags to `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            expectedTag,
+            { source: "a", flags: "zz" },
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("accepts a malformed pattern under a non-`es2025` flavor", () => {
+          // Only the `es2025` flavor is validated; other flavors are stored
+          // faithfully, so an unparseable source is not a decode failure.
+          const decoded = codec.decode(
+            expectedTag,
+            { flavor: "other", source: "(", flags: "" },
+            context,
+          );
+          expect(decoded).not.toBeInstanceOf(ProblematicValue);
+          expect(decoded).toBeInstanceOf(FabricRegExp);
+        });
       });
 
       describe("round trip encode-decode", () => {
@@ -233,7 +263,7 @@ describe("FabricRegExp", () => {
       const re = /abc/;
       (re as unknown as Record<string, unknown>).custom = 1;
       expect(() => shallowFabricFromNativeValue(re)).toThrow(
-        "Cannot store RegExp with extra enumerable properties",
+        "Not representable as a `FabricValue`: RegExp with extra enumerable properties",
       );
     });
   });

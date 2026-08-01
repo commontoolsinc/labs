@@ -252,7 +252,9 @@ Deno.test("post-commit builtin continuations inherit their source action", async
       { url: "/continuation" },
       "fetchText-start",
       async () => {
-        runtime.trackAsyncWork(Promise.resolve(), { externalEffect: true });
+        runtime.trackAsyncWork(Promise.resolve(), undefined, {
+          externalEffect: true,
+        });
         await Promise.resolve();
         const continuation = runtime.edit();
         continuationSource = continuation.tx.sourceAction;

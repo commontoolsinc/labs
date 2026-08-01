@@ -118,6 +118,9 @@ function makeNotificationState(args: {
       isMaterializer: () => false,
     },
     queueExecution: () => {},
+    isRendererInputSource: () => false,
+    holdShapedNotification: (_groupKey, _itemKey, _chargeKey, deliver) =>
+      deliver(),
   };
 }
 
@@ -257,11 +260,13 @@ describe("trigger reads survive failed runs", () => {
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
+      offBudgetRetries: new WeakMap(),
       pending: new Set(),
       commitPromise,
       resubscribe: () => args.onResubscribe?.(),
       markInvalid: () => args.onMarkInvalid?.(),
       queueExecution: () => args.onQueueExecution?.(),
+      getActionId: () => "test-action",
       restoreInvalidCauses: args.onRestore,
     });
     return commitPromise.then(async () => {

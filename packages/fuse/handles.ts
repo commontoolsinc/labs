@@ -40,6 +40,12 @@ export interface HandleState {
   writeTarget?: unknown;
   cfcAuthorizedOperations: Set<CfcExistingWritebackOperation>;
   cfcAuthorizationAnnotation?: CfcNodeAnnotation;
+  /**
+   * For a read-only snapshot of a generated file, when its bytes were
+   * published. A getattr on this handle reports it so the size and the
+   * modification time it carries describe the same render.
+   */
+  readSnapshotMtime?: number;
 }
 
 export function handleHasPendingChanges(
@@ -61,7 +67,13 @@ export class HandleMap {
   private nextFh = 1n;
   private handles = new Map<bigint, HandleState>();
 
-  /** Open a file handle. Copies current content into buffer if writable. */
+  /**
+   * Open a file handle. Copies current content into buffer if writable.
+   *
+   * `readSnapshot` buffers a read-only handle as well, fixing the bytes it
+   * serves for its lifetime. It is for generated files, whose published content
+   * changes under a descriptor as readers ask the tree for their size.
+   */
   open(
     ino: bigint,
     flags: number,
@@ -70,22 +82,28 @@ export class HandleMap {
       writeTarget?: unknown;
       cfcAuthorizedOperations?: CfcExistingWritebackOperation[];
       cfcAuthorizationAnnotation?: CfcNodeAnnotation;
+      readSnapshot?: Uint8Array;
+      readSnapshotMtime?: number;
     },
   ): bigint {
     const fh = this.nextFh++;
     const isWritable = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
+    const snapshot = options?.readSnapshot;
     this.handles.set(fh, {
       ino,
       flags,
       dirty: false,
       flushing: false,
-      buffer: isWritable ? new Uint8Array(content ?? []) : new Uint8Array(0),
-      bufferValid: isWritable,
+      buffer: snapshot
+        ? new Uint8Array(snapshot)
+        : (isWritable ? new Uint8Array(content ?? []) : new Uint8Array(0)),
+      bufferValid: snapshot !== undefined || isWritable,
       truncatePending: false,
       version: 0,
       writeTarget: options?.writeTarget,
       cfcAuthorizedOperations: new Set(options?.cfcAuthorizedOperations ?? []),
       cfcAuthorizationAnnotation: options?.cfcAuthorizationAnnotation,
+      readSnapshotMtime: snapshot ? options?.readSnapshotMtime : undefined,
     });
     return fh;
   }

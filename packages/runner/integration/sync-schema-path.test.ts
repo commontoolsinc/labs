@@ -43,6 +43,7 @@ function read(
 }
 
 async function test() {
+  const runId = crypto.randomUUID();
   // First runtime - save data
   const apiUrl = new URL(API_URL);
   const storageManager1 = StorageManager.open({
@@ -85,7 +86,7 @@ async function test() {
   let tx = runtime1.edit();
   const testEmployeeCell = runtime1.getCell(
     space,
-    `storage test employee cell`,
+    `storage test employee cell ${runId}`,
     employeeSchema,
     tx,
   );
@@ -100,7 +101,7 @@ async function test() {
   tx = runtime1.edit();
   const testAddressesCell = runtime1.getCell(
     space,
-    `storage test addresses cell`,
+    `storage test addresses cell ${runId}`,
     employeAddressesSchema,
     tx,
   );
@@ -139,7 +140,12 @@ async function test() {
   // so instead I'll extract the link myself, and check in the heap.
   // This will be the link to the employee's address field
   const sigilLink = JSON.parse(JSON.stringify(newCell.key(0).getRaw()));
-  const normalizedLink = parseLink(sigilLink) as NormalizedLink;
+  // The stored link elides what it shares with the slot holding it, so it has
+  // to be parsed against that slot to recover the space it lives in.
+  const normalizedLink = parseLink(
+    sigilLink,
+    newCell.key(0),
+  ) as NormalizedLink;
   const record = read(
     runtime2.storageManager,
     normalizedLink.space!,

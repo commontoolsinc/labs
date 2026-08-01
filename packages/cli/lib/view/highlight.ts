@@ -3,23 +3,40 @@
  * non-interactive print path (`renderLineColored` over every line) and as the
  * per-span styling primitive for the interactive renderer.
  *
- * Colour never changes the underlying characters: `renderLinePlain` and the
- * concatenated span text of `renderLineColored` are byte-for-byte identical to
- * the verbatim source line.
+ * Colour never changes the active representation's characters:
+ * `renderLinePlain` and the concatenated span text of `renderLineColored` are
+ * byte-for-byte identical to the document line.
  */
 import { paint, type Style } from "./ansi.ts";
 import type { Line, Span } from "./model.ts";
-import { bracketStyle, lineBg, styleFor } from "./theme.ts";
+import { bracketStyle, dialogStyleFor, lineBg, styleFor } from "./theme.ts";
 
 /** Resolve the ANSI {@link Style} for a span (bracket spans rainbow by depth). */
 export function spanStyle(span: Span): Style {
-  if (span.cls === "bracket" && span.bracketDepth !== undefined) {
-    return bracketStyle(span.bracketDepth);
-  }
-  return styleFor(span.cls);
+  const base = span.cls === "bracket" && span.bracketDepth !== undefined
+    ? bracketStyle(span.bracketDepth)
+    : styleFor(span.cls);
+  return withRichModifiers(base, span);
 }
 
-/** The verbatim line, no colour. */
+/** The style for a span shown inside a dialog (a light-grey panel), where the
+ * editor's bright colours would not read. */
+export function overlaySpanStyle(span: Span): Style {
+  return withRichModifiers(dialogStyleFor(span.cls), span);
+}
+
+/** Apply only modifiers that a rendered span explicitly turns on. */
+function withRichModifiers(style: Style, span: Span): Style {
+  return {
+    ...style,
+    ...(span.bold ? { bold: true } : {}),
+    ...(span.italic ? { italic: true } : {}),
+    ...(span.underline ? { underline: true } : {}),
+    ...(span.strikethrough ? { strikethrough: true } : {}),
+  };
+}
+
+/** The active source or rendered line, with no colour. */
 export function renderLinePlain(line: Line): string {
   return line.text;
 }

@@ -83,6 +83,7 @@ describe("pattern", () => {
     expect(doublePattern.derivedInternalCells).toEqual([
       {
         partialCause: "double",
+        kind: "computed",
       },
       {
         partialCause: "x",
@@ -102,9 +103,11 @@ describe("pattern", () => {
     expect(testPattern.derivedInternalCells).toEqual([
       {
         partialCause: { $generated: 0 },
+        kind: "computed",
       },
       {
         partialCause: "doubled",
+        kind: "computed",
       },
     ]);
     expect(testPattern.nodes[0].outputs).toMatchObject({
@@ -140,6 +143,7 @@ describe("pattern", () => {
       {
         partialCause: "isSelected",
         schema: { type: "boolean" },
+        kind: "computed",
       },
       {
         partialCause: {
@@ -147,6 +151,7 @@ describe("pattern", () => {
           $generated: 0,
         },
         schema: { type: "boolean" },
+        kind: "computed",
       },
     ]);
   });
@@ -218,7 +223,7 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      $alias: { cell: "argument", path: ["x"], scope: "space" },
+      $alias: { cell: "argument", path: ["x"] },
     });
     expect(nodes[0].outputs).toEqual({
       $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
@@ -320,7 +325,7 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { cell: "argument", path: ["x"], scope: "space" } },
+      x: { $alias: { cell: "argument", path: ["x"] } },
     });
     expect(nodes[0].outputs).toEqual({
       $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },

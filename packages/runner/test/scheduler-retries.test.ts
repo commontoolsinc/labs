@@ -124,10 +124,15 @@ describe("reactive retries", () => {
     errorName: string | undefined,
     initialRetries: number,
     rejectionDirective?: ActionCommitRejectionDirective,
+    // Share `action` + `offBudgetRetries` across calls to accumulate an
+    // off-budget streak; both default to fresh per call.
+    shared?: { action: Action; offBudgetRetries: WeakMap<Action, number> },
   ) => {
-    const action = (() => {}) as unknown as Action;
+    const action = shared?.action ?? ((() => {}) as unknown as Action);
     const retries = new WeakMap<Action, number>();
     if (initialRetries > 0) retries.set(action, initialRetries);
+    const offBudgetRetries = shared?.offBudgetRetries ??
+      new WeakMap<Action, number>();
     let queued = 0;
     let resubscribed = 0;
     const rejectionDispositions: string[] = [];
@@ -145,6 +150,7 @@ describe("reactive retries", () => {
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
       retries,
+      offBudgetRetries,
       pending: new Set<Action>(),
       commitPromise,
       resubscribe: () => {
@@ -154,6 +160,7 @@ describe("reactive retries", () => {
       queueExecution: () => {
         queued++;
       },
+      getActionId: () => "test-action",
       restoreInvalidCauses: () => {},
       onCommitRejected: (_error, disposition) => {
         rejectionDispositions.push(disposition);
@@ -162,7 +169,14 @@ describe("reactive retries", () => {
     });
     await commitPromise;
     await new Promise((r) => setTimeout(r, 0));
-    return { queued, resubscribed, retries, action, rejectionDispositions };
+    return {
+      queued,
+      resubscribed,
+      retries,
+      offBudgetRetries,
+      action,
+      rejectionDispositions,
+    };
   };
 
   it(
@@ -235,6 +249,44 @@ describe("reactive retries", () => {
       expect(r.queued).toBe(0);
       expect(r.retries.get(r.action)).toBe(10);
       expect(r.rejectionDispositions).toEqual(["abandoned"]);
+    },
+  );
+
+  it(
+    "retries a same-replica-race rejection off the bounded budget",
+    async () => {
+      // StorageTransactionInconsistent is a stale-basis rejection, like a
+      // conflict: re-running against the settled replica resolves it. It re-arms
+      // and re-queues WITHOUT charging the counter, so a burst longer than the
+      // budget cannot strand the compute as a zombie. Contrast the generic
+      // TransactionError above, which does charge the counter.
+      const r = await runWatcher("StorageTransactionInconsistent", 0);
+      expect(r.queued).toBe(1);
+      expect(r.retries.has(r.action)).toBe(false);
+      // Off-budget re-queues are counted separately, for the never-converging
+      // diagnostic, without charging the bounded budget.
+      expect(r.offBudgetRetries.get(r.action)).toBe(1);
+    },
+  );
+
+  it(
+    "accumulates the off-budget re-queue count across stale-basis retries and clears it on convergence",
+    async () => {
+      // The off-budget retry assumes the subscription eventually delivers the
+      // value. Its re-queue count accumulates across attempts (both stale-basis
+      // classes), separate from the bounded budget, so a never-closing loop can
+      // be surfaced every OFF_BUDGET_RETRY_WARN_INTERVAL re-queues. It clears
+      // when the action finally converges.
+      const shared = {
+        action: (() => {}) as unknown as Action,
+        offBudgetRetries: new WeakMap<Action, number>(),
+      };
+      await runWatcher("StorageTransactionInconsistent", 0, undefined, shared);
+      await runWatcher("ConflictError", 0, undefined, shared);
+      expect(shared.offBudgetRetries.get(shared.action)).toBe(2);
+      // A successful commit ends the streak and clears the count.
+      await runWatcher(undefined, 0, undefined, shared);
+      expect(shared.offBudgetRetries.has(shared.action)).toBe(false);
     },
   );
 

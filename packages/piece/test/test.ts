@@ -16,6 +16,9 @@ describe("PieceManager.get", () => {
         pieceSynced = true;
         return Promise.resolve();
       },
+      // A non-wrapper piece resolves to itself; get() canonicalizes the address
+      // (value-link slot -> result cell) before syncing + starting.
+      resolveAsCell: () => piece,
       asSchema: () => piece,
     };
     const runtime = {

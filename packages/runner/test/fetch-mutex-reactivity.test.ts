@@ -45,7 +45,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     // Mock fetch
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -57,15 +57,14 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
 
       fetchCalls.push({ url, init });
 
-      // Simulate a small delay
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      return new Response(
-        JSON.stringify({ mocked: true, url }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ mocked: true, url }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
   });
@@ -94,10 +93,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx = runtime.edit();
 
     // Pull first to trigger computation (starts the fetch)
+    await runtime.settled();
     await resultCell.pull();
 
-    // Wait for async work
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell.pull();
 
     const firstCallCount =
@@ -110,10 +108,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx = runtime.edit();
 
     // Pull first to trigger computation with new URL
+    await runtime.settled();
     await resultCell.pull();
 
-    // Wait for async work
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell.pull();
 
     // Should have made a new fetch with the new URL
@@ -136,10 +133,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull first to trigger computation
+    await runtime.settled();
     await resultCell1.pull();
 
-    // Wait for async work
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell1.pull();
 
     const jsonCallCount = fetchCalls.length;
@@ -157,10 +153,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull first to trigger computation
+    await runtime.settled();
     await resultCell2.pull();
 
-    // Wait for async work
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell2.pull();
 
     // Should have made additional fetch calls for the different builtin
@@ -170,7 +165,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
   it("should set pending to true during fetch and false after", async () => {
     // Use a longer delay to observe pending state
     const slowFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -181,13 +176,12 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
         : input.url;
       fetchCalls.push({ url, init });
 
-      // Longer delay
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      return new Response(JSON.stringify({ mocked: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return Promise.resolve(
+        new Response(JSON.stringify({ mocked: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
     };
 
     const fetchJson = byRef("fetchJson");
@@ -205,13 +199,8 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull first to trigger computation (starts the fetch)
+    await runtime.settled();
     await result.pull();
-
-    // Wait a bit for request to start
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    // Wait for completion
-    await new Promise((resolve) => setTimeout(resolve, 200));
 
     const finalData = (await result.pull()) as {
       pending?: boolean;
@@ -227,9 +216,8 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
   });
 
   const error404Fetch = () => {
-    globalThis.fetch = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      return new Response("Not Found", { status: 404 });
+    globalThis.fetch = () => {
+      return Promise.resolve(new Response("Not Found", { status: 404 }));
     };
   };
 
@@ -264,8 +252,10 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     );
     localTx.commit();
 
+    // The barrier must be THIS runtime's: the effect is tracked on `rt`, not
+    // on the suite's shared `runtime`.
+    await rt.settled();
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
 
     const data = (await result.pull()) as {
       error?: unknown;
@@ -314,8 +304,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     urlCell.withTx(tx).send("");
     tx.commit();
 
-    // Wait for async work
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
 
     const data = (await resultCell.pull()) as {
       error?: unknown;
@@ -359,8 +348,8 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull and wait for the fetch to complete
+    await runtime.settled();
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
     // Filter to only the calls that hit our endpoint

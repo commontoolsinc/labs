@@ -1,6 +1,5 @@
 node_modules
 dist
-lib
 *.tsbuildinfo
 .DS_Store
 .vscode
@@ -21,6 +20,8 @@ dist/
 .cf-harness-artifacts/
 claude-research.key
 *.key
+# Backup keys the tailscale share script rotates aside (e.g. cf.key.implicit-trust.bak)
+cf.key.*
 # Exported PKCS8/PEM identity keys (e.g. cf.pem) — never commit private keys
 *.pem
 .passphrase
@@ -30,8 +31,6 @@ claude-research.key
 .knowledge
 local-dev-toolshed.log
 local-dev-shell.log
-tools/ralph/logs/
-tools/ralph/smoketest/
 .playwright-mcp/
 .worktrees
 tmp/

@@ -14,6 +14,11 @@ import {
   pathsOverlap,
 } from "./path.ts";
 import {
+  containsReservedSchemaRefSubstring,
+  containsSyncSchemaRefString,
+  findSyncSchemaRef,
+} from "./sync-schema-ref.ts";
+import {
   type AuxiliaryLinkAdmission,
   scopeNamingLinkWriteViolation,
 } from "./scope-naming-link.ts";
@@ -30,6 +35,7 @@ import {
   type CellScope,
   type ClientCommit,
   commitPreconditionValueHash,
+  type CompleteActionScopeSummary,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
@@ -48,8 +54,11 @@ import {
   principalOfUserContextKey,
   type ProvenanceInputBasisComponent,
   type Reference,
+  type SchedulerActionKind,
+  type SchedulerActionObservation,
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
+  type SchedulerObservationAddress,
   sessionExecutionContextKey,
   type SessionId,
   type SqliteOperation,
@@ -59,7 +68,15 @@ import {
   userExecutionContextKey,
 } from "../v2.ts";
 
-export type { SchedulerExecutionContextKey } from "../v2.ts";
+export type {
+  CompleteActionScopeSummary,
+  ForeignReadStampAssertion,
+  SchedulerActionKind,
+  SchedulerActionObservation,
+  SchedulerExecutionContextKey,
+  SchedulerObservationAddress,
+  SchedulerObservationTransactionKind,
+} from "../v2.ts";
 // Canonical context-key helpers live in the dependency-light `../v2.ts`
 // (browser-safe for runner clients); this module remains an amendment-18
 // import site for engine/server/executor code.
@@ -79,10 +96,10 @@ const MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT = 1_000;
 // sessions cannot grow the cross-space read-index fanout without limit.
 const MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION = 32;
 
-export interface SchedulerScopeContext {
+export type SchedulerScopeContext = {
   principal: string;
   sessionId: SessionId;
-}
+};
 
 export type SchedulerActionSnapshotCursorWithContext =
   & SchedulerActionSnapshotCursor
@@ -448,6 +465,7 @@ CREATE TABLE IF NOT EXISTS head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
@@ -585,10 +603,10 @@ VALUES (
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-VALUES (:branch, :id, :scope_key, :seq, :op_index)
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+VALUES (:branch, :id, :scope_key, :seq, :op_index, :op)
 ON CONFLICT (branch, id, scope_key) DO UPDATE
-SET seq = :seq, op_index = :op_index
+SET seq = :seq, op_index = :op_index, op = :op
 `;
 
 const INSERT_SNAPSHOT = `
@@ -658,6 +676,46 @@ JOIN revision r
  AND r.seq = h.seq
  AND r.op_index = h.op_index
 WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
+`;
+
+const SELECT_CURRENT_ENTITY_IDS = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE_AFTER = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+  AND id > :after
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID = `
+SELECT 1 AS present
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND id = :id
+  AND op <> 'delete'
+LIMIT 1
 `;
 
 const SELECT_AT_SEQ_LOCAL = `
@@ -773,6 +831,45 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
+// True-basis (CT-1910) variants of the conflict scans: identical intervals,
+// but writes produced by the reader's own session's TRUE PREDECESSORS
+// (`local_seq` below the reader's) are excluded — the accepted own layers
+// the reader's materialized view included; conflicting with them would be
+// the self-conflict that forced pending reads to over-advance their basis
+// in the first place. The exclusion is deliberately NOT session-wide: an
+// own write with a HIGHER localSeq that was accepted first (out-of-order
+// submission — e.g. the runner's hold-mode admission can release a later
+// blind commit while an earlier read-bearing commit waits) was NOT in the
+// reader's view and must conflict exactly like a foreign write. Checking
+// `local_seq` here, rather than assuming the §3.6.3 same-session ordering
+// holds on the wire, keeps the scan sound without trusting the transport.
+const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
+SELECT r.seq AS seq
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND r.op IN ('set', 'delete')
+  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+ORDER BY r.seq DESC, r.op_index DESC
+LIMIT 1
+`;
+
+const SELECT_PATCH_CONFLICTS_EXCLUDING_SESSION = `
+SELECT r.seq AS seq, r.op_index AS op_index, r.data AS data
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND r.op = 'patch'
+  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+ORDER BY r.seq DESC, r.op_index DESC
+`;
+
 const SELECT_COMMIT_REVISIONS = `
 SELECT branch, id, scope_key, seq, op_index, op, data, commit_seq
 FROM revision
@@ -870,12 +967,17 @@ interface PreparedStatements {
   selectCommitRevisions: PreparedStatement;
   selectCommitSessionBySeq: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
+  selectCurrentEntityId: PreparedStatement;
+  selectCurrentEntityIds: PreparedStatement;
+  selectCurrentEntityIdPage: PreparedStatement;
+  selectCurrentEntityIdPageAfter: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
   selectLatestSnapshot: PreparedStatement;
   selectNextSeq: PreparedStatement;
   selectPatchConflicts: PreparedStatement;
+  selectPatchConflictsExcludingSession: PreparedStatement;
   selectPatchCount: PreparedStatement;
   selectPatches: PreparedStatement;
   selectPendingResolution: PreparedStatement;
@@ -885,20 +987,21 @@ interface PreparedStatements {
   selectAuthorizationEpochMax: PreparedStatement;
   selectAuthorizationEpochs: PreparedStatement;
   upsertAuthorizationEpoch: PreparedStatement;
+  selectSetDeleteConflictExcludingSession: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteBranch: PreparedStatement;
   deleteOldSnapshots: PreparedStatement;
 }
 
-export interface Engine {
+export type Engine = {
   url: URL;
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
-}
+};
 
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
@@ -975,20 +1078,20 @@ export class ExecutionActionFirewallError extends Error {
   }
 }
 
-export interface OpenOptions {
+export type OpenOptions = {
   url: URL;
   snapshotInterval?: number;
   snapshotRetention?: number;
-}
+};
 
-export interface InvocationRecord {
+export type InvocationRecord = {
   iss: string;
   aud?: string | null;
   cmd: string;
   sub: string;
   args?: FabricValue;
-  [key: string]: unknown;
-}
+  [key: string]: FabricValue;
+};
 
 export type AuthorizationRecord = FabricValue;
 
@@ -1129,7 +1232,7 @@ export interface ExecutionLeaseFence {
   authorizeActingPrincipal?: (engine: Engine, principal: string) => boolean;
 }
 
-export interface ApplyCommitOptions {
+export type ApplyCommitOptions = {
   /** Actual request/replay identity for this protocol session. */
   sessionId: SessionId;
   /** Host-derived session used only to resolve PerSession scope. */
@@ -1205,9 +1308,9 @@ export interface ApplyCommitOptions {
     space: string,
     principal: string,
   ) => number | undefined;
-}
+};
 
-export interface AppliedRevision {
+export type AppliedRevision = {
   id: EntityId;
   scope?: CellScope;
   scopeKey: string;
@@ -1218,9 +1321,9 @@ export interface AppliedRevision {
   op: Operation["op"];
   document?: EntityDocument;
   patches?: PatchOp[];
-}
+};
 
-export interface AppliedSchedulerObservationResult {
+export type AppliedSchedulerObservationResult = {
   localSeq: number;
   status: "kept" | "dropped";
   schedulerObservationId?: number;
@@ -1235,11 +1338,13 @@ export interface AppliedSchedulerObservationResult {
    * footprint an unclaimed unserved attempt leaves — count it, or the
    * migration off claims reads as unserved attempts having stopped. */
   unservedDiagnosticCode?: string;
-  reason?:
-    | "stale-confirmed-read"
-    | "stale-pending-read"
-    | "pending-read-missing";
-}
+  reason?: CommitReadDropReason;
+};
+
+export type CommitReadDropReason =
+  | "stale-confirmed-read"
+  | "stale-pending-read"
+  | "pending-read-missing";
 
 export type AppliedActionAttempt =
   | {
@@ -1263,7 +1368,7 @@ export type AppliedActionAttempt =
     diagnosticCode: string;
   };
 
-export interface AppliedCommit {
+export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
@@ -1271,7 +1376,7 @@ export interface AppliedCommit {
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
   actionAttempts?: AppliedActionAttempt[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
-}
+};
 
 // Replay status is process-local engine metadata, deliberately kept outside
 // AppliedCommit's serialized shape. The canonical response to a replay stays
@@ -1536,105 +1641,13 @@ const readAuthorityAclState = (
   space: string,
 ): EntityState | null => readState(engine, { id: aclDocId(space) });
 
-export type SchedulerActionKind =
-  | "computation"
-  | "effect"
-  | "event-handler";
-
-export type SchedulerObservationTransactionKind =
-  | "dependency-collection"
-  | "action-run"
-  | "event-preflight";
-
-export interface SchedulerObservationAddress {
-  space: string;
-  id: EntityId;
-  scope?: CellScope;
-  path: readonly string[];
-}
-
-export interface ResolvedSchedulerObservationAddress
-  extends SchedulerObservationAddress {
-  scopeKey: string;
-}
-
-/** C3.5: one Worker-asserted foreign read stamp — see
- * {@link SchedulerActionObservation.foreignReadStamps}. */
-export interface ForeignReadStampAssertion {
-  space: string;
-  id: EntityId;
-  /** The read space's stamped covering seq (its own domain, positive). */
-  seq: number;
-}
+export type ResolvedSchedulerObservationAddress =
+  & SchedulerObservationAddress
+  & { scopeKey: string };
 
 export type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
-
-export interface CompleteActionScopeSummary {
-  version: 1;
-  complete: true;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  piece: SchedulerObservationAddress;
-  reads: SchedulerObservationAddress[];
-  writes: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  directOutputs: SchedulerObservationAddress[];
-}
-
-export interface SchedulerActionObservation {
-  version: 1 | 2;
-  ownerSpace?: string;
-  branch: BranchName;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  actionKind: SchedulerActionKind;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  completeActionScopeSummary?: CompleteActionScopeSummary;
-  observedAtSeq: number;
-  /** Host-derived maximum accepted revision sequence in the commit read set. */
-  inputBasisSeq?: InputBasisSeq;
-  /** Transient exact-claim assertion; validated by the bound executor host. */
-  executionClaimAssertion?: ExecutionClaimAssertion;
-  /**
-   * C3.5: transient Worker assertion of the stamped foreign point reads the
-   * attempt consumed from its read-only mount — {space, id, seq} per read,
-   * in the READ space's seq domain. Like `executionClaimAssertion` it is a
-   * request field, never persisted: the HOST validates each stamp against
-   * its own served-point-read records (C3A13 — the engine cannot verify a
-   * foreign seq itself) and passes only host-validated components into the
-   * accept transaction; the engine strips this field from the canonical
-   * accepted observation. An asserted stamp the host never served is
-   * dropped, exactly like the asserted scalar.
-   */
-  foreignReadStamps?: readonly ForeignReadStampAssertion[];
-  /**
-   * Transient report that the host discarded a claimed action as one whole
-   * transaction. Valid only on an observation-only exact claimed attempt and
-   * stripped before scheduler state is persisted.
-   */
-  executionUnservedAttempt?: { diagnosticCode: string };
-  executionProvenance?: ActionExecutionProvenance;
-  observedAtLocalSeq?: number;
-  transactionKind: SchedulerObservationTransactionKind;
-  reads: SchedulerObservationAddress[];
-  shallowReads: SchedulerObservationAddress[];
-  actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites: SchedulerObservationAddress[];
-  declaredWrites?: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  ignoredSchedulingWrites?: SchedulerObservationAddress[];
-  actionOptions?: {
-    debounceMs?: number;
-    noDebounce?: boolean;
-    throttleMs?: number;
-  };
-  status: "success" | "failed";
-  errorFingerprint?: string;
-}
 
 const isSchedulerRecord = (
   value: unknown,
@@ -1785,13 +1798,13 @@ export const schedulerObservationFromValue = (
   return value as unknown as SchedulerActionObservation;
 };
 
-export interface SchedulerObservationSnapshot {
+export type SchedulerObservationSnapshot = {
   observationId: number;
   executionContextKey: SchedulerExecutionContextKey;
   commitSeq: number | null;
   observedAtSeq: number;
   observation: SchedulerActionObservation;
-}
+};
 
 export interface SchedulerObservationSnapshotWithState
   extends SchedulerObservationSnapshot {
@@ -1803,12 +1816,12 @@ export interface SchedulerObservationSnapshotWithState
   writerSessionId?: string;
 }
 
-export interface SchedulerObservationSnapshotPage {
+export type SchedulerObservationSnapshotPage = {
   snapshots: SchedulerObservationSnapshotWithState[];
   nextCursor?: SchedulerActionSnapshotCursorWithContext;
-}
+};
 
-export interface SchedulerReaderIndexEntry {
+export type SchedulerReaderIndexEntry = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1818,7 +1831,7 @@ export interface SchedulerReaderIndexEntry {
   observationId: number;
   readKind: "recursive" | "shallow";
   read: ResolvedSchedulerObservationAddress;
-}
+};
 
 export type SchedulerWriteIndexKind =
   | "current-known"
@@ -1855,7 +1868,7 @@ export interface SchedulerWriterCandidate {
   matchedWrites: SchedulerMatchedWrite[];
 }
 
-export interface SchedulerActionState {
+export type SchedulerActionState = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1866,7 +1879,7 @@ export interface SchedulerActionState {
   directDirtySeq: number | null;
   staleSeq: number | null;
   unknownReason: string | null;
-}
+};
 
 /**
  * Host-only wake query over the durable scheduler projections.
@@ -1885,16 +1898,16 @@ export interface SchedulerStaleReadersForTargetsOptions {
   dirtySeq: number;
 }
 
-export interface ReadOptions {
+export type ReadOptions = {
   id: EntityId;
   scope?: CellScope;
   principal?: string;
   sessionId?: SessionId;
   branch?: BranchName;
   seq?: number;
-}
+};
 
-export interface EntityState {
+export type EntityState = {
   id: EntityId;
   scope: CellScope;
   scopeKey: string;
@@ -1903,21 +1916,21 @@ export interface EntityState {
   opIndex: number;
   op: Operation["op"];
   document: EntityDocument | null;
-}
+};
 
-export interface PutBlobOptions {
+export type PutBlobOptions = {
   value: Uint8Array;
   contentType: string;
-}
+};
 
-export interface BranchState {
+export type BranchState = {
   name: BranchName;
   parentBranch: BranchName | null;
   forkSeq: number | null;
   createdSeq: number;
   headSeq: number;
   status: string;
-}
+};
 
 type HeadRow = {
   seq: number;
@@ -2006,12 +2019,21 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
   selectCommitSessionBySeq: database.prepare(SELECT_COMMIT_SESSION_BY_SEQ),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
+  selectCurrentEntityId: database.prepare(SELECT_CURRENT_ENTITY_ID),
+  selectCurrentEntityIds: database.prepare(SELECT_CURRENT_ENTITY_IDS),
+  selectCurrentEntityIdPage: database.prepare(SELECT_CURRENT_ENTITY_ID_PAGE),
+  selectCurrentEntityIdPageAfter: database.prepare(
+    SELECT_CURRENT_ENTITY_ID_PAGE_AFTER,
+  ),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
   selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
+  selectPatchConflictsExcludingSession: database.prepare(
+    SELECT_PATCH_CONFLICTS_EXCLUDING_SESSION,
+  ),
   selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
   selectPatches: database.prepare(SELECT_PATCHES),
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
@@ -2023,6 +2045,9 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   ),
   selectAuthorizationEpochs: database.prepare(SELECT_AUTHORIZATION_EPOCHS),
   upsertAuthorizationEpoch: database.prepare(UPSERT_AUTHORIZATION_EPOCH),
+  selectSetDeleteConflictExcludingSession: database.prepare(
+    SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION,
+  ),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteBranch: database.prepare(DELETE_BRANCH),
@@ -2038,6 +2063,17 @@ const hasColumn = (
     { name: string }
   >;
   return rows.some((row) => row.name === column);
+};
+
+const columnDefault = (
+  database: Database,
+  table: string,
+  column: string,
+): string | null | undefined => {
+  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+    { name: string; dflt_value: string | null }
+  >;
+  return rows.find((row) => row.name === column)?.dflt_value;
 };
 
 const hasTable = (database: Database, table: string): boolean =>
@@ -2187,6 +2223,7 @@ CREATE TABLE head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX idx_head_branch ON head (branch);
@@ -2206,9 +2243,15 @@ INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq
 SELECT branch, id, 'space', seq, op_index, op, data, commit_seq
 FROM revision_unscoped_migration;
 
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-SELECT branch, id, 'space', seq, op_index
-FROM head_unscoped_migration;
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT h.branch, h.id, 'space', h.seq, h.op_index, r.op
+FROM head_unscoped_migration h
+JOIN revision r
+  ON r.branch = h.branch
+  AND r.id = h.id
+  AND r.scope_key = 'space'
+  AND r.seq = h.seq
+  AND r.op_index = h.op_index;
 
 INSERT INTO snapshot (branch, id, scope_key, seq, value)
 SELECT branch, id, 'space', seq, value
@@ -2265,6 +2308,61 @@ FROM execution_lease_expiry_migration;
 DROP TABLE execution_lease_expiry_migration;
 
 COMMIT;
+`);
+};
+
+const migrateHeadCurrentOp = (database: Database): void => {
+  if (
+    !hasColumn(database, "head", "op") ||
+    columnDefault(database, "head", "op") !== null
+  ) {
+    database.exec(`
+BEGIN TRANSACTION;
+
+DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_live_entity_ids;
+
+ALTER TABLE head RENAME TO head_current_op_migration;
+
+CREATE TABLE head (
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
+  seq       INTEGER NOT NULL,
+  op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
+  PRIMARY KEY (branch, id, scope_key)
+);
+CREATE INDEX idx_head_branch ON head (branch);
+
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT
+  h.branch,
+  h.id,
+  h.scope_key,
+  h.seq,
+  h.op_index,
+  (
+  SELECT r.op
+  FROM revision r
+  WHERE r.branch = h.branch
+    AND r.id = h.id
+    AND r.scope_key = h.scope_key
+    AND r.seq = h.seq
+    AND r.op_index = h.op_index
+  )
+FROM head_current_op_migration h;
+
+DROP TABLE head_current_op_migration;
+
+COMMIT;
+`);
+  }
+
+  database.exec(`
+CREATE INDEX IF NOT EXISTS idx_head_live_entity_ids
+  ON head (branch, scope_key, id, op)
+  WHERE op <> 'delete';
 `);
 };
 
@@ -3124,6 +3222,7 @@ export const open = async (
   database.exec(INIT(!schedulerSchemaExists));
   migrateExecutionLeaseExpiry(database);
   migrateScopedEntityTables(database);
+  migrateHeadCurrentOp(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
   );
@@ -3195,6 +3294,46 @@ export const listBranches = (engine: Engine): BranchState[] => {
   return (engine.statements.selectBranches.all() as BranchRow[]).map(
     toBranchState,
   );
+};
+
+export const listEntityIds = (
+  engine: Engine,
+): EntityId[] => {
+  return (engine.statements.selectCurrentEntityIds.all({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export type EntityIdPageOptions = {
+  after?: EntityId;
+  limit: number;
+};
+
+export const listEntityIdPage = (
+  engine: Engine,
+  { after, limit }: EntityIdPageOptions,
+): EntityId[] => {
+  const statement = after === undefined
+    ? engine.statements.selectCurrentEntityIdPage
+    : engine.statements.selectCurrentEntityIdPageAfter;
+  return (statement.all({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+    limit,
+    ...(after === undefined ? {} : { after }),
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export const entityIdExists = (
+  engine: Engine,
+  id: EntityId,
+): boolean => {
+  return engine.statements.selectCurrentEntityId.get({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+    id,
+  }) !== undefined;
 };
 
 export const read = (
@@ -9059,6 +9198,7 @@ const applyCommitTransaction = (
     scopeContext,
     branch,
     commit,
+    commit.localSeq,
   );
   const inputBasisSeq = acceptedInputBasisSeq(
     commit.reads.confirmed,
@@ -9233,6 +9373,8 @@ const applyCommitTransaction = (
     revisions.push(revision);
   }
   ensureMergedPatchDocumentOnLastRevision(engine, branch, revisions);
+
+  validateStoredSyncSchemaRefs(engine, branch, revisions, original);
 
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
@@ -9489,6 +9631,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "set",
       });
       return {
         id: operation.id,
@@ -9548,6 +9691,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "patch",
       });
       return {
         id: operation.id,
@@ -9588,6 +9732,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "delete",
       });
       return {
         id: operation.id,
@@ -9726,46 +9871,134 @@ const validateConfirmedReads = (
   }
 };
 
+/**
+ * Validated `basisSeq` of a pending read — the CT-1910 true-basis shape — or
+ * `undefined` for the legacy shape. In the SERVER's space-log seq space (an
+ * accepted-commit `seq`, NOT the session's localSeq space); see
+ * {@link PendingRead.basisSeq}. A basis ahead of the log claims knowledge
+ * the server never produced. (A basis AT head is legal and yields an empty
+ * scan — the same client-trusted claim a confirmed read at head makes.)
+ */
+const pendingReadBasisSeq = (
+  engine: Engine,
+  read: { id: string; basisSeq?: number },
+): number | undefined => {
+  const { basisSeq } = read;
+  if (basisSeq === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(basisSeq) || basisSeq < 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names a malformed basisSeq: ${basisSeq}`,
+    );
+  }
+  if (basisSeq > serverSeq(engine)) {
+    throw new ProtocolError(
+      `pending read on ${read.id} claims a basisSeq ahead of the log: ${basisSeq}`,
+    );
+  }
+  return basisSeq;
+};
+
+// Shared normalization/validation for a pending read's dependency set: a
+// non-empty array (or scalar) of integer localSeqs. Malformed shapes are a
+// protocol violation regardless of which validator (ordinary commit or
+// scheduler observation) encounters them.
+const pendingReadLayers = (
+  read: { id: string; localSeq: number | number[] },
+): number[] => {
+  const layers = Array.isArray(read.localSeq) ? read.localSeq : [read.localSeq];
+  if (layers.length === 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names no localSeq`,
+    );
+  }
+  for (const layer of layers) {
+    if (!Number.isInteger(layer)) {
+      throw new ProtocolError(
+        `pending read on ${read.id} names a non-integer localSeq`,
+      );
+    }
+  }
+  return layers;
+};
+
 const resolvePendingReads = (
   engine: Engine,
   sessionKey: string,
   scopeContext: { principal?: string; sessionId: SessionId },
   branch: BranchName,
   commit: Pick<ClientCommit, "reads">,
+  /** The reader's own localSeq — the predecessor bound for the CT-1910
+   * true-basis own-session exclusion. Passed explicitly because this branch
+   * narrowed `commit` to its read set. */
+  commitLocalSeq: number,
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
   for (const read of commit.reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        throw new ConflictError(
-          `pending dependency not resolved: ${read.localSeq}`,
-        );
+    // An array localSeq names EVERY pending layer the read's view sat on:
+    // each element must have resolved to an accepted commit, and staleness
+    // is checked exactly once, from the basis §3.6.3 selects — the declared
+    // `basisSeq` when present, else the resolution of the HIGHEST element —
+    // the document's top-of-stack layer below the reader, which the array
+    // MUST include (03-commit-model.md §3.5). A scalar is the single-layer
+    // form.
+    const layers = pendingReadLayers(read);
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          throw new ConflictError(
+            `pending dependency not resolved: ${localSeq}`,
+          );
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
     }
 
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolveScopeKey(read.scope, scopeContext),
-      resolution.seq,
-      read.path,
-      read.nonRecursive ?? false,
-    );
+    // CT-1910 repair: a reader that names its true confirmed basis is
+    // scanned over the FULL interval (basisSeq, head], excluding only its
+    // own session's predecessor commits (local_seq below the reader's) —
+    // the accepted layers its materialized view included. A legacy reader
+    // (no basisSeq) keeps the max-dependency basis, so the over-advance
+    // deviation persists for it alone
+    // (docs/specs/memory-v2/09-invariants.md, INV-1).
+    const trueBasis = pendingReadBasisSeq(engine, read);
+    const conflictSeq = trueBasis !== undefined
+      ? findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, scopeContext),
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        { sessionKey, beforeLocalSeq: commitLocalSeq },
+      )
+      : findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, scopeContext),
+        basis!.seq,
+        read.path,
+        read.nonRecursive ?? false,
+      );
     if (conflictSeq !== null) {
       throw new ConflictError(
-        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
+        `stale pending read: ${read.id} via localSeq ${
+          basis!.localSeq
+        } conflicted with seq ${conflictSeq}`,
       );
     }
   }
@@ -9796,14 +10029,18 @@ const resolvedPendingReadsForBasis = (
 ): { seq: number }[] => {
   const resolutions = new Map<number, { seq: number }>();
   for (const read of reads) {
-    if (resolutions.has(read.localSeq)) continue;
-    const row = engine.statements.selectPendingResolution.get({
-      session_id: sessionKey,
-      local_seq: read.localSeq,
-    }) as { seq: number } | undefined;
-    // A missing dependency is handled by the existing observation validation
-    // and the observation is dropped. It contributes no accepted basis.
-    if (row !== undefined) resolutions.set(read.localSeq, row);
+    // `localSeq` may name every pending layer the read sat on (CT-1910); each
+    // one resolves independently and contributes to the accepted basis.
+    for (const localSeq of pendingReadLayers(read)) {
+      if (resolutions.has(localSeq)) continue;
+      const row = engine.statements.selectPendingResolution.get({
+        session_id: sessionKey,
+        local_seq: localSeq,
+      }) as { seq: number } | undefined;
+      // A missing dependency is handled by the existing observation validation
+      // and the observation is dropped. It contributes no accepted basis.
+      if (row !== undefined) resolutions.set(localSeq, row);
+    }
   }
   return [...resolutions.values()];
 };
@@ -10053,23 +10290,41 @@ const findConflictSeq = (
   // replace/delete changes the container the shape read observed, so it must
   // still conflict. Only Tier-2 (patch) granularity is refined.
   nonRecursive: boolean = false,
+  // True-basis reads (CT-1910): skip writes produced by this commit session
+  // key's TRUE PREDECESSOR commits (`local_seq < beforeLocalSeq`) — the
+  // reader's own accepted layers, which its view included. Own writes with
+  // a higher localSeq (accepted out of submission order) conflict like
+  // foreign writes; see the comment on the *_EXCLUDING_SESSION statements.
+  exclude?: { sessionKey: string; beforeLocalSeq: number },
 ): number | null => {
-  const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
+  const setDeleteStatement = exclude === undefined
+    ? engine.statements.selectSetDeleteConflict
+    : engine.statements.selectSetDeleteConflictExcludingSession;
+  const patchStatement = exclude === undefined
+    ? engine.statements.selectPatchConflicts
+    : engine.statements.selectPatchConflictsExcludingSession;
+  const exclusionParams = exclude === undefined ? {} : {
+    exclude_session: exclude.sessionKey,
+    before_local_seq: exclude.beforeLocalSeq,
+  };
+  const setOrDeleteConflict = setDeleteStatement.get({
     branch,
     id,
     scope_key: scopeKey,
     after_seq: afterSeq,
+    ...exclusionParams,
   }) as { seq: number } | undefined;
   if (setOrDeleteConflict !== undefined) {
     return setOrDeleteConflict.seq;
   }
 
   for (
-    const conflict of engine.statements.selectPatchConflicts.iter({
+    const conflict of patchStatement.iter({
       branch,
       id,
       scope_key: scopeKey,
       after_seq: afterSeq,
+      ...exclusionParams,
     }) as Iterable<{
       seq: number;
       data: string | null;
@@ -10098,11 +10353,15 @@ const schedulerObservationReadDropReason = (
     scopeContext,
     branch,
     reads,
+    localSeq,
   }: {
     sessionKey: string;
     scopeContext: { principal?: string; sessionId: SessionId };
     branch: BranchName;
     reads: ClientCommit["reads"];
+    /** The observation commit's localSeq — the predecessor bound for the
+     * true-basis own-session exclusion (CT-1910). */
+    localSeq: number;
   },
 ): SchedulerObservationDropReason | undefined => {
   for (const read of reads.confirmed) {
@@ -10125,31 +10384,58 @@ const schedulerObservationReadDropReason = (
 
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
   for (const read of reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        return "pending-read-missing";
+    // Same contract as resolvePendingReads: every listed layer must have
+    // resolved; staleness is checked once, based at the highest layer. A
+    // malformed dependency set throws the same ProtocolError as on the
+    // ordinary-commit path rather than degrading to a drop reason.
+    const layers = pendingReadLayers(read);
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          return "pending-read-missing";
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
     }
 
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolveScopeKey(read.scope, scopeContext),
-      resolution.seq,
-      read.path,
-      read.nonRecursive ?? false,
-    );
+    // CT-1910 repair: a reader that names its true confirmed basis is
+    // scanned over the FULL interval (basisSeq, head], excluding only its
+    // own session's predecessor commits (local_seq below the reader's) —
+    // the accepted layers its materialized view included. A legacy reader
+    // (no basisSeq) keeps the max-dependency basis, so the over-advance
+    // deviation persists for it alone
+    // (docs/specs/memory-v2/09-invariants.md, INV-1).
+    const trueBasis = pendingReadBasisSeq(engine, read);
+    const conflictSeq = trueBasis !== undefined
+      ? findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, scopeContext),
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        { sessionKey, beforeLocalSeq: localSeq },
+      )
+      : findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, scopeContext),
+        basis!.seq,
+        read.path,
+        read.nonRecursive ?? false,
+      );
     if (conflictSeq !== null) {
       return "stale-pending-read";
     }
@@ -10326,6 +10612,7 @@ const applySchedulerObservationOnlyCommit = (
       { principal: scopePrincipal, sessionId: scopeSessionId },
       branch,
       transaction,
+      localSeq,
     );
     inputBasisSeq = acceptedInputBasisSeq(
       transaction.reads.confirmed,
@@ -10345,6 +10632,7 @@ const applySchedulerObservationOnlyCommit = (
       scopeContext: { principal: scopePrincipal, sessionId: scopeSessionId },
       branch,
       reads: transaction.reads,
+      localSeq,
     });
   }
   const accepted = acceptedSchedulerObservation(schedulerObservation, {
@@ -10829,6 +11117,186 @@ const materializeSnapshots = (
     seen.add(key);
     maybeMaterializeSnapshot(engine, branch, revision.id, revisionScopeKey);
   }
+};
+
+const rejectStoredSyncSchemaRef = (
+  document: EntityDocument | undefined,
+): void => {
+  const ref = findSyncSchemaRef(document);
+  if (ref !== undefined) {
+    throw new ProtocolError(
+      `memory v2 documents may not persist reserved wire schema reference: ${ref}`,
+    );
+  }
+};
+
+const validateStoredSyncSchemaRefs = (
+  engine: Engine,
+  branch: BranchName,
+  revisions: readonly AppliedRevision[],
+  serializedCommit: string,
+): void => {
+  // Every string a set document or patch operation carries appears verbatim
+  // in the commit's serialization (already computed for the commit log), so
+  // a commit whose serialization lacks both reserved prefixes can only put a
+  // reference into a schema position via a JSON Patch move relocating a
+  // string that already exists in the stored pre-state.
+  const commitMayIntroduceRef = containsReservedSchemaRefSubstring(
+    serializedCommit,
+  );
+
+  // Entities whose patches need post-state validation, keyed by revision key,
+  // preserving this commit's revision order per entity.
+  const statefulEntities = new Map<string, AppliedRevision[]>();
+
+  for (const revision of revisions) {
+    if (revision.op === "set" && commitMayIntroduceRef) {
+      rejectStoredSyncSchemaRef(revision.document);
+    }
+    // Every revision here is set/patch/delete: sqlite operations never enter
+    // the revisions list (see applyCommitTransaction).
+    const key = revisionKey(
+      branch,
+      revision.id,
+      revision.scopeKey ?? DEFAULT_SCOPE_KEY,
+    );
+    const isCandidatePatch = revision.op === "patch" &&
+      (revision.patches?.some((patch) => patch.op === "move") === true ||
+        (commitMayIntroduceRef &&
+          containsSyncSchemaRefString(revision.patches)));
+    const group = statefulEntities.get(key);
+    if (group !== undefined) {
+      // Once an entity is stateful, every later revision participates in the
+      // replay so each intermediate stored state is validated.
+      group.push(revision);
+      continue;
+    }
+    if (isCandidatePatch) {
+      // Earlier same-commit revisions of this entity are irrelevant history:
+      // a set baseline is re-established by the replay's reconstruction.
+      statefulEntities.set(key, [revision]);
+    }
+  }
+
+  for (const group of statefulEntities.values()) {
+    validateStatefulEntityRevisions(
+      engine,
+      branch,
+      group,
+      commitMayIntroduceRef,
+    );
+  }
+};
+
+/** Replays one entity's in-commit revisions, validating each stored state.
+ *  Reconstructs the pre-state at most once per entity (and not at all when
+ *  neither the commit nor any stored source row can contain a reserved
+ *  reference), keeping validation linear in this commit's patch count. */
+const validateStatefulEntityRevisions = (
+  engine: Engine,
+  branch: BranchName,
+  entityRevisions: readonly AppliedRevision[],
+  commitMayIntroduceRef: boolean,
+): void => {
+  const first = entityRevisions[0];
+  const scopeKey = first.scopeKey ?? DEFAULT_SCOPE_KEY;
+  if (
+    !commitMayIntroduceRef &&
+    !storedEntitySourcesMayContainRef(engine, {
+      id: first.id,
+      scopeKey,
+      branch,
+      seq: first.seq,
+      opIndex: first.opIndex,
+    })
+  ) {
+    // A move can only relocate an existing string, and every string in the
+    // stored pre-state appears verbatim in some stored source row.
+    return;
+  }
+
+  let document: EntityDocument | undefined;
+  for (const revision of entityRevisions) {
+    if (revision.op === "set") {
+      document = revision.document;
+      // Already validated by the set path when the commit can introduce a
+      // reference; a clean commit's set document cannot contain one.
+      continue;
+    }
+    if (revision.op !== "patch") {
+      // A delete tombstones the entity: later in-commit patches start empty.
+      document = emptyEntityDocument();
+      continue;
+    }
+    document = document === undefined
+      ? reconstructPatchedDocument(engine, {
+        id: revision.id,
+        scopeKey,
+        branch,
+        seq: revision.seq,
+        opIndex: revision.opIndex,
+      })
+      : applyPatchDocument(document, revision.patches ?? []);
+    rejectStoredSyncSchemaRef(document);
+  }
+};
+
+/** Substring probe over the serialized rows reconstruction would read — the
+ *  latest set/snapshot base and the patch span — without decoding any of
+ *  them. A negative answer proves the reconstructed pre-state cannot contain
+ *  a reserved reference. */
+const storedEntitySourcesMayContainRef = (
+  engine: Engine,
+  options: {
+    id: EntityId;
+    scopeKey: string;
+    branch: BranchName;
+    seq: number;
+    opIndex: number;
+  },
+): boolean => {
+  const { id, scopeKey, branch, seq, opIndex } = options;
+  const baseRow = engine.statements.selectLatestBase.get({
+    branch,
+    id,
+    scope_key: scopeKey,
+    seq,
+    op_index: opIndex,
+  }) as ReadRow | undefined;
+  const snapshotRow = engine.statements.selectLatestSnapshot.get({
+    branch,
+    id,
+    scope_key: scopeKey,
+    seq,
+  }) as SnapshotRow | undefined;
+
+  let baseSeq = 0;
+  let baseOpIndex = -1;
+  let baseMayContain = false;
+  if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
+    baseSeq = snapshotRow.seq;
+    baseOpIndex = Number.MAX_SAFE_INTEGER;
+    baseMayContain = containsReservedSchemaRefSubstring(snapshotRow.value);
+  } else if (baseRow) {
+    baseSeq = baseRow.seq;
+    baseOpIndex = baseRow.op_index;
+    baseMayContain = baseRow.op === "set" && baseRow.data !== null &&
+      containsReservedSchemaRefSubstring(baseRow.data);
+  }
+  if (baseMayContain) return true;
+
+  const patches = engine.statements.selectPatches.all({
+    branch,
+    id,
+    scope_key: scopeKey,
+    base_seq: baseSeq,
+    base_op_index: baseOpIndex,
+    seq,
+    op_index: opIndex,
+  }) as Array<{ data: string }>;
+  return patches.some((patch) =>
+    containsReservedSchemaRefSubstring(patch.data)
+  );
 };
 
 const maybeMaterializeSnapshot = (

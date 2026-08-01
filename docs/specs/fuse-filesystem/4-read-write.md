@@ -18,14 +18,36 @@ Every path must resolve to a valid `stat` result:
 | `.tool` file | `-r--r--r--` (0444) | byte length of shebang text |
 | Symlink (cell ref) | `lrwxrwxrwx` | target path length |
 
-**Timestamps**: `mtime` reflects the cell's last modification time (from the
-`since` lamport clock, mapped to wall-clock time if available, or mount time
-as fallback). `ctime` = `mtime`. `atime` = current time or mount time (atime
-tracking is expensive and not useful here).
+**Timestamps**: each node carries an `mtime` that advances to the daemon's
+wall-clock time whenever the node's content changes or a directory gains or
+loses an entry, clamped to strictly greater than the node's previous `mtime` so
+two changes within one millisecond still differ; a rebuild that leaves a node
+unchanged preserves its `mtime`. `ctime` and `atime` are reported equal to
+`mtime`. `FsTree` tracks the value and `buildNodeStat` surfaces it. A moving
+`mtime` gives tools that key on it (`ls -l`, `make`, `find -newer`, file
+watchers) correct times, and is the signal by which a client detects a content
+change that keeps the same inode and size — the change the macOS NFS backend
+cannot see through inode invalidation, which it ignores.
 
-**Inode assignment**: Inodes are assigned from a counter, keyed by
-`(entity_id, path)`. The same logical cell always gets the same inode within
-a mount session.
+**Inode assignment**: Inodes are assigned from a counter that only ever counts
+up (`FsTree.allocInode` in `packages/fuse/tree.ts`). A new inode is allocated
+the first time a path appears and is reused for as long as that path keeps
+existing with the same node kind. Rebuilding a piece property builds the
+replacement under a staging name and reconciles it onto the live subtree
+(`FsTree.transplantSubtree`). A path that still exists with the same node kind
+keeps its inode and takes the new content; a genuinely new path is allocated a
+fresh inode; a genuinely removed path has its inode freed. Freed inode numbers
+are never reused, because the counter only counts up. A path whose node kind
+changes (a scalar becoming an object, a file becoming a directory, an array
+index that shrank away) is a removal followed by an addition, so its inode
+changes; this is the one case where a surviving path does not keep its inode.
+
+The reconciliation is synchronous, so no filesystem request observes a
+half-rebuilt tree: a reader sees either the pre-rebuild subtree or the fully
+rebuilt one. A surviving inode's content changes under it, so the rebuild
+invalidates the kernel caches for exactly the inodes whose content changed and
+the directory entries that appeared, disappeared or moved to a different inode;
+caches for unchanged paths are left intact.
 
 ### `readdir`
 

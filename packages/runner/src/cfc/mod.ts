@@ -86,6 +86,10 @@ export type {
   InspectConfLabelResult,
   LabelAtomProjection,
 } from "./label-introspection.ts";
+export {
+  CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
+  CfcSchemaMigrationError,
+} from "./migration-reason.ts";
 export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
 export type { LabelMetadataObservationClass } from "./observation-classes.ts";
 export {
@@ -252,6 +256,8 @@ export {
   resolveSchemaForValidation,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
+  validateSchemaDefinition,
+  validateSchemaValue,
 } from "./schema-sanitization.ts";
 export {
   atomsOutsideCeiling,
@@ -271,6 +277,7 @@ export {
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {
+  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
@@ -279,6 +286,7 @@ export {
   isEmbeddedCfcSchemaRef,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,

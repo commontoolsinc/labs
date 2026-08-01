@@ -34,13 +34,7 @@
  * }
  * ```
  */
-import {
-  handler,
-  type JSONSchema,
-  nonPrivateRandom,
-  safeDateNow,
-  Writable,
-} from "commonfabric";
+import { handler, type JSONSchema, Writable } from "commonfabric";
 
 // =============================================================================
 // SCHEMA UTILITIES
@@ -175,13 +169,13 @@ export const listToolHandler = handler(
     if (existingKeys.has(dedupeKey)) {
       resultMessage = `Duplicate: ${dedupeKey} already saved`;
     } else {
-      const id = `${state.idPrefix}-${safeDateNow()}-${
-        nonPrivateRandom().toString(36).slice(2, 8)
+      const id = `${state.idPrefix}-${Date.now()}-${
+        Math.random().toString(36).slice(2, 8)
       }`;
       const newRecord = {
         ...input,
         id,
-        [state.timestampField]: safeDateNow(),
+        [state.timestampField]: Date.now(),
       };
       delete newRecord.result;
 

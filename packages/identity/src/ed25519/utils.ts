@@ -64,7 +64,7 @@ export function ed25519RawToPkcs8(rawPrivateKey: Uint8Array): Uint8Array {
 
 // Generates a new random key in pkcs8 format, pem encoded.
 export function generateEd25519Pkcs8(): Uint8Array {
-  return ed25519RawToPkcs8(ed25519.utils.randomPrivateKey());
+  return ed25519RawToPkcs8(ed25519.utils.randomSecretKey());
 }
 
 const BEGIN_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----";

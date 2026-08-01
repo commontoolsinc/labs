@@ -8,10 +8,12 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createCell, isCell } from "../src/cell.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { areLinksSame, createDataCellURI } from "../src/link-utils.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { areLinksSame } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { CellResult } from "../src/query-result-proxy.ts";
@@ -185,12 +187,12 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
 
-      // Create nested documents in the array using [ID] syntax
+      // Anchoring creates a nested document per array element
       listCell.set({
         items: [
-          { [ID]: "item-1", name: "Item 1", value: 10 },
-          { [ID]: "item-2", name: "Item 2", value: 20 },
-          { [ID]: "item-3", name: "Item 3", value: 30 },
+          { name: "Item 1", value: 10 },
+          { name: "Item 2", value: 20 },
+          { name: "Item 3", value: 30 },
         ],
       });
 
@@ -227,6 +229,77 @@ describe("Schema - Link Resolution", () => {
       expect(links[0].id).not.toBe(links[1].id);
       expect(links[1].id).not.toBe(links[2].id);
       expect(links[0].id).not.toBe(links[2].id);
+    });
+
+    it("stores annotated values back as links, with [toCell] stripped", () => {
+      // `.get()` results carry a non-enumerable `[toCell]` symbol -- on plain
+      // OBJECTS as well as arrays. Written back into storage, such a value
+      // must become a link to its source (the annotation is the way back),
+      // never reaching conversion with the symbol attached: conversion
+      // rejects non-inert objects loudly, so a leak here would throw.
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                value: { type: "number" },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const source = runtime.getCell(
+        space,
+        "annotated-write-back-source",
+        schema,
+        tx,
+      );
+      source.set({ items: [{ name: "Ada", value: 1 }] });
+
+      const item = source.key("items").key(0).get();
+      const items = source.key("items").get();
+      expect(typeof (item as any)[toCell]).toBe("function");
+      expect(typeof (items as any)[toCell]).toBe("function");
+
+      const dest = runtime.getCell<{ single: unknown; list: unknown }>(
+        space,
+        "annotated-write-back-dest",
+        undefined,
+        tx,
+      );
+      dest.set({ single: item, list: items });
+
+      // Both the annotated object and the annotated array land as links to
+      // their source locations...
+      const raw = dest.getRaw() as { single: unknown; list: unknown };
+      const singleLink = parseLink(raw.single, dest);
+      expect(singleLink?.path).toEqual(["items", "0"]);
+      const listLink = parseLink(raw.list, dest);
+      expect(listLink?.path).toEqual(["items"]);
+
+      // ...no symbol survives anywhere in the stored tree...
+      const assertNoSymbolKeys = (value: unknown): void => {
+        if (value === null || typeof value !== "object") return;
+        for (const key of Reflect.ownKeys(value)) {
+          expect(typeof key).toBe("string");
+          assertNoSymbolKeys(
+            (value as Record<string, unknown>)[key as string],
+          );
+        }
+      };
+      assertNoSymbolKeys(raw);
+
+      // ...and reads through the links yield the source values.
+      const view = dest.get() as {
+        single: { name: string };
+        list: { value: number }[];
+      };
+      expect(view.single.name).toBe("Ada");
+      expect(view.list[0].value).toBe(1);
     });
 
     it("should create URIs for plain objects not marked asCell", () => {
@@ -312,9 +385,9 @@ describe("Schema - Link Resolution", () => {
       // Create todos as nested documents
       todoCell.set({
         todos: [
-          { [ID]: "todo-1", title: "Task 1", done: false },
-          { [ID]: "todo-2", title: "Task 2", done: true },
-          { [ID]: "todo-3", title: "Task 3", done: false },
+          { title: "Task 1", done: false },
+          { title: "Task 2", done: true },
+          { title: "Task 3", done: false },
         ],
       });
 
@@ -390,9 +463,9 @@ describe("Schema - Link Resolution", () => {
       // Mix of nested documents and plain objects
       mixedCell.set({
         items: [
-          { [ID]: "nested-1", type: "document", value: "A" },
+          { type: "document", value: "A" },
           { type: "plain", value: "B" }, // Plain object
-          { [ID]: "nested-2", type: "document", value: "C" },
+          { type: "document", value: "C" },
           { type: "plain", value: "D" }, // Plain object
         ],
       });
@@ -449,9 +522,9 @@ describe("Schema - Link Resolution", () => {
       // Create array with nested documents
       listCell.set({
         items: [
-          { [ID]: "doc-a", name: "A", order: 1 },
-          { [ID]: "doc-b", name: "B", order: 2 },
-          { [ID]: "doc-c", name: "C", order: 3 },
+          { name: "A", order: 1 },
+          { name: "B", order: 2 },
+          { name: "C", order: 3 },
         ],
       });
 
@@ -511,8 +584,8 @@ describe("Schema - Link Resolution", () => {
       // Create nested documents in the array
       listCell.set({
         items: [
-          { [ID]: "proxy-1", name: "Proxy 1", value: 100 },
-          { [ID]: "proxy-2", name: "Proxy 2", value: 200 },
+          { name: "Proxy 1", value: 100 },
+          { name: "Proxy 2", value: 200 },
         ],
       });
 
@@ -823,13 +896,13 @@ describe("Schema - Link Resolution", () => {
    */
   describe("validateAndTransform with redirect links", () => {
     it("creates schema-declared stream cells for missing stream targets", () => {
-      const processCell = runtime.getCell(
+      const resultCell = runtime.getCell<any>(
         space,
-        "missing-stream-target-process",
+        "missing-stream-target-result-cell",
         undefined,
         tx,
       );
-      processCell.setRawUntyped({ internal: {} });
+      resultCell.setRawUntyped({ internal: {} });
 
       const streamSchema = {
         type: "object",
@@ -841,17 +914,14 @@ describe("Schema - Link Resolution", () => {
         ifc: { confidentiality: [{ kind: "secret" }] },
       } as const satisfies JSONSchema;
 
+      // Redirects in data are sigil links (`$alias` records are plain data
+      // there): point at a stream target that doesn't exist yet.
       const inputs = runtime.getImmutableCell(
         space,
         {
           $ctx: {
-            add: {
-              $alias: {
-                cell: processCell.entityId,
-                path: ["internal", "dialog", "add"],
-                schema: streamSchema,
-              },
-            },
+            add: resultCell.key("internal").key("dialog").key("add")
+              .getAsWriteRedirectLink(),
           },
         },
         undefined,
@@ -877,6 +947,13 @@ describe("Schema - Link Resolution", () => {
       expect(result).toBeDefined();
       expect(result.$ctx).toBeDefined();
       expect(isCell(result.$ctx.add)).toBe(true);
+
+      // The stream cell must be created at the redirect target inside
+      // resultCell, not at the input cell's own location.
+      const streamLink = result.$ctx.add.getAsNormalizedFullLink();
+      expect(streamLink.id).toBe(resultCell.getAsNormalizedFullLink().id);
+      expect(streamLink.path).toEqual(["internal", "dialog", "add"]);
+
       expect(() => result.$ctx.add.send({ value: 1 })).not.toThrow();
     });
 
@@ -1726,7 +1803,7 @@ describe("Schema - Link Resolution", () => {
       } as FabricValue);
 
       // data cell's system points to cellB's argument.system
-      const dataCellURI = createDataCellURI({
+      const dataCellURI = dataUriFromValueWithResolvedLinks({
         "system": cellB.key("argument").key("system").getAsWriteRedirectLink({
           includeSchema: true,
         }),

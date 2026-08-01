@@ -2,9 +2,10 @@
 
 Status: Implemented behind the persistent-scheduler-state flag.
 Scope: persistent-scheduler-state flag ON only (`getPersistentSchedulerStateConfig()`);
-flag-off behavior is unchanged.
-Companions: `docs/specs/persistent-scheduler-state.md` (durable model),
-`README.md` §9 (v2 resume model). Follow-up CT from PR #4288.
+flag-off behavior is unchanged. Companions:
+[persistent scheduler state](../persistent-scheduler-state.md) defines the
+durable model, and [Scheduler v2](README.md#9-persistence-and-rehydration)
+defines the resume model. Follow-up CT from PR #4288.
 
 ## 1. Problem addressed
 

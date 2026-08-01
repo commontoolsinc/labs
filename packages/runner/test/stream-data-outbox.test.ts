@@ -116,7 +116,7 @@ describe("stream-data outbox mechanism", () => {
       expect(fetchCalls).toEqual([]);
 
       await commitPromise;
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.settled();
 
       expect(outboxEffects.length).toBeGreaterThan(0);
       expect(outboxEffects[0].kind).toBe("streamData-start");
@@ -163,7 +163,7 @@ describe("stream-data outbox mechanism", () => {
       }, resultCell);
       const commitPromise = tx.commit();
       await commitPromise;
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.settled();
 
       const expectedHash = hashOf(
         createFrozenRequestSnapshot({
@@ -223,14 +223,14 @@ describe("stream-data outbox mechanism", () => {
     action(rejectedTx);
     const rejectedResult = await rejectedTx.commit();
     expect(rejectedResult.error).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.settled();
     expect(fetchCalls).toEqual([]);
 
     const retryTx = runtime.edit();
     action(retryTx);
     const retryResult = await retryTx.commit();
     expect(retryResult.ok).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.settled();
 
     expect(fetchCalls.length).toBe(1);
     expect(fetchCalls[0].url).toContain("/stream-retry");
@@ -277,7 +277,7 @@ describe("stream-data outbox mechanism", () => {
     action(firstTx);
     const firstResult = await firstTx.commit();
     expect(firstResult.ok).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.settled();
     expect(fetchCalls.length).toBe(1);
 
     const linkTx = runtime.edit();
@@ -301,7 +301,7 @@ describe("stream-data outbox mechanism", () => {
     action(secondTx);
     const secondResult = await secondTx.commit();
     expect(secondResult.ok).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.settled();
 
     expect(fetchCalls.length).toBe(2);
   });

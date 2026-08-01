@@ -101,6 +101,7 @@ export const modalStyles = css`
   /* ===== Dialog ===== */
   .dialog {
     position: relative;
+    box-sizing: border-box;
     background: var(
       --cf-surface-overlay-background,
       var(--cf-modal-color-background, white)
@@ -108,7 +109,7 @@ export const modalStyles = css`
     border: var(--cf-modal-border);
     border-radius: var(--_border-radius);
     box-shadow: var(--cf-modal-box-shadow);
-    max-height: var(--_max-height);
+    max-height: min(var(--_max-height), 100%);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -141,7 +142,7 @@ export const modalStyles = css`
   :host([size="full"]) .dialog {
     width: calc(100vw - 32px);
     height: calc(100vh - 32px);
-    max-height: calc(100vh - 32px);
+    max-height: min(calc(100vh - 32px), 100%);
   }
 
   /* ===== Header ===== */
@@ -279,15 +280,15 @@ export const modalStyles = css`
   /* Sheet detent variants */
   :host([presentation="sheet"][detent="auto"]) .dialog,
   :host([presentation="sheet"]:not([detent])) .dialog {
-    max-height: 90vh;
+    max-height: min(90vh, 100%);
   }
 
   :host([presentation="sheet"][detent="half"]) .dialog {
-    max-height: 50vh;
+    max-height: min(50vh, 100%);
   }
 
   :host([presentation="sheet"][detent="full"]) .dialog {
-    max-height: 92vh;
+    max-height: min(92vh, 100%);
   }
 
   /* Sheet overrides size variants */

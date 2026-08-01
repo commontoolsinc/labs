@@ -1,4 +1,8 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
@@ -217,6 +221,8 @@ Deno.test({
         endedAt: "2026-04-15T21:00:05.000Z",
         terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
+        modelProvider: "openai-compatible-gateway",
+        modelAuthSource: "api-key",
         cfcInvocationContexts: [{
           type: "cf-harness.cfc-invocation-context",
           version: 1,
@@ -243,6 +249,10 @@ Deno.test({
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
           at: "2026-04-15T21:00:01.000Z",
+          model: {
+            providerId: "openai-compatible-gateway",
+            authSource: "api-key",
+          },
           cfc: {
             enforcementMode: "observe",
             absenceBehavior: "observe-only",
@@ -416,7 +426,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -446,7 +456,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -589,6 +602,11 @@ Deno.test({
       assertEquals(persistedReport.runId, "run-loop-persisted");
       assertEquals(persistedReport.status, "completed");
       assertEquals(persistedReport.model, "gpt-5.4");
+      assertEquals(
+        persistedReport.modelProvider,
+        "openai-compatible-gateway",
+      );
+      assertEquals(persistedReport.modelAuthSource, "api-key");
       assertEquals(persistedReport.modelTurns, 2);
       assertEquals(persistedReport.finalAssistantText, "Persisted summary.");
       assertEquals(persistedReport.cfcPolicySnapshot, persistedPolicySnapshot);
@@ -629,6 +647,11 @@ Deno.test({
         resultRef: result.runState.toolOutputs[0],
       });
       assertEquals(persistedReport.gatewayAttempts?.length, 2);
+      assertEquals(persistedReport.modelAttempts?.length, 2);
+      assertEquals(
+        persistedReport.modelAttempts?.map((attempt) => attempt.providerId),
+        ["openai-compatible-gateway", "openai-compatible-gateway"],
+      );
       assertEquals(
         persistedReport.gatewayAttempts?.map((attempt) => attempt.sequence),
         [1, 2],
@@ -797,12 +820,13 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string; content?: string }>;
           };
-          const hasToolResponse = body.messages.some((message) =>
-            message.role === "tool"
-          );
-          const toolResponseCount = body.messages.filter((message) =>
-            message.role === "tool"
-          ).length;
+          const hasToolResponse = chatViewOfRequest(body).messages.some((
+            message,
+          ) => message.role === "tool");
+          const toolResponseCount =
+            chatViewOfRequest(body).messages.filter((message) =>
+              message.role === "tool"
+            ).length;
           const payload = !hasToolResponse
             ? {
               choices: [{
@@ -853,7 +877,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -988,6 +1015,13 @@ Deno.test({
         messages: Array<{ role: string; content: string }>;
         tools: Array<{ function: { name: string } }>;
       }> = [];
+      const credentialOwner = {
+        type: "cf-harness.credential-owner-ref" as const,
+        version: 1 as const,
+        ownerKey: "loom:user-a",
+        tenantKey: "loom:tenant-a",
+      };
+      let runningSubagentRef: unknown;
       const loop = new CfHarnessPromptLoop({
         apiKey: "test-key",
         engine: new CfHarnessEngine({
@@ -995,14 +1029,30 @@ Deno.test({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-subagent-persisted",
           model: "gpt-5.4",
+          runManifest: {
+            type: "cf-harness.loom-run-manifest",
+            version: 1,
+            source: "loom",
+            credentialOwner,
+          },
           cfcEnforcementMode: "enforce-explicit",
         }),
-        fetchFn: (_input, init) => {
+        fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string; content: string }>;
             tools: Array<{ function: { name: string } }>;
           };
           requestBodies.push(body);
+          if (requestBodies.length === 2) {
+            const parentWhileChildRunning = await readHarnessRunState(
+              join(
+                artifactRoot,
+                "run-subagent-persisted",
+                "run-state.json",
+              ),
+            );
+            runningSubagentRef = parentWhileChildRunning.subagentRuns?.[0];
+          }
           const payload = requestBodies.length === 1
             ? {
               choices: [{
@@ -1043,8 +1093,9 @@ Deno.test({
                 },
               }],
             };
-          return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+          return new Response(
+            JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+            { status: 200 },
           );
         },
       });
@@ -1100,6 +1151,9 @@ Deno.test({
         "run-subagent-persisted.subagent.1",
       );
       assertEquals(subagentRun.status, "completed");
+      if (subagentRun.status === "running") {
+        throw new Error("expected terminal subagent run ref");
+      }
       assertEquals(subagentRun.summary, "Child artifact summary.");
       assertEquals(subagentRun.manifest.allowedToolIds, [
         "bash",
@@ -1123,8 +1177,24 @@ Deno.test({
         true,
       );
       assertEquals(subagentRun.runState.artifactRoot, childRunRoot);
+      assertEquals(runningSubagentRef, {
+        type: "cf-harness.subagent-run-ref",
+        parentToolCallId: "call-subagent-persisted",
+        childRunId: "run-subagent-persisted.subagent.1",
+        status: "running",
+        manifest: subagentRun.manifest,
+      });
 
       assertEquals(childState.runId, "run-subagent-persisted.subagent.1");
+      assertEquals(childState.lineage, {
+        role: "subagent",
+        rootRunId: "run-subagent-persisted",
+        parentRunId: "run-subagent-persisted",
+        parentToolCallId: "call-subagent-persisted",
+        depth: 1,
+      });
+      assertEquals(childState.runManifest?.source, "loom");
+      assertEquals(childState.runManifest?.credentialOwner, credentialOwner);
       assertEquals(childState.status, "completed");
       assertEquals(childState.artifactRoot, childRunRoot);
       assertEquals(
@@ -1230,7 +1300,7 @@ Deno.test({
           model: "gpt-5.4",
           cfcEnforcementMode: "enforce-explicit",
         }),
-        fetchFn: () => {
+        fetchFn: (_input, init) => {
           requestCount += 1;
           const payload = requestCount === 1
             ? {
@@ -1292,7 +1362,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1348,9 +1421,16 @@ Deno.test({
         JSON.stringify(delegateToolOutput).includes("raw-child-detail"),
         false,
       );
+      const persistedSubagentRun = persistedState.subagentRuns?.[0];
+      if (
+        persistedSubagentRun === undefined ||
+        persistedSubagentRun.status === "running"
+      ) {
+        throw new Error("expected terminal persisted subagent run ref");
+      }
       assertEquals(
         parentFailure,
-        persistedState.subagentRuns?.[0]?.runState.primaryFailure as
+        persistedSubagentRun.runState.primaryFailure as
           | Record<string, unknown>
           | undefined,
       );
@@ -1460,7 +1540,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -1493,7 +1573,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1642,7 +1725,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -1674,7 +1757,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });

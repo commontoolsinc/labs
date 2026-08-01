@@ -6,6 +6,7 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
+import { restoreErrorIsError } from "./error-taming.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";
 import { sanitizeLocaleMethods } from "./locale-taming.ts";
 
@@ -231,9 +232,10 @@ export class SESRuntime extends EventTarget {
 
   /**
    * Register a source map under `filename` so {@link mapPosition} (and stack
-   * parsing) can translate bundle coordinates back to original sources. The AMD
-   * isolate path does this implicitly via {@link SESIsolate.execute}; the ESM
-   * module-record loader composes a per-load bundle map and registers it here.
+   * parsing) can translate bundle coordinates back to original sources. The
+   * module-record loader composes a per-load bundle map from the per-module maps
+   * and registers it here; {@link SESIsolate.execute} registers one implicitly
+   * for a single-script evaluation.
    */
   loadSourceMap(filename: string, sourceMap: SourceMap): void {
     this.internals.loadSourceMap(filename, sourceMap);
@@ -317,16 +319,36 @@ function ensureSESInitialized(lockdownEnabled: boolean): void {
     sesInitialized = true;
     return;
   }
-  const lockdownFn = (globalThis as {
-    lockdown?: (options?: SESLockdownOptions) => void;
-  }).lockdown;
-  if (typeof lockdownFn !== "function") {
-    throw new Error("SES lockdown() is unavailable");
+  // `lockdown()` is `repairIntrinsics()` then `hardenIntrinsics()`; we run the
+  // two phases ourselves because restoreErrorIsError() needs the seam between
+  // them — the error constructors exist only after the first and freeze during
+  // the second. `hardenIntrinsics` is revealed by the repair call, so it can
+  // only be read afterwards.
+  const repairFn = (globalThis as {
+    repairIntrinsics?: (options?: SESLockdownOptions) => void;
+  }).repairIntrinsics;
+  if (typeof repairFn !== "function") {
+    throw new Error("SES repairIntrinsics() is unavailable");
   }
-  // Vetted shim — must precede lockdown() (the prototypes freeze there).
+  // Vetted shim — must precede the repair, which is where SES's locale taming
+  // would otherwise clobber these methods (and after which they freeze).
   // Pairs with `localeTaming: "unsafe"` below; see locale-taming.ts.
   sanitizeLocaleMethods();
-  lockdownFn(DEFAULT_LOCKDOWN_OPTIONS);
+  repairFn(DEFAULT_LOCKDOWN_OPTIONS);
+  // Vetted shim — must sit between the two phases; see error-taming.ts.
+  restoreErrorIsError();
+  // Asserted, not guarded: the repair call above is what reveals
+  // `hardenIntrinsics`, so its absence is not an environment question the way
+  // `repairIntrinsics` itself is — it would mean ses broke its own contract.
+  // Were that ever to happen this throws, which is the outcome that matters;
+  // the one thing lockdown must never do is quietly skip the harden.
+  const globalWithPhases = globalThis as { hardenIntrinsics?: () => void };
+  globalWithPhases.hardenIntrinsics!();
+  // `lockdown()` never reveals `hardenIntrinsics`, so drop it again: the host
+  // realm's global surface should differ from the one-call form only by the
+  // restored `Error.isError`. It is spent either way — the phases have run —
+  // but leaving it would let host code re-enter the harden pass.
+  delete globalWithPhases.hardenIntrinsics;
   globalState.lockdownInitialized = true;
   sesInitialized = true;
 }

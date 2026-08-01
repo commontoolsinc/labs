@@ -6,7 +6,7 @@ import {
   MAX_VIRTUAL_FILE_SIZE,
   validateVirtualFileRange,
 } from "./handles.ts";
-import { O_RDWR } from "./platform.ts";
+import { O_RDONLY, O_RDWR } from "./platform.ts";
 
 const encoder = new TextEncoder();
 
@@ -181,4 +181,44 @@ Deno.test("HandleMap tracks CFC truncate and write authorization separately", ()
 
   assertEquals(handles.hasCfcAuthorization(fh, "truncate"), true);
   assertEquals(handles.hasCfcAuthorization(fh, "write"), true);
+});
+
+Deno.test("HandleMap buffers a read-only handle from a read snapshot", () => {
+  const handles = new HandleMap();
+  const snapshot = encoder.encode("generated once");
+  const fh = handles.open(1n, O_RDONLY, undefined, { readSnapshot: snapshot });
+
+  const handle = handles.get(fh);
+  // A read-only handle is otherwise unbuffered, and reads fall through to the
+  // node — which would render again and could disagree with this descriptor.
+  assertEquals(handleHasBufferedContent(handle), true);
+  assertEquals(handle?.buffer, snapshot);
+  // Copied, so a renderer reusing its array cannot change the served bytes.
+  assertEquals(handle?.buffer === snapshot, false);
+  assertEquals(handleHasPendingChanges(handle), false);
+});
+
+Deno.test("HandleMap leaves a read-only handle unbuffered without a snapshot", () => {
+  const handles = new HandleMap();
+  const fh = handles.open(1n, O_RDONLY, encoder.encode("stored"));
+  assertEquals(handleHasBufferedContent(handles.get(fh)), false);
+});
+
+Deno.test("HandleMap carries a snapshot's publish time on the handle", () => {
+  const handles = new HandleMap();
+  const fh = handles.open(1n, O_RDONLY, undefined, {
+    readSnapshot: encoder.encode("v1"),
+    readSnapshotMtime: 1_700_000_000_500,
+  });
+  // A getattr on this handle reports both the snapshot's size and this time, so
+  // its attributes describe one render.
+  assertEquals(handles.get(fh)?.readSnapshotMtime, 1_700_000_000_500);
+});
+
+Deno.test("HandleMap ignores a snapshot time without a snapshot", () => {
+  const handles = new HandleMap();
+  const fh = handles.open(1n, O_RDONLY, encoder.encode("stored"), {
+    readSnapshotMtime: 1_700_000_000_500,
+  });
+  assertEquals(handles.get(fh)?.readSnapshotMtime, undefined);
 });

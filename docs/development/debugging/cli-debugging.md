@@ -15,15 +15,32 @@ deno task cf check pattern.tsx
 deno task cf check pattern.tsx --show-transformed
 ```
 
+## Identity for CLI Commands
+
+Every command below passes `-i "$CF_IDENTITY"`. Set it once per shell to the
+unique key you use for normal development — see
+[LOCAL_DEV_SERVERS.md](../LOCAL_DEV_SERVERS.md) for the full recipe:
+
+```bash
+mkdir -p .cf
+deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
+export CF_IDENTITY="$PWD/.cf/shared-dev.key"
+```
+
+Without it set, `-i "$CF_IDENTITY"` expands to an empty argument and the
+command fails immediately with `Missing value for option "--identity"`. Don't
+reach for `id derive "implicit trust"` here: that is the local server's own
+operator key, reserved for operator actions.
+
 ## Deploying a Test Piece
 
 ```bash
 # Deploy — returns a piece-id used by all commands below
-deno task cf piece new --identity key.json --api-url URL --space SPACE pattern.tsx
+deno task cf piece new -i "$CF_IDENTITY" --api-url URL --space SPACE pattern.tsx
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task cf piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
+  deno task cf piece set -i "$CF_IDENTITY" --api-url URL --space SPACE --piece ID testItem
 ```
 
 ## When to Use CLI vs Browser
@@ -86,19 +103,19 @@ deno task cf check \
 
 ```bash
 # 1. What's the full state?
-deno task cf piece inspect --piece <piece-id> -i claude.key -a URL -s space
+deno task cf piece inspect --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
 
 # 2. What are the inputs?
-deno task cf piece get --piece <piece-id> /input -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
 
 # 3. What's a specific computed value?
-deno task cf piece get --piece <piece-id> myComputedField -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
 
 # 4. Set known input, trigger recompute, verify output
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task cf piece set --piece <piece-id> /input -i claude.key -a URL -s space
-deno task cf piece step --piece <piece-id> -i claude.key -a URL -s space
-deno task cf piece get --piece <piece-id> itemCount -i claude.key -a URL -s space
+  deno task cf piece set --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
+deno task cf piece step --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
+deno task cf piece get --piece <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
 ```
 
 ## Common CLI Debugging Patterns
@@ -132,10 +149,10 @@ When iterating on fixes, always use `setsrc` instead of `new`:
 
 ```bash
 # Make a fix to your pattern, then:
-deno task cf piece setsrc --piece <piece-id> pattern.tsx -i claude.key -a URL -s space
+deno task cf piece setsrc --piece <piece-id> pattern.tsx -i "$CF_IDENTITY" -a URL -s space
 
 # Test again
-deno task cf piece get --piece <piece-id> brokenField -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.

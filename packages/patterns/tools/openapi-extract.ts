@@ -145,6 +145,28 @@ function schemaToTypeString(
   const type = resolved["type"] as string | undefined;
 
   if (type === "array") {
+    // OpenAPI 3.1 tuples; an `items` schema alongside `prefixItems` covers
+    // the remaining positions
+    const prefixItems = resolved["prefixItems"] as
+      | Record<string, unknown>[]
+      | undefined;
+    if (Array.isArray(prefixItems) && prefixItems.length > 0) {
+      const slots = prefixItems.map((slot) =>
+        schemaToTypeString(spec, slot, cache)
+      );
+      const rest = resolved["items"];
+      if (rest && typeof rest === "object") {
+        slots.push(
+          `...array<${
+            schemaToTypeString(spec, rest as Record<string, unknown>, cache)
+          }>`,
+        );
+      } else if (rest !== false) {
+        // An absent `items` leaves the tail open (PR #4969 review).
+        slots.push("...array<unknown>");
+      }
+      return `[${slots.join(", ")}]`;
+    }
     const items = resolved["items"] as Record<string, unknown> | undefined;
     if (items) {
       const inner = schemaToTypeString(spec, items, cache);

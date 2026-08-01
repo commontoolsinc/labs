@@ -7,9 +7,10 @@ function names(input: Uint8Array): string[] {
 }
 
 Deno.test("decode: printable characters and space", () => {
-  const { keys } = decodeKeys(bytes("a/?"));
-  assertEquals(keys.map((k) => k.name), ["a", "/", "?"]);
+  const { keys } = decodeKeys(bytes("a/?\\"));
+  assertEquals(keys.map((k) => k.name), ["a", "/", "?", "\\"]);
   assertEquals(keys[0].char, "a");
+  assertEquals(keys[3].char, "\\");
   assertEquals(names(bytes(" ")), ["space"]);
 });
 

@@ -122,6 +122,11 @@ Deno.test({
       values.get("stat_st_size"),
       p.STAT_ST_SIZE_OFFSET,
     );
+    check(
+      "STAT_ST_MTIM_OFFSET",
+      values.get("stat_st_mtim"),
+      p.STAT_ST_MTIM_OFFSET,
+    );
 
     // fuse_entry_param
     check(

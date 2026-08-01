@@ -46,7 +46,7 @@ describe("fetch-program outbox mechanism", () => {
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -58,12 +58,12 @@ describe("fetch-program outbox mechanism", () => {
 
       fetchCalls.push({ url, init });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      return new Response("export const value = 1;\n", {
-        status: 200,
-        headers: { "Content-Type": "text/plain" },
-      });
+      return Promise.resolve(
+        new Response("export const value = 1;\n", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+      );
     };
   });
 
@@ -108,13 +108,12 @@ describe("fetch-program outbox mechanism", () => {
 
     try {
       await result.pull();
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      await result.pull();
+      await runtime.settled();
 
       expect(committed).toBe(true);
       expect(fetchCalls.length).toBeGreaterThan(0);
       expect(fetchCalls[0].url).toContain("/program.ts");
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await runtime.settled();
     } finally {
       txPrototype.commit = originalTxCommit;
       wrapperPrototype.commit = originalWrapperCommit;
@@ -154,7 +153,6 @@ describe("fetch-program outbox mechanism", () => {
       }, resultCell);
       tx.commit();
       await result.pull();
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       const expectedHash = computeInputHashFromValue({
         url: "http://mock-test-server.local/program-idempotency.ts",

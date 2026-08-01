@@ -108,7 +108,6 @@ cell means none confirmed — check the component source before assuming.
 | `cf-calendar` | Month-grid mini calendar | `$value`, `$markedDates` |
 | `cf-canvas` | Fixed-size canvas surface emitting `cf-canvas-click` with x/y | |
 | `cf-card` | Content container with header/content/footer (built-in 1rem padding) | |
-| `cf-cell-context` | Associates a page region with a cell for inspection (see [CELL_CONTEXT.md](CELL_CONTEXT.md)) | `$cell` |
 | `cf-cell-link` | Renders a link or cell as a clickable, draggable pill | |
 | `cf-cfc-authorship` | Shows trusted authorship state for CFC-labeled content | `$value`, `$author` |
 | `cf-cfc-label` | Renders the CFC label of a bound cell value | `$value` |
@@ -440,6 +439,41 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 > Note: `sidebarUI`/`fabUI`/`settingsUI` are shell composition **slots**, a
 > separate concept — not size variants. A vended `uiVariant()` helper for
 > render paths outside `cf-render` is a planned follow-up and does not exist yet.
+
+### The piece context menu
+
+Right-clicking a rendered piece opens `cf-piece-menu` for it. **View source**
+shows the piece's retained authored files. **Origin and history** shows its
+active origin and recorded source revisions. A followed piece also has **Stop
+following source**, which keeps the exact current source and clears the origin.
+Historical entries can restore their retained source version or resume
+following their earlier origin. The menu warns before applying a structurally
+incompatible historical source. Its confirmation remains bound to the exact
+candidate that produced the warning.
+
+**Data** shows the piece's argument and result values (both stay live while
+the menu is open; linked cells appear as `{"@cell": …}` stubs), and
+**Actions** lists the handler streams the piece's declared argument and
+result schemas carry and dispatches an event to one, with an optional JSON
+payload. A handler only appears if the stream is declared in the pattern's
+output (or argument) type — the schema'd read is closed-world, so a handler
+returned at runtime behind an index signature is invisible to it. Dispatches
+from the menu are accepted-for-delivery acknowledgements (the commit is
+asynchronous) and are not renderer-trusted, so a handler gated on UI
+provenance will refuse them.
+
+The menu comes with `cf-render`. Importing the component registers it. It mounts
+itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
+it.
+
+The innermost rendered piece claims the click, so right-clicking a tile inside a
+piece addresses the tile. Three cases keep the browser's own menu instead: a
+click on a text entry, a click held with Shift, and a `cf-render` whose cell is a
+value inside a piece rather than a whole piece.
+
+Before opening, `cf-render` announces the click as `cf-piece-context-menu`; a host
+can cancel that event to show its own menu for the piece instead. The seam is
+written up in [HOST_EMBEDDING.md §3a](../../development/HOST_EMBEDDING.md).
 
 ---
 

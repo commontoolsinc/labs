@@ -164,6 +164,49 @@ describe("renderImpl", () => {
   });
 });
 
+describe("$alias records in child position", () => {
+  it("JSON-renders a $alias-shaped child with a warning instead of empty text", () => {
+    const { renderOptions, document } = mock;
+    // `$alias` records are Pattern-binding vocabulary; in data they are inert
+    // plain values. The old unresolved-alias special case rendered them as
+    // empty text; now they warn and JSON-render like any unexpected object.
+    const aliasRecord = { $alias: { path: ["x"] } };
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [aliasRecord],
+    } as unknown as VNode;
+    const parent = document.getElementById("root")!;
+
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    let cancel;
+    try {
+      cancel = renderImpl(parent, vnode, renderOptions);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.childNodes.length, 1, "Should render one text child");
+    assert.equal(
+      (div.childNodes[0] as Text).textContent,
+      JSON.stringify(aliasRecord),
+      "$alias child should render its JSON serialization, not empty text",
+    );
+    assert.equal(
+      warnings.length >= 1,
+      true,
+      "Should warn about the unexpected object",
+    );
+    cancel();
+  });
+});
+
 describe("sanitizeEvent", () => {
   function isPlainSerializableObject(obj: unknown): boolean {
     if (typeof obj !== "object" || obj === null) return true; // primitives are serializable

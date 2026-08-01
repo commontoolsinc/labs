@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pattern Test to Integration"
+  short_description: "Convert pattern tests into browser demos"
+  default_prompt: "Use $pattern-test-to-integration to turn this pattern unit test into a browser integration test that can be recorded with deno task demo."

@@ -4,6 +4,7 @@ import type {
   Source,
 } from "@commonfabric/js-compiler";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import type { PatternCoverageCollector } from "../pattern-coverage.ts";
 import type { MemorySpace } from "../runtime.ts";
 import type {
   CachedCompiledModule,
@@ -127,6 +128,15 @@ export interface EvaluateResult {
    */
   exportsByIdentity?: Map<string, Exports>;
   /**
+   * Module content identity → the authored file it came from.
+   *
+   * A pattern reloaded by identity gets no program attached (that path is
+   * source-free by design), so nothing downstream can say WHICH file a nested
+   * pattern came from. The evaluate loop knows both, so it records the pairing
+   * and `PatternManager` stamps it onto each indexed artifact.
+   */
+  sourcePathByIdentity?: Map<string, string>;
+  /**
    * Hoist registrations collected during this evaluation (`__cfReg`): module
    * content identity → (symbol → live builder artifact). The PatternManager turns
    * each trusted entry into a content-addressed `{ identity, symbol }` reference
@@ -173,7 +183,11 @@ export interface Harness extends EventTarget {
   evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
-    options?: { sourceFiles?: Source[]; trustedBodies?: boolean },
+    options?: {
+      sourceFiles?: Source[];
+      trustedBodies?: boolean;
+      patternCoverage?: PatternCoverageCollector;
+    },
   ): Promise<EvaluateResult>;
 
   // Cold recovery: recompile cacheable modules from the stored (already-resolved,
@@ -181,7 +195,10 @@ export interface Harness extends EventTarget {
   compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
-    options?: { fabricImports?: FabricImportOptions },
+    options?: {
+      fabricImports?: FabricImportOptions;
+      patternCoverage?: PatternCoverageCollector;
+    },
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's

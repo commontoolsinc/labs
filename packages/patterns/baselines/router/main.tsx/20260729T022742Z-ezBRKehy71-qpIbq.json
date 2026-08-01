@@ -1,0 +1,22 @@
+{
+  "argumentSchema": {
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "router/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

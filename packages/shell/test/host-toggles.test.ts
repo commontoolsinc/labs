@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { runtimeHostFlags, setupHostToggles } from "../src/lib/host-toggles.ts";
+import {
+  isPatternCoverageEnabled,
+  runtimeHostFlags,
+  setupHostToggles,
+} from "../src/lib/host-toggles.ts";
 
 class FakeStorage {
   map = new Map<string, string>();
@@ -67,8 +71,36 @@ describe("setupHostToggles", () => {
       }).commonfabric;
       expect(typeof cf?.forwardWorkerConsole).toBe("function");
       expect(typeof cf?.cfcRenderCeiling).toBe("function");
+      expect(typeof cf?.concurrentWatchRefresh).toBe("function");
     } finally {
       h.restore();
+    }
+  });
+});
+
+describe("isPatternCoverageEnabled", () => {
+  it("defaults to false when reading localStorage throws", () => {
+    // Accessing localStorage throws in some environments (disabled storage,
+    // sandboxed frames). The toggle must swallow that and default off rather
+    // than break runtime construction at login.
+    const descriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "localStorage",
+    );
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("localStorage is blocked");
+      },
+    });
+    try {
+      expect(isPatternCoverageEnabled()).toBe(false);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      } else {
+        delete (globalThis as { localStorage?: unknown }).localStorage;
+      }
     }
   });
 });
@@ -80,6 +112,8 @@ describe("runtimeHostFlags", () => {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: false,
         cfcRenderCeiling: false,
+        patternCoverage: false,
+        concurrentWatchRefresh: false,
       });
     } finally {
       h.restore();
@@ -93,11 +127,29 @@ describe("runtimeHostFlags", () => {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: false,
+        patternCoverage: false,
+        concurrentWatchRefresh: false,
       });
       h.storage.map.set("cfcRenderCeiling", "true");
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: true,
+        patternCoverage: false,
+        concurrentWatchRefresh: false,
+      });
+      h.storage.map.set("patternCoverage", "true");
+      expect(runtimeHostFlags()).toEqual({
+        forwardWorkerConsole: true,
+        cfcRenderCeiling: true,
+        patternCoverage: true,
+        concurrentWatchRefresh: false,
+      });
+      h.storage.map.set("concurrentWatchRefresh", "true");
+      expect(runtimeHostFlags()).toEqual({
+        forwardWorkerConsole: true,
+        cfcRenderCeiling: true,
+        patternCoverage: true,
+        concurrentWatchRefresh: true,
       });
     } finally {
       h.restore();

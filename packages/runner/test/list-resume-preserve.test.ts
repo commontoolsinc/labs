@@ -51,6 +51,13 @@ const space = signer.did();
 const FILTER_CHILD_DOC = /"type":"boolean"/;
 const FLATMAP_CHILD_DOC = /"type":"number"/;
 
+// How long the reload's storage manager holds back each per-element child
+// document before delivering it, which is what opens the resume window the
+// tests observe. The resuming runtime's pull/idle machinery blocks on these
+// deliveries, so this file runs on the real clock (see the `realClockFiles`
+// note in `test/clock-preload.ts`).
+const CHILD_DELAY_MS = 80;
+
 function delayingLoopback(
   server: MemoryV2Server.Server,
   childDelayMs: number,
@@ -190,7 +197,7 @@ describe("list builtin resume preservation", () => {
     sm2 = DelayingStorageManager.make(
       signer,
       server,
-      80,
+      CHILD_DELAY_MS,
       FILTER_CHILD_DOC,
       () => delayed++,
     );
@@ -230,7 +237,7 @@ describe("list builtin resume preservation", () => {
         x.label
       ),
     ).toEqual(EXPECTED);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     // RELOAD (runtime B): cold cache, with per-element predicate documents
     // delivered late so the container loads before the children.
@@ -288,8 +295,7 @@ describe("list builtin resume preservation", () => {
       expect(empties).toEqual([]);
       expect(shrank).toEqual([]);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
@@ -400,7 +406,7 @@ describe("flatMap builtin resume preservation", () => {
     sm2 = DelayingStorageManager.make(
       signer,
       server,
-      80,
+      CHILD_DELAY_MS,
       FLATMAP_CHILD_DOC,
       () => delayed++,
     );
@@ -440,7 +446,7 @@ describe("flatMap builtin resume preservation", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("values").getAsQueryResult() ?? []).toEqual(expected);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     // RELOAD (runtime B): cold cache, per-element result docs delivered late so
     // the container loads before the children.
@@ -493,8 +499,7 @@ describe("flatMap builtin resume preservation", () => {
       expect(empties).toEqual([]);
       expect(shrank).toEqual([]);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   }
 

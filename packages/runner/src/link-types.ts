@@ -4,10 +4,11 @@ import {
   type CellScope,
   type JSONSchema,
   type LinkScope,
+  type SchemaScope,
 } from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
-  type LegacyAlias,
+  type AliasBinding,
   type SigilLink,
   type SigilWriteRedirectLink,
   type URI,
@@ -39,6 +40,17 @@ function parseScopedIdSegment(idSegment: string): {
 }
 
 /**
+ * A follow cap declared by the schema at `depth` path segments from this
+ * link's root, remembered because narrowing past that segment drops the
+ * declaring schema. See {@link NormalizedLink.scopeCaps}.
+ */
+export type ScopeCapAtDepth = {
+  /** Number of leading `path` segments the declaring schema addresses. */
+  depth: number;
+  scope: SchemaScope;
+};
+
+/**
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
@@ -48,6 +60,29 @@ export type NormalizedLink = {
   scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
+  /**
+   * Follow caps declared by schemas ABOVE this link's leaf, ascending by
+   * depth. `schema` only describes the leaf, so a cap declared mid-path — an
+   * `asCell` entry's `scope` on an ancestor — is otherwise lost the moment
+   * `key()` narrows past it, and `resolveLink` has nothing to check when it
+   * discovers the stored link at that ancestor. Populated by `Cell.key()`,
+   * which is the one place that walks the schema segment by segment.
+   *
+   * Read-side only: this is never serialized into a sigil link, never part of
+   * link identity (`areNormalizedLinksSame`), and must never be stamped onto a
+   * followed link's own scope (CT-1623).
+   *
+   * Caps are MONOTONIC across `asSchema()`: reinterpreting an address can
+   * tighten a cap (the next `key()` merges the narrower of the two) but never
+   * lift one. Clearing them on `asSchema` looks tempting — it is a sibling
+   * with a different schema, so carrying provenance from the discarded one
+   * reads as surprising — but it would turn every `asSchema`-based read
+   * helper into a cap bypass. `cellWithScopedLinkRequiredsRelaxed`, the piece
+   * read boundary itself, ends in `cell.asSchema(relaxed)`; the ancestor caps
+   * a narrowed cell carries exist nowhere else, so dropping them there would
+   * silently lift the caps that boundary is supposed to enforce.
+   */
+  scopeCaps?: readonly ScopeCapAtDepth[];
 };
 
 /**
@@ -83,10 +118,13 @@ export function toMemorySpaceAddress(
 
 /**
  * Primitive cell link types that can be serialized.
+ *
+ * Legacy `$alias` records are NOT links: they only appear as bindings inside
+ * Pattern objects (see {@link isAliasBinding}) and are plain data anywhere
+ * else. Pattern machinery that consumes them checks `isAliasBinding`
+ * explicitly and parses via {@link parseAliasBinding}.
  */
-export type PrimitiveCellLink =
-  | SigilLink
-  | LegacyAlias; // @deprecated
+export type PrimitiveCellLink = SigilLink;
 
 export function isSigilLink(value: any): value is SigilLink {
   return isLinkRef(value);
@@ -95,8 +133,7 @@ export function isSigilLink(value: any): value is SigilLink {
 export function isPrimitiveCellLink(
   value: any,
 ): value is PrimitiveCellLink {
-  return isSigilLink(value) ||
-    isLegacyAlias(value);
+  return isSigilLink(value);
 }
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
@@ -131,17 +168,16 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
 }
 
 /**
- * Check if value is an alias in any format (old $alias or new sigil)
+ * Check if value is a write-redirect link (sigil `link@1` with
+ * `overwrite: "redirect"`).
+ *
+ * Legacy `$alias` records are deliberately NOT matched: they are only
+ * meaningful as bindings inside Pattern objects, not as links in data.
+ * Binding-side callers pair this with an explicit `isAliasBinding` check.
  */
 export function isWriteRedirectLink(
   value: any,
-): value is LegacyAlias | SigilWriteRedirectLink {
-  // Check legacy $alias format
-  if (isLegacyAlias(value)) {
-    return true;
-  }
-
-  // Check new sigil format (link@1 with overwrite field)
+): value is SigilWriteRedirectLink {
   if (isSigilLink(value)) {
     return linkRefPayload(value).overwrite === "redirect";
   }
@@ -150,15 +186,17 @@ export function isWriteRedirectLink(
 }
 
 /**
- * Check if value is a legacy alias.
+ * Check if value is a `$alias` Pattern binding.
  *
- * While legacy aliases are no longer used as links, we do still use them in
- * bindings in the intermediate form where we don't have enough detail to
- * point to an actual cell.
+ * `$alias` records are no longer links: they appear only as bindings inside
+ * Pattern objects, in the intermediate form where we don't have enough detail
+ * to point to an actual cell. In data they are plain values.
  */
-export function isLegacyAlias(value: any): value is LegacyAlias {
+export function isAliasBinding(value: any): value is AliasBinding {
   return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
-    Array.isArray(value.$alias.path);
+    Array.isArray(value.$alias.path) &&
+    (value.$alias.partialCause !== undefined ||
+      value.$alias.cell === "result" || value.$alias.cell === "argument");
 }
 
 /**
@@ -195,26 +233,42 @@ export function parseLinkPrimitive(
       ...(link.schema !== undefined && { schema: link.schema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
-  } else if (isLegacyAlias(value)) {
-    const alias = value.$alias;
-    // Named-cell ("argument"/"result") and partialCause aliases carry no
-    // absolute id of their own here, so resolve to the base cell's document.
-    const id = base?.id;
-
-    return {
-      ...(id && { id }),
-      path: alias.path,
-      ...(base?.space && { space: base.space }),
-      ...(alias.scope !== undefined
-        ? { scope: alias.scope }
-        : base?.scope
-        ? { scope: base.scope }
-        : {}),
-      ...(alias.schema !== undefined && { schema: alias.schema }),
-      overwrite: "redirect",
-    };
   }
   throw new Error(`Link is not a primitive: ${value}`);
+}
+
+/**
+ * Parse a legacy `$alias` Pattern binding to normalized format.
+ *
+ * This is binding-side machinery only: `$alias` records are kept in Pattern
+ * objects but are plain data everywhere else, so the generic link parsers
+ * ({@link parseLinkPrimitive}, `parseLink`) no longer accept them.
+ */
+export function parseAliasBinding(
+  value: AliasBinding,
+  base: NormalizedFullLink,
+): NormalizedFullLink {
+  const alias = value.$alias;
+  // A partialCause alias denotes a derived internal cell — a different
+  // document minted from the result cell and the partialCause (see
+  // getDerivedInternalCellLink), in the alias's own `scope` — not a path
+  // within the base document, so it cannot be parsed against a base link.
+  // Callers must convert it via unwrapOneLevelAndBindToDoc instead.
+  if (alias.partialCause !== undefined) {
+    throw new Error(
+      `Cannot parse partialCause alias as link: ${JSON.stringify(value)}`,
+    );
+  }
+  // Named-cell ("argument"/"result") aliases carry no absolute id of their
+  // own here, so resolve to the base cell's document, in the base's scope.
+  return {
+    id: base.id,
+    path: alias.path,
+    space: base.space,
+    scope: base.scope,
+    ...(alias.schema !== undefined && { schema: alias.schema }),
+    overwrite: "redirect",
+  };
 }
 
 /**

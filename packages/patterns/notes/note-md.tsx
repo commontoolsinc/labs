@@ -60,6 +60,13 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
     // cf-markdown will then convert these to clickable cf-cell-link components
     // Use content prop if provided, otherwise fall back to note.content
+    //
+    // The embedded id is the BARE tagged hash by contract: the editor strips
+    // `of:` at embed time (mentionIdFromCellId in packages/ui) and REJECTS
+    // `computed:` ids, so prepending `/of:` here is always correct. If
+    // mentionable cells ever include computed ones, the embed format must
+    // carry the scheme instead — the bare form cannot, because the scheme is
+    // part of the identity and `/of:` would address the wrong entity.
     const processedContent = computed(() => {
       const raw = content?.get?.() ?? note?.content ?? "";
       // Match [[Name (id)]] pattern and convert to [Name](/of:id)

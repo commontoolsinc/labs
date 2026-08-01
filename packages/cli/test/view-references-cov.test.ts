@@ -3,6 +3,7 @@ import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import {
   ancestorsOf,
   collectIdentUses,
+  collectIdentUsesBounded,
   findDependencies,
 } from "../lib/view/references.ts";
 import type {
@@ -25,13 +26,14 @@ function ident(
 
 /** Assemble a synthetic Document from line texts plus per-line spans. */
 function makeDoc(
-  lines: { text: string; spans: Span[] }[],
+  lines: { text: string; spans: Span[]; bg?: Line["bg"] }[],
   definitions: Map<string, Definition[]> = new Map(),
 ): Document {
   const text = lines.map((l) => l.text).join("\n");
   const modelLines: Line[] = lines.map((l) => ({
     text: l.text,
     spans: l.spans,
+    bg: l.bg,
   }));
   return {
     text,
@@ -99,6 +101,27 @@ Deno.test("findDependencies: real document still resolves a cross-node dep", () 
   assert(deps.some((d) => d.name === "__cfLift_1"));
 });
 
+Deno.test("findDependencies: removed diff lines do not contribute dependencies", () => {
+  const dep: Definition = {
+    name: "helper",
+    kind: "function",
+    startLine: 0,
+    endLine: 0,
+    startOffset: 0,
+    endOffset: 6,
+  };
+  const doc = makeDoc(
+    [{
+      text: "helper",
+      spans: [ident(0, "helper", "callName")],
+      bg: "del",
+    }],
+    new Map([["helper", [dep]]]),
+  );
+  const n = node({ startOffset: 100, endOffset: 200 });
+  assertEquals(findDependencies(doc, n), []);
+});
+
 Deno.test("collectIdentUses: skips line indices past the end of the document", () => {
   const doc = makeDoc([
     { text: "alpha beta", spans: [ident(0, "alpha"), ident(6, "beta")] },
@@ -115,6 +138,47 @@ Deno.test("collectIdentUses: skips line indices past the end of the document", (
   // Both identifiers on the present line are collected; the missing rows are
   // skipped without error.
   assertEquals(uses.map((u) => u.name), ["alpha", "beta"]);
+});
+
+Deno.test("collectIdentUses: removed diff lines do not consume the result limit", () => {
+  const doc = makeDoc([
+    { text: "old", spans: [ident(0, "old")], bg: "del" },
+    { text: "live", spans: [ident(0, "live")] },
+  ]);
+  const n = node({ endLine: 1 });
+  assertEquals(collectIdentUsesBounded(doc, n, 1), {
+    uses: [{ name: "live", useOffset: 4 }],
+    total: 1,
+  });
+});
+
+Deno.test("collectIdentUses: a bounded collection counts omitted exact uses", () => {
+  const doc = makeDoc([{
+    text: "runrunrun",
+    spans: [
+      { ...ident(0, "run"), exactDefinitionName: "run" },
+      { ...ident(3, "run"), exactDefinitionName: "run" },
+      { ...ident(6, "run"), exactDefinitionName: "run" },
+    ],
+  }]);
+  const n = node({});
+  assertEquals(collectIdentUsesBounded(doc, n, 2), {
+    uses: [
+      {
+        name: "run",
+        displayName: "run",
+        useOffset: 0,
+        exactDefinitionOnly: true,
+      },
+      {
+        name: "run",
+        displayName: "run",
+        useOffset: 3,
+        exactDefinitionOnly: true,
+      },
+    ],
+    total: 3,
+  });
 });
 
 Deno.test("collectIdentUses: drops end-line spans at or past endCol", () => {
@@ -135,11 +199,17 @@ Deno.test("collectIdentUses: drops end-line spans at or past endCol", () => {
   assertEquals(uses.map((u) => u.name), ["alpha"]);
 });
 
-Deno.test("collectIdentUses: stops once the limit is reached", () => {
+Deno.test("collectIdentUses: keeps exact-position uses with equal spellings", () => {
   const doc = makeDoc([
     {
-      text: "alpha beta gamma",
-      spans: [ident(0, "alpha"), ident(6, "beta"), ident(11, "gamma")],
+      text: "alpha alpha alpha",
+      spans: [
+        ident(0, "alpha"),
+        { col: 5, text: " ", cls: "whitespace" },
+        { ...ident(6, "alpha"), exactDefinitionName: "alpha" },
+        { col: 11, text: " ", cls: "whitespace" },
+        { ...ident(12, "alpha"), exactDefinitionName: "alpha" },
+      ],
     },
   ]);
   const n = node({
@@ -150,12 +220,21 @@ Deno.test("collectIdentUses: stops once the limit is reached", () => {
     endCol: 1000,
   });
 
-  const limited = collectIdentUses(doc, n, 2);
-  assertEquals(limited.map((u) => u.name), ["alpha", "beta"]);
-  // Without the cap, all three are returned, confirming the early return is
-  // what trimmed the list.
-  const all = collectIdentUses(doc, n, 40);
-  assertEquals(all.map((u) => u.name), ["alpha", "beta", "gamma"]);
+  assertEquals(collectIdentUses(doc, n), [
+    { name: "alpha", useOffset: 0 },
+    {
+      name: "alpha",
+      displayName: "alpha",
+      useOffset: 6,
+      exactDefinitionOnly: true,
+    },
+    {
+      name: "alpha",
+      displayName: "alpha",
+      useOffset: 12,
+      exactDefinitionOnly: true,
+    },
+  ]);
 });
 
 Deno.test("ancestorsOf: a node absent from the flat list has no ancestors", () => {

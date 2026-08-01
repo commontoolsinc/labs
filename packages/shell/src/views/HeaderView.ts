@@ -1,6 +1,7 @@
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { type DID, KeyStore } from "@commonfabric/identity";
+import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { navigate } from "../../shared/mod.ts";
@@ -570,8 +571,13 @@ export class XHeaderView extends BaseView {
       return this._localIsFavorite;
     }
     if (!this.pieceId) return false;
+    // CellHandle.id() is the full schemed id; the routing pieceId is bare
+    // (piece roots are always of:). Normalize the bare side for equality.
+    const pieceUri = hasEntityUriScheme(this.pieceId)
+      ? this.pieceId
+      : `of:${this.pieceId}`;
     return this._serverFavorites.some(
-      (f) => (f.cell as unknown as CellHandle<unknown>).id() === this.pieceId,
+      (f) => (f.cell as unknown as CellHandle<unknown>).id() === pieceUri,
     );
   }
 
@@ -646,7 +652,7 @@ export class XHeaderView extends BaseView {
   }
 
   /**
-   * Eagerly fetch all pieces in the current space as soon as the
+   * Eagerly fetch registered pieces in the current space as soon as the
    * runtime is available. Results are cached until the runtime or the
    * viewed space changes. This ensures the piece list is ready by the
    * time the user opens a dropdown.

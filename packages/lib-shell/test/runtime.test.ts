@@ -7,7 +7,6 @@ type MockRuntimeClientEvents = {
   navigaterequest: [{ cell: { id(): string; space(): DID } }];
   error: [unknown];
   telemetry: [unknown];
-  versionskew: [unknown];
 };
 
 class MockRuntimeClient {
@@ -57,6 +56,14 @@ class MockRuntimeClient {
 
   getPageSlug(pageId: string): Promise<string | undefined> {
     return Promise.resolve(this.slugByPageId.get(pageId));
+  }
+
+  /** Records the (pieceId, space) argument order source reads arrive in. */
+  pieceSourceCalls: Array<{ pieceId: string; space: DID }> = [];
+
+  getPieceSource(pieceId: string, space: DID): Promise<{ pieceId: string }> {
+    this.pieceSourceCalls.push({ pieceId, space });
+    return Promise.resolve({ pieceId });
   }
 
   /** Records which space each root-pattern request targeted. */
@@ -109,6 +116,26 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  it("reads a piece's source state through the client", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+    const space = "did:key:z6Mk-source-space" as DID;
+    try {
+      const source = await runtime.getPieceSource(space, "of:fid1:piece");
+
+      expect(source).toEqual({ pieceId: "of:fid1:piece" });
+      // The shell method takes (space, pieceId); the client takes them the
+      // other way round, so the order is worth pinning.
+      expect(client.pieceSourceCalls).toEqual([{
+        pieceId: "of:fid1:piece",
+        space,
+      }]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("resolves named spaces through the worker client", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const client = new MockRuntimeClient();
@@ -217,26 +244,6 @@ describe("RuntimeInternals", () => {
       });
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it("forwards a client versionskew event to the onVersionSkew callback", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
-    const client = new MockRuntimeClient();
-    const received: unknown[] = [];
-    const runtime = new RuntimeInternals(client as any, {
-      onVersionSkew: (event) => received.push(event),
-    });
-    try {
-      const event = {
-        space: "did:key:z6Mk-skew",
-        clientVersion: "c",
-        toolshedVersion: "t",
-      };
-      client.emit("versionskew", event);
-      expect(received).toEqual([event]);
     } finally {
       await runtime.dispose();
     }
@@ -490,6 +497,7 @@ describe("RuntimeInternals", () => {
   describe("create() forwards host flags to the worker", () => {
     type CapturedInitData = {
       forwardWorkerConsole?: boolean;
+      concurrentWatchRefresh?: boolean;
       renderDeclassificationPolicy?: string;
       renderConfidentialityCeiling?: {
         atoms?: unknown[];
@@ -497,7 +505,7 @@ describe("RuntimeInternals", () => {
       };
     };
 
-    it("includes forwardWorkerConsole and the render ceiling in the Initialize request", async () => {
+    it("includes forwardWorkerConsole, concurrentWatchRefresh, and the render ceiling in the Initialize request", async () => {
       const { RuntimeInternals, defaultRenderConfidentialityCeiling } =
         await import("@commonfabric/lib-shell");
       const { Identity } = await import("@commonfabric/identity");
@@ -541,6 +549,7 @@ describe("RuntimeInternals", () => {
             workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
             getBuildHash: () => Promise.resolve(undefined),
             forwardWorkerConsole: true,
+            concurrentWatchRefresh: true,
             cfcRenderCeiling: true,
           }),
         ).rejects.toThrow("stub init failure");
@@ -550,6 +559,9 @@ describe("RuntimeInternals", () => {
 
       expect(initRequests).toHaveLength(1);
       expect(initRequests[0].data.forwardWorkerConsole).toBe(true);
+      // The dogfood storage toggle rides the same InitializationData path; the
+      // worker maps it into StorageManager.open's experimentalConcurrentWatchRefresh.
+      expect(initRequests[0].data.concurrentWatchRefresh).toBe(true);
       // Epic H3a: the ceiling crosses the worker IPC as InitializationData —
       // exactly the fields the worker-side reconciler consumes.
       expect(initRequests[0].data.renderDeclassificationPolicy).toBe("deny");
@@ -659,6 +671,15 @@ describe("RuntimeInternals", () => {
       });
       expect(url.pathname).toBe("/scripts/worker-runtime.js");
       expect(url.searchParams.has("v")).toBe(false);
+    });
+
+    it("keeps an explicit local worker URL with a build identifier", async () => {
+      const url = await workerUrlFromCreate({
+        clientVersion: "source-checkout-sha",
+        getBuildHash: () => Promise.resolve("local-worker-hash"),
+      });
+      expect(url.pathname).toBe("/scripts/worker-runtime.js");
+      expect(url.searchParams.get("v")).toBe("local-worker-hash");
     });
   });
 

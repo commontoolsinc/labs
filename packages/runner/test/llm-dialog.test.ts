@@ -20,6 +20,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { waitForLlmMessages } from "./support/llm-result.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -141,11 +142,11 @@ describe("llmDialog", () => {
 
     // Turn 1: send greeting
     addMessage.send({ role: "user", content: "Hello" });
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     // Turn 2: send follow-up
     addMessage.send({ role: "user", content: "How are you?" });
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     const msgs = (await result.key("messages").pull())!;
     expect(msgs[0].content).toBe("Hello");
@@ -227,7 +228,7 @@ describe("llmDialog", () => {
     const run = await result.key("run").pull();
     run.send({});
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     const msgs = (await result.key("messages").pull())!;
     expect(msgs[0].content).toBe("Hello from handler");
@@ -337,7 +338,7 @@ describe("llmDialog", () => {
     });
 
     // user msg + assistant tool-call + tool result + assistant final = 4
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     expect(toolCalled).toBe(true);
 
@@ -450,7 +451,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Send the email." });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
     expect(capturedToolSchema).toMatchObject({
       type: "object",
       properties: {
@@ -793,171 +794,6 @@ describe("llmDialog", () => {
     }]);
   });
 
-  it("should expose a userland subagent in llmDialog tool catalogs", async () => {
-    const childResultSchema = {
-      type: "object",
-      properties: {
-        approved: { type: "boolean" },
-        summary: { type: "string" },
-      },
-      required: ["approved", "summary"],
-      additionalProperties: false,
-    } as const satisfies JSONSchema;
-
-    loadConversationFixture({
-      description: "llmDialog subAgent tool should be available to the parent",
-      responses: [
-        {
-          type: "sendRequest",
-          expectRequest: {
-            hasTools: ["delegate"],
-            messageCount: 1,
-          },
-          response: {
-            role: "assistant",
-            content: [{
-              type: "tool-call",
-              toolCallId: "call_delegate",
-              toolName: "delegate",
-              input: {
-                prompt: "analyze the hidden text",
-                resultSchema: childResultSchema,
-              },
-            }],
-            id: "dlg-subagent-r1",
-          },
-        },
-        {
-          type: "sendRequest",
-          expectRequest: {
-            hasTools: ["helperTool", "presentResult"],
-            messageCount: 1,
-          },
-          response: {
-            role: "assistant",
-            content: [{
-              type: "tool-call",
-              toolCallId: "call_child_present",
-              toolName: "presentResult",
-              input: {
-                approved: false,
-                summary: "Not approved.",
-              },
-            }],
-            id: "dlg-subagent-r2",
-          },
-        },
-        {
-          type: "sendRequest",
-          expectRequest: {
-            hasTools: ["delegate"],
-            messageCount: 3,
-          },
-          response: {
-            role: "assistant",
-            content: "Delegate completed.",
-            id: "dlg-subagent-r3",
-          },
-        },
-      ],
-    });
-
-    const helperTool = pattern(
-      () => ({ ok: true }),
-      {
-        type: "object",
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        properties: {
-          ok: { type: "boolean" },
-        },
-        required: ["ok"],
-        additionalProperties: false,
-      } as const satisfies JSONSchema,
-    );
-
-    const resultSchema = {
-      type: "object",
-      properties: {
-        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
-        pending: { type: "boolean" },
-        messages: {
-          type: "array",
-          items: { type: "object", additionalProperties: true },
-        },
-      },
-      required: ["addMessage"],
-    } as const satisfies JSONSchema;
-
-    const subAgentPattern = pattern<any, any>(
-      ({ prompt, resultSchema }) => {
-        return generateObject({
-          prompt,
-          schema: resultSchema,
-          tools: {
-            helperTool: patternTool(
-              helperTool,
-            ) as unknown as BuiltInLLMTool,
-          },
-        } as any).result;
-      },
-      {
-        type: "object",
-        properties: {
-          prompt: { type: "string" },
-          resultSchema: {
-            type: "object",
-            additionalProperties: true,
-          },
-        },
-        required: ["prompt", "resultSchema"],
-        additionalProperties: false,
-      },
-      true,
-    );
-
-    const testPattern = pattern(
-      () => {
-        const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        const dialog = llmDialog({
-          messages,
-          tools: {
-            delegate: {
-              description: "Run a child agent and return schema-limited JSON.",
-              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
-            },
-          },
-        });
-        return {
-          addMessage: dialog.addMessage,
-          pending: dialog.pending,
-          messages,
-        };
-      },
-      false,
-      resultSchema,
-    );
-
-    const resultCell = runtime.getCell(
-      space,
-      "llmDialog-subagent-tool-test",
-      resultSchema,
-      tx,
-    );
-
-    const result = runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
-
-    const addMessage = await result.key("addMessage").pull();
-    addMessage.send({ role: "user", content: "Start the workflow." });
-
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
-    const messages = (await result.key("messages").pull())!;
-    expect(messages.at(-1)?.content).toBe("Delegate completed.");
-  });
-
   it("should preserve mixed custom tools including subAgent when builtinTools is false", async () => {
     loadConversationFixture({
       description:
@@ -1201,7 +1037,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Start the safe workflow." });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
     const messages = (await result.key("messages").pull())!;
     expect(messages.at(-1)?.content).toBe("Tool catalog is available.");
   });
@@ -1336,7 +1172,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Start the workflow." });
 
-    await expect(waitForMessages(result, 6)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 6);
 
     const messages = (await result.key("messages").pull())!;
     expect(messages[4].role).toBe("tool");
@@ -1432,7 +1268,7 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
 
     addMessage.send({ role: "user", content: "Please pin this cell" });
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     const pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
@@ -1553,7 +1389,7 @@ describe("llmDialog", () => {
 
     // First pin a cell
     addMessage.send({ role: "user", content: "Please pin this cell" });
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     let pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells?.length).toBe(1);
@@ -1561,7 +1397,7 @@ describe("llmDialog", () => {
 
     // Now unpin it
     addMessage.send({ role: "user", content: "Please unpin that cell" });
-    await expect(waitForMessages(result, 8)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 8);
 
     pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
@@ -1658,7 +1494,7 @@ describe("llmDialog", () => {
     });
 
     // Wait for response
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     // Verify context cells appear in pinnedCells output
     const pinnedCells = await result.key("pinnedCells").pull();
@@ -1799,7 +1635,7 @@ describe("llmDialog", () => {
     });
 
     // Wait for: user message, assistant tool call, tool result, final response
-    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 4);
 
     // Verify pinnedCells output contains both context cell and tool-pinned cell
     const pinnedCells = await result.key("pinnedCells").pull();
@@ -1899,7 +1735,7 @@ describe("llmDialog", () => {
       content: "Reply without built-in tools.",
     });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
@@ -1988,7 +1824,7 @@ describe("llmDialog", () => {
       content: "Reply without built-in tools.",
     });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
@@ -2087,7 +1923,7 @@ describe("llmDialog", () => {
       content: "Reply with handler tools available.",
     });
 
-    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+    await waitForLlmMessages(runtime, result, 2);
 
     expect(capturedRequest).toBeDefined();
     expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
@@ -2226,7 +2062,7 @@ describe("llmDialog", () => {
       addMessage.send({ role: "user", content: "Read the briefing." });
 
       // user, assistant(tool-call), tool(result), assistant(final).
-      await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+      await waitForLlmMessages(ceilingRuntime, result, 4);
 
       const messages = (await result.key("messages").pull())!;
       const toolMessage = messages[2];
@@ -2251,26 +2087,180 @@ describe("llmDialog", () => {
       await ceilingStorageManager.close();
     }
   });
-});
+  it("should expose a userland subagent in llmDialog tool catalogs", async () => {
+    const childResultSchema = {
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        summary: { type: "string" },
+      },
+      required: ["approved", "summary"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
 
-function waitForMessages(result: any, expectedCount: number) {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(
-        new Error(
-          `Timeout waiting for ${expectedCount} messages and pending=false`,
-        ),
-      );
-    }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
-      if (pending === false && messages?.length === expectedCount) {
-        resolve();
-      }
+    loadConversationFixture({
+      description: "llmDialog subAgent tool should be available to the parent",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["delegate"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_delegate",
+              toolName: "delegate",
+              input: {
+                prompt: "analyze the hidden text",
+                resultSchema: childResultSchema,
+              },
+            }],
+            id: "dlg-subagent-r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["helperTool", "presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_child_present",
+              toolName: "presentResult",
+              input: {
+                approved: false,
+                summary: "Not approved.",
+              },
+            }],
+            id: "dlg-subagent-r2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["delegate"],
+            messageCount: 3,
+          },
+          response: {
+            role: "assistant",
+            content: "Delegate completed.",
+            id: "dlg-subagent-r3",
+          },
+        },
+      ],
     });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
+
+    const helperTool = pattern(
+      () => ({ ok: true }),
+      {
+        type: "object",
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema,
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const subAgentPattern = pattern<any, any>(
+      ({ prompt, resultSchema }) => {
+        return generateObject({
+          prompt,
+          schema: resultSchema,
+          tools: {
+            helperTool: patternTool(
+              helperTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        } as any).result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          resultSchema: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+        required: ["prompt", "resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          tools: {
+            delegate: {
+              description: "Run a child agent and return schema-limited JSON.",
+              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+            },
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-subagent-tool-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Start the workflow." });
+
+    await waitForLlmMessages(runtime, result, 4);
+    const messages = (await result.key("messages").pull())!;
+    // The conversation reaches its third request whether the delegate returned
+    // data or an error, so the closing assertion below cannot see an abandoned
+    // delegate. Assert on the tool result itself: a completed delegate reports
+    // `{ type: "json", ... }`, an abandoned one reports
+    // `{ type: "error-text", ... }`.
+    const toolMessage = messages.find((message: any) =>
+      message.role === "tool"
+    );
+    const delegateOutput = (toolMessage?.content as any[])?.find((part) =>
+      part?.type === "tool-result" && part.toolName === "delegate"
+    )?.output;
+    expect(delegateOutput).toMatchObject({ type: "json" });
+    expect(messages.at(-1)?.content).toBe("Delegate completed.");
   });
-}
+});

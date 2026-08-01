@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
-import { test as testCommand } from "../commands/test.ts";
+import { test as testCommand } from "../commands/test-command.ts";
 import { runTests } from "../lib/test-runner.ts";
 import { cf, checkStderr, withEnv } from "./utils.ts";
 

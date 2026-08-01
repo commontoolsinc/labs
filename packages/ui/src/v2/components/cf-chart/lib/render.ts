@@ -4,6 +4,7 @@
  * Uses d3-shape for path generation and Lit's svg template tag.
  */
 import { svg, type TemplateResult } from "lit";
+// @ts-types="@types/d3-shape"
 import {
   area as d3Area,
   curveLinear,
@@ -12,6 +13,7 @@ import {
   curveStep,
   line as d3Line,
 } from "d3-shape";
+// @ts-types="@types/d3-scale"
 import type { ScaleBand } from "d3-scale";
 import type { CurveType, DataPoint, MarkConfig } from "../types.ts";
 import type { XScale, YScale } from "./scales.ts";

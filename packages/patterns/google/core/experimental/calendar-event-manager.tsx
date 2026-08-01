@@ -27,7 +27,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -380,7 +379,7 @@ const confirmOperation = handler<
         success: true,
         operation: op.operation,
         eventId,
-        timestamp: new Date(safeDateNow()).toISOString(),
+        timestamp: new Date().toISOString(),
       });
 
       pendingOp.set(null);
@@ -407,7 +406,7 @@ const confirmOperation = handler<
         success: false,
         operation: op.operation,
         error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date(safeDateNow()).toISOString(),
+        timestamp: new Date().toISOString(),
       });
       // Close confirmation modal on error
       pendingOp.set(null);

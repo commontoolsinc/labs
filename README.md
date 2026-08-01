@@ -33,11 +33,22 @@ can run their own spaces or use hosted versions.
 
 ## Quick Start (Development)
 
-1. Install [Deno 2](https://docs.deno.com/runtime/getting_started/installation/)
+1. Install [mise](https://mise.jdx.dev/getting-started.html) and activate it in
+   your shell
 2. Clone this repo
-3. Install the Git hooks: `deno task install-hooks` (optional)
-4. Start local dev servers: `./scripts/start-local-dev.sh`
-5. Access the application at <http://localhost:8000>
+3. Run `mise trust && mise install` in the repo to install the pinned Deno
+   version
+4. Install the Git hooks: `deno task install-hooks` (optional)
+   - mise puts this checkout's `bin/` on PATH, so `cf` works as a plain command.
+     Without mise: `deno task install-cf`. Shell completion needs it — see
+     [Installing `cf` on PATH](./packages/cli/README.md#installing-cf-on-path).
+5. Start local dev servers: `./scripts/start-local-dev.sh`
+6. Access the application at <http://localhost:8000>
+
+Installing
+[Deno 2 directly](https://docs.deno.com/runtime/getting_started/installation/)
+also works. `deno task check` accepts the supported range in `tasks/check.sh`
+and warns when the installed version differs from the pin in `mise.toml`.
 
 For Claude Code users, run [`/deps`](.claude/commands/deps.md) to verify
 prerequisites, [`/start-local-dev`](.claude/commands/start-local-dev.md) to
@@ -92,20 +103,16 @@ through `/.agents/skills/`, while Claude compatibility preserves the existing
 `/pattern-dev`, `/pattern-test`, and related skill names through
 `/.claude/skills/`.
 
-### Dependencies & Integrations
-
-**Required**:
-
-- [Deno 2](https://docs.deno.com/runtime/getting_started/installation/) -
-  Runtime for backend and tooling
-
-**Recommended Integrations**:
+### Optional Integrations
 
 - [GitHub CLI](https://github.com/cli/cli) - For PR and issue workflows
 - Browser automation for pattern testing uses the bundled `agent-browser` skill
   (no MCP setup required)
 - Claude Code MCP integrations (run `/deps` in Claude Code for setup):
   - Playwright MCP — optional fallback browser driver for the `/tour` command
+
+When adding or rolling repository dependencies, follow the
+[dependency maintenance guide](./docs/development/DEPENDENCIES.md).
 
 ### Development Practices
 

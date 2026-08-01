@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import {
   CFC_LABEL_READ_FAILED_ATOM,
@@ -24,7 +25,11 @@ const clauseSetsEqual = (
   right: readonly unknown[],
 ): boolean =>
   left.length === right.length &&
-  left.every((clause) => right.some((other) => clausesEqual(clause, other)));
+  left.every((clause) =>
+    right.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 describe("CFC ceiling meet (pairwise alternative-set union)", () => {
   describe("edge cases", () => {
@@ -126,7 +131,7 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
     // atoms, OR-clauses (with an order-differing spelling), the malformed
     // empty clause, and the ungrantable read-failed marker (bare and
     // wrapped).
-    const ceilingClausePool: readonly unknown[] = [
+    const ceilingClausePool: readonly CfcConfClause[] = [
       A,
       B,
       C,
@@ -137,7 +142,7 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
       { anyOf: [] },
       CFC_LABEL_READ_FAILED_ATOM,
     ];
-    const labelClausePool: readonly unknown[] = [
+    const labelClausePool: readonly CfcConfClause[] = [
       A,
       B,
       C,
@@ -150,9 +155,9 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
     ];
 
     const subsetsUpToSize2 = (
-      pool: readonly unknown[],
-    ): readonly (readonly unknown[])[] => {
-      const subsets: (readonly unknown[])[] = [[]];
+      pool: readonly CfcConfClause[],
+    ): readonly (readonly CfcConfClause[])[] => {
+      const subsets: (readonly CfcConfClause[])[] = [[]];
       for (let i = 0; i < pool.length; i++) {
         subsets.push([pool[i]]);
         for (let j = i + 1; j < pool.length; j++) {

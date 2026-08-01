@@ -1,5 +1,14 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
+import {
+  backgroundLogFile,
+  classifyLaunch,
+  logUncaughtErrors,
+  redirectConsoleToFile,
+  runBackgroundParent,
+  writeListeningMarker,
+} from "@/background.ts";
+import { announceCloneIfServed } from "@/lib/clone-banner.ts";
 import { identity } from "@/lib/identity.ts";
 import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -90,8 +99,11 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-function startServer() {
+function startServer(onListening?: () => void) {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
+  // A rehearsal clone keeps the source space's DID, so nothing else in this
+  // log distinguishes it from production. Announce it before anything else.
+  announceCloneIfServed({ memoryDir: env.MEMORY_DIR, dbPath: env.DB_PATH });
   initializeRuntime();
   // The listener must be installed before Deno.serve accepts the first
   // execution-demand-bearing connection.
@@ -107,6 +119,7 @@ function startServer() {
     },
     onListen: ({ port, hostname }: { port: number; hostname: string }) => {
       console.log(`Server running on http://${hostname}:${port}`);
+      onListening?.();
     },
   };
 
@@ -128,5 +141,30 @@ Deno.addSignalListener("SIGINT", handleShutdown);
 Deno.addSignalListener("SIGTERM", handleShutdown);
 
 if (import.meta.main) {
-  startServer();
+  const backgroundLog = backgroundLogFile();
+  if (backgroundLog) {
+    // This process is the server half of a background launch. Its request
+    // logger already targets the log file (pino-logger.ts reads the same
+    // environment variable); route console output there too, so stdout carries
+    // only the readiness marker, and record uncaught errors that would
+    // otherwise reach a discarded stderr.
+    redirectConsoleToFile(backgroundLog);
+    logUncaughtErrors();
+    startServer(writeListeningMarker);
+  } else {
+    const launch = classifyLaunch(Deno.args);
+    if (launch.background) {
+      // Spawn the server as a background child and wait for it to bind; this
+      // call exits the process once the child is listening (or has failed to
+      // start).
+      await runBackgroundParent({
+        execPath: Deno.execPath(),
+        mainModule: import.meta.url,
+        serverArgs: launch.serverArgs,
+        logFile: launch.logFile,
+      });
+    } else {
+      startServer();
+    }
+  }
 }

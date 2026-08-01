@@ -43,7 +43,7 @@ await runtime.idle();
 
 ## Why it works
 
-The `{ asStream: true }` in the schema tells the cell that this property is a stream. When you call `.send()` on a stream-marked cell, it internally uses `scheduler.queueEvent()` which triggers the registered handler.
+The `{ asCell: ["stream"] }` in the schema tells the cell that this property is a stream. When you call `.send()` on a stream-marked cell, it internally uses `scheduler.queueEvent()` which triggers the registered handler.
 
 ## What doesn't work
 

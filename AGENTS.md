@@ -22,17 +22,20 @@ Common Fabric product.
 7. End-User Programs: home-schemas, patterns
 
 Support and test packages (utils, test-support, deno-web-test, integration,
-generated-patterns, content-hash, leb128, felt, static, vendor-astral,
-fs-sync-example) sit outside the layer stack.
+generated-patterns, content-hash, leb128, felt, static, fs-sync-example) sit
+outside the layer stack.
 
 ## Documentation Lifecycle
 
-Documentation is split into two categories with different obligations. The full
-rules are in `docs/README.md`; the short version:
+Whenever editing documentation, read [docs/README.md](docs/README.md) and follow
+the rules therein. These include:
 
 - **Live** documentation (everything outside `docs/history/`) describes the
   current system or pending plans. If your change alters behavior that a live
   document describes, update that document in the same change.
+- Live documentation must be forward-looking, and should not refer to previous
+  states of the repository or justify decisions based on past choices.
+  Everything should stand on its own merits in a forward-looking fashion.
 - **Historical** documentation (`docs/history/`) holds point-in-time records:
   audits, reports, investigation findings, executed plans, superseded designs.
   Never edit their content, and never treat them as descriptions of the current
@@ -46,8 +49,33 @@ rules are in `docs/README.md`; the short version:
 - When a live plan or design reaches "done" or is abandoned — for example, your
   change lands its last phase — archive it to `docs/history/` following the
   procedure in `docs/README.md`.
+- TypeScript and TSX code blocks under `docs/` are type-checked in CI by
+  `deno task check-docs`. A block selects the scaffold it compiles inside with
+  an opening context comment; `docs/check.md` defines that vocabulary, which is
+  not derivable from the source.
 
-## Pattern Development
+## Engineering principles and coding style
+
+### Avoid timeouts, retry loops, and sleeps
+
+Timeouts cause flakiness because they put an upper bound on success: anything
+that would have eventually completed cannot complete once it hits the timeout.
+
+Retry loops mask errors: anything that should have succeeded first time now gets
+missed because if it succeeds sometimes.
+
+Sleeps are flaky and expensive: they increase the floor on the amount of time
+operations take, and they rely on unpredictable timings to align for success.
+
+Avoid all three; when you see them in existing code, point them out and suggest
+starting an agent to remove them.
+
+For tests, `docs/development/waiting-in-tests.md` is the canonical guidance. It
+names the event-driven primitives to reach for instead of a poll, and the
+specific cases where a bounded poll is the honest tool — read it before removing
+one, so you don't strip a wait the repo keeps on purpose.
+
+### Pattern Development
 
 If you are developing patterns, use the repo-local `pattern-dev` skill at
 `skills/pattern-dev/SKILL.md`. `skills/` is the canonical authored source. Codex
@@ -57,9 +85,13 @@ compatibility continues to use `.claude/skills/`.
 When authoring or reviewing a skill itself, read
 `docs/development/skill-authoring.md` — what belongs in a skill (non-derivable
 map & values) versus what just constrains the agent (procedure a capable model
-already does).
+already does). `docs/development/skill-audit.md` covers what keeps those facts
+honest, including the `deno task check-skill-facts` tripwire that fails CI when
+a path or import a skill cites stops resolving.
 
-### Useful Pattern documentation
+For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
+
+#### Useful Pattern documentation
 
 **Start here:**
 
@@ -85,7 +117,7 @@ already does).
 - `docs/common/capabilities/llm.md` - Using generateText and generateObject for
   LLM integration
 - `docs/common/conventions/adding-pieces.md` - How to add pieces (use addPiece
-  handler, not allPieces.push)
+  handler, not pieceRegistry.push)
 
 **Reference:**
 
@@ -95,18 +127,37 @@ already does).
 
 **Important:** Ignore the `packages/patterns/deprecated` folder - it is defunct.
 
-## Runtime Development
+### Runtime Development
 
 If you are developing runtime code, read the following documentation:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
+  version pins, and dependency troubleshooting
+- `docs/development/space-clone-rehearsal.md` - Rehearsing a pattern update on a
+  clone of a real space before touching a populated one: when a rehearsal is
+  required, how to get a snapshot, the clone/verify/reset loop (`cf space`), and
+  the reads that will mislead you (~20 s cold loads, unstepped result reads,
+  fresh-replica reads). Read it before any `setsrc` against a space with real
+  data
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
   and integration test structure; hub that links the other testing docs
+- `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
+  polling: the primitives to use.
+- `docs/development/fetch-request-deadlines.md` - Why the fetch builtins keep a
+  wall-clock bound: it leases a claim held in durable state rather than bounding
+  a request, and it decides when the replica holding that claim is presumed
+  gone. Read it before changing how `fetch.ts` or `fetch-program.ts` decide to
+  start a request
 - `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
   splitting/rebalancing work
+- `docs/development/deploying.md` - How a commit reaches a host: which CI jobs
+  deploy where, and the contract the bastion's deploy wrapper enforces on what
+  they pass it. That wrapper belongs to the infra repository, and the staging
+  deploy jobs run only on `main`, so read this before editing a deploy step
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime
   coverage and transformer-based pattern coverage), which CI job collects which,
   and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
@@ -115,7 +166,9 @@ If you are developing runtime code, read the following documentation:
 - `docs/development/patch-operations.md` - The patch-operation family (the
   single logical changes a commit carries), the registries that define each op
   once, and how to add a new one across the memory / runner / api / transformer
-  layers
+  layers. Its neighbour `mergeable-collection-writes.md` covers why the
+  mergeable ops exist and what they do to conflict detection; read it before
+  changing how a handler writes to a list
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every
@@ -126,6 +179,11 @@ If you are developing runtime code, read the following documentation:
   the same change.
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
+- `docs/specs/ts-transformer/README.md` - **CTS transformer specs**: map of the
+  pattern-language spec, lowering contract, and behavior spec (schema mapping:
+  `docs/specs/schema-generator/ts_to_json_schema_mapping.md`). Working in those
+  packages? Start at `packages/ts-transformers/AGENTS.md` /
+  `packages/schema-generator/AGENTS.md`
 
 When investigating transformer behavior, inspect the emitted output directly
 before inferring from source code alone:
@@ -134,16 +192,7 @@ before inferring from source code alone:
 deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 ```
 
-The transformed output is dense. Pipe it into `cf view` for an interactive,
-syntax-aware pager (less-like) that colours builders, schemas, closures and type
-positions, and lets you navigate the structure tree (`wasd`), search (`/`) and
-peek definitions. The text shown is verbatim — colour only:
-
-```bash
-deno task cf check <pattern>.tsx --show-transformed --no-run | deno task cf view
-```
-
-### Adding New Packages
+#### Adding New Packages
 
 When adding a new workspace package:
 
@@ -159,4 +208,15 @@ task, Deno falls back to the root workspace's test task, which re-runs the
 entire suite recursively — causing exponential process spawning and CI timeouts.
 
 See `packages/utils/deno.jsonc` for an example of a correctly configured
-package.
+package. When the package needs a dependency, follow
+`docs/development/DEPENDENCIES.md`.
+
+## Instructions for committing to this repository
+
+Before committing, squashing, or otherwise getting a branch ready to be reviewed
+or landed: Execute repo-wide `deno fmt --check` and `deno lint` checks, and run
+all relevant tests.
+
+When babysitting a PR through CI, look for codex review comments in addition to
+failed CI jobs. When facing difficulties getting coverage checks to pass,
+consider the information in `docs/development/COVERAGE.md`.

@@ -29,9 +29,12 @@ import { Identity } from "@commonfabric/identity";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
+  parseLink,
   PatternCoverageCollector,
   patternCoverageOutputPath,
+  type PatternInstantiationObserver,
   Runtime,
+  type RuntimeOptions,
   runtimePresets,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
@@ -46,7 +49,7 @@ import type {
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import type { Reactive } from "@commonfabric/api";
+import type { AssertPart, AssertRecord, Reactive } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -121,6 +124,64 @@ function formatError(error: unknown): string {
     : String(error);
 }
 
+/** Indents every line, so a multi-line failure stays aligned under its step. */
+function indentLines(text: string, indent: string): string {
+  return text
+    .split("\n")
+    .map((line) => `${indent}${line}`)
+    .join("\n");
+}
+
+/**
+ * Recognizes the record an `assert(...)` assertion carries. A `computed(...)`
+ * assertion carries a bare boolean instead, so this is what tells the two
+ * apart at the point the harness reads the value.
+ */
+function asAssertRecord(value: unknown): AssertRecord | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<AssertRecord>;
+  if (
+    typeof candidate.ok !== "boolean" ||
+    typeof candidate.source !== "string" ||
+    !Array.isArray(candidate.parts)
+  ) {
+    return undefined;
+  }
+  const parts = candidate.parts.filter((part): part is AssertPart =>
+    typeof part === "object" && part !== null &&
+    typeof (part as Partial<AssertPart>).src === "string" &&
+    typeof (part as Partial<AssertPart>).rendered === "string"
+  );
+  return { ok: candidate.ok, source: candidate.source, parts };
+}
+
+/**
+ * Renders a failed `assert(...)` as its authored text followed by the operands
+ * recorded while it ran, for example:
+ *
+ *     a + b <= c
+ *       a + b = 3
+ *       c     = 2
+ *
+ * The operands say the assertion was false, so saying it again adds nothing.
+ * An assertion that recorded none — a bare value, or one whose operands are
+ * all literals — has nothing to explain itself with, so that one still reports
+ * what happened rather than restating the source on its own.
+ */
+function formatAssertRecord(record: AssertRecord): string {
+  if (record.parts.length === 0) {
+    return record.source.length > 0
+      ? `Expected true, got false: ${record.source}`
+      : "Expected true, got false";
+  }
+
+  const width = Math.max(...record.parts.map((part) => part.src.length));
+  const lines = record.parts.map((part) =>
+    `  ${part.src.padEnd(width)} = ${part.rendered}`
+  );
+  return [record.source, ...lines].join("\n");
+}
+
 /**
  * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
  * property.
@@ -140,7 +201,7 @@ function formatError(error: unknown): string {
  * reads an async-builtin result to keep the read deterministic under load.
  */
 export type TestStep =
-  | { assertion: Reactive<boolean>; skip?: boolean }
+  | { assertion: Reactive<boolean> | Reactive<AssertRecord>; skip?: boolean }
   | {
     action: Stream<unknown>;
     event?: unknown;
@@ -238,6 +299,12 @@ export interface TestRunResult {
   runtimeErrors: string[];
   /** If true, runtime errors are expected and should not fail the test */
   allowRuntimeErrors?: boolean;
+  /** If set, runtime errors are REQUIRED: the run fails when none (or, for a
+   * number, a different count) were captured. Like expectNonIdempotent, this
+   * asserts the loudness fires — it is not a mere tolerance — so reverting a
+   * throwing rejection to a silent return fails the suite. Implies
+   * allowRuntimeErrors for the captured errors themselves. */
+  expectRuntimeErrors?: boolean | number;
   /** Non-idempotent computation names detected by the idempotency check */
   nonIdempotent: string[];
   /** If true, non-idempotent computations are expected: detected violations
@@ -283,6 +350,41 @@ export interface TestRunnerOptions {
   patternCoverageDir?: string;
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+  /**
+   * Run against a caller-supplied identity and storage manager, and observe
+   * what the run instantiates.
+   *
+   * Why: `StorageManager.emulate` runs its memory server against `:memory:`,
+   * so an ordinary test run leaves no file behind. The pattern-update
+   * state-continuity capture (`tasks/pattern-vintage-run.ts`) runs a pattern's
+   * OWN tests against a file-backed store and snapshots the result, which is
+   * what puts real pattern state — written through real handlers — into a
+   * fixture instead of a bare materialized root.
+   *
+   * The caller OWNS the lifecycle: the runner will not close this storage
+   * manager, because a callee must not tear down a resource its caller is
+   * still using — the snapshot happens after the run returns.
+   *
+   * The RUNTIME is still torn down (`dispose({ closeStorage: false })`), which
+   * is what makes reading the store afterwards a statement about the state the
+   * run reached: the runtime that wrote it can no longer commit into it. A
+   * teardown that does not complete is RAISED, so a caller never reads a store
+   * whose writer never stopped.
+   */
+  storageHost?: {
+    identity: Identity;
+    storageManager: RuntimeOptions["storageManager"];
+    /**
+     * Cause for the test pattern's result cell, pinning its entity id.
+     *
+     * The default is `test-pattern-result-${Date.now()}` — fine for a store
+     * that is thrown away, fatal for one that is kept, since an id that
+     * differs every run can never be addressed again.
+     */
+    resultCause?: unknown;
+    /** Records every pattern the run materializes; see the vintage capture. */
+    onPatternInstantiated?: PatternInstantiationObserver;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -913,20 +1015,23 @@ export async function runTestPattern(
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
     ["runTestPattern", "identity"],
-    () => Identity.fromPassphrase("test-runner"),
+    () =>
+      options.storageHost?.identity ?? Identity.fromPassphrase("test-runner"),
   );
   const space = identity.did();
-  const { StorageManager } = await withPhase([
-    "runTestPattern",
-    "storageImport",
-  ], () => import("@commonfabric/runner/storage/cache.deno"));
-  const storageManager = await withPhase(
-    ["runTestPattern", "storageManager"],
-    () =>
-      StorageManager.emulate({
-        as: identity,
-      }),
-  );
+  // A caller-supplied store is FILE-BACKED, which the default emulation is not:
+  // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
+  // snapshot. See `TestRunnerOptions.storageHost`.
+  const storageManager = options.storageHost?.storageManager ??
+    await withPhase(
+      ["runTestPattern", "storageManager"],
+      async () => {
+        const { StorageManager } = await import(
+          "@commonfabric/runner/storage/cache.deno"
+        );
+        return StorageManager.emulate({ as: identity });
+      },
+    );
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
@@ -962,6 +1067,9 @@ export async function runTestPattern(
         // Tests that need a laxer mode than the shared pin opt out per test.
         ...(options.cfcEnforcementMode !== undefined
           ? { cfcEnforcementMode: options.cfcEnforcementMode }
+          : {}),
+        ...(options.storageHost?.onPatternInstantiated !== undefined
+          ? { onPatternInstantiated: options.storageHost.onPatternInstantiated }
           : {}),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
         navigateCallback: (target) => {
@@ -1069,7 +1177,7 @@ export async function runTestPattern(
     // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
-    // access allPieces, recentPieces, etc. work correctly.
+    // access pieceRegistry, recentPieces, etc. work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -1079,7 +1187,29 @@ export async function runTestPattern(
         undefined,
         setupTx,
       );
-      (defaultPatternCell as any).key("allPieces").set([]);
+      const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
+      pieceRegistry.set([]);
+      const addPiece = runtime.getCell(
+        space,
+        "test-default-add-piece",
+        undefined,
+        setupTx,
+      );
+      addPiece.setRaw({ $stream: true });
+      (defaultPatternCell as any).key("addPiece").set(addPiece);
+      const testPieceRegistrationCount = (defaultPatternCell as any).key(
+        "testPieceRegistrationCount",
+      );
+      testPieceRegistrationCount.set(0);
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event) => {
+          const piece = event?.piece;
+          if (!piece) return;
+          pieceRegistry.withTx(handlerTx).addUnique(piece);
+          testPieceRegistrationCount.withTx(handlerTx).increment();
+        },
+        parseLink(addPiece),
+      );
       (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
@@ -1107,7 +1237,8 @@ export async function runTestPattern(
         // Create a result cell for the pattern
         const resultCell = runtime.getCell<Record<string, unknown>>(
           space,
-          `test-pattern-result-${Date.now()}`,
+          options.storageHost?.resultCause ??
+            `test-pattern-result-${Date.now()}`,
           undefined,
           tx,
         );
@@ -1170,6 +1301,12 @@ export async function runTestPattern(
       async () =>
         await (patternResult.key("allowRuntimeErrors") as Cell<unknown>)
           .pull() === true,
+    );
+    const expectRuntimeErrors = await withPhase(
+      ["runTestPattern", "expectRuntimeErrors"],
+      async () =>
+        await (patternResult.key("expectRuntimeErrors") as Cell<unknown>)
+          .pull() as boolean | number | undefined,
     );
     const expectNonIdempotent = await withPhase(
       ["runTestPattern", "expectNonIdempotent"],
@@ -1579,6 +1716,14 @@ export async function runTestPattern(
             if (value === true) {
               return { passed: true };
             }
+            // An `assert(...)` assertion carries the operands recorded by the
+            // evaluation that produced this value, so report them.
+            const record = asAssertRecord(value);
+            if (record) {
+              return record.ok
+                ? { passed: true }
+                : { passed: false, error: formatAssertRecord(record) };
+            }
             return {
               passed: false,
               error: `Expected true, got ${toCompactDebugString(value)}`,
@@ -1697,6 +1842,7 @@ export async function runTestPattern(
       navigations,
       runtimeErrors: errorMessages,
       allowRuntimeErrors,
+      expectRuntimeErrors,
       nonIdempotent,
       expectNonIdempotent,
       consoleErrors,
@@ -1754,15 +1900,62 @@ export async function runTestPattern(
       });
     }
     // 6. Cleanup
+    // The run is over, so pattern-code output during teardown is no longer the
+    // test's behavior. This matters more than it used to: `engine.dispose()`
+    // was the FIRST cleanup step and killed the SES runtime immediately, while
+    // `Runtime.dispose()` reaches `harness.dispose()` only at the end — so the
+    // drain below now runs with pattern code still able to log. Both capture
+    // lists are returned BY REFERENCE, so a late push would still fail the run.
+    consoleCaptureActive = false;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
-    await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
-      engine.dispose();
-    });
-    await withPhase(
-      ["runTestPattern", "cleanup", "storageClose"],
-      () => storageManager.close(),
+    // Tear the whole runtime down, not just its engine: that is what stops it
+    // WRITING (`Runtime.dispose`'s JSDoc has the mechanism). It matters here
+    // because a caller-supplied store outlives this call and gets READ — the
+    // vintage capture snapshots it — so a runtime still able to commit would
+    // make the snapshot a race rather than a record. `closeStorage` keeps that
+    // store the CALLER's to close.
+    //
+    // Bounded the same way every other await in this function is (the step
+    // settles at `settleRuntime`), and for the same reason: a pattern under
+    // test is untrusted code that may never quiesce, and `scheduler.idle()` —
+    // which `dispose()` awaits — never resolves for a system that genuinely
+    // never settles. Unbounded, one such pattern turns "this file reports a
+    // timeout" into "`cf test` hangs with no output", since `runTests` has no
+    // per-file guard. Firing early is safe here in a way it is not elsewhere:
+    // it only skips the rest of a teardown in a process that is moving on.
+    //
+    // A teardown that does not complete is RAISED, on both paths. It says the
+    // runtime never quiesced, which is a fact about the pattern under test —
+    // reporting it only to stderr would let `cf test` exit 0 on a run whose
+    // writer was still going, and a caller that supplied its own store is worse
+    // off still, since it is about to read what that writer wrote. Raising also
+    // keeps the pre-existing contract: `storageManager.close()` used to sit here
+    // unguarded, so a failing teardown already failed the file.
+    //
+    // Logged BEFORE it is raised because throwing from a `finally` discards the
+    // result this function was about to return, including any step failures.
+    // The exit code is right either way; the log is what keeps the diagnosis.
+    //
+    // Losing the race ABANDONS the dispose rather than cancelling it:
+    // `settled()` takes no abort signal, so the drain runs on in the background
+    // and the steps after it never happen. Acceptable because the only path
+    // that reaches it has already failed, and a capture's temp store and server
+    // are torn down by `captureVintage`'s own `finally`.
+    const teardown = withPhase(
+      ["runTestPattern", "cleanup", "runtimeDispose"],
+      () =>
+        Promise.race([
+          runtime.dispose({ closeStorage: options.storageHost === undefined }),
+          timeout(TIMEOUT, `Runtime teardown timed out after ${TIMEOUT}ms`),
+        ]),
     );
+    await teardown.catch((error) => {
+      console.error(
+        `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
+      );
+      throw error;
+    });
   }
 }
 
@@ -1787,7 +1980,20 @@ export async function runTests(
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
 
-    const result = await runTestPattern(testPath, options);
+    // `runTestPattern` RAISES a teardown that did not complete, which is the
+    // right contract for a direct caller — the vintage capture is about to read
+    // what the run wrote, so it must refuse rather than snapshot. A multi-file
+    // run is the other case: one wedged file is a failure of that file, not a
+    // reason the remaining ones go unreported. Counted and skipped past, so the
+    // exit code is still non-zero.
+    let result: TestRunResult;
+    try {
+      result = await runTestPattern(testPath, options);
+    } catch (error) {
+      totalFailed++;
+      console.log(`  ✗ ${formatError(error)}`);
+      continue;
+    }
     allResults.push(result);
 
     if (result.error) {
@@ -1808,7 +2014,7 @@ export async function runTests(
         const skipLabel = test.skipped ? " (skipped)" : "";
         console.log(`  ${status} ${test.name}${suffix}${skipLabel}`);
         if (!test.passed && !test.skipped && test.error) {
-          console.log(`    ${test.error}`);
+          console.log(indentLines(test.error, "    "));
         }
       }
 
@@ -1847,8 +2053,24 @@ export async function runTests(
         );
       }
 
-      // Report runtime errors
-      if (result.runtimeErrors.length > 0) {
+      // Report runtime errors. An expectation both tolerates the captured
+      // errors and REQUIRES them (exact count when numeric): the flag asserts
+      // the loudness fires, so silently-absorbed rejections fail here.
+      const expectedErrors = result.expectRuntimeErrors;
+      if (expectedErrors !== undefined && expectedErrors !== false) {
+        const want = typeof expectedErrors === "number"
+          ? expectedErrors
+          : undefined;
+        const got = result.runtimeErrors.length;
+        if (got === 0 || (want !== undefined && got !== want)) {
+          totalFailed++;
+          console.log(
+            `  ✗ expected ${want ?? "some"} runtime error(s), saw ${got}`,
+          );
+        } else {
+          console.log(`  ⊘ ${got} runtime error(s) (expected)`);
+        }
+      } else if (result.runtimeErrors.length > 0) {
         if (result.allowRuntimeErrors) {
           console.log(
             `  ⊘ ${result.runtimeErrors.length} runtime error(s) (allowed)`,

@@ -3,8 +3,8 @@ import {
   computed,
   NAME,
   pattern,
-  safeDateNow,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import type {
@@ -31,8 +31,10 @@ const getDateDaysAgo = (baseTimestamp: number, daysAgo: number): string => {
 
 export default pattern<HabitTrackerInput, HabitTrackerOutput>(
   ({ habits, logs }) => {
-    const todayTimestamp = safeDateNow();
-    const todayDate = toDateString(todayTimestamp);
+    const nowCell = wish<number>({ query: "#now" });
+    const todayDate = computed(() =>
+      nowCell.result == null ? "" : toDateString(nowCell.result)
+    );
     const newHabitName = new Writable("");
     const newHabitIcon = new Writable("✓");
 
@@ -48,9 +50,10 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
       const habitExists = habits.get().some((h) => h.name === habitName);
       if (!habitExists) return;
 
+      const today = toDateString(Date.now());
       const currentLogs = logs.get();
       const existingIdx = currentLogs.findIndex(
-        (log) => log.habitName === habitName && log.date === todayDate,
+        (log) => log.habitName === habitName && log.date === today,
       );
       if (existingIdx >= 0) {
         // Write through the element's cell — replacing the array slot with a
@@ -61,7 +64,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
           !currentLogs[existingIdx].completed,
         );
       } else {
-        logs.push({ habitName, date: todayDate, completed: true });
+        logs.push({ habitName, date: today, completed: true });
       }
     });
 
@@ -90,12 +93,15 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
     const habitCards = computed(() => {
       const habitList = habits.get();
       const logList = logs.get();
+      const todayTimestamp = nowCell.result;
+      if (todayTimestamp == null) return [];
+      const today = toDateString(todayTimestamp);
 
       return habitList.map((habit) => {
         const isCompletedToday = logList.some(
           (log) =>
             log.habitName === habit.name &&
-            log.date === todayDate &&
+            log.date === today &&
             log.completed,
         );
 

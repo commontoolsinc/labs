@@ -816,51 +816,6 @@ export default function next(value: number) {
     );
   });
 
-  it("wraps explicit snapshot helpers with __cfHelpers.__cf_data", async () => {
-    const source = `
-import { nonPrivateRandom, safeDateNow } from "commonfabric";
-
-const startedAt = safeDateNow();
-const seed = nonPrivateRandom();
-
-export default function probe() {
-  return [safeDateNow(), nonPrivateRandom(), startedAt, seed];
-}
-`;
-
-    const output = await transformFiles({
-      "/main.ts": source,
-    });
-    const main = output["/main.ts"]!;
-
-    const root = parseModule(main);
-    const wrapsCall = (variableName: string, callee: string) => {
-      const decl = collect(root, ts.isVariableDeclaration).find((d) =>
-        ts.isIdentifier(d.name) && d.name.text === variableName
-      );
-      assert(decl?.initializer && ts.isCallExpression(decl.initializer));
-      const outer = decl.initializer;
-      assert(
-        ts.isPropertyAccessExpression(outer.expression) &&
-          outer.expression.name.text === "__cf_data",
-      );
-      const inner = outer.arguments[0];
-      assert(inner && ts.isCallExpression(inner));
-      assert(
-        ts.isIdentifier(inner.expression) && inner.expression.text === callee,
-      );
-    };
-    wrapsCall("startedAt", "safeDateNow");
-    wrapsCall("seed", "nonPrivateRandom");
-    // Explicit helper calls stay bare, not rewritten onto `__cfHelpers`.
-    assert(
-      !collect(root, ts.isPropertyAccessExpression).some((p) =>
-        ts.isIdentifier(p.expression) && p.expression.text === "__cfHelpers" &&
-        (p.name.text === "safeDateNow" || p.name.text === "nonPrivateRandom")
-      ),
-    );
-  });
-
   it("skips snapshot wrapping when cf-disable-transform is present", async () => {
     const output = await transformFiles({
       "/main.ts": `/// <cf-disable-transform />

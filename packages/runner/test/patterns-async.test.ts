@@ -81,9 +81,11 @@ describe("Pattern Runner - Async", () => {
     const pullPromise = result.pull();
 
     // Give time for the lift to start but not complete
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await clock.tick(10);
     expect(liftCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
+
+    await clock.tick(100);
 
     // Now await the pull to wait for completion
     const value = await pullPromise;
@@ -131,9 +133,11 @@ describe("Pattern Runner - Async", () => {
     piece.key("updater").send({ value: 5 });
 
     // Give a small delay to start the handler but not enough to complete
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await clock.tick(10);
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
+
+    await clock.tick(100);
 
     // Now pull should wait for the handler's promise to resolve
     const value = await piece.pull();
@@ -189,6 +193,8 @@ describe("Pattern Runner - Async", () => {
     await piece.pull();
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
+
+    await clock.tick(100);
 
     // Now wait for the timeout promise to resolve
     await timeoutPromise;

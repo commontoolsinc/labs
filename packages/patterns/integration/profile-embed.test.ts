@@ -18,7 +18,6 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const PROFILE_EMBED_TIMEOUT = 30_000;
 // The `#profile` wish fallback surface (rendered by the embed when no profile
 // resolves) is the shared trusted create surface: it forwards `inputId:
 // "wish-profile-name-input"` to its inner input and exposes the trusted
@@ -150,7 +149,6 @@ describe("profile-embed integration test", () => {
       page,
       '[data-ui-region="profile-embed-edit"] cf-input',
       "Grace Hopper",
-      { timeout: PROFILE_EMBED_TIMEOUT },
     );
     await clickSaveByLabel(page, "Save name");
     // The save dispatches into the resolved profile's owner-protected setName
@@ -191,7 +189,6 @@ async function waitForSelector(page: Page, selector: string) {
   try {
     await page.waitForSelector(selector, {
       strategy: "pierce",
-      timeout: PROFILE_EMBED_TIMEOUT,
     });
   } catch (cause) {
     const bodyText = await page.evaluate(() => document.body?.innerText ?? "")
@@ -207,9 +204,7 @@ async function waitForSelector(page: Page, selector: string) {
 // shared-profile.test.ts: fill the create input like a user, then fire the
 // trusted CreateProfile click carrying the typed name.
 async function createProfileFromFallback(page: Page, name: string) {
-  await fillCfInput(page, CREATE_INPUT, name, {
-    timeout: PROFILE_EMBED_TIMEOUT,
-  });
+  await fillCfInput(page, CREATE_INPUT, name);
   await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
   // Creating a profile satisfies `#profile` by committing into a new cross-space
   // child space, issued fire-and-forget by the trusted action's handler.
@@ -229,7 +224,6 @@ async function fillCfTextarea(page: Page, selector: string, value: string) {
   await waitForRuntimeIdle(page);
   const field = await page.waitForSelector(selector, {
     strategy: "pierce",
-    timeout: PROFILE_EMBED_TIMEOUT,
   });
   const ok = await field.evaluate(async (element: Element, nextValue) => {
     const textarea = element instanceof HTMLTextAreaElement
@@ -268,7 +262,6 @@ async function clickSaveByLabel(page: Page, label: string) {
   await markCfButtonByText(page, label, token);
   const button = await page.waitForSelector(`[data-cfc-mark="${token}"]`, {
     strategy: "pierce",
-    timeout: PROFILE_EMBED_TIMEOUT,
   });
   await button.click();
 }
@@ -295,7 +288,6 @@ async function markCfButtonByText(page: Page, label: string, token: string) {
       const clickTarget = (host.shadowRoot?.querySelector("[data-cf-button]") as
         | HTMLElement
         | null) ?? host;
-      clickTarget.scrollIntoView({ block: "center", inline: "center" });
       clickTarget.setAttribute("data-cfc-mark", targetToken);
       return true;
     }

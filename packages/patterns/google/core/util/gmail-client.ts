@@ -3,7 +3,7 @@
  *
  * This module provides a reusable Gmail client that handles:
  * - Token refresh on 401 errors
- * - Rate limit handling (429) with exponential backoff
+ * - Rate limit handling (429) with immediate retry
  * - Configurable retry logic
  * - Batch API requests for efficiency
  *
@@ -15,11 +15,7 @@
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
-import {
-  getPatternEnvironment,
-  nonPrivateRandom,
-  Writable,
-} from "commonfabric";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 // Re-export the Auth type for convenience
 export type { Auth } from "../gmail-importer.tsx";
@@ -32,10 +28,6 @@ import type { Auth } from "../gmail-importer.tsx";
 export interface GmailClientConfig {
   /** How many times the client will retry after an HTTP failure */
   retries?: number;
-  /** In milliseconds, the delay between making any subsequent requests due to failure */
-  delay?: number;
-  /** In milliseconds, the amount to permanently increment to the `delay` on every 429 response */
-  delayIncrement?: number;
   /** Enable verbose console logging */
   debugMode?: boolean;
   /**
@@ -198,14 +190,10 @@ export function gmailClient(
   auth: Writable<Auth>,
   {
     retries = 3,
-    delay: initialDelay = 1000,
-    delayIncrement = 100,
     debugMode = false,
     onRefresh,
   }: GmailClientConfig = {},
 ): GmailClient {
-  let delay = initialDelay;
-
   async function refreshAuth(): Promise<void> {
     if (onRefresh) {
       debugLog(debugMode, "Refreshing auth token via external callback...");
@@ -319,9 +307,6 @@ export function gmailClient(
 
     if (status === 401) {
       await refreshAuth();
-    } else if (status === 429) {
-      delay += delayIncrement;
-      debugLog(debugMode, `Rate limited, incrementing delay to ${delay}`);
     }
 
     return googleRequest(url, _options, remainingRetries - 1);
@@ -371,7 +356,7 @@ export function gmailClient(
   async function fetchBatch(messages: { id: string }[]): Promise<any[]> {
     if (messages.length === 0) return [];
 
-    const boundary = `batch_${nonPrivateRandom().toString(36).substring(2)}`;
+    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
     debugLog(debugMode, `Processing batch of ${messages.length} messages`);
 
     const batchBody = messages
@@ -491,7 +476,7 @@ Accept: application/json
       );
     }
 
-    const boundary = `batch_${nonPrivateRandom().toString(36).substring(2)}`;
+    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
     debugLog(
       debugMode,
       `Processing attachment batch of ${attachments.length} items`,

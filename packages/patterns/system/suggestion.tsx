@@ -202,7 +202,6 @@ Use the user context above to personalize your suggestions when relevant.`;
           "Ask the user a clarifying question. Options are optional — if provided (2-4 strings), they appear as quick-select buttons alongside a free-text input. If omitted, only a text input is shown. After calling, STOP and wait for the user's answer. Input: { question: string, options?: string[] }",
       },
     },
-    model: "anthropic:claude-sonnet-4-5",
     context,
     resultSchema: toSchema<{ cell: SuggestionResultCell }>(),
     queue: "suggestions",
@@ -234,13 +233,11 @@ Use the user context above to personalize your suggestions when relevant.`;
         $cell={llmResult}
         style={computed(() => (llmResult ? "" : "display:none"))}
       />
-      <cf-cell-context $cell={llmResult}>
-        {ifElse(
-          computed(() => !!llmResult),
-          computed(() => llmResult),
-          undefined,
-        )}
-      </cf-cell-context>
+      {ifElse(
+        computed(() => !!llmResult),
+        computed(() => llmResult),
+        undefined,
+      )}
       <cf-message-beads
         label="suggestion"
         $messages={messages}

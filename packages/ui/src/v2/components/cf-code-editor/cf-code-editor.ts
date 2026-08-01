@@ -72,6 +72,7 @@ import { consume } from "@lit/context";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 import type { DID } from "@commonfabric/identity";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
+import { mentionIdFromCellId } from "../../utils/mention-id.ts";
 import {
   Mentionable,
   MentionableArray,
@@ -736,13 +737,16 @@ export class CFCodeEditor extends BaseElement {
   }
 
   /**
-   * Get the stable piece cell ID for a mentionable item at the given index.
+   * Get the stable piece cell ID for a mentionable item at the given index,
+   * in the BARE embed form wiki-link text persists (see mentionIdFromCellId
+   * — CellHandle.id() is the full schemed URI; renderers add `/of:` back).
    * Returns the pre-resolved ID if available, otherwise falls back to
    * the sub-cell ID (which may be unstable across recomputations).
    */
   private _getPieceId(index: number): string {
-    return this._resolvedPieceIds.get(index) ??
+    const id = this._resolvedPieceIds.get(index) ??
       (this.mentionable?.key(index)?.id() ?? "");
+    return id ? mentionIdFromCellId(id) : id;
   }
 
   /**
@@ -821,9 +825,6 @@ export class CFCodeEditor extends BaseElement {
     if (newValue === currentValue) {
       return;
     }
-
-    // External updates override local edits, so drop any pending debounced write.
-    this._cellController.cancel();
 
     // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
@@ -1734,11 +1735,16 @@ export class CFCodeEditor extends BaseElement {
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
     });
 
-    // Update Cell value IMMEDIATELY (bypass debounce) so Cell sync doesn't revert
+    // Record the rewrite as a local edit through the CellController so it merges
+    // with any pending debounced edit and the controller's pending-edit view
+    // stays consistent with the document. Then flush: this is a remote change,
+    // not user input, so it must persist without waiting on the input-timing
+    // strategy — the blur strategy would otherwise hold it until the next
+    // focus/blur cycle, and a rewrite that arrives while the editor is
+    // unfocused would never be written.
     const newDocValue = this._editorView.state.doc.toString();
-    if (isCellHandle(this.value)) {
-      this.value.set(newDocValue);
-    }
+    this.setValue(newDocValue);
+    this._cellController.flush();
   }
 
   /**

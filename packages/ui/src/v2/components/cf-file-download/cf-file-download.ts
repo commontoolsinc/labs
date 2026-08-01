@@ -168,7 +168,8 @@ export class CFFileDownload extends BaseElement {
       }
 
       @keyframes gentle-pulse {
-        0%, 100% {
+        0%,
+        100% {
           opacity: 1;
         }
         50% {
@@ -178,13 +179,16 @@ export class CFFileDownload extends BaseElement {
 
       /* Shake animation for "not available" feedback */
       @keyframes shake {
-        0%, 100% {
+        0%,
+        100% {
           transform: translateX(0);
         }
-        20%, 60% {
+        20%,
+        60% {
           transform: translateX(-4px);
         }
-        40%, 80% {
+        40%,
+        80% {
           transform: translateX(4px);
         }
       }

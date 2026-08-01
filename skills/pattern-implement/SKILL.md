@@ -83,11 +83,15 @@ static local UI state, or draft/editing state:
 Transient UI state (active tab, selected item, filter text, open modal): apply
 the PerSession new-tab test from the pattern-dev skill.
 
-Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient `Date.now()` and
-`Math.random()` when a pattern needs explicit time or randomness. If a control
-is already bound to a cell, usually via `$value` or `$checked`, let that binding
-own the control value. Use `oncf-change` / `oncf-input` only for dependent state
-or other side effects.
+When a pattern needs explicit time or randomness, call the JavaScript built-ins
+directly: `Date.now()` (or `new Date()`) for the clock and `Math.random()` for
+entropy. These are gated inside a pattern sandbox — allowed only inside a
+handler, where the clock is coarsened to one-second resolution — and throw a
+`TimeCapabilityError` in a `computed()`/`lift()` or at pattern-body level. To
+read a live clock reactively in a `computed()`, use the `#now` wish instead. If
+a control is already bound to a cell, usually via `$value` or `$checked`, let
+that binding own the control value. Use `oncf-change` / `oncf-input` only for
+dependent state or other side effects.
 
 Do not invoke streams or writes while assigning JSX event props. For example,
 `onClick={selectItem.send(index)}` runs during render; use

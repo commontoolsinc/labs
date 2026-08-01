@@ -8,11 +8,10 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
-import { ID, JSONSchema } from "../src/builder/types.ts";
+import { JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -841,7 +840,7 @@ describe("asCell with schema", () => {
     expect(value.context.alias.get().value).toBe(100);
   });
 
-  it.skip("should handle nested references", () => {
+  it("should handle nested references", () => {
     // Create a chain of references
     const innerCell = runtime.getCell<{ value: number }>(
       space,
@@ -903,17 +902,18 @@ describe("asCell with schema", () => {
     expect(isCell(value.context.nested)).toBe(true);
     expect(value.context.nested.get().value).toBe(42);
 
-    // Check that 4 unique documents were read (by entity ID)
+    // Check that exactly the 4 documents in the chain were read (by entity
+    // ID; journal read paths are rooted at the document facet, so cells are
+    // matched by document id rather than by full link equality).
     const log = txToReactivityLog(tx);
     const readEntityIds = new Set(log.reads.map((r) => r.id));
     expect(readEntityIds.size).toBe(4);
-
-    // Verify each cell was read using equals()
-    const readCells = log.reads.map((r) => runtime.getCellFromLink(r));
-    expect(readCells.some((c2) => c2.equals(cell))).toBe(true);
-    expect(readCells.some((c2) => c2.equals(ref3Cell))).toBe(true);
-    expect(readCells.some((c2) => c2.equals(ref2Cell))).toBe(true);
-    expect(readCells.some((c2) => c2.equals(innerCell))).toBe(true);
+    expect(readEntityIds.has(cell.getAsNormalizedFullLink().id)).toBe(true);
+    expect(readEntityIds.has(ref3Cell.getAsNormalizedFullLink().id)).toBe(true);
+    expect(readEntityIds.has(ref2Cell.getAsNormalizedFullLink().id)).toBe(true);
+    expect(readEntityIds.has(innerCell.getAsNormalizedFullLink().id)).toBe(
+      true,
+    );
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
@@ -1181,28 +1181,6 @@ describe("asCell with schema", () => {
     expect(arrayCell.get()).toEqualIgnoringSymbols([10, 20, 30, 40]);
   });
 
-  it("should push values to undefined array with reused IDs", () => {
-    const c = runtime.getCell<{ items?: any[] }>(
-      space,
-      "push-to-undefined-schema-stable-id",
-      undefined,
-      tx,
-    );
-    c.set({});
-    const arrayCell = c.key("items");
-
-    arrayCell.push({ [ID]: "test3", "value": 30 });
-    expect(arrayCell.get()).toEqualIgnoringSymbols([
-      { "value": 30 },
-    ]);
-
-    arrayCell.push({ [ID]: "test3", "value": 40 });
-    expect(arrayCell.get()).toEqualIgnoringSymbols([
-      { "value": 40 }, // happens to overwrite, because IDs are the same
-      { "value": 40 },
-    ]);
-  });
-
   it("should transparently update ids when context changes", () => {
     const testCell = runtime.getCell<any>(
       space,
@@ -1244,7 +1222,6 @@ describe("asCell with schema", () => {
       },
     ];
     const initialDataCopy = JSON.parse(JSON.stringify(initialData));
-    addCommonIDfromObjectID(initialDataCopy);
 
     const frame1 = pushFrame({
       generatedIdCounter: 0,
@@ -1269,7 +1246,6 @@ describe("asCell with schema", () => {
     const linkFromContext1 = parseLink(testCell.getRaw()[0], testCell)!;
 
     const returnedData = JSON.parse(JSON.stringify(testCell.get()));
-    addCommonIDfromObjectID(returnedData);
 
     const frame2 = pushFrame({
       generatedIdCounter: 0,
@@ -1342,7 +1318,7 @@ describe("asCell with schema", () => {
     expect(() => cell.push(42)).toThrow();
   });
 
-  it("should create new entities when pushing to array in frame, but reuse IDs", () => {
+  it("should create new entities when pushing to array in frame", () => {
     const frame = pushFrame();
     const c = runtime.getCell<{ items: any[] }>(
       space,
@@ -1354,8 +1330,8 @@ describe("asCell with schema", () => {
     const arrayCell = c.key("items");
     arrayCell.push({ value: 42 });
     expect(frame.generatedIdCounter).toEqual(1);
-    arrayCell.push({ [ID]: "test", value: 43 });
-    expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
+    arrayCell.push({ value: 43 });
+    expect(frame.generatedIdCounter).toEqual(2);
     popFrame(frame);
     expect(isPrimitiveCellLink(c.getRaw()?.items[0])).toBe(true);
     expect(isPrimitiveCellLink(c.getRaw()?.items[1])).toBe(true);

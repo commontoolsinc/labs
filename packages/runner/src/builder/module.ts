@@ -1,4 +1,7 @@
 import type {
+  AssertPart,
+  AssertRawPart,
+  AssertRecord,
   CellScope,
   FactoryInput,
   Frame,
@@ -16,6 +19,7 @@ import type {
   StripCell,
   toJSON,
 } from "./types.ts";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
 import {
   applyArgumentIfcToResult,
@@ -23,7 +27,11 @@ import {
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToJSON } from "./json-utils.ts";
-import { brandTrustedBuilderArtifact } from "./pattern-metadata.ts";
+import {
+  brandTrustedBuilderArtifact,
+  getArtifactEntryRef,
+} from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -389,7 +397,7 @@ function handlerInternal<E, T>(
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E> {
+): HandlerFactory<E, T> {
   let writableProxy = false;
   if (typeof eventSchema === "function") {
     if (
@@ -420,7 +428,7 @@ function handlerInternal<E, T>(
     stateSchema as JSONSchema | undefined,
   );
 
-  const module: Handler<T, E> & toJSON & {
+  const module: Handler<E, T> & toJSON & {
     bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
@@ -479,28 +487,50 @@ export function handler<
   eventSchema: E,
   stateSchema: T,
   handler: (event: Schema<E>, props: Schema<T>) => any,
-): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+): HandlerFactory<SchemaWithoutCell<E>, SchemaWithoutCell<T>>;
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (Event: E, props: T) => any,
   options: { proxy: true },
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
-export function handler<E, T>(
+): HandlerFactory<E, T>;
+// Declared results, reached only by naming all three type arguments — the
+// same explicit-only rule as `action`'s result overload, mirrored here and in
+// api's `HandlerFunction` (both halves are hand-maintained; an overload
+// present in only one of them is unreachable from patterns while the other's
+// tests stay green). The `=> any` overloads above absorb every inferred call
+// first, so an incidental return never declares a result.
+export function handler<E, T, R>(
+  eventSchema: JSONSchema,
+  stateSchema: JSONSchema,
+  handler: (event: E, props: T) => R,
+): HandlerFactory<E, T, R>;
+export function handler<E, T, R>(
+  handler: (event: E, props: T) => R,
+  options: { proxy: true },
+): HandlerFactory<E, T, R>;
+export function handler<E, T, R>(
+  handler: (event: E, props: T) => R,
+): HandlerFactory<E, T, R>;
+export function handler<E, T, R = void>(
   eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E> {
-  return handlerInternal(eventSchema, stateSchema, handler);
+): HandlerFactory<E, T, R> {
+  return handlerInternal(eventSchema, stateSchema, handler) as HandlerFactory<
+    E,
+    T,
+    R
+  >;
 }
 
 // unsafe closures: doesn't need any arguments.
@@ -510,6 +540,57 @@ export const computed: <T>(fn: () => T) => Reactive<T> = <T>(fn: () => T) =>
   createNodeFactory<any, T>({
     type: "javascript",
     implementation: fn,
+    argumentSchema: false,
+  })(undefined);
+
+/**
+ * Records one operand of an `assert` body and returns it unchanged.
+ *
+ * It stores the resolved value the body computed rather than rendering it. The
+ * array is local to a single evaluation of the body and is discarded unless the
+ * assertion fails, so `assertRenderParts` renders these only on that failing
+ * path — a passing assertion never renders an operand.
+ */
+export const assertCapture = <T>(
+  parts: AssertRawPart[],
+  src: string,
+  value: T,
+): T => {
+  parts.push({ src, value });
+  return value;
+};
+
+/**
+ * Renders the operands captured by `assertCapture` into the record's `parts`.
+ *
+ * A passing assertion (`ok === true`) returns an empty list without touching
+ * the values, so the common case pays nothing to render diagnostics it will
+ * never show. Only a failing assertion renders each captured value with
+ * `toCompactDebugString`.
+ */
+export const assertRenderParts = (
+  ok: boolean,
+  parts: AssertRawPart[],
+): AssertPart[] =>
+  ok ? [] : parts.map(({ src, value }) => ({
+    src,
+    rendered: toCompactDebugString(value),
+  }));
+
+/**
+ * assert: a `computed` for pattern-test assertions that reports its operands.
+ *
+ * The assert-diagnostics transformer rewrites the body to record each operand
+ * and to return an `AssertRecord`, so this implementation is reached only when
+ * a source opts out of the transform. It produces the same record shape with
+ * no operands recorded, so the declared type holds either way.
+ */
+export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
+  fn: () => boolean,
+) =>
+  createNodeFactory<any, AssertRecord>({
+    type: "javascript",
+    implementation: () => ({ ok: fn(), source: "", parts: [] }),
     argumentSchema: false,
   })(undefined);
 
@@ -545,9 +626,30 @@ export const computed: <T>(fn: () => T) => Reactive<T> = <T>(fn: () => T) =>
  */
 // Overload 1: Zero-parameter callback returns Stream<void>
 export function action(_event: () => void): Stream<void>;
-// Overload 2: Parameterized callback returns Stream<T>
-export function action<T>(_event: (event: T) => void): Stream<T>;
-export function action<T>(_event: (event?: T) => void): Stream<T> {
+// Overload 2: Parameterized callback returns Stream<E>
+export function action<E>(_event: (event: E) => void): Stream<E>;
+// Overload 3: a declared result, reached only by supplying both type arguments
+// explicitly — `action<AddTopic, TopicRef>((e) => { ...; return ref })`.
+//
+// The result is NOT inferred from the callback, deliberately. A concise arrow
+// body returns whatever its last call evaluates to, and the common ones return
+// values rather than void — `Cell.set` returns the cell (api `ISettable`), so
+// `action((id: string) => selected.set(id))` would infer a `Cell` result and
+// silently declare a verb result nobody wrote. TypeScript cannot tell that
+// incidental return from a deliberate one, so overload 2 absorbs every
+// callback (anything is assignable to a void-returning signature) and a result
+// has to be asked for by name.
+//
+// Contextual typing does not reach here either: annotating the binding
+// `const v: Stream<E, R> = action(...)` still selects overload 2 and fails to
+// assign. That failure is the intended one — dropping a declared result is a
+// compile error naming `[CELL_RESULT_TYPE]`, not silence.
+export function action<E, R>(
+  _event: (event: E) => R,
+): Stream<E, R>;
+export function action<E, R = void>(
+  _event: (event?: E) => R,
+): Stream<E, R> {
   throw new Error(
     "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
   );
@@ -654,6 +756,22 @@ function prepareInspectableImplementation<
   implementation: T,
 ): T {
   if (Object.isExtensible(implementation)) {
+    return implementation;
+  }
+
+  // A hardened implementation that already carries verified identity must be
+  // returned as-is. Provenance and artifact entry refs are keyed on the
+  // function OBJECT (WeakMaps, the anti-spoof design), so the wrapper below is
+  // a fresh identity-less function: it serializes body-only with no `$implRef`
+  // and re-evaluates bare-SES — module scope gone — on reload (the silent
+  // "helper is not a function" unlink; see the helper-unlink investigation
+  // record). A registered implementation already passed through a factory
+  // once — that is how it was registered — so it already carries its
+  // inspectable metadata and loses nothing by skipping the wrap.
+  if (
+    getVerifiedProvenance(implementation) !== undefined ||
+    getArtifactEntryRef(implementation) !== undefined
+  ) {
     return implementation;
   }
 

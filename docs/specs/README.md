@@ -15,3 +15,58 @@ Two kinds stay here even when the work behind them is finished: a spec that
 remains the best description of the shipped subsystem, and a decision record
 whose decision still governs current behavior (archive it only when the
 decision is reversed or superseded).
+
+## Index
+
+### Pattern construction and authoring
+
+- [Pattern testing](PATTERN_TESTING_SPEC.md)
+- [Pattern construction](pattern-construction/README.md)
+- [Pattern imports](pattern-imports/README.md)
+- [TypeScript transformer](ts-transformer/README.md)
+- [Schema generator](schema-generator/README.md)
+- [Computed-cell identity](computed-cell-identity.md)
+- [Content-addressed action identity](content-addressed-action-identity.md)
+- [Content-addressed module loading](module-loading.md)
+- [Piece source lifecycle](piece-source-lifecycle.md)
+- [Scoped cell instances](scoped-cell-instances.md)
+
+### Data, storage, and execution
+
+- [JSON Schema](json_schema.md)
+- [Sigil data model](data-model/sigil.md)
+- [Sparse-array preservation](sparse-array-preservation.md)
+- [Space model](space-model/README.md)
+- [Formal space-model data specification](space-model-formal-spec/README.md)
+- [Memory v2](memory-v2/README.md)
+- [FUSE filesystem](fuse-filesystem/README.md)
+- [SQLite builtins](sqlite-builtin/README.md)
+- [Persistent scheduler state](persistent-scheduler-state.md)
+- [Scheduler v2](scheduler-v2/README.md)
+- [Server-primary execution](server-side-execution/README.md)
+- [Verifiable execution](verifiable-execution/README.md)
+- [Webhook ingress](webhook-ingress/README.md)
+
+### Contextual flow control and security
+
+- [CFC enforcement mode matrix](cfc-enforcement-matrix.md)
+- [CFC specification change list](cfc-spec-changes.md)
+- [Cross-space integrity](cfc-cross-space-integrity.md)
+- [Exchange-rule authoring](cfc-exchange-rules-authoring.md)
+- [Exchange-rule authoring extensions](cfc-exchange-rules-authoring-extensions.md)
+- [Label-metadata confidentiality](cfc-label-metadata-confidentiality.md)
+- [Observation classes](cfc-observation-classes.md)
+- [Persisted declassification](cfc-persisted-declassification.md)
+- [Range-scoped integrity](cfc-range-scoped-integrity.md)
+- [Render-boundary composition](cfc-render-boundary-composition.md)
+- [Runner future work](cfc-runner-future-work.md)
+- [Template population](cfc-template-population.md)
+- [Value-level provenance](cfc-value-level-provenance.md)
+- [Per-write read-prefix provenance](cfc-write-prefix-provenance.md)
+- [Sandboxing](sandboxing/README.md)
+- [Toolshed access control](toolshed-access-control.md)
+
+### Shared profiles
+
+- [Shared profile space](shared-profile-space.md)
+- [Shared-profile participant rosters](shared-profile-rosters.md)

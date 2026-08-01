@@ -2,10 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
-  DEEP_FREEZE,
   FabricInstance,
+  type FabricOrConvertibleNativeValue,
   type FabricValue,
-  IS_DEEP_FROZEN,
 } from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
@@ -20,12 +19,22 @@ import {
   isConvertibleNativeInstance,
   isFabricCompatible,
   nativeFromFabricValue,
+  shallowCleanArray,
+  shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import {
+  BaseFabricInstance,
+  DEEP_CLONE_CORE,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "@/fabric-instances/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 
@@ -34,7 +43,7 @@ import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
  * `fabricFromNativeValue()` and decodes it back to native form via
  * `nativeFromFabricValue()`.
  */
-function roundTrip(value: FabricValue): FabricValue {
+function roundTrip(value: FabricValue): FabricOrConvertibleNativeValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
 }
 
@@ -154,6 +163,29 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(result.error)).toBe(true);
       expect(result.code).toBe(500);
       expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("restores an overridden `name` when unwrapping a `FabricError`", () => {
+      const err = new TypeError("renamed");
+      err.name = "CustomName";
+      const se = FabricError.fromNativeError(err);
+      const result = nativeFromFabricValue(
+        se as unknown as FabricValue,
+      ) as Error;
+
+      expect(result).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("CustomName");
+      expect(result.message).toBe("renamed");
+    });
+
+    it("leaves the class's own `name` in place when not overridden", () => {
+      const se = FabricError.fromNativeError(new TypeError("plain"));
+      const result = nativeFromFabricValue(
+        se as unknown as FabricValue,
+      ) as Error;
+
+      expect(result).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("TypeError");
     });
 
     it("deeply unwraps `FabricError` in arrays (frozen)", () => {
@@ -358,10 +390,10 @@ describe("native-conversion", () => {
         ): boolean {
           return Object.isFrozen(this);
         }
-        deepClone(_frozen: boolean): CustomFabInst {
+        protected [DEEP_CLONE_CORE](_frozen: boolean): CustomFabInst {
           return new CustomFabInst();
         }
-        protected shallowUnfrozenClone(): CustomFabInst {
+        protected [SHALLOW_UNFROZEN_CLONE](): CustomFabInst {
           return new CustomFabInst();
         }
       }
@@ -568,7 +600,19 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => shallowFabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for arrays with a getter-backed index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(() => shallowFabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
     });
@@ -676,10 +720,14 @@ describe("native-conversion", () => {
         expect(result).toEqual({ exposed: true });
       });
 
-      it("converts arrays with `toJSON()`", () => {
+      it("throws for arrays with `toJSON()`", () => {
+        // An array is answered by the array rule whatever it carries, and that
+        // rule rejects the named own property `toJSON` is.
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
-        expect(shallowFabricFromNativeValue(arr)).toBe("custom array");
+        expect(() => shallowFabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
       });
 
       it("throws if `toJSON()` returns a non-fabric value", () => {
@@ -689,7 +737,7 @@ describe("native-conversion", () => {
           }
         }
         expect(() => shallowFabricFromNativeValue(new BadToJSON())).toThrow(
-          "`toJSON()` on object returned something other than a fabric value",
+          "`toJSON()` on object returned something other than a `FabricValue`",
         );
       });
 
@@ -701,7 +749,7 @@ describe("native-conversion", () => {
         }
         expect(() => shallowFabricFromNativeValue(new ReturnsFunction()))
           .toThrow(
-            "`toJSON()` on object returned something other than a fabric value",
+            "`toJSON()` on object returned something other than a `FabricValue`",
           );
       });
 
@@ -713,15 +761,44 @@ describe("native-conversion", () => {
         }
         expect(() => shallowFabricFromNativeValue(new ReturnsInstance()))
           .toThrow(
-            "`toJSON()` on object returned something other than a fabric value",
+            "`toJSON()` on object returned something other than a `FabricValue`",
           );
+      });
+
+      it("throws if a function's `toJSON()` returns a non-fabric value", () => {
+        const fn = Object.assign(() => 1, { toJSON: () => new Map() });
+        expect(() => shallowFabricFromNativeValue(fn)).toThrow(
+          "`toJSON()` on function returned something other than a `FabricValue`",
+        );
+      });
+
+      it("converts a function via a `toJSON()` returning a fabric value", () => {
+        const fn = Object.assign(() => 1, { toJSON: () => ({ x: 1 }) });
+        expect(shallowFabricFromNativeValue(fn)).toEqual({ x: 1 });
+      });
+    });
+
+    // "Death before confusion": a native type with a dedicated fabric
+    // representation carries no room for extra state, so silently dropping it
+    // would lose data on a round trip.
+    describe("rejects extra enumerable properties", () => {
+      it("throws for a `Date` carrying an extra property", () => {
+        const date = new Date(0) as Date & { extra?: number };
+        date.extra = 1;
+        expect(() => shallowFabricFromNativeValue(date)).toThrow(
+          "Not representable as a `FabricValue`: Date with extra enumerable properties",
+        );
+      });
+
+      it("still converts a `Date` with no extra properties", () => {
+        expect(() => shallowFabricFromNativeValue(new Date(0))).not.toThrow();
       });
     });
 
     describe("throws for non-convertible values", () => {
       it("throws for functions without `toJSON()`", () => {
         expect(() => shallowFabricFromNativeValue(() => {})).toThrow(
-          "Cannot store function per se",
+          "Not representable as a `FabricValue`: function per se",
         );
       });
 
@@ -761,7 +838,7 @@ describe("native-conversion", () => {
 
       it("throws on a unique symbol", () => {
         expect(() => shallowFabricFromNativeValue(Symbol("nope"))).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
     });
@@ -1024,7 +1101,7 @@ describe("native-conversion", () => {
       it("recursively processes nested arrays", () => {
         const date = new Date("2024-01-15T12:00:00.000Z");
         const result = fabricFromNativeValue([[date]]) as unknown[][];
-        expect(result[0][0]).toBeInstanceOf(FabricEpochNsec);
+        expect(result[0]![0]).toBeInstanceOf(FabricEpochNsec);
       });
     });
 
@@ -1122,7 +1199,7 @@ describe("native-conversion", () => {
         const obj: any = { a: 1 };
         obj.self = obj;
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1130,7 +1207,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, 2];
         arr.push(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1140,7 +1217,7 @@ describe("native-conversion", () => {
         a.b = b;
         b.a = a;
         expect(() => fabricFromNativeValue(a)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1149,7 +1226,7 @@ describe("native-conversion", () => {
         arr[0] = 1;
         arr[2] = arr; // sparse array with circular reference at index 2
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
 
@@ -1157,7 +1234,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, undefined, null];
         arr[3] = arr; // array with undefined element + circular reference
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store circular reference",
+          "Not representable as a `FabricValue`: circular reference",
         );
       });
     });
@@ -1165,13 +1242,15 @@ describe("native-conversion", () => {
     describe("throws for non-fabric nested values", () => {
       it("throws for nested unique symbol", () => {
         expect(() => fabricFromNativeValue({ val: Symbol("test") })).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
 
       it("throws for deeply nested non-fabric value", () => {
         expect(() => fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } }))
-          .toThrow("Cannot store unique (uninterned) symbol");
+          .toThrow(
+            "Not representable as a `FabricValue`: unique (uninterned) symbol",
+          );
       });
 
       it("accepts nested `bigint`", () => {
@@ -1335,12 +1414,12 @@ describe("native-conversion", () => {
     describe("handles nested functions", () => {
       it("throws for a function property in an object", () => {
         expect(() => fabricFromNativeValue({ a: 1, fn: () => {}, b: 2 }))
-          .toThrow("Cannot store function per se");
+          .toThrow("Not representable as a `FabricValue`: function per se");
       });
 
       it("throws for a function element in an array", () => {
         expect(() => fabricFromNativeValue([1, () => {}, 3]))
-          .toThrow("Cannot store function per se");
+          .toThrow("Not representable as a `FabricValue`: function per se");
       });
 
       it("converts a nested function with `toJSON()` via its `toJSON()` method", () => {
@@ -1363,7 +1442,7 @@ describe("native-conversion", () => {
     describe("throws for top-level function", () => {
       it("throws when a bare function is passed (not nested)", () => {
         expect(() => fabricFromNativeValue(() => {})).toThrow(
-          "Cannot store function per se",
+          "Not representable as a `FabricValue`: function per se",
         );
       });
     });
@@ -1397,7 +1476,7 @@ describe("native-conversion", () => {
         sparse[0] = 1;
         sparse[2] = 3;
         const result = fabricFromNativeValue([[sparse]]) as unknown[][][];
-        const inner = result[0][0];
+        const inner = result[0]![0]!;
         expect(inner[0]).toBe(1);
         expect(1 in inner).toBe(false); // hole preserved
         expect(inner[2]).toBe(3);
@@ -1432,12 +1511,12 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("throws for arrays with enumerable named properties", () => {
+    describe("throws for arrays with non-index properties", () => {
       it("throws for a top-level array with named properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1445,7 +1524,29 @@ describe("native-conversion", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
         expect(() => fabricFromNativeValue({ data: arr })).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for an array with a getter-backed index", () => {
+        // An accessor is live code, not a value: converting would silently
+        // flatten it to its momentary answer. Reject it loudly instead.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a nested array with a setter-only index", () => {
+        const arr = [1, 2];
+        Object.defineProperty(arr, 0, { set: () => {}, enumerable: true });
+        expect(() => fabricFromNativeValue({ data: arr })).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1455,7 +1556,7 @@ describe("native-conversion", () => {
         sparse[2] = 3;
         sparse.name = "test";
         expect(() => fabricFromNativeValue(sparse)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
 
@@ -1466,7 +1567,141 @@ describe("native-conversion", () => {
         arr.foo = "bar";
         Object.freeze(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a top-level array with a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for an object with a symbol-keyed property", () => {
+        // Previously such a property was silently dropped, which is exactly the
+        // confusion the array rule already refuses to allow.
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(() => fabricFromNativeValue(obj)).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
+      });
+
+      it("throws for an object with a non-enumerable string-keyed property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(() => fabricFromNativeValue(obj)).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
+      });
+
+      it("throws for a symbol-keyed object nested inside an array", () => {
+        const inner = { a: 1 } as Record<string | symbol, unknown>;
+        inner[Symbol("s")] = 2;
+        expect(() => fabricFromNativeValue([inner])).toThrow(
+          "Not representable as a `FabricValue`: object that is not an inert plain object",
+        );
+      });
+
+      it("throws for an array with a non-enumerable named property", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a non-array whose prototype is `Array.prototype`", () => {
+        // Such a value has `constructor === Array`, so type-tag dispatch routes
+        // it to array handling even though `Array.isArray()` is `false` for it.
+        // It has no fabric representation as either an array or an object, so
+        // it must be rejected rather than quietly converted.
+        const fake = Object.create(Array.prototype) as Record<string, unknown>;
+        fake[0] = "a";
+        fake.length = 1;
+        expect(() => fabricFromNativeValue(fake)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a nested array with a symbol-keyed property", () => {
+        const arr = [1, 2];
+        (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
+        expect(() => fabricFromNativeValue({ data: arr })).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+    });
+
+    describe("throws for indirect `Array` instances", () => {
+      it("throws for an `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(() => fabricFromNativeValue(sub)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a nested `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(() => fabricFromNativeValue({ data: sub })).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws even for an already-frozen subclass instance", () => {
+        // The case the deep-frozen identity short-circuit would otherwise wave
+        // through unconverted, prototype and all: iteration answers content
+        // that the indices never show, and freezing the instance does nothing
+        // about the prototype that does it.
+        class Smuggler extends Array {
+          override *[Symbol.iterator](): Generator<unknown> {
+            yield "smuggled";
+          }
+        }
+        const smuggler = new Smuggler();
+        smuggler.push("benign");
+        Object.freeze(smuggler);
+
+        expect([...smuggler]).toEqual(["smuggled"]);
+        expect(smuggler[0]).toBe("benign");
+        expect(() => fabricFromNativeValue(smuggler)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(() => fabricFromNativeValue(severed)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a subclass instance carrying `toJSON()`", () => {
+        // No property an array carries can route it away from the array rule,
+        // on the prototype or as an own key.
+        class ProtoJson extends Array<unknown> {
+          toJSON(): unknown[] {
+            return [7, 8];
+          }
+        }
+        const protoJson = new ProtoJson();
+        protoJson.push(1);
+        expect(() => fabricFromNativeValue(protoJson)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+
+        const ownJson = new (class extends Array<unknown> {})();
+        ownJson.push(1);
+        (ownJson as unknown as Record<string, unknown>).toJSON = () => [9];
+        expect(() => fabricFromNativeValue(ownJson)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
         );
       });
     });
@@ -1535,7 +1770,7 @@ describe("native-conversion", () => {
 
       it("throws on a nested unique symbol", () => {
         expect(() => fabricFromNativeValue({ k: Symbol("nope") })).toThrow(
-          "Cannot store unique (uninterned) symbol",
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
 
@@ -1544,6 +1779,16 @@ describe("native-conversion", () => {
         // -- so the result equals the constructed sentinel by identity.
         const out = fabricFromNativeValue(Symbol.for("identity-check"));
         expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
+      });
+
+      it("throws on a top-level unique symbol (freeze default)", () => {
+        // A unique symbol is not a `FabricValue`; conversion rejects it
+        // regardless of the `freeze` flag -- the deep-frozen fast-path
+        // (`isDeepFrozenFabricValue`) must not admit it and short-circuit the
+        // validation that `freeze=false` performs (see below).
+        expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
+        );
       });
     });
 
@@ -1646,7 +1891,7 @@ describe("native-conversion", () => {
           Record<string, unknown>
         >;
         expect(Object.getPrototypeOf(result.nested)).toBe(null);
-        expect(result.nested.val).toBe(42);
+        expect(result.nested!.val).toBe(42);
       });
     });
   });
@@ -1799,6 +2044,288 @@ describe("native-conversion", () => {
     it("rejects objects with `toJSON()` returning non-fabric values", () => {
       const obj = { toJSON: () => Symbol("bad") };
       expect(isFabricCompatible(obj)).toBe(false);
+    });
+
+    it("accepts a function with `toJSON()` returning a fabric value", () => {
+      const fn = Object.assign(() => 1, { toJSON: () => ({ x: 1 }) });
+      expect(isFabricCompatible(fn)).toBe(true);
+    });
+
+    it("rejects a function with `toJSON()` returning a non-fabric value", () => {
+      const fn = Object.assign(() => 1, { toJSON: () => Symbol("bad") });
+      expect(isFabricCompatible(fn)).toBe(false);
+    });
+
+    it("rejects a plain function", () => {
+      expect(isFabricCompatible(() => 1)).toBe(false);
+    });
+
+    // -- Arrays carrying named properties --
+    it("rejects an array with extra named properties", () => {
+      const arr = [1, 2, 3] as number[] & { extra?: string };
+      arr.extra = "nope";
+      expect(isFabricCompatible(arr)).toBe(false);
+    });
+
+    describe("indirect `Array` instances", () => {
+      it("rejects an `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(isFabricCompatible(sub)).toBe(false);
+        expect(isFabricCompatible({ data: sub })).toBe(false);
+      });
+
+      it("rejects an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(isFabricCompatible(severed)).toBe(false);
+      });
+    });
+
+    it("rejects an object with a symbol-keyed property", () => {
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      obj[Symbol("s")] = 2;
+      expect(isFabricCompatible(obj)).toBe(false);
+    });
+
+    it("rejects an object with a non-enumerable string-keyed property", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+      expect(isFabricCompatible(obj)).toBe(false);
+    });
+
+    it("rejects an array with named properties nested inside an object", () => {
+      const arr = [1] as number[] & { extra?: string };
+      arr.extra = "nope";
+      expect(isFabricCompatible({ list: arr })).toBe(false);
+    });
+  });
+
+  describe("shallowCleanPlainObject()", () => {
+    it("drops a symbol-keyed property, enumerable or not", () => {
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      obj[Symbol("enum")] = 2;
+      Object.defineProperty(obj, Symbol("nonEnum"), {
+        value: 3,
+        enumerable: false,
+      });
+
+      const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
+
+      expect(isInertPlainObject(result)).toBe(true);
+      expect(result).toEqual({ a: 1 });
+    });
+
+    it("drops a non-enumerable string-keyed property", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+
+      const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
+
+      expect(Object.getOwnPropertyNames(result)).toEqual(["a"]);
+    });
+
+    it("preserves a stored `undefined` as a present key", () => {
+      const result = shallowCleanPlainObject({ a: undefined }) as Record<
+        string,
+        unknown
+      >;
+
+      expect("a" in result).toBe(true);
+      expect(result.a).toBe(undefined);
+    });
+
+    it("returns a frozen result by default, and a mutable one on request", () => {
+      expect(Object.isFrozen(shallowCleanPlainObject({ a: 1 }) as object)).toBe(
+        true,
+      );
+      expect(
+        Object.isFrozen(shallowCleanPlainObject({ a: 1 }, false) as object),
+      )
+        .toBe(false);
+    });
+
+    it("does not mutate or alias its input, and copies values by reference", () => {
+      const inner = { deep: 1 };
+      const obj = { inner } as Record<string | symbol, unknown>;
+      obj[Symbol("s")] = 2;
+
+      const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
+
+      expect(result).not.toBe(obj);
+      expect(result.inner).toBe(inner);
+      expect(Object.getOwnPropertySymbols(obj)).toHaveLength(1); // input intact
+    });
+
+    it("produces a value the conversion functions accept", () => {
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      obj[Symbol("s")] = 2;
+
+      expect(() => shallowFabricFromNativeValue(obj)).toThrow();
+      expect(() =>
+        shallowFabricFromNativeValue(shallowCleanPlainObject(obj, false))
+      )
+        .not.toThrow();
+    });
+  });
+
+  describe("shallowCleanArray()", () => {
+    it("drops an enumerable named property", () => {
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(isArrayWithOnlyIndexProperties(result)).toBe(true);
+      expect(result).toEqual([1, 2, 3]);
+    });
+
+    it("drops a non-enumerable named property", () => {
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(isArrayWithOnlyIndexProperties(result)).toBe(true);
+      expect(Object.getOwnPropertyNames(result)).toEqual([
+        "0",
+        "1",
+        "2",
+        "length",
+      ]);
+    });
+
+    it("drops a symbol-keyed property, enumerable or not", () => {
+      const arr = [1, 2];
+      (arr as unknown as Record<symbol, unknown>)[Symbol("enum")] = "x";
+      Object.defineProperty(arr, Symbol("nonEnum"), {
+        value: "y",
+        enumerable: false,
+      });
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(isArrayWithOnlyIndexProperties(result)).toBe(true);
+      expect(Object.getOwnPropertySymbols(result)).toEqual([]);
+    });
+
+    it("preserves interior holes as holes rather than `undefined`", () => {
+      const arr: unknown[] = [];
+      arr[0] = 1;
+      arr[2] = 3;
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result.length).toBe(3);
+      expect(0 in result).toBe(true);
+      expect(1 in result).toBe(false); // the hole
+      expect(2 in result).toBe(true);
+    });
+
+    it("preserves trailing holes, so `length` survives", () => {
+      // Assigning element-by-element without setting `length` first would
+      // truncate these away.
+      const arr: unknown[] = [];
+      arr[0] = 1;
+      arr.length = 10;
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result.length).toBe(10);
+      expect(1 in result).toBe(false);
+    });
+
+    it("does not probe every index below `length`", () => {
+      // A hugely sparse array must not be walked slot by slot from JS. The
+      // engine still scans the index range to find which keys exist, so this
+      // is not O(present elements); what it pins is that the scan is not done
+      // here, one property access at a time.
+      const target: unknown[] = [];
+      target.length = 1_000_000;
+      target[5] = "x";
+
+      let probes = 0;
+      const counting = new Proxy(target, {
+        has(t, p) {
+          probes++;
+          return Reflect.has(t, p);
+        },
+        get(t, p, r) {
+          if (p !== "length") probes++;
+          return Reflect.get(t, p, r);
+        },
+      });
+
+      const result = shallowCleanArray(counting) as unknown[];
+
+      expect(result.length).toBe(1_000_000);
+      expect(result[5]).toBe("x");
+      expect(probes).toBeLessThan(100);
+    });
+
+    it("copies every index even when a proxy reports a named key first", () => {
+      // A `Proxy` chooses its own key order, so index keys need not come first
+      // the way they do on an ordinary array. Stopping at the first non-index
+      // key would therefore silently drop elements -- here, all of them.
+      const target = [10, 20];
+      const reordered = new Proxy(target, {
+        ownKeys: () => ["foo", "0", "1", "length"],
+        getOwnPropertyDescriptor: (t, p) => {
+          if (p === "foo") {
+            return { configurable: true, enumerable: true, value: "x" };
+          }
+          return Object.getOwnPropertyDescriptor(t, p);
+        },
+      });
+
+      expect(shallowCleanArray(reordered)).toEqual([10, 20]);
+    });
+
+    it("distinguishes a stored `undefined` from a hole", () => {
+      const arr: unknown[] = [undefined, 2];
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(0 in result).toBe(true);
+      expect(result[0]).toBe(undefined);
+    });
+
+    it("returns a frozen result by default, and a mutable one on request", () => {
+      const arr = [1, 2, 3];
+
+      expect(Object.isFrozen(shallowCleanArray(arr) as unknown[])).toBe(true);
+      expect(Object.isFrozen(shallowCleanArray(arr, false) as unknown[]))
+        .toBe(false);
+    });
+
+    it("does not mutate or alias its input", () => {
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result).not.toBe(arr);
+      expect(arr.foo).toBe("bar"); // input untouched
+    });
+
+    it("copies elements by reference, being a shallow operation", () => {
+      const inner = { a: 1 };
+      const arr = [inner] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result[0]).toBe(inner);
+    });
+
+    it("produces a value the conversion functions accept", () => {
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      expect(() => shallowFabricFromNativeValue(arr)).toThrow();
+      expect(() => shallowFabricFromNativeValue(shallowCleanArray(arr, false)))
+        .not.toThrow();
     });
   });
 });

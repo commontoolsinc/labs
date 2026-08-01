@@ -16,7 +16,6 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const SHARED_PROFILE_TIMEOUT = 30_000;
 const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 
 describe("shared profile integration test", () => {
@@ -111,7 +110,6 @@ async function waitForSelector(page: Page, selector: string) {
   try {
     await page.waitForSelector(selector, {
       strategy: "pierce",
-      timeout: SHARED_PROFILE_TIMEOUT,
     });
   } catch (cause) {
     const bodyText = await page.evaluate(() => document.body?.innerText ?? "")
@@ -136,9 +134,7 @@ async function submitProfileCreate(
   // `inputId: "wish-profile-name-input"`). `fillCfInput` drives the DOM like a
   // user and calls the host's `commit()` (a no-op for a cell-less submit input),
   // then the trusted submit click carries the typed text as event.target.value.
-  await fillCfInput(page, inputSelector, message, {
-    timeout: SHARED_PROFILE_TIMEOUT,
-  });
+  await fillCfInput(page, inputSelector, message);
   await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
   await waitForRuntimeIdle(page);
 }

@@ -6,15 +6,18 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
-import { parseDocument, SAMPLE } from "./view-helpers.ts";
+import { parseDocument, promptText, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
-import type { Semantics } from "../lib/view/semantics.ts";
+import type { Semantics } from "../lib/view/languages/language.ts";
 import type { EditableSource } from "../lib/view/editsource.ts";
 import type { DirEntry, FileGateway } from "../lib/view/filegateway.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
+import { overlayBox, renderFrame, type ViewState } from "../lib/view/render.ts";
+import type { Document } from "../lib/view/model.ts";
+import { frameTop, maxTop } from "../lib/view/actions.ts";
 
 // --- key helpers -----------------------------------------------------------
 
@@ -28,6 +31,15 @@ function press(s: Session, ...names: string[]): void {
 
 function type(s: Session, text: string): void {
   for (const ch of text) s.handleKey({ name: ch, char: ch });
+}
+
+/** Put the final display row on the viewport's last content row. */
+function lastFullPage(s: Session): void {
+  const view = s.view();
+  const rowCount = view.wrapPlan?.rowCount ?? s.displayDoc().lines.length;
+  const top = maxTop(rowCount, view.height);
+  press(s, "G");
+  press(s, ...Array(s.view().top - top).fill("k"));
 }
 
 function alt(name: string, char?: string): Key {
@@ -52,7 +64,7 @@ function makeSession(width = 90, height = 24): Session {
   );
 }
 
-// --- noticeLines: more than six edited files (236-238) ----------------------
+// --- save dialog: more than six edited files -------------------------------
 
 Deno.test("session: the save prompt lists six files plus an '… and N more' line", () => {
   const path = "/work/main.ts";
@@ -74,15 +86,16 @@ Deno.test("session: the save prompt lists six files plus an '… and N more' lin
     undefined,
     source,
   );
-  press(s, "down"); // reveal the cursor
+  press(s, "e"); // reveal the cursor
   type(s, "X"); // dirty the buffer
   press(s, "ctrl-c"); // raise the save prompt
-  const notice = s.view().notice!;
-  assert(notice, "the notice lists the files");
-  assertEquals(notice[0], "9 files with changes:");
+  const body = s.view().dialog!.body;
+  assert(body, "the dialog lists the files");
+  assert(body[0].includes("9 files"), body[0]);
   // Six files are shown, then a summary line for the remaining three.
-  assertEquals(notice.length, 1 + 6 + 1);
-  assertEquals(notice[notice.length - 1], "  … and 3 more");
+  const fileLines = body.filter((l) => l.trimStart().startsWith("file"));
+  assertEquals(fileLines.length, 6, "six files listed");
+  assertEquals(body[body.length - 1], "  … and 3 more");
 });
 
 Deno.test("session: a single edited file shows no notice list", () => {
@@ -102,11 +115,11 @@ Deno.test("session: a single edited file shows no notice list", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   type(s, "Y");
   press(s, "ctrl-c");
-  assertEquals(s.view().notice, null, "one file needs no list");
-  assert(s.view().inputLine?.includes("solo.ts"), s.view().inputLine ?? "");
+  assertEquals(s.view().dialog!.body.length, 1, "one file needs no list");
+  assert(promptText(s.view()).includes("solo.ts"), promptText(s.view()));
 });
 
 // --- selectNode out-of-range guard (288) ------------------------------------
@@ -204,7 +217,14 @@ function externalSession(destLine = 1, fileLines = 3): {
     prewarm: () => {},
     fileLines: (p) => p === filePath ? parseDocument(fileText).lines : null,
     definitionOf: () => [
-      { name: "ext", filePath, fileOffset: 0, line: destLine + 1, preview: "" },
+      {
+        name: "ext",
+        filePath,
+        fileOffset: 0,
+        line: destLine + 1,
+        col: 4,
+        preview: "",
+      },
     ],
   };
   const doc = parseDocument(`// transformed: /m.ts\nconst flag = ext();`);
@@ -244,6 +264,104 @@ Deno.test("session: card selection wraps at the bottom and scrolls to stay visib
   assertEquals(s.view().overlay!.selectedLine, undefined, "deselected at top");
   assertEquals(s.view().overlay!.scroll, 0, "scroll reset");
   assert(lastScroll >= 0);
+});
+
+Deno.test("session: Enter on a card's '… N more' line expands the list in place", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 16; i++) src += `const v${i} = ${i};\n`;
+  const doc = parseDocument(src);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 100, height: 40 },
+  );
+  selectByLabel(s, "app.ts"); // the file section
+  press(s, "enter"); // open its card
+  const lines = () => s.view().overlay!.lines;
+  const moreLine = lines().findIndex((l) => l.text.includes("2 more"));
+  assert(moreLine >= 0, "the card is truncated with a more line");
+  // Move the selection down until it lands on the "… 2 more" line (the last
+  // selectable target), then press Enter to expand.
+  let guard = 0;
+  while (s.view().overlay!.selectedLine !== moreLine && guard++ < 100) {
+    press(s, "down");
+  }
+  assertEquals(s.view().overlay!.selectedLine, moreLine, "more line selected");
+  // 'z' (reveal) has no destination on a "… N more" line, so it does nothing.
+  press(s, "z");
+  assert(s.view().overlay !== null, "z left the card open");
+  assertEquals(
+    s.view().overlay!.selectedLine,
+    moreLine,
+    "still on the more line",
+  );
+  press(s, "enter");
+  assert(!lines().some((l) => l.text.includes("more")), "no more line now");
+  assert(lines().some((l) => l.text.includes("v15")), "every child listed");
+});
+
+Deno.test("session: following card references stacks them; Esc walks back, q closes all", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 4; i++) src += `const v${i} = ${i};\n`;
+  const doc = parseDocument(src);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 100, height: 40 },
+  );
+  selectByLabel(s, "app.ts");
+  press(s, "enter"); // open the file section's card
+  const sectionTitle = s.view().overlay!.title;
+  assert(!s.view().overlay!.footer.includes("back"), "first card: Esc closes");
+  press(s, "down"); // select the first outline child (v0)
+  press(s, "enter"); // open v0's card, pushing the section card
+  assert(s.view().overlay!.title.includes("v0"), s.view().overlay!.title);
+  assert(
+    s.view().overlay!.footer.includes("esc back"),
+    "footer offers go-back",
+  );
+  press(s, "escape"); // pop back to the section card
+  assertEquals(
+    s.view().overlay!.title,
+    sectionTitle,
+    "back on the section card",
+  );
+  assertEquals(
+    s.view().overlay!.selectedLine !== undefined,
+    true,
+    "v0 reselected",
+  );
+  press(s, "escape"); // empty stack -> close to the main view
+  assertEquals(s.view().overlay, null, "the last Esc closes the card");
+  // q from within a stack closes everything at once.
+  press(s, "enter"); // reopen the section card
+  press(s, "down");
+  press(s, "enter"); // v0's card (stack: section)
+  press(s, "q");
+  assertEquals(s.view().overlay, null, "q closed the whole stack");
+});
+
+Deno.test("session: Enter on a 'defined elsewhere' entry, then Esc, returns to the card", () => {
+  const { s } = externalSession(1, 4);
+  const cardTitle = s.view().overlay!.title; // the flag card
+  press(s, "down"); // select the external reference
+  press(s, "enter"); // open the external file over the card
+  assert(
+    s.view().overlay!.title.includes("ext.ts"),
+    "opened the external file",
+  );
+  assert(
+    s.view().overlay!.title.includes("line 3, column 5"),
+    "shows the exact definition position",
+  );
+  assert(
+    s.view().overlay!.footer.includes("esc back"),
+    "the file offers go-back",
+  );
+  press(s, "escape"); // pop back to the card we came from
+  assertEquals(s.view().overlay?.title, cardTitle, "back on the flag card");
+  press(s, "escape"); // empty stack -> close
+  assertEquals(s.view().overlay, null, "the last Esc closes");
 });
 
 Deno.test("session: 'z' on a card opens the external definition file in place", () => {
@@ -348,6 +466,100 @@ Deno.test("session: overlay paging keys scroll the card", () => {
   assertEquals(s.view().overlay, null, "q closed the overlay");
 });
 
+Deno.test("session: overlay letter shortcuts match the help text", () => {
+  const s = makeSession(60, 8);
+  press(s, "?");
+  press(s, "J");
+  assert(s.view().overlay!.scroll > 0, "J scrolled the help overlay");
+  press(s, "K");
+  assertEquals(s.view().overlay!.scroll, 0, "K scrolled back");
+  press(s, "q");
+  assertEquals(s.view().overlay, null, "lowercase q closed the overlay");
+
+  press(s, "?");
+  press(s, "Q");
+  assertEquals(s.quit, true, "uppercase Q requested quit");
+
+  for (const pageUp of ["b", "B"]) {
+    const paging = makeSession(60, 8);
+    press(paging, "?", "space");
+    const afterPageDown = paging.view().overlay!.scroll;
+    assert(afterPageDown > 0, "Space paged down");
+    press(paging, pageUp);
+    assert(
+      paging.view().overlay!.scroll < afterPageDown,
+      `${pageUp} paged up`,
+    );
+  }
+});
+
+Deno.test("session: info-card letter shortcuts match the help text", () => {
+  for (const reveal of ["z", "Z"]) {
+    const s = makeSession();
+    selectByLabel(s, "pattern myPattern");
+    const subject = s.view().selected!;
+    const beforeTop = s.view().top;
+    press(s, "enter");
+    assert(s.view().overlay, "the info card opened");
+    press(s, reveal);
+    assertEquals(s.view().overlay, null, `${reveal} revealed the card subject`);
+    const expectedTop = Math.min(
+      frameTop(
+        subject.startLine,
+        subject.endLine,
+        s.view().height,
+        s.doc.lines.length,
+      ),
+      maxTop(s.doc.lines.length, s.view().height),
+    );
+    assert(expectedTop !== beforeTop, "the fixture requires reframing");
+    assertEquals(
+      s.view().top,
+      expectedTop,
+      `${reveal} framed the card subject`,
+    );
+    assertEquals(
+      s.view().selected?.startOffset,
+      subject.startOffset,
+      `${reveal} kept the card subject selected`,
+    );
+  }
+
+  const s = makeSession();
+  selectByLabel(s, "pattern myPattern");
+  press(s, "enter", "down", "down", "down", "enter");
+  assert(s.view().overlay?.title.includes("lift __cfLift_1"));
+  assertEquals(s.view().selected?.label, "pattern myPattern");
+  press(s, "t");
+  assertEquals(
+    s.view().inputLine,
+    "definition: __cfLift_1",
+    "t used the active followed card rather than the main-view selection",
+  );
+  press(s, "enter");
+  assert(s.view().overlay?.title.includes("__cfLift_1"));
+});
+
+Deno.test("session: overlay scrolling stops once the last line reaches the bottom", () => {
+  const doc = parseDocument(SAMPLE);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 100, height: 20 },
+  );
+  press(s, "?");
+  const lines = s.view().overlay!.lines.length;
+  const innerH = overlayBox(100, 20).innerH;
+  const maxScroll = lines - innerH;
+  assert(maxScroll > 0, "the help is taller than the box");
+  // Hammer down well past the end: the scroll settles so the final line sits on
+  // the last content row, never scrolling it up past the frame.
+  for (let i = 0; i < lines + 5; i++) press(s, "pagedown");
+  assertEquals(s.view().overlay!.scroll, maxScroll, "clamped to the last line");
+  press(s, "down");
+  assertEquals(s.view().overlay!.scroll, maxScroll, "cannot scroll further");
+});
+
 Deno.test("session: Tab toggles a peek card to source and z reveals the subject from there", () => {
   const s = makeSession(100, 24);
   selectByLabel(s, "pattern myPattern");
@@ -446,6 +658,100 @@ Deno.test("session: paging, half-paging and home/end via the keymap", () => {
   assertEquals(s.view().top, 0);
 });
 
+Deno.test("session: capital keycap shortcuts accept either letter case", () => {
+  const cases: Array<{
+    lower: string;
+    upper: string;
+    setup?: readonly string[];
+  }> = [
+    { lower: "q", upper: "Q" },
+    { lower: "j", upper: "J" },
+    { lower: "k", upper: "K", setup: ["j"] },
+    { lower: "h", upper: "H", setup: ["l"] },
+    { lower: "l", upper: "L" },
+    { lower: "b", upper: "B", setup: ["space"] },
+    { lower: "c", upper: "C" },
+  ];
+  for (const { lower, upper, setup = [] } of cases) {
+    const lowerSession = makeSession(30, 8);
+    const upperSession = makeSession(30, 8);
+    press(lowerSession, ...setup, lower);
+    press(upperSession, ...setup, upper);
+    assertEquals(
+      upperSession.view(),
+      lowerSession.view(),
+      `${upper} matches ${lower}`,
+    );
+    assertEquals(
+      upperSession.quit,
+      lowerSession.quit,
+      `${upper} and ${lower} have the same quit state`,
+    );
+  }
+});
+
+Deno.test("session: capital WASD keycaps navigate to the same tree nodes", () => {
+  const cases = [
+    {
+      lower: "w",
+      upper: "W",
+      from: "pattern myPattern",
+      to: "lift __cfLift_1",
+    },
+    {
+      lower: "s",
+      upper: "S",
+      from: "lift __cfLift_1",
+      to: "pattern myPattern",
+    },
+    { lower: "a", upper: "A", from: "pattern myPattern", to: "▸ /app.ts" },
+    { lower: "d", upper: "D", from: "pattern myPattern", to: "λ(input)" },
+  ];
+  for (const { lower, upper, from, to } of cases) {
+    const lowerSession = makeSession();
+    const upperSession = makeSession();
+    selectByLabel(lowerSession, from);
+    selectByLabel(upperSession, from);
+    press(lowerSession, lower);
+    press(upperSession, upper);
+    assertEquals(
+      lowerSession.view().selected?.label,
+      to,
+      `${lower} reached ${to}`,
+    );
+    assertEquals(
+      upperSession.view(),
+      lowerSession.view(),
+      `${upper} matches ${lower}`,
+    );
+  }
+});
+
+Deno.test("session: capital Z keycap frames the selected node", () => {
+  const height = 8;
+  const lowerSession = makeSession(80, height);
+  const upperSession = makeSession(80, height);
+  selectByLabel(lowerSession, "pattern myPattern");
+  selectByLabel(upperSession, "pattern myPattern");
+  const node = lowerSession.view().selected!;
+  press(lowerSession, "g");
+  press(upperSession, "g");
+  assertEquals(lowerSession.view().top, 0);
+  assertEquals(upperSession.view().top, 0);
+
+  press(lowerSession, "z");
+  press(upperSession, "Z");
+  const expected = frameTop(
+    node.startLine,
+    node.endLine,
+    height,
+    lowerSession.doc.lines.length,
+  );
+  assert(expected > 0, "the fixture requires reframing from the top");
+  assertEquals(lowerSession.view().top, expected, "z framed the node");
+  assertEquals(upperSession.view(), lowerSession.view(), "Z matches z");
+});
+
 Deno.test("session: Enter with no selection prompts to select a node", () => {
   const s = makeSession();
   press(s, "enter");
@@ -455,8 +761,14 @@ Deno.test("session: Enter with no selection prompts to select a node", () => {
 Deno.test("session: 'z' in pager mode frames the selected node", () => {
   const s = makeSession(80, 8);
   selectByLabel(s, "pattern myPattern");
+  press(s, "g");
   press(s, "z");
-  assert(s.view().top >= 0, "z framed the node");
+  const node = s.view().selected!;
+  assertEquals(
+    s.view().top,
+    frameTop(node.startLine, node.endLine, 8, s.doc.lines.length),
+    "z framed the node",
+  );
 });
 
 Deno.test("session: '#' toggles line numbers and escape clears selection & search", () => {
@@ -532,7 +844,7 @@ Deno.test("session: revealing the cursor on a non-editable view reports the reas
     { color: false, showLineNumbers: false },
     { width: 40, height: 10 },
   );
-  press(s, "down"); // try to reveal the cursor
+  press(s, "e"); // try to reveal the cursor
   assert(s.view().cursor === null, "no cursor without a source");
   assert(
     s.view().message.includes("no underlying file"),
@@ -540,7 +852,7 @@ Deno.test("session: revealing the cursor on a non-editable view reports the reas
   );
 });
 
-Deno.test("session: a read-only source reports its reason when arrowed", () => {
+Deno.test("session: a read-only source reports its reason on edit", () => {
   const doc = parseDocument("const a = 1;\n");
   const source: EditableSource = {
     label: null,
@@ -556,14 +868,14 @@ Deno.test("session: a read-only source reports its reason when arrowed", () => {
     undefined,
     source,
   );
-  press(s, "left");
+  press(s, "e");
   assertEquals(s.view().cursor, null);
   assert(s.view().message.includes("read-only"), s.view().message);
 });
 
 Deno.test("session: word, line and buffer movement in a file buffer", () => {
   const { s } = fileSession("alpha beta gamma\nsecond line here\nthird\n");
-  press(s, "down"); // reveal cursor at top
+  press(s, "e"); // reveal cursor at top
   assertEquals(s.view().cursor, { line: 0, col: 0 });
   s.handleKey(alt("f")); // word forward
   assert((s.view().cursor?.col ?? 0) > 0, "M-f moved forward a word");
@@ -605,7 +917,7 @@ Deno.test("session: cursor paging up and down moves the cursor by a page", () =>
     60,
     8,
   );
-  press(s, "down"); // reveal cursor at top
+  press(s, "e"); // reveal cursor at top
   press(s, "pagedown");
   assert((s.view().cursor?.line ?? 0) > 0, "pagedown moved the cursor");
   const afterDown = s.view().cursor!.line;
@@ -619,7 +931,7 @@ Deno.test("session: cursor paging up and down moves the cursor by a page", () =>
 
 Deno.test("session: typing, tab, space, kill-line, yank and word-case edits in a file", () => {
   const { s } = fileSession("hello world\n");
-  press(s, "down"); // reveal cursor
+  press(s, "e"); // reveal cursor
   press(s, "end"); // end of "hello world"
   type(s, "!"); // insert a char
   assert(s.doc.lines[0].text.endsWith("!"), s.doc.lines[0].text);
@@ -644,9 +956,42 @@ Deno.test("session: typing, tab, space, kill-line, yank and word-case edits in a
   assert(s.doc.lines[0].text.startsWith("Hello"), s.doc.lines[0].text);
 });
 
+Deno.test("session: displayed Alt-letter shortcuts accept either case", () => {
+  const cases: Array<{
+    lower: string;
+    upper: string;
+    text: string;
+    setup?: readonly string[];
+  }> = [
+    { lower: "f", upper: "F", text: "hello world\n" },
+    { lower: "b", upper: "B", text: "hello world\n", setup: ["end"] },
+    { lower: "l", upper: "L", text: "HELLO world\n" },
+    { lower: "u", upper: "U", text: "hello world\n" },
+    { lower: "c", upper: "C", text: "hello world\n" },
+  ];
+  for (const { lower, upper, text, setup = [] } of cases) {
+    const lowerSession = fileSession(text).s;
+    const upperSession = fileSession(text).s;
+    press(lowerSession, "e", ...setup);
+    press(upperSession, "e", ...setup);
+    lowerSession.handleKey(alt(lower));
+    upperSession.handleKey(alt(upper));
+    assertEquals(
+      upperSession.doc.text,
+      lowerSession.doc.text,
+      `Alt-${upper} edits like Alt-${lower}`,
+    );
+    assertEquals(
+      upperSession.view().cursor,
+      lowerSession.view().cursor,
+      `Alt-${upper} moves like Alt-${lower}`,
+    );
+  }
+});
+
 Deno.test("session: delete-forward, backspace, kill-word forward/back, newline and mark/region", () => {
   const { s } = fileSession("abcdef ghij\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "delete"); // delete the 'a'
   assert(s.doc.lines[0].text.startsWith("bcdef"), s.doc.lines[0].text);
   press(s, "ctrl-d"); // delete the 'b'
@@ -673,7 +1018,7 @@ Deno.test("session: delete-forward, backspace, kill-word forward/back, newline a
 
 Deno.test("session: yank-pop in a file rotates the kill ring", () => {
   const { s } = fileSession("one\ntwo\nthree\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-k", "ctrl-k"); // kill "one" then the empty line / newline
   press(s, "down");
   press(s, "ctrl-k");
@@ -684,14 +1029,14 @@ Deno.test("session: yank-pop in a file rotates the kill ring", () => {
 
 Deno.test("session: ctrl-` sets the mark like ctrl-space", () => {
   const { s } = fileSession("mark me\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   s.handleKey({ name: "ctrl-`" });
   assertEquals(s.view().message, "Mark set");
 });
 
 Deno.test("session: an unmodelled Alt combo while editing is a no-op", () => {
   const { s } = fileSession("text\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   const before = s.doc.text;
   s.handleKey(alt("q")); // not a modelled Alt binding
   assertEquals(s.doc.text, before, "unmodelled Alt combo changed nothing");
@@ -699,7 +1044,7 @@ Deno.test("session: an unmodelled Alt combo while editing is a no-op", () => {
 
 Deno.test("session: escape leaves edit mode and triggers a reparse", () => {
   const { s } = fileSession("const a = 1;\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "x"); // dirty + set needsReparse via live highlight
   press(s, "escape"); // leaves edit mode and reparses
   assertEquals(s.view().cursor, null, "cursor hidden after escape");
@@ -707,7 +1052,7 @@ Deno.test("session: escape leaves edit mode and triggers a reparse", () => {
 
 Deno.test("session: ctrl-c while editing quits a clean buffer", () => {
   const { s } = fileSession("clean\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-c");
   assert(s.quit, "ctrl-c quit the clean buffer");
 });
@@ -716,7 +1061,7 @@ Deno.test("session: ctrl-c while editing quits a clean buffer", () => {
 
 Deno.test("session: F3 saves an editable file and ctrl-x ctrl-s also saves", () => {
   const { s, saved } = fileSession("save me\n");
-  press(s, "down"); // reveal cursor at the start
+  press(s, "e"); // reveal cursor at the start
   press(s, "end"); // move to the end of the line
   type(s, "!");
   press(s, "f3");
@@ -778,30 +1123,32 @@ Deno.test("session: a save that throws is reported as a failure", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
+  assert(s.view().cursor !== null, "e entered edit mode");
   type(s, "x");
+  assert(s.doc.lines[0].text.startsWith("x"), "the edit landed");
   press(s, "f3");
   assert(s.view().message.includes("Save failed"), s.view().message);
   assert(s.view().message.includes("disk full"), s.view().message);
 });
 
-Deno.test("session: the quit save-prompt answers y / d / c", () => {
-  // (y) save then quit. Escape leaves edit mode first; q in the pager quits.
+Deno.test("session: the quit save-prompt answers s / d / c", () => {
+  // (s) save then quit. Escape leaves edit mode first; q in the pager quits.
   {
     const { s, saved } = fileSession("one\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "A");
     press(s, "escape"); // back to the pager (the buffer is still dirty)
     press(s, "q"); // dirty -> save prompt
-    assert(s.view().inputLine?.includes("Save changes"), s.view().inputLine!);
-    press(s, "y");
+    assert(promptText(s.view()).includes("Save changes"), promptText(s.view()));
+    press(s, "s");
     assert(saved.text?.includes("A"), saved.text ?? "");
-    assert(s.quit, "y saved and quit");
+    assert(s.quit, "s saved and quit");
   }
   // (d) discard then quit.
   {
     const { s, saved } = fileSession("two\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "B");
     press(s, "escape");
     press(s, "q");
@@ -812,7 +1159,7 @@ Deno.test("session: the quit save-prompt answers y / d / c", () => {
   // (c) cancel stays.
   {
     const { s } = fileSession("three\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "C");
     press(s, "escape");
     press(s, "q");
@@ -823,7 +1170,7 @@ Deno.test("session: the quit save-prompt answers y / d / c", () => {
   // escape also cancels.
   {
     const { s } = fileSession("four\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "D");
     press(s, "escape");
     press(s, "q");
@@ -835,7 +1182,7 @@ Deno.test("session: the quit save-prompt answers y / d / c", () => {
 
 Deno.test("session: requestQuitFromSignal raises the prompt with unsaved edits", () => {
   const { s } = fileSession("sig\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "Z"); // dirty
   const willPrompt = s.requestQuitFromSignal();
   assert(willPrompt, "a dirty buffer prompts on signal");
@@ -845,7 +1192,7 @@ Deno.test("session: requestQuitFromSignal raises the prompt with unsaved edits",
 
 Deno.test("session: requestQuitFromSignal on a clean buffer quits without a prompt", () => {
   const { s } = fileSession("clean\n");
-  press(s, "down"); // reveal cursor but make no edits
+  press(s, "e"); // reveal cursor but make no edits
   const willPrompt = s.requestQuitFromSignal();
   assertEquals(willPrompt, false, "clean buffer does not prompt");
   assert(s.quit, "and it quit");
@@ -867,29 +1214,32 @@ Deno.test("session: C-x C-c quits", () => {
 
 Deno.test("session: ctrl-r on a clean buffer reports nothing to revert", () => {
   const { s } = fileSession("nothing\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-r");
   assertEquals(s.view().message, "Nothing to revert.");
 });
 
 Deno.test("session: a plain-file revert prompt accepts y and reverts all", () => {
   const { s } = fileSession("original line\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "EDIT");
   assert(s.doc.text.includes("EDIT"), "edited");
   press(s, "ctrl-r");
-  assert(s.view().inputLine?.includes("Revert all"), s.view().inputLine!);
+  assert(promptText(s.view()).includes("Revert all"), promptText(s.view()));
   press(s, "y");
   assertEquals(s.doc.text, "original line\n", "reverted to the original");
   assert(s.view().message.includes("Reverted"), s.view().message);
 });
 
-Deno.test("session: a plain-file revert prompt cancels on an unknown key", () => {
+Deno.test("session: a plain-file revert prompt ignores unlisted keys, cancels on c", () => {
   const { s } = fileSession("keep me\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "X");
   press(s, "ctrl-r");
-  press(s, "q"); // not y/a -> cancelled
+  press(s, "q"); // not a button -> nothing happens, the prompt stays up
+  assertEquals(s.view().message, "", "an unlisted key does nothing");
+  assert(promptText(s.view()).includes("Revert"), "the prompt is still up");
+  press(s, "c"); // the Cancel button
   assertEquals(s.view().message, "Cancelled");
   assert(s.doc.text.includes("X"), "edit retained after cancel");
 });
@@ -912,7 +1262,7 @@ Deno.test("session: revert when the source offers none reports it", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   type(s, "x"); // dirty
   press(s, "ctrl-r");
   press(s, "y");
@@ -937,7 +1287,7 @@ Deno.test("session: revert that returns nothing-there is reported", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   type(s, "x"); // dirty
   press(s, "ctrl-r");
   press(s, "y");
@@ -948,7 +1298,7 @@ Deno.test("session: revert that returns nothing-there is reported", () => {
 
 Deno.test("session: ctrl-l when expanding context is unavailable reports it", () => {
   const { s } = fileSession("plain file\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-l"); // a plain file has no expandContext
   assertEquals(s.view().message, "Expanding context isn't available here.");
 });
@@ -975,7 +1325,7 @@ Deno.test("session: ctrl-l in pager mode with no hunk in view reports move-to-a-
   // Pager mode (no cursor): expandRefLine finds no hunk and returns null.
   press(s, "ctrl-l");
   assert(
-    s.view().message.includes("Move to a hunk first"),
+    s.view().message.includes("Move to a hunk's edge"),
     s.view().message,
   );
 });
@@ -995,7 +1345,7 @@ Deno.test("session: ctrl-l when expandContext yields nothing reports no more con
       undefined,
       source,
     );
-    press(s, "down"); // cursor mode
+    press(s, "e"); // cursor mode
     press(s, "ctrl-l");
     assertEquals(s.view().message, "No more context to show.");
   } finally {
@@ -1087,7 +1437,7 @@ function diffSession(ws: DiffWorkspace, height = 20): Session {
 
 /** Reveal the cursor and move it down to the given diff line. */
 function toLine(s: Session, line: number): void {
-  press(s, "down");
+  if (!s.view().cursor) press(s, "e"); // enter edit mode at the top
   let guard = 0;
   while ((s.view().cursor?.line ?? -1) < line && guard++ < 1000) {
     press(s, "down");
@@ -1271,8 +1621,8 @@ Deno.test("diffcov: revert prompt offers hunk / file / all for a diff", () => {
     type(s, "Z");
     assert(s.doc.text !== before, "edited");
     press(s, "ctrl-r");
-    assert(s.view().inputLine?.includes("hunk"), s.view().inputLine!);
-    press(s, "c"); // revert the chunk
+    assert(promptText(s.view()).includes("Hunk"), promptText(s.view()));
+    press(s, "h"); // revert the chunk
     assertEquals(s.doc.text, before, "the chunk reverted");
     assert(s.view().message.includes("Reverted"), s.view().message);
   } finally {
@@ -1296,7 +1646,7 @@ Deno.test("diffcov: revert 'file' scope through the session", () => {
   }
 });
 
-Deno.test("diffcov: an unknown key at the diff revert prompt cancels", () => {
+Deno.test("diffcov: an unlisted key at the diff revert prompt does nothing; Esc cancels", () => {
   const { ws, done } = diffWorkspace();
   try {
     const s = diffSession(ws);
@@ -1304,7 +1654,10 @@ Deno.test("diffcov: an unknown key at the diff revert prompt cancels", () => {
     press(s, "end");
     type(s, "M");
     press(s, "ctrl-r");
-    press(s, "z"); // not c/f/a
+    press(s, "z"); // not a button -> nothing happens
+    assertEquals(s.view().message, "", "an unlisted key does nothing");
+    assert(promptText(s.view()).includes("Revert"), "prompt still up");
+    press(s, "escape"); // Esc cancels (there is a Cancel button)
     assertEquals(s.view().message, "Cancelled");
   } finally {
     done();
@@ -1326,7 +1679,7 @@ Deno.test("diffcov: a diff that matches no file on disk is read-only", () => {
     undefined,
     diffSource(ws, edit),
   );
-  press(s, "down"); // try to reveal the cursor
+  press(s, "e"); // try to reveal the cursor
   assertEquals(s.view().cursor, null, "no cursor on a read-only diff");
   assert(s.view().message.length > 0, s.view().message);
 });
@@ -1391,11 +1744,13 @@ Deno.test("diffcov: pager-mode ctrl-l expands the hunk in view", () => {
       diffSource(ws, edit),
     );
     assert(s.view().canExpand, "expand advertised");
-    press(s, "ctrl-l"); // pager mode expand
-    assert(
-      s.doc.text.includes("alpha") || s.doc.text.includes("beta"),
-      s.doc.text,
+    assertEquals(
+      s.view().expandUp,
+      false,
+      "the quarter-screen target marks the lower hunk edge",
     );
+    press(s, "ctrl-l"); // pager mode expand
+    assert(s.doc.text.includes("theta"), s.doc.text);
   } finally {
     done();
   }
@@ -1417,6 +1772,673 @@ Deno.test("diffcov: pager-mode ctrl-l with a selected hunk expands that hunk", (
     selectByLabel(s, "@@");
     press(s, "ctrl-l");
     assert(s.doc.text.includes("alpha") || s.doc.text.includes("beta"));
+  } finally {
+    done();
+  }
+});
+
+// A hunk tall enough that the quarter-screen expansion target can be scrolled
+// into either half, with room to reveal a full expansion above and below.
+const TALL_LINES = Array.from(
+  { length: 60 },
+  (_, i) => `L${String(i + 1).padStart(2, "0")}`,
+);
+const TALL_FILE = `${TALL_LINES.join("\n")}\n`;
+const TALL_DIFF = `diff --git a/t.ts b/t.ts
+index 0000000..1111111 100644
+--- a/t.ts
++++ b/t.ts
+@@ -25,20 +25,20 @@
+${TALL_LINES.slice(24, 33).map((l) => ` ${l}`).join("\n")}
+-old L34
++L34
+${TALL_LINES.slice(34, 44).map((l) => ` ${l}`).join("\n")}
+`;
+
+/** A session over TALL_DIFF, in pager mode, `height` rows tall. */
+function tallSession(height: number): { s: Session; done: () => void } {
+  const root = Deno.makeTempDirSync();
+  Deno.writeTextFileSync(join(root, "t.ts"), TALL_FILE);
+  const ws: DiffWorkspace = {
+    resolve: (p) => join(root, p),
+    read: (a) => {
+      try {
+        return Deno.readTextFileSync(a);
+      } catch {
+        return null;
+      }
+    },
+  };
+  const model = parseDiff(TALL_DIFF)!;
+  const { doc, edit } = buildDiffDocument(TALL_DIFF, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height },
+    undefined,
+    diffSource(ws, edit),
+  );
+  return { s, done: () => Deno.removeSync(root, { recursive: true }) };
+}
+
+Deno.test("diffcov: pager-mode ctrl-l at a hunk's top expands upwards", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // With the viewport at the top of the hunk, the quarter-screen target is in
+    // the hunk's upper half, so the context comes from above it.
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes("L24"), "revealed the line above the hunk");
+    assert(!s.doc.text.includes("L45"), "did not reveal below the hunk");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: pager-mode ctrl-l at a hunk's bottom expands downwards", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // Scrolled to the end, the quarter-screen target is in the hunk's lower
+    // half, so the context comes from below it.
+    press(s, "G");
+    const view = s.view();
+    assertEquals(view.expandUp, false);
+    assert(
+      view.expandRow !== null,
+      "the bottom body line carries the triangle",
+    );
+    assertEquals(
+      view.diffMetadataRows,
+      [],
+      "there is no adjacent metadata below the triangle",
+    );
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes("L45"), "revealed the line below the hunk");
+    assert(!s.doc.text.includes("L24"), "did not reveal above the hunk");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: padded blank rows do not move the quarter-screen target", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    lines[9] = "new";
+    Deno.writeTextFileSync(join(root, "t.ts"), `${lines.join("\n")}\n`);
+    const diff = `diff --git a/t.ts b/t.ts
+index 0000000..1111111 100644
+--- a/t.ts
++++ b/t.ts
+@@ -10,1 +10,1 @@
+-old
++new`;
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => Deno.readTextFileSync(path),
+    };
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 21 },
+      undefined,
+      diffSource(ws, edit),
+    );
+
+    press(s, "G");
+    assertEquals(s.view().top, 2);
+    assertEquals(
+      s.view().expandUp,
+      false,
+      "the viewport quarter is nearest the hunk's bottom edge",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffcov: pager-mode ctrl-l follows the quarter-screen target as the view scrolls", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // The same session expands up first, then down once scrolled, rather than
+    // repeating one direction until it is exhausted.
+    press(s, "ctrl-l");
+    assert(s.doc.text.includes("L24"), s.doc.text);
+    press(s, "G", "ctrl-l");
+    assert(s.doc.text.includes("L45"), s.doc.text);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: pager-mode ctrl-l measures a selection's hunk from the selection", () => {
+  // Tall enough that both of the hunk's edges are on screen, so which one is
+  // nearest is a real question rather than the only one left.
+  const plain = tallSession(30);
+  try {
+    // Left alone, the quarter-screen target is nearer the hunk's top edge.
+    press(plain.s, "ctrl-l");
+    assert(
+      plain.s.doc.text.includes("L24"),
+      "the quarter-screen target reached upwards",
+    );
+  } finally {
+    plain.done();
+  }
+  const { s, done } = tallSession(30);
+  try {
+    // A selected line low in the hunk puts its bottom edge nearest instead, and
+    // that is the edge that grows: the user picked a place to look.
+    selectByLabel(s, "L37");
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes("L45"), "revealed below the selected line");
+    assert(!s.doc.text.includes("L24"), "did not reveal above the hunk");
+  } finally {
+    done();
+  }
+});
+
+const TWO_HUNK_FILE = `${
+  Array.from({ length: 30 }, (_, i) => `line${i + 1}`).join("\n")
+}\n`;
+const TWO_HUNK_DIFF = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ line4
+-OLD5
++line5
+ line6
+@@ -20,3 +20,3 @@
+ line20
+-OLD21
++line21
+ line22
+`;
+
+Deno.test("filepicker: opening it after an edit leaves the structure tree current", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), TWO_HUNK_FILE);
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(TWO_HUNK_DIFF)!;
+    const { doc, edit } = buildDiffDocument(TWO_HUNK_DIFF, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit),
+      gateway(),
+    );
+    press(s, "e");
+    // Land an edit, then split the line so the hunks below it move down.
+    for (let r = 0; r < 12; r++) {
+      const before = s.doc.text;
+      press(s, "x");
+      if (s.doc.text !== before) break;
+      press(s, "down");
+    }
+    press(s, "enter", "enter", "enter");
+    press(s, "ctrl-x", "ctrl-f"); // the picker drops the text cursor
+    press(s, "escape"); // cancelling returns to navigation
+    // The tree navigation lands on must describe the text as it now stands.
+    const real = parseDiff(s.doc.text)!.files.flatMap((f) => f.hunks).map((
+      h,
+    ) => [h.headerLine, h.endLine]);
+    const tree = s.doc.flatStructure.filter((n) => n.kind === "hunk").map((
+      n,
+    ) => [n.startLine, n.endLine]);
+    assertEquals(tree, real);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+// Four files, one big enough that hiding it takes a large slice of the document
+// off screen while leaving one row behind.
+const FOLD_FILE = (p: string) =>
+  `${
+    Array.from(
+      { length: 40 },
+      (_, i) => `${p}${String(i + 1).padStart(3, "0")}`,
+    )
+      .join("\n")
+  }\n`;
+const FOLD_SMALL = (name: string, p: string) =>
+  `diff --git a/${name} b/${name}
+index 0000000..1111111 100644
+--- a/${name}
++++ b/${name}
+@@ -20,3 +20,3 @@
+ ${p}020
+-old ${p}021
++${p}021
+ ${p}022`;
+const FOLD_DIFF = `${FOLD_SMALL("a.ts", "A")}
+diff --git a/big.ts b/big.ts
+index 0000000..1111111 100644
+--- a/big.ts
++++ b/big.ts
+@@ -5,20 +5,20 @@
+${
+  Array.from({ length: 9 }, (_, i) => ` B${String(i + 5).padStart(3, "0")}`)
+    .join("\n")
+}
+-old B014
++B014
+${
+  Array.from({ length: 10 }, (_, i) => ` B${String(i + 15).padStart(3, "0")}`)
+    .join("\n")
+}
+${FOLD_SMALL("c.ts", "C")}
+${FOLD_SMALL("d.ts", "D")}
+`;
+
+Deno.test("diffcov: pager-mode ctrl-l measures nearest in rows, not document lines", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    for (
+      const [name, p] of [
+        ["a.ts", "A"],
+        ["big.ts", "B"],
+        ["c.ts", "C"],
+        ["d.ts", "D"],
+      ]
+    ) {
+      Deno.writeTextFileSync(join(root, name), FOLD_FILE(p));
+    }
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(FOLD_DIFF)!;
+    const { doc, edit } = buildDiffDocument(FOLD_DIFF, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 23 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    selectByLabel(s, "big.ts");
+    press(s, "f", "escape"); // hide the big file, drop the selection
+    lastFullPage(s);
+    // The quarter-screen target is two display rows above c.ts's hunk and four
+    // below a.ts's. c.ts is what the eye is nearest, so c.ts grows even though
+    // big.ts's hidden lines put its header much farther away in the document.
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes("C019"), "the hunk nearest on screen grew");
+    assert(!s.doc.text.includes("A023"), "the hunk further away did not");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+// The tall hunk with a second file after it, so the content on either side of
+// the hunk can be found by name.
+const PIN_DIFF = `diff --git a/a.ts b/a.ts
+index 0000000..1111111 100644
+--- a/a.ts
++++ b/a.ts
+@@ -25,20 +25,20 @@
+${TALL_LINES.slice(24, 33).map((l) => ` ${l}`).join("\n")}
+-old L34
++L34
+${TALL_LINES.slice(34, 44).map((l) => ` ${l}`).join("\n")}
+diff --git a/b.ts b/b.ts
+index 0000000..1111111 100644
+--- a/b.ts
++++ b/b.ts
+@@ -20,3 +20,3 @@
+ B020
+-old B021
++B021
+ B022
+`;
+
+function pinSession(): { s: Session; done: () => void } {
+  const root = Deno.makeTempDirSync();
+  Deno.writeTextFileSync(join(root, "a.ts"), TALL_FILE);
+  Deno.writeTextFileSync(
+    join(root, "b.ts"),
+    `${
+      Array.from({ length: 40 }, (_, i) => `B${String(i + 1).padStart(3, "0")}`)
+        .join("\n")
+    }\n`,
+  );
+  const ws: DiffWorkspace = {
+    resolve: (p) => join(root, p),
+    read: (a) => {
+      try {
+        return Deno.readTextFileSync(a);
+      } catch {
+        return null;
+      }
+    },
+  };
+  const model = parseDiff(PIN_DIFF)!;
+  const { doc, edit } = buildDiffDocument(PIN_DIFF, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 13 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  return { s, done: () => Deno.removeSync(root, { recursive: true }) };
+}
+
+/** The screen row `text` sits on: negative above the viewport, at or past the
+ * content rows below it. A display row is a document line while nothing is
+ * collapsed. */
+function screenRow(s: Session, text: string): number {
+  const line = s.doc.text.split("\n").indexOf(text);
+  if (line < 0) throw new Error(`line not in the document: ${text}`);
+  return line - s.view().top;
+}
+
+Deno.test("diffcov: expanding upwards holds the content before the hunk still", () => {
+  const { s, done } = pinSession();
+  try {
+    const held = screenRow(s, "+++ b/a.ts");
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assertEquals(
+      screenRow(s, "+++ b/a.ts"),
+      held,
+      "the content before it held",
+    );
+    const revealed = screenRow(s, " L20");
+    assert(
+      revealed >= 0 && revealed < 12,
+      `revealed line on screen: ${revealed}`,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: expanding downwards holds the content after the hunk still", () => {
+  const { s, done } = pinSession();
+  try {
+    // Put the quarter-screen target in the hunk's lower half.
+    press(s, "ctrl-d", "ctrl-d", "j", "j", "j");
+    const held = screenRow(s, "diff --git a/b.ts b/b.ts");
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assertEquals(
+      screenRow(s, "diff --git a/b.ts b/b.ts"),
+      held,
+      "the content after it held",
+    );
+    const revealed = screenRow(s, " L50");
+    assert(
+      revealed >= 0 && revealed < 12,
+      `revealed line on screen: ${revealed}`,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: wrapped expansion holds the content after the hunk still", () => {
+  for (
+    const { width, scroll } of [
+      { width: 2, scroll: 144 },
+      { width: 3, scroll: 79 },
+      { width: 4, scroll: 44 },
+      { width: 5, scroll: 35 },
+    ]
+  ) {
+    const { s, done } = pinSession();
+    try {
+      s.resize(width, 13);
+      press(s, "\\", ...Array(scroll).fill("j"));
+      const before = s.view();
+      assertEquals(before.expandUp, false);
+      const heldLine = s.displayDoc().lines.findIndex((line) =>
+        line.text === "diff --git a/b.ts b/b.ts"
+      );
+      const heldRow = before.wrapPlan!.firstRow[heldLine] - before.top;
+      assertEquals(heldRow, 11, `initial row at width ${width}`);
+
+      press(s, "ctrl-l");
+      const after = s.view();
+      const movedLine = s.displayDoc().lines.findIndex((line) =>
+        line.text === "diff --git a/b.ts b/b.ts"
+      );
+      assertEquals(
+        after.wrapPlan!.firstRow[movedLine] - after.top,
+        heldRow,
+        `held row at width ${width}`,
+      );
+    } finally {
+      done();
+    }
+  }
+});
+
+Deno.test("diffcov: wrapped reveal keeps the next triangle on screen", () => {
+  const { s, done } = tallSession(9);
+  try {
+    s.resize(20, 9);
+    press(s, "\\", "ctrl-l");
+
+    const view = s.view();
+    assert(
+      (view.diffMetadataRows?.length ?? 0) > 0,
+      "the next edge has adjacent metadata",
+    );
+    assertEquals(
+      view.diffAnnotations,
+      [{ line: 5, kind: "expandUp" }],
+      "the metadata label is withheld when its reflow would hide the triangle",
+    );
+    const rendered = renderFrame(s.displayDoc(), view);
+    assert(
+      rendered.slice(0, -1).some((row) => row.endsWith("◥")),
+      "the next expansion triangle remains visible",
+    );
+    assert(
+      rendered.slice(0, -1).every((row) =>
+        !row.includes("^L") && !row.endsWith("█")
+      ),
+      "no orphan metadata connector is drawn in document rows",
+    );
+  } finally {
+    done();
+  }
+});
+
+/** The row texts a frame — or the session itself — puts on screen. */
+function rows(f: { doc: Document; view: ViewState }): string[] {
+  return f.doc.lines.slice(f.view.top, f.view.top + f.view.height - 1)
+    .map((l) => l.text);
+}
+
+function screenOf(s: Session): string[] {
+  return rows({ doc: s.displayDoc(), view: s.view() });
+}
+
+Deno.test("diffcov: the reveal frames run from the screen before to the one after", () => {
+  const { s, done } = pinSession();
+  try {
+    const before = screenOf(s);
+    press(s, "ctrl-l");
+    const reveal = s.pendingReveal!;
+    assertEquals(reveal.count, 10);
+    assertEquals(reveal.up, true);
+    const body = (ls: string[]) => ls.filter((l) => !l.startsWith("@@"));
+    // Nothing shown yet is the picture the user was already looking at, and
+    // everything shown is where it settles, so the frames only ever interpolate.
+    // The lines are what arrive: the header carries its finished counts from the
+    // first frame, reading the range the reveal is heading for rather than
+    // counting up to it.
+    assertEquals(body(rows(s.revealFrame(0)!)), body(before));
+    assert(
+      rows(s.revealFrame(0)!).some((l) => l.startsWith("@@ -15,30")),
+      "the header is already at the range it is heading for",
+    );
+    assertEquals(rows(s.revealFrame(reveal.count)!), screenOf(s));
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: reveal-frame metadata stays beside its triangle", () => {
+  const { s, done } = pinSession();
+  try {
+    press(s, "ctrl-l");
+    const reveal = s.pendingReveal!;
+    for (let shown = 0; shown <= reveal.count; shown++) {
+      const frame = s.revealFrame(shown)!;
+      const annotations = frame.view.diffAnnotations ?? [];
+      const triangle = annotations.find((annotation) =>
+        annotation.kind !== "diffMetadata"
+      );
+      for (
+        const metadata of annotations.filter((annotation) =>
+          annotation.kind === "diffMetadata"
+        )
+      ) {
+        assert(triangle, `metadata has no triangle at frame ${shown}`);
+        assertEquals(
+          Math.abs(metadata.line - triangle.line),
+          1,
+          `metadata is not adjacent at frame ${shown}`,
+        );
+      }
+      const rendered = renderFrame(frame.doc, frame.view);
+      if (rendered.some((row) => row.includes("^L█"))) {
+        assert(
+          rendered.some((row) => row.includes("◥") || row.includes("◢")),
+          `rendered metadata has no triangle at frame ${shown}`,
+        );
+      }
+    }
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: reveal frames land the line meeting the hunk first", () => {
+  const { s, done } = pinSession();
+  try {
+    press(s, "ctrl-l"); // upwards: L15..L24 revealed above the body
+    const first = s.revealFrame(1)!.doc.lines.map((l) => l.text);
+    // L24 meets the hunk, L15 is furthest from it. Landing the furthest first
+    // would put L15 next to the body and show a file that reads L15, L25.
+    assert(first.includes(" L24"), "the line meeting the hunk has landed");
+    assert(!first.includes(" L15"), "the furthest line has not");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: reveal frames landing downwards also start at the hunk", () => {
+  const { s, done } = pinSession();
+  try {
+    press(s, "ctrl-d", "ctrl-d", "j", "j", "j", "ctrl-l"); // downwards
+    const reveal = s.pendingReveal!;
+    assertEquals(reveal.up, false);
+    const first = s.revealFrame(1)!.doc.lines.map((l) => l.text);
+    assert(first.includes(" L45"), "the line meeting the hunk has landed");
+    assert(!first.includes(" L54"), "the furthest line has not");
+    // The held edge stays on its row throughout, not only at the end.
+    for (let shown = 0; shown <= reveal.count; shown++) {
+      const f = s.revealFrame(shown)!;
+      assertEquals(
+        rows(f).indexOf("diff --git a/b.ts b/b.ts"),
+        11,
+        `held edge moved at frame ${shown}`,
+      );
+    }
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: the next key ends the reveal", () => {
+  const { s, done } = pinSession();
+  try {
+    press(s, "ctrl-l");
+    assert(s.pendingReveal !== null, "a reveal is pending");
+    press(s, "j");
+    assertEquals(s.pendingReveal, null);
+    assertEquals(s.revealFrame(1), null);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: pager-mode ctrl-l drops a selection that scrolls out of view", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // The selected line is nearer the hunk's bottom edge. Scrolling it off the
+    // top hands the decision back to the quarter-screen target, which is in the
+    // hunk's upper half and expands upwards.
+    selectByLabel(s, "L37");
+    press(s, "g", "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(
+      s.doc.text.includes("L24"),
+      "the quarter-screen target decided, not the selection",
+    );
+    assert(!s.doc.text.includes("L45"), "the off-screen selection did not");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: pager-mode ctrl-l with a hidden file reports move-to-a-hunk", () => {
+  const { s, done } = tallSession(13);
+  try {
+    press(s, "F"); // hide every file: only the summary row is on screen
+    const before = s.doc.text;
+    press(s, "ctrl-l");
+    assert(
+      s.view().message.includes("Move to a hunk's edge"),
+      s.view().message,
+    );
+    assertEquals(s.doc.text, before, "a hidden hunk is not expanded");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: pager-mode ctrl-l with the file node selected uses the quarter-screen target", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // The file node spans the hunk rather than sitting in it, so it does not
+    // pin the reference line to its own start. The quarter-screen target still
+    // decides.
+    // Selecting scrolls to the node, so scroll to the end after selecting.
+    press(s, "tab", "a", "a", "a");
+    assert(s.view().selected?.label?.includes("t.ts"), "file node selected");
+    press(s, "G", "ctrl-l");
+    assert(s.doc.text.includes("L45"), s.doc.text);
   } finally {
     done();
   }
@@ -1567,7 +2589,7 @@ Deno.test("filepickercov: opening an existing file swaps the buffer", () => {
 
 Deno.test("filepickercov: the picker refuses to open with unsaved edits", () => {
   const s = pickerSession();
-  press(s, "down"); // reveal cursor
+  press(s, "e"); // reveal cursor
   type(s, "X"); // dirty
   press(s, "ctrl-x", "ctrl-f");
   type(s, "file00"); // filter to a single file entry
@@ -2015,7 +3037,7 @@ Deno.test("session: moving the edit cursor off-screen scrolls it back into view"
   const body = Array.from({ length: 40 }, (_, i) => `line${i} = ${i};`);
   const text = [longLine, ...body].join("\n") + "\n";
   const { s } = fileSession(text, 30, 8);
-  press(s, "down"); // reveal cursor at the top
+  press(s, "e"); // reveal cursor at the top
   // Move far down: b.row >= top + rows triggers the downward scroll branch.
   for (let i = 0; i < 30; i++) press(s, "down");
   assert(s.view().top > 0, "scrolled down to keep the cursor visible");
@@ -2070,5 +3092,805 @@ Deno.test("diffcov: removing an added line shrinks the hunk header counts", () =
     assert(headerAfter === "" || headerAfter.startsWith("@@"));
   } finally {
     done();
+  }
+});
+
+// --- only visible hunk edges, and what stops them ---------------------------
+
+/** A diff whose only hunk sits hard against the top of its file, with a second
+ * hunk close enough below that expanding down soon meets it. */
+function edgeSession(diff: string, fileLines: number, height: number) {
+  const root = Deno.makeTempDirSync();
+  Deno.writeTextFileSync(
+    join(root, "m.ts"),
+    `${
+      Array.from({ length: fileLines }, (_, i) => `line${i + 1}`).join("\n")
+    }\n`,
+  );
+  const ws: DiffWorkspace = {
+    resolve: (p) => join(root, p),
+    read: (a) => {
+      try {
+        return Deno.readTextFileSync(a);
+      } catch {
+        return null;
+      }
+    },
+  };
+  const model = parseDiff(diff)!;
+  const { doc, edit } = buildDiffDocument(diff, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height },
+    undefined,
+    diffSource(ws, edit),
+  );
+  return { s, done: () => Deno.removeSync(root, { recursive: true }) };
+}
+
+const AT_TOP_DIFF = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -1,3 +1,3 @@
+ line1
+-OLD2
++line2
+ line3
+`;
+
+const JOINABLE_HUNKS_DIFF = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ line4
+-OLD5
++line5
+ line6
+@@ -14,3 +14,3 @@
+ line14
+-OLD15
++line15
+ line16
+`;
+
+Deno.test("diffcov: a hunk with neither edge on screen offers nothing to expand", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // The hunk runs from row 4 to row 25; twelve rows starting at 6 hold
+    // neither end of it, so there is no edge to aim at and none to offer.
+    press(s, "ctrl-d");
+    assertEquals(s.view().top, 6);
+    assertEquals(s.view().canExpand, false);
+    const before = s.doc.text;
+    press(s, "ctrl-l");
+    assertEquals(s.doc.text, before, "nothing was revealed");
+    assert(
+      s.view().message.includes("Move to a hunk's edge"),
+      s.view().message,
+    );
+    assert(s.transientMessage, "the message takes itself away again");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a hunk against the top of its file says so", () => {
+  const { s, done } = edgeSession(AT_TOP_DIFF, 20, 13);
+  try {
+    // The hunk starts at file line 1, so its top edge — the nearest one to the
+    // expansion target — has nowhere to go.
+    const view = s.view();
+    assertEquals(view.canExpand, false);
+    assertEquals(view.diffAnnotations, []);
+    assert(
+      !renderFrame(s.displayDoc(), view).slice(0, -1).some((row) =>
+        row.endsWith("█")
+      ),
+      "the file boundary has no unpaired block",
+    );
+    const before = s.doc.text;
+    press(s, "ctrl-l");
+    assertEquals(s.view().message, "Top of file.");
+    assert(s.transientMessage, "the message takes itself away again");
+    // Emphatically not the other way: naming an edge means that edge.
+    assertEquals(s.doc.text, before, "nothing was revealed");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a hunk against the bottom of its file says so", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -18,3 +18,3 @@
+ line18
+-OLD19
++line19
+ line20
+`;
+  // A short screen, so scrolling to the end leaves the hunk's bottom edge on it
+  // and its top edge off: the bottom is the only edge to aim at.
+  const { s, done } = edgeSession(diff, 20, 6);
+  try {
+    press(s, "G");
+    const view = s.view();
+    assertEquals(view.canExpand, false);
+    assertEquals(view.diffAnnotations, []);
+    assert(
+      !renderFrame(s.displayDoc(), view).slice(0, -1).some((row) =>
+        row.endsWith("█")
+      ),
+      "the file boundary has no unpaired block",
+    );
+    const before = s.doc.text;
+    press(s, "ctrl-l");
+    assertEquals(s.view().message, "Bottom of file.");
+    assert(s.transientMessage, "the message takes itself away again");
+    // Emphatically not the other way: the top edge has room, but it is not the
+    // edge the user is looking at.
+    assertEquals(s.doc.text, before, "nothing was revealed");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: metadata is not marked without a Ctrl-L edge", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+old mode 100644
+new mode 100755
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -1,5 +1,5 @@
+-OLD1
++line1
+ line2
+ line3
+-OLD4
++line4
+ line5
+\\ No newline at end of file
+`;
+  const ws: DiffWorkspace = {
+    resolve: (path) => path,
+    read: () => null,
+  };
+  const { doc, edit } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 20 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  const view = s.view();
+  assertEquals(view.expandMargin, false);
+  assertEquals(view.canExpand, false);
+  assertEquals(view.diffMetadataRows, []);
+});
+
+Deno.test("diffcov: wrapped expansion annotations are stable between frames", () => {
+  const diff = `diff --git a/a.ts b/a.ts
+index 11111111111111111111..222 100644
+--- a/a.ts
++++ b/a.ts
+@@ -2,3 +2,3 @@
+ old_old_old_old_old
+-OLD_OLD_OLD_OLD_OLD
++NEW_NEW_NEW_NEW_NEW
+ tail_tail_tail_tail_tail`;
+  const ws: DiffWorkspace = {
+    resolve: (path) => path,
+    read: () =>
+      "pre\nold_old_old_old_old\nNEW_NEW_NEW_NEW_NEW\n" +
+      "tail_tail_tail_tail_tail\nafter",
+  };
+  const model = parseDiff(diff)!;
+  const { doc, edit } = buildDiffDocument(diff, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 10, height: 3 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  press(s, "\\", ...Array(11).fill("j"));
+
+  const first = s.view();
+  const firstRows = renderFrame(s.displayDoc(), first);
+  const second = s.view();
+  assertEquals(second.top, first.top);
+  assertEquals(second.diffAnnotations, first.diffAnnotations);
+  assertEquals(renderFrame(s.displayDoc(), second), firstRows);
+});
+
+Deno.test("diffcov: a wrapped edge labels only its closest connector", () => {
+  const { s, done } = edgeSession(JOINABLE_HUNKS_DIFF, 20, 10);
+  try {
+    s.resize(4, 10);
+    press(s, "\\", ...Array(33).fill("j"));
+    const view = s.view();
+    const annotations = view.diffAnnotations ?? [];
+    const triangle = annotations.find((annotation) =>
+      annotation.kind === "expandDown"
+    );
+    const metadata = annotations.find((annotation) =>
+      annotation.kind === "diffMetadata"
+    );
+    assert(triangle && metadata && view.wrapPlan);
+    assert(
+      view.wrapPlan.lastRow[triangle.line] >
+        view.wrapPlan.firstRow[triangle.line],
+      "the marked edge wraps",
+    );
+    const rendered = renderFrame(s.displayDoc(), view);
+    assertEquals(
+      rendered.filter((row) => row.includes("^L█")).length,
+      1,
+    );
+    const labelRow = view.wrapPlan.firstRow[triangle.line] + 1 - view.top;
+    const metadataRow = view.wrapPlan.firstRow[metadata.line] - view.top;
+    assert(rendered[labelRow].endsWith("^L█"));
+    assert(rendered[metadataRow].endsWith("\\█"));
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a moved annotation reclamps horizontal scrolling", () => {
+  const diff = `diff --git a/a.ts b/a.ts
+index 111..222 100644
+--- a/a.ts
++++ b/a.ts
+@@ -2,3 +2,3 @@ ${"z".repeat(40)}
+ old
+-OLD
++NEW
+ tail`;
+  const ws: DiffWorkspace = {
+    resolve: (path) => path,
+    read: () => "pre\nold\nNEW\ntail\nafter",
+  };
+  const model = parseDiff(diff)!;
+  const { doc, edit } = buildDiffDocument(diff, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 7 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  s.view();
+  press(s, ...Array(10).fill("l"));
+  assertEquals(s.view().left, 39);
+
+  press(s, "G");
+  const endView = s.view();
+  assertEquals(
+    endView.diffAnnotations?.find((annotation) =>
+      annotation.kind === "expandDown"
+    )?.line,
+    8,
+  );
+  const connectorRow = s.displayDoc().lines.length - endView.top;
+  assert(
+    renderFrame(s.displayDoc(), endView)[connectorRow].endsWith("^L█"),
+    "the connector adjacent to the final-line triangle labels Ctrl-L",
+  );
+  assertEquals(endView.left, 36);
+  press(s, "l");
+  assertEquals(s.view().left, 36, "right does not move the view backwards");
+});
+
+Deno.test("diffcov: repeated frames reuse the widest-line calculation", () => {
+  const parsed = parseDocument(
+    "ordinary line\n" +
+      "a much longer ordinary line that sets the horizontal limit\n",
+  );
+  let iterations = 0;
+  const lines = new Proxy([...parsed.lines], {
+    get(target, property, receiver) {
+      if (property === Symbol.iterator) {
+        return function* () {
+          iterations++;
+          yield* target;
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const doc = { ...parsed, lines };
+  const source: EditableSource = {
+    label: "width-cache",
+    editable: false,
+    parse: (text) => parseDocument(text),
+    save: () => "",
+    expandContext: () => null,
+  };
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 12, height: 5 },
+    undefined,
+    source,
+  );
+
+  s.view();
+  assertEquals(iterations, 1, "the first frame scans the ordinary lines");
+  s.view();
+  assertEquals(iterations, 1, "the second frame reuses the cached width");
+
+  press(s, "c");
+  assertEquals(iterations, 2, "a new display mode scans the lines once");
+  s.view();
+  assertEquals(iterations, 2, "the new display mode is cached too");
+});
+
+Deno.test("diffcov: revealing the last line between two hunks joins them", () => {
+  const { s, done } = edgeSession(JOINABLE_HUNKS_DIFF, 20, 10);
+  try {
+    lastFullPage(s);
+    const view = s.view();
+    assertEquals(view.expandUp, false);
+    assertEquals(
+      s.displayDoc().lines[view.expandRow!].text,
+      " line6",
+      "the first hunk's last body line carries the triangle",
+    );
+    assertEquals(
+      view.diffMetadataRows?.map((row) => s.displayDoc().lines[row]?.text),
+      ["@@ -14,3 +14,3 @@"],
+      "only the next hunk header carries the adjacent block",
+    );
+    press(s, "ctrl-l"); // reveals the seven lines between the two hunks
+    // Nothing is left between them, so the header that sat there described no
+    // gap at all: one hunk covering both ranges takes its place.
+    assertEquals(
+      parseDiff(s.doc.text)!.files.flatMap((f) => f.hunks).length,
+      1,
+      s.doc.text,
+    );
+    assert(s.doc.text.includes("@@ -4,13 +4,13 @@"), s.doc.text);
+    assert(!s.doc.text.includes("@@ -14,3"), "the joined-away header is gone");
+    // The body reads straight through where the header used to be.
+    const body = s.doc.text.split("\n");
+    assertEquals(body[body.indexOf(" line13") + 1], " line14");
+    // Its room is now measured against the file, not the hunk it swallowed.
+    assertEquals(s.view().canExpand, true, "there is still context to reveal");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a hunk that does not match the file is not joined to one that does", () => {
+  // The second hunk's new side says DIFFERENT15 where the file says line15, so
+  // it is not known to match. Joining it to the first would put lines of
+  // unknown provenance into a range that a save writes.
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ line4
+-OLD5
++line5
+ line6
+@@ -14,3 +14,3 @@
+ line14
+-OLD15
++DIFFERENT15
+ line16
+`;
+  const { s, done } = edgeSession(diff, 20, 10);
+  try {
+    lastFullPage(s);
+    press(s, "ctrl-l");
+    assertEquals(
+      parseDiff(s.doc.text)!.files.flatMap((f) => f.hunks).length,
+      2,
+      "the two hunks stay apart",
+    );
+    // They touch, so there is nothing left to reveal that way — and the file has
+    // not run out, so saying it had would be a lie.
+    press(s, "ctrl-l");
+    assertEquals(s.view().message, "No more context to show.");
+    assertEquals(s.view().canExpand, false);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a one-line hunk still grows the edge it was asked for", () => {
+  // `git diff -U0` emits hunks with no context. A pure insertion is one body
+  // line, so the hunk's midpoint falls exactly on its bottom edge — reading the
+  // direction off the midpoint alone would send this one upwards.
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -9,0 +10,1 @@
++line10
+`;
+  const { s, done } = edgeSession(diff, 20, 2);
+  try {
+    selectByLabel(s, "@@");
+    press(s, "j"); // the header scrolls off while the sole body line remains
+    const view = s.view();
+    assertEquals(view.top, 5);
+    assertEquals(view.selected?.kind, "hunk");
+    assertEquals(view.expandRow, 5, "the sole body line is marked");
+    assertEquals(s.displayDoc().lines[view.expandRow!].text, "+line10");
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes(" line11"), "revealed below the hunk");
+    assert(!s.doc.text.includes(" line9"), "did not reveal above it");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a header-only hunk expands without putting its triangle on the header", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -1,0 +2 @@
++line2
+`;
+  const { s, done } = edgeSession(diff, 20, 8);
+  try {
+    toLine(s, 5);
+    press(s, "end");
+    for (let i = 0; i < "line2".length + 1; i++) press(s, "backspace");
+    press(s, "escape");
+    assert(s.doc.text.includes("@@ -1,0 +1,0 @@"), s.doc.text);
+    assertEquals(s.view().canExpand, true, "the empty hunk can still expand");
+    assertEquals(
+      s.view().expandRow,
+      null,
+      "the header has no expansion triangle",
+    );
+    const before = s.doc.text;
+    press(s, "ctrl-l");
+    assert(s.doc.text !== before, "Ctrl-L expands the empty hunk");
+    assert(s.doc.text.includes(" line1"), s.doc.text);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a header-only hunk at file top expands downward", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -0,0 +1 @@
++line1
+`;
+  const { s, done } = edgeSession(diff, 20, 8);
+  try {
+    toLine(s, 5);
+    press(s, "end");
+    for (let i = 0; i < "line1".length + 1; i++) press(s, "backspace");
+    press(s, "escape");
+    assertEquals(
+      s.view().expandRow,
+      null,
+      "the header has no expansion triangle",
+    );
+    assertEquals(s.view().canExpand, true, "context below is available");
+    press(s, "ctrl-l");
+    assert(s.doc.text.includes(" line1"), s.doc.text);
+    assert(
+      s.view().message.includes("below the hunk"),
+      s.view().message,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a reveal says which way it reached and what it brought back", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // One run of context looks like any other, so the file's own line numbers
+    // are what tie the lines on screen to the file they came from.
+    press(s, "ctrl-l"); // the hunk covers file lines 25-44; upwards from there
+    assertEquals(s.view().message, "Showing lines 15-24 above the hunk.");
+    assert(s.transientMessage, "and it takes itself away again");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a reveal downwards counts from the hunk's last line", () => {
+  const { s, done } = tallSession(13);
+  try {
+    press(s, "G", "ctrl-l");
+    assertEquals(s.view().message, "Showing lines 45-54 below the hunk.");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a reveal that joins two hunks says that too", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ line4
+-OLD5
++line5
+ line6
+@@ -14,3 +14,3 @@
+ line14
+-OLD15
++line15
+ line16
+`;
+  const { s, done } = edgeSession(diff, 20, 10);
+  try {
+    // A header disappearing is otherwise left to be puzzled over.
+    lastFullPage(s);
+    press(s, "ctrl-l");
+    assertEquals(
+      s.view().message,
+      "Showing lines 7-13 below — the two hunks are now one.",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a reveal of a single line does not say lines 15-15", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -2,3 +2,3 @@
+ line2
+-OLD3
++line3
+ line4
+`;
+  // Only line 1 sits above the hunk, so only one line can come back.
+  const { s, done } = edgeSession(diff, 20, 13);
+  try {
+    press(s, "ctrl-l");
+    assertEquals(s.view().message, "Showing line 1 above the hunk.");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: expanding upwards in edit mode leaves a cursor on the header alone", () => {
+  // The revealed lines go in below the hunk's header, so the header does not
+  // move — and the text cursor can rest on one, where it cannot type.
+  const lines = Array.from(
+    { length: 60 },
+    (_, i) => `L${String(i + 1).padStart(2, "0")}`,
+  );
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -40,3 +40,3 @@
+ L40
+-old L41
++L41
+ L42
+`;
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), `${lines.join("\n")}\n`);
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 13 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    press(s, "e", "down", "down", "down", "down"); // onto the `@@` header
+    assertEquals(s.view().cursor?.line, 4);
+    press(s, "ctrl-l");
+    // Still on the header, which is still where it was: carrying the cursor down
+    // with the lines would drop it ten rows away on a line it never chose, and
+    // drag the view along behind it.
+    assertEquals(s.view().cursor?.line, 4, "the cursor stayed on the header");
+    assert(
+      s.doc.text.split("\n")[4].startsWith("@@ -30,13"),
+      s.doc.text.split("\n")[4],
+    );
+    assertEquals(s.view().top, 0, "and the view did not jump");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+// --- reveal-frame remapping and room-less hunks -----------------------------
+
+Deno.test("diffcov: a reveal frame carries a selected node to its shifted place", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // Select the hunk, then reveal: the animation frames redraw the structure,
+    // so revealFrame remaps the selection to where the reveal will leave it.
+    selectByLabel(s, "@@");
+    press(s, "ctrl-l");
+    assert(s.pendingReveal !== null, "a reveal is pending");
+    const frame = s.revealFrame(1)!;
+    assert(frame.view.selected !== null, "the frame keeps the selection");
+    assertEquals(frame.view.selected!.kind, "hunk");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a reveal frame carries surviving search matches to their shifted rows", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // A search on a line low in the hunk leaves a match below the revealed
+    // range. Revealing upward walks lines in above it; a mid-reveal frame keeps
+    // that match, remapped to the row it will end on.
+    press(s, "/");
+    type(s, "L43");
+    press(s, "enter");
+    press(s, "g"); // back to the top so the hunk's top edge is in view
+    assertEquals(s.view().matches?.length, 1, "the search found the line");
+    press(s, "ctrl-l");
+    assert(s.pendingReveal !== null, "a reveal is pending");
+    const frame = s.revealFrame(1)!;
+    assertEquals(
+      frame.view.matches?.length,
+      1,
+      "the surviving match is carried into the frame",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a hunk backing no file offers no edge to expand", () => {
+  // A deleted file's hunk has no workspace file, so expandRoom records nothing
+  // for it; visibleEdges must skip it rather than read a missing room. The
+  // second file's hunk still offers its edges.
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "keep.ts"),
+      `${
+        Array.from(
+          { length: 10 },
+          (_, i) => `K${String(i + 1).padStart(2, "0")}`,
+        )
+          .join("\n")
+      }\n`,
+    );
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const diff = `diff --git a/gone.ts b/gone.ts
+deleted file mode 100644
+--- a/gone.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-old1
+-old2
+diff --git a/keep.ts b/keep.ts
+--- a/keep.ts
++++ b/keep.ts
+@@ -3,3 +3,3 @@
+ K03
+-old K04
++K04
+ K05
+`;
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 24 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    // Evaluating the offer walks every visible hunk, including the deletion's,
+    // and must not stumble on the one with no room. The kept file's hunk still
+    // has edges, so Ctrl-L is offered and reveals from it.
+    assertEquals(s.view().canExpand, true, "the kept file's hunk can expand");
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes(" K02"), "the kept file's hunk grew");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffcov: a cursor on a header that a join removes moves to the merged header", () => {
+  // Two hunks close enough that revealing the second one upward closes the gap
+  // and joins them. The cursor rests on the second hunk's header — the header
+  // the join removes — so it must land on the surviving merged header rather
+  // than on the revealed content that slid up into its old line.
+  const lines = Array.from(
+    { length: 30 },
+    (_, i) => `L${String(i + 1).padStart(2, "0")}`,
+  );
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ L04
+-old L05
++L05
+ L06
+@@ -12,3 +12,3 @@
+ L12
+-old L13
++L13
+ L14
+`;
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), `${lines.join("\n")}\n`);
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 24 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    press(s, "e");
+    for (let i = 0; i < 20; i++) {
+      if (s.doc.text.split("\n")[s.view().cursor!.line].startsWith("@@ -12")) {
+        break;
+      }
+      press(s, "down");
+    }
+    press(s, "ctrl-l");
+    assert(s.doc.text.includes("@@ -4,11 +4,11 @@"), "the hunks joined");
+    assertEquals(
+      s.doc.text.split("\n")[s.view().cursor!.line],
+      "@@ -4,11 +4,11 @@",
+      "the cursor is on the surviving merged header",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
   }
 });

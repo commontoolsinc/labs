@@ -72,6 +72,7 @@ import {
   type ForeignAuthorizationEpochBump,
   parseCrossSpaceMessage,
 } from "../v2/cross-space.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 const SPACE = "did:key:z6Mk-xsp-epoch-authority";
 const PEER_SPACE = "did:key:z6Mk-xsp-epoch-home";
@@ -113,7 +114,8 @@ const engineApplier = (engine: Engine): EngineApplier => {
 const setAcl = (value: unknown): Operation => ({
   op: "set",
   id: aclDocId(SPACE),
-  value: { value } as { value: Record<string, unknown> },
+  // deno-lint-ignore no-explicit-any
+  value: { value } as any,
 });
 
 Deno.test("C3.2 engine: every validity-state transition bumps the floor — genesis on a populated implicit-access space (the C3A3 killer case), retraction, repair", async () => {
@@ -370,7 +372,7 @@ const transactSet = async (
       reads: { confirmed: [], pending: [] },
       operations: [{ op: "set", id, value: { value } }],
     },
-  }));
+  } as unknown as FabricValue));
   const response = messages.shift() as ResponseMessage<{ seq: number }>;
   assertExists(response, "expected a transact response");
   return response;

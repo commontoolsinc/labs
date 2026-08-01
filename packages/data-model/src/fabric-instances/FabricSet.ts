@@ -1,4 +1,9 @@
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
+import {
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import {
   CODEC,
   type FabricCodec,
@@ -41,7 +46,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): FabricSet {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
     return new FabricSet(this.set);
   }
 

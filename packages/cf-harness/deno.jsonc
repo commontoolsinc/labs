@@ -19,6 +19,13 @@
     "./artifacts": "./src/artifacts.ts",
     "./cli": "./src/cli.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
+    "./model/client": "./src/model/client.ts",
+    "./model/usage": "./src/model/usage.ts",
+    "./model/openai-compatible-gateway": "./src/model/openai-compatible-gateway.ts",
+    "./model/openai-codex-responses": "./src/model/openai-codex-responses.ts",
+    "./auth/types": "./src/auth/types.ts",
+    "./auth/credential-store": "./src/auth/credential-store.ts",
+    "./auth/openai-codex": "./src/auth/openai-codex.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
     "./contracts/cfc-invocation-context": "./src/contracts/cfc-invocation-context.ts",
     "./contracts/image": "./src/contracts/image.ts",
@@ -40,6 +47,7 @@
     "./skills/registry": "./src/skills/registry.ts"
   },
   "imports": {
-    "@db/sqlite": "jsr:@db/sqlite@^0.12.0"
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0"
   }
 }

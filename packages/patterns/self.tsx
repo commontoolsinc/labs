@@ -17,7 +17,6 @@ import {
   ifElse,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -238,7 +237,7 @@ export const recordNeurotype = handler<
     result,
     detail,
     source,
-    recordedAt: safeDateNow(),
+    recordedAt: Date.now(),
   };
   selfModel.set(upsertNeurotype(selfModel.get(), entry));
 });
@@ -252,7 +251,7 @@ export const addValueCard = handler<
   selfModel.set(appendValue(selfModel.get(), card));
 });
 
-/** Append a QAResponse. Timestamp is set automatically via safeDateNow(). */
+/** Append a QAResponse. Timestamp is set automatically via Date.now(). */
 export const recordResponse = handler<
   RecordResponseEvent,
   { selfModel: Writable<SelfModel> }
@@ -262,7 +261,7 @@ export const recordResponse = handler<
     prompt,
     answer,
     track,
-    answeredAt: safeDateNow(),
+    answeredAt: Date.now(),
   };
   selfModel.set(appendResponse(selfModel.get(), response));
 });
@@ -337,7 +336,7 @@ export const recordNeurotypeFromForm = handler<
     system,
     result,
     source: "self-reported",
-    recordedAt: safeDateNow(),
+    recordedAt: Date.now(),
   };
   selfModel.set(upsertNeurotype(selfModel.get(), entry));
   resultField.set("");
@@ -376,7 +375,7 @@ export const recordReflectionFromForm = handler<
     prompt: prompt.text,
     answer,
     track: "meaning",
-    answeredAt: safeDateNow(),
+    answeredAt: Date.now(),
   };
   selfModel.set(appendResponse(selfModel.get(), response));
   answerField.set("");

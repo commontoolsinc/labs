@@ -91,8 +91,10 @@ describe("Engine implementation identity", () => {
   });
 
   it("hashes module identity over PRISTINE authored source, not the helper-injected form (CT-1740)", async () => {
-    // module-loading.md:204-207, 531-535, 543: a module's identity is over its
-    // AUTHORED TypeScript, BEFORE the pretransform helper-injection decoration,
+    // module-loading.md §"Module Identity: Merkle hash over the import graph"
+    // (`normSrc`) and §"Stability and sensitivity properties": a module's
+    // identity is over its AUTHORED TypeScript, BEFORE the pretransform
+    // helper-injection decoration,
     // so it is TCB-version independent. Folding in the injection (the bug)
     // rotates a module's identity whenever the decoration changes between
     // compiles — which is the CT-1740 `writeAuthorizedBy` stamp divergence
@@ -119,6 +121,70 @@ describe("Engine implementation identity", () => {
     expect(pristineId).not.toBe(injectedId);
     // The invariant: identity is over the pristine authored source.
     expect(entryIdentity).toBe(pristineId);
+  });
+
+  it("mints nested writer claims with the engine's authored path and module identity", async () => {
+    const fileName = "/api/patterns/system/profile-home.tsx";
+    const program: RuntimeProgram = {
+      main: fileName,
+      files: [{
+        name: fileName,
+        contents: `/// <cts-enable />
+          import { handler, toSchema, Writable, WriteAuthorizedBy } from "commonfabric";
+          const setBio = handler<string, { bio: Writable<string> }>(
+            (value, { bio }) => bio.set(value),
+          );
+          type ProtectedBio = WriteAuthorizedBy<string, typeof setBio>;
+          interface Output { bio: ProtectedBio; }
+          export const schema = toSchema<Output>();
+        `,
+      }],
+    };
+
+    const compiled = await engine.compileToRecordGraph(program);
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    const findWriterIdentity = (
+      value: unknown,
+    ): Record<string, unknown> | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const record = value as Record<string, unknown>;
+      const marker = record.__ctWriterIdentityOf;
+      if (marker && typeof marker === "object") {
+        return marker as Record<string, unknown>;
+      }
+      for (const child of Object.values(record)) {
+        const found = findWriterIdentity(child);
+        if (found) return found;
+      }
+      return undefined;
+    };
+    const identity = findWriterIdentity(evaluated.main?.schema);
+
+    expect(identity).toEqual({
+      file: fileName,
+      path: ["setBio"],
+      moduleIdentity: compiled.entryIdentity,
+    });
+
+    // The source-cache recovery compiler is a separate pipeline construction
+    // site; pin the same born-stamped payload there as well.
+    const recovered = await engine.compileResolvedToRecordGraph(
+      program.files,
+      program.main,
+    );
+    expect(recovered.entryIdentity).toBe(compiled.entryIdentity);
+    const recoveredBody = recovered.modules.find((module) =>
+      module.filename === fileName
+    )?.js;
+    expect(recoveredBody).toContain(`file: "${fileName}"`);
+    expect(recoveredBody).toContain(
+      `moduleIdentity: "${compiled.entryIdentity}"`,
+    );
   });
 
   it("changes the identity when the shared module's source changes", async () => {
