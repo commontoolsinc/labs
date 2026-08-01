@@ -4,6 +4,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   CF_RUNTIME_ERROR_LOG,
   normalizeAbsentVerbPayload,
+  runtimeErrorLog,
   verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
@@ -2079,5 +2080,24 @@ describe("reportVerbInputErrorOrRethrow", () => {
 
     expect(printed).toEqual([]);
     expect(exited).toEqual([]);
+  });
+});
+
+describe("runtimeErrorLog", () => {
+  // Pinned directly rather than left to incidental coverage: which execution
+  // paths hand this a non-object runtime varies by run and sharding, and the
+  // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
+  it("returns [] for non-object runtimes and runtimes without a log", () => {
+    expect(runtimeErrorLog(undefined)).toEqual([]);
+    expect(runtimeErrorLog("not a runtime")).toEqual([]);
+    expect(runtimeErrorLog({})).toEqual([]);
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: "not an array" }))
+      .toEqual([]);
+  });
+
+  it("returns the recorded log when present", () => {
+    const records = [{ message: "boom" }];
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: records }))
+      .toEqual(records);
   });
 });
