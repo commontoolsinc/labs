@@ -979,6 +979,31 @@ describe("cli piece parsing", () => {
     )).rejects.toThrow(PieceResultProjectionError);
   });
 
+  it("rethrows a read failure that is not a path/projection condition", async () => {
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.reject(new Error("network unreachable")),
+            getCell: () =>
+              Promise.resolve({ schema: undefined, getRaw: () => undefined }),
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      {},
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    )).rejects.toThrow("network unreachable");
+  });
+
   it("preserves schema-valid undefined over present raw data", async () => {
     const rawCell = {
       schema: {
@@ -1183,6 +1208,30 @@ describe("cli piece parsing", () => {
       await expect(getCellValue(config, ["lastMessage"], {}, deps))
         .resolves.toEqual({ text: "hi" });
       await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
+    });
+
+    it("fails open when classification itself fails", async () => {
+      // A cell surface that throws during the guard's walk must never turn
+      // a successful read into a refusal: the guard swallows the failure
+      // and the value wins.
+      const throwingRoot = {
+        get: () => ({ field: "ok" }),
+        key: () => {
+          throw new Error("no traversal surface");
+        },
+      };
+      const piece = {
+        input: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(guardCell(undefined)),
+        },
+        result: {
+          get: () => Promise.resolve("ok"),
+          getCell: () => Promise.resolve(throwingRoot),
+        },
+      };
+      await expect(getCellValue(config, ["field"], {}, guardDeps(piece)))
+        .resolves.toBe("ok");
     });
 
     it("still reads plain data, tool bindings, and a verb's parent object", async () => {

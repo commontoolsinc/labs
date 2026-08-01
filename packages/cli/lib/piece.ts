@@ -2325,8 +2325,13 @@ export async function getCellValue(
       // Read-path guard (verb contract WS-F): the transform path returns
       // early, so it needs the same verb refusal the plain read applies
       // below — a verb read through a transform is the same mistake.
-      if (await readPathLandsOnVerb(piece, prop, path)) {
-        throw new PieceVerbReadError(String(path.at(-1)), resolvedConfig.piece);
+      const transformPathVerb = await classifyReadPathVerb(piece, prop, path);
+      if (transformPathVerb) {
+        throw new PieceVerbReadError(
+          transformPathVerb.verb,
+          resolvedConfig.piece,
+          transformPathVerb.callable,
+        );
       }
       const sourceWasAbsent = typeof targetCell.getRaw === "function" &&
         targetCell.getRaw() === undefined;

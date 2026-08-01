@@ -28,6 +28,68 @@ import { LinkValidationError } from "../lib/piece.ts";
 import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
 
 describe("executePieceCallable", () => {
+  it("reports not-found when the piece cell has no schema-cast surface", async () => {
+    // The forced-stream probe's type guard: a piece cell without asSchema
+    // cannot take the cast, so the third resolution path answers null and
+    // the resolver reports not-found instead of crashing on the probe.
+    const emptyChild: Record<string, unknown> = {
+      schema: undefined,
+      get: () => undefined,
+      getRaw: () => undefined,
+    };
+    emptyChild.key = () => emptyChild;
+    emptyChild.asSchemaFromLinks = () => emptyChild;
+    const emptyRoot = {
+      schema: undefined,
+      get: () => ({}),
+      getRaw: () => ({}),
+      key: () => emptyChild,
+      asSchemaFromLinks: () => emptyChild,
+    };
+    const piece = {
+      result: { getCell: () => Promise.resolve(emptyRoot) },
+      input: { getCell: () => Promise.resolve(emptyRoot) },
+      getCell: () => ({}),
+    };
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "missing",
+        [],
+        {
+          loadManager: () =>
+            Promise.resolve({ getSpace: () => "home" } as never),
+          loadPiece: () => Promise.resolve(piece as never),
+        },
+      ),
+    ).rejects.toThrow('Callable "missing" not found');
+
+    // A piece exposing no cell at all skips the probe the same way.
+    const { getCell: _getCell, ...pieceWithoutCell } = piece;
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "missing",
+        [],
+        {
+          loadManager: () =>
+            Promise.resolve({ getSpace: () => "home" } as never),
+          loadPiece: () => Promise.resolve(pieceWithoutCell as never),
+        },
+      ),
+    ).rejects.toThrow('Callable "missing" not found');
+  });
+
   it("preserves plain-text mode while resolving a callable", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
