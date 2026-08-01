@@ -285,7 +285,7 @@ resumable.
 > end — recorded in the top box since `ab948050b` and now confirmed at the
 > close.
 
-**Last landed:** `PENDING-GATE-COMMIT` — the flip GATED on
+**Last landed:** `ce20e0956` — the flip GATED on
 `serverPrimaryExecution`; two configurations, no hybrid (see the box above).
 Before it: `b46e9b7e0` — the flip. Before that: `9c9513317` deleted
 `background-piece-service` (D12) and `f945d1ed0` disabled it under the flag;
