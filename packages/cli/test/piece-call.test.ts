@@ -1777,8 +1777,8 @@ describe("piece call wait control", () => {
     expect(resolveWaitControl({ await: true })).toEqual({ mode: "settle" });
   });
 
-  it("maps --no-wait to a detached dispatch", () => {
-    expect(resolveWaitControl({ wait: false })).toEqual({ mode: "detach" });
+  it("maps --no-wait to a commit-acknowledged, readback-skipped exit", () => {
+    expect(resolveWaitControl({ wait: false })).toEqual({ mode: "commit" });
   });
 
   it("refuses the --await --no-wait contradiction", () => {
@@ -1836,11 +1836,16 @@ describe("piece call wait control", () => {
     const never = new Promise<never>(() => {});
     const error = await boundedSettlement(never, 0.01).catch((e) => e);
     expect(error).toBeInstanceOf(WaitBoundExpired);
-    expect((error as WaitBoundExpired).message).toMatch(/--wait bound/);
+    // The wording is pinned: the handler runs in THIS process, so an expiry
+    // must not claim the invocation "continues settling" — it may never have
+    // executed or committed, and the same-id re-invoke is the recovery.
+    expect((error as WaitBoundExpired).message).toMatch(
+      /--wait bound of 0\.01s expired: the invocation may not have executed or committed — re-invoke with the same invocation id/,
+    );
     expect((error as WaitBoundExpired).seconds).toBe(0.01);
   });
 
-  it("returns at dispatch under detach without awaiting commit acknowledgement", async () => {
+  it("skips only the readback under --no-wait: commit acknowledged, receipt never read", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "addComment",
@@ -1851,9 +1856,7 @@ describe("piece call wait control", () => {
         },
         required: ["message"],
       },
-      // The commit callback NEVER fires, so this resolving at all proves the
-      // detached path awaited nothing past the dispatch itself.
-      neverCommit: true,
+      receiptValue: { commentId: "c-1" },
     });
     const phases: string[] = [];
 
@@ -1864,29 +1867,131 @@ describe("piece call wait control", () => {
       {
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-detach",
-        detachAfterDispatch: true,
+        invocationId: "inv-no-readback",
+        skipReadback: true,
         onPhase: (phase) => phases.push(phase),
       },
     );
 
-    // The furthest observed phase rides as `status`: this invocation is not
-    // settled, and the JSON must not claim it is.
+    // Status is "committed", not "settled": the JSON must not claim a
+    // settlement nobody observed. And not "dispatched" either — the handler
+    // ran HERE and its commit was acknowledged before this returned.
     expect(result.invocation).toEqual({
-      id: "inv-detach",
-      status: "dispatched",
+      id: "inv-no-readback",
+      status: "committed",
     });
-    expect(phases).toEqual(["dispatched"]);
-    // The dispatch went out carrying the idempotency key — the handle the
-    // detached caller retries with or reads the receipt through.
-    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-detach" }]);
-    // No readback, and no quiescence drain either.
+    expect(phases).toEqual(["dispatched", "committed"]);
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-no-readback" },
+    ]);
+    // The receipt was never opened — the readback (sync + read) is the whole
+    // saving — and no quiescence drain crept in either.
     expect(harness.tracker.receiptLinkRequested).toBeUndefined();
     expect(harness.tracker.idleCalls).toBe(0);
     expect(harness.tracker.syncedCalls).toBe(0);
   });
 
-  it("requires an invocation id to detach", async () => {
+  it("still awaits the commit acknowledgement under --no-wait", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      // The commit callback never fires. --no-wait must NOT return: exiting
+      // before the acknowledgement would abandon the invocation un-executed
+      // (the handler runs in this process), not leave it settling elsewhere.
+      neverCommit: true,
+    });
+    const phases: string[] = [];
+
+    const error = await boundedSettlement(
+      executePieceCallable(config, "addComment", ["--message", "milk"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-held-commit",
+        skipReadback: true,
+        onPhase: (phase) => phases.push(phase),
+      }),
+      0.01,
+    ).catch((e) => e);
+
+    // Only the deadline got us out — the skip-readback path was still
+    // parked on the commit acknowledgement, exactly where it must wait.
+    expect(error).toBeInstanceOf(WaitBoundExpired);
+    expect(phases).toEqual(["dispatched"]);
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
+
+  it("reports a deduplicated collision without reading the receipt back", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptExists: true,
+      receiptValue: { commentId: "c-original" },
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-dup-no-readback",
+        skipReadback: true,
+      },
+    );
+
+    // The collision is still a success — the ORIGINAL commit stands and is
+    // durable — but the original outcome is not fetched; a later same-id
+    // call reads it back.
+    expect(result.invocation).toEqual({
+      id: "inv-dup-no-readback",
+      status: "committed",
+      deduplicated: true,
+    });
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
+
+  it("surfaces a commit failure under --no-wait as a normal failure", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      handlerFailureMessage: "Bad message payload",
+    });
+
+    // Skipping the readback must not skip the verdict: a commit that fails
+    // is reported exactly as it would be on the default path.
+    await expect(
+      executePieceCallable(config, "recordMessage", ["--message", "milk"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-failed-commit",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
+  });
+
+  it("requires an invocation id to skip the readback", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "refresh",
@@ -1898,16 +2003,16 @@ describe("piece call wait control", () => {
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
-        detachAfterDispatch: true,
+        skipReadback: true,
       }),
     ).rejects.toThrow(/requires an invocation id/);
 
-    // Refused BEFORE dispatch: nothing went out that the caller now cannot
-    // find again.
+    // Refused BEFORE dispatch: skipping the readback is only sound when a
+    // later same-id call can fetch the outcome, and that needs the id.
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  it("keeps the pre-dispatch gate ahead of a detached dispatch", async () => {
+  it("keeps the pre-dispatch gate ahead of a readback-skipping dispatch", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "recordMessage",
@@ -1928,19 +2033,20 @@ describe("piece call wait control", () => {
         {
           loadManager: () => Promise.resolve(harness.manager),
           loadPiece: () => Promise.resolve(harness.piece),
-          invocationId: "inv-detach-typo",
-          detachAfterDispatch: true,
+          invocationId: "inv-no-wait-typo",
+          skipReadback: true,
         },
       ),
     ).rejects.toThrow(/Invalid input for "recordMessage"/);
 
-    // A detached dispatch is the one a caller cannot watch fail, so the gate
-    // refusing it locally — id unspent — matters even more than usual.
+    // A --no-wait caller never sees the settled outcome, so the gate
+    // refusing a bad payload locally — id unspent — matters even more than
+    // usual.
     expect(harness.tracker.handlerWrites).toEqual([]);
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  it("refuses to detach a tool run", async () => {
+  it("refuses --no-wait for a tool run", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
       cellKey: "search",
@@ -1968,8 +2074,8 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "search", ["--query", "tea"], {
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-tool-detach",
-        detachAfterDispatch: true,
+        invocationId: "inv-tool-no-wait",
+        skipReadback: true,
       }),
     ).rejects.toThrow(/--no-wait is not available for tool "search"/);
 
@@ -2000,13 +2106,17 @@ describe("piece call wait control", () => {
     );
     t = 3020;
     observer.onPhase("dispatched");
-    t = 3021;
+    t = 3050;
+    observer.onPhase("committed");
+    t = 3051;
     observer.finish("detached");
-    // "settled" would be a lie here — settlement is happening elsewhere,
-    // after this process has gone.
+    // "settled" would be a lie here — the readback was skipped, so nobody
+    // observed a settlement. The span sequence also documents where
+    // --no-wait stops: after the commit acknowledgement, never before it.
     expect(lines).toEqual([
       "timing: initial_sync → dispatched 20.0ms",
-      "timing: dispatched → detached 1.0ms",
+      "timing: dispatched → committed 30.0ms",
+      "timing: committed → detached 1.0ms",
     ]);
   });
 });

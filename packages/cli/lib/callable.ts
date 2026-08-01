@@ -140,25 +140,28 @@ export interface CallableExecutionDeps {
   invocationId?: string;
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
-  /** `--no-wait`: return as soon as the dispatch is on its way, without
-   * awaiting commit acknowledgement or receipt readback. Sound because a
-   * caller-supplied id makes a retry safe in EVERY phase (the create-only
-   * receipt deduplicates a same-id redelivery — verb contract D1/D3), so
-   * leaving early loses nothing but confirmation: the caller re-invokes with
-   * the same id later, or reads the receipt, to learn the outcome. Requires
-   * an `invocationId` — without one there is no handle to do either with —
-   * and only the handler send path supports it (a tool runs to completion in
-   * this process; detaching would abandon the run before its result exists). */
-  detachAfterDispatch?: boolean;
+  /** `--no-wait`: await this handling's transaction-local commit
+   * acknowledgement, then return WITHOUT the receipt readback (sync + read).
+   * The commit acknowledgement cannot be skipped: the handler executes in
+   * THIS process's runtime, so exiting before the commit is acknowledged
+   * would abandon the invocation un-executed — nothing durable would have
+   * happened — not leave it settling elsewhere. What CAN be skipped is
+   * fetching the outcome back, because a caller-supplied id keeps that
+   * fetch available forever: a later same-id call deduplicates against the
+   * create-only receipt and returns the original outcome (verb contract
+   * D1/D3). Requires an `invocationId` — without one there is no receipt to
+   * come back for — and only the handler send path supports it (a tool's
+   * result is delivered by this process, not read back from a receipt). */
+  skipReadback?: boolean;
 }
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
 export interface InvocationOutcome {
   id: string;
   /** `"settled"` once receipt readback completed. Otherwise the furthest
-   * phase the caller chose to observe: a detached dispatch (`--no-wait`)
-   * returns at `"dispatched"`, and a caller-bounded wait reports the phase
-   * its bound expired in. */
+   * phase the caller chose to observe: `--no-wait` returns at `"committed"`
+   * (commit acknowledged, readback skipped), and a caller-bounded wait
+   * reports the phase its bound expired in. */
   status: "settled" | InvocationPhase;
   /** The verb's result read back from the handling's receipt, when the
    * receipt carried one (a reactive-bearing return, or a plain return under
@@ -485,29 +488,12 @@ export async function executeResolvedCallable(
       const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
       const errorCountBefore = runtimeErrors.length;
       const invocationId = deps.invocationId;
-      if (deps.detachAfterDispatch && invocationId === undefined) {
-        // Refused before dispatch: a detached caller's only handles on the
-        // outcome are a same-id retry and the receipt, both of which need
-        // the id.
-        throw new Error(
-          "A detached dispatch (--no-wait) requires an invocation id",
-        );
+      if (deps.skipReadback && invocationId === undefined) {
+        // Refused before dispatch: skipping the readback is only sound when
+        // a later same-id call can fetch the outcome, and that needs the id.
+        throw new Error("--no-wait requires an invocation id");
       }
       deps.onPhase?.("dispatched");
-      if (deps.detachAfterDispatch) {
-        // Fire the dispatch without awaiting its commit acknowledgement.
-        // A synchronous throw from send still propagates — that dispatch
-        // never left, so there is nothing to detach from.
-        send.call(
-          resolved.callableCell,
-          dispatchInput,
-          undefined,
-          { eventId: invocationId },
-        );
-        return {
-          invocation: { id: invocationId!, status: "dispatched" },
-        };
-      }
       const tx = await new Promise<CallableTransactionLike>(
         (resolve, reject) => {
           try {
@@ -547,6 +533,21 @@ export async function executeResolvedCallable(
 
       if (invocationId === undefined) return {};
 
+      if (deps.skipReadback) {
+        // --no-wait's exit point: the commit is acknowledged, so the
+        // handling — and on a collision, the original one — is durable on
+        // the server and survives this process. Only the readback
+        // (sync + read of the outcome) is skipped; a later same-id call
+        // retrieves it by deduplicating against the create-only receipt.
+        return {
+          invocation: {
+            id: invocationId,
+            status: "committed",
+            ...(deduplicated ? { deduplicated: true } : {}),
+          },
+        };
+      }
+
       // Read the handling's outcome back off its receipt. On a receipt-exists
       // collision this is the ORIGINAL handling's receipt — same id, same
       // outcome, no re-execution — so a retry settles as a success.
@@ -578,10 +579,11 @@ export async function executeResolvedCallable(
       };
     }
 
-    if (deps.detachAfterDispatch) {
+    if (deps.skipReadback) {
       // This handler dispatches through a plain data write, outside the
-      // invocation receipt protocol — nothing durable would remain for a
-      // detached caller to read the outcome back from.
+      // invocation receipt protocol — there is no per-handling commit
+      // acknowledgement to wait for and no receipt a later same-id call
+      // could read the outcome back from.
       throw new Error(
         `--no-wait is not available for "${resolved.cellKey}": ` +
           "this callable dispatches without an invocation receipt",
@@ -594,10 +596,10 @@ export async function executeResolvedCallable(
     return {};
   }
 
-  if (deps.detachAfterDispatch) {
-    // A tool runs to completion inside this process; detaching would abandon
-    // the run before its result exists, rather than leave it settling
-    // elsewhere the way a dispatched handler event does.
+  if (deps.skipReadback) {
+    // A tool's result is produced and delivered by this process, not read
+    // back from a receipt — there is nothing to skip that a later call
+    // could recover.
     throw new Error(
       `--no-wait is not available for tool "${resolved.cellKey}": ` +
         "a tool runs to completion in this process",
