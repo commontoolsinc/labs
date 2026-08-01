@@ -1246,8 +1246,34 @@ Section 4.5.
   name-driven copying or serialization
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
+- **Host restriction, not a model rule:** the property names `__proto__` and
+  `constructor` cause rejection in the JavaScript implementation. See the
+  callout below
 - Reconstruction produces regular plain objects, which is the only object
   shape a fabric value has
+
+> **Host-unsafe property names.** A fabric record's keys are strings, and the
+> model attaches no meaning to any particular one: a property name is data. Two
+> names are nonetheless refused by the JavaScript implementation, `__proto__`
+> and `constructor`.
+>
+> The reason is entirely local to that host. Records are rebuilt by name-driven
+> copying at every boundary — conversion, cloning, encoding, decoding — and in
+> JavaScript `target[key] = value` for those names does not create a property:
+> it reaches `Object.prototype`'s `__proto__` accessor, mutating the copy's
+> prototype and dropping the value, or shadows the constructor that type
+> dispatch reads. A record carrying such a name therefore cannot survive a copy
+> in this host, and the boundary refuses it rather than corrupting it in transit
+> ("death before confusion").
+>
+> This restriction belongs to the implementation, not to the model. A host that
+> does not route property assignment through a prototype chain — Rust, Swift,
+> C++, Python, and most others — has no unsafe names at all and must not adopt
+> this rule. In the JavaScript implementation it is expressed as a check
+> separate from the inertness rules, so that it can be removed as a unit if
+> those boundaries are ever rebuilt on `Object.defineProperty()` or an
+> equivalent that copies any name faithfully. An implementation in another
+> language accepts these names as ordinary keys.
 
 ### 1.6 Circular References and Shared References
 

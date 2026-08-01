@@ -14,6 +14,7 @@ import {
   isString,
   isUnsafeObjectKey,
   Mutable,
+  unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 
 type ImmutableObj<T> = {
@@ -411,6 +412,73 @@ describe("types", () => {
             "isUnsafeObjectKey() is now open to prototype pollution.",
         );
         throw e;
+      }
+    });
+  });
+
+  describe("unsafeObjectKeyIn", () => {
+    it("finds an unsafe own key", () => {
+      const withProto = { other: 1 } as Record<string, unknown>;
+      Object.defineProperty(withProto, "__proto__", {
+        value: 1,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      expect(unsafeObjectKeyIn(withProto)).toBe("__proto__");
+      expect(unsafeObjectKeyIn({ ["constructor"]: 1 })).toBe("constructor");
+    });
+
+    it("returns `undefined` for ordinary objects", () => {
+      expect(unsafeObjectKeyIn({})).toBe(undefined);
+      expect(unsafeObjectKeyIn({ a: 1, prototype: 2, toString: 3 })).toBe(
+        undefined,
+      );
+    });
+
+    it("ignores an inherited unsafe name", () => {
+      // Every object inherits `constructor`, and most inherit `__proto__`.
+      // Only an OWN property is the value's own data, and only that can fail
+      // to survive a copy.
+      expect(unsafeObjectKeyIn(Object.create({ constructor: 1 }))).toBe(
+        undefined,
+      );
+    });
+
+    it("pins the host behavior the restriction exists for", () => {
+      // The companion to the `__proto__`-is-inert test above, from the other
+      // side. Deno neutralises the accessor, so a copy loop there is safe and
+      // no test can see the hazard. A realm that keeps the accessor -- every
+      // browser, and this repo ships `data-model` to browsers -- loses the
+      // property and mutates the copy instead. That is what makes these names
+      // uncarryable HERE, and the day no realm behaves this way is the day the
+      // restriction can go.
+      const saved = Object.getOwnPropertyDescriptor(
+        Object.prototype,
+        "__proto__",
+      );
+      try {
+        Object.defineProperty(Object.prototype, "__proto__", {
+          configurable: true,
+          get(this: object) {
+            return Object.getPrototypeOf(this);
+          },
+          set(this: object, v: object | null) {
+            Object.setPrototypeOf(this, v);
+          },
+        });
+
+        const copy: Record<string, unknown> = {};
+        copy["__proto__"] = { marker: true };
+
+        expect(Object.hasOwn(copy, "__proto__")).toBe(false);
+        expect(Object.getPrototypeOf(copy)).not.toBe(Object.prototype);
+      } finally {
+        if (saved === undefined) {
+          delete (Object.prototype as Record<string, unknown>)["__proto__"];
+        } else {
+          Object.defineProperty(Object.prototype, "__proto__", saved);
+        }
       }
     });
   });

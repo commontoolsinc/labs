@@ -1865,6 +1865,37 @@ describe("native-conversion", () => {
         expect(Object.isFrozen(obj)).toBe(false);
       });
 
+      it("throws for a host-unsafe property name, naming the cause", () => {
+        // The message says "this JavaScript host" rather than blaming
+        // inertness, because such an object is inert: what it violates is a
+        // restriction of the runtime, not of the data model.
+        expect(() => fabricFromNativeValue({ ["__proto__"]: 1, a: 2 })).toThrow(
+          "Not representable as a `FabricValue`: object with a property name " +
+            "this JavaScript host cannot carry (`__proto__`)",
+        );
+      });
+
+      it("throws for a `constructor` property, reaching the object rule", () => {
+        // Type-tag dispatch reads `value.constructor`, which such an object
+        // shadows with a non-class. It answers `Object` on the prototype
+        // instead, so the value is rejected by name rather than as some
+        // unrecognized type.
+        expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
+          "Not representable as a `FabricValue`: object with a property name " +
+            "this JavaScript host cannot carry (`constructor`)",
+        );
+      });
+
+      it("throws for a host-unsafe name nested in the graph", () => {
+        expect(() => fabricFromNativeValue({ a: { ["__proto__"]: 1 } }))
+          .toThrow(
+            "this JavaScript host cannot carry (`__proto__`)",
+          );
+        expect(() => fabricFromNativeValue([{ ["__proto__"]: 1 }])).toThrow(
+          "this JavaScript host cannot carry (`__proto__`)",
+        );
+      });
+
       it("throws for a null-prototype object at the top level", () => {
         const obj = Object.create(null) as Record<string, unknown>;
         obj.x = 1;
@@ -2061,6 +2092,14 @@ describe("native-conversion", () => {
         sub.push(1, 2);
         expect(isFabricCompatible(sub)).toBe(false);
         expect(isFabricCompatible({ data: sub })).toBe(false);
+      });
+
+      it("rejects a host-unsafe property name", () => {
+        expect(isFabricCompatible({ ["__proto__"]: 1 })).toBe(false);
+        expect(isFabricCompatible({ ["constructor"]: 1 })).toBe(false);
+        expect(isFabricCompatible({ nested: { ["__proto__"]: 1 } })).toBe(
+          false,
+        );
       });
 
       it("rejects an array whose prototype was severed", () => {

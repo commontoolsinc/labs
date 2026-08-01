@@ -2,6 +2,7 @@ import {
   isInstance,
   isRecord,
   isUnsafeObjectKey,
+  unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
@@ -287,6 +288,16 @@ export function shallowFabricFromNativeValue(
         throw new Error(
           "Not representable as a `FabricValue`: object that is not an " +
             "inert plain object",
+        );
+      }
+      // A host restriction rather than a model one, so it says so rather than
+      // blaming inertness: such an object IS inert, and a runtime that does
+      // not route assignment through a prototype chain would take it happily.
+      const unsafeKey = unsafeObjectKeyIn(value as object);
+      if (unsafeKey !== undefined) {
+        throw new Error(
+          "Not representable as a `FabricValue`: object with a property name " +
+            `this JavaScript host cannot carry (\`${unsafeKey}\`)`,
         );
       }
       // Plain objects: delegate frozenness handling to `cloneHelper()`.
@@ -702,7 +713,10 @@ function isFabricCompatibleInternal(
       // Plain objects -- check the key shape, then all property values
       // recursively. A symbol key or a non-enumerable string key has no fabric
       // representation, just as an array's non-index properties do not.
-      if (!isInertPlainObject(value)) {
+      if (
+        !isInertPlainObject(value) ||
+        (unsafeObjectKeyIn(value) !== undefined)
+      ) {
         seen.delete(value);
         return false;
       }

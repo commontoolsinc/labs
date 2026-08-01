@@ -198,9 +198,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
-    // Null-prototype objects (`Object.create(null)`).
+    // Plain objects whose constructor was unusable: a null prototype, or an
+    // own `constructor` property shadowing the real one with something that
+    // is not a class. Both are answered `Object` so the object rule decides
+    // them by name, the same way an indirect array is answered `Array`.
     const proto = Object.getPrototypeOf(value);
-    if (proto === null) tag = NATIVE_TAGS.Object;
+    if (proto === null || proto === Object.prototype) tag = NATIVE_TAGS.Object;
   }
 
   // For `Object` and still-null tags: a per-instance `toJSON()` method

@@ -168,3 +168,32 @@ const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
 export function isUnsafeObjectKey(key: string): boolean {
   return UNSAFE_OBJECT_KEYS.has(key);
 }
+
+/**
+ * Returns the host-unsafe own property name the given object carries, if any.
+ *
+ * This asks about the JavaScript host, not about the data model. A property
+ * name is data like any other, and a runtime that does not route property
+ * assignment through a prototype chain -- which is most of them -- has no
+ * unsafe names at all. What makes these two names unusable *here* is that
+ * name-driven copying (`target[key] = value`), which is how records are
+ * rebuilt at every boundary, does not create the property: it reaches
+ * `Object.prototype`'s `__proto__` accessor instead, mutating the copy's
+ * prototype and dropping the value. So a record carrying one cannot survive
+ * a copy in this host, whatever the model says about it.
+ *
+ * The check is two `Object.hasOwn()` calls rather than a key walk, so it costs
+ * nothing per property and can sit on a hot validation path.
+ *
+ * @param value The object to check.
+ * @returns The offending property name, or `undefined` if there is none.
+ */
+export function unsafeObjectKeyIn(value: object): string | undefined {
+  for (const key of UNSAFE_OBJECT_KEYS) {
+    if (Object.hasOwn(value, key)) {
+      return key;
+    }
+  }
+
+  return undefined;
+}
