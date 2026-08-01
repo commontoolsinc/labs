@@ -287,15 +287,60 @@ export function exitWithDataError(
  * action body only ever runs under Cliffy, so anything written there is
  * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
  * threaded so a test can observe the report without a real process exit.
+ *
+ * `observer` is the call's phase observer: this exit bypasses the action's
+ * catch (it terminates the process from inside the promise chain), so the
+ * verbose in-flight span must be closed HERE — otherwise a pre-dispatch
+ * payload rejection under --verbose would leave the initial_sync span
+ * dangling with no failure timing. A rethrown error is closed by the
+ * action's own failure exit instead.
  */
 export function reportVerbInputErrorOrRethrow(
   error: unknown,
   piece: string | undefined,
   deps?: Parameters<typeof exitWithDataError>[1],
+  observer?: { finish: (end?: "settled" | "failed") => void },
 ): never {
   const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
-  if (report) exitWithDataError(report, deps);
+  if (report) {
+    observer?.finish("failed");
+    exitWithDataError(report, deps);
+  }
   throw error;
+}
+
+/**
+ * The failure exit for `cf piece call`: closes the verbose in-flight span as
+ * `failed` (idempotent — a span already closed elsewhere stays closed),
+ * rethrows Cliffy validation errors so usage failures still render the usage
+ * screen — with their span closed first — and reports everything else as the
+ * failure message plus the invocation id beside the furthest observed phase,
+ * the retry key, before exiting 1. A named export rather than catch-block
+ * prose because the action body only runs under Cliffy and is unreachable
+ * from a unit test; the seams let a test observe the exact exit contract.
+ */
+export function exitPieceCallFailure(
+  observer: { finish: (end?: "settled" | "failed") => void },
+  error: unknown,
+  invocationId: string,
+  phase: InvocationPhase,
+  deps?: {
+    printError?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never {
+  observer.finish("failed");
+  if (error instanceof ValidationError) {
+    throw error;
+  }
+  const printError = deps?.printError ?? console.error;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(error instanceof Error ? error.message : String(error));
+  // Where the invocation stopped decides retry semantics: anything at or
+  // past "dispatched" retries SAFELY ONLY with this same id (same-id
+  // retries deduplicate; a fresh id would re-execute).
+  printError(`invocation: ${invocationId} phase: ${phase}`);
+  return exit(1);
 }
 
 export function pieceCallRawArgs(
@@ -1351,7 +1396,12 @@ after --. Handlers interpret piped input when no input argument is present.`,
           ),
         },
       ).catch((error) =>
-        reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
+        reportVerbInputErrorOrRethrow(
+          error,
+          pieceConfig.piece,
+          undefined,
+          observer,
+        )
       );
       if (result.helpText) {
         render(result.helpText);
@@ -1394,17 +1444,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
     } catch (error) {
-      if (error instanceof ValidationError) {
-        throw error;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(message);
-      observer.finish("failed");
-      // Where the invocation stopped decides retry semantics: anything at or
-      // past "dispatched" retries SAFELY ONLY with this same id (same-id
-      // retries deduplicate; a fresh id would re-execute).
-      console.error(`invocation: ${invocationId} phase: ${phase}`);
-      Deno.exit(1);
+      exitPieceCallFailure(observer, error, invocationId, phase);
     }
   })
   /* piece verbs */
