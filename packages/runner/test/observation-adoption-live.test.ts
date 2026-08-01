@@ -45,14 +45,11 @@ class SharedServerStorageManager extends EmulatedStorageManager {
   }
 }
 
-const newSharedServer = () =>
+const newSharedServer = (
+  serverOptions: { flushBeforeVerdict?: boolean } = {},
+) =>
   new MemoryV2Server.Server({
-    // Pins client recovery/conflict machinery whose fixture is controlled
-    // staleness or the legacy verdict-first choreography; the CT-1927
-    // default-on ordering repairs staleness before verdicts, destroying the
-    // premise. Opt out — the legacy path stays load-bearing for old servers
-    // and the rollback hatch. Default-on ordering: v2-flush-before-verdict-test.ts.
-    flushBeforeVerdict: false,
+    ...serverOptions,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
         ?.principal;
@@ -112,7 +109,14 @@ describe("incremental observation adoption (live)", () => {
   let managerB: SharedServerStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Opt out of the CT-1927 default-on pre-verdict flush: adoption rides
+    // the writer's POST-verdict observation batch, which pre-verdict
+    // delivery outruns — the receiver then re-runs instead of adopting.
+    // This suite pins adoption under the batched (opt-out / old-server)
+    // delivery; the default-on describe below pins the current
+    // re-run-and-converge reality. Adoption under default-on delivery is
+    // an open item on CT-1927.
+    server = newSharedServer({ flushBeforeVerdict: false });
     managerA = SharedServerStorageManager.connectTo(server, { as: signer });
     managerB = SharedServerStorageManager.connectTo(server, { as: signer });
   });
@@ -249,6 +253,100 @@ describe("incremental observation adoption (live)", () => {
           (v) => v === 14,
         ),
       ).toBe(14);
+
+      cancelSink1();
+      cancelSink2();
+    } finally {
+      await rt1.dispose();
+      await rt2.dispose();
+    }
+  });
+});
+
+// CT-1927 default-on reality: the pre-verdict flush delivers the value frame
+// BEFORE the writer's post-verdict computation run exists, so its adoption
+// observation cannot ride along — the receiver re-runs the computation and
+// converges. Functionally correct (values agree; re-running is adoption's
+// safe fallback), but the dedup is lost; restoring adoption under
+// pre-verdict delivery is an open item on CT-1927. This pins the current
+// behavior so a change in either direction is loud.
+describe("incremental observation adoption (live, CT-1927 default-on)", () => {
+  let server: MemoryV2Server.Server;
+  let managerA: SharedServerStorageManager;
+  let managerB: SharedServerStorageManager;
+
+  beforeEach(() => {
+    server = newSharedServer();
+    managerA = SharedServerStorageManager.connectTo(server, { as: signer });
+    managerB = SharedServerStorageManager.connectTo(server, { as: signer });
+  });
+
+  afterEach(async () => {
+    await managerA?.close();
+    await managerB?.close();
+    await server?.close();
+  });
+
+  it("a receiver re-runs and converges under pre-verdict delivery", async () => {
+    const rt1 = newRuntime(managerA);
+    const rt2 = newRuntime(managerB);
+    try {
+      const tx1 = rt1.edit();
+      const valueCell1 = rt1.getCell(space, "adopt-value", VALUE_SCHEMA, tx1);
+      valueCell1.withTx(tx1).set(1);
+      const compiled = await rt1.patternManager.compilePattern(PROGRAM, {
+        space,
+        tx: tx1,
+      });
+      const resultCell1 = rt1.getCell(space, "adopt-result", undefined, tx1);
+      const r1 = rt1.run(
+        tx1,
+        // deno-lint-ignore no-explicit-any
+        compiled as any,
+        { value: valueCell1 },
+        resultCell1,
+      );
+      rt1.prepareTxForCommit(tx1);
+      expect((await tx1.commit()).error).toBeUndefined();
+      const cancelSink1 = r1.sink(() => {});
+      await rt1.idle();
+      expect(await r1.key("doubled").pull()).toBe(2);
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+      await rt1.idle();
+      await rt1.storageManager.synced();
+
+      const resultLink = r1.getAsNormalizedFullLink();
+      const resultCell2 = rt2.getCellFromLink(resultLink);
+      await resultCell2.sync();
+      expect(await rt2.start(resultCell2)).toBeTruthy();
+      const cancelSink2 = resultCell2.key("doubled").sink(() => {});
+      await rt2.idle();
+      await rt2.storageManager.synced();
+      await rt2.idle();
+      expect(resultCell2.key("doubled").getAsQueryResult()).toBe(2);
+
+      rt2.scheduler.setActionRunTraceEnabled(true);
+      const tx2 = rt1.edit();
+      valueCell1.withTx(tx2).set(10);
+      expect((await tx2.commit()).error).toBeUndefined();
+      await rt1.idle();
+      await rt1.storageManager.synced();
+
+      expect(
+        await waitForCellValue<number>(
+          rt2,
+          resultCell2.key("doubled"),
+          (v) => v === 20,
+        ),
+      ).toBe(20);
+      // The receiver RAN the computation: the pre-verdict value frame
+      // outran the writer's observation, so full adoption dedup is lost
+      // (frame-timing may still land a partial adoption alongside, so no
+      // count is asserted). Convergence is preserved; restoring dedup
+      // under pre-verdict delivery is the open CT-1927 item.
+      const liveTrace = rt2.scheduler.getActionRunTrace();
+      expect(opRuns(liveTrace).length).toBeGreaterThan(0);
 
       cancelSink1();
       cancelSink2();

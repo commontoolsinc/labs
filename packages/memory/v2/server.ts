@@ -374,6 +374,7 @@ class Connection {
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
+  #receiveFlushSuspensions = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
 
   constructor(
@@ -534,29 +535,47 @@ class Connection {
   }
 
   /**
-   * Runs `work` with this receive UNCOUNTED as inbound pressure (CT-1927).
-   * The pre-verdict flush awaits the refresh pipeline, and an in-flight
-   * timer pass's `waitForConnectionQueuesToDrain` counts pending receives —
-   * including the very transact that is awaiting the flush. Left counted,
-   * the two wait for each other until the drain deadline (a latency cliff
-   * in real time; a deadlock under a fake clock). A receive that is blocked
-   * ON fan-out is not pressure the fan-out should yield to.
+   * Runs `work` with this connection's ENTIRE serialized receive queue
+   * exempt from drain accounting (CT-1927). The pre-verdict flush awaits
+   * the refresh pipeline, and an in-flight timer pass's
+   * `waitForConnectionQueuesToDrain` counts pending receives — the transact
+   * awaiting the flush AND everything queued behind it, none of which can
+   * execute until the flush returns. Left counted, the two sides wait for
+   * each other until the drain deadline (a latency cliff in real time; a
+   * deadlock under a fake clock). A receive queue blocked ON fan-out is
+   * not pressure the fan-out should yield to. Suspension wakes any
+   * drain-waiter parked on this connection's idle signal so it re-checks.
    */
   private async withReceiveUncounted<T>(work: () => Promise<T>): Promise<T> {
-    this.releasePendingReceive();
+    this.#receiveFlushSuspensions += 1;
+    this.#receiveIdle?.resolve();
+    this.#receiveIdle = null;
     try {
       return await work();
     } finally {
-      this.#pendingReceives += 1;
+      this.#receiveFlushSuspensions -= 1;
     }
   }
 
   hasPendingReceives(): boolean {
-    return this.#pendingReceives > 0;
+    return this.effectivePendingReceives() > 0;
+  }
+
+  /**
+   * Receives are serialized per connection, so while the HEAD receive is
+   * suspended awaiting the pre-verdict flush (CT-1927), nothing queued
+   * behind it can execute either — the WHOLE queue is exempt from drain
+   * accounting, not just the head. Counting the queued tail recreates the
+   * wait cycle one layer out: the drain waits for a queued receive that
+   * cannot run until the head's flush returns, which waits behind the
+   * drain.
+   */
+  private effectivePendingReceives(): number {
+    return this.#receiveFlushSuspensions > 0 ? 0 : this.#pendingReceives;
   }
 
   async waitForReceiveQueueToDrain(deadlineMs: number): Promise<boolean> {
-    while (this.#pendingReceives > 0) {
+    while (this.effectivePendingReceives() > 0) {
       const remainingMs = deadlineMs - Date.now();
       if (remainingMs <= 0) {
         return false;
@@ -574,7 +593,7 @@ class Connection {
         clearTimeout(timeoutId);
       }
       if (!drained) {
-        return this.#pendingReceives === 0;
+        return this.effectivePendingReceives() === 0;
       }
     }
     return true;
@@ -1435,6 +1454,10 @@ export class Server {
         }],
       },
     });
+    // Dirty BEFORE the side-effect await, matching the transact path
+    // (CT-1927): a concurrent commit's pre-verdict flush must see this
+    // durable write.
+    this.markSpaceDirty(space, [toDirtyKey(id)]);
     await this.runPostCommitSchedulerSideEffects(
       space,
       commit,
@@ -1442,7 +1465,6 @@ export class Server {
       new Map(),
       undefined,
     );
-    this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
 
@@ -3457,12 +3479,14 @@ export class Server {
         return;
       }
 
-      for (const space of spaces) {
-        this.#dirtySpaces.delete(space);
-      }
       pending = undefined;
 
       for (const space of spaces) {
+        // Removed at its own processing turn (CT-1927): pre-deleting the
+        // whole selection meant a failure mid-batch stranded every
+        // not-yet-processed space — dirty maps intact but the space no
+        // longer discoverable.
+        this.#dirtySpaces.delete(space);
         const dirtyIds = this.#dirtyDocsBySpace.get(space);
         if (dirtyIds !== undefined) {
           this.#dirtyDocsBySpace.delete(space);
@@ -3511,6 +3535,20 @@ export class Server {
             let currentOrigins = this.#dirtyOriginsBySpace.get(space);
             for (const id of dirtyIds) {
               if (current.has(id)) {
+                // The id was re-dirtied while the failed batch was in
+                // flight. Provenance survives only when BOTH batches agree
+                // on the same session; otherwise the merged novelty is
+                // mixed and must fan out authoritatively — restoring the
+                // newer origin alone would echo-suppress the consumed
+                // batch's foreign/unattributed novelty (CT-1927 review).
+                const restoredOrigin = dirtyOrigins?.get(id);
+                const currentOrigin = currentOrigins?.get(id);
+                if (
+                  currentOrigin !== undefined &&
+                  restoredOrigin?.sessionId !== currentOrigin.sessionId
+                ) {
+                  currentOrigins?.delete(id);
+                }
                 continue;
               }
               current.add(id);

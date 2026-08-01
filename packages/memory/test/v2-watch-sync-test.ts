@@ -9,6 +9,7 @@ import {
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
+  type SessionSync,
 } from "../v2.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
@@ -43,6 +44,16 @@ const nextResponse = <Result>(
     const message = shiftMessage(messages);
     if (message.type !== "session/effect") {
       return assertResponse<Result>(message);
+    }
+    // Only MARKER-ONLY empty frames may be skipped implicitly: a frame
+    // carrying upserts/removes is content a test must consume explicitly,
+    // or an erroneous self-echo would be silently swallowed here.
+    const effect = (message as SessionEffectMessage)
+      .effect as unknown as SessionSync;
+    if (effect.upserts.length > 0 || effect.removes.length > 0) {
+      throw new Error(
+        "nextResponse skipped a NON-EMPTY sync frame; consume it explicitly",
+      );
     }
   }
 };

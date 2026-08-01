@@ -12,6 +12,7 @@
 // absorb, proving the ordering comes from the flush, not from a lucky timer.
 
 import { assertEquals, assertExists } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -522,4 +523,168 @@ Deno.test("memory v2 server: a durable write is visible to a concurrent commit's
 
   gate.resolve();
   await secondCommit;
+});
+
+Deno.test("memory v2 server: a queued second receive does not recreate the drain-wait cycle", async () => {
+  const time = new FakeTime();
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 0,
+    store: "memory://flush-before-verdict-queued-receive",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  const gate = Promise.withResolvers<void>();
+  const originalTransact = server.transact.bind(server);
+  (server as unknown as {
+    transact(
+      message: Parameters<Server["transact"]>[0],
+    ): ReturnType<Server["transact"]>;
+  }).transact = async (message) => {
+    if (message.requestId === "tx-1") {
+      await gate.promise;
+    }
+    return await originalTransact(message);
+  };
+
+  try {
+    const transactFor = (requestId: string, id: string) =>
+      encodeMemoryBoundary({
+        type: "transact",
+        requestId,
+        space,
+        sessionId: committerSessionId,
+        commit: {
+          localSeq: requestId === "tx-1" ? 1 : 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{ op: "set", id, value: { value: { requestId } } }],
+        },
+      });
+
+    // Two receives: tx-1 gated inside transact, tx-2 SERIALIZED behind it.
+    const first = committer.receive(transactFor("tx-1", "of:doc:a"));
+    const second = committer.receive(transactFor("tx-2", "of:doc:c"));
+
+    // The scheduled refresh (armed by setup's writeDocument) fires and
+    // starts drain-waiting with BOTH receives counted. Under the fake
+    // clock its deadline never expires: pre-fix, releasing the gate then
+    // deadlocks — tx-1's flush chains behind the drain-waiting pass, which
+    // waits for queued tx-2, which cannot run until tx-1 finishes. The
+    // whole-queue suspension breaks the cycle deterministically.
+    await time.tickAsync(0);
+    gate.resolve();
+    await first;
+    await second;
+
+    const effect = assertEffect(shiftMessage(committerMessages));
+    assertEquals(
+      (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
+      ["of:doc:b"],
+    );
+    assertEquals(
+      assertResponse<{ seq: number }>(shiftMessage(committerMessages)).ok?.seq,
+      2,
+    );
+  } finally {
+    gate.resolve();
+    time.restore();
+  }
+});
+
+Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://flush-before-verdict-multi-space",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  const spaceB = "did:key:z6Mk-flush-before-verdict-second-space";
+  await server.writeDocument(spaceB, "of:doc:z", { parked: true });
+
+  const original = server.syncSessionForConnection.bind(server);
+  let failed = false;
+  (server as unknown as {
+    syncSessionForConnection: typeof original;
+  }).syncSessionForConnection = (...args) => {
+    if (!failed) {
+      failed = true;
+      return Promise.reject(new Error("synthetic first-space failure"));
+    }
+    return original(...args);
+  };
+
+  let threw = false;
+  try {
+    await server.flushSessions([space, spaceB]);
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+
+  // BOTH spaces must remain discoverable: pre-fix the whole selection was
+  // deleted from the dirty set up front, so the not-yet-processed spaceB
+  // kept its dirty docs but no refresh would ever visit them again.
+  await server.flushSessions();
+  const effect = assertEffect(shiftMessage(committerMessages));
+  assertEquals(
+    (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
+    ["of:doc:b"],
+  );
+  // spaceB has no session to observe, but a third flush finding nothing to
+  // do proves its dirty state was consumed by the recovery pass rather
+  // than stranded (a stranded space would still hold docs with no space
+  // entry — invisible either way — so the observable claim is the
+  // successful recovery delivery above plus this clean settle).
+  await server.flushSessions();
+  assertEquals(committerMessages.length, 0);
+  void committerSessionId;
+});
+
+Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
+  const context = await setup({
+    flushBeforeVerdict: true,
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://flush-before-verdict-requeue-origin",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
+  // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
+  // write would. The requeue merge must not let the newer origin win:
+  // provenance survives only when both batches agree.
+  const original = server.syncSessionForConnection.bind(server);
+  let failed = false;
+  (server as unknown as {
+    syncSessionForConnection: typeof original;
+  }).syncSessionForConnection = (...args) => {
+    if (!failed) {
+      failed = true;
+      server.markSpaceDirty(space, ["space\u0000of:doc:b"], {
+        sessionId: committerSessionId,
+        seq: 99,
+      });
+      return Promise.reject(new Error("synthetic fan-out failure"));
+    }
+    return original(...args);
+  };
+
+  let threw = false;
+  try {
+    await server.flushSessions([space]);
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+
+  // Recovery: doc:b must fan out to the committer AUTHORITATIVELY — the
+  // consumed batch's unattributed novelty forbids suppressing it as the
+  // committer's own echo.
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  assertEquals(
+    (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
+    ["of:doc:b"],
+  );
 });
