@@ -16,7 +16,8 @@ import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts"
  * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
  * `undefined`, and arrays with `undefined` elements or sparse holes
  * -- in addition to the base fabric types (`null`, `boolean`, `number`,
- * `string`, plain objects, dense arrays).
+ * `string`, plain objects, dense arrays). An array must be a direct `Array`
+ * instance; a subclass instance is not a fabric value.
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -43,7 +44,8 @@ export function isFabricValueLayer(
       if (Array.isArray(value)) {
         // Arrays with `undefined` elements and sparse holes are accepted, but
         // not arrays carrying named or symbol-keyed properties, nor an
-        // accessor-backed index (live code rather than inert data).
+        // accessor-backed index, nor an indirect instance such as an `Array`
+        // subclass (all live code rather than inert data).
         return isInertArray(value);
       }
       // Plain objects are accepted; class instances are not (except
@@ -73,13 +75,15 @@ export function isFabricValueLayer(
  * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
  * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
  * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
- * `FabricPrimitive`, an array of `FabricValue`s with no named or symbol-keyed
- * properties, `length` aside (sparse holes allowed), or a plain object whose
- * values are all
+ * `FabricPrimitive`, a direct `Array` instance holding `FabricValue`s with no
+ * named or symbol-keyed properties, `length` aside (sparse holes allowed), or
+ * a plain object whose values are all
  * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
  * symbol -- whether the value itself or reached anywhere within it -- for an
  * accessor-backed (getter/setter) property anywhere, plain-object keyed or
- * array-indexed alike, which makes its container non-inert, and for any
+ * array-indexed alike, which makes its container non-inert, for an `Array`
+ * subclass instance or other indirectly-rooted array, whose prototype is live
+ * code the same way an accessor is, and for any
  * other class instance (`Date`, `Map`, ...) not representable as a
  * `FabricValue`. Handles circular references.
  *
@@ -141,7 +145,8 @@ export function isFabricValue(value: unknown): value is FabricValue {
     } else if (Array.isArray(item)) {
       // Arrays with named (non-index) or symbol-keyed properties have no
       // fabric representation; an accessor-backed index is live code rather
-      // than inert data.
+      // than inert data, as is the prototype of an indirect instance such as
+      // an `Array` subclass.
       if (!isInertArray(item)) return false;
       for (let i = 0; i < item.length; i++) {
         if (!(i in item)) continue; // sparse hole

@@ -720,10 +720,14 @@ describe("native-conversion", () => {
         expect(result).toEqual({ exposed: true });
       });
 
-      it("converts arrays with `toJSON()`", () => {
+      it("throws for arrays with `toJSON()`", () => {
+        // An array is answered by the array rule whatever it carries, and that
+        // rule rejects the named own property `toJSON` is.
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
-        expect(shallowFabricFromNativeValue(arr)).toBe("custom array");
+        expect(() => shallowFabricFromNativeValue(arr)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
       });
 
       it("throws if `toJSON()` returns a non-fabric value", () => {
@@ -1631,6 +1635,77 @@ describe("native-conversion", () => {
       });
     });
 
+    describe("throws for indirect `Array` instances", () => {
+      it("throws for an `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(() => fabricFromNativeValue(sub)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a nested `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(() => fabricFromNativeValue({ data: sub })).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws even for an already-frozen subclass instance", () => {
+        // The case the deep-frozen identity short-circuit would otherwise wave
+        // through unconverted, prototype and all: iteration answers content
+        // that the indices never show, and freezing the instance does nothing
+        // about the prototype that does it.
+        class Smuggler extends Array {
+          override *[Symbol.iterator](): Generator<unknown> {
+            yield "smuggled";
+          }
+        }
+        const smuggler = new Smuggler();
+        smuggler.push("benign");
+        Object.freeze(smuggler);
+
+        expect([...smuggler]).toEqual(["smuggled"]);
+        expect(smuggler[0]).toBe("benign");
+        expect(() => fabricFromNativeValue(smuggler)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(() => fabricFromNativeValue(severed)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+
+      it("throws for a subclass instance carrying `toJSON()`", () => {
+        // No property an array carries can route it away from the array rule,
+        // on the prototype or as an own key.
+        class ProtoJson extends Array<unknown> {
+          toJSON(): unknown[] {
+            return [7, 8];
+          }
+        }
+        const protoJson = new ProtoJson();
+        protoJson.push(1);
+        expect(() => fabricFromNativeValue(protoJson)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+
+        const ownJson = new (class extends Array<unknown> {})();
+        ownJson.push(1);
+        (ownJson as unknown as Record<string, unknown>).toJSON = () => [9];
+        expect(() => fabricFromNativeValue(ownJson)).toThrow(
+          "Not representable as a `FabricValue`: array that is not an inert array",
+        );
+      });
+    });
+
     // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
     // members and pass through unchanged.
     describe("special numbers", () => {
@@ -1990,6 +2065,22 @@ describe("native-conversion", () => {
       const arr = [1, 2, 3] as number[] & { extra?: string };
       arr.extra = "nope";
       expect(isFabricCompatible(arr)).toBe(false);
+    });
+
+    describe("indirect `Array` instances", () => {
+      it("rejects an `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(isFabricCompatible(sub)).toBe(false);
+        expect(isFabricCompatible({ data: sub })).toBe(false);
+      });
+
+      it("rejects an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(isFabricCompatible(severed)).toBe(false);
+      });
     });
 
     it("rejects an object with a symbol-keyed property", () => {

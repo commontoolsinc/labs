@@ -229,6 +229,12 @@ export type MutableFabricValueLayer =
  * `isFabricCompatible()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
+ * Arrays are the exception the arm cannot state structurally: an array is
+ * decided by the array rule whatever it carries, so one bearing a `toJSON`
+ * method is rejected rather than converted, even though it satisfies this
+ * arm's shape. A type cannot say "any object with `toJSON()` except an
+ * array", so the carve-out lives here in prose.
+ *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
  */
