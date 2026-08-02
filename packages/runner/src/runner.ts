@@ -292,6 +292,7 @@ const recordOutputSchemaPolicyInputs = (
           path: [...targetLink.path],
         },
         schema,
+        schemaRole: "output",
       });
     }
     return;
@@ -329,6 +330,7 @@ const recordSchemaPolicyInputForLink = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   if (schema === undefined) {
     return;
@@ -342,6 +344,7 @@ const recordSchemaPolicyInputForLink = (
       path: [...link.path],
     },
     schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -368,8 +371,8 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
         ),
     );
     const schema = bindingLink.schema ?? link.schema;
-    recordSchemaPolicyInputForLink(tx, bindingLink, schema);
-    recordSchemaPolicyInputForLink(tx, link, schema);
+    recordSchemaPolicyInputForLink(tx, bindingLink, schema, "output");
+    recordSchemaPolicyInputForLink(tx, link, schema, "output");
     return;
   }
 
@@ -453,6 +456,7 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     tx,
     result.getAsNormalizedFullLink(),
     result.schema,
+    "output",
   );
 };
 
@@ -1483,9 +1487,12 @@ export class Runner {
       );
       // Convert-and-freeze (default): a deep-frozen value lets the storage
       // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze.
+      // deep-cloning-to-freeze. The result root marks the whole result
+      // document as generated: setup rewrites the complete projection.
       writableResultCell.setRawUntyped(
         fabricFromNativeValue(result),
+        false,
+        "output",
       );
     }
   }

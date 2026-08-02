@@ -336,6 +336,16 @@ function declaredCellScope(
   return isCellScope(cap) ? cap : undefined;
 }
 
+export type DiffAndUpdateOptions = IReadOptions & {
+  /**
+   * Marks every schema-bearing document produced by this traversal as a
+   * generated output. This must propagate through collection entries anchored
+   * as entity documents: they are separate storage targets, so an output
+   * marker on the containing document cannot cover them.
+   */
+  schemaRole?: "output";
+};
+
 /**
  * Mutable state threaded through a single `normalizeAndDiff()` walk.
  */
@@ -375,10 +385,10 @@ export function diffAndUpdate(
   link: NormalizedFullLink,
   newValue: unknown,
   context?: unknown,
-  options?: IReadOptions,
+  options?: DiffAndUpdateOptions,
   anchorIds?: () => string | number,
 ): boolean {
-  const readOptions: IReadOptions = {
+  const readOptions: DiffAndUpdateOptions = {
     ...options,
     meta: {
       ...options?.meta,
@@ -439,7 +449,7 @@ function anchorValueAsEntity(
   registerKey: unknown,
   idSeed: string | number,
   context: unknown,
-  options: IReadOptions | undefined,
+  options: DiffAndUpdateOptions | undefined,
   state: DiffWalkState,
 ): ChangeSet {
   let path = link.path;
@@ -472,9 +482,16 @@ function anchorValueAsEntity(
 
   state.seen.set(registerKey, newEntryLink);
 
-  // When a child value becomes its own entity document, carry the child
-  // schema over so CFC metadata can be prepared for that new document too.
-  recordRelevantSchemaWritePolicyInput(tx, newEntryLink, newEntryLink.schema);
+  // This helper handles both creation and later writes to an anchored entity.
+  // Carry the child schema on every visit so CFC can merge the candidate
+  // envelope — including generated-output provenance — against an existing
+  // long-lived document.
+  recordRelevantSchemaWritePolicyInput(
+    tx,
+    newEntryLink,
+    newEntryLink.schema,
+    options?.schemaRole,
+  );
 
   return [
     // If it wasn't already, set the current value to be a doc link to this doc
@@ -528,7 +545,7 @@ export function normalizeAndDiff(
   link: NormalizedFullLink,
   newValue: unknown,
   context?: unknown,
-  options?: IReadOptions,
+  options?: DiffAndUpdateOptions,
   state: DiffWalkState = { seen: new Map() },
   precomputedCurrent: unknown = NO_PRECOMPUTED,
   // Whether the PARENT object's schema lists this slot in `required`

@@ -814,11 +814,36 @@ const storedMetadataFor = (
 /**
  * This returns a map whose values are always interned schemas.
  */
+const generatedOutputPathsByTarget = (
+  inputs: readonly WritePolicyInput[],
+): Map<string, readonly (readonly string[])[]> => {
+  const result = new Map<string, readonly (readonly string[])[]>();
+  for (const input of inputs) {
+    if (
+      input.kind !== "schema" || input.schema === undefined ||
+      input.schemaRole !== "output"
+    ) {
+      continue;
+    }
+    const key = targetKey(input.target);
+    const path = canonicalizeLogicalPath(input.target.path);
+    const existing = result.get(key) ?? [];
+    if (!existing.some((candidate) => arraysEqual(candidate, path))) {
+      result.set(key, [...existing, path]);
+    }
+  }
+  return result;
+};
+
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
+  generatedOutputPaths: ReadonlyMap<
+    string,
+    readonly (readonly string[])[]
+  >,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -841,7 +866,9 @@ const candidateSchemasByTarget = (
         ? internSchema(candidate)
         : schemasEqualIgnoringWriterStamp(existing, candidate)
         ? existing
-        : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
+        : mergeCfcSchemaEnvelopes(existing, candidate, {
+          generatedOutputPaths: generatedOutputPaths.get(key),
+        }), // Guaranteed interned.
     );
   }
   return result;
@@ -5160,9 +5187,13 @@ export const prepareBoundaryCommit = (
     // recorded input is registered in this map, so a missing key cannot occur
     // for a real input; an unattributed write must fail closed.
     state.writePolicyInputIdentities.get(input);
+  const generatedOutputPaths = generatedOutputPathsByTarget(
+    state.writePolicyInputs,
+  );
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
+    generatedOutputPaths,
   );
   const writeAuthorIdentities = writePolicyIdentitiesByTarget(
     state.writePolicyInputs,
@@ -5388,7 +5419,9 @@ export const prepareBoundaryCommit = (
         mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
           ? storedSchema
-          : mergeCfcSchemaEnvelopes(storedSchema, schema);
+          : mergeCfcSchemaEnvelopes(storedSchema, schema, {
+            generatedOutputPaths: generatedOutputPaths.get(key),
+          });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
         // token so the default-root runnability backstop can key on THIS class
@@ -5415,6 +5448,7 @@ export const prepareBoundaryCommit = (
         : mergeCfcSchemaEnvelopes(
           schema,
           storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
+          { generatedOutputPaths: generatedOutputPaths.get(key) },
         )
       : schema;
 

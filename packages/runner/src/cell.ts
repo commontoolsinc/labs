@@ -204,6 +204,7 @@ const recordSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema) ??
     storedSchemaForWritePolicyInput(tx, link);
@@ -221,6 +222,7 @@ const recordSchemaWritePolicyInput = (
     },
     schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -253,6 +255,7 @@ export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema);
   const cfcRelevant = schemaHasIfc(resolvedSchema) ||
@@ -265,6 +268,7 @@ export const recordRelevantSchemaWritePolicyInput = (
     tx,
     link,
     schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+    schemaRole,
   );
 };
 
@@ -392,8 +396,16 @@ declare module "@commonfabric/api" {
      * the write is skipped entirely if it deep-equals the value that would be
      * written. The read is marked `ignoreReadForScheduling`, so it does not
      * register a dependency that could re-trigger the writing computation.
+     *
+     * `schemaRole` is runner-internal provenance. Result projection writes pass
+     * `"output"` so the schema record created by this write carries the role;
+     * ordinary callers must leave it absent.
      */
-    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
+    setRawUntyped(
+      value: FabricValue,
+      onlyIfDifferent?: boolean,
+      schemaRole?: "output",
+    ): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -2299,7 +2311,11 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
+  setRawUntyped(
+    value: FabricValue,
+    onlyIfDifferent = false,
+    schemaRole?: "output",
+  ): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -2330,6 +2346,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       this.link,
       this.link.schema ?? this.schema,
+      schemaRole,
     );
     this.tx.writeValueOrThrow(this.link, inlined);
 
