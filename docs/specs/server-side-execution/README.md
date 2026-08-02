@@ -11,6 +11,25 @@ constrain how. It replaces the archived design and implementation plan;
 the v2 implementation is sequenced in
 [`docs/plans/server-execution-v2.md`](../../plans/server-execution-v2.md),
 which carries the task and success-criteria checkboxes.
+
+This README is the constitution: goal, invariant, lessons, budgets,
+deletion list. The normative engineering detail — written to be executed
+by implementing agents without re-deriving design decisions — is split by
+domain:
+
+| doc | governs | plan phases |
+| --- | --- | --- |
+| [`serving-loop.md`](serving-loop.md) | executor host, lease, wake→fixpoint→commit, memoization, outbox, recovery, counters | 1 |
+| [`speculation.md`](speculation.md) | client overlay, read-through, reconciliation, offline | 2 |
+| [`events.md`](events.md) | handler events end to end, payload capture, idempotency, failure semantics | 3 |
+| [`protocol.md`](protocol.md) | commit classes, the whole admission table, push, watermark, client-effect channel, wire discipline | 1–4 |
+| [`builtins.md`](builtins.md) | per-built-in contracts: placement, memo keys, navigateTo split, deferred list | 1, 4, 5 |
+| [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |
+
+Each detail doc opens with **Anchors** — module paths verified on main
+2026-08-02, to re-verify before coding — and closes with FORBIDDEN
+tripwires. A change that contradicts a detail doc edits the doc in the
+same PR or does not land.
 (The v1 branches, `codex/server-execution-w1-2-shared-pool` and
 `codex/server-execution-flags-on`, are archives — do not merge.)
 
