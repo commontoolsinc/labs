@@ -7,7 +7,10 @@ documents and the full lesson log are archived under
 with the standing-knowledge record in
 [`passivity-arc-orchestration.md`](../../history/specs/server-side-execution/passivity-arc-orchestration.md).
 This document states what we now know we are building and the lessons that
-constrain how. It replaces the archived design and implementation plan.
+constrain how. It replaces the archived design and implementation plan;
+the v2 implementation is sequenced in
+[`docs/plans/server-execution-v2.md`](../../plans/server-execution-v2.md),
+which carries the task and success-criteria checkboxes.
 (The v1 branches, `codex/server-execution-w1-2-shared-pool` and
 `codex/server-execution-flags-on`, are archives — do not merge.)
 
