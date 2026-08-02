@@ -57,6 +57,18 @@ describe("structural predicate narrowing", () => {
         throw new Error("Expected a plain object.");
       }
     });
+
+    it("narrows `unknown` for `isPlainContainer()`", () => {
+      // This one narrowed before it was overloaded, so it is the only predicate
+      // here whose existing narrowing could have been *lost* rather than gained.
+      const value: unknown = { a: 1 };
+
+      if (isPlainContainer(value)) {
+        expect(Object.keys(value)).toEqual(["a"]);
+      } else {
+        throw new Error("Expected a plain container.");
+      }
+    });
   });
 
   describe("leaves the `false` branch usable for a caller that already knows the shape", () => {
@@ -88,6 +100,20 @@ describe("structural predicate narrowing", () => {
       }
 
       // Still `readonly number[]`, not `never`.
+      expect(array[0]!.toFixed(1)).toBe("1.0");
+    });
+
+    it("keeps an array usable after a `false` result from `isArrayWithOnlyIndexProperties()`", () => {
+      // This predicate got the overload pair for family consistency rather than
+      // to fix a call site, which makes it the likeliest of the five to have the
+      // pair "simplified away" later. Hence a guard of its own.
+      const array: number[] = [1, 2, 3];
+      Object.defineProperty(array, "named", { value: 1, enumerable: true });
+
+      if (isArrayWithOnlyIndexProperties(array)) {
+        throw new Error("Expected a named property to be rejected.");
+      }
+
       expect(array[0]!.toFixed(1)).toBe("1.0");
     });
 
@@ -153,6 +179,64 @@ describe("structural predicate narrowing", () => {
       const _widened: unknown[] = value;
 
       expect(value[0]).toBe(1);
+    });
+
+    it("narrows `unknown` to a read-only record, not a mutable one", () => {
+      const value: unknown = Object.freeze({ a: 1 });
+
+      if (!isInertPlainObject(value)) {
+        throw new Error("Expected a frozen plain object to be inert.");
+      }
+
+      // A read-only *index signature* is not caught by assignability the way a
+      // `readonly` array is -- `ReadonlyRecord` assigns happily to
+      // `Record<string, unknown>`. Only a write catches it, so the assertion
+      // lives in a function that is never called, the value being frozen.
+      const _assertReadOnly = () => {
+        // @ts-expect-error The narrowed type confers read access, not write.
+        value.a = 2;
+      };
+
+      expect(value.a).toBe(1);
+    });
+
+    it("narrows `unknown` to a read-only record for `isPlainObject()` too", () => {
+      const value: unknown = Object.freeze({ a: 1 });
+
+      if (!isPlainObject(value)) {
+        throw new Error(
+          "Expected a frozen plain object to be `Object`-rooted.",
+        );
+      }
+
+      const _assertReadOnly = () => {
+        // @ts-expect-error The narrowed type confers read access, not write.
+        value.a = 2;
+      };
+
+      expect(value.a).toBe(1);
+    });
+  });
+
+  describe("narrows `isPlainContainer()` to a mutable type, deliberately", () => {
+    it("keeps the container writable, as `value-clone.ts` requires", () => {
+      // The one exception to the read-only rule above, and the one place where
+      // a well-meaning tidy-up would do real damage: `value-clone.ts` writes
+      // through this result. Should the narrowed type ever go read-only, the
+      // write below stops compiling -- which is the point.
+      //
+      // It has to be the record arm. Reaching the array arm means going through
+      // `Array.isArray()`, whose signature narrows to `any[]` and so launders
+      // any `readonly` away, leaving nothing for this to detect.
+      const value: unknown = { a: 1 };
+
+      if (!isPlainContainer(value) || Array.isArray(value)) {
+        throw new Error("Expected a plain-object container.");
+      }
+
+      value.a = 2;
+
+      expect(value.a).toBe(2);
     });
   });
 });
