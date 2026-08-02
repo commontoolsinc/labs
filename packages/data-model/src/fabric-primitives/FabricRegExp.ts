@@ -165,10 +165,9 @@ export class FabricRegExp extends BaseFabricPrimitive
         // `RegExp`); other flavors are stored faithfully and may carry
         // arbitrary `source`/`flags`. So a malformed non-`es2025` wire object
         // is accepted as-is rather than becoming a `ProblematicValue`.
-        const s = state as Record<string, unknown>;
-        const flavor = (s.flavor as string) ?? DEFAULT_FLAVOR;
-        const source = (s.source as string) ?? "";
-        const flags = (s.flags as string) ?? "";
+        const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
+        const source = (state.source as string) ?? "";
+        const flags = (state.flags as string) ?? "";
         try {
           return new FabricRegExp(flavor, source, flags);
         } catch (e) {
