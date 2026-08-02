@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-29
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (navigateTo server-side seam design); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # navigateTo server-side — design
 
 **Live design doc.** Wave G of the passivity arc: making `navigateTo`
@@ -6,7 +14,7 @@ runnable server-side. Siblings:
 serves), [`passivity-arc-orchestration.md`](passivity-arc-orchestration.md)
 (wave G's worklist), [`README.md`](README.md),
 [`implementation-plan.md`](implementation-plan.md). Archive to
-`docs/history/` per [`docs/README.md`](../../README.md) when built.
+`docs/history/` per [`docs/README.md`](../../../README.md) when built.
 
 **Status: RATIFIED** (2026-07-29). §7's gates 1 and 2 are ruled by the
 owner; 3 and 4 are orchestrator sequencing. The design's core call —

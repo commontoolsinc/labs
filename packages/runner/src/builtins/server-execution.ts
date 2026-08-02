@@ -85,7 +85,7 @@ export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   // server-side" requires.
   "llmDialog",
   // `navigateTo` joins for the SEAM, not for a broker route (owner gate 2,
-  // `docs/specs/server-side-execution/navigate-to-server-side.md` §2c: it is
+  // `docs/history/specs/server-side-execution/navigate-to-server-side.md` §2c: it is
   // not a pattern effect OR a rendering effect but BOTH, split at a seam — the
   // DECISION to navigate derives from pattern state and belongs server-side;
   // the ACTUATION is a shell view change and stays a client rendering effect,

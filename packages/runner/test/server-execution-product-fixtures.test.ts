@@ -542,7 +542,7 @@ const rankWidenings = (
  * `executor/action-transaction-router.ts:424-427`) — and nothing carries it
  * across runs. That is the arc's top box working as designed: *scope is
  * DISCOVERED by running, not declared before it*
- * (`docs/specs/server-side-execution/passivity-arc-orchestration.md`), the
+ * (`docs/history/specs/server-side-execution/passivity-arc-orchestration.md`), the
  * same inversion `scoped-cell-instances.md` already applies to write surfaces.
  * An action whose upstreams resolve in order therefore TIGHTENS as it
  * discovers them: `__cfLift_28` — the `{participantIdentity[UI]}`

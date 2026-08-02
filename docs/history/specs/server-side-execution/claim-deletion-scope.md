@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-29
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (claim-mechanism deletion scoping paper); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # Deleting claim arbitration — scope
 
 **Live design doc.** Scopes the work D11 names: replacing per-action claim

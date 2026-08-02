@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-07
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (the phased implementation plan); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # Server-Primary Execution — Implementation Plan
 
 Companion to [README.md](./README.md). Read the design first; this plan turns
@@ -7,7 +15,7 @@ Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
 500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
 remains pending. The
-[2026-07-15 interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+[2026-07-15 interactive-latency investigation](../../../development/performance/server-execution-interactive-latency-2026-07-15.md)
 found large flag-on interactive regressions that the CPU gate cannot see;
 Phase 2.5 below turns its findings into work orders and blocks the deployed
 drill until its gates pass. Later background, feed, scoped, and handler work
@@ -1226,7 +1234,7 @@ runbook using only serverPrimaryExecution.
 - [ ] Browser compute and lazy-client CPU pass the final fresh-deployment
       flag-off/flag-on gate. The earlier 500-event counterbalanced result is
       retained in the
-      [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md),
+      [Phase 2 rollout report](../../../development/performance/server-primary-rollout-2026-07-13.md),
       but its per-space authority phases are no longer the rollout model.
 - [x] The browser fixture reports client scheduler runs,
       suppressed/upstream client transactions, completed server action runs,
@@ -1240,7 +1248,7 @@ runbook using only serverPrimaryExecution.
 ## 4.5 Phase 2.5 — interactive performance hardening
 
 The
-[2026-07-15 interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+[2026-07-15 interactive-latency investigation](../../../development/performance/server-execution-interactive-latency-2026-07-15.md)
 measured flag-on regressions of +27–81% (default-app note-create,
 lunch-poll multi-client) with per-interaction latency growing as the graph
 grows, settlements lagging 17–27 s, 124 claimed-action conflicts per 34
@@ -1476,7 +1484,7 @@ The owner ruling (2026-07-15) reclassified register entries R3
 (`untrusted-implementation`) and R4 (`incomplete-static-surface`) as defect
 classes with target zero. The diagnosis pass (2026-07-15; one instrumented
 flag-on default-app run plus two static pipeline maps, recorded in
-[the dated report](../../history/development/performance/server-execution-r3-r4-diagnosis-2026-07-15.md))
+[the dated report](../../../development/performance/server-execution-r3-r4-diagnosis-2026-07-15.md))
 enumerated the full population: 37 verdicts from 18 distinct offenders
 across 7 pieces, produced by exactly two mechanisms.
 
@@ -1833,7 +1841,7 @@ scopeKey) doc-set membership plus per-wave point reads; closure comes from
 served-action observations or exact client-exported closures; **mixed mode
 is designed-in** (the `wish` deferral and R1/R2/R7 classes have no server
 closure source). Critical path (amended by adversarial review, 2026-07-16 — verdicts in
-[the archived review](../../history/development/design/feed-adversarial-review-2026-07-16.md),
+[the archived review](../../../development/design/feed-adversarial-review-2026-07-16.md),
 amendments FA1–FA16 binding): F1 residuals (FA12) → **C1.5b → F2**
 (order flipped; F2 owns the shared revision-matching contract, FA6) →
 F3 → F4 (+F4b boot-root demotion, FA3) → F5 (the W2.9 parity gate);
@@ -2087,7 +2095,7 @@ inside the isolated worktree. The gate:
 #### Feed repair wave (2026-07-17, from the Fable commit review FB1–FB31)
 
 Owns every defect the
-[Fable commit review](../../history/development/design/fable-commit-review-2026-07-17.md)
+[Fable commit review](../../../development/design/fable-commit-review-2026-07-17.md)
 confirmed in the landed feed/C1/W2.x commits. FW1–FW2 are the blocker
 chain and go first: they are what stands between the branch and an
 engageable F5 gate, and per the corrected C2 prerequisite they precede
@@ -2139,7 +2147,7 @@ The W0.1 context-key fix is necessary but not sufficient for this phase.
 #### C1 — user lanes: work-order decomposition (2026-07-15)
 
 **Status (2026-07-17, corrected by the
-[Fable commit review](../../history/development/design/fable-commit-review-2026-07-17.md)
+[Fable commit review](../../../development/design/fable-commit-review-2026-07-17.md)
 and re-bound the same day by the repair wave): the design §7 C1
 acceptance criterion is MET and BINDING — FW7 deleted the
 `CF_RUN_USER_LANE_GATE` env gate after root-causing its flake (a Deno
@@ -2172,7 +2180,7 @@ exists today; `sessionsForPrincipal` is built in C1.7). An adversarial
 panel (four lenses + code-verifying synthesis; 25/25 findings confirmed,
 none refuted) reviewed this table on 2026-07-15 — the **binding
 amendments** below the table came out of it; full verdicts in
-[the archived review](../../history/development/design/c1-adversarial-review-2026-07-15.md). Two engine guards must not be conflated: the W0.4
+[the archived review](../../../development/design/c1-adversarial-review-2026-07-15.md). Two engine guards must not be conflated: the W0.4
 guard (`claim.contextKey !== "space"`, engine.ts ~7977 →
 `claim-observation-mismatch`, NOT guard-tolerated) must widen first;
 `claim-context-mismatch` (~8398) is already the correct effective-context
@@ -2200,7 +2208,7 @@ sequential patches. C1.2 and C1.3 share `engine.ts` — likewise.
 
 Amendment references (A1–A25) are the adversarial-review amendments,
 archived in full in
-[the review record](../../history/development/design/c1-adversarial-review-2026-07-15.md);
+[the review record](../../../development/design/c1-adversarial-review-2026-07-15.md);
 build prompts must carry the full amendment text for their work orders.
 Entry-bullet reconciliation (A25): "without duplicating unscoped
 computation" means without duplicating unscoped AUTHORITY
@@ -2266,7 +2274,7 @@ session is its own anchor; session-end = lane-end, no re-anchor), and
 narrow session-claim delivery to the named session.
 
 **The adversarial panel (2026-07-17; verdicts archived in
-[the review record](../../history/development/design/c2-adversarial-review-2026-07-17.md),
+[the review record](../../../development/design/c2-adversarial-review-2026-07-17.md),
 amendments CA1–CA14 binding) corrected the scout in load-bearing ways —
 read them before building:**
 
@@ -2560,7 +2568,7 @@ The reviewed decomposition, for the record:
 
 Scouted (`.agents/c3-12-scout-report-2026-07-24.md`) and adversarially
 panel-reviewed
-([the review record](../../history/development/design/c3-12-adversarial-review-2026-07-24.md),
+([the review record](../../../development/design/c3-12-adversarial-review-2026-07-24.md),
 CR1–CR10 binding). **Panel rulings (read before building):** the root
 diagnosis is CONFIRMED — a real space-B replica *is* opened, its foreign
 cell's sink fires exactly once and never on a later B change, and an
@@ -2641,7 +2649,7 @@ carries the re-pin instruction).
 
 **The adversarial panel (2026-07-17; 24 verdicts — 2 blockers, 15
 serious, none refuted — archived in
-[the review record](../../history/development/design/c3-adversarial-review-2026-07-17.md),
+[the review record](../../../development/design/c3-adversarial-review-2026-07-17.md),
 amendments C3A1–C3A24 binding) corrected the scout in load-bearing ways
 — read them before building:**
 
@@ -2747,7 +2755,7 @@ scope for the foreign wake (C3A24).
 
 Amendment references (C3A1–C3A24) are the adversarial-review amendments,
 archived in full in
-[the review record](../../history/development/design/c3-adversarial-review-2026-07-17.md);
+[the review record](../../../development/design/c3-adversarial-review-2026-07-17.md);
 build prompts must carry the full amendment text for their work orders.
 
 Prerequisite: C3 build starts after the **C2 exit gate** — C2.8, per the

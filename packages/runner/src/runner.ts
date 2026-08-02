@@ -3420,7 +3420,7 @@ export class Runner {
    * demand plane is 1:1 with no roll-up, so a nested piece is covered by the
    * demand its own eventual `start()` publishes — for a navigate target, the
    * shell's start once the navigation lands. See
-   * `docs/specs/server-side-execution/navigate-to-server-side.md` §8b.
+   * `docs/history/specs/server-side-execution/navigate-to-server-side.md` §8b.
    *
    * Nothing awaits the deferred start's commit continuation, so the snapshot
    * is tracked for settle rather than returned; `removeExecutionDemand` does

@@ -29,7 +29,7 @@ export function navigateTo(
    * that was authored before it.
    *
    * This declaration is also the design's safety hinge
-   * (`docs/specs/server-side-execution/navigate-to-server-side.md` §6 item 2).
+   * (`docs/history/specs/server-side-execution/navigate-to-server-side.md` §6 item 2).
    * `session` scope is admitted ONLY at session lane rank
    * (`scheduler/servability.ts` `laneAdmitsScope`), so declaring it is what
    * pins the action's `contextRank` to `"session"` and makes a space- or

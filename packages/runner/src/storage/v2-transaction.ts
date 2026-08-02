@@ -2423,7 +2423,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // that run item and (b) both mount writers (hydrateForeignReadMount,
     // refreshForeignMountForWake) ride the serial work queue. If either leaves,
     // value/stamp can desync (R4 reopens) and a run-start mount snapshot becomes
-    // required — see docs/specs/server-side-execution/implementation-plan.md.
+    // required — see docs/history/specs/server-side-execution/implementation-plan.md.
     const served = this.storage.foreignReadDocument?.(
       branch.space,
       address.id,

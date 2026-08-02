@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-15
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (context-lattice claims design); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # Context-Lattice Execution: Scoped and Cross-Space Server Authority
 
 Status: reviewed design; the lattice mechanism is landed through C2 —
@@ -13,7 +21,7 @@ is the wrong end state.
 
 Author: design session 2026-07-15, from the Phase 2.5 measurement evidence
 (see the
-[interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+[interactive-latency investigation](../../../development/performance/server-execution-interactive-latency-2026-07-15.md)
 and implementation-plan §4.5).
 
 Related: `docs/specs/server-side-execution/README.md` (§3.2.1 context keys,

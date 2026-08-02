@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-28
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (the learning-run orchestration log and standing-knowledge record); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # Server-primary passivity arc — build & orchestration plan
 
 > ## READ THIS FIRST — owner, 2026-07-29
@@ -224,7 +232,7 @@ current arc's plan+evidence log
 ([`client-passivity.md`](client-passivity.md), whose §0 is START-HERE).
 Those say WHAT and WHY; this says WHO BUILDS IT AND IN WHAT ORDER. Keep §1
 accurate as work lands; archive to `docs/history/` per
-[`docs/README.md`](../../README.md) when the arc completes.
+[`docs/README.md`](../../../README.md) when the arc completes.
 
 **Goal of the arc (owner, 2026-07-28):** everything reactive runs on the
 server. Client-side execution of reactive functions becomes *purely
@@ -1199,6 +1207,230 @@ diagnoses them a seventh time:
 **None of the three is ever caused by arc work in `.agents/worktrees/`.** If a
 future agent's own changed files are individually clean, the hook is telling it
 about a checkout nobody is working in.
+
+### 2.5c-BASELINE First real flag-on measurement: the server runner is competitive
+
+Measured 2026-08-02 through `deno task integration --port-offset=750 patterns
+counter`, arms **alternating within each rep** so load drift hits both equally.
+Merge base `f25518c1f` (client executes) vs thin `9cf0cb305` (flags ON, server
+executes). `counter.test.ts` is byte-identical on both (§2.5e).
+
+Live reactive update — the round trip that matters:
+
+| | samples (ms) | median | spread |
+| --- | --- | --- | --- |
+| flags OFF | 279, 306, 318, 326 | **~312** | 47 |
+| flags ON | 292, 296, 339, 545 | **~317** | **253** |
+
+**8/8 runs green on both arms**, all three steps each.
+
+**What this establishes:** server-side execution is *not* an order of
+magnitude slower — medians are within 5 ms of each other. The "maybe it's
+really slow" hypothesis is refuted for this path. Page-refresh step and total
+wall time are likewise a wash (~890-1000 ms; 4-5 s).
+
+**What it does NOT establish:** whether flags-on has a genuinely worse tail.
+The single 545 ms sample is the only thing suggesting it, n=4 per arm, and
+load ran 11-15 throughout — above §2.5's ceiling for trusting a latency
+difference. Treat the tail as *worth re-measuring on a quiet box*, not as a
+finding.
+
+**Scope limits, stated so nobody over-reads the table:** `counter.test.ts` is
+the simplest case in the suite (one piece, one cell), both ends are localhost
+so a real deployment adds network RTT, and this says nothing about breadth —
+how many other tests survive flags-on is a separate and currently unanswered
+question.
+
+### 2.5c-SUITE Suite context costs 34x more than the flag does
+
+Measured 2026-08-02 on a genuinely quiet box (load 4.0-6.0), arms adjacent per
+test, each test run **isolated** (own server pair) via
+`deno task integration --port-offset=750 patterns <name>`. All 10 runs green.
+
+| test | main | flags ON | identical workload? |
+| --- | --- | --- | --- |
+| `cf-checkbox` | 4 s | 4 s | **yes** |
+| `cfc-group-chat-demo-multi-runtime` | 10 s | **7 s** | **yes** |
+| `default-app` | 10 s | 14 s | no (+162/−27) |
+| `lunch-poll-vote` | 10 s | 15 s | no (+8) |
+| `cfc-group-chat-demo-two-browsers` | 7 s | 8 s | no (+55) |
+
+**On the two byte-identical comparators there is no flag penalty** — one is a
+wash, the other is *faster* under flags-on. The +4/+5 s on the modified tests
+is not interpretable as runtime: those files carry the arc's own
+instrumentation. Note these are 7-15 s tests of which ~4 s is fixed server
+startup, so the variable part is 3-11 s and single-run deltas of 3-5 s in
+*both directions* are inside the noise band. Do not read a winner out of this
+table; read "no measurable penalty".
+
+**The finding is elsewhere, and it is large.** `cf-checkbox` takes **4 s
+isolated** and **138 s inside the full 336-testcase patterns suite** — same
+code, same arm, **34x**. That is far outside any noise band and it is not the
+flag, because isolated main and isolated flags-on agree exactly.
+
+So the open question is **does a space degrade as it accumulates?** The suite
+runs 80+ files against one toolshed, accumulating spaces, pieces and
+documents. If that degradation is arm-independent it is a harness artifact and
+fresh stores per file fix it. If it is worse under flags-on it is a real
+design finding — server-side execution slowing as spaces grow is something a
+rebuild must design for, not discover in production.
+
+**Discriminating experiment (not yet run):** the full patterns suite on the
+merge base, and compare `cf-checkbox`'s *in-suite* time across arms. Isolated
+numbers cannot answer it.
+
+### 2.5c-COST The measured shape of the flags-on cost (n=3-4 per cell, loads 4-8)
+
+Three-way decomposition on `lunch-poll-vote` (two browsers, shared option):
+the merge-base file run against BOTH runtimes, plus the arc's instrumented
+file, all isolated via `deno task integration --port-offset=750`. Wall times
+were stable to ±1s across reps in every cell.
+
+| | mainbase runtime | thin runtime (instr. file) | thin runtime (merge-base file) |
+| --- | --- | --- | --- |
+| reactive steps (StepTimer) | 2.1 s | 3.2 s | 4.9 s |
+| in-test teardown (`it()` − steps) | 2.9 s | 6.8 s | **8.1 s** |
+| deploy + hooks (`describe` − `it()`) | 5.0 s | 6.0 s | 7.0 s |
+| wall | 10 s | 15-16 s | 19-21 s |
+
+Per-step, the reactive delta concentrates entirely in cross-user propagation:
+
+| step | mainbase | thin (mb file) |
+| --- | --- | --- |
+| option A propagates to both | 92 ms | 1171 ms |
+| both cast green concurrently | 294 ms | 1821 ms |
+| navigate/login, name fill, tally checks | ≈equal | ≈equal |
+
+**Findings, in design order:**
+
+1. **Cross-user reactive propagation is 4-6x slower under flags-on** —
+   ~100-300 ms → ~500-1800 ms. The single-user counter probe (§2.5c-BASELINE)
+   showed no delta because one client's round trip hides it; the SECOND
+   browser's view pays it in full. For the speculate-locally design this is
+   the number that matters: local echo covers the actor, so the whole
+   user-visible cost of server-primary execution lands on the *other*
+   observers. The rebuild's server→client push path must be designed against
+   this number, and 1-1.8 s is not acceptable as a steady state.
+2. **In-test teardown nearly triples** (2.9 s → 8.1 s) — logout/idle-wait
+   while a piece is rendered. Echoes blocker #40's family: shutdown now waits
+   on something the server owns. Not user-facing, but it will tax every CI
+   run and every session close.
+3. **The arc's own measurement instrumentation SPEEDS UP flags-on runs**
+   (15-16 s instrumented vs 19-21 s clean, same runtime): the
+   `beginServerExecutionMeasurement` diagnostics read appears to warm the
+   executor path that the clean run pays for mid-test. Corollary: every
+   arc-instrumented timing this session UNDERSTATES the flags-on cost, and
+   any future A/B must use uninstrumented workloads on both arms.
+4. **`cfc-group-chat-demo-multi-runtime` (byte-identical, n=3-4/arm):
+   mainbase 6 s steady / thin 7-8 s** — consistent with the propagation tax
+   at smaller interaction counts. `cf-checkbox` shows exactly 0 delta (4 s =
+   4 s x4), because it is startup-dominated with one trivial cell.
+
+Still open, unchanged by this: the §2.5c-SUITE 34x suite-context blowup, which
+is orthogonal (it appears on identical code at identical flags).
+
+### 2.5c-STORM The propagation slowdown, root-caused and PROVEN 2026-08-02
+
+The §2.5c-COST 4-6x cross-user propagation slowdown is **observation
+persistence flooding the commit stream**. Traced end-to-end and then proven by
+ablation.
+
+**The trace (uninstrumented lunch-poll on thin, /api/health/stats sampled at
+~200 ms):**
+
+- The executor itself is FAST: the whole reactive workload — 59 scheduler
+  runs, 29 shadow + 26 authoritative transactions, 26 claims — completes in
+  **~700 ms**.
+- But the run generates **595 accepted-commit notifications** (~10 logical
+  writes → ~60x amplification), and after the votes land the pool keeps
+  receiving them at **~50/s for 12+ seconds** — through the entire teardown.
+  70% are suppressed as unrelated; they still cost index decisions, WAL
+  writes, and subscription pushes to both browsers.
+- The store shows what they are. Thin space file: **~80 MB** per run;
+  **72% is scheduler-observation persistence** (`scheduler_observation` +
+  `_snapshot` + `_replay`). 542 commits vs mainbase's 150; mainbase's
+  observation tables are **empty** (0 rows). Server-side sessions wrote 71%
+  of the commits — the server talking to itself.
+- One replay row for a single `cf:builtin/map` run: **158 KB** — `reads`:
+  130 KB (714 links serialized individually), `actualChangedWrites` 20 KB,
+  plus a SECOND copy of the read set inside `completeActionScopeSummary`
+  (the certificate). §2.4f predicted exactly this ("provenance-envelope
+  expansion … timing regression is a live hypothesis") and nobody tested it.
+
+**The ablation (server-primary ON, `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false`):**
+
+| step | mainbase | flags-on | flags-on, persistence OFF |
+| --- | --- | --- | --- |
+| option A propagates | 92 ms | 767-1171 ms | **399 ms** |
+| both cast green | 294 ms | 797-1821 ms | **453 ms** |
+| `it()` wall | 5 s | 10-13 s | **7 s** |
+
+All green — the persistence is NOT load-bearing for this path. The storm
+owned 50-75% of the propagation delta and most of the teardown delta (#43:
+same mechanism — the idle/drain path was digesting the firehose).
+
+**Attribution of blame, carefully:** `persistentSchedulerState` itself is
+pre-arc (#3646) and innocent at handler frequency with small records —
+mainbase has it on and persists nothing here. The arc turned it into the
+claims/admission EVIDENCE LOG: every derived run on the server durably
+records its full read/write link sets plus a certificate copy, at executor
+frequency. The scaffolding is not merely conceptually in the hot path — it is
+byte-for-byte the majority of all data the system moves.
+
+**Residual after ablation:** ~150-350 ms over mainbase per cross-user step —
+the honest cost of the extra hop (executor compute + commit + push) with
+shadow/claim machinery still on. This is the number the rebuild's push path
+starts from, before deleting shadow runs and claim round trips.
+
+**Also explains (hypothesis, one experiment short of proven):** the
+§2.5c-SUITE 34x — stores PERSIST across `deno task integration` invocations
+(stop/start does not wipe `cache/`), grow ~0.5 GB per heavy run under
+flags-on, and the engine indexes/fans out every commit against every active
+lane. `cf-checkbox` in-suite runs behind 80+ files of accumulated stores and
+subscriptions.
+
+### 2.5d-PRE Do not hand-roll an integration harness — `deno task integration` exists
+
+**Read this before §2.5d, §2.5e and §2.5f: those three were written while
+hand-rolling a harness that should never have been written.** The repo already
+has the correct entry point, and §2.5's own phrase "the offset-750 servers"
+was always referring to it:
+
+```
+deno task integration --port-offset=750 patterns counter
+```
+
+`tasks/integration.ts` → `scripts/start-local-dev.sh` starts **both** servers on
+offset ports and wires storage correctly (`start-local-dev.sh:107-108`):
+
+```
+TOOLSHED_API_URL=${API_URL:-"http://localhost:$TOOLSHED_PORT"}
+TOOLSHED_MEMORY_URL=${MEMORY_URL:-"$TOOLSHED_API_URL"}
+```
+
+A hand-rolled `deno run index.ts --port=NNNN` gets **two** things wrong that
+this handles:
+
+1. **`MEMORY_URL` defaults to `http://localhost:8000`**
+   (`packages/toolshed/env.ts:147`). On this box that is the loom primary
+   instance, so a server "isolated" on port 8751 still sends every storage
+   write to another tenant's memory endpoint. Isolating the API port isolates
+   nothing. In CI the default is harmless because toolshed *is* the thing on
+   8000 — it points at itself.
+2. **No shell.** Integration tests load a frontend; `FRONTEND_URL` defaults to
+   `API_URL`. A toolshed with no shell dev server has no page to serve.
+
+**Measured 2026-08-02, and this is the whole point:** `counter.test.ts` under
+the hand-rolled harness failed a 60 s barrier and then hung 47 minutes, on
+*every* branch including the CI-clean merge base — which looked exactly like
+"local integration is broken in this environment" and produced a whole §2.5f
+about harness timeouts. Through `deno task integration` the same test passes
+**1/1 in 5 s**, individual steps ~900 ms.
+
+Nothing measured through the hand-rolled harness means anything. The lesson
+generalises past this arc: **when a repo ships a task for the thing you are
+about to script, the gap between it and your script is a bug you are
+choosing to own.**
 
 ### 2.5d Port 8000 belongs to the loom primary — never measure against it
 

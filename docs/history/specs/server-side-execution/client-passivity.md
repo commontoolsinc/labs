@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-26
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (the no-dual-execution end-state design); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # Client passivity: the no-dual-execution end state
 
 **Status: PANEL-AMENDED PLAN (2026-07-26). Theory ruled SOUND WITH
@@ -1701,7 +1709,7 @@ C1 asked whether a purely speculative client deletes the §4 widening
 requirement. **Ruled SURVIVES**, and the premise behind the question is
 wrong at the source: the pair is not a client-authority mechanism. It is
 a base-runtime scope-discovery rule from
-[`scoped-cell-instances.md`](../scoped-cell-instances.md), emitted
+[`scoped-cell-instances.md`](../../../specs/scoped-cell-instances.md), emitted
 unconditionally by every runtime. The emission predicate
 (`pattern-binding.ts:274`) contains no lane, claim, executor or server
 term — verified directly. The context-lattice §4 firewall is a *backstop*

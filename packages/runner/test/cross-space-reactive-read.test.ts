@@ -2,7 +2,7 @@
  * C3.12.0 — the three-way diagnostic repro for client-side cross-space
  * reactivity (defect (ii)). This is WO-0 of the C3.12 decomposition and a
  * GATE: its verdict decides whether the rows below it are built (see
- * `docs/specs/server-side-execution/implementation-plan.md` §"C3.12 — client
+ * `docs/history/specs/server-side-execution/implementation-plan.md` §"C3.12 — client
  * cross-space reactivity" and `docs/history/development/design/
  * c3-12-adversarial-review-2026-07-24.md`, CR2/CR3/CR5/CR7).
  *

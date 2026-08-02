@@ -764,7 +764,7 @@ export type ExecutionSettlementEvent = {
 /**
  * The one-shot COMMAND on an otherwise state-reconciling feed: the client half
  * of a server-side `navigateTo`
- * (`docs/specs/server-side-execution/navigate-to-server-side.md` §2c, owner
+ * (`docs/history/specs/server-side-execution/navigate-to-server-side.md` §2c, owner
  * gate 2). `navigateTo` is neither a pattern effect nor a rendering effect but
  * both, split at a seam — the DECISION to navigate derives from pattern state
  * and runs server-side; the ACTUATION is a shell view change and stays a client

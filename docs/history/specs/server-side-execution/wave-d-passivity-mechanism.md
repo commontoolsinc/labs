@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-29
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (P3 passivity mechanism design); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
 # Wave D — the P3 passivity mechanism (design)
 
 **Live design doc.** The build spec for wave D of the passivity arc.
@@ -8,7 +16,7 @@ START HERE), [`context-lattice-execution.md`](context-lattice-execution.md)
 (the lattice register) and
 [`passivity-arc-orchestration.md`](passivity-arc-orchestration.md) (who
 builds it, in what order). Archive to `docs/history/` per
-[`docs/README.md`](../../README.md) when wave D completes.
+[`docs/README.md`](../../../README.md) when wave D completes.
 
 **Status: DRAFTED, NOT RATIFIED.** §13's open questions are owner-gated
 and unanswered as of 2026-07-29. Do not start building from this document

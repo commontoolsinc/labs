@@ -298,6 +298,12 @@ One line per archived document; each document's header carries the fuller
 - [09-remediation-direction.md](specs/scheduler-v2/addenda/09-remediation-direction.md)
   — scheduler-v2 addendum: remediation direction — coalesce/dedup, not
   version-skip.
+- [server-side-execution/](specs/server-side-execution/README.md) — the v1
+  server-primary execution learning run (2026-07-07 → 2026-08-02): original
+  design, implementation plan, context-lattice claims, client-passivity
+  design, claim-deletion scoping, and the orchestration log carrying the
+  full lesson record. Superseded by the live
+  [server-primary execution v2 spec](../specs/server-side-execution/README.md).
 - [OPTIMIZATION-JOURNAL.md](packages/runner/test/traverse-replay/OPTIMIZATION-JOURNAL.md)
   — traverse optimization log.
 - [SCHEMA_INJECTION_NOTES.md](packages/ts-transformers/SCHEMA_INJECTION_NOTES.md),

@@ -684,7 +684,7 @@ propagate](#how-flags-propagate).
   the provably-dead `retired` skip branch deleted. FB9/FB10/FB11(gate
   math)/FB28 are closed; the W2.9 wall-time gate itself remains a live
   measurement (see the F5 measurement protocol in
-  `docs/specs/server-side-execution/implementation-plan.md`).
+  `docs/history/specs/server-side-execution/implementation-plan.md`).
 - **Path to removal.** Once the W2.9 gate is green across the rollout, set the
   dial to `*`, make doc-set admission unconditional for negotiated peers,
   fold the dial into `serverPrimaryExecution`, and delete the config
@@ -1306,7 +1306,7 @@ the per-epic implementation notes).
   context-lattice rank dial, 2026-07-16); the `session` stage landed with
   C2.1 (2026-07-17), the `cross-space-read` stage with C3.6 (2026-07-18).
 - **Purpose.** The issuance-side rank dial from the
-  [context-lattice design §6](../specs/server-side-execution/context-lattice-execution.md):
+  [context-lattice design §6](../history/specs/server-side-execution/context-lattice-execution.md):
   the highest context rank the host ISSUES execution claims for, staged
   space → user → session → cross-space as each rank's lane machinery lands.
   The value is a ladder, not a set — the `session` stage admits user-rank
@@ -1400,7 +1400,7 @@ the per-epic implementation notes).
 - **Added by.** Bernhard Seefeld, in server-side execution C1.7
   (context-scoped delivery, 2026-07-16).
 - **Purpose.** The context-lattice claim-delivery subcapability
-  ([design §5](../specs/server-side-execution/context-lattice-execution.md),
+  ([design §5](../history/specs/server-side-execution/context-lattice-execution.md),
   adversarial-review amendments 11/17/21): a session that negotiated it may
   receive context-scoped (`user:`/`session:`) execution claims, filtered by
   the single delivery predicate (`#sessionAcceptsClaim`) — user-context
@@ -1458,7 +1458,7 @@ the per-epic implementation notes).
 - **Added by.** Bernhard Seefeld, in server-side execution C3.6b
   (cross-space-read claim delivery cohort gate, 2026-07-18).
 - **Purpose.** The cross-space-read claim-delivery subcapability
-  ([design §6](../specs/server-side-execution/context-lattice-execution.md),
+  ([design §6](../history/specs/server-side-execution/context-lattice-execution.md),
   adversarial-review amendment C3A18): a session that negotiated it may
   RECEIVE an execution claim whose action reads foreign spaces (a claim with a
   non-empty `crossSpaceReadSpaces`), narrowed by the same single delivery
