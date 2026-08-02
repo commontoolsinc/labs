@@ -3249,7 +3249,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             }
           }
           const merged = this.objectCreator.mergeMatches(
-            matches as FabricValue[],
+            matches,
             resolved,
           );
           if (matches.length > 0) {
@@ -3322,7 +3322,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           }
         }
         const merged = this.objectCreator.mergeMatches(
-          matches as FabricValue[],
+          matches,
           resolved,
         );
         if (matches.length > 0) {
@@ -3422,7 +3422,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         }
         if (allOf.length > 0) {
           const merged = this.objectCreator.mergeMatches(
-            matches as FabricValue[],
+            matches,
             resolved,
           );
           return {

@@ -691,7 +691,7 @@ export function cloneWithoutValueAtPath(
   );
   const lastKey = path[path.length - 1]!;
   if (Array.isArray(pathValue)) {
-    (pathValue as FabricValue[]).splice(Number(lastKey), 1);
+    pathValue.splice(Number(lastKey), 1);
   } else {
     delete (pathValue as Record<string, FabricValue>)[lastKey];
   }

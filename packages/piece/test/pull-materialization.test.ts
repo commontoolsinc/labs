@@ -1516,7 +1516,7 @@ describe("piece pull materialization", () => {
             includeSchema: true,
           }),
         },
-        ...(originalInternal as FabricValue[]),
+        ...originalInternal,
       ]);
       orphan.withTx(tx).setMetaRaw(
         "result",

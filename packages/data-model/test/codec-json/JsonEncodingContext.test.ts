@@ -1124,7 +1124,7 @@ describe("JsonEncodingContext", () => {
     it("deserialized arrays are frozen", () => {
       const result = fromWireFormat(
         [1, 2, 3] as JsonWireValue,
-      ) as FabricValue[];
+      );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
@@ -1138,7 +1138,7 @@ describe("JsonEncodingContext", () => {
     it("mutation of deserialized array throws", () => {
       const result = fromWireFormat(
         [1, 2, 3] as JsonWireValue,
-      ) as FabricValue[];
+      );
       expect(() => {
         (result as unknown as number[])[0] = 99;
       }).toThrow();

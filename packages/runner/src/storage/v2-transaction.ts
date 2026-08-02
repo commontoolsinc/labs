@@ -613,7 +613,7 @@ const buildArrayPatchCandidates = (
         path: encodePointer(path),
         index: before.length,
         remove: 0,
-        add: after.slice(before.length) as FabricValue[],
+        add: after.slice(before.length),
       },
       path,
       coversDescendants: false,
@@ -2704,9 +2704,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       })
     );
     return {
-      workingArray: Array.isArray(working)
-        ? working as FabricValue[]
-        : undefined,
+      workingArray: Array.isArray(working) ? working : undefined,
       hadInitialArray: Array.isArray(initial),
       // Presence, not definedness: an already-present slot (even holding
       // `undefined`) does not add a key to its parent, so the op does not

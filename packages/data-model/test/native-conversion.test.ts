@@ -226,7 +226,7 @@ describe("native-conversion", () => {
     });
 
     it("preserves sparse holes", () => {
-      const arr = new Array(3) as FabricValue[];
+      const arr = new Array(3);
       arr[0] = 1;
       arr[2] = 3;
       Object.freeze(arr);
@@ -264,7 +264,7 @@ describe("native-conversion", () => {
     });
 
     it("deeply unwraps `FabricSet` to `FrozenSet`", () => {
-      const set = new Set<FabricValue>([42] as FabricValue[]);
+      const set = new Set<FabricValue>([42]);
       const ss = new FabricSet(set);
       const arr = [ss];
       const result = nativeFromFabricValue(arr) as unknown[];
