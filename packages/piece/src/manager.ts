@@ -46,7 +46,7 @@ import {
 } from "../../runner/src/piece-helpers.ts";
 import { prepareSourceClosureVerification } from "../../runner/src/compilation-cache/cell-cache.ts";
 import type { PatternUpdateOutcome } from "../../runner/src/pattern-updater.ts";
-import { deriveSystemPatternUrl } from "./system-pattern-url.ts";
+import { deriveSystemPatternSource } from "./system-pattern-url.ts";
 ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
@@ -277,7 +277,7 @@ export class PieceManager {
         const root = await this.get(defaultPattern, false, nameSchema);
         outcome = await this.runtime.patternUpdater.checkDefaultPattern(
           root,
-          deriveSystemPatternUrl(this.space, this.runtime),
+          deriveSystemPatternSource(this.space, this.runtime),
         );
       } catch {
         throw error;

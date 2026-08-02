@@ -113,7 +113,7 @@ export class TraverseCaptureRecorder {
       // Snapshot via deep-frozen clone (identity-passes already-frozen
       // selectors): callers may mutate or intern them later.
       this.selectors.push(
-        cloneIfNecessary(selector as FabricValue) as SchemaPathSelector,
+        cloneIfNecessary(selector) as SchemaPathSelector,
       );
       this.selectorIndex.set(key, index);
     }
@@ -127,7 +127,7 @@ export class TraverseCaptureRecorder {
       index = this.links.length;
       this.links.push(
         cloneIfNecessary(
-          link as unknown as FabricValue,
+          link,
         ) as unknown as NormalizedFullLink,
       );
       this.linkIndex.set(key, index);
@@ -201,7 +201,7 @@ export class TraverseCaptureRecorder {
     if (ok !== undefined && ok.value !== undefined) {
       this.docs.set(
         key,
-        cloneIfNecessary(ok.value as FabricValue) as FabricValue,
+        cloneIfNecessary(ok.value),
       );
     }
   }

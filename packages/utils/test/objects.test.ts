@@ -14,12 +14,6 @@ describe("objects", () => {
           .toBe(true);
       });
 
-      it("accepts a null-prototype object", () => {
-        const obj = Object.create(null) as Record<string, unknown>;
-        obj.a = 1;
-        expect(isInertPlainObject(obj)).toBe(true);
-      });
-
       it("accepts a key whose value is `undefined`", () => {
         // A present key holding `undefined` is still an enumerable string key.
         expect(isInertPlainObject({ a: undefined }))
@@ -161,6 +155,18 @@ describe("objects", () => {
         const fake = Object.create(Array.prototype) as Record<string, unknown>;
         fake.a = 1;
         expect(isInertPlainObject(fake)).toBe(false);
+      });
+
+      it("rejects a null-prototype object", () => {
+        // A record has one shape here, the one the natural syntax produces. A
+        // prototype has no representation in any encoding, so accepting this
+        // would mean carrying a distinction that stops existing at the first
+        // storage boundary. `shallowCleanPlainObject()` is how a caller says
+        // it means to shed one.
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.a = 1;
+        expect(isInertPlainObject(obj)).toBe(false);
+        expect(isInertPlainObject(Object.create(null))).toBe(false);
       });
 
       it("answers rather than throwing for `null` and `undefined`", () => {

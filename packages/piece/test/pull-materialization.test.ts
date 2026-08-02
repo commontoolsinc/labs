@@ -7273,6 +7273,57 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
   // keep: the terminal handle still applies the scoped-link relaxation (so a
   // scoped child voids only itself, not its whole object), and a path THROUGH
   // the handle still lands on the right document.
+  // #5231 moved the asCell scope cap into the runner's own projection, which
+  // let the narrow read drop its resolveAsCell() routing. That routing was the
+  // only thing keeping a capped handle capped here, so pin the behavior at
+  // this layer rather than trusting the runner test to stand in for it.
+  it("keeps a capped asCell handle capped through the narrow read", async () => {
+    const tx = writerRuntime.edit();
+    const target = writerRuntime.getCell(
+      writerManager.getSpace(),
+      "capped-target-" + crypto.randomUUID(),
+      { type: "object", properties: { field: { type: "string" } } },
+      tx,
+      "session",
+    );
+    target.set({ field: "secret" });
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerManager.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            // The handle may only follow links at space scope; the stored
+            // link is session-scoped, so it must not resolve.
+            handle: {
+              type: "object",
+              properties: { field: { type: "string" } },
+              required: ["field"],
+              asCell: [{ kind: "cell", scope: "space" }],
+            },
+            plain: { type: "string" },
+          },
+          required: ["handle", "plain"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: target, plain: "visible" },
+      undefined,
+      { start: true },
+    );
+    await writerManager.synced();
+    const controller = new PieceController(writerManager, piece);
+
+    expect(await controller.input.get(["handle"])).toBeUndefined();
+    // An uncapped sibling on the same input still reads, so the block above
+    // is the cap and not a broken fixture.
+    expect(await controller.input.get(["plain"])).toBe("visible");
+  });
+
   it("relaxes a scoped link below an asCell handle, at and through it", async () => {
     const sectionSchema = {
       type: "object",

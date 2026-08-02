@@ -2719,7 +2719,7 @@ const writeInstallsInitialSchemaDefault = (
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
     valueEqual(
       writeValueForTarget(tx, pathTarget),
-      schema.default as FabricValue,
+      schema.default,
     );
 };
 
@@ -4518,7 +4518,7 @@ const ensureSchemaDocument = (
   }, {
     // System-owned canonical schema document. This is intentionally outside the
     // phase-1 value-surface attempted-target model.
-    value: schema as unknown as FabricValue,
+    value: schema,
   });
 };
 
@@ -6551,7 +6551,7 @@ export const prepareBoundaryCommit = (
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive
       // attempted-target tracking of this internal metadata update.
-    }, metadata as unknown as FabricValue);
+    }, metadata);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

@@ -9,6 +9,7 @@ import {
   isStoredArgumentSchemaRefusal,
   type JSONSchema,
   type ModuleByteCache,
+  normalizePatternSource,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
   type PieceSourceTransition,
@@ -36,15 +37,21 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
-// System space-root pattern URLs and their derivation live in
-// ../system-pattern-url.ts (shared with PieceManager's default-root
-// heal-on-load-failure retry); re-exported here for existing importers.
+// System space-root pattern refs, their derivation, and the source→URL
+// resolution live in ../system-pattern-url.ts (shared with PieceManager's
+// default-root heal-on-load-failure retry); re-exported here for existing
+// importers.
 import {
-  DEFAULT_APP_PATTERN_URL,
-  deriveSystemPatternUrl,
-  HOME_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
+  deriveSystemPatternSource,
+  HOME_PATTERN_SOURCE,
+  patternSourceUrl,
 } from "../system-pattern-url.ts";
-export { DEFAULT_APP_PATTERN_URL, deriveSystemPatternUrl, HOME_PATTERN_URL };
+export {
+  DEFAULT_APP_PATTERN_SOURCE,
+  deriveSystemPatternSource,
+  HOME_PATTERN_SOURCE,
+};
 
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
@@ -281,7 +288,14 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Read the default app URL from the home space's configuration.
+   * Read the configured default app source from the home space.
+   *
+   * The value is authored as a URL and canonicalized to the ref that names the
+   * same file, so a root is born with the provenance it will keep. Stamping the
+   * authored spelling instead would leave every new root waiting on a migration
+   * to become followable — and on a deployment with the update flag off, waiting
+   * forever. A locator naming no pattern route is returned as authored.
+   *
    * Returns empty string if not configured or if home space is not accessible.
    */
   private async getDefaultAppUrlFromHome(): Promise<string> {
@@ -298,7 +312,9 @@ export class PiecesController<T = unknown> {
           homeSpaceCell.key("defaultPattern")
             .asSchema(homeSchema).key("defaultAppUrl").get(),
       );
-      return typeof url === "string" ? url.trim() : "";
+      return typeof url === "string"
+        ? normalizePatternSource(url.trim(), this.#manager.runtime.apiUrl)
+        : "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
       return "";
@@ -341,13 +357,13 @@ export class PiecesController<T = unknown> {
     const isHomeSpace =
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-    let patternConfig: { name: string; urlPath: string; cause: string };
+    let patternConfig: { name: string; source: string; cause: string };
     let pattern;
 
     if (options?.customProgram) {
       patternConfig = {
         name: isHomeSpace ? "Home" : "DefaultPieceList",
-        urlPath: "custom",
+        source: "custom",
         cause: isHomeSpace
           ? `home-pattern-${Date.now()}`
           : `space-root-${Date.now()}`,
@@ -360,20 +376,20 @@ export class PiecesController<T = unknown> {
       if (isHomeSpace) {
         patternConfig = {
           name: "Home",
-          urlPath: HOME_PATTERN_URL,
+          source: HOME_PATTERN_SOURCE,
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
         const customUrl = await this.getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
-          urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
+          source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
           cause: `space-root-${Date.now()}`,
         };
       }
 
-      const patternUrl = new URL(
-        patternConfig.urlPath,
+      const patternUrl = patternSourceUrl(
+        patternConfig.source,
         this.#manager.runtime.apiUrl,
       );
 
@@ -420,7 +436,7 @@ export class PiecesController<T = unknown> {
       // setPatternRepository below, so a custom root without a repository
       // intentionally stays unstamped.
       if (options?.customProgram === undefined) {
-        setPatternSource(pieceCell, tx, patternConfig.urlPath);
+        setPatternSource(pieceCell, tx, patternConfig.source);
       }
 
       if (options?.repository !== undefined) {
@@ -481,12 +497,12 @@ export class PiecesController<T = unknown> {
     const isHomeSpace =
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-    let patternConfig: { name: string; urlPath: string; cause: string };
+    let patternConfig: { name: string; source: string; cause: string };
 
     if (isHomeSpace) {
       patternConfig = {
         name: "Home",
-        urlPath: HOME_PATTERN_URL,
+        source: HOME_PATTERN_SOURCE,
         cause: "home-pattern",
       };
     } else {
@@ -496,13 +512,13 @@ export class PiecesController<T = unknown> {
       );
       patternConfig = {
         name: "DefaultPieceList",
-        urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
+        source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
         cause: "space-root",
       };
     }
 
-    const patternUrl = new URL(
-      patternConfig.urlPath,
+    const patternUrl = patternSourceUrl(
+      patternConfig.source,
       this.#manager.runtime.apiUrl,
     );
 
@@ -568,7 +584,7 @@ export class PiecesController<T = unknown> {
 
           // Stamp the provenance the piece tracks for updates (the source it
           // was born from) — the same transaction, one extra meta write.
-          setPatternSource(pieceCell, tx, patternConfig.urlPath);
+          setPatternSource(pieceCell, tx, patternConfig.source);
 
           // Link as default pattern within same transaction
           defaultPatternCell.set(pieceCell.withTx(tx));
@@ -808,7 +824,7 @@ export class PiecesController<T = unknown> {
     const space = this.#manager.getSpace();
     // Reuse the canonical official-URL derivation (home.tsx for the home DID,
     // default-app.tsx otherwise) — never hard-code home here.
-    const officialUrlPath = deriveSystemPatternUrl(space, runtime);
+    const officialUrlPath = deriveSystemPatternSource(space, runtime);
     const msg = (error: unknown) =>
       error instanceof Error ? error.message : String(error);
     // Name the check that actually refused. Two signals escalate to this heal —
@@ -839,7 +855,10 @@ export class PiecesController<T = unknown> {
     // could roll forward onto the WRONG host's system pattern. `hostForSpace`
     // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
     // uses for its own roll-forward.
-    const officialUrl = new URL(officialUrlPath, runtime.hostForSpace(space));
+    const officialUrl = patternSourceUrl(
+      officialUrlPath,
+      runtime.hostForSpace(space),
+    );
     let officialPattern;
     let officialRef;
     try {
@@ -1036,7 +1055,7 @@ export class PiecesController<T = unknown> {
       if (!root) return "current";
       return await runtime.patternUpdater.checkDefaultPattern(
         root,
-        deriveSystemPatternUrl(space, runtime),
+        deriveSystemPatternSource(space, runtime),
       );
     } catch (error) {
       pieceUpdateLogger.warn("root-resolution-failed", () => [

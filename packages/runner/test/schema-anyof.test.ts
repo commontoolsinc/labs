@@ -6,7 +6,6 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -527,7 +526,7 @@ describe("Schema - AnyOf Support", () => {
             childrenArrayCell.getAsLink(),
             "or just text",
           ],
-        } as unknown as FabricValue);
+        });
 
         const vdomSchema = {
           $ref: "#/$defs/VDom",

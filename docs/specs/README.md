@@ -21,6 +21,7 @@ decision is reversed or superseded).
 ### Pattern construction and authoring
 
 - [Pattern testing](PATTERN_TESTING_SPEC.md)
+- [Pattern update testing](pattern-update-testing.md)
 - [Pattern construction](pattern-construction/README.md)
 - [Pattern imports](pattern-imports/README.md)
 - [TypeScript transformer](ts-transformer/README.md)

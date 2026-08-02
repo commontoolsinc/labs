@@ -2,9 +2,11 @@
  * Pure utility functions for checking the property-key shape of plain objects.
  */
 
+import type { ReadonlyRecord } from "./types.ts";
+
 /**
- * Indicates whether the given value is an *inert* plain object -- prototype
- * `Object.prototype` or `null`, every own property an enumerable
+ * Indicates whether the given value is an *inert* plain object -- a direct
+ * instance of `Object`, every own property an enumerable
  * string-keyed *data* property -- which is what "plain object" means in this
  * system. Symbol keys and non-enumerable string keys cause rejection,
  * whether or not they carry data, because neither has any representation as
@@ -15,15 +17,38 @@
  * live code, a read of which executes it and can answer differently every
  * time -- and freezing the object does not change that.
  *
+ * "Direct instance" means the prototype is `Object.prototype` exactly, so a
+ * null-prototype object is rejected along with every class instance. A
+ * prototype is not part of what an object says as data: it has no
+ * representation in any encoding, so a record that crosses a storage boundary
+ * comes back `Object.prototype`-rooted whatever it went in as. Accepting a
+ * null-prototype object would therefore mean carrying a distinction that
+ * exists only in memory and stops existing at the first boundary. A caller
+ * holding one and meaning to shed it can say so with
+ * `shallowCleanPlainObject()`, which rebuilds the record `Object`-rooted.
+ *
  * Anything that isn't a plain object is rejected, class instances and arrays
  * included, which also makes this function total: it answers rather than
  * throwing no matter what it is handed. A `Proxy` is the one exception, and
  * unavoidably so, since it can throw from its own traps.
  *
+ * Inertness is a property of the object at the moment of the check, not of its
+ * type: a property can be redefined as an accessor, or a symbol-keyed one
+ * added, at any later point. So this predicate narrows only to
+ * `ReadonlyRecord` -- true of the value forever after -- and never to anything
+ * asserting the inertness itself, and it narrows in one direction only. A
+ * `false` result means inertness was not established, which is weaker than its
+ * negation, and `false`-branch narrowing is subtraction, which cannot express
+ * that. Hence the overload pair, which keeps a caller already holding a record
+ * type out of the subtraction; the header of the `types` module gives the full
+ * account.
+ *
  * @param value The value to check.
  * @returns `true` if the value is a plain object all of whose own properties
  *   are enumerable string-keyed data properties, `false` otherwise.
  */
+export function isInertPlainObject(value: ReadonlyRecord): boolean;
+export function isInertPlainObject(value: unknown): value is ReadonlyRecord;
 export function isInertPlainObject(
   value: unknown,
 ): boolean {
@@ -31,8 +56,7 @@ export function isInertPlainObject(
     return false;
   }
 
-  const proto = Object.getPrototypeOf(value);
-  if (!((proto === Object.prototype) || (proto === null))) {
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
     return false;
   }
 

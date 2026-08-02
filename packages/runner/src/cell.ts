@@ -120,7 +120,7 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -1645,7 +1645,7 @@ export class CellImpl<T extends FabricValue>
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
     // durable state, catching elements the local replica had not loaded.
-    const candidates = value as FabricValue[];
+    const candidates = value;
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
@@ -1684,7 +1684,7 @@ export class CellImpl<T extends FabricValue>
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
       const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(candidate) as FabricValue
+        ? fabricFromNativeValue(candidate)
         : candidate;
       return existing.some((element) => valueEqual(element, comparable));
     };
@@ -1774,7 +1774,7 @@ export class CellImpl<T extends FabricValue>
     const currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const array = currentValue as FabricValue[];
+    const array = currentValue;
     if (array === undefined) {
       return;
     }
@@ -1814,7 +1814,7 @@ export class CellImpl<T extends FabricValue>
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
         op: "remove-by-value",
-        value: element as FabricValue,
+        value: element,
       });
     }
   }
@@ -1940,6 +1940,39 @@ export class CellImpl<T extends FabricValue>
     let childSchema: JSONSchema | undefined;
     const childPath = keys.map((key) => key.toString());
 
+    // Follow caps this walk narrows past, so resolveLink can still check a hop
+    // it later finds at an ancestor. `schema` only ever describes the leaf, so
+    // a cap on an `asCell` ancestor otherwise vanishes the moment the path
+    // continues past it (#5230). Costs nothing on the uncapped path.
+    let scopeCaps = currentLink.scopeCaps;
+    const recordCap = (depth: number, schema: JSONSchema | undefined) => {
+      // getSchemaScopeCap is the long-standing path-resolution precedence;
+      // the compound lookup adds anyOf/oneOf-wrapped asCell caps it cannot
+      // see. Taking the narrower is additive: it can only tighten.
+      const cap = narrowerScopeCap(
+        ContextualFlowControl.getSchemaScopeCap(schema),
+        ContextualFlowControl.getAsCellFollowScopeCap(schema),
+      );
+      if (cap === undefined) return;
+      // A repeated key() over the same prefix re-derives the same depth, and
+      // asSchema() can re-declare one with a DIFFERENT cap. Keep the narrower:
+      // skipping on depth alone would let a looser recorded cap shadow a
+      // tighter one the caller just asked for.
+      const existing = scopeCaps?.find((entry) => entry.depth === depth);
+      if (existing !== undefined) {
+        if (narrowerScopeCap(cap, existing.scope) === existing.scope) return;
+        scopeCaps = scopeCaps!.map((entry) =>
+          entry.depth === depth ? { depth, scope: cap } : entry
+        );
+        return;
+      }
+      scopeCaps = [...(scopeCaps ?? []), { depth, scope: cap }];
+    };
+    // Seed with the cap declared at the address we start from: it governs a
+    // link stored AT this address, which the first appended segment already
+    // puts beyond the reach of the leaf schema.
+    if (keys.length > 0) recordCap(currentLink.path.length, currentLink.schema);
+
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
@@ -1956,10 +1989,14 @@ export class CellImpl<T extends FabricValue>
       // scope during writes. Stamping schema scope onto this link here would
       // re-address the value to the wrong scoped instance of the container doc
       // (see CT-1623).
+      const path = [...currentLink.path, key.toString()] as string[];
+      recordCap(path.length, childSchema);
+
       currentLink = {
         ...currentLink,
-        path: [...currentLink.path, key.toString()] as string[],
+        path,
         schema: childSchema,
+        ...(scopeCaps !== undefined && { scopeCaps }),
       };
     }
 
@@ -2340,7 +2377,7 @@ export class CellImpl<T extends FabricValue>
       path: [metaField],
       ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
-    this.tx.writeOrThrow(metaAddr, value as FabricValue);
+    this.tx.writeOrThrow(metaAddr, value);
   }
 
   /**

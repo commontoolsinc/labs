@@ -352,8 +352,9 @@ describe("arrays", () => {
 
     describe("`Proxy` handling", () => {
       it("accepts a pass-through proxy over an inert array", () => {
-        // `Array.isArray()` sees through to the target, so a proxied inert
-        // array is still recognized as one.
+        // `Array.isArray()` sees through to the target, and the prototype
+        // question forwards to it as well, so a proxied inert array is still
+        // recognized as one.
         expect(isInertArray(new Proxy([1, 2, 3], {}))).toBe(true);
       });
 
@@ -412,6 +413,57 @@ describe("arrays", () => {
           configurable: true,
         });
         expect(isInertArray(arr)).toBe(false);
+      });
+    });
+
+    describe("returns `false` for indirect `Array` instances", () => {
+      it("rejects an `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+
+        // Index-only and data-backed, so only the prototype separates it from
+        // an inert array.
+        expect(isArrayWithOnlyIndexProperties(sub)).toBe(true);
+        expect(isInertArray(sub)).toBe(false);
+      });
+
+      it("rejects a subclass instance whose prototype rewrites iteration", () => {
+        // The concrete hazard the prototype requirement addresses: iteration
+        // and index reads answer different content, and freezing the instance
+        // does not touch the prototype that does it.
+        class Smuggler extends Array {
+          override *[Symbol.iterator](): Generator<unknown> {
+            yield "smuggled";
+          }
+        }
+        const smuggler = new Smuggler();
+        smuggler.push("benign");
+        Object.freeze(smuggler);
+
+        expect([...smuggler]).toEqual(["smuggled"]);
+        expect(smuggler[0]).toBe("benign");
+        expect(isInertArray(smuggler)).toBe(false);
+      });
+
+      it("rejects an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(isInertArray(severed)).toBe(false);
+      });
+
+      it("rejects an array reparented onto another prototype", () => {
+        const reparented: unknown[] = [1, 2];
+        Object.setPrototypeOf(reparented, Object.prototype);
+        expect(isInertArray(reparented)).toBe(false);
+      });
+
+      it("rejects a proxy that answers a non-`Array` prototype", () => {
+        // `Array.isArray()` sees the array target, so the prototype answer is
+        // the only thing that can catch this one.
+        const lying = new Proxy([1, 2], { getPrototypeOf: () => null });
+        expect(Array.isArray(lying)).toBe(true);
+        expect(isInertArray(lying)).toBe(false);
       });
     });
   });

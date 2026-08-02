@@ -3014,6 +3014,14 @@ export function llmDialog(
     // Abort the request if it's still pending.
     abortController?.abort("Pattern stopped");
 
+    // The cells below are assigned during the first run of this node, and a
+    // pattern can be stopped before that happens -- notably when startup
+    // fails, since the failure path cancels what it already registered. There
+    // is nothing of ours to wind down in that case, and reaching for the cells
+    // would throw from inside cleanup, replacing whatever error caused the
+    // stop.
+    if (!cellsInitialized) return;
+
     const tx = runtime.edit();
 
     // If the pending request is ours, set pending to false and clear the requestId.

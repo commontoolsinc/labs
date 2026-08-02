@@ -384,7 +384,7 @@ export class Chronicle {
 
           edit.assert({
             ...loaded,
-            is: alignedMerged as FabricValue,
+            is: alignedMerged,
             cause: causeRef,
           });
         }

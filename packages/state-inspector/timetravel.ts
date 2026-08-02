@@ -215,7 +215,7 @@ export function entityTimeline(
         doc = r.data ? (decodeStored(r.data) as FabricValue) : undefined;
       } else if (r.op === "patch") {
         const ops = r.data ? (decodeStored(r.data) as PatchOp[]) : [];
-        doc = applyPatch((doc ?? {}) as FabricValue, ops);
+        doc = applyPatch(doc ?? {}, ops);
       } else if (r.op === "delete") {
         doc = undefined;
       }

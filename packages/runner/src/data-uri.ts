@@ -117,7 +117,7 @@ export function dataUriFromValueWithResolvedLinks(
             [key, value],
           ) => [
             key,
-            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+            traverseAndAddBaseIdToRelativeLinks(value, seen),
           ]),
         );
       }

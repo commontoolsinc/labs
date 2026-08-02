@@ -8,7 +8,5 @@ export const toTransactionDocumentValue = (
     return undefined;
   }
 
-  return Object.keys(document).length === 0
-    ? undefined
-    : document as FabricValue;
+  return Object.keys(document).length === 0 ? undefined : document;
 };

@@ -535,7 +535,7 @@ Deno.test("memory v2 client fails closed without entity identifier capabilities"
       flags: {
         modernCellRep: getMemoryProtocolFlags().modernCellRep,
       },
-    } as FabricValue),
+    }),
   });
   const space = await client.mount(
     "did:key:z6Mk-memory-v2-client-legacy-entity-identifiers",
