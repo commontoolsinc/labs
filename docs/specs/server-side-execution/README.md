@@ -33,10 +33,20 @@ generated machinery: dual *execution* is fine and deliberate (that is what
 speculation is); dual *commitment* is what must never happen. Stated as the
 invariant it actually is:
 
-> **Every cell class has exactly one committer.** Derived cells: the
-> space's server runtime. Event streams: whoever holds an append handle.
-> UI-binding cells: the client that owns the binding (transitional).
-> No cell has two, so no arbitration machinery exists anywhere.
+> **Derived state has exactly one deriving committer — the space's
+> server runtime — and this holds by construction, not by enforcement:
+> the client has no code path that commits a derivation result.**
+>
+> Authored state is the opposite and stays exactly as it is today: any
+> number of writers with authority may write (handler events, UI
+> bindings, several widgets editing the same document path), made sound
+> by the pre-existing CAS/conflict/retry machinery. An authored write
+> happens exactly once by definition — there is nothing to re-run, so
+> no "who runs it" question exists. That question only exists for
+> derivations (standing functions that fire repeatedly), and v2 answers
+> it with a constant. Two committing derivers is what CAS cannot
+> absorb: effects fire twice, stale results flap against fresh ones,
+> and N clients recomputing everything is the conflict storm itself.
 
 The egress rule falls out of the same line: **speculate on anything you can
 throw away; never on anything you can't take back.** A derived value is
@@ -91,10 +101,15 @@ Corollaries already ruled:
 - Write bounding is done by **capability handles + CFC checks at write
   time**, by whoever holds the handle. Untrusted pattern code only gets
   handles to what it may write. No commit-time certificates
-  (D-2026-08-02). Under §3.6 the client-side check narrows further: the
-  only computational thing a client commits is an event append, so
-  admission is "does this principal hold an append handle to this
-  stream?" — a capability lookup, not scope reasoning.
+  (D-2026-08-02). Under §3.6, **execution admission is deleted as a
+  category**: no client commit ever asserts "I ran something," so the
+  server never reconstructs an execution from evidence (certificates,
+  read-set provenance, claim matching). Every client commit is an
+  authored fact admitted by target + principal — append authority on the
+  stream for an event, write authority on the doc/path for a direct edit
+  — plus CAS for soundness. Both checks pre-date v1 and are robust; v1's
+  layer on top was about *where things run*, and v2 makes that question
+  unaskable by construction.
 - Placement is determined **from input links**, as the pre-arc runner
   already does. No static scope discovery before first run; scope is
   discovered *by running* (D11).
@@ -153,9 +168,9 @@ results.
   last committed result. Keep v1's one surviving insight here: *drop only
   the authority of a local run, never the ability to run* (the
   "speculation for rendering, not rerun for authority" rule).
-- **UI bindings** (`$value` on `cf-checkbox` and friends) keep committing
-  direct cell writes for now — see §3.6 for why this is a benign,
-  shrinking exception.
+- **UI bindings** (`$value` on `cf-checkbox` and friends) commit direct
+  authored writes — the normal, pre-existing write path under ACL + CAS.
+  Not an exception and not transitional (§3.6).
 - **Rendering effects** stay client-side; the server never sees them.
 - Client-effect enactment: the client subscribes to its session's effect
   cells (§3.7) and enacts what lands there (navigation, etc.).
@@ -188,7 +203,8 @@ hop and the rebuild must design it deliberately:
   emits partial tokens; committing per token would rebuild the
   amplification storm at the protocol layer. Partials flow on an ephemeral
   session channel (or throttled coarse snapshots); only the settled result
-  commits.
+  commits. The ephemeral channel may defer along with `stream-data` —
+  settled-result-only commits are a complete v2 baseline.
 
 ### 3.4 Configuration
 
@@ -207,7 +223,8 @@ discovered mid-rebuild. Three placement classes:
 
 | class | built-ins | runs on | client speculation |
 | --- | --- | --- | --- |
-| **Pure structural** | `map`, `filter`, `flatmap`, `if-else`/`when`/`unless`, `list-element-link`, `list-op-argument-usage`, `list-result-schema`, `op-pattern-ref`, `inspect-conf-label`, `scope-policy`, `stream-data`, `wish` | server | yes — free to discard |
+| **Pure structural** | `map`, `filter`, `flatmap`, `if-else`/`when`/`unless`, `list-element-link`, `list-op-argument-usage`, `list-result-schema`, `op-pattern-ref`, `inspect-conf-label`, `scope-policy`, `wish` | server | yes — free to discard |
+| **Deferred** | `stream-data` | disabled in the v2 interim (unused today; the low-latency UI it promises likely wants a different mechanism — owner, 2026-08-02) | — |
 | **Effectful / network** | `fetch` (`fetchData`), `fetch-program`, `llm` (`generateText`/`generateObject`), `llm-dialog`, `sqlite*` | **server only** | **never** — speculation reads through to the last committed result |
 | **Compile / instantiate** | `compile-and-run` (charm creation, incl. from handlers) | server (sandboxed worker; toolshed already compiles) | no |
 | **Client-enacted effect** | `navigate-to` | server *computes*, client *enacts* (§3.7) | echo allowed (navigate optimistically, reconcile) |
@@ -251,14 +268,20 @@ So in v2:
   divergence and reconciles the same way. Handlers whose body reaches an
   effectful built-in speculate up to it and read through (§3.5).
 
-**The transitional exception, and why it is benign:** UI components
-(bidirectional `$value` bindings) commit direct cell writes and will for a
-while. These are *state authorship*, not computation — the user typing
-into a cell they own. They never needed claims in v1 and need nothing in
-v2: the per-cell single-committer invariant (§1) already covers them,
-because a UI-binding cell's committer is the binding's client, and derived
-state downstream of it is the server's. The class shrinks as components
-migrate to events; nothing waits on it.
+**UI-binding writes are not an exception.** Bidirectional `$value`
+bindings (and any widget editing a document path) are *state authorship*,
+not computation: authored facts under existing write authority and CAS,
+multi-writer by design (§1). They coexist indefinitely with events;
+whether components later migrate to events is a product choice, not an
+architectural requirement. What §1 requires is only that *derived* state
+downstream of those writes is committed by the server alone.
+
+**Handler inputs are explicit** — the event payload plus the cells the
+handler reads. A client-only ephemeral value the handler needs (viewport
+size, selection) travels *in the payload*, captured at fire time; that
+keeps the server run deterministic and makes echo divergence transient by
+construction. A handler reaching for ambient client state outside the
+payload is a pattern bug the transformer can flag.
 
 ### 3.7 The client-effect channel (navigateTo and its future siblings)
 
@@ -364,10 +387,6 @@ survival test before it triggers implementation.
 6. **Effect authority for multi-user triggers** (§3.8): whose grant powers
    a served effect reacting to another user's data — wiring user (default)
    or acting user? CFC implications either way.
-7. **Ephemeral client-only state in handlers.** A speculative handler may
-   read local UI state the server cannot see. Rule: handler inputs are
-   explicit (event payload + cells); anything else is a pattern bug the
-   transformer can flag.
 
 ## 7. Relationship to prior documents
 
