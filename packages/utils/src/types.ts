@@ -18,8 +18,8 @@
  *
  * The narrowed types are read-only for the same reason. A frozen value is the
  * ordinary case here, and a predicate narrowing to a mutable `unknown[]` would
- * hand a caller holding `unknown` a writable view of one -- narrowing replaces
- * such a declared type outright rather than intersecting with it.
+ * hand a caller holding `unknown` a writable view of one, there being no
+ * `readonly` on the declared type for the result to inherit.
  * `isPlainContainer()` is the deliberate exception on both counts: it narrows
  * to mutable types, which claim more than it checks, because its callers are
  * the ones that go on to write through the result. The residual hazard is its
@@ -39,10 +39,13 @@
  * branches; a caller holding `unknown` or `object`, who has no such type to
  * lose, gets the narrowing. Keeping the `false` branch usable is the whole of
  * what the first overload buys, and the only reason it is there. It is not what
- * protects a `readonly` declaration -- the read-only narrowed types do that
- * unaided, since narrowing a declared type that is already read-only
- * intersects with it rather than replacing it, which also preserves the element
- * and property types the caller arrived with.
+ * protects a `readonly` declaration; the read-only narrow targets do that
+ * unaided. A declared type that is already read-only is assignable to such a
+ * target, so narrowing keeps it exactly as it was -- element and property types
+ * included -- and it goes on rejecting writes. Against a *mutable* target it
+ * would not be assignable, and TypeScript would intersect the two instead: the
+ * resulting `readonly number[] & unknown[]` accepts writes, which is how a
+ * mutable target launders `readonly` away.
  */
 
 /**
