@@ -178,11 +178,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // `isEncodedInstance()` guaranteed a single-property object, so this
-    // destructures that one entry. (`isPlainObject()` is not a type guard, so
-    // narrow explicitly for the type-checker.)
-    const [key, value] = Object.entries(
-      data as Record<string, JsonWireValue>,
-    )[0]!;
+    // destructures that one entry.
+    const [key, value] = Object.entries(data)[0]!;
     return { tag: key.slice(1), state: value };
   }
 
