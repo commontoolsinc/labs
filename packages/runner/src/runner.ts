@@ -2482,7 +2482,23 @@ export class Runner {
         // Without cleanup the piece stays registered in `this.cancels`, so
         // every later start() reports "already running" for a piece that has
         // no nodes or event handlers — events sent to it are then dropped.
-        cleanup();
+        //
+        // Cleanup runs every registered cancel, any of which may itself throw.
+        // Letting that escape would REPLACE the error being handled, so what
+        // surfaced would describe the cleanup rather than the failure that
+        // caused it — and a cancel running against half-initialized state
+        // fails in ways that look nothing like the original. Report it and
+        // rethrow what actually went wrong.
+        try {
+          cleanup();
+        } catch (cleanupError) {
+          logger.warn(
+            "start",
+            "Cleanup failed while handling a start error; reporting the " +
+              "start error, which is the one that matters.",
+            cleanupError,
+          );
+        }
         throw error;
       }
       if (!doNotUpdateOnPatternChange) {
