@@ -1,4 +1,39 @@
 /**
+ * Type predicates over the general shape of a value.
+ *
+ * The predicates here come in two kinds, and the difference is visible at the
+ * call site. One kind tests an exact `typeof` class -- `isString()`,
+ * `isNumber()`, `isFunction()` -- and says everything there is to say about the
+ * value, so its `false` branch is exactly as trustworthy as its `true` branch.
+ *
+ * The other kind is *structural*: `isPlainObject()` and `isPlainContainer()`
+ * here, and `isInertArray()`, `isArrayWithOnlyIndexProperties()`, and
+ * `isInertPlainObject()` in the sibling `arrays` and `objects` modules. Each of
+ * those checks strictly more than the type it narrows to can express, and
+ * deliberately so: each narrows to the weakest type that stays true however the
+ * value is treated afterwards, never to the property it actually checks. A
+ * prototype can be reassigned and a property redefined, so "is `Object`-rooted"
+ * or "is inert" describes an instant rather than a type, and a narrowed type
+ * that claimed it would go on claiming it after it stopped being so.
+ *
+ * A structural predicate is therefore *one-directional*: its `false` branch
+ * means "not established", not "the negation holds". TypeScript cannot be told
+ * this, because narrowing a `false` branch is subtraction and the language has
+ * no negated types. Left to itself it would subtract the narrowed type from the
+ * declared one, so a caller already holding a type at least as specific as what
+ * the predicate narrows to would find the `false` branch reduced to `never` --
+ * a value the check rejected, for a reason the type system never recorded.
+ *
+ * Each structural predicate heads this off with a pair of overloads. A caller
+ * who already knows the broad shape gets a plain `boolean`, keeping both
+ * branches intact along with whatever element or property types it came in
+ * with; a caller holding `unknown` or `object`, who has no such type to lose,
+ * gets the narrowing. The first overload is also what keeps a `readonly`
+ * declaration from being silently widened, since narrowing intersects and would
+ * otherwise hand back a mutable view of a frozen value.
+ */
+
+/**
  * Predicate for narrowing a mutable string-keyed record type.
  * @param value - The value to check
  * @returns True if the value is a record object
@@ -96,9 +131,16 @@ export function isFiniteNumber(value: unknown): boolean {
  * null-prototype object answers `true` here and `false` there, and both
  * answers are right for their own question.
  *
+ * This is a structural predicate, so it narrows in one direction only, and is
+ * overloaded accordingly; see the module header for what that means and why.
+ * In particular, a `false` result says the value is not `Object`-rooted right
+ * now, which is not the same as any statement about its type.
+ *
  * @param value - The value to check
  * @returns True if the value is a plain object
  */
+export function isPlainObject(value: ReadonlyRecord): boolean;
+export function isPlainObject(value: unknown): value is ReadonlyRecord;
 export function isPlainObject(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   const proto = Object.getPrototypeOf(value);
@@ -113,12 +155,21 @@ export function isPlainObject(value: unknown): boolean {
  * uniformly. Non-plain class instances (`Date`, `Map`, `Set`, `Error`,
  * user-defined classes, ...) deliberately do not qualify.
  *
+ * This is a structural predicate, so it narrows in one direction only, and is
+ * overloaded accordingly; see the module header. Unlike its neighbours it
+ * narrows to a *mutable* pair of types, because its callers are the ones that
+ * go on to write through the result.
+ *
  * @param value - The value to check
  * @returns True if the value is a plain object or an array
  */
 export function isPlainContainer(
+  value: ReadonlyRecord | readonly unknown[],
+): boolean;
+export function isPlainContainer(
   value: unknown,
-): value is Record<string, unknown> | unknown[] {
+): value is Record<string, unknown> | unknown[];
+export function isPlainContainer(value: unknown): boolean {
   return Array.isArray(value) || isPlainObject(value);
 }
 
