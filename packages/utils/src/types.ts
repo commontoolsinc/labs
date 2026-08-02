@@ -16,6 +16,16 @@
  * or "is inert" describes an instant rather than a type, and a narrowed type
  * that claimed it would go on claiming it after it stopped being so.
  *
+ * The narrowed types are read-only for the same reason. A frozen value is the
+ * ordinary case here, and a predicate narrowing to a mutable `unknown[]` would
+ * hand a caller holding `unknown` a writable view of one -- narrowing replaces
+ * such a declared type outright rather than intersecting with it.
+ * `isPlainContainer()` is the deliberate exception on both counts: it narrows
+ * to mutable types, which claim more than it checks, because its callers are
+ * the ones that go on to write through the result. The residual hazard is its
+ * own: a caller passing `unknown` gets a writable view of what may be a frozen
+ * container, with nothing at compile time to say so.
+ *
  * A structural predicate is therefore *one-directional*: its `false` branch
  * means "not established", not "the negation holds". TypeScript cannot be told
  * this, because narrowing a `false` branch is subtraction and the language has
@@ -25,12 +35,14 @@
  * a value the check rejected, for a reason the type system never recorded.
  *
  * Each structural predicate heads this off with a pair of overloads. A caller
- * who already knows the broad shape gets a plain `boolean`, keeping both
- * branches intact along with whatever element or property types it came in
- * with; a caller holding `unknown` or `object`, who has no such type to lose,
- * gets the narrowing. The first overload is also what keeps a `readonly`
- * declaration from being silently widened, since narrowing intersects and would
- * otherwise hand back a mutable view of a frozen value.
+ * who already knows the broad shape gets a plain `boolean` and keeps both
+ * branches; a caller holding `unknown` or `object`, who has no such type to
+ * lose, gets the narrowing. Keeping the `false` branch usable is the whole of
+ * what the first overload buys, and the only reason it is there. It is not what
+ * protects a `readonly` declaration -- the read-only narrowed types do that
+ * unaided, since narrowing a declared type that is already read-only
+ * intersects with it rather than replacing it, which also preserves the element
+ * and property types the caller arrived with.
  */
 
 /**

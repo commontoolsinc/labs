@@ -173,8 +173,7 @@ export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
  * means inertness was not established, which is weaker than its negation, and
  * `false`-branch narrowing is subtraction, which cannot express that. Hence the
  * overload pair, which keeps a caller already holding an array type out of the
- * subtraction and preserves its element type and `readonly`-ness; the header of
- * the `types` module gives the full account.
+ * subtraction; the header of the `types` module gives the full account.
  *
  * @param array The value to check.
  * @returns `true` if the array is an inert array, `false` otherwise.

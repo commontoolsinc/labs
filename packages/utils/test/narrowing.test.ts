@@ -5,7 +5,11 @@ import {
   isInertArray,
 } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
-import { isPlainObject, type ReadonlyRecord } from "@commonfabric/utils/types";
+import {
+  isPlainContainer,
+  isPlainObject,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 /**
  * The narrowing contract of the structural predicates, as described in the
@@ -74,6 +78,19 @@ describe("structural predicate narrowing", () => {
       expect(array[0]!.toFixed(1)).toBe("1.0");
     });
 
+    it("keeps a `readonly`-declared array usable after a `false` result", () => {
+      const backing: number[] = [1, 2, 3];
+      Object.defineProperty(backing, 1, { get: () => 2 });
+      const array: readonly number[] = backing;
+
+      if (isInertArray(array)) {
+        throw new Error("Expected an accessor-backed index to be rejected.");
+      }
+
+      // Still `readonly number[]`, not `never`.
+      expect(array[0]!.toFixed(1)).toBe("1.0");
+    });
+
     it("keeps a record usable after a `false` result", () => {
       const record: Record<string, unknown> = Object.create(null);
       record.a = 1;
@@ -82,8 +99,10 @@ describe("structural predicate narrowing", () => {
         throw new Error("Expected a null-prototype object to be rejected.");
       }
 
-      // `record` is still `Record<string, unknown>` here, not `never`.
-      expect(Object.keys(record)).toEqual(["a"]);
+      // `record` is still `Record<string, unknown>` here, not `never`. It has
+      // to be a property access: `Object.keys()` and index access both accept
+      // `never` without complaint, and so would pass even had it collapsed.
+      expect(record.a).toBe(1);
     });
 
     it("keeps a record usable after a `false` result from `isPlainObject()`", () => {
@@ -96,27 +115,32 @@ describe("structural predicate narrowing", () => {
         throw new Error("Expected a non-`Object`-rooted value to be rejected.");
       }
 
-      expect(Object.keys(record)).toEqual([]);
+      // Again a property access, for the reason given just above. The value
+      // comes from the prototype, which is exactly what disqualified it.
+      expect(record.inherited).toBe(1);
+    });
+
+    it("keeps a container usable after a `false` result", () => {
+      const container: ReadonlyRecord = new Date() as unknown as ReadonlyRecord;
+
+      if (isPlainContainer(container)) {
+        throw new Error("Expected a class instance to be rejected.");
+      }
+
+      expect(container.nope).toBe(undefined);
     });
   });
 
-  describe("never hands back a mutable view of a `readonly` value", () => {
-    // These assert assignability rather than performing a write: the values are
+  describe("narrows to a read-only type, so a frozen value stays frozen", () => {
+    // This guards the choice of narrowed *type*, not the overload pair: a
+    // `readonly`-declared caller keeps its `readonly` either way, because
+    // narrowing intersects with such a type rather than replacing it. It is the
+    // caller passing `unknown` -- who has no `readonly` of their own -- that a
+    // mutable narrow target would hand a writable view of a frozen value.
+    //
+    // It asserts assignability rather than performing a write: the value is
     // frozen, so an actual assignment would throw at runtime under module
     // strict mode and prove nothing about the type.
-
-    it("preserves `readonly` on a value that arrived `readonly`", () => {
-      const frozen: readonly number[] = Object.freeze([1, 2, 3]);
-
-      if (!isInertArray(frozen)) {
-        throw new Error("Expected a frozen array to be inert.");
-      }
-
-      // @ts-expect-error `readonly` survives the check; it is not widened.
-      const _widened: number[] = frozen;
-
-      expect(frozen[0]).toBe(1);
-    });
 
     it("narrows `unknown` to a read-only array, not a mutable one", () => {
       const value: unknown = Object.freeze([1]);
