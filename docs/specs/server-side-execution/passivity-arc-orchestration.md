@@ -53,6 +53,56 @@
 > server runs everything, it is migration scaffolding. Do not make it more
 > correct. Do not extend it to a new case. Ask what deletes it.
 >
+> ### D13 — owner, 2026-08-01: what the remaining work IS
+>
+> Four rulings, and two of them change what a task means rather than just
+> answering it.
+>
+> **The gate is a SIMPLICITY target, not a performance one.**
+>
+> > *"We should run it all on the server. That's less a performance claim than a
+> > simplicity claim. So part of the task is to understand the exact reason
+> > here. If it could run on the server and we just have a complex decision
+> > logic in the way, fix it and simplify. Need really good reasons for the rest
+> > to remain."*
+>
+> So every unserved candidate is one of exactly two things, and the work is to
+> say which: **(a)** it could run on the server and partial-migration decision
+> logic is in the way — then delete the logic, or **(b)** there is a real
+> reason — then it must be stated and it must be good. "It doesn't serve" is
+> not a finding; the REASON is the finding. Note this is the same mechanism as
+> the ROOT CAUSE above: the decision logic in the way IS the machinery partial
+> migration generated.
+>
+> **Partial flag states are a DEBUGGING BASE, not just a liability.**
+>
+> > *"Still the goal, but since partial states work that's an excellent
+> > debugging base. So maybe the next step here is to debug until full states
+> > work, then collapse the flag?"*
+>
+> Measured 2026-08-01: `user-lane-gate` and `session-lane-gate` pass at their
+> partial configurations. That makes the ladder a **bisection instrument** —
+> when the all-on configuration breaks, walk the dials up one at a time and the
+> first one that reddens names the cause. Collapse to one flag comes AFTER full
+> states work, not before; collapsing now would destroy the tool needed to get
+> there.
+>
+> **Do NOT merge yet, and the reason is worth holding.**
+>
+> > *"Not yet. Soon, but I want to see everything working and be sure that's the
+> > right approach. We had so many detours that I'm not sure it is vs a clean
+> > rebuild after all the lessons learned."*
+>
+> A clean rebuild is a live option. **That makes the LESSONS the durable asset,
+> not the diff** — this file, the ROOT CAUSE, the survival test, §2's traps, and
+> the measured negative results are what survive either path. Keep writing them
+> down at the standard that assumes the code might not survive.
+>
+> The four deletion items (`claim-not-live`'s `assertedLane` leg, the firewall
+> on-switch, the exclusion protocol, the claimed-arm dirt-clear) are DEFERRED by
+> the same ruling: they are migration-scaffolding archaeology, and the question
+> answers itself far more cheaply once flags-on actually ships.
+>
 > ### THE SURVIVAL TEST — apply it before starting ANY item
 >
 > Owner, 2026-07-29: *"we keep falling back playing whack-a-mole with the
