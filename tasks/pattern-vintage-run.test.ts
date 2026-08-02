@@ -86,7 +86,7 @@ const BREAKING = HEALTHY.replace(
 /** The same input evolution made satisfiable by a default. */
 const COMPATIBLE = BREAKING.replace(
   "interface Input { addedLater: string; }",
-  "interface Input { addedLater: string | Default<'ready'>; }",
+  "interface Input { addedLater: Default<string, 'ready'>; }",
 );
 
 /** Same contract, different backing cell — the class the gate cannot see. */
@@ -411,6 +411,16 @@ const SUBJECT_TEST = [
   "",
 ].join("\n");
 
+/**
+ * The current-generation companion satisfies the new source's authored type.
+ * The pinned vintage still carries the old empty argument, which is what proves
+ * that the candidate schema can fill the required field from its default.
+ */
+const COMPATIBLE_SUBJECT_TEST = SUBJECT_TEST.replace(
+  "Subject({})",
+  "Subject({ addedLater: 'ready' })",
+);
+
 const TEST_KEY = KEY.replace(/\.tsx$/, ".test.tsx");
 
 /**
@@ -485,6 +495,8 @@ describe("the vintage gate, end to end", () => {
 
   const setSource = (source: string) =>
     Deno.writeTextFile(`${dir}/patterns/${KEY}`, source);
+  const setTestSource = (source: string) =>
+    Deno.writeTextFile(`${dir}/patterns/${TEST_KEY}`, source);
 
   it("captures a vintage for a required pattern that has none", async () => {
     const { captured, problems } = await captureMissing(
@@ -561,8 +573,8 @@ describe("the vintage gate, end to end", () => {
 
   it("passes again once the new input carries a default", async () => {
     // The other half of the red/green pair: the two candidates differ by
-    // exactly `Default<'ready'>`, so the failure above is attributable to that
-    // and not to anything else about the change.
+    // exactly `Default<string, 'ready'>`, so the failure above is attributable
+    // to that and not to anything else about the change.
     await captureMissing(
       roots,
       [TEST_KEY],
@@ -1241,6 +1253,7 @@ describe("the vintage gate, end to end", () => {
     // Move the world on, compatibly — a change the update APPLIES rather than
     // one it refuses, because a generation records a world that worked.
     await setSource(COMPATIBLE);
+    await setTestSource(COMPATIBLE_SUBJECT_TEST);
 
     const moved = await replayAll(roots);
     expect(moved.failures).toEqual([]);
@@ -1383,6 +1396,7 @@ describe("the vintage gate, end to end", () => {
       );
     }
     await setSource(COMPATIBLE);
+    await setTestSource(COMPATIBLE_SUBJECT_TEST);
 
     const outcome = await captureChangedGenerations(
       roots,
@@ -1520,6 +1534,7 @@ describe("the vintage gate, end to end", () => {
       .toBe("needs-one-key");
 
     await setSource(COMPATIBLE);
+    await setTestSource(COMPATIBLE_SUBJECT_TEST);
     await captureChangedGenerations(
       roots,
       await replayAll(roots),

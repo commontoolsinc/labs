@@ -70,6 +70,13 @@ and has not changed since, and both the definition validator and the subset
 proof blow up combinatorially on some real schemas — so the steady state, where
 no contract changed, costs nothing beyond the compile.
 
+Compatibility is directional by role. Existing invocations must still satisfy
+the candidate argument schema, so a newly required argument needs a default or
+must be optional. A newly required result does not need a schema default: the
+candidate pattern generates it during setup. This admits the forward migration;
+add a result default as well when an older concurrently running generation must
+still be able to write its previous result shape.
+
 ## Tier 2 — state continuity
 
 Replays committed SQLite stores — real state, written through a pattern's own
@@ -118,8 +125,10 @@ three rows disappearing is a finding, not a warning. Judged only at the top, a
 
 The comparison reads the vintage under the root's **own stored schema**, so it
 sees the data as the version that wrote it did, and compares only keys that
-were present before — an update may legitimately *add* a field, which is what
-`Default<>` is for.
+were present before. An update may legitimately add a generated result field,
+and the candidate setup materializes it during replay; arguments and ordinary
+durable document fields still need defaults when existing state must supply a
+newly required value.
 
 That schema is relaxed at its `unknown` positions first, on both sides: a
 schema-driven read resolves nothing there, so a key an index signature covers
