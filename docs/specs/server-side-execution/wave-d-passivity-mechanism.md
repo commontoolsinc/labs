@@ -337,7 +337,7 @@ The chain, with the file each hop lives in:
 | Advertisement fold | `getMemoryProtocolFlags` (`base && ownDial`) | :1852-1854 |
 | Client option | `ExperimentalOptions` key | `runner/src/runtime.ts:310-333` |
 | Env map | `EXPERIMENTAL_ENV_VARS` | `runner/src/runtime-presets.ts:214-222` |
-| Ambient install | `Runtime` constructor + `dispose` reset | `runner/src/runtime.ts:996-1006`, `:1354-1357` |
+| Ambient install | `Runtime` constructor install + `dispose` unwind (`AMBIENT_EXPERIMENTAL_DIALS`; since 2026-08-01 an omitted flag is never written and a named one unwinds to the value it displaced, not to the default) | `runner/src/runtime.ts:996-1006`, `:1354-1357` |
 | Worker protocol | `runtime-client/protocol/types.ts` `InitializationData` | :173-180 |
 | lib-shell flags | `packages/lib-shell/src/runtime.ts` `ExperimentalRuntimeFlags` | :35-41 |
 | Shell env | `packages/shell/src/lib/env.ts` global + define | :6-11, :34-45 |

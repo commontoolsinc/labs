@@ -18,7 +18,6 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   getModernCellRepConfig,
-  resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
@@ -27,11 +26,6 @@ import {
   getServerPrimaryExecutionConfig,
   getServerPrimaryExecutionContextLatticeClaimsConfig,
   getServerPrimaryExecutionDocSetWatchConfig,
-  resetCommitPreconditionsConfig,
-  resetPersistentSchedulerStateConfig,
-  resetServerPrimaryExecutionConfig,
-  resetServerPrimaryExecutionContextLatticeClaimsConfig,
-  resetServerPrimaryExecutionDocSetWatchConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
   setServerPrimaryExecutionConfig,
@@ -375,6 +369,94 @@ export interface ExperimentalOptions {
    */
   systemPatternAutoUpdate?: boolean | undefined;
 }
+
+/**
+ * One {@link ExperimentalOptions} flag whose consumer is an AMBIENT (module-
+ * global) dial in a lower layer rather than this Runtime instance.
+ */
+interface AmbientExperimentalDial {
+  /** The `ExperimentalOptions` key naming this dial. Boolean-valued: every
+   * ambient dial is a capability switch, and the non-boolean options
+   * (`serverPrimaryExecutionDemandShrinkHoldMs`) are runtime-local. */
+  readonly key: {
+    [K in keyof ExperimentalOptions]-?: ExperimentalOptions[K] extends
+      boolean | undefined ? K : never;
+  }[keyof ExperimentalOptions];
+  readonly read: () => boolean;
+  readonly write: (enabled: boolean) => void;
+}
+
+/**
+ * The ambient dials a Runtime bridges — its `experimental` options in, the
+ * effective values back out.
+ *
+ * A RUNTIME IS NOT THE ONLY WRITER, and that is the whole reason this is a
+ * table with a lifecycle rather than a dozen open-coded calls. A memory server
+ * installs `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` at ITS construction
+ * (`applyServerPrimaryExecutionEnvConfig`), and every realm-separated
+ * deployment — browser ↔ toolshed, executor Workers ↔ the standalone server —
+ * has a server with no Runtime beside it. So two authorities write one global
+ * with no ordering between them, and the rules that keep that coherent are:
+ *
+ * 1. An OMITTED flag is "no opinion" — the dial is not written at all. It used
+ *    to be written with `undefined`, which the setters resolved to the compiled
+ *    default, so merely constructing a Runtime reverted a deployment's
+ *    configuration. For the master server-primary dial that configuration IS
+ *    the rollback lever (`=false` selects the pre-arc posture whole), so the
+ *    revert was silent and total.
+ * 2. A named flag is written for THIS RUNTIME'S LIFETIME and unwound to the
+ *    value it displaced. Not to the compiled default — that would be a third
+ *    opinion neither writer expressed.
+ *
+ * The read-back is unconditional either way: `runtime.experimental` reports
+ * what is actually in effect, which is what hosts gate on (toolshed's
+ * `startServerExecutionPool` reads `experimental.serverPrimaryExecution`).
+ *
+ * `eagerSourceAnnotation` is deliberately NOT here: it is a pure debug seam
+ * that tests toggle directly around construction, it has no reset on dispose,
+ * and rule 1 has always applied to it (see the constructor).
+ */
+const AMBIENT_EXPERIMENTAL_DIALS: readonly AmbientExperimentalDial[] = [
+  {
+    key: "modernCellRep",
+    read: getModernCellRepConfig,
+    write: setModernCellRepConfig,
+  },
+  {
+    key: "persistentSchedulerState",
+    read: getPersistentSchedulerStateConfig,
+    write: setPersistentSchedulerStateConfig,
+  },
+  {
+    key: "commitPreconditions",
+    read: getCommitPreconditionsConfig,
+    write: setCommitPreconditionsConfig,
+  },
+  {
+    key: "serverPrimaryExecution",
+    read: getServerPrimaryExecutionConfig,
+    write: setServerPrimaryExecutionConfig,
+  },
+  // The F3 doc-set watch subcapability dial. Bridged symmetrically with the
+  // base flag: on a server build it decides advertisement (getMemoryProtocol
+  // Flags folds it with the base capability), on a client build it is the
+  // own-side gate the replica checks against the negotiated peer flag.
+  {
+    key: "serverPrimaryExecutionDocSetWatch",
+    read: getServerPrimaryExecutionDocSetWatchConfig,
+    write: setServerPrimaryExecutionDocSetWatchConfig,
+  },
+  // The C1.7 context-lattice-claims-v1 subcapability dial, bridged
+  // symmetrically with the two above: on a server build it decides
+  // advertisement, on a client build it is what this realm's `hello` OFFERS —
+  // the half a browser had no path to before (CA4 audit, client-passivity §5g
+  // item 5).
+  {
+    key: "serverPrimaryExecutionContextLatticeClaims",
+    read: getServerPrimaryExecutionContextLatticeClaimsConfig,
+    write: setServerPrimaryExecutionContextLatticeClaimsConfig,
+  },
+];
 
 /**
  * Content-addressed cache of compiled MODULE BYTES, injected via
@@ -798,6 +880,14 @@ export class Runtime {
     init?: RequestInit,
   ) => Promise<Response>;
   readonly externalSinkDisposition: ExternalSinkDispositionPolicy;
+  /**
+   * Undo thunks for the AMBIENT (process-global) dials this Runtime wrote at
+   * construction, each restoring the value it displaced. One entry per flag
+   * the caller NAMED — an omitted flag is never written and so has nothing to
+   * put back. Drained by `dispose()`, which is therefore idempotent and never
+   * touches a dial some other authority owns. See AMBIENT_EXPERIMENTAL_DIALS.
+   */
+  readonly #ambientDialRestores: (() => void)[] = [];
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -1124,48 +1214,26 @@ export class Runtime {
     this.experimental.serverPrimaryExecutionSessionRankCandidates ??= true;
     this.experimental.serverPrimaryExecutionCrossSpaceReadCandidates ??= true;
 
-    // Propagate experimental flags to their ambient control points, then read
-    // back the effective state so `experimental.*` reflects what is actually in
-    // effect (matters when the caller didn't pass an explicit value and the
-    // default happens to be `true`; without this, consumers would see
-    // `undefined` and probably get very confused).
-    setModernCellRepConfig(this.experimental.modernCellRep);
-    this.experimental.modernCellRep = getModernCellRepConfig();
-    setPersistentSchedulerStateConfig(
-      this.experimental.persistentSchedulerState,
-    );
-    this.experimental.persistentSchedulerState =
-      getPersistentSchedulerStateConfig();
-    setCommitPreconditionsConfig(this.experimental.commitPreconditions);
-    this.experimental.commitPreconditions = getCommitPreconditionsConfig();
-    setServerPrimaryExecutionConfig(
-      this.experimental.serverPrimaryExecution,
-    );
-    this.experimental.serverPrimaryExecution =
-      getServerPrimaryExecutionConfig();
-    // The F3 doc-set watch subcapability dial. Bridged symmetrically with the
-    // base flag: on a server build it decides advertisement (getMemoryProtocol
-    // Flags folds it with the base capability), on a client build it is the
-    // own-side gate the replica checks against the negotiated peer flag.
-    setServerPrimaryExecutionDocSetWatchConfig(
-      this.experimental.serverPrimaryExecutionDocSetWatch,
-    );
-    this.experimental.serverPrimaryExecutionDocSetWatch =
-      getServerPrimaryExecutionDocSetWatchConfig();
-    // The C1.7 context-lattice-claims-v1 subcapability dial, bridged
-    // symmetrically with the two above: on a server build it decides
-    // advertisement, on a client build it is what this realm's `hello`
-    // OFFERS — the half a browser had no path to before (CA4 audit,
-    // client-passivity §5g item 5).
-    setServerPrimaryExecutionContextLatticeClaimsConfig(
-      this.experimental.serverPrimaryExecutionContextLatticeClaims,
-    );
-    this.experimental.serverPrimaryExecutionContextLatticeClaims =
-      getServerPrimaryExecutionContextLatticeClaimsConfig();
-    // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
-    // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
-    // directly around runtime construction), and an unconditional
-    // `undefined -> default` write would stomp it.
+    // Propagate the NAMED experimental flags to their ambient control points,
+    // then read back the effective state so `experimental.*` reflects what is
+    // actually in effect (matters when the caller didn't pass an explicit
+    // value; without this, consumers would see `undefined` and probably get
+    // very confused). An omitted flag is left alone rather than reset to its
+    // compiled default, and what this Runtime does write it unwinds on
+    // dispose — see AMBIENT_EXPERIMENTAL_DIALS for why both halves matter.
+    for (const dial of AMBIENT_EXPERIMENTAL_DIALS) {
+      const requested = this.experimental[dial.key];
+      if (requested !== undefined) {
+        const displaced = dial.read();
+        dial.write(requested);
+        this.#ambientDialRestores.push(() => dial.write(displaced));
+      }
+      this.experimental[dial.key] = dial.read();
+    }
+    // Same rule, one layer over: the ambient flag is also a test seam (tests
+    // toggle `setEagerSourceAnnotation` directly around runtime construction),
+    // and an unconditional `undefined -> default` write would stomp it. Not in
+    // the table above because it deliberately does NOT unwind on dispose.
     if (this.experimental.eagerSourceAnnotation !== undefined) {
       setEagerSourceAnnotation(this.experimental.eagerSourceAnnotation);
     }
@@ -1582,11 +1650,14 @@ export class Runtime {
    * Passing `false` makes closing the CALLER's job — nothing else will. Note
    * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
    *
-   * Either way this resets the PROCESS-GLOBAL experimental config to defaults
-   * (`resetModernCellRepConfig` and friends). Under a non-default flag that is
-   * visible to a second runtime still running against the same store, which is
-   * exactly the caller this option serves — so set the flags per process, not
-   * per runtime, if two of them must agree.
+   * Either way this unwinds the PROCESS-GLOBAL experimental dials this runtime
+   * wrote, each back to the value it displaced (AMBIENT_EXPERIMENTAL_DIALS).
+   * Flags it never named are left alone — so a value installed per process (a
+   * memory server's `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION`, say) survives any
+   * number of runtime lifecycles. Two runtimes that must AGREE on a flag still
+   * want it set per process rather than named by one of them: the dials are
+   * global, so a second runtime running against the same store sees whatever
+   * the first one installed for as long as it lives.
    */
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
@@ -1669,13 +1740,12 @@ export class Runtime {
     // Dispose the Engine (clears compiler/runtime state and the console hook)
     this.harness.dispose();
 
-    // Reset experimental config to defaults.
-    resetModernCellRepConfig();
-    resetPersistentSchedulerStateConfig();
-    resetCommitPreconditionsConfig();
-    resetServerPrimaryExecutionConfig();
-    resetServerPrimaryExecutionDocSetWatchConfig();
-    resetServerPrimaryExecutionContextLatticeClaimsConfig();
+    // Unwind this Runtime's writes to the process-global experimental dials —
+    // only the flags it NAMED, each back to the value it displaced. LIFO, and
+    // draining as it goes so a second dispose() restores nothing stale.
+    for (const restore of this.#ambientDialRestores.splice(0).reverse()) {
+      restore();
+    }
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

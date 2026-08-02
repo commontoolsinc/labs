@@ -8,6 +8,7 @@ import {
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  applyServerPrimaryExecutionEnvConfig,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
@@ -18,6 +19,7 @@ import {
   resetServerPrimaryExecutionConfig,
   resetServerPrimaryExecutionContextLatticeClaimsConfig,
   resetServerPrimaryExecutionDocSetWatchConfig,
+  SERVER_PRIMARY_EXECUTION_ENV,
 } from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
@@ -351,6 +353,74 @@ describe("ExperimentalOptions", () => {
       expect(getPersistentSchedulerStateConfig()).toBe(true);
       expect(getCommitPreconditionsConfig()).toBe(true);
       expect(getServerPrimaryExecutionConfig()).toBe(true);
+    });
+  });
+
+  // A Runtime is not the only authority over these ambient dials. A memory
+  // server applies `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` at ITS construction
+  // (`applyServerPrimaryExecutionEnvConfig`), and every realm-separated
+  // deployment has a server with no Runtime beside it — so the two writers
+  // meet on the same module global with no ordering between them.
+  //
+  // The rule that makes that safe: an OMITTED flag is "no opinion", not "reset
+  // to the compiled default", and a Runtime's writes are scoped to its own
+  // lifetime. Without it a Runtime lifecycle silently reverted the deployment's
+  // one rollback lever — which is a whole-configuration switch, not a nicety.
+  describe("ambient config the Runtime does not own", () => {
+    const setServerPrimaryExecutionEnv = (value: string) =>
+      applyServerPrimaryExecutionEnvConfig((name) =>
+        name === SERVER_PRIMARY_EXECUTION_ENV ? value : undefined
+      );
+
+    it("survives a construct-and-dispose cycle that never names the flag", async () => {
+      // As the memory server installs it, from the env.
+      setServerPrimaryExecutionEnv("false");
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
+
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        // Deliberately silent on `serverPrimaryExecution` — the shape every
+        // host that does not read the env produces.
+        experimental: {},
+      });
+
+      // Not clobbered at construction...
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
+      // ...and the read-back reports what is actually in effect, so a host
+      // that gates on `runtime.experimental` sees the deployment's value.
+      expect(runtime.experimental.serverPrimaryExecution).toBe(false);
+
+      await runtime.dispose();
+      await sm.close();
+
+      // Nor at disposal: the Runtime never set this dial, so it has nothing
+      // to put back.
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
+    });
+
+    it("restores the value it displaced, not the compiled default", async () => {
+      setServerPrimaryExecutionEnv("false");
+
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { serverPrimaryExecution: true },
+      });
+
+      // An explicit flag still reaches the ambient dial for this Runtime's
+      // lifetime — that half is unchanged.
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+
+      // And unwinds to what was there before it, which is NOT the compiled
+      // default (`true`): restoring the default here would leave the process
+      // in a configuration nobody selected.
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
     });
   });
 });

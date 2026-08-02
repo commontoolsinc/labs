@@ -1760,6 +1760,29 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
 //
+// THE CONTRACT EVERY DIAL BELOW OBEYS — three words, and the middle one is the
+// one that was wrong:
+//
+//   set(value)     — install `value`.
+//   set(undefined) — NO OPINION. Leave whatever is installed alone.
+//   reset()        — put the COMPILED DEFAULT back. The explicit way to say it.
+//
+// `set(undefined)` used to mean `reset()`, and that conflation is a trap
+// because these globals have MORE THAN ONE writer with no ordering between
+// them. A memory server installs `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` at
+// its own construction; a runner `Runtime` bridges `RuntimeOptions.
+// experimental` at its. A host that constructs a Runtime without naming a flag
+// was passing `undefined` — "I have no opinion" — and silently reverting the
+// deployment's configuration, which for the master dial is the whole rollback
+// lever. `setModernCellRepConfig` (data-model/src/cell-rep.ts) already read
+// `undefined` this way; the dials here now agree with it.
+//
+// The lifecycle half belongs to the caller and is the same rule from the other
+// end: a writer with a bounded lifetime (a Runtime) reads the prior value,
+// installs its own, and puts the PRIOR value back when it ends — never the
+// compiled default, which would be a third opinion nobody expressed. See
+// `#ambientFlagRestores` in runner/src/runtime.ts.
+//
 // THE SERVER-PRIMARY DIAL SET MOVES AS ONE (owner ruling, 2026-08-01).
 // "Server-primary execution is on" names the WHOLE configuration, not a flag:
 // the master dial, the issuance rank at its top stage, and both claim-delivery
@@ -1809,7 +1832,8 @@ let serverPrimaryExecutionGraphRetirementSpaces: ReadonlySet<string> =
  * client/server handshakes, so it lives beside the memory protocol flags.
  */
 export function setPersistentSchedulerStateConfig(enabled?: boolean): void {
-  persistentSchedulerStateEnabled = enabled ?? true;
+  if (enabled === undefined) return;
+  persistentSchedulerStateEnabled = enabled;
 }
 
 export function getPersistentSchedulerStateConfig(): boolean {
@@ -1832,10 +1856,14 @@ export function resetPersistentSchedulerStateConfig(): void {
  * of the handshake resolve it: a memory server applies the env var at
  * construction, a runner Runtime bridges its `ExperimentalOptions` value, and
  * an omitted value on either side must mean the same thing
- * ({@link SERVER_PRIMARY_EXECUTION_DEFAULT}).
+ * ({@link SERVER_PRIMARY_EXECUTION_DEFAULT}) — resolved by
+ * {@link resetServerPrimaryExecutionConfig} or by never setting the dial at
+ * all, NOT by `set(undefined)`. This is the dial with two live writers, so it
+ * is where the contract at the top of this section is load-bearing today.
  */
 export function setServerPrimaryExecutionConfig(enabled?: boolean): void {
-  serverPrimaryExecutionEnabled = enabled ?? SERVER_PRIMARY_EXECUTION_DEFAULT;
+  if (enabled === undefined) return;
+  serverPrimaryExecutionEnabled = enabled;
 }
 
 export function getServerPrimaryExecutionConfig(): boolean {
@@ -1903,8 +1931,8 @@ export const serverPrimaryExecutionCrossSpaceReadsEnabled = (): boolean =>
 export function setServerPrimaryExecutionClaimRankConfig(
   rank?: ServerPrimaryExecutionClaimRank,
 ): void {
-  serverPrimaryExecutionClaimRank = rank ??
-    SERVER_PRIMARY_EXECUTION_CLAIM_RANK_DEFAULT;
+  if (rank === undefined) return;
+  serverPrimaryExecutionClaimRank = rank;
 }
 
 export function getServerPrimaryExecutionClaimRankConfig(): ServerPrimaryExecutionClaimRank {
@@ -1928,8 +1956,8 @@ export function resetServerPrimaryExecutionClaimRankConfig(): void {
 export function setServerPrimaryExecutionContextLatticeClaimsConfig(
   enabled?: boolean,
 ): void {
-  serverPrimaryExecutionContextLatticeClaimsEnabled = enabled ??
-    SERVER_PRIMARY_EXECUTION_DEFAULT;
+  if (enabled === undefined) return;
+  serverPrimaryExecutionContextLatticeClaimsEnabled = enabled;
 }
 
 export function getServerPrimaryExecutionContextLatticeClaimsConfig(): boolean {
@@ -1958,8 +1986,8 @@ export function resetServerPrimaryExecutionContextLatticeClaimsConfig(): void {
 export function setServerPrimaryExecutionCrossSpaceClaimsConfig(
   enabled?: boolean,
 ): void {
-  serverPrimaryExecutionCrossSpaceClaimsEnabled = enabled ??
-    SERVER_PRIMARY_EXECUTION_DEFAULT;
+  if (enabled === undefined) return;
+  serverPrimaryExecutionCrossSpaceClaimsEnabled = enabled;
 }
 
 export function getServerPrimaryExecutionCrossSpaceClaimsConfig(): boolean {
@@ -1981,7 +2009,8 @@ export function resetServerPrimaryExecutionCrossSpaceClaimsConfig(): void {
 export function setServerPrimaryExecutionDocSetWatchConfig(
   enabled?: boolean,
 ): void {
-  serverPrimaryExecutionDocSetWatchEnabled = enabled ?? false;
+  if (enabled === undefined) return;
+  serverPrimaryExecutionDocSetWatchEnabled = enabled;
 }
 
 export function getServerPrimaryExecutionDocSetWatchConfig(): boolean {
@@ -2023,9 +2052,8 @@ export function resetServerPrimaryExecutionDocSetWatchConfig(): void {
 export function setServerPrimaryExecutionGraphRetirementConfig(
   spaces?: Iterable<string>,
 ): void {
-  serverPrimaryExecutionGraphRetirementSpaces = spaces === undefined
-    ? new Set()
-    : new Set(spaces);
+  if (spaces === undefined) return;
+  serverPrimaryExecutionGraphRetirementSpaces = new Set(spaces);
 }
 
 export function getServerPrimaryExecutionGraphRetirementConfig(): ReadonlySet<
@@ -2168,7 +2196,8 @@ export function applyServerPrimaryExecutionEnvConfig(
  * but the memory protocol needs the value during client/server handshakes.
  */
 export function setCommitPreconditionsConfig(enabled?: boolean): void {
-  commitPreconditionsEnabled = enabled ?? true;
+  if (enabled === undefined) return;
+  commitPreconditionsEnabled = enabled;
 }
 
 export function getCommitPreconditionsConfig(): boolean {
@@ -2186,7 +2215,8 @@ export function resetCommitPreconditionsConfig(): void {
  * shape.
  */
 export function setSyncSchemaTableConfig(enabled?: boolean): void {
-  syncSchemaTableEnabled = enabled ?? true;
+  if (enabled === undefined) return;
+  syncSchemaTableEnabled = enabled;
 }
 
 export function getSyncSchemaTableConfig(): boolean {

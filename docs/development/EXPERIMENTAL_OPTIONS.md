@@ -130,6 +130,26 @@ straight off `runtime.experimental` — so the constructor normalizes them
 locally instead, after the override banner, which is why an omitted value never
 shows up as an explicit override in the log.
 
+**An omitted flag INHERITS; it does not reset (2026-08-01).** The ambient
+control points take an optional value, and `undefined` means "no opinion —
+leave whatever is installed alone", never "put the compiled default back".
+`resetXConfig()` is how you ask for the default explicitly. This matters
+because a Runtime is not the only writer: a memory server installs
+`EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` at its own construction
+(`applyServerPrimaryExecutionEnvConfig`), and every realm-separated deployment
+has a server with no Runtime beside it. Correspondingly, **a Runtime's writes
+to these dials are scoped to its own lifetime**: it records the value each
+NAMED flag displaced and restores exactly those on `dispose()` — not the
+compiled default, which would be a third opinion nobody expressed. So an
+env-set configuration survives any number of Runtime construct/dispose cycles.
+Before this, constructing or disposing a Runtime that never mentioned a flag
+silently reverted it to the compiled default — which for `serverPrimaryExecution`
+is the whole deployment rollback lever. The table lives in
+`AMBIENT_EXPERIMENTAL_DIALS`
+([`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts)) and
+the setter contract is stated once at the top of the flag section in
+[`packages/memory/v2.ts`](../../packages/memory/v2.ts).
+
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
@@ -238,7 +258,13 @@ propagate](#how-flags-propagate).
   apply it at construction (`applyServerPrimaryExecutionEnvConfig` — toolshed
   storage route, standalone server), and runner Runtimes bridge
   `experimental.serverPrimaryExecution` at construction, so a server's
-  advertisement no longer depends on a Runtime living in its realm.
+  advertisement no longer depends on a Runtime living in its realm. This is
+  the one dial with two live writers today, so it is where the inherit rule in
+  the category note above is load-bearing: a Runtime that does not name the
+  flag leaves the server's env-set value alone, and one that does name it puts
+  that value back on `dispose()`. Until 2026-08-01 either event reverted the
+  dial to the compiled default, so `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false`
+  was silently undone by any Runtime lifecycle in the server's realm.
 - **Added by.** Bernhard Seefeld, in server-primary execution W0.6
   (2026-07-12).
 - **Purpose.** Gates the trusted-client server-primary execution protocol:
@@ -1757,7 +1783,10 @@ Experimental flag overrides: modernCellRep=true
   values.
 
 The dedicated plumbing test checks that constructing and disposing a `Runtime`
-sets and resets the ambient flag state correctly:
+sets and unwinds the ambient flag state correctly — including the two cases the
+inherit rule turns on: a flag the Runtime never names survives the whole
+lifecycle untouched, and a flag it does name is restored to the value it
+displaced rather than to the compiled default:
 
 ```bash
 cd packages/runner
@@ -1783,8 +1812,10 @@ The Category 1 flags are declared as the `ExperimentalOptions` interface in
 `Runtime` constructor merges the provided flags with the built-in defaults
 (`persistentSchedulerState` and `commitPreconditions` true; the other Category
 1 flags false),
-propagates each one to its ambient control point, and then reads the effective
-state back so that `runtime.experimental.*` reflects what is actually in effect.
+propagates the ones the caller NAMED to their ambient control points, and then
+reads the effective state back so that `runtime.experimental.*` reflects what is
+actually in effect. An omitted flag is left alone, and every write is unwound to
+the value it displaced on `dispose()` (`AMBIENT_EXPERIMENTAL_DIALS`).
 
 First-party construction config is centralized in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
