@@ -1573,11 +1573,14 @@ export class CellImpl<T extends FabricValue>
             resolvedSchema.default,
           )
           : [];
+      // From here on `currentValue` is the array just created, not what the
+      // read returned.
       currentValue = created;
     }
 
-    // Read-only: a stored `FabricArray` is a `ReadonlyArray`, and this method
-    // only reads it, building the replacement in `combined` below.
+    // Read-only: a value that came from storage is a `FabricArray`, which is a
+    // `ReadonlyArray`, and though a freshly created one is not, this method
+    // only ever reads what it finds -- the replacement is `combined`, below.
     const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
@@ -1651,11 +1654,12 @@ export class CellImpl<T extends FabricValue>
             resolvedSchema.default,
           )
           : [];
+      // As in `push()`, `currentValue` is now the created array.
       currentValue = created;
     }
 
-    // Read-only, as in `push()`: the comparisons below only read, and the
-    // replacement is built separately.
+    // Read-only for the same reason as in `push()`: the comparisons below only
+    // read, and the replacement is built separately.
     const array: readonly FabricValue[] = currentValue;
 
     // Keep only the values not already present (by stored-value equality,

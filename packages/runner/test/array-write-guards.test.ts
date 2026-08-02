@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { Runtime } from "../src/runtime.ts";
+import type { Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 /**
@@ -35,17 +36,18 @@ describe("array write guards", () => {
     await storageManager?.close();
   });
 
+  // Typed as `Cell<string[]>` rather than cast to a structural `{ push(...) }`,
+  // so these calls are checked against the real signatures and would stop
+  // compiling if either method changed shape or left `Cell`.
   for (
     const { name, write } of [
       {
         name: "push()",
-        write: (cell: ReturnType<Runtime["getCell"]>, v: string) =>
-          (cell as unknown as { push(v: string): void }).push(v),
+        write: (cell: Cell<string[]>, v: string) => cell.push(v),
       },
       {
         name: "addUnique()",
-        write: (cell: ReturnType<Runtime["getCell"]>, v: string) =>
-          (cell as unknown as { addUnique(v: string): void }).addUnique(v),
+        write: (cell: Cell<string[]>, v: string) => cell.addUnique(v),
       },
     ]
   ) {
@@ -61,6 +63,26 @@ describe("array write guards", () => {
         write(cell, "one");
 
         expect(cell.get()).toEqual(["one"]);
+      });
+
+      it("seeds from the schema default when there is no value yet", () => {
+        // The other absent-value case takes the `: []` arm. This one reaches
+        // `processDefaultValue()`, whose `any` return is what the created
+        // array's annotation exists to constrain.
+        const cell = runtime.getCell<string[]>(
+          space,
+          `defaulted-${name}`,
+          {
+            type: "array",
+            items: { type: "string" },
+            default: ["seed"],
+          } as const,
+          tx,
+        );
+
+        write(cell, "one");
+
+        expect(cell.get()).toEqual(["seed", "one"]);
       });
 
       it("appends to an existing array", () => {
