@@ -204,6 +204,7 @@ const recordSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema) ??
     storedSchemaForWritePolicyInput(tx, link);
@@ -221,6 +222,7 @@ const recordSchemaWritePolicyInput = (
     },
     schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -253,6 +255,7 @@ export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema);
   const cfcRelevant = schemaHasIfc(resolvedSchema) ||
@@ -265,6 +268,7 @@ export const recordRelevantSchemaWritePolicyInput = (
     tx,
     link,
     schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+    schemaRole,
   );
 };
 
@@ -392,8 +396,16 @@ declare module "@commonfabric/api" {
      * the write is skipped entirely if it deep-equals the value that would be
      * written. The read is marked `ignoreReadForScheduling`, so it does not
      * register a dependency that could re-trigger the writing computation.
+     *
+     * `schemaRole` is runner-internal provenance. Result projection writes pass
+     * `"output"` so the schema record created by this write carries the role;
+     * ordinary callers must leave it absent.
      */
-    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
+    setRawUntyped(
+      value: FabricValue,
+      onlyIfDifferent?: boolean,
+      schemaRole?: "output",
+    ): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -1537,23 +1549,22 @@ export class CellImpl<T extends FabricValue>
     );
     // Read marked as the op's own incidental read: dropped from the commit's
     // conflict set so the append merges, while a handler's explicit read is not.
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as unknown[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.push() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.push() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
 
-    // If there is no array yet, create it first. We have to do this as a
-    // separate operation, so that in the next steps each object element is
-    // properly anchored in the array.
-    if (array === undefined) {
+      // No array yet, so create it first. This has to be a separate operation,
+      // so that in the next steps each object element is properly anchored in
+      // the array.
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -1562,15 +1573,27 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // and assigning that back to `currentValue` would discard the narrowing
+      // this block exists to establish.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      // From here on `currentValue` is the array just created, not what the
+      // read returned.
+      currentValue = created;
     }
+
+    // Read-only: a value that came from storage is a `FabricArray`, which is a
+    // `ReadonlyArray`, and though a freshly created one is not, this method
+    // only ever reads what it finds -- the replacement is `combined`, below.
+    const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
     const combined = new Array(array.length + value.length);
@@ -1617,30 +1640,39 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       resolvedLink.schema ?? this.schema,
     );
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as FabricValue[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.addUnique() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
-    if (array === undefined) {
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.addUnique() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
+
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated for the same reason as in `push()`: `processDefaultValue()`
+      // answers `any`, which would discard the narrowing on assignment.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      // As in `push()`, `currentValue` is now the created array.
+      currentValue = created;
     }
+
+    // Read-only for the same reason as in `push()`: the comparisons below only
+    // read, and the replacement is built separately.
+    const array: readonly FabricValue[] = currentValue;
 
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
@@ -2299,7 +2331,11 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
+  setRawUntyped(
+    value: FabricValue,
+    onlyIfDifferent = false,
+    schemaRole?: "output",
+  ): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -2330,6 +2366,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       this.link,
       this.link.schema ?? this.schema,
+      schemaRole,
     );
     this.tx.writeValueOrThrow(this.link, inlined);
 

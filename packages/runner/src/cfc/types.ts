@@ -402,6 +402,14 @@ export type WritePolicyInput =
     readonly target: CfcAddress;
     readonly schemaHash?: string;
     readonly schema?: JSONSchema;
+    /**
+     * Present only when this schema describes a generated output of the
+     * running module. Such outputs may introduce required fields without
+     * defaults because the module materializes them. Absence is deliberately
+     * strict: inputs and ordinary document writes must preserve values already
+     * at rest.
+     */
+    readonly schemaRole?: "output";
   }
   | {
     readonly kind: "structural-provenance";

@@ -292,7 +292,7 @@ function sendValueToBindingInner<T>(
           scopedRef,
           value,
           { cell: cell.getAsNormalizedFullLink(), binding },
-          { meta: ignoreReadForScheduling },
+          { meta: ignoreReadForScheduling, schemaRole: "output" },
         );
       }
       tx.writeValueOrThrow(
@@ -336,7 +336,7 @@ function sendValueToBindingInner<T>(
       ref,
       value,
       { cell: cell.getAsNormalizedFullLink(), binding },
-      { meta: ignoreReadForScheduling },
+      { meta: ignoreReadForScheduling, schemaRole: "output" },
     );
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {

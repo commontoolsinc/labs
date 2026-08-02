@@ -1402,7 +1402,7 @@ describe("piece schema compatibility", () => {
     ).toThrow(/argument/);
   });
 
-  it("preserves required result guarantees and defaults new required results", () => {
+  it("preserves required result guarantees and allows new required results", () => {
     const optionalized = pattern(
       oldPattern.argumentSchema,
       {
@@ -1446,7 +1446,7 @@ describe("piece schema compatibility", () => {
         oldPattern,
         newRequiredWithoutDefault,
       )
-    ).toThrow(/result\.summary: newly required result field has no default/);
+    ).not.toThrow();
     expect(() =>
       assertPatternSchemasBackwardCompatible(oldPattern, newRequiredWithDefault)
     ).not.toThrow();
