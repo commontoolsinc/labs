@@ -62,7 +62,7 @@ describe("cloneForMutation", () => {
       expect(Object.isFrozen(value)).toBe(false);
       expect(pathValue).toBe(value);
       // `[SHALLOW_UNFROZEN_CLONE]` preserves the FabricValue-shaped state.
-      const cloned = value as unknown as FabricError;
+      const cloned = value;
       expect(cloned.type).toBe(err.type);
       expect(cloned.name).toBe(err.name);
       expect(cloned.message).toBe(err.message);
