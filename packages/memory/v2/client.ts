@@ -296,8 +296,18 @@ export class Client {
     const requestId = message.requestId as string;
     const deferred = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, { deferred, beforeResolve });
-    await this.transport.send(encodeMemoryBoundary(message));
-    const result = await deferred.promise as ResponseMessage<Result>;
+    // A REPLY IS AWAITED IN THE SAME EXPRESSION THAT SENDS THE REQUEST.
+    // `#pending` is reachable by `rejectPending()` — which every disconnect
+    // runs — from the moment the entry is registered, while `transport.send()`
+    // suspends for as long as a whole socket open. Awaiting the send first
+    // leaves a window in which that rejection has no observer, and an
+    // unobserved rejection is an unhandled rejection, which aborts the process
+    // instead of failing the request.
+    const [, response] = await Promise.all([
+      this.transport.send(encodeMemoryBoundary(message)),
+      deferred.promise,
+    ]);
+    const result = response as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
       error.name = result.error.name;
@@ -387,13 +397,21 @@ export class Client {
       throw protocolError("memory client protocol flags are malformed");
     }
     this.#advertisedFlags = flags;
-    await this.transport.send(encodeMemoryBoundary({
-      type: "hello",
-      protocol: MEMORY_PROTOCOL,
-      flags: wireMemoryProtocolFlags(flags),
-    }));
     try {
-      await ack.promise;
+      // Same rule as `requestConnected()`: the handshake reply is awaited in
+      // the same expression that sends the greeting. `#helloPending` is
+      // rejectable by `rejectPending()` the moment it is published, and the
+      // send below suspends for a whole socket open — which is exactly when a
+      // reconnect runs it. Awaiting the send first made "the server is down
+      // while the client retries" abort the process on an unhandled rejection.
+      await Promise.all([
+        this.transport.send(encodeMemoryBoundary({
+          type: "hello",
+          protocol: MEMORY_PROTOCOL,
+          flags: wireMemoryProtocolFlags(flags),
+        })),
+        ack.promise,
+      ]);
       this.#connected = true;
     } finally {
       this.#helloPending = null;
@@ -600,6 +618,13 @@ export class Client {
             return;
           }
           this.rejectPending(err);
+          // A FAILED HANDSHAKE SPENDS THE CONNECTION. `hello` is per physical
+          // connection and the server refuses a second one on the same socket,
+          // so retrying without rotating can only fail identically, forever.
+          // The fresh-challenge branch above already rotates for the same
+          // reason; a live socket is not evidence that its handshake can be
+          // retried.
+          await this.transport.close();
           await this.waitForReconnectDelay(reconnectDelayMs(attempt));
           attempt += 1;
         }

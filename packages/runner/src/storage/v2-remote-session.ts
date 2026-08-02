@@ -145,35 +145,56 @@ export class WebSocketTransport implements MemoryClient.Transport {
       const socket = new WebSocket(address);
       this.#socket = socket;
       let opened = false;
+      // A RETIRED SOCKET IS SILENT — it reports its disconnect exactly once
+      // and delivers nothing afterwards. Both halves matter to the reconnect
+      // that the disconnect starts:
+      //  - a socket that fails mid-flight fires `error` AND then `close`, and
+      //    both used to reach `#closeReceiver`. The second notification lands
+      //    while the client is already reconnecting from the first and tears
+      //    down the handshake running on the SUCCESSOR socket. The retry then
+      //    re-greets a socket that has already said hello, which the server
+      //    refuses permanently ("hello may only be sent once"), so the client
+      //    never re-establishes.
+      //  - listeners outlive the socket they were registered on, so a frame
+      //    buffered on the previous connection would be delivered into that
+      //    successor's handshake, where any message other than `hello.ok`
+      //    fails it.
+      // Retiring once makes "the transport disconnected" a fact about the
+      // socket rather than a count of its failure events.
+      let retired = false;
+      const retire = (error?: Error) => {
+        if (this.#socket === socket) {
+          this.#socket = null;
+        }
+        if (this.#opening === opening) {
+          this.#opening = null;
+        }
+        if (retired) {
+          return;
+        }
+        retired = true;
+        this.#closeReceiver(error);
+      };
       socket.addEventListener("open", () => {
         opened = true;
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", (event) => {
+        if (retired) {
+          return;
+        }
         if (typeof event.data === "string") {
           this.#receiver(event.data);
         }
       });
       socket.addEventListener("close", () => {
-        if (this.#socket === socket) {
-          this.#socket = null;
-        }
-        if (this.#opening === opening) {
-          this.#opening = null;
-        }
-        this.#closeReceiver();
+        retire();
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }
       });
       socket.addEventListener("error", (event) => {
-        if (this.#socket === socket) {
-          this.#socket = null;
-        }
-        if (this.#opening === opening) {
-          this.#opening = null;
-        }
-        this.#closeReceiver(
+        retire(
           event instanceof ErrorEvent && event.error instanceof Error
             ? event.error
             : new Error("memory websocket transport error"),
