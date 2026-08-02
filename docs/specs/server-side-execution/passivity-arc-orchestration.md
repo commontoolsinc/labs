@@ -217,6 +217,43 @@ resumable.
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
 
+> ## "BOTH BRANCHES ARE GREEN" WAS WRONG — CORRECTED 2026-08-01
+>
+> The green claim repeated throughout this arc — runner 1557/0, memory 905/0,
+> toolshed 103/0, data-model 47/0 — covers **local unit batteries only**. Per
+> §2.3, `deno task test` does not run `packages/patterns/integration`, and
+> nobody ever ran that suite as a battery on either branch. CI does run it.
+>
+> **CI, adjacent, same workflow:**
+>
+> | commit | success | failure | cancelled | skipped |
+> | --- | --- | --- | --- | --- |
+> | merge base `f25518c1f` | **27** | **0** | 0 | 3 |
+> | fat `44b46ad02` (flags OFF) | 17 | **4** | 4 | 5 |
+> | thin `48d5ced18` (flags ON) | — | — | — | **never ran** |
+>
+> Eight failing *jobs* on the fat branch: `Check` (docs code blocks),
+> `Test (1/6)`, `Pattern Update Compatibility` (1/4 and 4/4),
+> `Pattern Unit Tests (1/5)`, `Pattern Integration Tests` (3/4 and 4/4),
+> `Status`.
+>
+> **Not all flakes.** `Test (1/6)` is `ts-transformers` with two **fixture
+> output mismatches** (`optional-method-calls`, `map generic type parameter`) —
+> deterministic golden-file diffs, which cannot be blamed on load. Of the two
+> integration failures, `server-execution-cross-space-gate` is the documented
+> §2.4 flake, but `server-execution-lunch-poll-placement-gate` (C2.10) failed
+> its settlement tail with `{committed: 0, noOp: 92, unserved: 0}` alongside
+> `crashes: 1` and `abruptStops: 1` — a serving failure, not a barrier blip.
+>
+> **This settles the sanity check that the timing analysis was meant to run.**
+> The fat branch with flags OFF is supposed to be "today's behaviour exactly".
+> It is not: the merge base is CI-clean and the fat branch is CI-red. The two
+> arms are distinguishable on **correctness**, so comparing their **latency**
+> answers nothing. Timing is premature until the fat branch is green.
+>
+> **The thin branch has never been through CI at all** — no PR, no run. Its
+> only evidence is the same local unit batteries.
+
 > ## THE FLIP IS LANDED — `b46e9b7e0`, 2026-07-31 — AND GATED, 2026-08-01
 >
 > `externalSinkDisposition` defaults to **`"suppress"`**. A client never runs an
@@ -1112,6 +1149,107 @@ diagnoses them a seventh time:
 **None of the three is ever caused by arc work in `.agents/worktrees/`.** If a
 future agent's own changed files are individually clean, the hook is telling it
 about a checkout nobody is working in.
+
+### 2.5d Port 8000 belongs to the loom primary — never measure against it
+
+Measured 2026-08-01: a toolshed has been listening on `127.0.0.1:8000` since
+11:30 that day, with cwd
+`/Users/berni/looms/primary/vendor/labs/packages/toolshed`. It is the **loom
+primary instance**, not this arc's.
+
+`packages/integration/env.ts` defaults `API_URL` to `http://localhost:8000`.
+So an integration run launched with no `API_URL` does not fail — it silently
+drives someone else's primary server, which both corrupts that instance's
+store and measures a machine under a foreign workload. This is exactly the
+"never target a production/primary instance" rule, and the default makes
+violating it the *path of least effort*.
+
+**Always pass an explicit arm-private `API_URL`.** The arc's convention is an
+offset port per arm — 8751/8752/8753 for mainbase/fat/thin.
+
+### 2.5e Arms are only comparable where the WORKLOAD is byte-identical
+
+The obvious three-arm design — run the same four integration tests on
+mainbase, fat and thin — is **invalid for the mainbase↔fat pair on most
+tests**, because the arc edited the tests themselves. Measured
+`f25518c1f` (merge base) vs `44b46ad02` (fat):
+
+| workload | mainbase↔fat | fat↔thin |
+| --- | --- | --- |
+| `default-app.test.ts` | **+162/−27** | identical |
+| `cfc-group-chat-demo-two-browsers.test.ts` | **+55/−0** | identical |
+| `lunch-poll-vote.test.ts` | **+8/−0** | identical |
+| `cfc-group-chat-demo-multi-runtime.test.ts` | identical | identical |
+
+The arc added 20 files to `integration/` and wired
+`server-execution-measurement.ts` (751 lines, **absent on mainbase**) into
+several existing tests. A mainbase↔fat wall-clock delta on `default-app`
+therefore measures *a bigger test*, not a slower runtime.
+
+**Consequences for any future A/B here:**
+
+- **fat↔thin is clean on all four**, because thin touches only five
+  `integration/` files and none of them are workloads. This is the pair that
+  answers "what does turning the dials on cost".
+- **mainbase↔fat needs a comparator whose file is byte-identical.** 35 of
+  mainbase's integration tests qualify, including
+  `cfc-group-chat-demo-multi-runtime`, `cfc-group-chat-demo`, `home-profile`,
+  `counter`, `chatbot`. Use those for the "flags-off is a no-op" sanity check.
+- **`origin/main` is the wrong arm-1 anyway.** It has moved past the merge
+  base (`dd63b3d25` vs `f25518c1f`), and three of the four commits it gained
+  touch per-value hot paths — `data-model/src/value-clone.ts`,
+  `runner/src/sandbox/plain-data.ts`,
+  `runner/src/sandbox/result-normalization.ts`. Comparing fat to current main
+  conflates the arc with main's own drift. **Use the merge base.**
+
+### 2.5f A measurement harness must be able to give up
+
+Measured 2026-08-01, the hard way. A first-cut runner invoked
+`deno test` with no timeout. `counter.test.ts` on the thin arm failed case 1 on
+a 60 s barrier and then **hung for 47 minutes on case 2 with its browser
+already dead** (zero `headless_shell` processes alive). Because the invocation
+was unbounded:
+
+- the run never wrote its result row, so the results file stayed empty and
+  looked like "still starting" rather than "wedged";
+- a chained follow-on job that waited for the arm's port to clear
+  **deadlocked behind it**, so nothing after it ran either;
+- ~50 minutes of wall time produced exactly one datum, and that datum was
+  `t_test = 2861.99s`, which is not a latency.
+
+**Requirements this imposes on any runner here:**
+
+1. **Hard cap every invocation** (`timeout --kill-after=30 <cap>`), and record
+   rc 124 as its own outcome — a timeout is a *category*, never a number that
+   goes in a latency column.
+2. **Never chain on an unbounded wait.** "Wait for the port to clear" inherits
+   the hang. Bound it or poll with a deadline.
+3. **Gate on load, and be willing to measure nothing.** A runner that waits
+   for load < 5 and *exits* when the box never goes quiet is correct; one that
+   measures anyway is worse than useless, because its numbers look like data.
+4. **Validity before timing.** Run a cheap identical-on-all-arms test first and
+   stop if any arm fails. You cannot time an arm that does not work, and
+   discovering that after a three-hour matrix wastes the whole matrix.
+
+**And the local integration setup could not run these tests at all.** With the
+cap in place, `counter.test.ts` hit `TIMEOUT_300s` on the **merge base** —
+the CI-clean commit — so the hang is not an arc property, it is this
+environment. Load went **4.96 → 48.60 during that single run**. Nothing about
+local integration latency on this box is worth measuring until that is
+understood; CI runs the same suite on a dedicated 4-vCPU runner against a
+prebuilt toolshed binary, and is the better instrument for correctness.
+
+### 2.5g This box is SHARED — do not pkill by pattern
+
+§2.5 says "kill leftover `ms-playwright` browsers". Taken literally that is
+`pkill -f headless_shell`, and on this box it would kill the **loom primary
+instance's** browsers mid-test (§2.5d — it runs its own suites from
+`/Users/berni/looms/primary/vendor/labs`).
+
+Snapshot the browser PIDs before the run and kill only the difference
+afterwards. The same caution applies to any `pkill`, `killall`, or
+`lsof`-driven cleanup written for a single-tenant assumption: check what else
+matches before the pattern goes live.
 
 ### 2.6 Comparing action ids across arms
 
