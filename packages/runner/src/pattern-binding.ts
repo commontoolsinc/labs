@@ -516,14 +516,18 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       }
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
-      // else, so the shared path allocates nothing. Holes are skipped rather
-      // than visited, exactly as `map()` skips them, and never assigned to —
-      // writing at a hole's index would materialize it and desparsify the
-      // array.
+      // else, so the shared path allocates nothing.
+      //
+      // Holes are skipped rather than visited, as `map()` skips them. That is a
+      // cost guard, not a correctness one: `convert()` returns a hole's
+      // `undefined` unchanged, so the `next === value` test below would skip it
+      // regardless. Testing membership first keeps a sparse array priced by its
+      // element count rather than by its extent — length 100k with two elements
+      // is otherwise 100k pointless `convert()` calls.
       let converted: FabricExecValue[] | undefined;
       for (let i = 0; i < binding.length; i++) {
         if (!(i in binding)) continue;
-        const value = binding[i] as FabricExecValue;
+        const value = binding[i];
         const next = convert(
           value,
           cfc.getSchemaAtPath(targetSchema, [`${i}`]),
@@ -534,7 +538,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         // `map()` did, so an `Array` subclass with a custom `Symbol.species`
         // sees what it always saw; and the copy already carries every unchanged
         // element and every hole, leaving only changed indices to write.
-        converted ??= binding.slice() as FabricExecValue[];
+        converted ??= binding.slice();
         converted[i] = next;
       }
       // Nothing rebound, so the original is the answer.
