@@ -72,6 +72,10 @@ import {
 import { cliCommand } from "./cli-name.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
+import {
+  derivePieceGetValue,
+  type PieceGetTransform,
+} from "./piece-get-transform.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -107,6 +111,7 @@ export interface SetPiecePatternOptions {
 export interface GetCellValueOptions {
   input?: boolean;
   step?: boolean;
+  transform?: PieceGetTransform;
 }
 
 export class PieceResultProjectionError extends Error {
@@ -194,6 +199,7 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
     source: "input data" | "result data" | "metadata",
     error: unknown,
   ) => void;
+  derivePieceGetValue?: typeof derivePieceGetValue;
 }
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
@@ -2200,9 +2206,39 @@ export async function getCellValue(
       await manager.synced();
     }
 
+    const prop = options.input ? "input" : "result";
+    if (options.transform !== undefined) {
+      const rootCell = await piece[prop].getCell();
+      const targetCell = rootCell.key(...path);
+      let transformed: unknown;
+      try {
+        transformed = await (deps.derivePieceGetValue ?? derivePieceGetValue)(
+          manager.runtime,
+          manager.getSpace(),
+          targetCell,
+          options.transform,
+        );
+      } catch (error) {
+        if (
+          !options.input && error instanceof Error &&
+          error.message.startsWith("Cannot access path") &&
+          await resultProjectionFailedAtPath(piece, path)
+        ) {
+          throw new PieceResultProjectionError(path, shouldStep);
+        }
+        throw error;
+      }
+      if (
+        !options.input && transformed === undefined &&
+        await resultProjectionFailedAtPath(piece, path)
+      ) {
+        throw new PieceResultProjectionError(path, shouldStep);
+      }
+      return transformed;
+    }
+
     let value: unknown;
     try {
-      const prop = options.input ? "input" : "result";
       value = await timeCliPhase(
         `getCellValue.${prop}.get`,
         () => piece[prop].get(path),
