@@ -4,6 +4,7 @@ import {
   createBuilder,
   deepEqual,
   type JSONSchema,
+  KeepAsCell,
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
@@ -769,6 +770,30 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   return true;
 }
 
+function projectValue(value: unknown, schema: JSONSchema): unknown {
+  if (schema === true || schema === false || value === null) return value;
+  if (Array.isArray(value)) {
+    const itemSchema = schema.items ?? true;
+    return value.map((item) => projectValue(item, itemSchema));
+  }
+  if (!isRecord(value)) return value;
+
+  const properties = schema.properties ?? {};
+  const projected: Record<string, unknown> = {};
+  if (schema.additionalProperties !== false) {
+    for (const [key, child] of Object.entries(value)) {
+      const childSchema = properties[key] ?? schema.additionalProperties ??
+        true;
+      projected[key] = projectValue(child, childSchema);
+    }
+    return projected;
+  }
+  for (const [key, childSchema] of Object.entries(properties)) {
+    if (key in value) projected[key] = projectValue(value[key], childSchema);
+  }
+  return projected;
+}
+
 function maskFromPaths(
   paths: Array<Array<string | number>>,
 ): PredicateMask {
@@ -950,13 +975,24 @@ export async function derivePieceGetValue(
   transform: PieceGetTransform,
   deps: DerivePieceGetDependencies = {},
 ): Promise<unknown> {
+  // Match ordinary piece path reads: a selected slot can itself be a link to
+  // the value being read (for example TopicsInput.topics). The transform must
+  // execute over that target, not over the Cell wrapper stored in the slot.
+  sourceCell = sourceCell.resolveAsCell();
+  const declaredSourceSchema = sourceCell.schema;
+  const sourceSchema = isRecord(declaredSourceSchema) &&
+      declaredSourceSchema.asCell !== undefined
+    ? dereferencedElementSchema(declaredSourceSchema)
+    : declaredSourceSchema;
+  const sourceValueCell = sourceSchema === declaredSourceSchema
+    ? sourceCell
+    : sourceCell.asSchema(sourceSchema);
   if (transform.filter === undefined && transform.projection === undefined) {
-    return await sourceCell.pull();
+    return await sourceValueCell.pull();
   }
 
   const cfc = new ContextualFlowControl();
-  const sourceValue = await sourceCell.pull();
-  const sourceSchema = sourceCell.schema;
+  const sourceValue = await sourceValueCell.pull();
   if (transform.filter !== undefined && !Array.isArray(sourceValue)) {
     throw new PieceGetTransformError(
       "--filter can only be applied to an array",
@@ -1055,7 +1091,7 @@ export async function derivePieceGetValue(
       additionalProperties: false,
     };
     const projectionModule = lift(
-      ({ element }: { element: unknown }) => element,
+      ({ element }: { element: unknown }) => projectValue(element, itemSchema),
       argumentSchema,
       itemSchema,
     );
@@ -1077,7 +1113,8 @@ export async function derivePieceGetValue(
   const directProjectionModule = projection !== undefined &&
       !projection.projectsArrayItems
     ? lift(
-      ({ value }: { value: unknown }) => value,
+      ({ value }: { value: unknown }) =>
+        projectValue(value, projection.outputSchema),
       directProjectionArgumentSchema,
       projection.outputSchema,
     )
@@ -1121,7 +1158,7 @@ export async function derivePieceGetValue(
     space,
     {
       pieceGetTransform: {
-        source: sourceCell.getAsNormalizedFullLink(),
+        source: sourceValueCell.getAsNormalizedFullLink(),
         filter: transform.filter?.source,
         schema: transform.projection?.source,
       },
@@ -1135,9 +1172,18 @@ export async function derivePieceGetValue(
   const result = runtime.run(
     tx,
     mainPattern,
-    { value: sourceCell.asSchema(sourceReadSchema) },
+    {
+      value: sourceValueCell.asSchema(sourceReadSchema).getAsLink({
+        includeSchema: true,
+        keepAsCell: KeepAsCell.OnlyStream,
+      }),
+    },
     resultCell,
   );
+  // Computed results can return an alias whose target carries a broader (or
+  // absent) schema. Re-assert the expression's declared result shape at the
+  // read boundary so following that alias cannot widen the projection.
+  const outputCell = result.key("value").asSchema(outputSchema);
   try {
     runtime.prepareTxForCommit(tx);
     const committed = await tx.commit();
@@ -1146,11 +1192,12 @@ export async function derivePieceGetValue(
         `Could not apply piece get transform: ${committed.error}`,
       );
     }
-    await result.pull();
+    await outputCell.pull();
     await runtime.idle();
     await runtime.storageManager.synced();
-    await result.pull();
+    await outputCell.pull();
     await runtime.idle();
+    const outputValue = outputCell.get();
     const recorded = errors.slice(errorCountBefore).at(-1);
     if (recorded !== undefined) {
       throw new PieceGetTransformError(
@@ -1158,7 +1205,7 @@ export async function derivePieceGetValue(
       );
     }
     deps.onResultCell?.(result as Cell<unknown>);
-    return result.key("value").get();
+    return outputValue;
   } finally {
     runtime.runner.stop(resultCell);
   }

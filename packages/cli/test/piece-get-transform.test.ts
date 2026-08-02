@@ -378,6 +378,155 @@ describe("cf piece get transforms", () => {
     ]);
   });
 
+  it("filters and projects through a linked array slot", async () => {
+    const tx = runtime.edit();
+    const list = runtime.getCell(
+      space,
+      "linked-transform-list",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            title: { type: "string" },
+          },
+        },
+      },
+      tx,
+    );
+    list.set([
+      { id: 1, title: "First" },
+      { id: 2, title: "Second" },
+    ]);
+    const container = runtime.getCell(
+      space,
+      "linked-transform-container",
+      {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number" },
+                title: { type: "string" },
+              },
+            },
+            asCell: ["cell"],
+          },
+        },
+      },
+      tx,
+    );
+    container.set({ items: list as never });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, container.key("items"), {
+        filter: parsePieceGetFilter(".id == 2"),
+        projection: await parsePieceGetProjection("title"),
+      }),
+    ).toEqual([{ title: "Second" }]);
+  });
+
+  it("projects a linked object whose target has no schema", async () => {
+    const tx = runtime.edit();
+    const target = runtime.getCell(
+      space,
+      "linked-transform-schema-less-target",
+      undefined,
+      tx,
+    );
+    target.set({ title: "Visible", hidden: "not returned" });
+    const container = runtime.getCell(
+      space,
+      "linked-transform-schema-less-container",
+      {
+        type: "object",
+        properties: {
+          topic: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              hidden: { type: "string" },
+            },
+            asCell: ["cell"],
+          },
+        },
+      },
+      tx,
+    );
+    container.set({ topic: target as never });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, container.key("topic"), {
+        projection: await parsePieceGetProjection("title"),
+      }),
+    ).toEqual({ title: "Visible" });
+  });
+
+  it("filters and projects a writable array value", async () => {
+    const tx = runtime.edit();
+    const first = runtime.getCell(
+      space,
+      "writable-transform-first",
+      {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          title: { type: "string" },
+        },
+      },
+      tx,
+    );
+    first.set({ id: 1, title: "First" });
+    const second = runtime.getCell(
+      space,
+      "writable-transform-second",
+      {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          title: { type: "string" },
+        },
+      },
+      tx,
+    );
+    second.set({ id: 2, title: "Second" });
+    const source = runtime.getCell(
+      space,
+      "writable-transform-list",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            title: { type: "string" },
+          },
+          asCell: ["cell"],
+        },
+        asCell: ["cell"],
+      },
+      tx,
+    );
+    source.set([
+      first,
+      second,
+    ]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        filter: parsePieceGetFilter(".id == 2"),
+        projection: await parsePieceGetProjection("title"),
+      }),
+    ).toEqual([{ title: "Second" }]);
+  });
+
   it("does not leak nested siblings from overlapping concise paths", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(
