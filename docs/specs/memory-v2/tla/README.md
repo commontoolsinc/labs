@@ -108,9 +108,12 @@ or missed contributor directly.
   observations, hiding contributor differences the set form exposes.
 - **Atomic verdict delivery.** The server's verdict and the client's mirrored
   cascade happen in one action. This removes the accepted-versus-dropped race
-  (INV-6) from scope. Extending the model
-  with an in-flight verdict channel is the natural next step if that area
-  churns — until then INV-6 has no model coverage, only the reconnect unit
+  (INV-6) from scope. That area has now churned: CT-1927's pre-verdict sync
+  delivery gives the client a decided-but-not-yet-received window in which
+  frame-time overlay retirement acts on `caughtUpLocalSeq` — behavior the
+  atomic abstraction excludes entirely. Extending the model with an in-flight
+  verdict channel is the standing refinement that would bring it (and INV-6)
+  into scope; until then INV-6 has no model coverage, only the reconnect unit
   tests.
 - **FIFO per-session admission.** INV-5 holds by construction, matching the
   current implementation (which rejects rather than holds). If admission is

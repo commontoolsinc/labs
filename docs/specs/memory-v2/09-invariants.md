@@ -223,8 +223,11 @@ commit whose acceptance is still possible without confirming its fate.
 
 Checked by: currently only example-based tests (reconnect-race,
 pending-commit-durability). The TLA+ model treats verdict delivery as atomic
-with admission and therefore does NOT cover this invariant; extending it
-with delayed verdict delivery is the natural next step if this area churns.
+with admission and therefore does NOT cover this invariant. That area has
+churned — CT-1927's pre-verdict sync delivery creates a decided-but-not-yet-
+received window in which frame-time overlay retirement acts on
+`caughtUpLocalSeq` — so extending the model with delayed verdict delivery is
+the standing refinement that would bring this invariant into scope.
 
 ### INV-7 — Committed writes are never silently dropped
 
