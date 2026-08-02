@@ -22,8 +22,9 @@ and commit nothing but intent.**
 - The client runs **rendering effects** (invisible to the server anyway)
   and **any amount of speculative execution it likes** — the same derived
   graph, run locally for latency, with results that are never committed.
-- The client's durable output is **intent**: handler events, plus (for a
-  transition period) direct writes from UI bindings (§3.6).
+- The client's durable output is **authored facts**: handler events, and
+  direct writes from UI bindings and widget edits (§3.6) — never
+  computation results.
 - External side effects (webhooks, outbound fetch, LLM calls that bill)
   are performed **only** by the server executor.
 
