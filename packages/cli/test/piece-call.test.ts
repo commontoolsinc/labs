@@ -1181,16 +1181,31 @@ describe("forced-stream fallback dispatch", () => {
       key: () => emptyChild,
     };
 
-    const rootValue = { hiddenPing: {} };
+    const dataCell = {
+      schema: { type: "number" } as JSONSchema,
+      get: () => 3,
+      getRaw: () => 3,
+      asSchemaFromLinks: () => dataCell,
+      key: () => emptyChild,
+    };
+    const rootValue = { hiddenPing: {}, topicCount: 3 };
     const rootCell = {
       schema: {
         type: "object",
-        properties: { hiddenPing: { type: "object" } },
+        properties: {
+          hiddenPing: { type: "object" },
+          topicCount: { type: "number" },
+        },
       } as JSONSchema,
       get: () => rootValue,
       getRaw: () => rootValue,
       asSchemaFromLinks: () => rootCell,
-      key: (name: string) => name === "hiddenPing" ? linkDerivedCell : absent,
+      key: (name: string) =>
+        name === "hiddenPing"
+          ? linkDerivedCell
+          : name === "topicCount"
+          ? dataCell
+          : absent,
     };
     // The input root offers nothing, so resolution falls past both ordinary
     // paths to the forced cast.
@@ -1217,6 +1232,12 @@ describe("forced-stream fallback dispatch", () => {
     const piece = {
       getCell: () => ({
         get: () => rootValue,
+        // Handler evidence comes from the unmodified live cell. The forced
+        // schema view reports every name as a stream by construction, so it
+        // must never be used as the evidence.
+        key: (name: string) => ({
+          isStream: () => name === "hiddenPing",
+        }),
         asSchema: () => ({ key: () => streamCell }),
       }),
       input: {
@@ -1295,6 +1316,26 @@ describe("forced-stream fallback dispatch", () => {
     expect(result.resolved.commandSpec.inputSchema).toEqual(
       harness.linkDerivedCell.schema,
     );
+  });
+
+  it("does not dispatch an ordinary data field through the forced-stream fallback", async () => {
+    const harness = createFallbackHarness();
+
+    await expect(
+      executePieceCallable(
+        config,
+        "topicCount",
+        [],
+        {
+          loadManager: () => Promise.resolve(harness.manager as never),
+          loadPiece: () => Promise.resolve(harness.piece as never),
+          isStdinTerminal: () => true,
+        },
+      ),
+    ).rejects.toThrow('Callable "topicCount" not found');
+
+    expect(harness.sends).toEqual([]);
+    expect(harness.dataWrites).toEqual([]);
   });
 });
 

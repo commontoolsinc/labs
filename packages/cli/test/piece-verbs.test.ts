@@ -112,22 +112,29 @@ describe("listPieceCallables", () => {
       },
     );
 
-    // "hiddenPing" defeats ordinary detection (plain object value/schema) but
-    // succeeds through the forced stream cast — resolvePieceCallable's third
-    // path — so the listing must include it. "\u00e9dit" pins byte ordering:
-    // utf8Compare puts it AFTER "setup"/"search" (0xC3 > s), where locale
-    // collation would interleave it linguistically.
-    const pieceRootValue = { hiddenPing: {}, "\u00e9dit": { $stream: true } };
+    // "hiddenPing" defeats ordinary result/input detection (plain object
+    // value/schema) but the unmodified piece cell still identifies it as a
+    // stream, so the legacy fallback must include it. "topicCount" reproduces
+    // a real data field: the forced view below calls every name a stream, but
+    // the unmodified cell does not. "\u00e9dit" pins byte ordering.
+    const pieceRootValue = {
+      hiddenPing: {},
+      topicCount: 3,
+      "\u00e9dit": { $stream: true },
+    };
     const piece = {
       result: { getCell: () => Promise.resolve(resultRoot) },
       input: { getCell: () => Promise.resolve(inputRoot) },
       getPatternRef: () => Promise.resolve(TEST_PATTERN_REF),
       getCell: () => ({
         get: () => pieceRootValue,
+        key: (name: string) => ({
+          isStream: () => name === "hiddenPing" || name === "\u00e9dit",
+        }),
         asSchema: (_s: unknown) => ({
-          key: (name: string) => ({
-            isStream: () => name === "hiddenPing" || name === "\u00e9dit",
-          }),
+          // This is true for every name because the caller imposed a stream
+          // schema. It is a dispatch view, not evidence that a handler exists.
+          key: (_name: string) => ({ isStream: () => true }),
         }),
       }),
     };
