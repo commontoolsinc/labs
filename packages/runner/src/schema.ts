@@ -1433,7 +1433,7 @@ class TransformObjectCreator
         // Ensure value is mutable before injecting default properties.
         // cloneIfNecessary with { deep: false, frozen: false, force: false }
         // is a no-op for unfrozen objects and shallow-clones frozen ones.
-        value = cloneIfNecessary(value as FabricValue, {
+        value = cloneIfNecessary(value, {
           deep: false,
           frozen: false,
           force: false,

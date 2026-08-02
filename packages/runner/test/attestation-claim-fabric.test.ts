@@ -16,7 +16,6 @@ import type {
   ISpaceReplica,
   State,
 } from "../src/storage/interface.ts";
-import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 // A replica whose stored state carries `storedValue`. `getDocument` is
 // deliberately absent so `claim()` takes its `read`-based `actual` path (the
@@ -28,7 +27,7 @@ const replicaHolding = (storedValue: FabricValue): ISpaceReplica => {
     of: "of:attest-claim-fabric",
     is: storedValue,
     // A real cause hash is irrelevant to the value comparison under test.
-    cause: undefined as unknown as FabricHash,
+    cause: undefined,
   } as State;
   return {
     did: () => "did:test:attest" as ReturnType<ISpaceReplica["did"]>,

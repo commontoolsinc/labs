@@ -1645,7 +1645,7 @@ export class CellImpl<T extends FabricValue>
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
     // durable state, catching elements the local replica had not loaded.
-    const candidates = value as FabricValue[];
+    const candidates = value;
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
@@ -1684,7 +1684,7 @@ export class CellImpl<T extends FabricValue>
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
       const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(candidate) as FabricValue
+        ? fabricFromNativeValue(candidate)
         : candidate;
       return existing.some((element) => valueEqual(element, comparable));
     };
@@ -1774,7 +1774,7 @@ export class CellImpl<T extends FabricValue>
     const currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const array = currentValue as FabricValue[];
+    const array = currentValue;
     if (array === undefined) {
       return;
     }
@@ -1814,7 +1814,7 @@ export class CellImpl<T extends FabricValue>
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
         op: "remove-by-value",
-        value: element as FabricValue,
+        value: element,
       });
     }
   }
@@ -2377,7 +2377,7 @@ export class CellImpl<T extends FabricValue>
       path: [metaField],
       ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
-    this.tx.writeOrThrow(metaAddr, value as FabricValue);
+    this.tx.writeOrThrow(metaAddr, value);
   }
 
   /**

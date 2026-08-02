@@ -38,7 +38,7 @@ class Probe extends BaseFabricInstance {
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     Object.freeze(this);
-    return this as unknown as FabricValue;
+    return this;
   }
 
   [IS_DEEP_FROZEN](
@@ -79,16 +79,16 @@ class DeepProbe extends BaseFabricInstance {
   [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    subFreeze(this.state as unknown as FabricValue);
+    subFreeze(this.state);
     Object.freeze(this);
-    return this as unknown as FabricValue;
+    return this;
   }
 
   [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     return Object.isFrozen(this) &&
-      subIsDeepFrozen(this.state as unknown as FabricValue);
+      subIsDeepFrozen(this.state);
   }
 
   protected [DEEP_CLONE_CORE](_frozen: boolean): DeepProbe {

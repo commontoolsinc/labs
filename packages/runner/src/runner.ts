@@ -1357,7 +1357,7 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     if (!deepEqual(previous, resultSchema)) {
-      cell.setMetaRaw("schema", resultSchema as FabricValue);
+      cell.setMetaRaw("schema", resultSchema);
     }
   }
 
@@ -4618,7 +4618,7 @@ export class Runner {
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
     // binding, which must not be followed at this level.
-    let value: FabricValue = inputs.$event as FabricValue;
+    let value: FabricValue = inputs.$event;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
@@ -6742,7 +6742,7 @@ function initializePieceSourceHistory(
     source: sourceRetentionLink(runtime, resultCell, tx, pattern),
     ...(origin === undefined ? {} : { origin }),
     operation: "create",
-  }] as unknown as FabricValue);
+  }]);
 }
 
 function samePieceSourceSnapshot(

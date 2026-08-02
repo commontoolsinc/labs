@@ -140,7 +140,7 @@ export class EngineObjectManager implements ObjectStorageManager {
         type: type as MIME,
         path: [],
       },
-      value: state.document as unknown as FabricValue,
+      value: state.document,
     };
     this.#attestations.set(key, attestation);
     this.#details.set(key, {

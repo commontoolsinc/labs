@@ -1659,7 +1659,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // as inexpensive defense-in-depth against accidental deeper mutation of
         // the shared input.
         valueObj = shallowMutableClone(
-          currentValue as FabricValue,
+          currentValue,
         ) as MutableFabricPlainObjectLayer;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
@@ -1681,7 +1681,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           nextValue[key] =
             (isNextKeyArrayIndex ? [] : {}) as FabricPlainObject;
       }
-      nextValue[lastKey] = value as FabricValue;
+      nextValue[lastKey] = value;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       if (writeResultRetry.error) {

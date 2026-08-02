@@ -1,7 +1,6 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isRecord } from "@commonfabric/utils/types";
-import type { FabricValue } from "@commonfabric/api";
 import type { URI } from "@commonfabric/memory/interface";
 import { getCommitPreconditionsConfig } from "@commonfabric/memory/v2";
 import type {
@@ -318,7 +317,7 @@ export const flushCfcGrantConsumptionClaims = (
         id: claim.receiptId,
         type: "application/json",
         path: ["value"],
-      }, receipt as unknown as FabricValue);
+      }, receipt);
     } catch (error) {
       reasons.push(
         `cfc-grant: staging consumption receipt for single-use grant ` +
