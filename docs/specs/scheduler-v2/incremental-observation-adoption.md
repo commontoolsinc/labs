@@ -7,6 +7,15 @@ degenerate case of this mechanism. Flag-on only
 FASTER than main — clients use scheduler information to skip work in ongoing
 operation, not just on reload.
 
+> **Dedup is currently timing-dependent under default server ordering.**
+> CT-1927's pre-verdict flush (`flushBeforeVerdict`, on by default) delivers
+> a commit's value frame before the writer's own post-verdict run exists, so
+> the run's observation cannot ride that frame — it rides a later window,
+> and the receiver usually re-runs before it arrives. Correctness is
+> unaffected (§3's race analysis is exactly this case); the M−1 skip below
+> is what's lost. Restoring reliable adoption under pre-verdict delivery is
+> CT-1930.
+
 ## 1. The idea
 
 Every action run already attaches its observation to the run's commit, and
@@ -124,14 +133,19 @@ the observation arrives, its unchanged output causes no scheduling activity
 multiple pushes (the writer's cascade = one commit per action run), the
 receiver adopts a prefix and runs the not-yet-covered suffix; both converge
 to the same values, so the overlap is wasted CPU at worst, never
-incorrectness.
+incorrectness. Under CT-1927's pre-verdict delivery the receiver-runs-first
+branch is the structural common case, not a rare race — the semantic
+commit's frame always precedes the observation's window (CT-1930).
 
 ## 4. Transport (concretized against the traced push chain)
 
 The subscription push is a **batched doc diff**, not a commit stream: the
 server accumulates dirty doc ids per space (`markSpaceDirty` on accepted
-commits), flushes on a short timer, re-evaluates each session's watch set,
-and pushes `SessionEffectMessage{effect: SessionSync}` where `SessionSync =
+commits), flushes them — immediately before each transact verdict under
+CT-1927's default-on `flushBeforeVerdict`, on a short timer for
+non-transact dirt (direct writes, the opt-out path) — re-evaluates each
+session's watch set, and pushes
+`SessionEffectMessage{effect: SessionSync}` where `SessionSync =
 {fromSeq, toSeq, upserts: [{id, scope, seq, doc}], removes}` — per-doc
 snapshots with per-doc seqs, no operations, no per-commit boundaries.
 Observations are extracted from commits in `applyCommit`, persisted, and
