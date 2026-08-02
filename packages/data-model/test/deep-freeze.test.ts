@@ -6,7 +6,6 @@ import {
   isDeepFrozen,
   isDeepFrozenFabricValue,
 } from "@/deep-freeze.ts";
-import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 

@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,

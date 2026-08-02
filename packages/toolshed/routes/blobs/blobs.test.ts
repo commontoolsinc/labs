@@ -13,7 +13,6 @@ import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type { URI } from "@commonfabric/memory/interface";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FabricValue } from "@commonfabric/data-model/fabric-value";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");

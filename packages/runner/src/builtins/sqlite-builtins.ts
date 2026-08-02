@@ -39,10 +39,7 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { stripEntityUriScheme } from "../entity-kind.ts";
 import {
   columnDeclaresIfc,

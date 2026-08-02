@@ -1,7 +1,6 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isRecord } from "@commonfabric/utils/types";
-import type { FabricValue } from "@commonfabric/api";
 import type { URI } from "@commonfabric/memory/interface";
 import { getCommitPreconditionsConfig } from "@commonfabric/memory/v2";
 import type {

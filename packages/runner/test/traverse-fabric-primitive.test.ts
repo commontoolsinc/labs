@@ -15,7 +15,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
   Revision,

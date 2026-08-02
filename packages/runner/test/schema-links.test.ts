@@ -7,7 +7,6 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createCell, isCell } from "../src/cell.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import { parseLink } from "../src/link-utils.ts";

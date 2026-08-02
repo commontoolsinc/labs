@@ -1,9 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import {
   type FabricExecValue,
   isPattern,

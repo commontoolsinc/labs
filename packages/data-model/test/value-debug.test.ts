@@ -11,7 +11,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
+import { FabricSpecialObject } from "@/interface.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {

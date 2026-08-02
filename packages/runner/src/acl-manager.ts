@@ -6,10 +6,7 @@ import {
   isACL,
 } from "@commonfabric/memory/acl";
 import type { Capability, URI } from "@commonfabric/memory/interface";
-import {
-  cloneIfNecessary,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
 
