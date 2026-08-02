@@ -193,7 +193,7 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
     meta: { seen: false, tags: ["a", "b"] },
   }));
   const base = deepFreeze(
-    { items: bigList, status: "draft" } as unknown as FabricValue,
+    { items: bigList, status: "draft" },
   ) as unknown as Record<string, unknown>;
 
   const tx = txWith([

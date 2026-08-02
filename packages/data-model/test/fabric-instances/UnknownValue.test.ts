@@ -34,7 +34,7 @@ describe("UnknownValue", () => {
         const child = { y: 2 };
         const uv = new UnknownValue(
           "Fancy@3",
-          child as unknown as FabricValue,
+          child,
         );
         const result = deepFreeze(uv);
         expect(result).toBe(uv);
@@ -47,7 +47,7 @@ describe("UnknownValue", () => {
         const child = { y: 2 };
         const uv = new UnknownValue(
           "Fancy@3",
-          child as unknown as FabricValue,
+          child,
         );
         const result = uv[DEEP_FREEZE](subFreeze);
         expect(result).toBe(uv);

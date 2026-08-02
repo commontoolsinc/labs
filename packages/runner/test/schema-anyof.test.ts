@@ -527,7 +527,7 @@ describe("Schema - AnyOf Support", () => {
             childrenArrayCell.getAsLink(),
             "or just text",
           ],
-        } as unknown as FabricValue);
+        });
 
         const vdomSchema = {
           $ref: "#/$defs/VDom",

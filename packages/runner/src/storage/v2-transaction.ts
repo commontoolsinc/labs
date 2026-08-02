@@ -266,7 +266,7 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   // deep-clones-and-freezes -- isolating the result from later source
   // mutation. On the hot read path, repeated reads of the same stored
   // (deep-frozen) value collapse to a single cache lookup.
-  return cloneIfNecessary(value as FabricValue) as T;
+  return cloneIfNecessary(value) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -1631,7 +1631,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const isolatedValue = value === undefined
       ? undefined
-      : cloneIfNecessary(value) as FabricValue;
+      : cloneIfNecessary(value);
 
     // Compute the activity path and previous-value snapshots BEFORE the
     // write -- `applyMutablePathWrite()` mutates `current.value` in place
@@ -1653,7 +1653,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const previousActivityValue = cloneIfNecessary(
       readValueAtPath(current.value, activityPath, {
         allowArrayLength: true,
-      }) as FabricValue,
+      }),
     ) as FabricValue | undefined;
     // Pre-write slot presence (distinct from value: a slot holding
     // `undefined` is present) for the write details — also read BEFORE the
@@ -1764,7 +1764,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : cloneIfNecessary(value) as FabricValue;
+        : cloneIfNecessary(value);
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1789,7 +1789,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }) as FabricValue,
+        }),
       ) as FabricValue | undefined;
       // Pre-write slot presence for the write details (see
       // `writeWithinBranch`; empty path = root definedness, since

@@ -586,7 +586,7 @@ export function sqliteDatabase(
             // Carry db.exec's write revision forward — dropping it would make
             // this re-derivation look like "new inputs" to every handle hasher.
             ...(typeof prior?.rev === "number" && { rev: prior.rev }),
-          }) as FabricValue,
+          }),
           true,
         );
       }

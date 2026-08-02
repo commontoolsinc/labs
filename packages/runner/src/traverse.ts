@@ -1515,7 +1515,7 @@ export abstract class BaseObjectTraverser {
         const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
         // transforms in this system, e.g. toJSON and shallowFabricFromNativeValue)
-        newValue[index] = v === undefined ? null : v as FabricValue;
+        newValue[index] = v === undefined ? null : v;
       });
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true);
@@ -1870,7 +1870,7 @@ export function getAtPath(
           ...curDoc.address,
           path: appendToPath(curDoc.address.path, part),
         },
-        value: cursorObj[part] as FabricValue,
+        value: cursorObj[part],
       };
       tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else {
@@ -2355,7 +2355,7 @@ function traverseMetaLinkedDoc(
       ...doc.address,
       path: ["value"],
     },
-    value: fullDoc.value as FabricValue,
+    value: fullDoc.value,
   });
 }
 
@@ -3602,7 +3602,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return {
         ok: this.objectCreator.createObject(
           newLink,
-          newValue as FabricValue,
+          newValue,
         ),
       };
     }
@@ -3778,7 +3778,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     return {
       ok: this.createPlainSchemaObject(
         newLink,
-        newValue as FabricValue,
+        newValue,
       ),
     };
   }

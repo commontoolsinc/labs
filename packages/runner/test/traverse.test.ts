@@ -695,7 +695,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -758,7 +758,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -822,7 +822,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],

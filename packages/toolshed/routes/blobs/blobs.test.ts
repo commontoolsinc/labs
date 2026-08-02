@@ -109,7 +109,7 @@ describe("Blob Routes", () => {
     const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: blobUploadEncoding.encode(contents as FabricValue),
+      body: blobUploadEncoding.encode(contents),
     });
     expect(post.status).toBe(201);
     expect(await post.json()).toEqual({

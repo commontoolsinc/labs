@@ -10,7 +10,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 describe("cloneForMutation", () => {
   describe("empty path", () => {
     it("returns the root as mutable, plus identical `pathValue`", () => {
-      const root = Object.freeze({ a: 1, b: 2 }) as FabricValue;
+      const root = Object.freeze({ a: 1, b: 2 });
       const { value, pathValue } = cloneForMutation(root, []);
 
       expect(value).not.toBe(root);
@@ -20,7 +20,7 @@ describe("cloneForMutation", () => {
     });
 
     it("returns input identity when already mutable + `force=false`", () => {
-      const root = { a: 1 } as FabricValue;
+      const root = { a: 1 };
       const { value, pathValue } = cloneForMutation(root, [], {
         force: false,
       });
@@ -32,7 +32,7 @@ describe("cloneForMutation", () => {
       // Default `force` is true, matching `cloneIfNecessary`'s default
       // when `frozen: false`. Even with mutable input, the result is a
       // fresh copy.
-      const root = { a: 1 } as FabricValue;
+      const root = { a: 1 };
       const { value, pathValue } = cloneForMutation(root, []);
       expect(value).not.toBe(root);
       expect(pathValue).toBe(value);
@@ -41,7 +41,7 @@ describe("cloneForMutation", () => {
     });
 
     it("always shallow-clones the root when `force=true`", () => {
-      const root = { a: 1 } as FabricValue;
+      const root = { a: 1 };
       const { value, pathValue } = cloneForMutation(root, [], {
         force: true,
       });
@@ -55,7 +55,7 @@ describe("cloneForMutation", () => {
       const err = FabricError.fromNativeError(new Error("test"));
       Object.freeze(err);
       const { value, pathValue } = cloneForMutation(
-        err as unknown as FabricValue,
+        err,
         [],
       );
       expect(value).not.toBe(err);
@@ -77,7 +77,7 @@ describe("cloneForMutation", () => {
       const root = Object.freeze({
         a: inner,
         b: sibling,
-      }) as FabricValue;
+      });
 
       const { value, pathValue } = cloneForMutation(root, ["a"]);
 
@@ -98,7 +98,7 @@ describe("cloneForMutation", () => {
       const noteB = Object.freeze({ title: "second" });
       const root = Object.freeze({
         notes: Object.freeze([noteA, noteB]),
-      }) as FabricValue;
+      });
 
       const { value, pathValue } = cloneForMutation(root, ["notes"]);
 
@@ -118,7 +118,7 @@ describe("cloneForMutation", () => {
 
     it("returns input root identity when already mutable + `force=false`", () => {
       const inner = { x: 1 };
-      const root = { a: inner } as FabricValue;
+      const root = { a: inner };
 
       const { value, pathValue } = cloneForMutation(root, ["a"], {
         force: false,
@@ -133,7 +133,7 @@ describe("cloneForMutation", () => {
     it("does not touch a mutable input on default options", () => {
       // Default `force` is true: input is left alone even when mutable.
       const inner = { x: 1 };
-      const root = { a: inner } as FabricValue;
+      const root = { a: inner };
 
       const { value, pathValue } = cloneForMutation(root, ["a"]);
 
@@ -144,7 +144,7 @@ describe("cloneForMutation", () => {
 
     it("always copies the root and leaf when `force=true`", () => {
       const inner = { x: 1 };
-      const root = { a: inner } as FabricValue;
+      const root = { a: inner };
 
       const { value, pathValue } = cloneForMutation(root, ["a"], {
         force: true,
@@ -171,7 +171,7 @@ describe("cloneForMutation", () => {
       const b = Object.freeze({ c, b2 });
       const a2 = Object.freeze({ off: "spine-a" });
       const a = Object.freeze({ b, a2 });
-      const root = Object.freeze({ a, a2 }) as FabricValue;
+      const root = Object.freeze({ a, a2 });
 
       const { value, pathValue } = cloneForMutation(root, ["a", "b", "c"]);
 
@@ -214,7 +214,7 @@ describe("cloneForMutation", () => {
       const target = Object.freeze({ leaf: true });
       const otherNote = Object.freeze({ leaf: false });
       const notes = Object.freeze([otherNote, target]);
-      const root = Object.freeze({ notes }) as FabricValue;
+      const root = Object.freeze({ notes });
 
       const { value, pathValue } = cloneForMutation(
         root,
@@ -240,7 +240,7 @@ describe("cloneForMutation", () => {
       expect(isDeepFrozen(sibling)).toBe(true);
 
       const target = Object.freeze({ leaf: true });
-      const root = deepFreeze({ a: target, b: sibling }) as FabricValue;
+      const root = deepFreeze({ a: target, b: sibling });
 
       const { value } = cloneForMutation(root, ["a"]);
 
@@ -256,7 +256,7 @@ describe("cloneForMutation", () => {
     it("clones via `shallowClone(false)`, not as a plain object", () => {
       const err = FabricError.fromNativeError(new Error("boom"));
       Object.freeze(err);
-      const root = Object.freeze({ payload: err }) as FabricValue;
+      const root = Object.freeze({ payload: err });
 
       const { value, pathValue } = cloneForMutation(root, ["payload"]);
 
@@ -277,7 +277,7 @@ describe("cloneForMutation", () => {
   describe("mutation through pathValue", () => {
     it("supports array push without touching the input", () => {
       const notes = Object.freeze([{ id: 1 }, { id: 2 }]);
-      const root = Object.freeze({ notes }) as FabricValue;
+      const root = Object.freeze({ notes });
 
       const { value, pathValue } = cloneForMutation(root, ["notes"]);
 
@@ -297,7 +297,7 @@ describe("cloneForMutation", () => {
       const root = Object.freeze({
         keep: 1,
         drop: 2,
-      }) as FabricValue;
+      });
 
       const { value, pathValue } = cloneForMutation(root, []);
 
@@ -312,7 +312,7 @@ describe("cloneForMutation", () => {
       const root = { inner };
 
       const { value, pathValue } = cloneForMutation(
-        root as unknown as FabricValue,
+        root,
         ["inner"],
         { force: true },
       );
@@ -330,7 +330,7 @@ describe("cloneForMutation", () => {
 
   describe("createMissing", () => {
     it("creates a missing intermediate object", () => {
-      const root = Object.freeze({ a: { existing: 1 } }) as FabricValue;
+      const root = Object.freeze({ a: { existing: 1 } });
       const { value, pathValue } = cloneForMutation(
         root,
         ["a", "new"],
@@ -351,7 +351,7 @@ describe("cloneForMutation", () => {
     });
 
     it("creates a missing intermediate array (numeric next key)", () => {
-      const root = Object.freeze({ a: {} }) as FabricValue;
+      const root = Object.freeze({ a: {} });
       const { value, pathValue } = cloneForMutation(
         root,
         ["a", "items"],
@@ -368,7 +368,7 @@ describe("cloneForMutation", () => {
     });
 
     it("treats `-` as the JSON-Pointer array append marker", () => {
-      const root = Object.freeze({}) as FabricValue;
+      const root = Object.freeze({});
       const { value: _v, pathValue } = cloneForMutation(
         root,
         ["items"],
@@ -378,7 +378,7 @@ describe("cloneForMutation", () => {
     });
 
     it("defaults to an object when `nextKeyAfterPath` is omitted", () => {
-      const root = Object.freeze({}) as FabricValue;
+      const root = Object.freeze({});
       const { pathValue } = cloneForMutation(
         root,
         ["new"],
@@ -401,7 +401,7 @@ describe("cloneForMutation", () => {
       //   "title" -> object.
       // - path[2]="title" -> the leaf, nextKeyAfterPath="" -> object
       //   if missing.
-      const root = Object.freeze({}) as FabricValue;
+      const root = Object.freeze({});
       const { value, pathValue } = cloneForMutation(
         root,
         ["notes", "0", "title"],
@@ -424,7 +424,7 @@ describe("cloneForMutation", () => {
       const existingNotes = Object.freeze([{ kept: 1 }]);
       const root = Object.freeze({
         notes: existingNotes,
-      }) as FabricValue;
+      });
       const { value, pathValue } = cloneForMutation(
         root,
         ["notes", "0", "newKey"],
@@ -446,7 +446,7 @@ describe("cloneForMutation", () => {
       // same as the default.
       const root = Object.freeze({
         a: Object.freeze({ b: Object.freeze({ c: 42 }) }),
-      }) as FabricValue;
+      });
       const { pathValue } = cloneForMutation(
         root,
         ["a", "b"],
@@ -459,7 +459,7 @@ describe("cloneForMutation", () => {
       // If `createMissing: true` but every step exists AND `force:
       // false` AND input is already mutable, identity is preserved.
       const inner = { existing: 1 };
-      const root = { a: inner } as FabricValue;
+      const root = { a: inner };
       const { value, pathValue } = cloneForMutation(
         root,
         ["a"],
@@ -472,7 +472,7 @@ describe("cloneForMutation", () => {
     it("respects `force=true` on the spine-thaw even when creating", () => {
       // When force=true (default), already-mutable spine containers
       // are still copied. `createMissing` doesn't change that.
-      const root = { existing: 1 } as FabricValue;
+      const root = { existing: 1 };
       const { value, pathValue } = cloneForMutation(
         root,
         ["new"],
@@ -490,7 +490,7 @@ describe("cloneForMutation", () => {
 
   describe("CloneForMutationError", () => {
     it("uses kind `missing-segment` for a missing intermediate", () => {
-      const root = Object.freeze({ a: { b: 1 } }) as FabricValue;
+      const root = Object.freeze({ a: { b: 1 } });
       try {
         cloneForMutation(root, ["a", "nonesuch", "more"]);
         throw new Error("expected throw");
@@ -504,7 +504,7 @@ describe("cloneForMutation", () => {
     });
 
     it("uses kind `non-container-descent` for primitive in path", () => {
-      const root = Object.freeze({ x: 42 }) as FabricValue;
+      const root = Object.freeze({ x: 42 });
       try {
         cloneForMutation(root, ["x", "anything"]);
         throw new Error("expected throw");
@@ -518,7 +518,7 @@ describe("cloneForMutation", () => {
     });
 
     it("uses kind `non-mutable-leaf` for a primitive leaf", () => {
-      const root = Object.freeze({ x: 42 }) as FabricValue;
+      const root = Object.freeze({ x: 42 });
       try {
         cloneForMutation(root, ["x"]);
         throw new Error("expected throw");
@@ -533,7 +533,7 @@ describe("cloneForMutation", () => {
 
     it("uses kind `non-mutable-root` for empty path with bad root", () => {
       try {
-        cloneForMutation(42 as FabricValue, []);
+        cloneForMutation(42, []);
         throw new Error("expected throw");
       } catch (e) {
         expect(e).toBeInstanceOf(CloneForMutationError);
@@ -546,7 +546,7 @@ describe("cloneForMutation", () => {
 
     it("uses kind `non-container-root` for non-empty path with bad root", () => {
       try {
-        cloneForMutation(42 as FabricValue, ["x"]);
+        cloneForMutation(42, ["x"]);
         throw new Error("expected throw");
       } catch (e) {
         expect(e).toBeInstanceOf(CloneForMutationError);
@@ -559,7 +559,7 @@ describe("cloneForMutation", () => {
 
     it("sets `error.name` to `CloneForMutationError`", () => {
       try {
-        cloneForMutation(42 as FabricValue, []);
+        cloneForMutation(42, []);
         throw new Error("expected throw");
       } catch (e) {
         expect((e as Error).name).toBe("CloneForMutationError");
@@ -569,7 +569,7 @@ describe("cloneForMutation", () => {
 
   describe("errors", () => {
     it("throws on a missing path segment", () => {
-      const root = Object.freeze({ a: { b: 1 } }) as FabricValue;
+      const root = Object.freeze({ a: { b: 1 } });
       expect(() => cloneForMutation(root, ["a", "nonesuch"]))
         .toThrow("missing path segment");
     });
@@ -577,20 +577,20 @@ describe("cloneForMutation", () => {
     it("throws on a missing array index", () => {
       const root = Object.freeze({
         notes: Object.freeze([1, 2, 3]),
-      }) as FabricValue;
+      });
       expect(() => cloneForMutation(root, ["notes", "10"]))
         .toThrow("missing path segment");
     });
 
     it("throws when descending through a primitive", () => {
-      const root = Object.freeze({ x: 42 }) as FabricValue;
+      const root = Object.freeze({ x: 42 });
       expect(() => cloneForMutation(root, ["x", "anything"]))
         .toThrow("cannot descend into");
     });
 
     it("throws when descending through a `FabricInstance`", () => {
       const err = FabricError.fromNativeError(new Error("inside"));
-      const root = Object.freeze({ err }) as FabricValue;
+      const root = Object.freeze({ err });
       // `path = ["err", "something"]` tries to descend INTO the
       // FabricInstance, which isn't supported.
       expect(() => cloneForMutation(root, ["err", "message"])).toThrow(
@@ -601,14 +601,14 @@ describe("cloneForMutation", () => {
     it("throws when descending through a `FabricPrimitive`", () => {
       const epoch = new FabricEpochNsec(123n);
       const root = Object.freeze({
-        epoch: epoch as unknown as FabricValue,
-      }) as FabricValue;
+        epoch: epoch,
+      });
       expect(() => cloneForMutation(root, ["epoch", "anything"]))
         .toThrow("cannot descend into");
     });
 
     it("throws when the leaf is a primitive (not mutable)", () => {
-      const root = Object.freeze({ x: 42 }) as FabricValue;
+      const root = Object.freeze({ x: 42 });
       expect(() => cloneForMutation(root, ["x"]))
         .toThrow("cannot mutate");
     });
@@ -616,19 +616,19 @@ describe("cloneForMutation", () => {
     it("throws when the leaf is a `FabricPrimitive` (not mutable)", () => {
       const epoch = new FabricEpochNsec(123n);
       const root = Object.freeze({
-        epoch: epoch as unknown as FabricValue,
-      }) as FabricValue;
+        epoch: epoch,
+      });
       expect(() => cloneForMutation(root, ["epoch"]))
         .toThrow("cannot mutate");
     });
 
     it("throws on empty-path against a non-mutable root", () => {
-      expect(() => cloneForMutation(42 as FabricValue, []))
+      expect(() => cloneForMutation(42, []))
         .toThrow("cannot mutate");
     });
 
     it("throws on non-empty path against a non-container root", () => {
-      expect(() => cloneForMutation(42 as FabricValue, ["x"]))
+      expect(() => cloneForMutation(42, ["x"]))
         .toThrow("cannot descend into");
     });
 
@@ -636,7 +636,7 @@ describe("cloneForMutation", () => {
       // A FabricInstance is OK at the leaf but not as the root of a
       // non-empty path (we don't descend into FabricInstance internals).
       const err = FabricError.fromNativeError(new Error("test"));
-      expect(() => cloneForMutation(err as unknown as FabricValue, ["x"]))
+      expect(() => cloneForMutation(err, ["x"]))
         .toThrow("cannot descend into");
     });
   });

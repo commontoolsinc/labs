@@ -1684,7 +1684,7 @@ export class CellImpl<T extends FabricValue>
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
       const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(candidate) as FabricValue
+        ? fabricFromNativeValue(candidate)
         : candidate;
       return existing.some((element) => valueEqual(element, comparable));
     };
@@ -1814,7 +1814,7 @@ export class CellImpl<T extends FabricValue>
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
         op: "remove-by-value",
-        value: element as FabricValue,
+        value: element,
       });
     }
   }
@@ -2377,7 +2377,7 @@ export class CellImpl<T extends FabricValue>
       path: [metaField],
       ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
-    this.tx.writeOrThrow(metaAddr, value as FabricValue);
+    this.tx.writeOrThrow(metaAddr, value);
   }
 
   /**

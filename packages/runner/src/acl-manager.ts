@@ -43,7 +43,7 @@ export class ACLManager {
     // default) identity-passes the already-deep-frozen stored value (zero-copy)
     // and otherwise freezes a clone. Callers that change the ACL (`set` /
     // `remove`) build a fresh object rather than mutating this.
-    return cloneIfNecessary(aclData as FabricValue) as ACL;
+    return cloneIfNecessary(aclData) as ACL;
   }
 
   async set(user: ACLUser, capability: Capability): Promise<void> {

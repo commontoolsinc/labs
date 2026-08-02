@@ -35,7 +35,7 @@ describe("ProblematicValue", () => {
         const child = { x: 1 };
         const pv = new ProblematicValue(
           "Bad@1",
-          child as unknown as FabricValue,
+          child,
           "oops",
         );
         const result = deepFreeze(pv);
@@ -49,7 +49,7 @@ describe("ProblematicValue", () => {
         const child = { x: 1 };
         const pv = new ProblematicValue(
           "Bad@1",
-          child as unknown as FabricValue,
+          child,
           "oops",
         );
         const result = pv[DEEP_FREEZE](subFreeze);

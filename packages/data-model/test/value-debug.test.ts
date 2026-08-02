@@ -267,7 +267,7 @@ describe("value-debug", () => {
         // second failure on top of the first.
         class RogueSpecial extends FabricSpecialObject {}
 
-        expect(toCompactDebugString(new RogueSpecial() as FabricValue)).toBe(
+        expect(toCompactDebugString(new RogueSpecial())).toBe(
           "/RogueSpecial(...)",
         );
       });

@@ -318,7 +318,7 @@ export const flushCfcGrantConsumptionClaims = (
         id: claim.receiptId,
         type: "application/json",
         path: ["value"],
-      }, receipt as unknown as FabricValue);
+      }, receipt);
     } catch (error) {
       reasons.push(
         `cfc-grant: staging consumption receipt for single-use grant ` +

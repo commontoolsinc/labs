@@ -1564,7 +1564,7 @@ export class RuntimeProcessor {
     const body = blobUploadEncoding.encode({
       type: request.contentType,
       body: new FabricBytes(bytes),
-    } as FabricValue);
+    });
     const response = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

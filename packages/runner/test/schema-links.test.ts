@@ -1800,7 +1800,7 @@ describe("Schema - Link Resolution", () => {
             includeSchema: true,
           }),
         },
-      } as FabricValue);
+      });
 
       // data cell's system points to cellB's argument.system
       const dataCellURI = dataUriFromValueWithResolvedLinks({

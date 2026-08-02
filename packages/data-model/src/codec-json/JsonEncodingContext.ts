@@ -268,7 +268,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
         } else {
           result.push(
-            this.#encodeValue(value[i] as FabricValue, seen, registry),
+            this.#encodeValue(value[i], seen, registry),
           );
           i++;
         }
@@ -349,7 +349,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // `CODEC_META_TAGS.quote` literal handling (Section 5.6).
       if (tag === CODEC_META_TAGS.quote) {
-        return rawState as FabricValue;
+        return rawState;
       }
 
       // `CODEC_META_TAGS.object` unwrapping (Section 5.6).

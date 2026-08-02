@@ -482,7 +482,7 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set":
-      return cloneIfNecessary(pending.value as FabricValue) as EntityDocument;
+      return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
       let next = base;
       for (

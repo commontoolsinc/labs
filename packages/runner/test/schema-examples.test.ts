@@ -141,7 +141,7 @@ describe("Schema - Examples", () => {
       cell.withTx(tx).setRawUntyped({
         value: "root",
         current: innerCell.getAsLink(),
-      } as FabricValue);
+      });
 
       tx.commit();
       tx = runtime.edit();

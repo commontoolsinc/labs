@@ -225,7 +225,7 @@ export function cloneHelper(
       if (deep) {
         for (const [key, val] of Object.entries(obj)) {
           copy[key] = cloneHelper(
-            val as FabricValue,
+            val,
             frozen,
             deep,
             force,
@@ -539,7 +539,7 @@ export function cloneForMutation<T extends FabricValue>(
     // `FabricInstance`s this is a `cloneIfNecessary(_, { frozen: false,
     // deep: false, force })` call; under `force: false` and an
     // already-mutable input it short-circuits to identity.
-    const thawed = cloneIfNecessary(next as FabricValue, cloneOpts);
+    const thawed = cloneIfNecessary(next, cloneOpts);
     if (thawed !== next) {
       (current as Record<string, FabricValue>)[key] = thawed;
     }

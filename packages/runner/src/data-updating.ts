@@ -765,7 +765,7 @@ export function normalizeAndDiff(
         try {
           tx.writeValueOrThrow(
             seedTarget,
-            fabricFromNativeValue(seedDefault) as FabricValue,
+            fabricFromNativeValue(seedDefault),
           );
           // The marker is what authorizes the write above past an
           // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
@@ -1368,7 +1368,7 @@ export function normalizeAndDiff(
     // instances short-circuit by identity.
     changes.push({
       location: link,
-      value: fabricFromNativeValue(newValue) as FabricValue,
+      value: fabricFromNativeValue(newValue),
     });
     return changes;
   }
