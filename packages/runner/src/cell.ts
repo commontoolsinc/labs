@@ -1537,23 +1537,22 @@ export class CellImpl<T extends FabricValue>
     );
     // Read marked as the op's own incidental read: dropped from the commit's
     // conflict set so the append merges, while a handler's explicit read is not.
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as unknown[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.push() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.push() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
 
-    // If there is no array yet, create it first. We have to do this as a
-    // separate operation, so that in the next steps each object element is
-    // properly anchored in the array.
-    if (array === undefined) {
+      // No array yet, so create it first. This has to be a separate operation,
+      // so that in the next steps each object element is properly anchored in
+      // the array.
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -1562,15 +1561,24 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // and assigning that back to `currentValue` would discard the narrowing
+      // this block exists to establish.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      currentValue = created;
     }
+
+    // Read-only: a stored `FabricArray` is a `ReadonlyArray`, and this method
+    // only reads it, building the replacement in `combined` below.
+    const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
     const combined = new Array(array.length + value.length);
@@ -1617,30 +1625,38 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       resolvedLink.schema ?? this.schema,
     );
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as FabricValue[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.addUnique() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
-    if (array === undefined) {
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.addUnique() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
+
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated for the same reason as in `push()`: `processDefaultValue()`
+      // answers `any`, which would discard the narrowing on assignment.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      currentValue = created;
     }
+
+    // Read-only, as in `push()`: the comparisons below only read, and the
+    // replacement is built separately.
+    const array: readonly FabricValue[] = currentValue;
 
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
