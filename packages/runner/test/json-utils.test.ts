@@ -826,6 +826,32 @@ describe("json-utils", () => {
       );
     });
 
+    it("keeps shared and circular structure intact around a converted native", () => {
+      // The conversion can hand back a DIFFERENT object than it was given (it
+      // clones in order to freeze), and this walk keys circularity on object
+      // identity. So conversion and the `seen` bookkeeping have to agree, or a
+      // cycle stops being detected and recurses until the stack dies. This
+      // pins the two working together rather than each alone.
+      const shared = { tag: "s" };
+      const tree: Record<string, unknown> = {
+        a: shared,
+        b: shared,
+        blob: new Uint8Array([1, 2]),
+      };
+      tree.self = tree;
+
+      const out = withAliasBindings(tree as any) as any;
+
+      // the native converted...
+      expect(out.blob).toBeInstanceOf(FabricBytes);
+      expect([...out.blob.slice()]).toEqual([1, 2]);
+      // ...a shared (non-circular) reference still serializes at each site...
+      expect(out.a).toEqual({ tag: "s" });
+      expect(out.b).toEqual({ tag: "s" });
+      // ...and the cycle is still caught rather than followed.
+      expect(out.self).toEqual({});
+    });
+
     it("leaves ordinary containers alone", () => {
       // The conversion above must not reach an inert plain object or an array;
       // those are already fabric values and are walked, not converted.
