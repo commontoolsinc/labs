@@ -2277,10 +2277,10 @@ class PiecePropIo implements PieceCellIo {
     // #getFromRoot, see schemaWithScopedLinkRequiredsRelaxed.
     const selected = cellWithScopedLinkRequiredsRelaxed(selectedReadCell).get();
     if (isCell(selected)) {
-      // An asCell projection materializes even an absent or explicitly
-      // undefined slot as a Cell, so inspect the stored slot before reading
-      // through the handle. Falling back preserves the root read's
-      // absent-vs-undefined rules and its missing-path diagnostics.
+      // A remaining nested Cell wrapper, or a Cell surfaced through an
+      // undeclared-schema path, still needs one more boundary resolution.
+      // Inspect the stored slot first so the root fallback preserves
+      // absent-vs-undefined rules and missing-path diagnostics.
       if (selectedCell.getRaw() === undefined) {
         return await this.#getFromRoot(targetCell, path);
       }

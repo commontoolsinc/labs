@@ -1805,6 +1805,81 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("consumes exactly one wrapper from a nested asCell slot", async () => {
+    const tx = runtime.edit();
+    const value = runtime.getCell(
+      manager.getSpace(),
+      "nested-read-value-" + crypto.randomUUID(),
+      { type: "number" },
+      tx,
+    );
+    const innerHandle = runtime.getCell(
+      manager.getSpace(),
+      "nested-read-handle-" + crypto.randomUUID(),
+      { type: "number", asCell: ["cell"] },
+      tx,
+    );
+    value.set(7);
+    innerHandle.set(value as never);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell", "cell"] },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: innerHandle },
+      undefined,
+      { start: true },
+    );
+
+    expect(await new PieceController(manager, piece).input.get(["handle"]))
+      .toBe(7);
+  });
+
+  it("materializes a payload-less asCell slot", async () => {
+    const tx = runtime.edit();
+    const target = runtime.getCell(
+      manager.getSpace(),
+      "payload-less-read-target-" + crypto.randomUUID(),
+      {
+        type: "object",
+        properties: { field: { type: "string" } },
+        required: ["field"],
+      },
+      tx,
+    );
+    target.set({ field: "visible" });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { handle: { asCell: ["cell"] } },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: target },
+      undefined,
+      { start: true },
+    );
+
+    expect(await new PieceController(manager, piece).input.get(["handle"]))
+      .toEqual({ field: "visible" });
+  });
+
   it("narrows a multi-segment input path without pulling the root", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, {
@@ -7361,10 +7436,11 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
   // keep: the terminal handle still applies the scoped-link relaxation (so a
   // scoped child voids only itself, not its whole object), and a path THROUGH
   // the handle still lands on the right document.
-  // #5231 moved the asCell scope cap into the runner's own projection, which
-  // let the narrow read drop its resolveAsCell() routing. That routing was the
-  // only thing keeping a capped handle capped here, so pin the behavior at
-  // this layer rather than trusting the runner test to stand in for it.
+  // #5231 moved the asCell scope cap into the runner's own projection. The
+  // Piece read boundary now also routes through resolveAsCell() deliberately:
+  // it records CFC dereference metadata before reasserting the declared slot
+  // payload schema. Pin the cap here so that extra resolution step cannot
+  // weaken the projection's scope decision.
   it("keeps a capped asCell handle capped through the narrow read", async () => {
     const tx = writerRuntime.edit();
     const target = writerRuntime.getCell(

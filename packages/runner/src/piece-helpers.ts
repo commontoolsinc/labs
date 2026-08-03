@@ -101,6 +101,8 @@ export function resolveCellPath<T>(
  * records scope caps); the final `asSchema()` retains that decision for the
  * Piece boundary, which rejects `false` before reading and otherwise prevents a
  * linked target from replacing a narrower leaf schema.
+ *
+ * @internal Shared by the Piece controller and CLI read boundary.
  */
 export function selectPieceReadCell<T>(
   root: Cell<T>,
@@ -125,8 +127,10 @@ export function selectPieceReadCell<T>(
  * may carry a broader schema, however, so the schema declared on the materialized
  * handle is reasserted after resolution. Both ordinary and transformed Piece
  * reads use this boundary helper and therefore share one schema authority rule.
+ *
+ * @internal Shared by the Piece controller and CLI read boundary.
  */
-export function resolvePieceReadCell<T>(cell: Cell<T>): Cell<T> {
+export function resolvePieceReadCell<T>(cell: Cell<T>): Cell<unknown> {
   const declaredSchema = cell.schema;
   let readSchema = declaredSchema;
   if (isRecord(declaredSchema)) {
@@ -148,7 +152,7 @@ export function resolvePieceReadCell<T>(cell: Cell<T>): Cell<T> {
   }
 
   const resolved = cell.resolveAsCell();
-  return readSchema === undefined ? resolved : resolved.asSchema<T>(readSchema);
+  return readSchema === undefined ? resolved : resolved.asSchema(readSchema);
 }
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {

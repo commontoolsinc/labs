@@ -133,7 +133,9 @@ arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
 `.tags[-1]`), JSON literals, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`,
 `not`, and parentheses. Like jq, only `false` and `null` are falsey, so a
 missing path simply does not match. A stored `undefined` is treated like a
-missing value and is also falsey. Filtering happens before schema projection.
+missing value and is also falsey. A path excluded by the declared Piece slot
+schema is different: the command exits nonzero rather than reporting a false
+match. Filtering happens before schema projection.
 
 `--schema` accepts one of three forms:
 
@@ -179,7 +181,8 @@ metadata apply, then reasserts the slot's declared payload schema. A link minted
 by another pattern generation therefore cannot expose a property excluded by a
 closed slot, even when the target's baked schema includes it. Ordinary and
 transformed reads share `selectPieceReadCell` and `resolvePieceReadCell` for
-this rule.
+this rule. A filter or projection that requests an excluded path exits nonzero
+and names the path instead of silently omitting it.
 
 ## Built Binary
 

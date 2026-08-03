@@ -2202,7 +2202,7 @@ export async function getCellValue(
       const rootCell =
         await (options.input ? piece.input.getCell() : piece.result.getCell());
       const targetCell = selectPieceReadCell(rootCell, path);
-      await targetCell.pull();
+      if (targetCell.schema !== false) await targetCell.pull();
       await manager.synced();
       await manager.runtime.idle();
       await manager.synced();

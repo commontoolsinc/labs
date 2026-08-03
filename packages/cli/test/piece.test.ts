@@ -670,10 +670,13 @@ describe("cli piece parsing", () => {
     )).rejects.toBe(transformError);
   });
 
-  it("rejects transformed paths excluded by the declared slot schema", async () => {
+  it("does not prefetch or transform paths excluded by the declared slot schema", async () => {
     const targetCell = {
       schema: false,
       asSchema: () => targetCell,
+      pull: () => {
+        throw new Error("excluded paths must not be prefetched");
+      },
     };
     const rootCell = {
       schema: {
@@ -688,6 +691,7 @@ describe("cli piece parsing", () => {
     const controller = {
       get: () =>
         Promise.resolve({
+          getCell: () => ({ pull: () => Promise.resolve() }),
           result: {
             getCell: () => Promise.resolve(rootCell),
             get: (path: Array<string | number>) => {
@@ -701,16 +705,21 @@ describe("cli piece parsing", () => {
             },
           },
         }),
+      stop: () => Promise.resolve(),
     };
 
     await expect(getCellValue(
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
       ["secret"],
-      { transform: { filter: parsePieceGetFilter(".secret != null") } },
+      {
+        step: true,
+        transform: { filter: parsePieceGetFilter(".secret != null") },
+      },
       {
         loadManager: () =>
           Promise.resolve({
-            runtime: {},
+            runtime: { idle: () => Promise.resolve() },
+            synced: () => Promise.resolve(),
             getSpace: () => "did:key:test-space",
           } as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),

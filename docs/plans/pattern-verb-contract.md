@@ -371,10 +371,11 @@ so their CFC behavior matches pattern expressions, without returning an
 identity alias that can widen to a linked target's schema. The shared Piece read
 boundary resolves stored links for scope and CFC metadata, then reasserts the
 declared slot payload schema; mixed-generation targets therefore cannot add
-fields excluded by a closed slot. A limit on the number of records returned
-from a large array remains deferred, blocking nothing. It is adjacent CLI work
-for when board scale demands it, not an ask on any workstream in this
-implementation plan.
+fields excluded by a closed slot. Predicate and projection requests for those
+excluded paths fail explicitly rather than being interpreted as absent data. A
+limit on the number of records returned from a large array remains deferred,
+blocking nothing. It is adjacent CLI work for when board scale demands it, not
+an ask on any workstream in this implementation plan.
 
 **A set of verbs wants to be a structural interface, and the machinery for that
 already exists.** Schemas are the type system, so a verb set is a schema

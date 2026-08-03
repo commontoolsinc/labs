@@ -214,6 +214,14 @@ as `SomeInterface`, only properties declared in that interface are visible —
 everything else is dropped, even if the underlying data contains it. This is a
 common source of mysterious `undefined`s.
 
+The schema declared by the receiving pattern remains authoritative when the
+reference points to a Cell created by another pattern generation. Reading the
+reference follows its stored link so scope and CFC metadata apply, then projects
+the target through the receiving slot's schema. A target with a broader baked
+schema therefore cannot expose fields the slot does not declare. CLI filters and
+projections reject requests for those excluded paths rather than treating them
+as absent data.
+
 ```typescript
 // Shown at module scope.
 // If Notebook.notes is typed as NotePiece[]...

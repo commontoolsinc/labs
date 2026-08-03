@@ -94,7 +94,6 @@
     "exclude": [
       ".agents/",
       ".claude/",
-      ".beads/",
       "./packages/static/assets",
       "./tmp/",
       "./packages/patterns/record/"
@@ -123,7 +122,6 @@
     "proseWrap": "always",
     "exclude": [
       ".agents/",
-      ".beads/",
       ".claude/",
       "docs/",
       "packages/dashboard/",

@@ -646,7 +646,7 @@ describe("cf piece get transforms", () => {
     let projectedCell: Cell<unknown> | undefined;
     expect(
       await derivePieceGetValue(runtime, space, selected, {
-        projection: await parsePieceGetProjection("title,secret"),
+        projection: await parsePieceGetProjection("title"),
       }, {
         onOutputCell: (cell) => projectedCell = cell,
       }),
@@ -666,6 +666,16 @@ describe("cf piece get transforms", () => {
     expect(derivedConfidentiality(probe.getAsNormalizedFullLink().id))
       .toContain("declared-slot-title");
 
+    await expect(
+      derivePieceGetValue(runtime, space, selected, {
+        projection: await parsePieceGetProjection("title,secret"),
+      }),
+    ).rejects.toThrow(
+      '--schema path "secret" is not declared by this slot\'s schema',
+    );
+  });
+
+  it("rejects transform paths excluded by a declared linked-list schema", async () => {
     const listTarget = runtime.getCell(
       space,
       "linked-transform-generation-skew-list-target",
@@ -708,14 +718,30 @@ describe("cf piece get transforms", () => {
     listContainer.withTx(listTx).set({ topics: listTarget as never });
     expect((await listTx.commit()).ok).toBeDefined();
 
-    expect(
-      await derivePieceGetValue(
+    await expect(
+      derivePieceGetValue(
         runtime,
         space,
         listContainer.key("topics"),
         { filter: parsePieceGetFilter(".secret != null") },
       ),
-    ).toEqual([]);
+    ).rejects.toThrow(
+      '--filter path ".secret" is not declared by this slot\'s schema',
+    );
+    await expect(
+      derivePieceGetValue(
+        runtime,
+        space,
+        listContainer.key("topics"),
+        {
+          projection: await parsePieceGetProjection(
+            '{"type":"array","items":{"type":"object","properties":{"title":true,"secret":true}}}',
+          ),
+        },
+      ),
+    ).rejects.toThrow(
+      '--schema path "[].secret" is not declared by this slot\'s schema',
+    );
   });
 
   it("keeps a declared link scope cap during transforms", async () => {
@@ -743,7 +769,23 @@ describe("cf piece get transforms", () => {
       },
       tx,
     );
+    const uncappedContainer = runtime.getCell(
+      space,
+      "linked-transform-uncapped-container",
+      {
+        type: "object",
+        properties: {
+          handle: {
+            type: "object",
+            properties: { field: { type: "string" } },
+            asCell: ["cell"],
+          },
+        },
+      },
+      tx,
+    );
     container.set({ handle: target as never });
+    uncappedContainer.set({ handle: target as never });
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
@@ -751,6 +793,14 @@ describe("cf piece get transforms", () => {
         projection: await parsePieceGetProjection("field"),
       }),
     ).toBeUndefined();
+    expect(
+      await derivePieceGetValue(
+        runtime,
+        space,
+        uncappedContainer.key("handle"),
+        { projection: await parsePieceGetProjection("field") },
+      ),
+    ).toEqual({ field: "session-only" });
   });
 
   it("materializes a projection instead of aliasing its broader source", async () => {
