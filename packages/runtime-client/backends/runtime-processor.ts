@@ -30,6 +30,7 @@ import {
   isCellResult,
   markRendererInputTx,
   markUiInputBlindWriteTx,
+  normalizeSpaceHost,
   PatternCoverageCollector,
   Runtime,
   runtimePresets,
@@ -648,11 +649,11 @@ export class RuntimeProcessor {
       space,
       processor.renderMembershipProvider,
     );
-    // Site-table v0: the home space carries did → host hints; the
+    // Site-table v0: the home space carries space-to-host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
-    // session — "move the lookup into the runtime itself"). Refusals
-    // (seeded differently / space already open) are by design; failures
-    // here must not block worker boot.
+    // session — "move the lookup into the runtime itself"). A seeded route or
+    // earlier hint can reject an entry. A default-host provider is provisional.
+    // Failures here must not block worker boot.
     processor.watchSiteTable();
     return processor;
   }
@@ -661,16 +662,16 @@ export class RuntimeProcessor {
   #siteTableWarned = new Set<string>();
 
   /**
-   * Subscribe to the home-space site table and register each entry as
-   * a host hint. Fire-and-forget: resolution hints are an enhancement,
-   * never a boot dependency.
+   * Subscribe to the home-space site table and register the last valid HTTP or
+   * HTTPS entry for each space as a host hint. Fire-and-forget: resolution
+   * hints are an enhancement, never a boot dependency.
    *
-   * ORDERING CONTRACT for embedders: this subscription races the first
-   * mount. An embedder about to mount a space it just learned the host
-   * for must push the hint via the RegisterSpaceHost IPC BEFORE that
-   * mount — once a space opens against the default host, the
-   * opened-space rule pins it for the session. The table is the
-   * durable record; the IPC is the ordering guarantee.
+   * ORDERING CONTRACT for embedders: push a newly learned hint through the
+   * RegisterSpaceHost IPC before relying on that space, and proceed only when
+   * registration succeeds. The first hint can replace a provisional
+   * default-host provider that has not issued a write. A route already accepted
+   * from the table remains fixed and rejects a conflicting IPC hint. The table
+   * is the durable record.
    */
   watchSiteTable(): void {
     try {
@@ -686,22 +687,44 @@ export class RuntimeProcessor {
         if (this._isDisposed) return;
         this.#siteTableCancel = table.sink(
           (entries: Readonly<SiteTable> | undefined) => {
+            const latestEntries = new Map<
+              string,
+              { did: DID; host: string }
+            >();
             for (const entry of entries ?? []) {
-              if (!entry?.did || !entry.host) continue;
-              if (!String(entry.did).startsWith("did:")) continue;
+              if (
+                typeof entry?.did !== "string" ||
+                typeof entry.host !== "string" ||
+                entry.host.length === 0 ||
+                !entry.did.startsWith("did:")
+              ) {
+                continue;
+              }
+              try {
+                const host = normalizeSpaceHost(entry.host);
+                latestEntries.set(entry.did, {
+                  did: entry.did as DID,
+                  host: host.toString(),
+                });
+              } catch (error) {
+                console.warn(
+                  `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
+                  error instanceof Error ? error.message : error,
+                );
+              }
+            }
+            for (const entry of latestEntries.values()) {
               try {
                 const accepted = this.runtime.registerSpaceHost(
-                  entry.did as DID,
+                  entry.did,
                   entry.host,
                 );
-                // The dual of "never silently re-point": never silently
-                // fail to take effect. Warn (once per fact) when the
-                // hint lost — usually the boot race: the space opened
-                // against the default host first.
+                // Warn once per rejected fact. A seeded route or an earlier
+                // accepted hint can fix a different host.
                 if (!accepted) {
                   const key = `${entry.did}|${entry.host}`;
                   const effective = this.runtime.hostForSpace(
-                    entry.did as DID,
+                    entry.did,
                   ).toString();
                   if (
                     effective !== new URL(entry.host).toString() &&
@@ -710,7 +733,7 @@ export class RuntimeProcessor {
                     this.#siteTableWarned.add(key);
                     console.warn(
                       `[RuntimeProcessor] Site-table hint for ${entry.did} not in effect ` +
-                        `(space already open or seeded elsewhere); using ${effective}`,
+                        `(explicit space route already fixed); using ${effective}`,
                     );
                   }
                 }
