@@ -1070,6 +1070,10 @@ function createPieceCallableHarness(options: {
    * completes anyway — or exercises a wait bound against a call that can
    * never beat it. */
   neverCommit?: boolean;
+  /** Omit the stream cell's `send`: the dispatch falls back to a plain data
+   * write, the path with no per-handling commit acknowledgement and no
+   * receipt — the shape --no-wait must refuse. */
+  withoutSend?: boolean;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -1113,7 +1117,7 @@ function createPieceCallableHarness(options: {
     callableSchema,
     {
       scope: options.callableScope,
-      ...(options.callableKind === "handler"
+      ...(options.callableKind === "handler" && !options.withoutSend
         ? {
           send: (
             value: unknown,
@@ -2325,6 +2329,35 @@ describe("piece call wait control", () => {
     // The run was never started: an abandoned half-run would be worse than
     // the refusal.
     expect(harness.tracker.toolRunPattern).toBeUndefined();
+  });
+
+  it("refuses --no-wait for a handler that dispatches without a receipt", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+      },
+      withoutSend: true,
+    });
+
+    await expect(
+      executePieceCallable(config, "recordMessage", ["--message", "hi"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-set-fallback-no-wait",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(
+      /--no-wait is not available for "recordMessage": this callable dispatches without an invocation receipt/,
+    );
+
+    // Refused before the data write: the set-fallback dispatch would leave
+    // nothing a later same-id call could read an outcome back from.
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("carries the furthest phase as status for an unsettled invocation", () => {
