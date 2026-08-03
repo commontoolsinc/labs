@@ -85,7 +85,8 @@ piece:
 ```bash
 cf piece call --piece <board> addTopic \
   '{"title":"...","body":"the initial living document","agentName":"Sol"}'
-cf piece get  --piece <board> topics --input      # then address a topic piece
+cf piece get --piece <board> topics --input \
+  --schema title,createdAt,lastActivityAt,commentCount
 cf piece call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
 cf piece call --piece <topic> setBody \
@@ -93,6 +94,37 @@ cf piece call --piece <topic> setBody \
 cf piece call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
+
+The board input links to complete Topic objects, including bodies, threads,
+handlers, and cross-reference data. Headless discovery should therefore combine
+an exact/range `--filter` with a concise `--schema` instead of materializing the
+whole corpus:
+
+```bash
+cf piece get --piece <board> topics --input \
+  --filter '.title == "<exact title>"' \
+  --schema title,lastActivityAt,commentCount
+cf piece get --piece <board> topics --input \
+  --filter '.lastActivityAt >= <epoch-milliseconds>' \
+  --schema title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+cf piece get --piece <board> crossrefs --step \
+  --filter '.topic.title == "<exact title>"' \
+  --schema fid,topic.title,topic.lastActivityAt,topic.commentCount
+cf piece get --piece <topic> comments --input \
+  --filter '.author.name == "Sol" or .authorName == "Sol"' \
+  --schema sentAt,author.kind,author.name,authorName,body
+cf piece get --piece <topic> links --input \
+  --filter '.kind == "pr"' --schema kind,url,label,addedAt
+```
+
+Filtering happens before projection and preserves list order. The jq-inspired
+predicate subset supports paths, JSON literals, comparisons, boolean operators,
+and parentheses; it does not provide substring search, regexes, sorting, or an
+arbitrary jq pipeline. These transforms execute as a session-scoped computed
+pattern expression, so their CFC metadata behavior matches authored
+filter/map/lift expressions. The durable `topics --input` list remains evidence
+when the computed `crossrefs --step` index cannot materialize, but only a
+successful crossref row supplies the canonical Topic fid.
 
 Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human

@@ -1,7 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { FabricPrimitive } from "@commonfabric/data-model/interface";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/interface";
 import {
   type FabricExecValue,
   isPattern,
@@ -422,13 +425,17 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * would yield a bare `{}`. Returning it as-is preserves it, and skips an
    * `Object.entries()` call that can only ever come back empty.
    *
-   * TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a container
-   * holding other `FabricValue`s, so it does need descending into, but by its
-   * codec contents rather than by property name. It currently falls through to
-   * the record branch, where its zero enumerable own properties mean nothing
-   * rebinds and the original is handed back — preserved rather than decomposed,
-   * but never descended, so a bound alias nested inside one is missed. The two
-   * sibling walks in this file carry the same marker.
+   * A `FabricInstance` leaves next, by throwing. It is NOT a leaf: it is a
+   * container holding other `FabricValue`s, so it does need descending into,
+   * but by its codec contents rather than by property name — which this walk
+   * has no way to do. The alternative to throwing is to hand one back whole,
+   * which reads as success while leaving any bound alias in its contents
+   * silently unbound. Neither disposition is correct, so this one takes the
+   * one that reports itself, and names the class and the work it needs.
+   *
+   * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+   * point the throw becomes a rebind. The two sibling walks in this file carry
+   * `Latent` markers for the same hazard.
    *
    * The container branches then hand back the original when nothing under one
    * rebound, without checking whether a rebuild would have reproduced it. For
@@ -532,6 +539,11 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       }
     } else if (binding instanceof FabricPrimitive) {
       return binding;
+    } else if (binding instanceof FabricInstance) {
+      throw new Error(
+        `Cannot yet handle \`${binding.constructor.name}\` (a ` +
+          "`FabricInstance`) as a pattern binding.",
+      );
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
       // else, so the shared path allocates nothing.

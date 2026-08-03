@@ -50,6 +50,7 @@ import {
 } from "../commands/piece.ts";
 import {
   parsePieceGetFilter,
+  parsePieceGetProjection,
   PieceGetTransformError,
 } from "../lib/piece-get-transform.ts";
 
@@ -723,6 +724,70 @@ describe("cli piece parsing", () => {
         derivePieceGetValue: () => Promise.resolve(undefined),
       },
     )).rejects.toThrow(PieceResultProjectionError);
+  });
+
+  it("distinguishes failed transforms, JSON null, and absent sources", async () => {
+    let sourceRaw: unknown;
+    const targetCell = {
+      schema: { type: ["object", "null"] },
+      getRaw: () => sourceRaw,
+    };
+    const rootCell = { key: () => targetCell };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { getCell: () => Promise.resolve(rootCell) },
+        }),
+    };
+
+    const options = {
+      input: true,
+      transform: { projection: await parsePieceGetProjection("id") },
+    };
+    const deps = {
+      loadManager: () =>
+        Promise.resolve({
+          runtime: {},
+          getSpace: () => "did:key:test-space",
+        } as any),
+      resolvePieceAddress: (_manager: any, id: string) => Promise.resolve(id),
+      createController: () => controller as any,
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => {
+          sourceRaw = { id: "loaded-during-transform" };
+          return Promise.resolve(undefined);
+        },
+      },
+    )).rejects.toThrow("This is not JSON null");
+
+    sourceRaw = null;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(null),
+      },
+    )).resolves.toBeNull();
+
+    sourceRaw = undefined;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).resolves.toBeUndefined();
   });
 
   it("steps, reads, syncs, and stops in one get operation", async () => {
