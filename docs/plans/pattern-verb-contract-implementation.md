@@ -476,11 +476,14 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   misses the event schema does not make the argument invalid: `$event` reads
   back as `undefined`, the body runs with no event, and its receipt spends the
   id while the call reports settled. Two shapes stay legal, because the runtime
-  accepts them: a call with no payload at all (`$event` is genuinely optional —
-  value-less verbs are a supported shape), and a payload omitting a property
-  that carries a `default`, which the runtime injects on read. (D5 narrows the
-  first: once it lands, an absent payload against an object-schema verb is
-  normalized to `{}` and judged like any other — see its bullet below.)
+  accepts them: a call with no payload against a verb whose schema — after
+  resolving a top-level local `$ref` — is not an object schema (`$event` is
+  genuinely optional — value-less verbs are a supported shape), and a payload
+  omitting a property that carries a `default`, which the runtime injects on
+  read. An absent payload against an object-schema verb is normalized to `{}`
+  and judged like any supplied payload (D5 — see its bullet below): refused
+  when top-level `required` survives relaxation, dispatched as `{}` — so the
+  runtime materializes defaults — when it does not.
 - **cli, phase reporting:** every output — success, failure, timeout — carries
   the furthest observed `phase`
   (`initial_sync | dispatched | committed | readback`) beside the invocation
@@ -519,7 +522,7 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   a *result* back off the receipt, because a void verb leaves none to read.
   That assertion joins when WS-C gives verbs return values — or sooner
   against `plainResultReceipts`.
-- **cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
+- ~~**cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
   deferred.** The pre-dispatch validator passes `input === undefined`
   unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
   so a call that sends *nothing* against a verb whose event schema requires
@@ -575,8 +578,34 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   a provably-unsatisfiable absence is refused pre-dispatch like any other
   unfit payload. Migration note for the PR: calls that previously "settled"
   with no payload against a required-fields verb now fail locally and are
-  retryable under the same invocation id.
-- **runner/cfc, relocate the relaxation helper (D6).**
+  retryable under the same invocation id.~~ — **done (D5)**: the shared gate
+  (`assertVerbInputSatisfiesSchema`, both entry points) normalizes an absent
+  payload to `{}` where the schema — after `localRefTarget` resolves a
+  top-level local `$ref` — is an object schema: directly object-shaped, or
+  an `allOf` conjunction with an object-schema branch (a conjunction with an
+  object branch IS an object schema, no branch choice involved — added on
+  review, 2026-07-31; disjunctive `anyOf`/`oneOf` roots remain out of scope
+  per this bullet's combinator boundary, since normalizing there would pick
+  among alternatives on the caller's behalf). It dispatches exactly what
+  it judged, so an all-defaulted verb now receives a defaults-populated
+  object instead of `undefined`; the refusal reuses
+  `VerbInputValidationError` with a "no payload was supplied … send a
+  payload" detail distinct from fix-your-payload. Characterized first at
+  both entry points (the absent payload observed dispatching `undefined` on
+  unmodified code), then flipped. Measured while wiring the integration
+  mirror: a deployed stream cell's schema carries the handler's *own* event
+  schema, so it is `$ref`-rooted only when that schema is authored or
+  generated with `$defs`; flag-derivable inline-object schemas never reach
+  dispatch with an absent payload — the arg parser's requires-input check
+  (bare call) or its `{}` flag-parse (explicit `invoke`) already covers
+  them — and the gate closes the `$ref`-rooted shape, reached via explicit
+  `invoke`. `run_piece_call_retry` scenario 6 pins the property end to end
+  against a new `$ref`-rooted `recordNote` fixture verb: absent refused
+  locally, zero messages, corrected call under the SAME id records exactly
+  one (pre-D5, measured live: the absent call recorded "(no event)" and the
+  corrected same-id retry deduplicated against it, the correction never
+  applied).
+- ~~**runner/cfc, relocate the relaxation helper (D6).**
   `relaxDefaultedRequired` and `localRefTarget` re-implement the runtime's
   default-satisfaction rule inside `packages/cli/lib/callable.ts`, and C5
   (closed-world inputs enforced at dispatch) needs the identical relaxation
@@ -593,7 +622,22 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   `validateSchemaValue` applies but the relaxer doesn't — each a potential
   refused-but-valid call if a generated schema leans on a required property
   there); naming the boundary is the point. Pure move plus doc comment, no
-  behavior change, its own commit beside D5 so the diff reviews as such.
+  behavior change, its own commit beside D5 so the diff reviews as such.~~ —
+  **done (D6)**: both helpers moved verbatim into the validator's own module
+  (`packages/runner/src/cfc/schema-sanitization.ts`, beside
+  `validateSchemaValue`), exported from the defining module and imported
+  directly by the CLI through a new `./cfc/schema-sanitization` package
+  export — no re-export shim, nothing added to `cfc/mod.ts`. The relaxation
+  tests moved with the code
+  (`packages/runner/test/cfc-defaulted-required-relaxation.test.ts`, pinned
+  against the same relax-then-validate composition the gate applies); the
+  CLI keeps the gate tests plus one defaulted-required pin proving the gate
+  applies the relaxation. The doc comment now names the boundary: only
+  `required` is rewritten, so `additionalProperties`, `patternProperties`,
+  `minProperties` and the other constraints, `const`/`enum`, `not` /
+  `if`/`then`/`else`, and `oneOf` exclusivity are judged against the
+  original schema text — each a potential refused-but-valid call when a
+  schema leans on a defaulted property through them.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
