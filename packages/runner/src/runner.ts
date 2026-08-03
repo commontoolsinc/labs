@@ -5914,11 +5914,20 @@ export class Runner {
    * index is session-lifetime, and the op's module evaluated in this session by
    * construction (the sentinel is stamped from its live artifact right here),
    * so the builtin's sync resolution cannot miss short of a bug — and a bug
-   * should be loud, not silently served a stale graph. `inputBindings` here is
-   * the freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindToDoc`; its pattern values carry their derivation
-   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`).
+   * should be loud, not silently served a stale graph.
+   *
+   * The `op` substitution below writes through `inputBindings`, so it needs
+   * that record to be a fresh copy rather than the node's own `inputs`.
+   * `unwrapOneLevelAndBindToDoc` shares structure — it returns the original for
+   * any container under which nothing rebound — so the copy is not guaranteed
+   * in general. It is guaranteed HERE: this path runs only for the list
+   * builtins, whose `list` input is an alias, so the root always rebinds and is
+   * always copied.
+   *
+   * Either way the ref resolves. A copied pattern value carries its derivation
+   * link (`noteDerivedCopy`), and a shared one simply IS the original, so
+   * `getArtifactEntryRef` finds the ref (assigned post-eval by
+   * `registerEvaluatedModules`) in both cases.
    *
    * An op with NO known ref but a LIVE trusted original is a KEYLESS pattern
    * — hand-built through the in-process builder DSL, or evaluated through the
