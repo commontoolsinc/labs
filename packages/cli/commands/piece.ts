@@ -614,6 +614,8 @@ export function renderPieceCallOutcome(
  * only when the call collided on an existing receipt, and `result` only when
  * the receipt carried one — a value-less verb omits it rather than reporting
  * `null`, which would be indistinguishable from a verb that returned null.
+ * `links` appears only under --show-links: provenance beside the value,
+ * never inline in it.
  */
 export function invocationJson(
   outcome: InvocationOutcome,
@@ -625,6 +627,7 @@ export function invocationJson(
     ...("result" in outcome && outcome.result !== undefined
       ? { result: outcome.result }
       : {}),
+    ...(outcome.links !== undefined ? { links: outcome.links } : {}),
   };
 }
 
@@ -648,15 +651,24 @@ export interface PieceCallWaitControl {
  * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
  * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
  * names the patience. A non-positive bound is refused: it would spell
- * "don't wait" while claiming to be a wait.
+ * "don't wait" while claiming to be a wait. `--show-links --no-wait` is
+ * refused too: the links ride the receipt readback a detached exit skips,
+ * so honoring both is impossible — refusing beats silently dropping the
+ * links.
  */
 export function resolveWaitControl(
-  options: { await?: boolean; wait?: number | boolean },
+  options: { await?: boolean; wait?: number | boolean; showLinks?: boolean },
 ): PieceCallWaitControl {
   if (options.wait === false) {
     if (options.await) {
       throw new ValidationError(
         "--await and --no-wait contradict each other; pass one.",
+      );
+    }
+    if (options.showLinks) {
+      throw new ValidationError(
+        "--show-links needs the receipt readback that --no-wait skips; " +
+          "pass one.",
       );
     }
     return { mode: "commit" };
@@ -1583,6 +1595,16 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "the outcome back. The handler still executes here and its commit " +
       "is durable. Handler invocations only.",
   )
+  .option(
+    "--show-links",
+    "Annotate the Invocation JSON with a links dictionary mapping result " +
+      "paths to their backing cell addresses (before the callable name). " +
+      'The root "/" entry is the result\'s own backing document — the ' +
+      "receipt, unless the result is itself a reference, in which case a " +
+      'separate "receipt" entry keeps the receipt address; other entries ' +
+      "appear only where a path is backed by a different document. Handler " +
+      "invocations only — a tool already reports its result cell on stderr.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
@@ -1611,6 +1633,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
           {
             invocationId,
             skipReadback: waitControl.mode === "commit",
+            showLinks: !!options.showLinks,
             onPhase: invocationPhaseReporter(
               invocationId,
               observer.onPhase,
