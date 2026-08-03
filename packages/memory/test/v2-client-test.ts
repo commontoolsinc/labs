@@ -110,6 +110,38 @@ const asyncHandshakeTransport = (helloOk: FabricValue): Transport => {
   };
 };
 
+Deno.test("memory v2 client marks only a new outstanding commit as issued", async () => {
+  const client = await connect({
+    transport: handshakeTransport(HELLO_OK),
+  });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-before-issue",
+  );
+  const commit = {
+    localSeq: 1,
+    reads: { confirmed: [], pending: [] },
+    operations: [{
+      op: "set" as const,
+      id: "of:before-issue",
+      value: { value: { count: 1 } },
+    }],
+  };
+  let firstIssues = 0;
+  let duplicateIssues = 0;
+
+  const first = session.transact(commit, () => firstIssues++);
+  const duplicate = session.transact(commit, () => duplicateIssues++);
+  const settled = Promise.allSettled([first, duplicate]);
+
+  assertEquals(firstIssues, 1);
+  assertEquals(duplicateIssues, 0);
+  await client.close();
+  assertEquals(
+    (await settled).map((result) => result.status),
+    ["rejected", "rejected"],
+  );
+});
+
 Deno.test("memory v2 client rejects malformed async hello session.open metadata", async () => {
   await assertRejects(
     () =>

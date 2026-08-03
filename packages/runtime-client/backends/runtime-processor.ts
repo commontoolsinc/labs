@@ -652,9 +652,9 @@ export class RuntimeProcessor {
     );
     // Site-table v0: the home space carries space-to-host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
-    // session — "move the lookup into the runtime itself"). A seeded route,
-    // an earlier hint, or an open connection can reject an entry. Failures
-    // here must not block worker boot.
+    // session — "move the lookup into the runtime itself"). A seeded route or
+    // earlier hint can reject an entry. A default-host provider is provisional.
+    // Failures here must not block worker boot.
     processor.watchSiteTable();
     return processor;
   }
@@ -667,13 +667,12 @@ export class RuntimeProcessor {
    * HTTPS entry for each space as a host hint. Fire-and-forget: resolution
    * hints are an enhancement, never a boot dependency.
    *
-   * ORDERING CONTRACT for embedders: this subscription races the first
-   * mount. An embedder about to mount a space it just learned the host
-   * for must push the hint via the RegisterSpaceHost IPC BEFORE that
-   * mount and proceed only when registration succeeds. A route already
-   * accepted from the table remains fixed and rejects a conflicting IPC
-   * hint. The table is the durable record; the IPC checks the route before
-   * the mount opens a connection.
+   * ORDERING CONTRACT for embedders: push a newly learned hint through the
+   * RegisterSpaceHost IPC before relying on that space, and proceed only when
+   * registration succeeds. The first hint can replace a provisional
+   * default-host provider that has not issued a write. A route already accepted
+   * from the table remains fixed and rejects a conflicting IPC hint. The table
+   * is the durable record.
    */
   watchSiteTable(): void {
     try {
@@ -721,8 +720,8 @@ export class RuntimeProcessor {
                   entry.did,
                   entry.host,
                 );
-                // Warn once per rejected fact. A seeded route, an earlier
-                // hint, or an open connection can fix a different host.
+                // Warn once per rejected fact. A seeded route or an earlier
+                // accepted hint can fix a different host.
                 if (!accepted) {
                   const key = `${entry.did}|${entry.host}`;
                   const effective = this.runtime.hostForSpace(
@@ -735,7 +734,7 @@ export class RuntimeProcessor {
                     this.#siteTableWarned.add(key);
                     console.warn(
                       `[RuntimeProcessor] Site-table hint for ${entry.did} not in effect ` +
-                        `(space route already fixed elsewhere); using ${effective}`,
+                        `(explicit space route already fixed); using ${effective}`,
                     );
                   }
                 }

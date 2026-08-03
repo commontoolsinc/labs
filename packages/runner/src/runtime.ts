@@ -2090,10 +2090,11 @@ export class Runtime {
 
   /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space (the v0
-   * site-table flow). Storage decides first. A seed, an accepted late hint,
-   * or an open connection fixes the route for the session. Compute routing
-   * follows when storage accepts the hint. Returns whether storage accepted
-   * or confirmed the hint.
+   * site-table flow). Storage decides first. A seed or an accepted late hint
+   * fixes the route for the session. A default-host provider stays provisional
+   * while it is read-only. The first hint can replace it and replay its reads.
+   * Compute routing follows when storage accepts the hint. Returns whether
+   * storage accepted or confirmed the hint.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
     let normalized: string;

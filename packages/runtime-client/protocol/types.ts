@@ -335,14 +335,14 @@ export interface ResolveSpaceNameRequest extends BaseRequest {
  * embedder make a just-learned hint (e.g. from a share link) effective
  * on the live runtime without waiting for a sync round-trip. The
  * worker returns whether it accepted or confirmed the hint. A seed, an
- * accepted late hint, or an open connection fixes the route for the session.
+ * accepted late hint fixes the route for the session. A read-only unseeded
+ * provider opened through the default host remains provisional.
  *
- * ORDERING CONTRACT: an embedder that will mount a space it just
- * learned the host for must send this BEFORE the first mount of that
- * space and proceed only when the worker returns true. An accepted
- * site-table route can reject a conflicting IPC hint. The IPC checks
- * the route before the mount opens a connection; it does not override
- * a route already accepted for the session.
+ * ORDERING CONTRACT: an embedder sends a newly learned hint before it relies
+ * on the space and proceeds only when the worker returns true. The first hint
+ * replaces and reloads a read-only provisional default-host provider. An
+ * accepted site-table route can reject a conflicting IPC hint. The IPC does
+ * not override a seed or route already accepted for the session.
  */
 export interface RegisterSpaceHostRequest extends BaseRequest {
   type: RequestType.RegisterSpaceHost;

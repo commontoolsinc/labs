@@ -27,6 +27,10 @@ canonical HTTP or HTTPS URL as the active origin in the same transaction as its
 source-backed creation revision. Programmatically constructed patterns without
 retained source continue to run without restorable history. Retained source
 closures are reverified in the transaction that publishes each history entry.
+An unseeded space now uses the default host provisionally until a stateful
+operation is issued there. Before that cutoff, its first accepted host hint
+replaces the route and replays prior reads, including when a pattern followed a
+link before site-table hydration completed.
 
 This lifecycle slice is partial. Revisions retain the existing verified
 `pattern:<identity>` source-document closure rather than the complete authored
@@ -137,11 +141,51 @@ retains the supplied URL in history and must persist the space DID to host route
 before it commits a hostless canonical target. If the route cannot be persisted,
 the origin transition fails without changing the piece. The transition also
 registers the accepted hint on the ordinary storage manager before opening the
-origin space. It does not create a secondary session. A conflicting seeded
-route or previously accepted late hint fails the transition. After the origin
-space opens, only the hint that was already registered can be confirmed. Any
-other route attempt fails the transition. A later load hydrates the durable
-route before resolving the canonical fabric target.
+origin space. It does not create a secondary session. A seeded route or a
+previously accepted late hint is authoritative, so a conflicting hint fails the
+transition.
+
+The default host is only a provisional route for a space that has neither a
+seed nor an accepted hint. The first accepted hint may replace that provisional
+route after its provider opens. Storage clears the provisional replica, closes
+its session, and cancels connection, initial or reconnect session signature
+creation, mount, and ACL setup work that is still in progress. It does not wait
+for the provisional host to respond. Storage opens the same provider through
+the hinted host and replays every document read registered on it. An
+asynchronous read-only operation that overlaps replacement restarts on the
+hinted replica and returns that result instead of the provisional replica's
+closure error. These operations include document reads, entity listing and
+lookup, scheduler snapshot listing, and SQLite queries.
+An existing `synced()` barrier follows the replacement and waits for those
+replayed reads on the hinted replica.
+Replay also loads CFC schema documents discovered from the hinted data.
+Reactive consumers therefore receive the intended data when site-table
+hydration loses the race with link traversal.
+
+A transaction keeps the replica from which it read its basis. Replacement
+makes a transaction holding the provisional replica inconsistent. Its commit
+is rejected and may be retried from the hinted data; it cannot carry a result
+calculated from missing provisional data into the intended host.
+Immediately before a transaction mutation is accepted for issue, storage
+rechecks every replica that supplied the transaction's read basis. This
+includes read spaces other than the mutation's target space. If any read-basis
+replica was replaced, storage rejects the transaction before handing the
+mutation to any host.
+
+Replacement is allowed until the provisional session accepts a stateful
+operation for issue. Stateful operations are ordinary transactions, scheduler
+transactions, ACL setup transactions, and injected SQLite source registration.
+Work that is still waiting for a session does not prevent replacement. When the
+hint wins that race, the old replica is invalidated before the waiting work can
+issue. A failure before issuance also leaves the route provisional.
+
+Once a stateful operation is handed to the provisional host, the route becomes
+authoritative. This remains true when the client later reports an error because
+the host may have committed the operation before its acknowledgement was lost.
+A hint naming another host is then a conflict. A hint matching the default host
+makes the route authoritative without reconnecting. After the first hint is
+accepted, a different hint remains a conflict. A later load hydrates the
+durable route before resolving the canonical fabric target.
 
 An origin is not proof of the bytes currently running. The content-addressed
 `patternIdentity` is that proof. A fabric URL that names a content-addressed
@@ -581,25 +625,65 @@ The operation never persists a hint that the live registry has already
 rejected.
 
 The runtime does not open a short-lived secondary session for origin
-resolution. A configured route and an existing live connection remain stable
-for the current session. A seeded route can only be confirmed. Once a late hint
-is accepted, a different hint is a conflict even before the space opens. After
-the space opens, only the hint already in effect can be confirmed. Any other
-attempt fails without changing the piece. It does not silently reconnect or
-allow two live connections to disagree about where the same space resides.
+resolution. A seeded route can only be confirmed. Once a late hint is accepted,
+a different hint is a conflict before or after the space opens.
+
+Opening an unseeded space on the default host does not accept that fallback as
+its route. If no stateful operation has been issued, the first late hint still
+wins. If it names another host, the storage manager invalidates and closes the
+provisional replica, replaces it in place, and settles its queued and in-flight
+reads even if its connection has not opened. Route cancellation closes
+connection, initial or reconnect session signature creation, mount, and ACL
+setup work that is still in progress. The manager then replays its registered
+document reads on the hinted host. Asynchronous document reads, entity listing
+and lookup, scheduler snapshot listing, and SQLite queries that overlap
+replacement follow the hinted replica rather than returning the provisional
+close result. A `synced()` call that already started also waits for the
+replacement and its replay. Replay includes CFC schema documents discovered
+from the hinted entities. Existing reactive readers observe the hinted space's
+data, and convergence does not remain blocked on the provisional connection.
+
+Work already holding the invalidated replica cannot commit through it. A
+transaction that read from that replica becomes inconsistent and must recompute
+from the hinted data. The issue boundary checks every read-basis space, not only
+the write target, before it hands a mutation to a host. Session construction
+checks the route generation before each mount and after each asynchronous setup
+step. It also receives the route cancellation signal, so an abandoned
+connection, signature operation, mount, or ACL query settles instead of
+remaining alive beside the replacement.
+
+The manager refuses to replace a provisional replica after its session accepts
+any stateful operation for issue. Stateful operations include ordinary and
+scheduler transactions, ACL setup transactions, and injected SQLite source
+registration. The route is fixed at issuance rather than successful
+acknowledgement because a reported error does not prove that the host rejected
+the operation. A hint can still replace work that is waiting for a session or
+is rejected before the session accepts it. Route generations prevent
+invalidated work from starting a later mount or issuing a mutation after
+replacement. Waiting scheduler observations and SQLite registrations settle
+against the invalidated replica instead of blocking convergence. Storage
+rejects only the scheduler observations whose read routes were invalidated. It
+still issues valid observations from the same batch, and a failed earlier batch
+does not strand observations queued behind it. A semantic transaction waits for
+every scheduler-observation batch that was queued ahead of it, including a
+batch another waiter has already started. If an earlier batch fails, the
+semantic transaction is not issued and receives that failure. Its unused
+sequence number is not added to the failure's retry condition. A hint that names
+the default host confirms the provisional route without rebuilding the replica.
 
 This policy settles ingestion of a known host hint. It does not yet make route
 discovery reliable. Host unavailability, replicated hosts, failover, stale
-site-table entries, authenticated space relocation, and closing and reopening
-an affected live session remain open design work.
+site-table entries, authenticated replacement of an explicit route, and
+replicated-host failover remain open design work.
 
 | Capability | Repository status | Remaining work |
 |---|---|---|
-| Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and an opened space accepts only its previously registered matching hint |
+| Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and the first accepted late hint becomes authoritative |
 | Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
-| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last valid HTTP or HTTPS entry for each space, and registers those hints. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
+| Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
+| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last valid HTTP or HTTPS entry for each space, and registers those hints. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
-| Recover from host failure or space movement | **Reliability design required** | There is no authoritative route-change, failover, or live close-and-reopen protocol |
+| Replace an explicit route after host failure or space movement | **Reliability design required** | There is no authenticated route-change or failover protocol after a seed or late hint becomes authoritative |
 
 ## Reconciliation when a piece loads
 
@@ -884,13 +968,19 @@ The implementation evidence for this table is concentrated in:
 - Storage supports late registration of a space-to-host hint before that space
   opens. The runtime processor hydrates durable hints from the home-space site
   table by selecting its last valid HTTP or HTTPS entry for each space. A
-  seeded route can only be confirmed. An opened space accepts only its
-  previously registered matching hint. The first accepted late hint also
-  remains stable before the space opens, including against a later table
-  update. IPC callers must check the registration result and stop before
-  mounting on a conflict. Historical fabric origin resolution can register a
-  matching live route, but it does not yet persist that route through the site
-  table.
+  seeded route can only be confirmed. An unseeded default-host provider remains
+  provisional until its session accepts a stateful operation. The first
+  accepted hint can replace it, cancel unfinished session setup, clear its
+  replica, and replay its reads so running patterns observe the hinted space.
+  A provisional provider can move while an operation is waiting for a session.
+  Invalidated transactions are rejected and recompute from the hinted replica.
+  Once an ordinary or scheduler transaction, ACL setup transaction, or SQLite
+  source registration is issued, the route remains fixed even if its
+  acknowledgement fails. The first accepted late hint remains stable,
+  including against a later table update.
+  IPC callers must check the registration result and stop before mounting on a
+  conflict. Historical fabric origin resolution can register a matching live
+  route, but it does not yet persist that route through the site table.
 - Tooling exposes the immutable source ref, optional repository locator,
   authored entry path, current origin, revision history, and lifecycle actions
   separately.
@@ -940,8 +1030,10 @@ The implementation evidence for this table is concentrated in:
    accepted space-to-host route before removing the host from the canonical
    target. Validate and register the route before writing it to the site table,
    then open the origin space. Honor the conflict guards for seeded routes and
-   previously accepted late hints. Once the space opens, fail any hint that was
-   not already registered and matching. Do not create a secondary session.
+   previously accepted late hints. Treat an unseeded default-host provider as
+   provisional until its first hint arrives or a stateful operation is issued.
+   Before a stateful operation is issued, allow the first hint to replace and
+   reload the provider. Do not create a secondary session.
    Keep the supplied canonical URL in history. Do not make shortlink retention
    part of the lifecycle contract until the open provenance question is
    settled. Any later alias provenance must remain separate from active origins
@@ -1002,7 +1094,8 @@ The implementation evidence for this table is concentrated in:
    cross-space authorization and provenance, web and fabric URL policy,
    mutable versus content-addressed fabric targets, explicit pins, durable host
    routing after reload, conflicts between late hints before a target opens,
-   route conflicts after a target opens, space-root creation from a default,
+   replacement of a provisional default route after a target opens, conflicts
+   with an explicit route after a target opens, space-root creation from a default,
    changes to a default after root creation, tracked and detached root baseline
    migration, source-less legacy roots, relative-path normalization,
    root-interface rejection, runtime-fingerprint rebuilds, authorized upstream

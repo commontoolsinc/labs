@@ -14,6 +14,7 @@ export interface SessionFactory {
     space: MemorySpace,
     signer?: Signer,
     mountOptions?: MemoryClient.MountOptions,
+    signal?: AbortSignal,
   ): Promise<{
     client: MemoryClient.Client;
     session: MemoryClient.SpaceSession;
@@ -258,27 +259,50 @@ export class RemoteSessionFactory implements SessionFactory {
     space: MemorySpace,
     signer = this.defaultSigner,
     mountOptions: MemoryClient.MountOptions = {},
+    signal?: AbortSignal,
   ) {
-    const client = await MemoryClient.connect({
-      transport: new WebSocketTransport(
-        toSpaceWebSocketAddress(this.resolveAddress(space), space),
-      ),
-    });
-    const session = await client.mount(
-      space,
-      mountOptions,
-      (
-        targetSpace: string,
-        descriptor: MemoryClient.MountOptions,
-        context: MemoryClient.SessionOpenAuthContext,
-      ) =>
-        this.#createSessionOpenAuth(
-          signer,
-          targetSpace as MemorySpace,
-          descriptor,
-          context,
-        ),
+    const transport = new WebSocketTransport(
+      toSpaceWebSocketAddress(this.resolveAddress(space), space),
     );
-    return { client, session };
+    let client: MemoryClient.Client | undefined;
+    const abortError = (): Error =>
+      signal?.reason instanceof Error
+        ? signal.reason
+        : new Error("memory replica route replaced");
+
+    try {
+      if (signal?.aborted) throw abortError();
+      client = await MemoryClient.connect({ transport, signal });
+      const closeForAbort = (): void => {
+        void client?.close().catch(() => {});
+      };
+      signal?.addEventListener("abort", closeForAbort, { once: true });
+      if (signal?.aborted) throw abortError();
+      try {
+        const session = await client.mount(
+          space,
+          mountOptions,
+          (
+            targetSpace: string,
+            descriptor: MemoryClient.MountOptions,
+            context: MemoryClient.SessionOpenAuthContext,
+          ) =>
+            this.#createSessionOpenAuth(
+              signer,
+              targetSpace as MemorySpace,
+              descriptor,
+              context,
+            ),
+          signal,
+        );
+        if (signal?.aborted) throw abortError();
+        return { client, session };
+      } finally {
+        signal?.removeEventListener("abort", closeForAbort);
+      }
+    } catch (error) {
+      await (client?.close() ?? transport.close()).catch(() => {});
+      throw signal?.aborted ? abortError() : error;
+    }
   }
 }
