@@ -1226,6 +1226,45 @@ describe("cli piece parsing", () => {
       await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
     });
 
+    it("refuses a verb whose result projection also fails", async () => {
+      // The shape a real board hits: reading `addTopic` on an unstepped piece
+      // fails the result-projection check BEFORE the verb is classified, so
+      // the caller was told "use --step" — advice that sends them to re-run a
+      // read which can never succeed, because a verb is not a materializable
+      // result. The verb refusal has to win over the projection error.
+      const verbCell = {
+        schema: { type: "object" },
+        getRaw: () => ({ "/": "stream-link" }),
+        asSchemaFromLinks: () => verbCell,
+      };
+      const rootCell = {
+        schema: {
+          type: "object",
+          properties: { addTopic: { type: "object" } },
+          required: ["addTopic"],
+        },
+        get: () => ({ addTopic: { $stream: true } }),
+        key: () => verbCell,
+      };
+      const piece = {
+        result: {
+          // The read yields nothing: the projection could not materialize it.
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      const error = await getCellValue(
+        config,
+        ["addTopic"],
+        {},
+        guardDeps(piece),
+      )
+        .catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toContain("cf piece call");
+      expect((error as Error).message).not.toContain("--step");
+    });
+
     it("fails open when classification itself fails", async () => {
       // A cell surface that throws during the guard's walk must never turn
       // a successful read into a refusal: the guard swallows the failure
