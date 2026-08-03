@@ -214,14 +214,29 @@ same-named types emit `$ref`s to it.
 
 `NATIVE_TYPE_SCHEMAS` (`src/formatters/native-type-formatter.ts`), as of
 this writing: `VNode` →
-`{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date` →
-`{ type: "string", format: "date-time" }`; `URL` → `{ type: "string", format:
+`{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date`, `RegExp`,
+and `Uint8Array` → `{ type: "object" }`; `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
-`ArrayBufferView`, the eleven typed arrays (`Uint8Array` … `BigUint64Array`),
-and `JSONSchemaObj`/`JSONSchema` → `true`.
+`ArrayBufferView`, the remaining ten typed arrays
+(`Uint8ClampedArray` … `BigUint64Array`), and `JSONSchemaObj`/`JSONSchema` →
+`true`.
+
+The three mapped to `{ type: "object" }` are the ones with a canonical fabric
+form: a `Date` is stored as a `FabricEpochNsec`, a `RegExp` as a
+`FabricRegExp`, and a `Uint8Array` as a `FabricBytes`. There is no schema
+vocabulary for `Fabric*` types yet, and `"object"` is what they are called in
+the meantime — a value stored as one reads back intact through it, where
+`{ type: "string" }` projects the read to `undefined`. `URL` is the exception
+that stays a string, because it converts to a plain string rather than to a
+fabric object.
+
+The remaining typed arrays and the buffer types map to `true` (accept
+anything), which overclaims: none of them is representable as a `FabricValue`,
+so a value of one of those types is rejected at the storage boundary rather
+than stored. `true` is the status quo for them, not an endorsement.
 
 Guard: the lib-declared subset (`LIB_DECLARED_NATIVE_TYPES` — `Date`
-through `BigUint64Array`) is claimed only when declared in a default-lib or
+through `BigUint64Array`, and `RegExp`) is claimed only when declared in a default-lib or
 `@types/node` file (`hasLibraryDeclaration`), so a user-defined
 `interface Date {…}` is not swallowed. `VNode`/`JSONSchemaObj`/`JSONSchema`
 have **no** such guard (untested collision). Native resolution also pierces
@@ -378,6 +393,22 @@ the identity alias to the inner type object itself (no aliasSymbol), so inner
 named types still hoist, as the fixture shows. The ts-transformers behavior
 spec §12 uses the same single-`asCell` vocabulary. Any doc claiming `Reactive`
 emits `asCell: ["opaque"]` is wrong on this tree.
+
+### 6.5 Stream event schemas — deliberately open (C5)
+
+A stream property's schema object is the verb's **event** schema — what a
+caller sends, which `cf piece verbs` publishes and `piece call` validates
+payloads against. It carries no `additionalProperties` of its own — only
+what the event type itself demands (an index signature, a `Record` value
+type). The verb contract wants event schemas closed-world
+(`additionalProperties: false` — an undeclared field is a rejection, never
+ignored), but emitting that is blocked on a pattern-update-gate migration:
+the argument-role compatibility rule refuses the open→closed direction for
+verbs reachable through a piece's argument schema (plan
+`docs/plans/pattern-verb-contract-implementation.md`, WS-C and Risks). The
+open event side is pinned as a decision in `test/stream-result.test.ts`; a
+schema that declares the closure by hand is enforced at dispatch by the
+runner (C5).
 
 ## 7. `Default<T,V>` And `DeepDefault<V>`
 

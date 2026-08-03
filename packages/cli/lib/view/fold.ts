@@ -8,6 +8,7 @@
  */
 import type { Line, Span, TokenClass } from "./model.ts";
 import { parseDiff } from "./diff.ts";
+import { languageForFile } from "./languages/language.ts";
 
 /** One file in the diff, with the collapsed one-line summary to show for it. */
 export interface DiffFileRange {
@@ -17,9 +18,10 @@ export interface DiffFileRange {
    * hunk line). */
   readonly headerLine: number;
   readonly endLine: number;
-  /** The path used for test-file detection (new side, else old side). */
+  /** The path used for file-category detection (new side, else old side). */
   readonly path: string;
   readonly isTest: boolean;
+  readonly isMarkdown: boolean;
   /** The one-line summary shown when the file is collapsed. */
   readonly summary: Line;
 }
@@ -45,6 +47,7 @@ export function diffFiles(text: string): DiffFileRange[] {
       endLine: file.endLine,
       path,
       isTest: isTestPath(path),
+      isMarkdown: isMarkdownPath(path),
       summary: summaryLine({
         oldPath: file.oldPath,
         newPath: file.newPath,
@@ -196,7 +199,12 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-// --- test-file detection ----------------------------------------------------
+// --- file-category detection ------------------------------------------------
+
+/** Whether a path selects the pager's Markdown language. */
+export function isMarkdownPath(path: string): boolean {
+  return languageForFile(path).id === "markdown";
+}
 
 const TEST_SEGMENTS = new Set([
   "test",

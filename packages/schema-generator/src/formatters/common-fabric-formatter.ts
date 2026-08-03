@@ -280,6 +280,19 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (typeWithAlias.aliasTypeArguments.length >= 2) {
         const defaultType = typeWithAlias.aliasTypeArguments[1]!;
         const defaultValue = this.extractDefaultValue(defaultType, context);
+        // TODO(danfuzz): A default for a fabric-backed native disagrees with
+        // the value its type actually stores. `Date`, `RegExp`, and
+        // `Uint8Array` map to `{ type: "object" }` because they are stored as
+        // `FabricEpochNsec` / `FabricRegExp` / `FabricBytes`, but the default
+        // captured here is the authored TS literal. So
+        // `Default<Date, "2020-01-01T00:00:00.000Z">` emits
+        // `{ type: "object", default: "2020-01-01T00:00:00.000Z" }` -- a string
+        // standing in for an object, and not the form a read of that slot would
+        // ever produce. Decide how a default for these types is expressed
+        // (converted to the fabric form here, converted where the default is
+        // applied, or refused outright) instead of leaving the two disagreeing.
+        // The node-based path below attaches defaults the same way and needs
+        // the same answer.
         if (defaultValue !== undefined) {
           if (typeof valueSchema === "boolean") {
             return (valueSchema === false
@@ -948,6 +961,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     if (defaultValue !== undefined) {
+      // TODO(danfuzz): This attaches a default without checking it against the
+      // shape its type stores -- see the marker on the type-based path above,
+      // which describes the fabric-backed-native mismatch and needs one answer
+      // covering both paths.
+      //
       // JSON Schema Draft 2020-12 allows default as a sibling of $ref
       // Simply add the default property directly to the schema
       if (typeof valueSchema === "boolean") {

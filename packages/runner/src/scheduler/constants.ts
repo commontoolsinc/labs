@@ -65,3 +65,14 @@ export const AUTO_DEBOUNCE_DELAY_MS = 100;
 // (observed: CI's slow runners quantized second-navigation boots to ~10s and
 // starved a 30s UI-commit wait; see lunch-poll-vote integration failure).
 export const INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS = 2_000;
+
+/**
+ * Action-timing stats entries kept before the least recently run is dropped.
+ * An action id names one action INSTANCE, not one piece of source, so a
+ * pattern that keeps creating actions — a list projecting a window that moves
+ * over a long list makes a fresh set every time the window moves — adds ids
+ * without ever reusing them. Auto debounce and the scheduler graph read these,
+ * and both concern actions that are still running, so the least recently run
+ * entry is the one to lose.
+ */
+export const MAX_ACTION_STATS = 20_000;

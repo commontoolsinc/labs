@@ -5,6 +5,7 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type { PieceManager } from "@commonfabric/piece";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
@@ -31,7 +32,7 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { entityIdFrom, Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime, RuntimeTelemetry } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
@@ -3008,19 +3009,25 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     expect(calls).toBe(1);
   });
 
-  it("watchSiteTable registers table entries, isolating bad ones", async () => {
+  it("watchSiteTable uses the last usable entry per space without replacing an accepted route", async () => {
     const { runtime } = createRuntime();
     const { siteTableCause, siteTableSchema } = await import(
       "@commonfabric/home-schemas"
     );
     const registered: Array<[string, string]> = [];
+    let resolveRegistered = () => {};
+    const entriesRegistered = new Promise<void>((resolve) => {
+      resolveRegistered = resolve;
+    });
+    const registeredRoute = "did:key:z6Mk-table-b" as MemorySpace;
+    const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+    expect(registerSpaceHost(registeredRoute, "http://ipc-host.test/"))
+      .toBe(true);
     Object.assign(runtime, {
       registerSpaceHost: (space: string, host: string) => {
         registered.push([space, host]);
-        // Malformed hosts throw in the real registry — simulate to
-        // assert per-entry isolation.
-        if (host === "not a url") throw new Error("Invalid host");
-        return host !== "http://refused.test/";
+        if (registered.length === 3) resolveRegistered();
+        return registerSpaceHost(space as MemorySpace, host);
       },
     });
     const userDid = runtime.userIdentityDID;
@@ -3033,28 +3040,56 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     table.withTx(tx).set([
       { did: "did:key:z6Mk-table-a", host: "http://host-a.test/" },
       { did: "not-a-did", host: "http://ignored.test/" },
-      { did: "did:key:z6Mk-table-bad", host: "not a url" },
-      { did: "did:key:z6Mk-table-b", host: "http://refused.test/" },
+      { did: registeredRoute, host: "http://stale-table.test/" },
       { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
+      { did: "did:key:z6Mk-table-a", host: "http://host-a-new.test/" },
+      { did: "did:key:z6Mk-table-a", host: "not a url" },
     ]);
     await tx.commit();
 
-    const processor = { runtime } as unknown as RuntimeProcessor;
+    const { PieceManager: PieceManagerConstructor } = await import(
+      "@commonfabric/piece"
+    );
+    const pieceManager = new PieceManagerConstructor(
+      { as: cfcSigner, space: userDid },
+      runtime,
+    );
+    const cc = new PiecesController(pieceManager);
+    const ProcessorConstructor = RuntimeProcessor as unknown as new (
+      runtime: Runtime,
+      pieceManager: PieceManager,
+      cc: PiecesController,
+      initSpace: MemorySpace,
+      identity: Identity,
+      telemetry: RuntimeTelemetry,
+    ) => RuntimeProcessor;
+    const processor = new ProcessorConstructor(
+      runtime,
+      pieceManager,
+      cc,
+      userDid,
+      cfcSigner,
+      new RuntimeTelemetry(),
+    );
     try {
-      (RuntimeProcessor.prototype as unknown as {
-        watchSiteTable(): void;
-      }).watchSiteTable.call(processor);
-      await runtime.idle();
-      // Microtask drain: sync() resolution + first sink fire.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      processor.watchSiteTable();
+      await entriesRegistered;
       expect(registered).toEqual([
-        ["did:key:z6Mk-table-a", "http://host-a.test/"],
-        ["did:key:z6Mk-table-bad", "not a url"],
-        ["did:key:z6Mk-table-b", "http://refused.test/"],
+        ["did:key:z6Mk-table-a", "http://host-a-new.test/"],
+        [registeredRoute, "http://stale-table.test/"],
         ["did:key:z6Mk-table-c", "http://host-c.test/"],
       ]);
+      expect(runtime.mappedHostFor(registeredRoute)).toBe(
+        "http://ipc-host.test/",
+      );
+      const tableRoute = "did:key:z6Mk-table-a" as MemorySpace;
+      expect(registerSpaceHost(tableRoute, "http://late-ipc.test/"))
+        .toBe(false);
+      expect(runtime.mappedHostFor(tableRoute)).toBe(
+        "http://host-a-new.test/",
+      );
     } finally {
-      await runtime.dispose();
+      await processor.dispose();
     }
   });
 

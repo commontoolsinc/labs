@@ -49,6 +49,7 @@ export type Transport = {
 
 export type ConnectOptions = {
   transport: Transport;
+  signal?: AbortSignal;
 };
 
 export type MountOptions = {
@@ -107,6 +108,42 @@ const compareEntitySnapshot = (
   (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
   left.id.localeCompare(right.id);
 
+const runWithAbortSignal = async <T>(
+  signal: AbortSignal | undefined,
+  fallbackMessage: string,
+  start: () => T | PromiseLike<T>,
+): Promise<T> => {
+  const abortError = (): Error =>
+    signal?.reason instanceof Error
+      ? signal.reason
+      : new Error(fallbackMessage);
+  if (signal?.aborted) {
+    throw abortError();
+  }
+  if (signal === undefined) {
+    return await start();
+  }
+
+  const cancelled = Promise.withResolvers<never>();
+  const cancel = (): void => cancelled.reject(abortError());
+  signal.addEventListener("abort", cancel, { once: true });
+  let work: Promise<T>;
+  try {
+    work = Promise.resolve(start());
+  } catch (error) {
+    signal.removeEventListener("abort", cancel);
+    throw error;
+  }
+  if (signal.aborted) {
+    cancel();
+  }
+  try {
+    return await Promise.race([work, cancelled.promise]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+};
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -135,8 +172,25 @@ export class Client {
 
   static async connect(options: ConnectOptions): Promise<Client> {
     const client = new Client(options.transport);
-    await client.hello();
-    return client;
+    const abortError = (): Error =>
+      options.signal?.reason instanceof Error
+        ? options.signal.reason
+        : new Error("memory client connection cancelled");
+    const closeForAbort = (): void => {
+      void client.close().catch(() => {});
+    };
+    options.signal?.addEventListener("abort", closeForAbort, { once: true });
+    try {
+      if (options.signal?.aborted) throw abortError();
+      await client.hello();
+      if (options.signal?.aborted) throw abortError();
+      return client;
+    } catch (error) {
+      await client.close().catch(() => {});
+      throw options.signal?.aborted ? abortError() : error;
+    } finally {
+      options.signal?.removeEventListener("abort", closeForAbort);
+    }
   }
 
   /** The flags the SERVER advertised in its `hello.ok` (null before the first
@@ -161,13 +215,28 @@ export class Client {
     space: string,
     options: MountOptions = {},
     openAuthFactory?: SessionOpenAuthFactory,
+    signal?: AbortSignal,
   ): Promise<SpaceSession> {
-    const auth = await openAuthFactory?.(
-      space,
-      options,
-      this.sessionOpenAuthContext(),
+    const auth = await runWithAbortSignal(
+      signal,
+      "memory session mount cancelled",
+      () =>
+        openAuthFactory?.(
+          space,
+          options,
+          this.sessionOpenAuthContext(),
+        ),
     );
-    const result = await this.openSession(space, options, auth);
+    const result = await runWithAbortSignal(
+      signal,
+      "memory session mount cancelled",
+      () => this.openSession(space, options, auth),
+    );
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error("memory session mount cancelled");
+    }
     const session = new SpaceSession(
       this,
       space,
@@ -175,6 +244,7 @@ export class Client {
       result.sessionToken,
       result.serverSeq,
       openAuthFactory,
+      signal,
     );
     this.#spaces.add(session);
     return session;
@@ -260,13 +330,15 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(encodeMemoryBoundary({
-      type: "hello",
-      protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
-    }));
     try {
-      await ack.promise;
+      await Promise.all([
+        this.transport.send(encodeMemoryBoundary({
+          type: "hello",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+        })),
+        ack.promise,
+      ]);
       this.#connected = true;
     } finally {
       this.#helloPending = null;
@@ -545,6 +617,7 @@ export class SpaceSession {
     sessionToken: string | undefined,
     serverSeq: number,
     private readonly openAuthFactory?: SessionOpenAuthFactory,
+    private readonly routeSignal?: AbortSignal,
   ) {
     this.#sessionId = sessionId;
     this.#sessionToken = sessionToken;
@@ -579,13 +652,21 @@ export class SpaceSession {
     }
   }
 
-  async transact(commit: ClientCommit): Promise<AppliedCommit> {
+  /**
+   * `beforeIssue` runs after the open-session check and before this mutation
+   * enters the session's outstanding request state. Throwing prevents issue.
+   */
+  async transact(
+    commit: ClientCommit,
+    beforeIssue?: () => void,
+  ): Promise<AppliedCommit> {
     this.#assertOpen();
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;
     }
 
+    beforeIssue?.();
     const pending = Promise.withResolvers<AppliedCommit>();
     this.#outstandingCommits.set(commit.localSeq, {
       commit,
@@ -695,11 +776,14 @@ export class SpaceSession {
   async registerSqliteDiskSource(
     id: string,
     path: string,
+    beforeIssue?: () => void,
   ): Promise<SqliteRegisterDiskSourceResult> {
     this.#assertOpen();
+    const requestId = crypto.randomUUID();
+    beforeIssue?.();
     return await this.client.request<SqliteRegisterDiskSourceResult>({
       type: "sqlite.register-disk-source",
-      requestId: crypto.randomUUID(),
+      requestId,
       space: this.space,
       sessionId: this.#sessionId,
       id,
@@ -1188,16 +1272,26 @@ export class SpaceSession {
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
     };
-    const auth = await this.openAuthFactory?.(
-      this.space,
-      session,
-      this.client.sessionOpenAuthContext(),
+    const auth = await runWithAbortSignal(
+      this.routeSignal,
+      "memory session route cancelled",
+      () =>
+        this.openAuthFactory?.(
+          this.space,
+          session,
+          this.client.sessionOpenAuthContext(),
+        ),
     );
-    const restored = await this.client.openSession(this.space, {
-      sessionId: this.#sessionId,
-      seenSeq: this.#serverSeq,
-      sessionToken: this.#sessionToken,
-    }, auth);
+    const restored = await runWithAbortSignal(
+      this.routeSignal,
+      "memory session route cancelled",
+      () =>
+        this.client.openSession(this.space, {
+          sessionId: this.#sessionId,
+          seenSeq: this.#serverSeq,
+          sessionToken: this.#sessionToken,
+        }, auth),
+    );
     const sessionChanged = restored.sessionId !== oldSessionId;
     const sessionReplaced = sessionChanged || restored.resumed !== true;
     this.#sessionId = restored.sessionId;

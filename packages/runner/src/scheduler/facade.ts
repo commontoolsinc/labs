@@ -1,3 +1,4 @@
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cancel } from "../cancel.ts";
 import { getTopFrame } from "../builder/pattern.ts";
@@ -35,6 +36,7 @@ import type {
 import {
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
+  MAX_ACTION_STATS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
 import {
@@ -440,7 +442,9 @@ export class Scheduler {
 
   // Compute time tracking for auto-debounce and diagnostics
   // Keyed by action ID (source location) to persist stats across action recreation
-  private actionStats = new Map<string, ActionStats>();
+  private actionStats = new BoundedKeyMap<string, ActionStats>(
+    MAX_ACTION_STATS,
+  );
   private actionTimingState: ActionTimingState = {
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
@@ -1332,6 +1336,13 @@ export class Scheduler {
       eventId?: string;
       originTx?: IExtendedStorageTransaction;
       time?: number;
+      /**
+       * Payload keys the RUNTIME itself injected into `event`'s value —
+       * provenance for the closed-world gate, forwarded from the send's
+       * internal options (never derivable from payload data). See
+       * `StreamSendOptions` (cell.ts).
+       */
+      runtimeInjectedEventKeys?: readonly string[];
     } = {},
   ): void {
     // Bind the event's wall-clock time at its causal origin. A pre-supplied time
@@ -1360,7 +1371,12 @@ export class Scheduler {
         event,
         retries,
         onCommit,
-        { eventId: opts.eventId, originTx: opts.originTx, time },
+        {
+          eventId: opts.eventId,
+          originTx: opts.originTx,
+          time,
+          runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+        },
       );
       return;
     }
@@ -1373,6 +1389,7 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
       time,
+      runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
     });
   }
 
@@ -1394,6 +1411,7 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
       time: opts.time,
+      runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's

@@ -11,6 +11,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type { URI } from "./sigil-types.ts";
 
 /**
@@ -44,7 +45,7 @@ export function toURI(value: unknown, kind?: EntityKind): URI {
       }
       // TODO(seefeld): Remove this once we want to support any URI, ideally
       // once there are no bare ids anymore
-      if (!hasEntityUriScheme(value) && !value.startsWith("data:")) {
+      if (!hasEntityUriScheme(value) && !hasDataUriScheme(value)) {
         throw new Error(`Invalid URI: ${value}`);
       }
       return value as URI;
@@ -71,7 +72,7 @@ export function fromURI(uri: URI | string): string {
     return uri;
   } else if (entityScheme !== undefined) {
     return uri.slice(entityScheme.length);
-  } else if (uri.startsWith("data:")) {
+  } else if (hasDataUriScheme(uri)) {
     return hashOf(uri).toString();
   } else {
     // TODO(seefeld): Remove this once we want to support any URI

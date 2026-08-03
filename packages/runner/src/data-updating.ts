@@ -51,6 +51,7 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
@@ -841,9 +842,10 @@ export function normalizeAndDiff(
   // deliberately does not carry over: inlined content in an array slot stores
   // inline, exactly as the annotation scheme (which never looked behind
   // links) stored it.
-  if (
-    isCellLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")
-  ) {
+  const newValueLinkId = isCellLink(newValue)
+    ? parseLink(newValue, link).id
+    : undefined;
+  if (newValueLinkId !== undefined && hasDataUriScheme(newValueLinkId)) {
     return normalizeAndDiff(
       runtime,
       tx,

@@ -298,21 +298,14 @@ Resolves "auto" to actual color scheme based on system preference.
 
 Resolves a ColorToken to a concrete color value.
 
-### getThemeColor(value: keyof CFTheme["colors"] | ColorToken | string, theme: CFTheme): string
+### getSemanticSpacing(density: CFTheme["density"], size, context?): string
 
-Gets a color that can be semantic (theme key), a token, or a specific value.
-
-### getThemeSpacing(value: string, theme: CFTheme): string
-
-Gets spacing that can be semantic or specific.
+Returns a `var(--cf-spacing-N, …rem)` string for a base size, scaled by the
+theme's density.
 
 ### getAnimationDuration(speed: CFTheme["animationSpeed"]): string
 
 Returns CSS duration value based on animation speed setting.
-
-### createThemeVariant(baseTheme: CFTheme, overrides: Partial<CFTheme>): CFTheme
-
-Creates a theme override with granular control.
 
 ### mergeWithDefaultTheme(partialTheme: any, baseTheme?: CFTheme): CFTheme
 
