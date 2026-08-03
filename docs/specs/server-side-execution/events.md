@@ -42,7 +42,12 @@ are ENVELOPE fields for admission, not payload — admission reads
 both (protocol.md §2, §7). `firedAt` is **server-stamped**: the
 memory server writes `user` and `session` from the authenticated
 commit envelope at admission, and a client-supplied `firedAt` that
-disagrees is REJECTED, never corrected. It carries the USER as well
+disagrees is REJECTED, never corrected. For DELEGATED appends
+(protocol.md §2's server-produced authored row) the stamp source is
+the VALIDATED acting identity carried in the commit metadata — the
+originating chain actor, per §2's inheritance rule — never the
+delegating envelope; the value is server-controlled either way.
+It carries the USER as well
 as the session because scopes.md §5 resolves a handler's scoped
 reads and writes against the acting user; deriving the user from the
 append later would reintroduce exactly the binding the stamp already
@@ -74,18 +79,33 @@ handler fires
    state now authoritative
 ```
 
-- Server-originated events (`stream.send()` from a served computation, or
-  piece-to-piece) enter at "enqueue" with `firedAt.session = server` and
-  are otherwise identical. One path, two producers. When the target
+- Server-originated events (`stream.send()` from a handler cascade
+  or a served computation, piece-to-piece) enter at "enqueue" and
+  are otherwise identical — one path, two producers — but their
+  ACTOR is INHERITED, never blanked (owner, 2026-08-03): **an event
+  emitted by a handler run carries that run's acting identity —
+  events run as the session they originated from.** A cascade
+  rooted in a client event therefore preserves the ROOT
+  (user, session) hop by hop, so session-scoped consequences land
+  in the ORIGINATING session's instances (scopes.md §5) —
+  navigateTo above all, whose intent must address the session that
+  actually acted (builtins.md §4). Only an event with NO acting
+  session anywhere in its chain — a derivation's `stream.send()`, a
+  timer — enters with `firedAt.session = "server"` (carrying an
+  acting user only if its emitting run had one). When the target
   stream lives in ANOTHER space, the append travels via the outbox as an
-  authored commit — the only cross-space mutation (protocol.md §2b).
-  **A SESSIONLESS actor has no session instance**: if such a handler
+  authored commit — the only cross-space mutation (protocol.md §2b)
+  — and the acting identity travels WITH it as validated commit
+  metadata, so inheritance crosses spaces too (protocol.md §2's
+  delegated-append stamping).
+  **A SESSIONLESS actor has no session instance**: if a
+  no-acting-session handler
   run attempts a SESSION-SCOPED write, there is no instance to write
   — that is a runtime ERROR naming this bullet, not a fallback to
   the space instance and not a silently minted session. It is the
   same rule, for the same reason, as the sessionless `navigateTo`
   error (builtins.md §4); scopes.md §5 states the scope-side half.
-  User-scoped writes under a server-fired event are equally an error
+  User-scoped writes under a sessionless event are equally an error
   unless the event carries an acting user.
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim

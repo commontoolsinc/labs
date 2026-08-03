@@ -189,7 +189,7 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | --- | --- |
 | `authored` doc write | session authenticated → write authority on doc/path (existing ACL) → CAS on base revision |
 | `authored` event append | session authenticated → append authority on stream doc → `eventId` unique among stream entries above the stream's `eventWatermark` (CAS — the dedupe horizon, events.md §4) → the memory server STAMPS `firedAt` from the commit envelope (authenticated principal + session); a client-supplied `firedAt` that disagrees is REJECTED, never corrected |
-| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries `actingPrincipal` + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → CAS |
+| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
 | READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1) | requester holds the live `execution_lease` for the space (the SAME one equality check) → the named instance is read. A non-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
@@ -215,10 +215,20 @@ disagreeing client value is rejected rather than silently overwritten.
 `clientSeq` stays client-minted — it orders one session's own appends
 and steers nothing.
 Delegated appends (the server-produced authored row above) stamp
-from the DELEGATION, never the delegating envelope:
-`firedAt.user` := the validated `actingPrincipal`,
-`firedAt.session` := `"server"` (events.md §2) — stamping from the
-outbox's own envelope would run the target handler as
+from the CARRIED DELEGATION, never the delegating envelope:
+`firedAt` := the validated acting identity in the commit metadata
+(`actingPrincipal` + `actingSession`) — which, by the
+actor-inheritance rule (events.md §2, owner 2026-08-03), is the
+ORIGINATING chain actor: **events run as the session they
+originated from**, so the target's session-scoped consequences and
+its navigateTo intents land in the session that actually acted.
+`actingSession` is absent only for a chain with no acting session
+(a derivation-emitted event), which stamps
+`firedAt.session = "server"`. The carriage is admissible on the
+same one-trust-environment footing as §1's derived annotations —
+the producer is a lease-holding SpaceServer on the same co-hosted
+memory server. Stamping from the
+outbox's own envelope would instead run the target handler as
 `user:<serviceDID>`, the silent-empty-instance trap this section
 exists to prevent.
 This PRESERVES a guarantee the store gives today rather than adding
@@ -281,9 +291,13 @@ them). v2 keeps that invariant and adds the class discipline:
 The event append crosses as an ordinary `authored` commit under the
 piece's append capability, carried by the OUTBOX (serving-loop.md §5):
 at-least-once, deduped by `eventId` at the target's admission, FIFO per
-(source wave → target stream). The commit carries
-`actingPrincipal` + `capabilityRef` metadata and the target's admission
-validates that grant (§2) — delegation, never impersonation. The
+(source wave → target stream). The commit carries the acting
+identity (`actingPrincipal` + `actingSession` — the originating
+chain actor, events.md §2) + `capabilityRef` metadata; the target's
+admission
+validates that grant (§2) — delegation, never impersonation — and
+stamps `firedAt` from the carried actor, so the event RUNS AS THE
+SESSION IT ORIGINATED FROM even across the space boundary. The
 target's SpaceServer processes it like any event. This matches the
 codebase's own convention — patterns already mutate cross-space through
 exported streams — and it is now the rule, not a style: a server action
@@ -452,8 +466,10 @@ disabled (README §3.5).
 - Commit metadata additions in v2, complete list: `class`, `holder`
   (derived only), `derivedThrough` (derived only), `consequenceOf`
   (derived only), `eventId`/`firedAt` (event appends),
-  `actingPrincipal`/`capabilityRef` (server-produced authored commits
-  only — §2); plus, WITHIN a derived commit's body, the ADDRESSING
+  `actingPrincipal`+`actingSession`/`capabilityRef` (server-produced
+  authored commits
+  only — §2; the acting identity is the ORIGINATING chain actor,
+  events.md §2); plus, WITHIN a derived commit's body, the ADDRESSING
   and ATTRIBUTION pair §1 defines — never envelope identity (R-Q6b):
   the explicit `scope_key` on every scoped write (addressing) and
   the acting identity on every action RUN's writes, where the run

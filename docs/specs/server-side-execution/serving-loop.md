@@ -647,6 +647,12 @@ process-local; on crash, missing results are re-missed from keys).
   handle, identity carriage — §4's miss rule: the result-cell
   address with its `scope_key`, plus the acting identity where the
   run had one).
+- Cross-space event appends and `.inSpace` provisioning commits ride
+  the same outbox (protocol.md §2b); their entries carry the acting
+  identity (`actingPrincipal` + `actingSession`) + `capabilityRef`
+  that the target's admission validates and stamps `firedAt` from —
+  actor inheritance crosses spaces through exactly this carriage
+  (events.md §2).
 - At-least-once; idempotence comes from the memo hit rule (a duplicate
   completion writes an identical key and is a CAS no-op).
 - Authority: the capability handle bound at wiring time (README §3.8);

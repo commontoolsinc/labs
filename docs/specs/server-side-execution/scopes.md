@@ -228,7 +228,18 @@ R-Q6b: attribution within the derived commit, never a
 SpaceServer-ambient identity (protocol.md §1/§7;
 runtime-mapping.md N57).
 
-**A sessionless actor has no session instance.** A server-fired
+**Consequence events INHERIT the actor (owner, 2026-08-03).** An
+event emitted by a handler run carries that run's acting identity —
+events run as the session they originated from — so a chain rooted
+in a client event preserves the ROOT (user, session) across
+cascades and across spaces (events.md §2; protocol.md §2/§2b
+carriage), and session-scoped consequences land in the ORIGINATING
+session's instances, navigateTo's intent above all (builtins.md
+§4). "Sessionless" below therefore means an event with NO acting
+session anywhere in its chain — a derivation's send, a timer — not
+merely one fired server-side.
+
+**A sessionless actor has no session instance.** A sessionless
 event (`firedAt.session = "server"`, events.md §2) whose handler
 attempts a SESSION-SCOPED write is a runtime ERROR — there is no
 instance to write, and neither falling back to the space instance

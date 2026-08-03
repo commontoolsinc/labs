@@ -92,13 +92,22 @@ reconciles it.
 
 Implementation note: the served half needs the firing session's
 identity — it comes from the event's `firedAt`, which is
-SERVER-STAMPED from the authenticated commit envelope and carries
+SERVER-STAMPED (from the authenticated commit envelope, or from the
+validated carried actor for delegated appends — protocol.md §2) and
+carries
 both user and session (events.md §1, protocol.md §2). The served half
 CONSUMES that value; it never re-derives, defaults, or trusts a
-client-supplied one. A
+client-supplied one. Actor inheritance (events.md §2, owner
+2026-08-03) is what makes this compose across chains: an event
+emitted by a handler run carries that run's acting identity, so a
+navigateTo computed several hops from the click — cascades and
+cross-space appends included — still addresses the SESSION THAT
+CLICKED. "Consequences of a client-fired event" below means the
+whole inheritance chain, not just the first hop. A
 navigation computed outside any event context (pure derivation) has no
-session, and a server-fired event (`firedAt.session = server`,
-events.md §2) has no client to enact — both are the SAME runtime
+session, and a sessionless event (`firedAt.session = "server"`,
+events.md §2 — no acting session anywhere in its chain) has no
+client to enact — both are the SAME runtime
 ERROR: navigateTo MUST be reachable only from the consequences of a
 client-fired event. Enforce with a runtime check, not a type dance.
 
