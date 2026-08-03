@@ -3,7 +3,10 @@ import type { TransformationContext } from "../../core/mod.ts";
 import { isEventHandlerJsxAttribute } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import {
+  createHandlerEventSchema,
+  createHandlerStateSchema,
+} from "../utils/schema-factory.ts";
 import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
 
 /**
@@ -47,12 +50,11 @@ export function transformHandlerJsxAttribute(
   const { captureTree } = collector.analyze(callback);
   const { factory } = context;
 
-  // Build type information for handler params using SchemaFactory
-  const schemaFactory = new SchemaFactory(context);
-  const eventTypeNode = schemaFactory.createHandlerEventSchema(callback);
-  const stateTypeNode = schemaFactory.createHandlerStateSchema(
+  const eventTypeNode = createHandlerEventSchema(callback, context);
+  const stateTypeNode = createHandlerStateSchema(
     captureTree,
     callback.parameters[1] as ts.ParameterDeclaration | undefined,
+    context,
   );
 
   const finalCall = buildCapturedHandlerClosureCall(

@@ -26,7 +26,7 @@ import {
 } from "../../utils/identifiers.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import { createLiftAppliedInputSchema } from "../utils/schema-factory.ts";
 
 /**
  * Pre-register unwrapped types for captured identifiers in a callback body.
@@ -571,13 +571,13 @@ export function transformLiftAppliedCall(
   setParentPointers(newCallback);
 
   // Build TypeNodes for schema generation
-  const schemaFactory = new SchemaFactory(context);
-  let inputTypeNode = schemaFactory.createLiftAppliedInputSchema(
+  let inputTypeNode = createLiftAppliedInputSchema(
     originalInputParamName,
     originalInput,
     captureTree,
     captureNameMap,
     hadZeroParameters,
+    context,
   );
   const capabilityAnalysis = getCapabilityAnalysis(
     newCallback,

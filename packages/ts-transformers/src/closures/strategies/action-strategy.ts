@@ -2,7 +2,11 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import { detectCallKind, registerSyntheticCallType } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import {
+  createActionEventSchema,
+  createHandlerEventSchema,
+  createHandlerStateSchema,
+} from "../utils/schema-factory.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
 
@@ -106,20 +110,18 @@ export function transformActionCall(
     ? eventParam.name.text
     : "_";
 
-  // Build type information for handler params using SchemaFactory
-  const schemaFactory = new SchemaFactory(context);
-
   // For action, event parameter is optional:
   // - action(() => ...) → event schema is `false` (never type)
   // - action((e) => ...) → event schema is inferred from the parameter
   const eventTypeNode = callback.parameters.length > 0
-    ? schemaFactory.createHandlerEventSchema(callback)
-    : schemaFactory.createActionEventSchema();
+    ? createHandlerEventSchema(callback, context)
+    : createActionEventSchema(context);
 
   // State schema is based on captures
-  const stateTypeNode = schemaFactory.createHandlerStateSchema(
+  const stateTypeNode = createHandlerStateSchema(
     captureTree,
     undefined, // no explicit state parameter in action
+    context,
   );
 
   const finalCall = buildCapturedHandlerClosureCall(
