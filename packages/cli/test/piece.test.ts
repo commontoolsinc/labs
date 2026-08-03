@@ -1233,6 +1233,98 @@ describe("cli piece parsing", () => {
       await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
     });
 
+    it("refuses a verb whose result projection also fails", async () => {
+      // The shape a real board hits: reading `addTopic` on an unstepped piece
+      // fails the result-projection check BEFORE the verb is classified, so
+      // the caller was told "use --step" — advice that sends them to re-run a
+      // read which can never succeed, because a verb is not a materializable
+      // result. The verb refusal has to win over the projection error.
+      const verbCell = {
+        schema: { type: "object" },
+        getRaw: () => ({ "/": "stream-link" }),
+        asSchemaFromLinks: () => verbCell,
+      };
+      const rootCell = {
+        schema: {
+          type: "object",
+          properties: { addTopic: { type: "object" } },
+          required: ["addTopic"],
+        },
+        get: () => ({ addTopic: { $stream: true } }),
+        key: () => verbCell,
+      };
+      const piece = {
+        result: {
+          // The read yields nothing: the projection could not materialize it.
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      const error = await getCellValue(
+        config,
+        ["addTopic"],
+        {},
+        guardDeps(piece),
+      )
+        .catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toContain("cf piece call");
+      expect((error as Error).message).not.toContain("--step");
+    });
+
+    it("refuses a verb read through a transform, not a projection error", async () => {
+      // The transform path has its own projection-failure exits, so a verb
+      // read through --filter/--schema must reach the same refusal: asking a
+      // stream to project is the same mistake whichever route it takes.
+      const verbCell = {
+        schema: { type: "object" },
+        getRaw: () => ({ "/": "stream-link" }),
+        asSchemaFromLinks: () => verbCell,
+      };
+      const rootCell = {
+        schema: {
+          type: "object",
+          properties: { addTopic: { type: "object" } },
+          required: ["addTopic"],
+        },
+        get: () => ({ addTopic: { $stream: true } }),
+        key: () => verbCell,
+      };
+      const piece = {
+        result: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      const deps = {
+        ...guardDeps(piece),
+        loadManager: () =>
+          Promise.resolve(
+            { runtime: {}, getSpace: () => "did:key:test-space" } as never,
+          ),
+      };
+      const options = { transform: { filter: parsePieceGetFilter(".active") } };
+
+      // The transform throws the "Cannot access path" shape a real projection
+      // failure raises.
+      const thrown = await getCellValue(config, ["addTopic"], options, {
+        ...deps,
+        derivePieceGetValue: () =>
+          Promise.reject(
+            new Error('Cannot access path "addTopic" - property not found'),
+          ),
+      }).catch((error) => error);
+      expect(thrown).toBeInstanceOf(PieceVerbReadError);
+      expect((thrown as Error).message).toContain("cf piece call");
+
+      // And the same when the transform simply yields nothing.
+      const empty = await getCellValue(config, ["addTopic"], options, {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      }).catch((error) => error);
+      expect(empty).toBeInstanceOf(PieceVerbReadError);
+    });
+
     it("fails open when classification itself fails", async () => {
       // A cell surface that throws during the guard's walk must never turn
       // a successful read into a refusal: the guard swallows the failure

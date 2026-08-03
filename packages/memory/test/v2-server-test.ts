@@ -117,6 +117,129 @@ const createServer = (
     },
   });
 
+type TestConnection = ReturnType<Server["connect"]>;
+
+const openTestSession = async (
+  connection: TestConnection,
+  messages: ServerMessage[],
+  space: string,
+  label: string,
+): Promise<string> => {
+  await connection.receive(encodeMemoryBoundary(HELLO));
+  const sessionOpen = expectHelloOk(messages);
+  await connection.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: `${label}-open`,
+    space,
+    session: {},
+    invocation: authInvocation(sessionOpen),
+  }));
+  return assertResponse<{ sessionId: string }>(shiftMessage(messages)).ok!
+    .sessionId;
+};
+
+const assertCommitBurstBeforeFanout = async (
+  name: string,
+  writerCount: 1 | 2,
+): Promise<void> => {
+  const time = new FakeTime();
+  const server = createServer(`memory://${name}`, 1);
+  const space = `did:key:z6Mk-${name}`;
+  const observerMessages: ServerMessage[] = [];
+  const observer = server.connect((message) => observerMessages.push(message));
+  const writerMessages = Array.from(
+    { length: writerCount },
+    () => [] as ServerMessage[],
+  );
+  const writers = writerMessages.map((messages) =>
+    server.connect((message) => messages.push(message))
+  );
+  const ids = ["of:doc:1", "of:doc:2"];
+
+  try {
+    const observerSessionId = await openTestSession(
+      observer,
+      observerMessages,
+      space,
+      "observer",
+    );
+    const writerSessionIds = await Promise.all(
+      writers.map((writer, index) =>
+        openTestSession(
+          writer,
+          writerMessages[index],
+          space,
+          `writer-${index + 1}`,
+        )
+      ),
+    );
+
+    await observer.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "observer-watch",
+      space,
+      sessionId: observerSessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: ids.map((id) => ({
+            id,
+            selector: { path: [], schema: false },
+          })),
+        },
+      }],
+    }));
+    assertResponse<unknown>(shiftMessage(observerMessages));
+
+    const transact = (index: number) => {
+      const writerIndex = writerCount === 1 ? 0 : index;
+      return writers[writerIndex].receive(encodeMemoryBoundary({
+        type: "transact",
+        requestId: `tx-${index + 1}`,
+        space,
+        sessionId: writerSessionIds[writerIndex],
+        commit: {
+          localSeq: writerCount === 1 ? index + 1 : 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: ids[index],
+            value: { value: { version: index + 1 } },
+          }],
+        },
+      }));
+    };
+
+    await Promise.all([transact(0), transact(1)]);
+
+    const responseIds = writerMessages.flatMap((messages) =>
+      messages
+        .filter((message) => message.type === "response")
+        .map((message) => (message as ResponseMessage<unknown>).requestId)
+    ).sort();
+    assertEquals(responseIds, ["tx-1", "tx-2"]);
+    assertEquals(
+      observerMessages,
+      [],
+      "both commits must receive verdicts before the next subscription fan-out",
+    );
+
+    await server.flushSessions([space]);
+
+    const effect = assertEffect(shiftMessage(observerMessages));
+    assertEquals(effect.effect.toSeq, 2);
+    assertEquals(
+      effect.effect.upserts.map((entry) => entry.id).sort(),
+      ids,
+    );
+    assertEquals(observerMessages, []);
+  } finally {
+    await server.close();
+    time.restore();
+  }
+};
+
 Deno.test("memory v2 server stateless respond does not issue hello.ok", async () => {
   const server = createServer("memory://memory-v2-server-stateless-respond");
   try {
@@ -2475,6 +2598,20 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
   } finally {
     await server.close();
   }
+});
+
+Deno.test("memory v2 server accepts same-client commit bursts before fan-out", async () => {
+  await assertCommitBurstBeforeFanout(
+    "memory-v2-same-client-commit-burst",
+    1,
+  );
+});
+
+Deno.test("memory v2 server accepts cross-client commit bursts before fan-out", async () => {
+  await assertCommitBurstBeforeFanout(
+    "memory-v2-cross-client-commit-burst",
+    2,
+  );
 });
 
 Deno.test("memory v2 server does not echo same-session operation docs through watches", async () => {
