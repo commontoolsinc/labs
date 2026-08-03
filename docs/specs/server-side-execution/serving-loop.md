@@ -49,7 +49,8 @@ loads graph structure sufficient to resolve the demanded values and
 the queued events — never "instantiate the pieces" as a step of its
 own. Demand is value-granular client pull: a subscription to a value
 recomputes that value and its upstream, nothing else. Events run
-their handlers eagerly. Undemanded derivations stay
+their handlers eagerly — after preflight makes any dirty state
+inputs current (D-v2-2). Undemanded derivations stay
 dirty-unmaterialized indefinitely — `idle()` already excludes them
 (§3b's pull-based laziness). Per-piece start/stop, root-piece
 bootstrap, and auto-start-on-event are client-era framings with no
@@ -119,9 +120,10 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
   // no event handling outside it (D-v2-2, ruled 2026-08-02). Events
   // enter the scheduler's ordinary queue; idle() does not resolve
   // until every queued event is processed, same as a client today.
-  // Handler-input freshness is the scheduler's existing rule: a dirty
-  // computed input is recomputed ON DEMAND before the handler that
-  // reads it runs, and only then (anchor:
+  // Handlers run eagerly — but only after preflight makes any dirty
+  // state inputs current (D-v2-2): the scheduler's existing rule
+  // recomputes a dirty computed input ON DEMAND before the handler
+  // that reads it runs, and only then (anchor:
   // scheduler/event-preflight-dependencies.ts). Pull-based laziness
   // therefore still skips derived work nothing demands — which is
   // where rapid-fire coalescing comes from: superseded intermediates

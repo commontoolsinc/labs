@@ -33,13 +33,18 @@ Tasks:
 - [x] Owner confirms or amends **D-v2-1** (events are the client's only
       computational commit) on PR #5269 — **RULED YES 2026-08-02:
       events-down from day one.**
-- [ ] Owner rules Q1 (offline event queueing) and Q6 (effect authority for
-      multi-user triggers) far enough to unblock Phases 3 and 1
-      respectively; the rest of §6 can trail.
+- [x] Owner rules Q1 (offline event queueing) and Q6 (effect authority
+      for multi-user triggers) far enough to unblock Phases 3 and 1
+      respectively — **RULED 2026-08-02**: offline events discharge on
+      reconnect and a conflicting discharge is dropped with a client
+      notice (events.md §5, speculation.md §5); effect run cardinality
+      follows cell scopes, quota attribution deferred (README §3.8,
+      §6).
 - [ ] Owner + spec review of cell SCOPES (`user`/`session`) end to
       end — v1's scope confusion must not carry into v2; blocks the
       user/session-derived-state question (README §6 Q7, was ledger
-      L10; runtime-mapping.md N56).
+      L10; runtime-mapping.md N56). Inherits Q6's non-quota remainder:
+      per-run identity for served effects (runtime-mapping.md N57).
 - [ ] Name the single flag, register it in `EXPERIMENTAL_OPTIONS.md` with
       both states defined; OFF is today byte-for-byte.
 - [ ] CI runs a flag-ON arm of the integration suites from the first PR
@@ -102,9 +107,10 @@ Stages, one PR each:
       the §7 counters.
 - [ ] **F — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
-      performed only here (effect authority per Q6 ruling); recovery
-      = basis-index re-marking, recompute pure nodes, reuse memoized
-      effect results, no replay (serving-loop.md §4–§6).
+      performed only here (effect authority per README §3.8; quota
+      attribution deferred); recovery = basis-index re-marking,
+      recompute pure nodes, reuse memoized effect results, no replay
+      (serving-loop.md §4–§6).
 
 Success criteria (flag OFF — the ON gates are Phase 2's):
 

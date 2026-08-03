@@ -107,8 +107,9 @@ relocated into the wave's commit step:
 
 - Provisioning writes seal as AUTHORED-class commits into the
   destination space, under the **acting principal of the event** whose
-  handler produced them (creating THEIR space — the one settled case of
-  Q6), carried as `actingPrincipal` + `capabilityRef` commit metadata
+  handler produced them (creating THEIR space — RULED; the only
+  effect-authority residual is quota attribution, README §3.8),
+  carried as `actingPrincipal` + `capabilityRef` commit metadata
   for the target's admission (§2). Never derived-class: single-deriver
   per space is untouched, and the minted space's own SpaceServer
   activates later (first session or event) as its only deriver.

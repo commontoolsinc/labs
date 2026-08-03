@@ -345,9 +345,13 @@ session-scoped client act. The wiring:
 - **Effect authority**: a server-run `fetchData`/LLM call executes under
   the authority *bound into the capability handle at wiring time* — the
   granting user's token, not an ambient server credential. Clients never
-  hold provider secrets; the executor's broker does. (Which grant flows
-  into a piece wired by user A but reacting to user B's data is Q6 —
-  default: the wiring user's.)
+  hold provider secrets; the executor's broker does. For an effectful
+  node serving multiple users, run CARDINALITY is not open — cell
+  scopes already determine it (a user-scoped effectful node runs once
+  per user; RULED 2026-08-02). The one deferred question is QUOTA
+  attribution: whose quota a served run is charged against (§6,
+  later). The Phase 0 cell-scopes review inherits the rest of the
+  identity surface (runtime-mapping.md N57).
 - **Multi-tenancy**: one executor host serves many spaces. Per-space
   budgets (CPU time per wave, outstanding LLM calls, egress rate) are part
   of the executor contract from day one — a runaway pattern (an LLM
@@ -373,7 +377,7 @@ the archived
 | One `map` run's evidence record | 158 KB (130 KB serialized read links + certificate copy) | never persist per-run provenance for recovery a recompute can do |
 | Teardown, v1 | 2.9 s → 8.1 s (drains the storm) | session close must be O(1), not O(traffic) |
 | ts-transformers certificate surface | 13 src files, 214 goldens, 321 marker sites | deleting at the source (don't emit) collapses all of it |
-| Suite-context degradation | same test 4 s isolated, 138 s in-suite (34×) | open question §6; server must stay flat as spaces accumulate |
+| Suite-context degradation | same test 4 s isolated, 138 s in-suite (34×) | dropped as a question (v1-run minutiae — ruled 2026-08-02); the requirement stands: server stays flat as spaces accumulate (plan Phase 6 gate) |
 
 Also bought, as method: compare arms only on byte-identical workloads;
 measurement instrumentation must not touch the measured path (v1's own
@@ -414,32 +418,27 @@ survival test before it triggers implementation.
 
 ## 6. Open questions (owner rulings or experiments required)
 
-1. **Offline / disconnected clients.** Handlers queue as pending events,
-   speculation renders freely, reconciliation on reconnect — needs its own
-   design pass (ordering, conflict with events that landed meanwhile).
-2. **The 34× suite-context degradation.** Mechanism has a strong candidate
-   (stores persist and grow; every commit fans out against every active
-   lane) but the discriminating experiment (mainbase full suite, compare
-   in-suite `cf-checkbox`) has not run. v2's requirement stands regardless:
-   flat performance as spaces accumulate.
-3. **Cross-space reads and read-time clearance.** The v1 product failures
-   (`shared-profile`, `profile-embed`, `sqlite read-time clearance`) were
-   deferred as straggler bugs. v2 must make these work *by construction*
-   per §3.1.
-4. **Handler event schema.** Events carry payload + target stream +
-   durable ID (#4288). What, if anything, of the scheduler-v2 event shape
-   slims down once observations go?
-5. **Speculation reconciliation UX.** When an authoritative value differs
-   from the speculation it replaces, what does the user see? (v1 never got
-   far enough to measure divergence rates.)
-6. **Effect authority for multi-user triggers** (§3.8): whose grant powers
-   a served effect reacting to another user's data — wiring user (default)
-   or acting user? CFC implications either way.
-7. **Cell scopes (`user`/`session`), end to end.** Who derives and
-   commits user- and session-scoped derived state under the flag
+The 2026-08-02 ruling pass closed most of this section; the answers
+live in the governing detail docs — offline discharge and
+conflict-dropped events in events.md §5 + speculation.md §5, the
+durable event shape (complete as specced) and its
+integrity-provenance follow-up in events.md §1, reconciliation UX in
+speculation.md §4, sqlite clearance in builtins.md §2. Two former
+questions dropped outright: the 34× suite-context mechanism (v1-run
+minutiae; the flat-accumulation requirement stands — plan Phase 6)
+and cross-space read clearance (Phase 5 builds it by construction).
+Still open:
+
+1. **Quota attribution for server-run effects (Q6 residual — later).**
+   §3.8 settles authority and cell scopes settle run cardinality; the
+   one deferred question is whose quota a served effect's run is
+   charged against.
+2. **Cell scopes (`user`/`session`), end to end (Q7).** Who derives
+   and commits user- and session-scoped derived state under the flag
    (runtime-mapping.md N56)? Plan Phase 0 carries an owner + spec
    review of cell scopes end to end — v1's scope confusion must not
-   carry into v2; that review blocks this question (was ledger L10).
+   carry into v2; that review blocks this question and inherits Q6's
+   non-quota remainder (was ledger L10).
 
 ## 7. Relationship to prior documents
 

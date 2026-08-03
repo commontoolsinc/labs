@@ -33,6 +33,10 @@ An event is an **authored append to a stream document**:
 Admission (protocol.md §2): append authority on the stream doc + CAS.
 Nothing about the event says or implies "I ran something."
 
+The shape is settled as specced — every field above is load-bearing
+(RULED 2026-08-02); a later follow-up adds integrity provenance to
+events (e.g. attesting an authentic DOM origin).
+
 ## 2. Lifecycle, end to end
 
 ```
@@ -65,8 +69,10 @@ handler fires
 - **Batching is at the COMMIT level only (D-v2-2, ruled 2026-08-02)**:
   the wave commits once, at scheduler idle, with `consequenceOf`
   listing every event processed. Handler-visible semantics are
-  UNCHANGED from today's client: the scheduler recomputes a dirty
-  computed input on demand before the handler that reads it runs
+  UNCHANGED from today's client: handlers run eagerly, but only after
+  preflight makes any dirty state inputs current (D-v2-2) — the
+  scheduler recomputes a dirty computed input on demand before the
+  handler that reads it runs
   (`event-preflight-dependencies.ts:246-248` — preflight recomputes an
   input that is invalid OR has never run, so the lazy-computed case is
   literally in the code; CT-1795's staleness park is an extra gate on
@@ -140,10 +146,19 @@ handler-run provenance records.
   handler-error surface (same shape clients show today) as the derived
   commit for that event, advance `eventWatermark` past it (an error IS
   the consequence — else a poison event wedges the stream), push.
-- Client offline at fire time: events queue client-side as unacked
-  authored commits and submit on reconnect in fired order (Q1's default;
-  owner may refine). The speculative echo stands meanwhile; reconciliation
-  is ordinary (speculation.md §4).
+- Client offline at fire time (RULED 2026-08-02): events accumulate
+  client-side as unacked authored commits and discharge on reconnect
+  in fired order. A discharged event whose handler run CONFLICTS with
+  state that landed meanwhile is DROPPED — no consequences commit —
+  and the client MUST be signaled so the UI can react: a
+  dropped-event notice naming the eventId and the reason, written as
+  that event's consequence (advancing `eventWatermark` past it — the
+  same non-wedging rule as the error case above). The UI treatment
+  itself is a follow-up: components that send authored commits
+  already handle conflict feedback gracefully today, and events
+  reuse that posture. The speculative echo stands while offline;
+  reconciliation is ordinary (speculation.md §4), and the notice
+  retires the dropped event's overlay entries like any consequence.
 - Duplicate submission (client retry after ambiguous network outcome):
   the append is CAS-guarded by `eventId` uniqueness above the dedupe
   horizon (§4) — a duplicate of a not-yet-consequenced event is

@@ -61,8 +61,9 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
 Rendering reads through the overlay, so the actor sees handler
 consequences immediately (echo) and everyone's UI reads identically
 through one code path. There is no "speculative styling" requirement in
-v2; divergence handling is value replacement (§4), not UI annotation.
-(Q5 in README §6 tracks whether product wants divergence surfaced.)
+v2; divergence handling is value replacement (§4), not UI annotation
+(RULED 2026-08-02: replacement IS the reconciliation UX — how
+conflicts render today; no divergence surfacing ships in v2).
 
 ## 4. Reconciliation, exactly
 
@@ -71,7 +72,8 @@ On each pushed `derived` commit with `derivedThrough = W` and
 
 1. Apply the commit to the local store replica (existing path).
 2. Retire overlay entries whose `origin` is `intent(e)` for `e ∈ E` —
-   the authoritative consequences now exist; the echo's job is done.
+   the authoritative consequences (or, for a dropped event, its
+   notice — events.md §5) now exist; the echo's job is done.
 3. Retire overlay entries whose `origin` is `input` once their authored
    commit is acked AND `W ≥` that commit's seq — regardless of value
    agreement (the store wins); keep live-input echoes whose authored
@@ -82,16 +84,23 @@ On each pushed `derived` commit with `derivedThrough = W` and
    the echo rebases instead of going stale.
 
 Divergence is silent by default: the authoritative value replaces the
-speculative one in the same render path. No flicker suppression beyond
-what rebasing gives — measure first (Q5), design after.
+speculative one in the same render path — the simplest thing, and
+exactly how conflicts render today (RULED 2026-08-02). No flicker
+suppression beyond what rebasing gives.
 
 ## 5. Offline
 
-- Events queue locally in fired order (events.md §5), speculation stands,
-  the overlay grows. On reconnect: submit queued events in order, then
-  reconcile as pushes arrive. Overlay memory is bounded by pending-intent
-  count — if product wants long-offline, that is a Q1 design pass, not an
-  incremental tweak here.
+- Events accumulate locally in fired order (events.md §5), speculation
+  stands, the overlay grows. On reconnect: discharge queued events in
+  order, then reconcile as pushes arrive (RULED 2026-08-02). A
+  discharged event whose handler conflicts is DROPPED server-side;
+  its dropped-event notice (eventId + reason, events.md §5) retires
+  the event's overlay entries — the echo un-renders instead of
+  lingering as false state — and is the UI's hook to react (the UI
+  treatment is a follow-up; components that send authored commits
+  already handle conflict feedback gracefully today, and events
+  reuse that posture). Overlay memory is bounded by pending-intent
+  count.
 
 ## 6. Tripwires
 

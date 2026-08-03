@@ -122,7 +122,7 @@ Status legend:
 | 54 | `.inSpace()` provisioning: destinationSpace-threaded writes, foreign-first commit order, name cache | `storage/interface.ts:1269`, `runtime.ts:671` (name cache), rows 14/53 | protocol §2b | COVERED |
 | 55 | Cross-space reads and foreign-commit wakes (per-doc client subscriptions today) | `runner.ts:1034-1036`, `storage/query.ts` | README §3.1, serving-loop §3b | CHANGED |
 | 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | none | GAP |
-| 57 | Runtime bound to one user identity; outbound fetch signed as that user | `runtime.ts:669`, `666`, `toolshed-http-auth.ts` | README §3.8 (Q6 open) | CHANGED |
+| 57 | Runtime bound to one user identity; outbound fetch signed as that user | `runtime.ts:669`, `666`, `toolshed-http-auth.ts` | README §3.8 (quota deferred; identity to the Phase 0 scopes review) | CHANGED |
 | 58 | ACL admission for authored writes | `acl-manager.ts:16` | protocol §2 (unchanged) | COVERED |
 
 ### 1i. Persisted scheduler state and observation sharing
@@ -250,11 +250,12 @@ NO piece-start policy in v2: the space is one lazy reactive graph
 (serving-loop §1). Today's auto-start (`ensurePieceRunning` holding
 the FIFO slot, `events.ts:331-395`) maps to loading graph structure
 sufficient to run the event's handler — the event IS the demand for
-its handler; events run handlers eagerly. The derivation path needs
-no analogue: a commit dirtying docs read by unmaterialized nodes
-leaves them dirty-unmaterialized until a value-granular client pull
-(a subscription) demands them and their upstream — `idle()` already
-excludes them. Nothing starts a piece because its *inputs* changed,
+its handler; events run handlers eagerly, after preflight makes any
+dirty state inputs current (D-v2-2, events.md §2). The derivation
+path needs no analogue: a commit dirtying docs read by unmaterialized
+nodes leaves them dirty-unmaterialized until a value-granular client
+pull (a subscription) demands them and their upstream — `idle()`
+already excludes them. Nothing starts a piece because its *inputs* changed,
 and nothing "starts pieces" on activation at all.
 
 **N24 (presync).** `presyncInputs` exists so a handler's synchronous
@@ -406,12 +407,13 @@ under the flag).
 
 **N47 (sqlite).** Today's row-level clearance happens where the read
 is served (toolshed RPC under the caller's signed identity). v2 keeps
-that and adds the reader principal to the memo key (builtins §2) —
-which today's single-user-runtime hash does not contain
-(`fetch-utils.ts:72` hashes inputs only). The SpaceServer signs the
-RPC with *whose* identity is exactly Q6/row 57; until ruled, the memo
-key must include the principal chosen, or two readers share a result
-they must not.
+that and adds the reader principal to the memo key (builtins §2 —
+per-reader materialization, RULED 2026-08-02) — which today's
+single-user-runtime hash does not contain (`fetch-utils.ts:72` hashes
+inputs only). The SpaceServer signs the RPC with *whose* identity is
+row 57's identity question, inherited by the Phase 0 scopes review;
+the ruled memo key already carries the reader principal, so two
+readers never share a result whichever way identity lands.
 
 **N50 (wish `#now` timers).** `wish` hosts per-(runtime, space,
 interval) wall-clock tick timers that advance a ticking cell
@@ -450,13 +452,14 @@ now carries the owner + spec review of cell scopes end to end
 **N57 (identity/authority).** Today one runtime = one
 `userIdentityDID` (`runtime.ts:669`) and all first-party HTTP is
 signed as that user (`toolshed-http-auth.ts`). The SpaceServer
-runtime serves computations wired by many users; §3.8 already rules
-effects run under the capability handle's grant (Q6 default: wiring
-user), but the *runtime-level* ambient identity — used by scoped-cell
-resolution, sqlite RPC signing, space provisioning principals — has
-no v2 statement. Treat as part of the Q6 ruling; the mapping's
-recommendation is to make identity per-action-context (from the
-event/handle), never a SpaceServer-ambient user.
+runtime serves computations wired by many users; §3.8 rules effects
+run under the capability handle's grant, cell scopes settle run
+cardinality, and only quota attribution stays open (README §6). The
+*runtime-level* ambient identity — used by scoped-cell resolution,
+sqlite RPC signing, space provisioning principals — still has no v2
+statement; the Phase 0 cell-scopes review inherits it, and the
+mapping's recommendation is to make identity per-action-context
+(from the event/handle), never a SpaceServer-ambient user.
 
 **N59/N60/N61 (persisted observations vs the basis index).** Today's
 experimental `persistentSchedulerState` writes payload-carrying

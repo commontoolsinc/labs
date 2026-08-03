@@ -43,19 +43,13 @@ key; client speculation reads through (speculation.md §2).
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
 | `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
-| `sqlite*` | database link, statement, params (+ reader principal iff mechanism 2 below is picked) | cleared rows (shape per the pending pick) | read served under the reader's clearance | clearance mechanism PENDING OWNER PICK — see below (Phase 5 gate) |
+| `sqlite*` | database link, statement, params, reader principal | one cleared result cell per (query, reader) | read served under the reader's clearance | clearance = per-reader materialization (RULED 2026-08-02) — see below |
 
-`sqlite*` row clearance — the mechanism is PENDING OWNER PICK
-(flagged 2026-08-02) among three candidates; do not build ahead of
-the pick:
-
-1. **One-run + delivery-filter**: one uncleared query run; rows are
-   filtered per reader at delivery time, where the read is served.
-2. **Per-reader materialization** (the table row's original shape):
-   reader principal in the memo key; one cleared result cell per
-   reader.
-3. **Superset + derived views**: one superset result cell; per-reader
-   cleared views derived from it as ordinary derivations.
+`sqlite*` row clearance — RULED 2026-08-02: **per-reader
+materialization**, today's shape. The reader principal is part of
+the memo key, and each (query, reader) pair materializes its own
+cleared result cell, cleared where the read is served — no two
+readers ever share a result cell.
 
 FORBIDDEN: any of these executing in a client runtime under the flag;
 result caches outside the cell (no process LRU that survives the memo
