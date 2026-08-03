@@ -45,9 +45,10 @@ export function withAliasBindings(
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
-): FabricExecValue | undefined {
-  // Turn strongly typed builder values into legacy JSON structures while
-  // preserving alias metadata for consumers that still rely on it.
+): FabricExecValue {
+  // Turn strongly typed builder values into the serialized binding structure:
+  // cell references become `$alias` records, and data leaves come through as
+  // the fabric values they are.
 
   // Convert regular cells and results from Cell.get() to opaque refs
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
