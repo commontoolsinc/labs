@@ -1,4 +1,59 @@
 /**
+ * Reads the method by which a value produces its encodable form.
+ *
+ * The name the runtime asks for is `toEncodableForm`, which claims only what
+ * is true: this is the form a value takes on the way to being encoded, and
+ * has nothing to do with JSON.
+ *
+ * `toJSON` is the other name a value may answer to, for two kinds of value
+ * that keep it:
+ *
+ * - A builder artifact carries `toJSON` alongside `toEncodableForm`, for one
+ *   consumer: `JSON.stringify()` of a pattern reaches each node's module
+ *   through it, and a graph serialized without it loses every module's body
+ *   and `$implRef`. Nothing in the runtime reads that spelling.
+ * - A pattern factory and a `Cell` carry only `toJSON` -- a factory because
+ *   `JSON.stringify(SomePattern)` is an idiom pattern source uses, a `Cell`
+ *   because that is how it becomes a link.
+ *
+ * So this is the one place that knows both names, which keeps the remaining
+ * `toJSON` findable and makes retiring it a change here rather than a sweep.
+ * Retiring the factory's is a pattern-author migration whose failure mode is
+ * a silent `undefined`, so it is deliberately not an internal rename.
+ */
+function encodableFormMethod(value: unknown): (() => unknown) | undefined {
+  if (
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function")
+  ) {
+    return undefined;
+  }
+
+  const artifact = value as { toEncodableForm?: unknown; toJSON?: unknown };
+  if (typeof artifact.toEncodableForm === "function") {
+    return artifact.toEncodableForm as () => unknown;
+  }
+  if (typeof artifact.toJSON === "function") {
+    return artifact.toJSON as () => unknown;
+  }
+  return undefined;
+}
+
+/** Checks whether a value can produce an encodable form of itself. */
+export function hasEncodableForm(value: unknown): boolean {
+  return encodableFormMethod(value) !== undefined;
+}
+
+/**
+ * Produces the encodable form of a value that has one, or `undefined` for a
+ * value that does not. Ask `hasEncodableForm()` to tell those apart from a
+ * value whose encodable form is itself `undefined`.
+ */
+export function encodableFormOf(value: unknown): unknown {
+  return encodableFormMethod(value)?.call(value);
+}
+
+/**
  * Marks an object whose replacement is under way -- an ancestor in the walk --
  * so a cycle is recognized instead of followed forever.
  */
