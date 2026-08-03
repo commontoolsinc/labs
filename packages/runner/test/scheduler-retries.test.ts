@@ -94,10 +94,16 @@ describe("reactive retries", () => {
   const runWatcher = async (
     errorName: string | undefined,
     initialRetries: number,
-    // Share `action` + `offBudgetRetries` across calls to accumulate an
-    // off-budget streak; both default to fresh per call.
-    shared?: { action: Action; offBudgetRetries: WeakMap<Action, number> },
+    options: {
+      rejectPromise?: boolean;
+      restoreInvalidCauses?: () => void;
+      shared?: {
+        action: Action;
+        offBudgetRetries: WeakMap<Action, number>;
+      };
+    } = {},
   ) => {
+    const { rejectPromise = false, shared } = options;
     const action = shared?.action ?? ((() => {}) as unknown as Action);
     const retries = new WeakMap<Action, number>();
     if (initialRetries > 0) retries.set(action, initialRetries);
@@ -108,10 +114,13 @@ describe("reactive retries", () => {
     const error = errorName === undefined
       ? undefined
       : { name: errorName, message: `injected ${errorName}` };
-    const commitPromise = Promise.resolve({ error }) as unknown as ReturnType<
-      IExtendedStorageTransaction["commit"]
-    >;
-    watchReactiveActionCommit({
+    const commitPromise =
+      (rejectPromise
+        ? Promise.reject(error)
+        : Promise.resolve({ error })) as unknown as ReturnType<
+          IExtendedStorageTransaction["commit"]
+        >;
+    await watchReactiveActionCommit({
       action,
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
@@ -127,10 +136,8 @@ describe("reactive retries", () => {
         queued++;
       },
       getActionId: () => "test-action",
-      restoreInvalidCauses: () => {},
+      restoreInvalidCauses: options.restoreInvalidCauses ?? (() => {}),
     });
-    await commitPromise;
-    await new Promise((r) => setTimeout(r, 0));
     return { queued, resubscribed, retries, offBudgetRetries, action };
   };
 
@@ -169,6 +176,61 @@ describe("reactive retries", () => {
     },
   );
 
+  it("retries when the storage commit promise rejects", async () => {
+    const r = await runWatcher("TransactionError", 0, {
+      rejectPromise: true,
+    });
+    expect(r.queued).toBe(1);
+    expect(r.resubscribed).toBe(1);
+    expect(r.retries.get(r.action)).toBe(1);
+  });
+
+  it(
+    "retries a rejected stale-basis error without charging the bounded budget",
+    async () => {
+      const r = await runWatcher("ConflictError", 3, {
+        rejectPromise: true,
+      });
+      expect(r.queued).toBe(1);
+      expect(r.resubscribed).toBe(1);
+      expect(r.retries.get(r.action)).toBe(3);
+      expect(r.offBudgetRetries.get(r.action)).toBe(1);
+    },
+  );
+
+  it(
+    "does not retry a rejected terminal error and clears the retry budget",
+    async () => {
+      const r = await runWatcher("RowLabelCommitError", 3, {
+        rejectPromise: true,
+      });
+      expect(r.queued).toBe(0);
+      expect(r.resubscribed).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+    },
+  );
+
+  it("retries when the storage commit promise rejects without a reason", async () => {
+    const r = await runWatcher(undefined, 0, {
+      rejectPromise: true,
+    });
+    expect(r.queued).toBe(1);
+    expect(r.resubscribed).toBe(1);
+    expect(r.retries.get(r.action)).toBe(1);
+  });
+
+  it("settles when reactive retry handling throws", async () => {
+    const retryHandlingError = new Error("retry handling failed");
+    const r = await runWatcher("TransactionError", 0, {
+      restoreInvalidCauses: () => {
+        throw retryHandlingError;
+      },
+    });
+    expect(r.queued).toBe(0);
+    expect(r.resubscribed).toBe(0);
+    expect(r.retries.get(r.action)).toBe(1);
+  });
+
   it(
     "retries a same-replica-race rejection off the bounded budget",
     async () => {
@@ -198,11 +260,11 @@ describe("reactive retries", () => {
         action: (() => {}) as unknown as Action,
         offBudgetRetries: new WeakMap<Action, number>(),
       };
-      await runWatcher("StorageTransactionInconsistent", 0, shared);
-      await runWatcher("ConflictError", 0, shared);
+      await runWatcher("StorageTransactionInconsistent", 0, { shared });
+      await runWatcher("ConflictError", 0, { shared });
       expect(shared.offBudgetRetries.get(shared.action)).toBe(2);
       // A successful commit ends the streak and clears the count.
-      await runWatcher(undefined, 0, shared);
+      await runWatcher(undefined, 0, { shared });
       expect(shared.offBudgetRetries.has(shared.action)).toBe(false);
     },
   );

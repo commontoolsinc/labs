@@ -228,7 +228,7 @@ describe("trigger reads survive failed runs", () => {
         ReturnType<IExtendedStorageTransaction["commit"]>
       >,
     );
-    watchReactiveActionCommit({
+    return watchReactiveActionCommit({
       action,
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
@@ -241,10 +241,6 @@ describe("trigger reads survive failed runs", () => {
       queueExecution: () => args.onQueueExecution?.(),
       getActionId: () => "test-action",
       restoreInvalidCauses: args.onRestore,
-    });
-    return commitPromise.then(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
     });
   }
 
@@ -326,9 +322,6 @@ describe("trigger reads survive failed runs", () => {
       onMarkInvalid: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    // The rejected readiness gate adds microtask hops before the re-queue; a
-    // macrotask flush drains them so the assertion sees the final state.
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
@@ -349,7 +342,6 @@ describe("trigger reads survive failed runs", () => {
       onMarkInvalid: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
