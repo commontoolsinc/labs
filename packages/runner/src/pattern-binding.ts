@@ -1,6 +1,7 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { FabricSpecialObject } from "@commonfabric/data-model/interface";
 import {
   type FabricExecValue,
   isPattern,
@@ -415,19 +416,32 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
    *
-   * The container branches hand back the original without checking whether a
-   * rebuild would have reproduced it exactly, because it always would.
-   * `binding` is a `FabricExecValue`, whose containers are the *inert* array
-   * and plain object of `isInertArray()` / `isInertPlainObject()`; every shape
-   * a name-driven rebuild would silently alter is non-inert by definition, so
-   * re-checking here would only restate the parameter type. Fabric membership
-   * is `isFabricValue()`'s job, once, and inertness is enforced at the fabric
-   * chokepoints rather than at each walk that happens to pass a value along.
+   * A `FabricSpecialObject` leaves first, ahead of the container branches. It
+   * is an opaque leaf to a name-driven walk: its state lives in private fields,
+   * so `Object.entries()` reports none of it and a rebuild from those entries
+   * would yield a bare `{}`. Returning it as-is preserves it, and skips an
+   * `Object.entries()` call that can only ever come back empty.
    *
-   * That an accessor-backed property is non-inert matters most here, since it
-   * is the one such shape a rebuild does not merely drop: it would *evaluate*
-   * the accessor into a data property, quietly converting live code into a
-   * value. Sharing leaves it alone for the chokepoint to reject.
+   * TODO(danfuzz): Latent — a `FabricInstance` (unlike a `FabricPrimitive`) is
+   * a container, so an alias nested in its codec contents is not rebound by
+   * this walk. Leaving it whole is strictly better than decomposing it, but a
+   * bound alias inside one would be missed. The two sibling walks in this file
+   * carry the same marker.
+   *
+   * The container branches then hand back the original when nothing under one
+   * rebound, without checking whether a rebuild would have reproduced it. For
+   * the shapes those branches actually see, it would: an array and a plain
+   * object reaching them are the *inert* ones of `isInertArray()` /
+   * `isInertPlainObject()`, and every shape a name-driven rebuild silently
+   * alters — a foreign prototype, a symbol key, a non-enumerable or
+   * accessor-backed property — is non-inert. That is a claim about the
+   * CONTAINERS, not about `FabricExecValue` as a whole: the special objects
+   * handled above are non-inert too, which is exactly why they leave first.
+   *
+   * Sharing is quieter than rebuilding for an accessor in one respect only. It
+   * is not frozen *into* a data property, as `Object.fromEntries()` would do;
+   * but `Object.entries()` still reads it on the way past, so a getter's side
+   * effect fires either way.
    */
   function convert(
     binding: FabricExecValue,
@@ -514,6 +528,8 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           { includeSchema: true, overwrite: "redirect" },
         );
       }
+    } else if (binding instanceof FabricSpecialObject) {
+      return binding;
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
       // else, so the shared path allocates nothing.
@@ -544,26 +560,30 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       // Nothing rebound, so the original is the answer.
       return converted ?? binding;
     } else if (isRecord(binding)) {
-      let changed = false;
-      const entries = Object.entries(binding).map(([key, value]) => {
+      // Copy lazily, as the array branch does: allocate only once a value
+      // actually converts to something else, so the shared path — the common
+      // one, and the majority of nodes — allocates nothing at all. (Compare
+      // `overlayUnresolvedLinkPlaceholders()` in `runner.ts`, the same idiom.)
+      let converted: Record<string, FabricExecValue> | undefined;
+      for (const key of Object.keys(binding)) {
+        const value = binding[key];
         const next = convert(value, cfc.getSchemaAtPath(targetSchema, [key]));
-        if (next !== value) changed = true;
-        return [key, next] as const;
-      });
-      if (!changed) {
-        // Nothing under here rebound, and rebuilding would have produced an
-        // equal object, so hand back the original. `noteDerivedCopy()` is
-        // skipped deliberately: it no-ops when copy and original are the same
-        // value, and `resolveOriginal()` already answers with the original.
+        if (next === value) continue;
+        converted ??= { ...binding };
+        converted[key] = next;
+      }
+      if (converted === undefined) {
+        // Nothing under here rebound, so hand back the original.
+        // `noteDerivedCopy()` is skipped deliberately: it no-ops when copy and
+        // original are the same value, and `resolveOriginal()` already answers
+        // with the original.
         return binding;
       }
-      const result: Record<string | symbol, FabricExecValue> = Object
-        .fromEntries(entries);
       // Carry the derivation link (trust + content-addressed entry ref) onto
       // the bound copy so a pattern value re-bound here still resolves its
       // `{ identity, symbol }` and stays trusted.
-      if (isPattern(binding)) noteDerivedCopy(result, binding);
-      return result;
+      if (isPattern(binding)) noteDerivedCopy(converted, binding);
+      return converted;
     } else return binding;
   }
   return convert(binding, options?.targetSchema) as T;

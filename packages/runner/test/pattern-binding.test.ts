@@ -21,6 +21,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -629,6 +630,26 @@ describe("pattern-binding", () => {
 
       expect(result.length).toBe(4);
       for (const i of [1, 2, 3]) expect(i in result).toBe(false);
+    });
+
+    it("keeps a FabricPrimitive whole instead of flattening it", () => {
+      // A `FabricPrimitive` keeps its state in private fields, so
+      // `Object.entries()` reports none of it. A name-driven rebuild of the
+      // enclosing record therefore used to replace it with a bare `{}`.
+      const stamp = new FabricEpochNsec(123n);
+      const shared = bind({ stamp, n: 1 });
+      expect(shared.stamp).toBeInstanceOf(FabricEpochNsec);
+      expect(shared.stamp).toBe(stamp);
+
+      // ...and it survives the COPY path too, where a sibling rebinds.
+      const copied = bind({ stamp, aliased: alias() });
+      expect(copied).not.toBe(undefined);
+      expect(copied.stamp).toBeInstanceOf(FabricEpochNsec);
+      expect(copied.stamp).toBe(stamp);
+
+      // Same at the root, and inside an array.
+      expect(bind(stamp)).toBe(stamp);
+      expect(bind([stamp, alias()])[0]).toBe(stamp);
     });
 
     it("hands an Array subclass's species the same length `map()` would", () => {
