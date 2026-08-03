@@ -39,6 +39,28 @@ and the next wave recomputes the derivation over it. v2 adds no
 security guarantees beyond today's unless trivial (owner,
 2026-08-02); tightening is future work.
 
+Identity at the derived envelope (R-Q6b, RULED, owner 2026-08-02):
+`derived` is a DIFFERENT TRUST CLASS from `authored`. An authored
+commit crosses a trust boundary — a session did work the server
+never saw, so the envelope identity is the check. A derived commit
+does not: the server admitting it also DID the work, so producer
+and admitter share one trust environment at the envelope, and
+envelope identity verifies nothing there. The SpaceServer therefore
+commits under its own service identity — the envelope principal IS
+the lease holder §2 checks — and ATTRIBUTION rides WITHIN the
+commit: an explicit `scope_key` on every scoped write, and the
+acting principal on every action's writes (the same per-action
+granularity as serving-loop.md §3c's CFC provenance). Attributed,
+not signed, today. The considered alternative — N commits per wave,
+one per session, each attributed at its envelope — is recorded and
+rejected as the other extreme of the same axis: the wave stays ONE
+commit (§7's amplification budget). Anticipated, not built:
+per-user server-generated keys under user-delegated authority; when
+delegation exists, attribution graduates to acting-key signatures
+without changing the envelope model. CFC labels remain the
+load-bearing enforcement; commit-level identity is not load-bearing
+(owner).
+
 ## 2. Admission, the whole table
 
 | commit class | checks, in order |
@@ -222,7 +244,10 @@ disabled (README §3.5).
   (derived only), `derivedThrough` (derived only), `consequenceOf`
   (derived only), `eventId`/`firedAt` (event appends),
   `actingPrincipal`/`capabilityRef` (server-produced authored commits
-  only — §2). Anything further needs a spec edit here first.
+  only — §2); plus, WITHIN a derived commit's body — attribution,
+  never envelope identity (R-Q6b, §1) — the explicit `scope_key` on
+  every scoped write and the acting principal on every action's
+  writes. Anything further needs a spec edit here first.
 - All metadata is small and fixed-shape, with one bounded carve-out:
   `consequenceOf` scales with the wave's INPUT (the events drained that
   wave), never with graph size. The v1 failure mode — 130 KB of
@@ -232,4 +257,8 @@ disabled (README §3.5).
 - Writes inside a `derived` commit keep PER-ACTION provenance for CFC
   label purposes (serving-loop.md §3c), carried in the write PAYLOAD,
   never as commit metadata: the commit is a transport batch, never a
-  label boundary.
+  label boundary. R-Q6b's attribution (§1) rides at the same
+  granularity — `scope_key` per scoped write, acting principal per
+  action — attributed, not signed, today; when per-user delegated
+  keys exist (anticipated, not built), attribution graduates to
+  acting-key signatures without changing the envelope model.

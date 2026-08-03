@@ -30,8 +30,9 @@ implemented as the gates below. Method inherited from the v1 learning run
 ## 2. CI arms
 
 From the first PR with testable behavior: the integration suites run
-twice — flag OFF (must be byte-identical to today; any OFF-arm diff is a
-Phase-gate failure by itself) and flag ON. The ON arm is allowed to skip
+twice — `EXPERIMENTAL_SERVER_EXECUTION` OFF (must be byte-identical
+to today; any OFF-arm diff is a Phase-gate failure by itself) and
+ON. The ON arm is allowed to skip
 not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never
 went through CI at all.)

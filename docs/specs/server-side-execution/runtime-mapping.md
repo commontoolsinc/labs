@@ -122,7 +122,7 @@ Status legend:
 | 54 | `.inSpace()` provisioning: destinationSpace-threaded writes, foreign-first commit order, name cache | `storage/interface.ts:1269`, `runtime.ts:671` (name cache), rows 14/53 | protocol §2b | COVERED |
 | 55 | Cross-space reads and foreign-commit wakes (per-doc client subscriptions today) | `runner.ts:1034-1036`, `storage/query.ts` | README §3.1, serving-loop §3b | CHANGED |
 | 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | scopes.md (RULED 2026-08-02) | CHANGED |
-| 57 | Runtime bound to one user identity; outbound fetch signed as that user | `runtime.ts:669`, `666`, `toolshed-http-auth.ts` | README §3.8 (quota deferred; identity to the Phase 0 scopes review) | CHANGED |
+| 57 | Runtime bound to one user identity; outbound fetch signed as that user | `runtime.ts:669`, `666`, `toolshed-http-auth.ts` | README §3.8, protocol.md §1/§7 (identity RULED — R-Q6b; quota deferred) | CHANGED |
 | 58 | ACL admission for authored writes | `acl-manager.ts:16` | protocol §2 (unchanged) | COVERED |
 
 ### 1i. Persisted scheduler state and observation sharing
@@ -410,10 +410,11 @@ is served (toolshed RPC under the caller's signed identity). v2 keeps
 that and adds the reader principal to the memo key (builtins §2 —
 per-reader materialization, RULED 2026-08-02) — which today's
 single-user-runtime hash does not contain (`fetch-utils.ts:72` hashes
-inputs only). The SpaceServer signs the RPC with *whose* identity is
-row 57's identity question, inherited by the Phase 0 scopes review;
-the ruled memo key already carries the reader principal, so two
-readers never share a result whichever way identity lands.
+inputs only). The SpaceServer signs the RPC with *whose* identity
+was row 57's identity question, now RESOLVED (N57 — R-Q6b:
+per-action-context identity, never SpaceServer-ambient); the ruled
+memo key already carries the reader principal, so two readers never
+share a result.
 
 **N50 (wish `#now` timers).** `wish` hosts per-(runtime, space,
 interval) wall-clock tick timers that advance a ticking cell
@@ -452,23 +453,25 @@ and recorded in scopes.md §7 the five assumptions of main's scope
 machinery that a SpaceServer breaks (M1–M5: per-identity scope
 discovery; scope-NAME in-memory keying; no all-principals write
 path; scope-NAME wake keys; no session-data GC); scopes.md §8 lists
-what the review still owes, and row 57's identity remainder stays
-with it.
+what the review still owes (after the batch-4 closures: basis-index
+DDL authoring + session-data GC design); row 57's identity
+remainder is RESOLVED (N57, R-Q6b).
 
-**N57 (identity/authority).** Today one runtime = one
-`userIdentityDID` (`runtime.ts:669`) and all first-party HTTP is
-signed as that user (`toolshed-http-auth.ts`). The SpaceServer
-runtime serves computations wired by many users; §3.8 rules effects
-run under the capability handle's grant, cell scopes settle run
-cardinality, and only quota attribution stays open (README §6). The
-*runtime-level* ambient identity — used by scoped-cell resolution,
-sqlite RPC signing, space provisioning principals — still has no v2
-statement; the Phase 0 cell-scopes review inherits it, and the
-mapping's recommendation is to make identity per-action-context
-(from the event/handle), never a SpaceServer-ambient user. scopes.md
-§7 M3 records the concrete storage-side blocker: no all-principals
-write path exists — `resolveScopeKey` binds scoped writes to the
-authenticated session (`packages/memory/v2/server.ts:1577-1580`).
+**N57 (identity/authority) — RESOLVED 2026-08-02 (R-Q6b).** Today
+one runtime = one `userIdentityDID` (`runtime.ts:669`) and all
+first-party HTTP is signed as that user (`toolshed-http-auth.ts`).
+The v2 statement now lives in protocol.md §1/§7 and README §3.8:
+the SpaceServer's envelope identity is its own service identity —
+the lease holder; derived commits are a different trust class,
+produced and admitted inside one trust environment — and per-run
+identity is per-action-context WITHIN the commit (acting principal
+per action, explicit `scope_key` per scoped write), never a
+SpaceServer-ambient user: the mapping's recommendation, now ruled.
+scopes.md §7 M3 resolves the same way — `resolveScopeKey`'s session
+binding (`packages/memory/v2/server.ts:1577-1580`) narrows to
+authored commits only; derived admission stays the lease check.
+Effects still run under the capability handle's grant (README
+§3.8); only quota attribution stays open (README §6).
 
 **N59/N60/N61 (persisted observations vs the basis index).** Today's
 experimental `persistentSchedulerState` writes payload-carrying

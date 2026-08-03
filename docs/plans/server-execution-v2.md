@@ -43,18 +43,28 @@ Tasks:
 - [ ] Owner + spec review of cell SCOPES (`user`/`session`) end to
       end — v1's scope confusion must not carry into v2; blocks the
       user/session-derived-state question (README §6 Q7, was ledger
-      L10; runtime-mapping.md N56). Inherits Q6's non-quota remainder:
-      per-run identity for served effects (runtime-mapping.md N57).
+      L10; runtime-mapping.md N56). Q6's non-quota remainder —
+      per-run identity for served effects — RULED 2026-08-02, R-Q6b:
+      service-identity envelope, attribution within the derived
+      commit (protocol.md §1/§7; runtime-mapping.md N57 resolved).
       **In progress 2026-08-02**: the batch-3 rulings are drafted as
       [scopes.md](../specs/server-side-execution/scopes.md) (scope
       keys instances, never authority). Scout complete 2026-08-02:
       scopes.md anchored (§Anchors verified), the five
-      main-vs-SpaceServer mismatches M1–M5 recorded (scopes.md §7);
-      scopes.md §8 carries the residual opens (basis-index keying,
-      watermark × fan-out, context-floor fate, session-data GC, the
-      M3 write path).
-- [ ] Name the single flag, register it in `EXPERIMENTAL_OPTIONS.md` with
-      both states defined; OFF is today byte-for-byte.
+      main-vs-SpaceServer mismatches M1–M5 recorded (scopes.md §7).
+      Batch-4 closures 2026-08-02: watermark × fan-out (composition —
+      a narrowing writes only the redirect; instances materialize on
+      demand), `scheduler_context_floor` (deletes with the
+      observation machinery), the M3 write path (R-Q6b). scopes.md
+      §8 now carries two residual opens: basis-index DDL authoring +
+      session-data GC design.
+- [ ] Name the single flag — NAMED 2026-08-02:
+      `EXPERIMENTAL_SERVER_EXECUTION` (RuntimeOptions key
+      `serverExecution`), deliberately distinct from v1's
+      `SERVER_PRIMARY_EXECUTION` so archived docs never alias it —
+      and register it in `EXPERIMENTAL_OPTIONS.md` with both states
+      defined; OFF is today byte-for-byte. Registration remains an
+      implementation task (Phase 1 stage A).
 - [ ] CI runs a flag-ON arm of the integration suites from the first PR
       that has anything to test (v1 lesson: the flags-on branch never went
       through CI).
@@ -97,8 +107,12 @@ Stages, one PR each:
 - [ ] **C — main reduction**: delete main's certificate surface —
       `completeSchedulerScopeSummary` emission (ts-transformers) and
       every consumer (runner); reduce the observation tables to the
-      v2 basis index — standalone `(action, entity, seq)` rows
-      replacing the full-JSON payload form (serving-loop.md §3b).
+      v2 basis index — standalone `(action, entity, seq)` rows,
+      keyed per scope INSTANCE (scopes.md §8), replacing the
+      full-JSON payload form (serving-loop.md §3b);
+      `scheduler_context_floor` deletes with them — nothing is left
+      to floor once the index is per-instance (scopes.md §7, ruled
+      2026-08-02).
 - [ ] **D — seal-into-wave**: action transactions seal into the wave
       accumulator server-side; per-doc CAS with per-write-class
       conflict handling; CFC stays per action run
@@ -126,9 +140,9 @@ Success criteria (flag OFF — the ON gates are Phase 2's):
       (testing.md §2); the ON arm runs in CI from stage A with
       explicit skip lists, never silent filtering.
 - [ ] Stage C leaves no `completeSchedulerScopeSummary` reference on
-      main and no full-JSON observation payload tables; the basis
-      index is the only persisted scheduler state besides W and
-      `eventWatermark`.
+      main, no full-JSON observation payload tables, and no
+      `scheduler_context_floor`; the basis index is the only
+      persisted scheduler state besides W and `eventWatermark`.
 
 ## Phase 2 — Flag ON: server derives and the client does not
 

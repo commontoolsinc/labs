@@ -210,8 +210,9 @@ executing:
   scope.
 - **Scope discovery is part of read discovery**: a run's scope is the
   narrowest scope of anything it read, so it too is discovered by
-  running, and a narrowing discovery fans out per-principal instances
-  in that same discovering wave (scopes.md §2).
+  running. A narrowing discovery writes only the broad-slot redirect;
+  per-principal instances materialize on demand like any other
+  undemanded derivation (scopes.md §2, ruled 2026-08-02 batch 4).
 - Read sets are authoritative IN MEMORY. Two persisted forms are
   distinguished, and confusing them is how v1 died:
   1. **The basis index (CORRECTNESS-BEARING for recovery)**: compact

@@ -3,9 +3,11 @@
 Normative spec for scope semantics wherever scoped state appears
 (plan Phases 1–5; the Phase 0 scopes review owns this doc and is in
 progress). Drafted from the owner rulings of 2026-08-02, batch 3
-(S1–S5 below); anchors verified by the scope-mechanics scout pass of
-2026-08-02 (§Anchors, §7). Read [README.md](README.md) §3.8 and §6
-Q7 first; assumes [serving-loop.md](serving-loop.md) vocabulary.
+(S1–S5 below), with the batch-4 closures folded in (§2 fan-out
+composition; §7 M3 and floor); anchors verified by the
+scope-mechanics scout pass of 2026-08-02 (§Anchors, §7). Read
+[README.md](README.md) §3.8 and §6 Q7 first; assumes
+[serving-loop.md](serving-loop.md) vocabulary.
 MUST/NEVER language is binding on implementers.
 
 ## Anchors (verified 2026-08-02, scout pass)
@@ -118,17 +120,24 @@ faced them:
   many instances a node has depends on the scope its runs discover
   and on how many principals exist at that scope — and principals
   keep arriving (a new session, a new user) after the narrowing.
-- **A narrowing discovery FANS OUT, in the discovering wave.** The
-  wave that discovers the narrowing writes the redirect AND the
-  instances — one per principal at the new scope — as part of that
-  same wave.
+- **A narrowing discovery writes ONLY the redirect (RULED
+  2026-08-02, batch 4).** Fan-out is a cardinality fact, not a wave
+  event: the discovering wave writes the broad-slot redirect and
+  nothing more; instances MATERIALIZE ON DEMAND, like any other
+  undemanded derivation (demand-driven materialization,
+  serving-loop.md §1/§3b — a subscription or an event is the
+  demand). This also closes watermark × fan-out by composition: W
+  covers DEMANDED derivations only (protocol.md §4), so it never
+  waits on undemanded instances — a narrowing multiplies ADDRESSES,
+  never a wave's work.
 - **This is NEW complexity, and v2 owns it.** Today's client
   scheduler never faced fan-out: per client runtime, scoped
   cardinality is exactly 1 — each client computes only its own
-  user's/session's instance. The SpaceServer computes EVERYONE'S,
-  so the full fan-out lands on the serving loop with no prior art
-  in the client scheduler. Do NOT port client-era cardinality
-  assumptions into the fan-out path.
+  user's/session's instance. The SpaceServer computes EVERYONE'S —
+  demand-paced, per the bullet above — so the full instance set
+  lands on the serving loop with no prior art in the client
+  scheduler. Do NOT port client-era cardinality assumptions into
+  the fan-out path.
 
 **Monotonicity (owner-ruled): narrowing is for everyone or no one.**
 User-scoped for one user means user-scoped for ALL users; within a
@@ -149,7 +158,8 @@ only strictly-narrower, so a later broader-scoped run writes
 THROUGH the sticky redirect into the narrow instance instead of
 un-narrowing the slot; the server-side context floor narrows
 monotonically by SQL construction
-(`packages/memory/v2/engine.ts:3828-3832`). Per-scope
+(`packages/memory/v2/engine.ts:3828-3832`; the floor itself deletes
+in Phase 1 — §7). Per-scope
 result cells (`byScope`, §Anchors) let a node's output LINKS point
 broader again, but the slot redirect stays. No un-narrowing code
 exists anywhere on main, and v2 keeps it that way: the widen-back
@@ -195,8 +205,10 @@ writes against THAT principal, never against a SpaceServer-ambient
 identity. (events.md §1's sketched shape spells only the session;
 whether `firedAt` carries the user explicitly or derives it from
 the authenticated append is a shape detail the 2026-08-02 scout
-pass did not settle. It and the wider served-effect identity
-surface stay with the Phase 0 review — runtime-mapping.md N57.)
+pass did not settle; it stays with the Phase 0 review. The wider
+served-effect identity surface is RULED — R-Q6b: attribution within
+the derived commit, never a SpaceServer-ambient identity
+(protocol.md §1/§7; runtime-mapping.md N57).)
 
 An event MAY operate ENTIRELY within user or session scope: when
 the state a handler modifies is user- or session-scoped, its
@@ -245,10 +257,13 @@ Phases 1–5 meet them wherever scoped state appears.
   binds to the authenticated session
   (`packages/memory/v2/server.ts:1577-1580`), and mirrors refuse to
   re-derive scope context (`engine.ts:2580-2596`): a scoped write
-  requires that instance's principal. → v2: derived-class commits
-  need an explicit scopeKey-carrying write sanctioned at admission —
-  extending the delegated-capability metadata (protocol.md §2b) to
-  scoped derived writes (§8 item 5).
+  requires that instance's principal. → v2, RESOLVED (R-Q6b,
+  2026-08-02): derived commits carry an explicit `scope_key` on
+  every scoped write WITHIN the commit (protocol.md §1, §7), so
+  `resolveScopeKey`'s session binding narrows to AUTHORED commits
+  only. Admission for derived stays the lease equality check,
+  unchanged — no per-principal admission, no delegated-capability
+  extension to scoped derived writes.
 - **M4 — Wake/sync dirties by scope NAME.** Storage-side reader
   matching is exact-scope_key
   (`packages/memory/v2/engine.ts:3024-3066`), but the wake/sync
@@ -260,38 +275,40 @@ Phases 1–5 meet them wherever scoped state appears.
   owner.** Session EXECUTION CONTEXTS are capped at 32 per action
   (`packages/memory/v2/engine.ts:55`); session DATA rows are never
   GC'd — nothing retires session data today. → v2: §3's
-  durable-with-retirement needs an actual GC design (§8 item 4),
+  durable-with-retirement needs an actual GC design (§8 item 2),
   and a server owning ALL instances cannot have its working set
   silently evicted.
+
+Ruled with the batch-4 closures (owner-accepted derivation,
+2026-08-02): `scheduler_context_floor` DELETES with the observation
+machinery in the Phase-1 reduction (runtime-mapping.md N59–N61;
+plan Phase 1 stage C). Its only job was gating SHARED observation
+snapshots across principals; the v2 basis index is per-instance and
+shares nothing across principals, so nothing is left to floor.
+Nothing of the floor survives as per-instance keying evidence.
 
 ## 8. Open — scout + owner (what the Phase 0 review still owes)
 
 Closed by the scout pass, 2026-08-02: widen-back (NO — §2
-Permanence) and the redirect's on-disk shape (§Anchors). Still
-open:
+Permanence) and the redirect's on-disk shape (§Anchors). Closed by
+the batch-4 rulings, 2026-08-02: watermark × fan-out (§2 — the
+discovering wave writes only the redirect; instances materialize on
+demand, and the demanded-only W never waits on them),
+`scheduler_context_floor` (§7 — deletes whole with the observation
+machinery), and the M3 write path (§7 M3 — R-Q6b: explicit
+`scope_key` per scoped write WITHIN the derived commit; admission
+stays the lease check). Still open:
 
-1. **Basis-index keying per instance.** serving-loop.md §3b's rows
-   are `(action, entity, seq)`; under fan-out one action yields
-   many instances — how the index keys them, and what "overwritten
-   in place" means then (M2 names the cost; this item owns the
-   design).
-2. **Watermark × fan-out.** W is one integer per space (protocol.md
-   §4); how a fan-out wave's multiplied work reports settledness
-   through W.
-3. **`scheduler_context_floor`'s fate under the Phase-1 reduction.**
-   The floor table keys observation SHARING
-   (`packages/memory/v2/engine.ts:300-321`; resolution
-   `engine.ts:3964-4027`) — part of the persisted-scheduler-state
-   machinery Phase 1 slims (runtime-mapping.md N59–N61). Whether
-   any of it survives as per-instance keying evidence or it deletes
-   whole must be ruled before Phase 1 touches those tables.
-4. **Session-data GC (M5).** The mechanism that actually retires a
+1. **Basis-index DDL authoring.** Per-instance keying is the
+   settled shape — the §7 closures lean on it (the index shares
+   nothing across principals) — so serving-loop.md §3b's
+   `(action, entity, seq)` rows key by INSTANCE (id + scope_key),
+   overwritten in place per (action, instance). What remains is
+   authoring the engine-v3 DDL that Phase 1 stage C reduces the
+   observation tables to (M2 names the re-keying cost).
+2. **Session-data GC (M5).** The mechanism that actually retires a
    retired session's scoped instances — none exists today, so §3's
    ONE retirement rule needs it designed, not assumed.
-5. **The M3 write path shape.** The explicit scopeKey-carrying
-   derived write and its admission check — the exact metadata
-   shape, and how it composes with protocol.md §2b's
-   `actingPrincipal`/`capabilityRef` validation.
 
 ## 9. Tripwires
 
@@ -307,6 +324,7 @@ FORBIDDEN in v2 scope code (additive to serving-loop.md §8):
 - static scope inference (compile-time or load-time) feeding
   placement, admission, or fan-out;
 - per-scope or per-instance watermarks (W stays one integer —
-  protocol.md §4; §8 item 2 escalates, it does not fork W);
+  protocol.md §4; watermark × fan-out is closed by composition in
+  §2 — nothing forks W);
 - reviving the persisted-state context ladder or rehydration ranks
   for instance sharing (runtime-mapping.md row 60).

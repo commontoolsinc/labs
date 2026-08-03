@@ -247,7 +247,10 @@ hop and the rebuild must design it deliberately:
 
 ### 3.4 Configuration
 
-Exactly two states, one flag. OFF is today's behaviour byte-for-byte; ON is
+Exactly two states, one flag: `EXPERIMENTAL_SERVER_EXECUTION`
+(RuntimeOptions key `serverExecution`), named deliberately unlike
+v1's `SERVER_PRIMARY_EXECUTION` so the archived docs never alias it.
+OFF is today's behaviour byte-for-byte; ON is
 the full v2 posture. **No shippable intermediate states** — partial flag
 combinations exist only as debugging affordances during bring-up, and the
 v1 dial set (eight interlocking dials) is the cautionary tale. Both halves
@@ -351,8 +354,18 @@ session-scoped client act. The wiring:
   scopes already determine it (a user-scoped effectful node runs once
   per user; RULED 2026-08-02). The one deferred question is QUOTA
   attribution: whose quota a served run is charged against (§6,
-  later). The Phase 0 cell-scopes review inherits the rest of the
-  identity surface (runtime-mapping.md N57).
+  later). The rest of the identity surface is RULED (R-Q6b,
+  2026-08-02) — Q6 is fully closed: derived commits are a different
+  trust class from authored ones (the server admitting them also did
+  the work — one trust environment at the envelope), so the
+  SpaceServer commits under its own service identity and attribution
+  rides WITHIN the commit — explicit scope_key per scoped write,
+  acting principal per action — never a SpaceServer-ambient user
+  identity for served work (protocol.md §1, §7; runtime-mapping.md
+  N57). CFC labels stay the load-bearing enforcement; commit-level
+  identity is not. Anticipated: per-user server-generated keys with
+  user-delegated authority graduate attribution to acting-key
+  signatures, envelope model unchanged.
 - **Multi-tenancy**: one executor host serves many spaces. Per-space
   budgets (CPU time per wave, outstanding LLM calls, egress rate) are part
   of the executor contract from day one — a runaway pattern (an LLM
@@ -431,15 +444,16 @@ and cross-space read clearance (Phase 5 builds it by construction).
 Still open:
 
 1. **Quota attribution for server-run effects (Q6 residual — later).**
-   §3.8 settles authority and cell scopes settle run cardinality; the
-   one deferred question is whose quota a served effect's run is
-   charged against.
+   §3.8 settles authority and identity (R-Q6b) and cell scopes settle
+   run cardinality; the one deferred question is whose quota a served
+   effect's run is charged against.
 2. **Cell scopes (`user`/`session`), end to end (Q7).** Who derives
    and commits user- and session-scoped derived state under the flag
    (runtime-mapping.md N56)? Plan Phase 0 carries an owner + spec
    review of cell scopes end to end — v1's scope confusion must not
-   carry into v2; that review blocks this question and inherits Q6's
-   non-quota remainder (was ledger L10).
+   carry into v2; that review blocks this question. Q6's non-quota
+   remainder, which the review had inherited (was ledger L10), is
+   now ruled — R-Q6b (§3.8; protocol.md §1, §7).
 
 ## 7. Relationship to prior documents
 
