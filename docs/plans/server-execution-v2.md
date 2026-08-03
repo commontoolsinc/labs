@@ -137,12 +137,19 @@ Tasks:
       subscription).
 - [ ] Per-reader clearance enforced where the read is served (sqlite row
       admissibility, CFC labels).
+- [ ] `.inSpace()` provisioning server-side: foreign-first split at the
+      wave commit step, event-derived deterministic DIDs (CT-1650),
+      replay-idempotent (protocol.md §2b).
 
 Success criteria:
 
 - [ ] The three v1 stragglers are the acceptance tests, green in the ON
       arm: `shared-profile`, `profile-embed`,
       `sqlite-read-clearance-multi-runtime`.
+- [ ] Profile creation (the `.inSpace()` flow: `profile-create`,
+      `home-profile`) green in the ON arm, including a kill between the
+      foreign and home commits — replay converges on the same DIDs, no
+      orphans, no duplicates.
 
 ## Phase 6 — Watermark, budgets, scale
 

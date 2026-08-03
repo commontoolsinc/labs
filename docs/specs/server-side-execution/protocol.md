@@ -55,6 +55,7 @@ keeps that invariant and adds the class discipline:
 | derive FROM foreign state | home derivation reading foreign inputs; result commits HOME |
 | mutate a foreign space | **an event append to a foreign stream — the ONLY cross-space mutation** |
 | `derived` commit into a foreign space | FORBIDDEN — SpaceServer(B) is B's only deriver; A never derives into B |
+| provision a foreign/new space (`.inSpace`) | authored-class, foreign-first split at the wave commit step — see below |
 | client authored writes to several spaces | unchanged from today: separate per-space commits, per-space ACL + CAS |
 
 The event append crosses as an ordinary `authored` commit under the
@@ -65,6 +66,39 @@ like any event. This matches the codebase's own convention — patterns
 already mutate cross-space through exported streams — and it is now the
 rule, not a style: a server action tx that opens a foreign-space writer
 is a runtime error naming this section.
+
+**Provisioning writes — the second sanctioned crossing
+(`.inSpace(...)`)**: the profile-system patterns create foreign spaces —
+even mint new ones — from a handler (`profile-create.tsx`,
+`ProfileHome.inSpace()`); the transaction layer already threads a
+`destinationSpace` per write (`extended-storage-transaction.ts`) and
+today splits the commit foreign-first, home-after-success. v2 keeps the
+API, the split, and the order, relocated into the wave's commit step:
+
+- Provisioning writes seal as AUTHORED-class commits into the
+  destination space, under the **acting principal of the event** whose
+  handler produced them (creating THEIR space — the one settled case of
+  Q6). Never derived-class: single-deriver per space is untouched, and
+  the minted space's own SpaceServer activates later (first session or
+  event) as its only deriver.
+- Sequencing at the wave commit step: foreign provisioning commits land
+  FIRST (per destination space), then the home derived commit carrying
+  the links and the `eventWatermark` advance. Same host, same process —
+  this is store sequencing, not a network await.
+- Failure: foreign fails ⇒ home never commits ⇒ the event stays
+  unconsequenced and replays; persistent failure falls to the
+  error-is-the-consequence rule (events.md §5).
+- Replay safety: destination DIDs/ids derive from the creation event
+  (CT-1650 — anonymous `inSpace()`, DID unique per user + creation
+  event), so a replayed handler re-derives the SAME ids and the
+  re-provisioning is a CAS no-op. The today-orphan window (foreign
+  landed, home did not) becomes convergent instead of dangling.
+- The foreign-writer runtime error therefore narrows to ACCIDENTAL
+  crossings: a server action tx may write a foreign space exactly where
+  the API marked it (`destinationSpace` present). Unmarked foreign
+  writes remain an error naming this section.
+- Sharded future (spaces not co-hosted): provisioning becomes
+  outbox-carried and the home commit defers a wave. Out of v2 scope.
 
 **Atomicity, stated plainly:** nothing spanning two spaces is atomic —
 not today, not in v2. A wave is per-space; cross-space influence is

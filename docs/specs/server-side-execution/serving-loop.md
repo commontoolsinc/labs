@@ -237,6 +237,12 @@ commit. Count drops as `wave.supersededWrites`. Whole-wave CAS failure is
 FORBIDDEN (livelock under sustained authored traffic), as are blind
 derived writes (clobber).
 
+**Multi-space seals** (`.inSpace(...)` provisioning): writes the action
+tx marked with a `destinationSpace` are sequenced at the commit step —
+foreign authored commits first, home derived commit after success —
+per protocol.md §2b. The wave does not close until the split completes
+or fails as a unit (same-host store sequencing, not a network await).
+
 ## 4. Effectful nodes: memoization contract
 
 For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
