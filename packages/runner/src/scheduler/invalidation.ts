@@ -173,6 +173,12 @@ export function processStorageNotification(
         sourceChangeGroup,
       });
       const cause: IMemorySpaceAddress = { ...change.address, space };
+      // Arc: an `integrate` notification is a REMOTE change landing, so a
+      // claimed computation defers rather than re-running client-side. Carried
+      // through both the shaped and unshaped release paths below.
+      const planOptions = {
+        deferClaimedRemote: notification.type === "integrate",
+      };
       const shapeGroupKey = plan.operation !== "none"
         ? shapableWakeGroupKey(state, notification, action)
         : undefined;
@@ -191,10 +197,17 @@ export function processStorageNotification(
           shapeGroupKey,
           `${actionId}|${spaceAndURI}`,
           commitChargeKey,
-          () => applyPullTriggeredActionPlan(state, action, plan, cause),
+          () =>
+            applyPullTriggeredActionPlan(
+              state,
+              action,
+              plan,
+              cause,
+              planOptions,
+            ),
         );
       } else {
-        applyPullTriggeredActionPlan(state, action, plan, cause);
+        applyPullTriggeredActionPlan(state, action, plan, cause, planOptions);
       }
 
       triggerTraceEntry?.triggered.push(
@@ -410,6 +423,7 @@ export function applyPullTriggeredActionPlan(
   action: Action,
   plan: TriggeredActionPlan,
   cause: IMemorySpaceAddress,
+  options: { readonly deferClaimedRemote?: boolean } = {},
 ): void {
   if (plan.operation === "schedule") {
     state.scheduleWithDebounce(action);
@@ -417,7 +431,9 @@ export function applyPullTriggeredActionPlan(
   }
 
   if (plan.operation === "invalidate") {
-    state.markInvalid(action, cause);
+    state.markInvalid(action, cause, {
+      deferClaimedRemote: options.deferClaimedRemote === true,
+    });
   }
 }
 
@@ -445,6 +461,7 @@ export interface StorageNotificationState {
   readonly markInvalid: (
     action: Action,
     cause: IMemorySpaceAddress,
+    options: { readonly deferClaimedRemote: boolean },
   ) => void;
   readonly isInvalid: (action: Action) => boolean;
   readonly materializerIndex: MaterializerIndexState;

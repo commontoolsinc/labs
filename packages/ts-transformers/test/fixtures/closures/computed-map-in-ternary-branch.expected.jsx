@@ -142,7 +142,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     return (<li>

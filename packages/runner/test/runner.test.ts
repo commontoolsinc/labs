@@ -39,6 +39,8 @@ import {
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+const directRootOutputBindingDiagnostic =
+  "Computation nodes require exactly one direct root write-redirect output binding";
 
 function runTrusted(
   runtime: Runtime,
@@ -107,10 +109,8 @@ describe("runPattern", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -146,6 +146,228 @@ describe("runPattern", () => {
     expect(resultValue).toEqual({ output: 1 });
   });
 
+  it("rejects a nested computation output binding", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => ({ nested: 1 }),
+          },
+          inputs: {},
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested computation output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects multiple computation output bindings", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        first: { $alias: { partialCause: "first", path: [] } },
+        second: { $alias: { partialCause: "second", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => ({ first: 1, second: 2 }),
+          },
+          inputs: {},
+          outputs: {
+            first: { $alias: { partialCause: "first", path: [] } },
+            second: { $alias: { partialCause: "second", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects multiple computation output bindings",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a computation without an output binding", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => undefined,
+          },
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects computation without output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a nested raw computation output binding", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "raw",
+            implementation: () => () => undefined,
+          },
+          inputs: {},
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested raw computation output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a nested sub-pattern output binding", () => {
+    const childPattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    } as Pattern;
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: { type: "pattern", implementation: childPattern },
+          inputs: {},
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested sub-pattern output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a nested passthrough output binding", () => {
+    const pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: {
+            nested: { $alias: { cell: "argument", path: ["input"] } },
+          },
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested passthrough output binding",
+    );
+    expect(() =>
+      runTrusted(runtime, undefined, pattern, { input: 1 }, resultCell)
+    ).toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects multiple passthrough output bindings", () => {
+    const pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          first: { type: "number" },
+          second: { type: "number" },
+        },
+      },
+      resultSchema: {},
+      result: {
+        first: { $alias: { partialCause: "first", path: [] } },
+        second: { $alias: { partialCause: "second", path: [] } },
+      },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: {
+            first: { $alias: { cell: "argument", path: ["first"] } },
+            second: { $alias: { cell: "argument", path: ["second"] } },
+          },
+          outputs: {
+            first: { $alias: { partialCause: "first", path: [] } },
+            second: { $alias: { partialCause: "second", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects multiple passthrough output bindings",
+    );
+    expect(() =>
+      runTrusted(
+        runtime,
+        undefined,
+        pattern,
+        { first: 1, second: 2 },
+        resultCell,
+      )
+    ).toThrow(directRootOutputBindingDiagnostic);
+  });
+
   it("writes internal aliases through derived internal cell manifest links", async () => {
     const pattern = {
       argumentSchema: {
@@ -166,10 +388,8 @@ describe("runPattern", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -279,10 +499,8 @@ describe("runPattern", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -359,14 +577,10 @@ describe("runPattern", () => {
             type: "passthrough",
           },
           inputs: {
-            value: {
-              $alias: { cell: "argument", path: ["input"], defer: 1 },
-            },
+            $alias: { cell: "argument", path: ["input"], defer: 1 },
           },
           outputs: {
-            value: {
-              $alias: { partialCause: "output", path: [], defer: 1 },
-            },
+            $alias: { partialCause: "output", path: [], defer: 1 },
           },
         },
       ],
@@ -532,7 +746,7 @@ describe("runPattern", () => {
     expect(sourceDataReads).toBe(0);
   });
 
-  it("should run a simple module with no outputs", async () => {
+  it("should write undefined from a simple module", async () => {
     let ran = false;
 
     const mockPattern: Pattern = {
@@ -548,14 +762,14 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } },
-          outputs: {},
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
 
     const resultCell = runtime.getCell(
       space,
-      "should run a simple module with no outputs",
+      "should write undefined from a simple module",
     );
     const result = await runtime.runSynced(
       resultCell,
@@ -585,7 +799,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["other"] } },
-          outputs: {},
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -1316,10 +1530,8 @@ describe("setup/start", () => {
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
@@ -1748,10 +1960,8 @@ describe("setup/start", () => {
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
@@ -1923,10 +2133,8 @@ describe("setup/start", () => {
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };

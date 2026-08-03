@@ -167,7 +167,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["activeSpotOpts"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_5 = __cfHelpers.lift<{
     spotPreferences: string[];
 }, boolean>(({ spotPreferences }) => spotPreferences.length > 0, {
@@ -183,7 +183,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["spotPreferences"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_6 = __cfHelpers.lift<{
     spotPreferences: string[];
 }, string>(({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "), {
@@ -199,7 +199,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["spotPreferences"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const person = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");

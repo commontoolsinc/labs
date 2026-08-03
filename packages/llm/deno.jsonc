@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
     "./client": "./src/client.ts",
+    "./internal": "./src/internal.ts",
     "./schema-transport": "./src/schema-transport.ts"
   },
   "imports": {

@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["list"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: optional-element-access
 // Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(lift(...)(...))
 //   !list.get()?.[0] && <span> → when(lift(({list}) => !list.get()?.[0])({ list }), <span>)

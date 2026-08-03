@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         value: number;
@@ -55,7 +55,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: ternary_computed
 // Verifies: ternary with expressions on both sides produces ifElse() with a lift-applied computation for each branch
 //   state.value + 1 ? state.value + 2 : "undefined" → ifElse(...schemas, lift(...)({...}), lift(...)({...}), "undefined")

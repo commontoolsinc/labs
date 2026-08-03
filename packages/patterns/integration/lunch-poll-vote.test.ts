@@ -40,6 +40,10 @@ import {
   waitForRuntimeIdle,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
+import {
+  beginServerExecutionMeasurement,
+  finishServerExecutionMeasurement,
+} from "./server-execution-measurement.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const PROPAGATION_TIMEOUT = 60_000;
@@ -137,6 +141,9 @@ describe("lunch poll: two users vote on a shared option", () => {
 
   it("both users' votes on the same option survive, and a second option tallies independently", async () => {
     const timer = new StepTimer();
+    const executionMeasurement = await beginServerExecutionMeasurement(
+      "lunch-poll-vote",
+    );
     const view = { spaceName: SPACE_NAME, pieceId };
     const hostPage = hostShell.page();
     const guestPage = guestShell.page();
@@ -280,6 +287,7 @@ describe("lunch poll: two users vote on a shared option", () => {
             waitForSettledText(hostPage, "body", "2 love it"),
           ]),
       );
+      await finishServerExecutionMeasurement(executionMeasurement);
     } finally {
       logStepTimings("lunch-poll vote", timer);
       for (

@@ -5,6 +5,7 @@ import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
+import { deploymentRuntimeOptions } from "./runtime-options.ts";
 const { API_URL } = env;
 
 // Create test identity
@@ -19,13 +20,14 @@ const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 async function test() {
   // First runtime - save data
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(API_URL),
-    }),
+  const apiUrl = new URL(API_URL);
+  const storageManager1 = StorageManager.open({
+    as: identity,
+    memoryHost: apiUrl,
   });
+  const runtime1 = new Runtime(
+    deploymentRuntimeOptions(apiUrl, storageManager1),
+  );
 
   const schema = {
     type: "object",
@@ -50,13 +52,13 @@ async function test() {
   await runtime1.dispose();
 
   // Second runtime - fetch data
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(API_URL),
-    }),
+  const storageManager2 = StorageManager.open({
+    as: identity,
+    memoryHost: apiUrl,
   });
+  const runtime2 = new Runtime(
+    deploymentRuntimeOptions(apiUrl, storageManager2),
+  );
 
   const cell2 = runtime2.getCell(identity.did(), cause, schema);
   await cell2.sync();

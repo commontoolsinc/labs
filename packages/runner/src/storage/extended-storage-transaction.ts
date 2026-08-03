@@ -11,6 +11,8 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
+  ExternalSinkDisposition,
+  ExternalSinkDispositionPolicy,
   IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -37,6 +39,7 @@ import type {
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type {
   CommitPrecondition,
+  ExecutionClaim,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
@@ -50,6 +53,7 @@ import {
   isInternalVerifierRead,
   reactivityLogFromActivities,
 } from "./reactivity-log.ts";
+import { runWithTransactionSourceAction } from "./transaction-source-context.ts";
 
 import {
   type NormalizedFullLink,
@@ -351,11 +355,70 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private readResultCacheHits = 0;
   private readResultCacheMisses = 0;
   private readResultCacheSets = 0;
+  // Frozen "this runtime egressed on its OWN authority" memo for the
+  // server-side executor, the counterpart of the client-side pin on
+  // `tx.executionEffectAuthority`. ECMAScript-private (#) for the same reason
+  // as #cfcState / #cfcEnforcementFloor above: `tx` is `public` and
+  // `IStorageTransaction.executionEffectAuthority` is a plain writable
+  // property, so a memo parked there could be FORGED by handler or pattern
+  // code reaching `cell.tx` — re-authorising its own egress past the
+  // claim-observer stand-down. `as any` cannot touch a `#private` member, and
+  // this field is only ever set from constructor-time state (the declared
+  // policy), never from anything the untrusted side supplies.
+  #serverExecutorAuthority = false;
 
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
+    private readonly sinkDisposition: ExternalSinkDispositionPolicy =
+      "claim-conditional",
+    private readonly captureExecutionClaim?: (
+      sourceAction: object | undefined,
+    ) => ExecutionClaim | undefined,
   ) {}
+
+  externalSinkDisposition(): ExternalSinkDisposition {
+    // Memo FIRST: the authority decision is frozen per transaction (see
+    // `executionEffectAuthority` in interface.ts). sqlite-builtins.ts:798 and
+    // llm-dialog.ts:3272 both consult this gate BEFORE
+    // `enqueueSinkRequestPostCommitEffect` re-consults it, and both REQUIRE
+    // the same answer twice; the executor's policy is a live predicate over
+    // its claim table, so without this memo a claim released mid-transaction
+    // strands the result cell `pending` forever — a silently missing effect,
+    // which is the worse failure of the two.
+    if (this.#serverExecutorAuthority) return "allow";
+    const configured = typeof this.sinkDisposition === "function"
+      ? this.sinkDisposition(this.tx.sourceAction)
+      : this.sinkDisposition;
+    // "suppress" BEFORE everything else: a suppress-configured runtime must
+    // never egress, whatever else it or the transaction says.
+    if (configured === "suppress") return "suppress";
+    if (configured === "server-executor") {
+      // "server-executor" BEFORE the claim-observer stand-down below. This
+      // short-circuit is exactly the one that would be a double-egress trap
+      // if it were keyed on a configured "allow" — every client held "allow"
+      // by default, so such a client would skip its stand-down and issue the
+      // same outside-world action the server is already issuing under its
+      // claim. It is safe here only because "server-executor" is UN-SPELLABLE
+      // by a claim-observing client: it is not the default, no client preset
+      // exposes the option, and the memo it sets is #private rather than a
+      // forgeable field on the transaction. This runtime is the claim HOLDER,
+      // so the observer rule below is not about it.
+      this.#serverExecutorAuthority = true;
+      return "allow";
+    }
+    // ── "claim-conditional" (client) arm — unchanged, byte for byte ────────
+    if (this.tx.executionEffectAuthority === "server") return "suppress";
+    if (this.tx.executionEffectAuthority === "client") return "allow";
+    const claim = this.captureExecutionClaim?.(this.tx.sourceAction);
+    if (claim?.actionKind === "effect") {
+      this.tx.executionEffectAuthority = "server";
+      this.tx.executionClaim = claim;
+      return "suppress";
+    }
+    this.tx.executionEffectAuthority = "client";
+    return "allow";
+  }
 
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
@@ -1903,7 +1966,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (result.ok && !readOnly) {
       for (const effect of this.#cfcState.outbox) {
         try {
-          await effect.flush(this);
+          await runWithTransactionSourceAction(
+            this.tx.sourceAction,
+            () => effect.flush(this),
+          );
           this.cfcInstrumentation.onOutboxFlush?.(effect);
         } catch (error) {
           logger.error(
@@ -2125,6 +2191,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     info: { sink: string; effectId: string; detail: string },
   ): void {
     this.wrapped.noteCfcSinkReleaseReject(info);
+  }
+
+  externalSinkDisposition(): ExternalSinkDisposition {
+    return this.wrapped.externalSinkDisposition();
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {

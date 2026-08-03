@@ -84,17 +84,16 @@ You need your own Google OAuth credentials:
 
 Tokens expire after ~1 hour. Refresh happens automatically in two layers:
 
-**Layer 1: Automatic (background-piece-service)** When google-auth is registered
-with background-piece-service, the `bgUpdater` handler is polled every ~60
-seconds. If the token has < 10 minutes remaining, it refreshes proactively — no
-user action needed.
+**Layer 1: Automatic — NOT CURRENTLY RUNNING.** The `bgUpdater` handler
+refreshes proactively when the token has < 10 minutes remaining, but the service
+that used to poll it every ~60 seconds (background-piece-service) has been
+retired, and nothing has replaced it yet. The handler still exists and still
+works when something sends to the stream; no process does so on a schedule.
+Treat Layer 2 as the only refresh path today.
 
-To enable: register your google-auth piece with background-piece-service.
-
-**Layer 2: One-click (UI fallback)** If background refresh isn't running (e.g.,
-local dev), consuming patterns show a "Refresh Session" button when the token
-expires. Clicking it calls the google-auth piece's `refreshToken` stream to
-refresh the token inline.
+**Layer 2: One-click (UI fallback)** Consuming patterns show a "Refresh Session"
+button when the token expires. Clicking it calls the google-auth piece's
+`refreshToken` stream to refresh the token inline.
 
 **Layer 3: Manual (last resort)** If refresh fails (e.g., refresh token
 revoked):

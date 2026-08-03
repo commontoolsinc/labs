@@ -43,7 +43,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["x", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     y: number;
     state: {
@@ -68,7 +68,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["y", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element", "x");
     const y = __cf_pattern_input.key("element", "y");

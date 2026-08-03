@@ -43,7 +43,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["info"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
     const info = [file.key("type"), file.key("name")] as const;

@@ -38,7 +38,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -66,7 +66,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -94,7 +94,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: jsx-filter-length-roots
 // Verifies: structural filter-length wrappers use the shared post-closure path
 //   instead of rewriting the filter callback itself to filterWithPattern().

@@ -27,7 +27,7 @@ const liftOptional = lift((input: Writable<{
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const deriveInput: Writable<{
     foo: string;
     bar: string;
@@ -96,7 +96,7 @@ const liftInterprocedural = lift((input: Writable<{
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const liftWriteOnly = lift((input: Writable<{
     foo: string;
     bar: string;
@@ -114,7 +114,7 @@ const liftWriteOnly = lift((input: Writable<{
     asCell: ["writeonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["foo"]], completeSchedulerScopeSummary: true });
 const liftExplicit = lift((input) => input.key("foo").get(), {
     type: "object",
     properties: {
@@ -126,7 +126,7 @@ const liftExplicit = lift((input) => input.key("foo").get(), {
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

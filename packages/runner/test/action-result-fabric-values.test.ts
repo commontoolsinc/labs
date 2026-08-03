@@ -187,6 +187,10 @@ describe("action results use FabricValue legality", () => {
     writer = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: writerStorage,
+      // This runtime is the sole party performing the `fetchBinary` effect the
+      // pattern's values are seeded from, so it declares that authority; a
+      // runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
       fetch: () =>
         Promise.resolve(
           new Response(new Uint8Array([1, 2, 3, 4]), {

@@ -64,6 +64,11 @@ export interface PullSchedulingState {
   readonly isLiveAction: (action: Action) => boolean;
   readonly hasActiveDebounceTimer: (action: Action) => boolean;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  // Unlike authored throttle/debounce freshness windows, an exact claimed
+  // remote-speculation grace is part of the current convergence wave: idle()
+  // must not let callers sample stale output before either server adoption or
+  // the bounded local fallback run.
+  readonly isClaimedRemoteSpeculationDeferred: (action: Action) => boolean;
   // Per-action escape valve for convergence-backoff-deferred work. Keeping the
   // episode count on the gated node prevents one non-settling subgraph from
   // releasing idle() for an unrelated future convergence wave.
@@ -162,6 +167,10 @@ export function assessPullWork(
   let deferredIdleBlocking = false;
 
   const futureRunWaitsForIdle = (action: Action): boolean => {
+    if (state.isClaimedRemoteSpeculationDeferred(action)) {
+      return state.dirtyPullRunnableState
+        .isDemandedPullComputation(action);
+    }
     // Escape valve: once a non-settling episode has spent its backoff-pass
     // budget, NO deferred node blocks idle(), so a genuinely non-converging
     // (cyclic) subgraph still resolves idle() (the settle cap keeps the system

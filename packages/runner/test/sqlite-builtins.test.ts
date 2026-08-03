@@ -27,7 +27,13 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
+    });
     tx = runtime.edit();
     ({ commonfabric: cf } = createTrustedBuilder(runtime));
   });

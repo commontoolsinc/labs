@@ -43,7 +43,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["kind"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
     const __cf_destructure_1 = file.key("tags"), kind = __cf_destructure_1.key("0");

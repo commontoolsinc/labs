@@ -24,10 +24,19 @@ import {
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  getServerPrimaryExecutionConfig,
+  getServerPrimaryExecutionContextLatticeClaimsConfig,
+  getServerPrimaryExecutionDocSetWatchConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionContextLatticeClaimsConfig,
+  resetServerPrimaryExecutionDocSetWatchConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setServerPrimaryExecutionConfig,
+  setServerPrimaryExecutionContextLatticeClaimsConfig,
+  setServerPrimaryExecutionDocSetWatchConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
@@ -40,6 +49,7 @@ import type {
   ChangeGroup,
   CommitError,
   DID,
+  ExternalSinkDispositionPolicy,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -109,10 +119,12 @@ import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import type { ServerExecutableBuiltinId } from "./builtins/server-execution.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   type AsyncLocalStore,
   FallbackAsyncLocalStore,
@@ -125,6 +137,12 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
+import { getTransactionSourceAction } from "./storage/transaction-source-context.ts";
+import {
+  isExecutionLeaseFenceRejection,
+  isPermanentRejection,
+  isTerminalRejection,
+} from "./storage/rejection.ts";
 import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
@@ -134,6 +152,11 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+
+const executionLogger = getLogger("runtime.execution", {
+  enabled: true,
+  level: "error",
+});
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -190,7 +213,6 @@ export type ErrorWithContext = Error & {
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
-export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
@@ -209,10 +231,104 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
-  /** Persist scheduler observations and use them for scheduler rehydration. */
+  /** Persist scheduler observations and rehydrate from them (default on). */
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
+  /** Enable the trusted-client server-primary execution protocol (default off). */
+  serverPrimaryExecution?: boolean | undefined;
+  /**
+   * Hold window (ms) of the P0 demand-shrink gate: demand GROWTH publishes
+   * immediately, SHRINK is held this long and folded away when growth
+   * follows inside the window, so a same-space navigation never publishes
+   * the transient empty demand set ("sponsor-demand-gone", 53/53 claim
+   * refusals on the real workload). Default 10s (matches the pool's demand
+   * grace); `0` is byte-identical immediate passthrough. Programmatic-only —
+   * tests use a short hold to assert the held-shrink contract without
+   * waiting out the production window.
+   */
+  serverPrimaryExecutionDemandShrinkHoldMs?: number | undefined;
+  /**
+   * Let the executor Worker produce USER-RANK candidate claims for
+   * computation actions whose surfaces are user-scoped (context-lattice
+   * C1.5a). Default off: every observation classifies exactly as the
+   * space-only executor does (space or unservable), and no user-rank claim
+   * is ever requested. Effects and session-scoped surfaces are unaffected
+   * either way (amendment 8: user-rank is computation-only in C1).
+   * Programmatic-only — the C1.9 measurement fixture flips it together with
+   * the memory-side `serverPrimaryExecutionClaimRank` dial.
+   */
+  serverPrimaryExecutionUserRankCandidates?: boolean | undefined;
+  /**
+   * Let the executor Worker produce SESSION-RANK candidate claims for
+   * computation actions whose surfaces are session-scoped (context-lattice
+   * C2.5). Layered on {@link serverPrimaryExecutionUserRankCandidates} —
+   * the rank ladder, mirroring the memory-side claim-rank dial — so
+   * enabling it alone changes nothing. Candidates key by the canonical
+   * `session:<did>:<sessionId>` context keys of OPEN session lanes only;
+   * with no open session lane a session-rank action produces zero
+   * candidates (review CA9: the session identity source is the host's
+   * lane-grant machinery — never a key fabricated from a DID). Default off:
+   * session-scoped surfaces classify exactly as the pre-C2.5 executor does
+   * (unservable), byte-identical space/user behavior. Programmatic-only,
+   * flipped inside C2 gate fixtures together with the memory-side
+   * `serverPrimaryExecutionClaimRank` dial's `session` stage.
+   */
+  serverPrimaryExecutionSessionRankCandidates?: boolean | undefined;
+  /**
+   * Let the executor Worker admit FOREIGN-space, space-scoped READ surfaces
+   * (context-lattice C3.6): a computation — or supported builtin effect —
+   * whose read surface names a foreign space classifies claim-ready with a
+   * `crossSpaceReadSpaces` capability, and the executor issues a
+   * cross-space-read claim (the host re-verifies the acting principal's
+   * foreign READ per space at issuance and soft-declines otherwise). Default
+   * off: foreign reads classify exactly as the pre-C3.6 executor does
+   * (`foreign-read-space`, unservable), byte-identical. Foreign-read admission
+   * is ORTHOGONAL to the rank dials — it is a capability, not a fifth lane —
+   * so it composes with any of space/user/session candidacy. Programmatic-only
+   * and, per the CA4/C3A17 ordering invariant, never enabled outside gate
+   * fixtures until the memory-side `serverPrimaryExecutionClaimRank` reaches
+   * the `cross-space-read` stage AND the host advertises the
+   * `cross-space-claims-v1` cohort gate.
+   */
+  serverPrimaryExecutionCrossSpaceReadCandidates?: boolean | undefined;
+  /**
+   * The client half of the F3 doc-set watch subcapability (feed protocol):
+   * when on, and the peer advertises `serverPrimaryExecutionDocSetWatchV1`,
+   * the client replica exports its held-doc closure as an additive `docs`
+   * WatchSpec kind (server-membership point-read deltas) and demotes the
+   * steady-state schema-graph watches it would otherwise keep subscribed.
+   * Default off; layered above {@link serverPrimaryExecution} (the base feed
+   * capability) exactly like the server dial — enabling server-primary
+   * execution alone never turns it on. A mixed fleet stays valid: a client
+   * whose peer never advertised the kind keeps its graph watches unchanged,
+   * and the entire client path is byte-identical to the flag-off world.
+   * Registered in docs/development/EXPERIMENTAL_OPTIONS.md.
+   */
+  serverPrimaryExecutionDocSetWatch?: boolean | undefined;
+  /**
+   * The client half of the C1.7 `context-lattice-claims-v1` subcapability:
+   * whether THIS client offers context-scoped claim delivery in its memory
+   * `hello`. Installed as the realm's ambient memory config by the Runtime
+   * constructor, exactly like {@link serverPrimaryExecutionDocSetWatch}, and
+   * layered above {@link serverPrimaryExecution} — enabling the base flag
+   * alone never turns it on, and the connection getter chain ANDs both peers'
+   * advertisements.
+   *
+   * This is a NEGOTIATION dial, not a rank dial: it says nothing about which
+   * context ranks the host issues (`serverPrimaryExecutionClaimRank`, memory
+   * side) or which candidates this executor produces
+   * ({@link serverPrimaryExecutionUserRankCandidates} and the ladder above
+   * it), all of which stay programmatic-only. It is env-exposed because the
+   * amendment-11 cohort gate requires EVERY session of a principal to have
+   * negotiated before a user lane may open, so a fleet whose clients cannot
+   * negotiate makes every server-side rank dial inert (client-passivity §5g
+   * item 5, the CA4 audit). Default off; a mixed fleet stays valid either way
+   * — the cohort gate fences lanes around non-negotiating sessions rather
+   * than rejecting them. Registered in
+   * docs/development/EXPERIMENTAL_OPTIONS.md.
+   */
+  serverPrimaryExecutionContextLatticeClaims?: boolean | undefined;
   /**
    * Project a handler's plain JSON return into its per-event receipt cell
    * instead of the empty `{}` witness, so a caller — or a same-id retry that
@@ -330,7 +446,6 @@ export interface RuntimeOptions {
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
-  pieceCreatedCallback?: PieceCreatedCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
@@ -482,6 +597,8 @@ export interface RuntimeOptions {
    * globals. (LLM calls mock separately, at the `LLMClient` layer.)
    */
   fetch?: RuntimeFetch;
+  /** Whether builtins may release external post-commit sink effects. */
+  externalSinkDisposition?: ExternalSinkDispositionPolicy;
 }
 
 export interface CfcRuntimeStats {
@@ -627,7 +744,6 @@ export class Runtime {
   readonly harness: Engine;
   readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
-  readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
   /** See `RuntimeOptions.onPatternInstantiated`. */
@@ -657,6 +773,8 @@ export class Runtime {
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
+  /** Base used by the server builtin broker for authored relative URLs. */
+  readonly #patternApiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
@@ -664,6 +782,12 @@ export class Runtime {
    * `RuntimeOptions.fetch`.
    */
   readonly fetch: RuntimeFetch;
+  private serverBuiltinFetch?: (
+    builtinId: ServerExecutableBuiltinId,
+    rawUrl: string,
+    init?: RequestInit,
+  ) => Promise<Response>;
+  readonly externalSinkDisposition: ExternalSinkDispositionPolicy;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -944,6 +1068,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      serverPrimaryExecution: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
       eagerSourceAnnotation: undefined,
@@ -987,6 +1112,30 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+    setServerPrimaryExecutionConfig(
+      this.experimental.serverPrimaryExecution,
+    );
+    this.experimental.serverPrimaryExecution =
+      getServerPrimaryExecutionConfig();
+    // The F3 doc-set watch subcapability dial. Bridged symmetrically with the
+    // base flag: on a server build it decides advertisement (getMemoryProtocol
+    // Flags folds it with the base capability), on a client build it is the
+    // own-side gate the replica checks against the negotiated peer flag.
+    setServerPrimaryExecutionDocSetWatchConfig(
+      this.experimental.serverPrimaryExecutionDocSetWatch,
+    );
+    this.experimental.serverPrimaryExecutionDocSetWatch =
+      getServerPrimaryExecutionDocSetWatchConfig();
+    // The C1.7 context-lattice-claims-v1 subcapability dial, bridged
+    // symmetrically with the two above: on a server build it decides
+    // advertisement, on a client build it is what this realm's `hello`
+    // OFFERS — the half a browser had no path to before (CA4 audit,
+    // client-passivity §5g item 5).
+    setServerPrimaryExecutionContextLatticeClaimsConfig(
+      this.experimental.serverPrimaryExecutionContextLatticeClaims,
+    );
+    this.experimental.serverPrimaryExecutionContextLatticeClaims =
+      getServerPrimaryExecutionContextLatticeClaimsConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -1002,6 +1151,9 @@ export class Runtime {
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
+    this.#patternApiUrl = new URL(
+      options.patternEnvironment?.apiUrl ?? options.apiUrl,
+    );
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
     // space, not mid-builtin as a bare Invalid URL.
@@ -1028,6 +1180,45 @@ export class Runtime {
     // mock is used as-is.
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
+    // THE TERMINAL CONDITION, GATED. The arc has exactly TWO configurations
+    // and no hybrid, and this default is the client half of the second one:
+    //
+    //   serverPrimaryExecution ON  — the server executes AND the client is
+    //     passive. A client never runs an egress effect, full stop:
+    //     "suppress" is what a runtime gets by declaring nothing, and `allow`
+    //     is the exception a server-side executor EARNS by declaring
+    //     "server-executor" — which `executor/executor-worker.ts` is the one
+    //     site in the repo to do, and which no client preset can spell (see
+    //     `ExternalSinkDispositionPolicy`).
+    //
+    //   serverPrimaryExecution OFF — today's behaviour precisely: no server
+    //     execution, so the client does everything and egresses.
+    //     "claim-conditional" IS that behaviour — stand down only on an
+    //     OBSERVED server effect claim, and with the flag off nothing ever
+    //     issues one (`captureExecutionClaim` below is gated on the same
+    //     flag), so every action egresses from the client.
+    //
+    // Making the passivity half unconditional is the hybrid, and it fails in
+    // the direction this arc rates strictly worse than duplication: with the
+    // flag off a client would suppress every egress effect and NO EXECUTOR
+    // WOULD EXIST to perform it — a silently missing side effect. The
+    // claim-observer race that "suppress" retires only exists in the flag-ON
+    // world, where a server executor is there to win it.
+    //
+    // "egress effect" here means a POST-COMMIT SINK-REQUEST DISPATCH.
+    // Module resolution is excluded by construction, not by exemption: the
+    // gate can only suppress work whose result arrives by settlement, and a
+    // resolved module is a live JS object no settlement can deliver — see the
+    // item-3 ruling in `passivity-arc-orchestration.md` §1.
+    //
+    // `this.experimental` is fully resolved above (ambient round-trip
+    // included), so this reads the flag's effective per-runtime value; an
+    // explicit `options.externalSinkDisposition` still overrides both arms,
+    // which is how the executor Worker declares its own egress authority.
+    this.externalSinkDisposition = options.externalSinkDisposition ??
+      (this.experimental.serverPrimaryExecution
+        ? "suppress"
+        : "claim-conditional");
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
@@ -1046,6 +1237,18 @@ export class Runtime {
     (this.storageManager as {
       setTelemetry?: (telemetry: RuntimeTelemetry) => void;
     }).setTelemetry?.(this.telemetry);
+    // FA4/FB7: a doc-set membership retraction evicts the doc from the
+    // replica; the same step must clear this runtime's missing-doc kick latch
+    // for it — the latch's "first pull leaves a live watch behind"
+    // justification does not survive the retraction — so the next traversal
+    // read re-kicks instead of being deduped into silent staleness.
+    this.docEvictionUnsubscribe = this.storageManager.subscribeDocEvictions?.(
+      (space, id, scope) => {
+        this.missingDocLoadKicks.delete(
+          `${space}\0${normalizeCellScope(scope)}\0${id}`,
+        );
+      },
+    );
     this.moduleByteCache = options.moduleByteCache;
     this.patternCoverage = options.patternCoverage;
     // Validated + digested + frozen before the trust-snapshot provider
@@ -1109,7 +1312,6 @@ export class Runtime {
 
     // Set the navigate callback
     this.navigateCallback = options.navigateCallback;
-    this.pieceCreatedCallback = options.pieceCreatedCallback;
 
     // Handle pattern environment configuration. Only set the (process-global)
     // pattern environment when a host explicitly provides one — setting it
@@ -1176,13 +1378,33 @@ export class Runtime {
    * Passing it is what lets `settledFor` wait for one run rather than the whole
    * runtime. Omit it only for work that belongs to no single run.
    */
-  trackAsyncWork(promise: Promise<unknown>, owner?: Cell<any>): void {
+  trackAsyncWork(
+    promise: Promise<unknown>,
+    owner?: Cell<any>,
+    options: { externalEffect?: boolean } = {},
+  ): void {
+    const sourceAction = options.externalEffect === true
+      ? getTransactionSourceAction()
+      : undefined;
+    if (sourceAction !== undefined) {
+      const role = this.hasServerBuiltinFetch() ? "server" : "client";
+      executionLogger.debug(`execution-${role}-async-request`, () => [
+        "Async builtin work started",
+        { role },
+      ]);
+      this.storageManager.beginClientExecutionEffect?.(sourceAction);
+    }
     const tracked = promise.then(() => {}, () => {});
     const ownerKey = owner === undefined
       ? undefined
       : addressKey(owner.getAsNormalizedFullLink());
     this.#pendingAsyncWork.set(tracked, ownerKey);
-    tracked.finally(() => this.#pendingAsyncWork.delete(tracked));
+    tracked.finally(() => {
+      this.#pendingAsyncWork.delete(tracked);
+      if (sourceAction !== undefined) {
+        this.storageManager.endClientExecutionEffect?.(sourceAction);
+      }
+    });
   }
 
   /**
@@ -1375,6 +1597,11 @@ export class Runtime {
     // Stop all running docs
     this.runner.stopAll();
 
+    // stopAll() publishes the final empty execution-demand snapshot. Keep the
+    // memory transport alive until that snapshot settles so the shared server
+    // pool does not retain a client that has already gone away.
+    await this.runner.executionDemandSettled();
+
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.
     await this.patternUpdater.dispose();
@@ -1392,6 +1619,11 @@ export class Runtime {
 
     // Clear module registry
     this.moduleRegistry.clear();
+
+    // Detach from the storage manager's eviction signal (a sequential
+    // Runtime may reuse the manager; its subscription must not outlive us).
+    this.docEvictionUnsubscribe?.();
+    this.docEvictionUnsubscribe = undefined;
 
     // Cancel all storage operations
     if (closeStorage) await this.storageManager.close();
@@ -1415,6 +1647,9 @@ export class Runtime {
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
+    resetServerPrimaryExecutionConfig();
+    resetServerPrimaryExecutionDocSetWatchConfig();
+    resetServerPrimaryExecutionContextLatticeClaimsConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -1433,6 +1668,10 @@ export class Runtime {
     options: { changeGroup?: ChangeGroup } = {},
   ): IExtendedStorageTransaction {
     const tx = this.storageManager.edit();
+    const continuationSourceAction = getTransactionSourceAction();
+    if (continuationSourceAction !== undefined) {
+      tx.sourceAction = continuationSourceAction;
+    }
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }
@@ -1441,65 +1680,73 @@ export class Runtime {
     if (debugActionId) {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
-    const wrapped = new ExtendedStorageTransaction(tx, {
-      resolvePolicyManifest: (
-        reference,
-        tx,
-        destinationSpace,
-        bindCommit,
-      ) =>
-        this.resolveCfcPolicyManifest(
+    const wrapped = new ExtendedStorageTransaction(
+      tx,
+      {
+        resolvePolicyManifest: (
           reference,
           tx,
           destinationSpace,
           bindCommit,
-        ),
-      hasPolicyManifest: (space, reference, tx) =>
-        this.hasCfcPolicyManifest(space, reference, tx),
-      installPolicyManifest: (space, reference, tx) =>
-        this.installCfcPolicyManifest(space, reference, tx),
-      onRelevantTx: () => {
-        this.cfcStats.cfcRelevantTx += 1;
+        ) =>
+          this.resolveCfcPolicyManifest(
+            reference,
+            tx,
+            destinationSpace,
+            bindCommit,
+          ),
+        hasPolicyManifest: (space, reference, tx) =>
+          this.hasCfcPolicyManifest(space, reference, tx),
+        installPolicyManifest: (space, reference, tx) =>
+          this.installCfcPolicyManifest(space, reference, tx),
+        onRelevantTx: () => {
+          this.cfcStats.cfcRelevantTx += 1;
+        },
+        onPreparedTx: () => {
+          this.cfcStats.cfcPreparedTx += 1;
+        },
+        onPrepareReject: () => {
+          this.cfcStats.cfcPrepareRejects += 1;
+        },
+        onDigestInvalidation: () => {
+          this.cfcStats.cfcDigestInvalidations += 1;
+        },
+        onOutboxFlush: () => {
+          this.cfcStats.cfcOutboxFlushes += 1;
+        },
+        onSinkDedupHit: () => {
+          this.cfcStats.sinkDedupHits += 1;
+        },
+        onSinkReleaseReject: () => {
+          this.cfcStats.sinkReleaseRejects += 1;
+        },
+        // Stage-0 D4 precision counters: installed only when the deployment
+        // opted in, so the default prepare path skips all measurement.
+        ...(this.cfcPrefixProvenanceStats
+          ? {
+            onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
+              this.cfcStats.prefixProvenanceSummaries += 1;
+              this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
+              this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
+              this.cfcStats.prefixTxGlobalGatedReads +=
+                summary.txGlobalGatedReads;
+              this.cfcStats.prefixBoundReal += summary.boundSources.real;
+              this.cfcStats.prefixBoundInfinityFallback +=
+                summary.boundSources.infinityFallback;
+              this.cfcStats.prefixBoundClockLess +=
+                summary.boundSources.clockLess;
+              this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
+              this.cfcStats.prefixClockLessReads += summary.clockLessReads;
+            },
+          }
+          : {}),
       },
-      onPreparedTx: () => {
-        this.cfcStats.cfcPreparedTx += 1;
-      },
-      onPrepareReject: () => {
-        this.cfcStats.cfcPrepareRejects += 1;
-      },
-      onDigestInvalidation: () => {
-        this.cfcStats.cfcDigestInvalidations += 1;
-      },
-      onOutboxFlush: () => {
-        this.cfcStats.cfcOutboxFlushes += 1;
-      },
-      onSinkDedupHit: () => {
-        this.cfcStats.sinkDedupHits += 1;
-      },
-      onSinkReleaseReject: () => {
-        this.cfcStats.sinkReleaseRejects += 1;
-      },
-      // Stage-0 D4 precision counters: installed only when the deployment
-      // opted in, so the default prepare path skips all measurement.
-      ...(this.cfcPrefixProvenanceStats
-        ? {
-          onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
-            this.cfcStats.prefixProvenanceSummaries += 1;
-            this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
-            this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
-            this.cfcStats.prefixTxGlobalGatedReads +=
-              summary.txGlobalGatedReads;
-            this.cfcStats.prefixBoundReal += summary.boundSources.real;
-            this.cfcStats.prefixBoundInfinityFallback +=
-              summary.boundSources.infinityFallback;
-            this.cfcStats.prefixBoundClockLess +=
-              summary.boundSources.clockLess;
-            this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
-            this.cfcStats.prefixClockLessReads += summary.clockLessReads;
-          },
-        }
-        : {}),
-    });
+      this.externalSinkDisposition,
+      (sourceAction) =>
+        this.experimental.serverPrimaryExecution
+          ? this.storageManager.captureExecutionClaim?.(sourceAction)
+          : undefined,
+    );
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
@@ -1520,7 +1767,12 @@ export class Runtime {
   // subscription, so a later creation of the doc still arrives — one kick per
   // doc suffices. Scope is part of the key: scoped instances (user/session)
   // are distinct docs, and a kick for one scope must not suppress another's.
+  // EXCEPTION (FA4/FB7): a doc-set membership retraction ends exactly that
+  // per-doc subscription, so the storage manager's eviction signal (subscribed
+  // in the constructor) clears the evicted doc's entry — the next traversal
+  // read must re-kick or the reader goes silently stale.
   private missingDocLoadKicks = new Set<string>();
+  private docEvictionUnsubscribe?: () => void;
 
   /**
    * Asynchronously load a link target that a read found absent from the
@@ -1658,6 +1910,10 @@ export class Runtime {
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
       if (error) {
+        if (
+          isPermanentRejection(error) || isTerminalRejection(error) ||
+          isExecutionLeaseFenceRejection(error)
+        ) return { error };
         if (maxRetries > 0) {
           // A CONFLICT means this replica is behind the authoritative
           // version: re-running immediately re-reads the same stale local
@@ -2180,6 +2436,63 @@ export class Runtime {
    */
   hostForSpace(space: MemorySpace): URL {
     return new URL(this.mappedHostFor(space) ?? this.apiUrl);
+  }
+
+  /** Install the executor-only narrow broker before any demanded piece runs. */
+  installServerBuiltinFetch(
+    fetchImpl: (
+      builtinId: ServerExecutableBuiltinId,
+      rawUrl: string,
+      init?: RequestInit,
+    ) => Promise<Response>,
+  ): void {
+    if (!this.experimental.serverPrimaryExecution) {
+      throw new Error(
+        "server builtin fetch requires server-primary execution",
+      );
+    }
+    if (this.serverBuiltinFetch !== undefined) {
+      throw new Error("server builtin fetch is already installed");
+    }
+    this.harness.disableCompatibilityFetch();
+    this.serverBuiltinFetch = fetchImpl;
+  }
+
+  hasServerBuiltinFetch(): boolean {
+    return this.serverBuiltinFetch !== undefined;
+  }
+
+  /**
+   * Network seam used only by trusted builtins. The broker receives the raw
+   * authored URL so it can distinguish relative serving-origin requests from
+   * authored absolute/authority-bearing URLs; ordinary runtimes use the
+   * already-resolved URL and their existing injected fetch.
+   */
+  fetchBuiltin(
+    builtinId: ServerExecutableBuiltinId,
+    rawUrl: string,
+    resolvedUrl: URL | undefined,
+    init?: RequestInit,
+  ): Promise<Response> {
+    if (this.serverBuiltinFetch === undefined) {
+      if (resolvedUrl === undefined) {
+        throw new TypeError("builtin request URL is invalid");
+      }
+      return this.fetch(resolvedUrl, init);
+    }
+    let brokerUrl = rawUrl;
+    if (resolvedUrl !== undefined) {
+      try {
+        brokerUrl = new URL(rawUrl, this.#patternApiUrl).href ===
+            resolvedUrl.href
+          ? rawUrl
+          : resolvedUrl.href;
+      } catch {
+        // Forward malformed raw input unchanged. The host egress classifier
+        // converts it into the permanent invalid-url servability result.
+      }
+    }
+    return this.serverBuiltinFetch(builtinId, brokerUrl, init);
   }
 
   /**

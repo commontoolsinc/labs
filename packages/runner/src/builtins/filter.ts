@@ -33,6 +33,7 @@ import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
+  listBuiltinResultContainerCause,
   narrowestCellScope,
   outputSpotFromBinding,
   scopedCell,
@@ -219,7 +220,11 @@ export function filter(
       }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        { filter: parentCell.entityId, outputSpot },
+        listBuiltinResultContainerCause(
+          "filter",
+          parentCell.entityId,
+          outputSpot,
+        ),
         resultSchema,
         tx,
       );

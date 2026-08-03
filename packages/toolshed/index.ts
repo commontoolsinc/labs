@@ -13,7 +13,7 @@ import { identity } from "@/lib/identity.ts";
 import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createToolshedRuntime } from "@/runtime-options.ts";
-import { memory } from "@/routes/storage/memory.ts";
+import { memory, startServerExecutionPool } from "@/routes/storage/memory.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
 // Create a global runtime instance for the server
@@ -105,6 +105,9 @@ function startServer(onListening?: () => void) {
   // log distinguishes it from production. Announce it before anything else.
   announceCloneIfServed({ memoryDir: env.MEMORY_DIR, dbPath: env.DB_PATH });
   initializeRuntime();
+  // The listener must be installed before Deno.serve accepts the first
+  // execution-demand-bearing connection.
+  startServerExecutionPool(runtime);
 
   const serverOptions = {
     hostname: env.HOST,

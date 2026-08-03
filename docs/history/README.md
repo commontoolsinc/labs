@@ -258,6 +258,10 @@ One line per archived document; each document's header carries the fuller
   and
   [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
   — June 2026 profiling snapshots.
+- [server-primary-rollout-2026-07-12.md](development/performance/server-primary-rollout-2026-07-12.md)
+  — initial Phase 2 browser CPU and authority-rollout measurement, July 2026.
+- [server-primary-rollout-2026-07-13.md](development/performance/server-primary-rollout-2026-07-13.md)
+  — accepted 500-event Phase 2 browser CPU and authority-rollout measurement.
 - [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
   — root cause of the July 2026 labs CI duration increase: two unsharded
   pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.

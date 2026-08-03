@@ -4,6 +4,7 @@ import {
   type HelloMessage,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
   type ServerMessage,
   wireMemoryProtocolFlags,
@@ -20,8 +21,10 @@ const toError = (name: string, message: string): TypedError => ({
   message,
 });
 
-export const respondToHello = (message: HelloMessage): ServerMessage => {
-  const expectedFlags = getMemoryProtocolFlags();
+export const respondToHello = (
+  message: HelloMessage,
+  expectedFlags: MemoryProtocolFlags = getMemoryProtocolFlags(),
+): ServerMessage => {
   if (message.protocol !== MEMORY_PROTOCOL) {
     return {
       type: "response",

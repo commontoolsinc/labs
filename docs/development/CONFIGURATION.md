@@ -11,7 +11,6 @@ of each section.
 |---|---|
 | Toolshed (server) | [`packages/toolshed/env.ts`](../../packages/toolshed/env.ts) |
 | Shell (browser, build-time) | [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts), [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts) |
-| Background piece service | [`packages/background-piece-service/src/env.ts`](../../packages/background-piece-service/src/env.ts) |
 | CLI | [`packages/cli/launcher.ts`](../../packages/cli/launcher.ts), [`packages/cli/mod.ts`](../../packages/cli/mod.ts) |
 | Integration tests | [`packages/integration/env.ts`](../../packages/integration/env.ts) |
 | Experimental flags | [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) |
@@ -133,16 +132,15 @@ All blank by default. Each integration is gated on its `_CLIENT_ID` /
 
 ## Identity & auth
 
-There are three interacting identity concepts. Pick one column based on which
+There are two interacting identity concepts. Pick one column based on which
 process you're configuring.
 
 | Process | Path-to-keyfile var | Passphrase var | Default fallback |
 |---|---|---|---|
 | Toolshed | `IDENTITY` | `IDENTITY_PASSPHRASE` _(deprecated)_ | `"implicit trust"` (dev only) |
-| Background piece service | `IDENTITY` | `OPERATOR_PASS` | `"implicit trust"` (dev only) |
 | CF CLI | `CF_IDENTITY` env or `--identity <path>` | _(none)_ | _(none — error if remote)_ |
 
-For local dev, all three default to the implicit-trust passphrase so they
+For local dev, both default to the implicit-trust passphrase so they
 share an identity automatically. To match the CLI to the local server (only
 needed for operator/admin tasks on your own localhost):
 
@@ -212,6 +210,12 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 | `OTEL_TRACES_SAMPLER` | `always_on` |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` |
 
+The toolshed SDK provider registered by `OTEL_ENABLED` lives only in the main
+isolate. Server executor Workers bridge their isolated Runtime telemetry only
+under Deno native OTel (`OTEL_DENO=true|1` with `--unstable-otel`). Attachment
+and teardown are fail-open; spans identify the executor Runtime, served space,
+and sponsoring user while metrics keep those DIDs out of their labels.
+
 ---
 
 ## Build info
@@ -241,7 +245,7 @@ longer exist.
 [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) is the
 central registry of every experimental flag: what each gates, who added it, its
 default, its planned end state, and its removal path, plus the propagation paths
-(server / shell / bg-piece / CLI) and verification steps. Briefly:
+(server / shell / CLI) and verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
 - Shell-side toggles are baked at build time — toggling requires a rebuild.
@@ -253,6 +257,7 @@ The environment-backed flags (the only ones settable without editing code) are:
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
+| `serverPrimaryExecution` | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` |
 | `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
 
 The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
@@ -273,7 +278,8 @@ Most shell config is **build-time**: esbuild injects defines in
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
-| `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset = runtime on)_ | See experimental flags. |
+| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | `EXPERIMENTAL.serverPrimaryExecution` | _(unset = runtime off)_ | See experimental flags. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
@@ -289,7 +295,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec` against a remote toolshed. |
+| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec`, and `execution` against a remote toolshed. |
 | `CF_API_URL` | _(none)_ | Toolshed URL. Required for the same commands as above. |
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
@@ -306,7 +312,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 ### Per-command args
 
-`piece`, `acl`, `exec`, and `fuse` accept their own subcommand options
+`piece`, `acl`, `exec`, `execution`, and `fuse` accept their own subcommand options
 (`-i,--identity`, `-a,--api-url`, `-s,--space`, etc.). Use `cf <command> --help`
 for the authoritative list — it's not duplicated here.
 
@@ -321,19 +327,6 @@ Passed before the CLI args; rarely needed:
 | `--config <path>` | `<labs-root>/deno.jsonc` | Override the Deno config. |
 | `--cli-entrypoint <path>` | `<labs-root>/packages/cli/mod.ts` | Override the CLI entry. |
 | `--cwd <path>` | `INIT_CWD` env or `process.cwd()` | Override the working directory passed to the CLI. |
-
----
-
-## Background piece service
-
-| Var | Default | Notes |
-|---|---|---|
-| `OPERATOR_PASS` | `"implicit trust"` | Passphrase for implicit identity. Must match toolshed's identity in dev. |
-| `IDENTITY` | _(unset)_ | Path to keyfile; takes precedence over `OPERATOR_PASS`. |
-| `API_URL` | `http://localhost:8000` | Toolshed URL the service calls. |
-| `EXPERIMENTAL_MODERN_CELL_REP` | _(unset)_ | See experimental flags. |
-| `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | _(unset)_ | See experimental flags. |
-| `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | _(unset)_ | See experimental flags. |
 
 ---
 
@@ -367,7 +360,7 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `check` | Type-check all packages (`./tasks/check.sh`). |
 | `test` | Run all package tests (`./tasks/test.ts`). |
 | `integration` | Run integration tests (`./tasks/integration.ts`). |
-| `build-binaries` | Build all standalone binaries, build only the named targets passed after the task (`toolshed`, `bg-piece-service`, or `cf`), or use the legacy `deno task build-binaries --cli-only` alias to build only `cf`. |
+| `build-binaries` | Build all standalone binaries, build only the named targets passed after the task (`toolshed` or `cf`), or use the legacy `deno task build-binaries --cli-only` alias to build only `cf`. |
 | `cf` | Run the CLI via the launcher. |
 | `initialize-db` | Initialize the local development database. |
 | `install-hooks` | Install git pre-commit hooks. |
@@ -403,18 +396,6 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `test` | Unit tests. |
 | `integration`, `fuse-integration`, `acl-integration` | Integration suites against a local toolshed. |
 
-### Background piece service (`packages/background-piece-service`)
-
-| Task | What it does |
-|---|---|
-| `start` | Run from source. |
-| `add-admin-piece` | One-time setup: cast the admin piece into the system space. |
-| `test` | Run unit tests. |
-| `check` | Type-check source files. |
-| `lint` | Lint source files. |
-| `fmt` | Format package files. |
-| `help` | Service help. |
-
 ---
 
 ## Where defaults live
@@ -426,10 +407,9 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
   - `SANDBOX_SERVICE_URL` → `https://sandbox.stage.commontools.dev`.
   Both fall back gracefully when unreachable, but expect logs warning about
   the failed probes if you're off the corporate network.
-- **`"implicit trust"`** appears as the identity-passphrase default in three
-  places (toolshed `IDENTITY_PASSPHRASE`, bg-service `OPERATOR_PASS`, and the
-  CLI dev recipe). They must match for those three processes to share an
-  identity in local dev.
+- **`"implicit trust"`** appears as the identity-passphrase default in two
+  places (toolshed `IDENTITY_PASSPHRASE` and the CLI dev recipe). They must
+  match for those two processes to share an identity in local dev.
 
 ---
 

@@ -39,7 +39,7 @@ const readOnly = lift((input: Writable<State>) => input.key("foo").get(), {
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const setOnly = lift((input: Writable<State>) => {
     input.key("foo").set("updated");
     return 1;
@@ -54,7 +54,7 @@ const setOnly = lift((input: Writable<State>) => {
     asCell: ["writeonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["foo"]], completeSchedulerScopeSummary: true });
 const updateOnly = lift((input: Writable<State>) => {
     input.key("profile").update({ name: "Ada" });
     return 1;
@@ -83,7 +83,7 @@ const updateOnly = lift((input: Writable<State>) => {
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["profile"]], completeSchedulerScopeSummary: true });
 const pushOnly = lift((input: Writable<State>) => {
     input.key("items").push({ id: "1", label: "First" });
     return 1;
@@ -115,7 +115,7 @@ const pushOnly = lift((input: Writable<State>) => {
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["items"]], completeSchedulerScopeSummary: true });
 const readWrite = lift((input: Writable<State>) => {
     input.key("foo").set(input.key("foo").get().toUpperCase());
     return 1;
@@ -130,13 +130,13 @@ const readWrite = lift((input: Writable<State>) => {
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["foo"]], completeSchedulerScopeSummary: true });
 const comparable = lift((input: Writable<State>) => input.equals(input), {
     type: "unknown",
     asCell: ["comparable"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return item.key("id");
@@ -190,7 +190,7 @@ const opaqueMap = lift((input: Writable<Item[]>) => input.mapWithPattern(__cfPat
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 export { comparable, opaqueMap, pushOnly, readOnly, readWrite, setOnly, updateOnly, };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

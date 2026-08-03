@@ -48,7 +48,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: with-reactive
 // Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }

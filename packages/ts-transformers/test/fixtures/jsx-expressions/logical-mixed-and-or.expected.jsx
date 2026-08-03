@@ -35,7 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "boolean",
             "enum": [false]
         }]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     defaultMessage: __cfHelpers.Cell<string>;
 }, string>(({ defaultMessage }) => defaultMessage.get(), {
@@ -49,7 +49,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["defaultMessage"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
 }, boolean>(({ user }) => user.get().age > 18, {
@@ -69,7 +69,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_4 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
 }, string>(({ user }) => user.get().name, {
@@ -89,7 +89,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_5 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
 }, string | false>(({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
@@ -118,7 +118,7 @@ const __cfLift_5 = __cfHelpers.lift<{
             type: "boolean",
             "enum": [false]
         }]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless
 // FIXTURE: logical-mixed-and-or

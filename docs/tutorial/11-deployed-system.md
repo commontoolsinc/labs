@@ -60,25 +60,31 @@ header, and a piece renderer around the runtime:
 
 ## Background execution
 
-The background piece service (`packages/background-piece-service`) is the proof
-that a piece is *not* a UI artifact. It runs as a headless process with an
-operator identity, connects to the same WebSocket endpoint, and maintains a
-registry cell of pieces that asked for background updates (the `bgUpdater`
-convention from Chapter 5; registration
-via the `cf-updater` component or the integrations API). Per space it
-spawns a worker that, on each poll tick (default 60 s), sends an event to
-each registered piece's `bgUpdater` stream — and from there it's just
-Chapter 8: the handler runs, transactions commit, watchers (including any
-open browsers) sync. Same graph, third kind of executor.
+> **Retired.** A background piece service used to demonstrate that a piece
+> is *not* a UI artifact: a headless process with an operator identity,
+> connected to the same WebSocket endpoint, holding a registry cell of
+> pieces that asked for background updates (the `bgUpdater` convention
+> from Chapter 5; registration via the `cf-updater` component or the
+> integrations API). Per space it spawned a worker that, on each poll tick
+> (default 60 s), sent an event to each registered piece's `bgUpdater`
+> stream.
+>
+> It has been removed. The owner's summary is the reason: it was "a
+> runtime that runs pieces on the server by pretending to be a client" —
+> the server executing a piece under client authority, which is exactly
+> what server-side execution replaces. **Nothing polls `bgUpdater` streams
+> today.** Registration through `POST /api/integrations/bg` still records
+> which pieces want background work, so the record survives for whatever
+> succeeds it, but no process acts on it.
 
 ## The CLI, revisited
 
 With the architecture visible, Chapter 6's CLI needs one sentence: `cf` is a
-fourth client — key file instead of passkey, terminal instead of DOM,
-loopback or remote transport — driving the identical runtime. That all four
-executors (shell, toolshed, background service, CLI) are *the same machine
-with different transports* is the architectural payoff of the local/remote
-symmetry noted in Chapter 9.
+third client — key file instead of passkey, terminal instead of DOM,
+loopback or remote transport — driving the identical runtime. That all three
+executors (shell, toolshed, CLI) are *the same machine with different
+transports* is the architectural payoff of the local/remote symmetry noted
+in Chapter 9.
 
 ## The full trace
 
@@ -115,9 +121,9 @@ ran `cf piece link` long ago to feed the list into a dashboard piece.
    state; Alice's session is skipped as origin.
 5. **Remote update** (Ch. 8/11). Bob's worker integrates the upsert into
    his replica; the notification hits his trigger index; the same computeds
-   re-run on his machine; his DOM updates. The dashboard piece — possibly
-   currently being recomputed by the background service rather than any
-   browser — sees the same change the same way.
+   re-run on his machine; his DOM updates. The dashboard piece — open in
+   another browser, or in no browser at all — sees the same change the
+   same way.
 
 Total pattern-author code involved: one `$checked` binding and two
 `computed()` lines. Everything else — atomicity, conflict detection,

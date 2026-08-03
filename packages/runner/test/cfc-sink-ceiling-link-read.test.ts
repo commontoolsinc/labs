@@ -80,6 +80,12 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
+      // This runtime MAY egress, and has to for the end-to-end case below to
+      // mean anything: `expect(fetchCalls).toEqual([])` is the whole assertion
+      // there, so a runtime that could not egress in the first place satisfies
+      // it without the sink ceiling being consulted at all. Nothing here went
+      // red under the terminal flip — that is precisely the hazard.
+      externalSinkDisposition: "server-executor",
     });
 
     fetchCalls = [];

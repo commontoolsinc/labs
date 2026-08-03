@@ -35,6 +35,9 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
 
@@ -94,6 +97,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     tx.commit();
 
     // Pull the result to trigger computation
+    await runtime.settled();
     await result.pull();
     await result.pull();
 
@@ -138,6 +142,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     );
     tx.commit();
 
+    await runtime.settled();
     await result.pull();
     await result.pull();
 
@@ -175,6 +180,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
 
     try {
       tx.commit();
+      await runtime.settled();
       await result.pull();
       await runtime.idle();
 
@@ -219,6 +225,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
         url: "http://mock-test-server.local/api/idempotency",
       }, resultCell);
       tx.commit();
+      await runtime.settled();
       await result.pull();
 
       const expectedHash = computeInputHashFromValue({
@@ -307,6 +314,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     tx.commit();
 
     // Pull first to trigger computation (starts the fetch)
+    await runtime.settled();
     await resultCell1.pull();
     await resultCell2.pull();
 

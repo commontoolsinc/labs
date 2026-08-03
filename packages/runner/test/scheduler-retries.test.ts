@@ -18,7 +18,10 @@ import type {
   ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
+import {
+  type ActionCommitRejectionDirective,
+  watchReactiveActionCommit,
+} from "../src/scheduler/run.ts";
 
 describe("reactive retries", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -87,6 +90,32 @@ describe("reactive retries", () => {
     },
   );
 
+  it("reports rejected action commits to the executor control hook", async () => {
+    const rejected: Array<{ action: Action; error: unknown }> = [];
+    runtime.scheduler.setActionCommitRejectionHandler(
+      (action: Action, error: unknown) => {
+        rejected.push({ action, error });
+      },
+    );
+    const action: Action = (actionTx) => {
+      actionTx.abort("executor-control-rejection");
+    };
+
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+    for (let attempt = 0; attempt < 20 && rejected.length === 0; attempt++) {
+      await runtime.idle();
+    }
+
+    expect(rejected[0]?.action).toBe(action);
+    expect((rejected[0]?.error as { name?: string })?.name).toBe(
+      "StorageTransactionAborted",
+    );
+  });
+
   // Directly exercise the reactive commit-result classification
   // (`watchReactiveActionCommit`): a whole-runtime commit injector would churn
   // every commit and re-trigger the action externally, confounding the retry
@@ -94,6 +123,7 @@ describe("reactive retries", () => {
   const runWatcher = async (
     errorName: string | undefined,
     initialRetries: number,
+    rejectionDirective?: ActionCommitRejectionDirective,
     // Share `action` + `offBudgetRetries` across calls to accumulate an
     // off-budget streak; both default to fresh per call.
     shared?: { action: Action; offBudgetRetries: WeakMap<Action, number> },
@@ -105,6 +135,7 @@ describe("reactive retries", () => {
       new WeakMap<Action, number>();
     let queued = 0;
     let resubscribed = 0;
+    const rejectionDispositions: string[] = [];
     const error = errorName === undefined
       ? undefined
       : { name: errorName, message: `injected ${errorName}` };
@@ -113,6 +144,9 @@ describe("reactive retries", () => {
     >;
     watchReactiveActionCommit({
       action,
+      // Consumed only by the P4 conflict-retry debug probe; any stable label
+      // identifies this fixture's action in that line.
+      actionId: "scheduler-retries-test-action",
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
       retries,
@@ -128,10 +162,21 @@ describe("reactive retries", () => {
       },
       getActionId: () => "test-action",
       restoreInvalidCauses: () => {},
+      onCommitRejected: (_error, disposition) => {
+        rejectionDispositions.push(disposition);
+        return rejectionDirective;
+      },
     });
     await commitPromise;
     await new Promise((r) => setTimeout(r, 0));
-    return { queued, resubscribed, retries, offBudgetRetries, action };
+    return {
+      queued,
+      resubscribed,
+      retries,
+      offBudgetRetries,
+      action,
+      rejectionDispositions,
+    };
   };
 
   it(
@@ -146,6 +191,7 @@ describe("reactive retries", () => {
       const r = await runWatcher("RowLabelCommitError", 3);
       expect(r.queued).toBe(0);
       expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
     },
   );
 
@@ -155,6 +201,17 @@ describe("reactive retries", () => {
       const r = await runWatcher("PreconditionFailedError", 3);
       expect(r.queued).toBe(0);
       expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
+    },
+  );
+
+  it(
+    "does not retry a stale execution lease fence and clears the retry budget",
+    async () => {
+      const r = await runWatcher("ExecutionLeaseFenceError", 3);
+      expect(r.queued).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
     },
   );
 
@@ -166,6 +223,32 @@ describe("reactive retries", () => {
       const r = await runWatcher("TransactionError", 0);
       expect(r.queued).toBe(1);
       expect(r.retries.get(r.action)).toBe(1);
+      expect(r.rejectionDispositions).toEqual(["retrying"]);
+    },
+  );
+
+  it(
+    "lets executor control suppress a generic retry after revoking authority",
+    async () => {
+      const r = await runWatcher(
+        "AuthorizationError",
+        3,
+        "suppress-retry",
+      );
+      expect(r.queued).toBe(0);
+      expect(r.resubscribed).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["retrying"]);
+    },
+  );
+
+  it(
+    "reports a transient rejection as abandoned when its retry budget is exhausted",
+    async () => {
+      const r = await runWatcher("TransactionError", 9);
+      expect(r.queued).toBe(0);
+      expect(r.retries.get(r.action)).toBe(10);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
     },
   );
 
@@ -198,11 +281,11 @@ describe("reactive retries", () => {
         action: (() => {}) as unknown as Action,
         offBudgetRetries: new WeakMap<Action, number>(),
       };
-      await runWatcher("StorageTransactionInconsistent", 0, shared);
-      await runWatcher("ConflictError", 0, shared);
+      await runWatcher("StorageTransactionInconsistent", 0, undefined, shared);
+      await runWatcher("ConflictError", 0, undefined, shared);
       expect(shared.offBudgetRetries.get(shared.action)).toBe(2);
       // A successful commit ends the streak and clears the count.
-      await runWatcher(undefined, 0, shared);
+      await runWatcher(undefined, 0, undefined, shared);
       expect(shared.offBudgetRetries.has(shared.action)).toBe(false);
     },
   );

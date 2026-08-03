@@ -8,6 +8,12 @@ import {
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
+import {
+  isInternalLLMBrokerRequestOptions,
+  type LLMClientRequestOptions,
+} from "./request-options.ts";
+
+export type { LLMClientRequestOptions } from "./request-options.ts";
 import { assertJsonTransportSafe } from "./schema-transport.ts";
 
 type PartialCallback = (text: string) => void;
@@ -467,15 +473,7 @@ export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
     abortSignal?: AbortSignal,
-    opts?: {
-      /**
-       * Full LLM endpoint URL for THIS call (e.g.
-       * `new URL("/api/ai/llm", host)`); the module-level default
-       * (setLLMUrl) is the fallback. Lets one runtime route per-space
-       * work to that space's host.
-       */
-      endpoint?: string | URL;
-    },
+    opts?: LLMClientRequestOptions,
   ): Promise<LLMGenerateObjectResponse> {
     // The request crosses to the provider as ordinary JSON. Refuse a schema
     // holding a value that would not survive that intact, before anything is
@@ -500,17 +498,20 @@ export class LLMClient {
     }
 
     // Guard: block live calls in test environments
-    if (_isTestEnvironment) {
+    if (_isTestEnvironment && !isInternalLLMBrokerRequestOptions(opts)) {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
     const endpoint = opts?.endpoint?.toString() ?? llmApiUrl;
-    const response = await fetch(endpoint + "/generateObject", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-      signal: abortSignal,
-    });
+    const response = await (opts?.fetch ?? globalThis.fetch)(
+      endpoint + "/generateObject",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: abortSignal,
+      },
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -544,10 +545,7 @@ export class LLMClient {
     request: LLMRequest,
     callback?: PartialCallback,
     abortSignal?: AbortSignal,
-    opts?: {
-      /** Per-call LLM endpoint; module-level default is the fallback. */
-      endpoint?: string | URL;
-    },
+    opts?: LLMClientRequestOptions,
   ): Promise<LLMResponse> {
     if (request.stream && !callback) {
       throw new Error(
@@ -604,16 +602,19 @@ export class LLMClient {
     }
 
     // Guard: block live calls in test environments
-    if (_isTestEnvironment) {
+    if (_isTestEnvironment && !isInternalLLMBrokerRequestOptions(opts)) {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
-    const response = await fetch(opts?.endpoint?.toString() ?? llmApiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-      signal: abortSignal,
-    });
+    const response = await (opts?.fetch ?? globalThis.fetch)(
+      opts?.endpoint?.toString() ?? llmApiUrl,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: abortSignal,
+      },
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

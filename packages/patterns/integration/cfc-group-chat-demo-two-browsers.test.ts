@@ -300,6 +300,61 @@ describe(
             ),
         );
 
+        // Persistent multi-user series (client-passivity P1): alternate
+        // posts between browsers at a human cadence, timing each post's
+        // cross-browser propagation. The session stays open for the whole
+        // series, so the server-primary executor engages and the
+        // measurement captures the steady multi-user regime — the
+        // commit-thrashing shape server arbitration should improve.
+        // Default (unset) skips the series; the assertion flow is
+        // unchanged.
+        const chatSeries = (() => {
+          try {
+            const raw = Deno.env.get("CF_CHAT_MESSAGE_SERIES");
+            return raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : 0;
+          } catch {
+            return 0;
+          }
+        })();
+        const chatDelayMs = (() => {
+          try {
+            const raw = Deno.env.get("CF_CHAT_MESSAGE_DELAY_MS");
+            return raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : 0;
+          } catch {
+            return 0;
+          }
+        })();
+        if (chatSeries > 0) {
+          const propagation: Array<
+            { index: number; from: number; sendToSeenMs: number }
+          > = [];
+          for (let n = 0; n < chatSeries; n++) {
+            if (chatDelayMs > 0) {
+              await new Promise((resolve) => setTimeout(resolve, chatDelayMs));
+            }
+            const from = n % pages.length;
+            const body = `series-${n} from ${userNames[from]}`;
+            await fillCfInput(pages[from], "#trusted-message-draft", body);
+            await waitForDisabled(pages[from], "#trusted-send-button", false);
+            const sentAt = Date.now();
+            await clickCfButton(pages[from], "#trusted-send-button");
+            await Promise.all(
+              others(from).map((page) =>
+                waitForText(page, "#trusted-conversation-preview", body)
+              ),
+            );
+            propagation.push({
+              index: n,
+              from,
+              sendToSeenMs: Date.now() - sentAt,
+            });
+          }
+          console.log(
+            "chatPropagationSeries:",
+            JSON.stringify(propagation, null, 2),
+          );
+        }
+
         // First user locks down admin. Every other user loses admin (cannot
         // add rooms) but must still be able to POST — sending is never
         // admin-gated.

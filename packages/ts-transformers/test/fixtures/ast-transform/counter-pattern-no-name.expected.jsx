@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: counter-pattern-no-name
 // Verifies: same transforms as counter-pattern apply even when the file has no unique name
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)

@@ -29,6 +29,9 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
 
@@ -114,7 +117,11 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await result.pull();
+    // `settled()` is the barrier for tracked async builtin work — the fetch
+    // and its writeback — where `idle()`/`pull()` alone deliberately are not.
+    // This branch routes the request through the post-commit sink outbox, so
+    // the dispatch is one flush further out than a bare `pull()` covers.
+    await runtime.settled();
     await result.pull();
 
     return result.get() as { pending: any; result: any; error: any };
@@ -305,7 +312,9 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await resultCell.pull();
+    // See the note on `runFetch`: `settled()` is the barrier that covers the
+    // post-commit sink outbox this branch routes the request through.
+    await runtime.settled();
     await resultCell.pull();
 
     expect((resultCell.get() as { result: unknown }).result).toBe(

@@ -26,6 +26,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
 
@@ -90,6 +93,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx = runtime.edit();
 
     // Pull first to trigger computation (starts the fetch)
+    await runtime.settled();
     await resultCell.pull();
 
     await resultCell.pull();
@@ -104,6 +108,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx = runtime.edit();
 
     // Pull first to trigger computation with new URL
+    await runtime.settled();
     await resultCell.pull();
 
     await resultCell.pull();
@@ -128,6 +133,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull first to trigger computation
+    await runtime.settled();
     await resultCell1.pull();
 
     await resultCell1.pull();
@@ -147,6 +153,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull first to trigger computation
+    await runtime.settled();
     await resultCell2.pull();
 
     await resultCell2.pull();
@@ -192,6 +199,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull first to trigger computation (starts the fetch)
+    await runtime.settled();
     await result.pull();
 
     const finalData = (await result.pull()) as {
@@ -219,6 +227,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const localTx = rt.edit();
     const { commonfabric } = createTrustedBuilder(rt);
@@ -241,6 +252,9 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     );
     localTx.commit();
 
+    // The barrier must be THIS runtime's: the effect is tracked on `rt`, not
+    // on the suite's shared `runtime`.
+    await rt.settled();
     await result.pull();
 
     const data = (await result.pull()) as {
@@ -334,6 +348,7 @@ describe("fetch-json mutex mechanism: reactive fetch state", () => {
     tx.commit();
 
     // Pull and wait for the fetch to complete
+    await runtime.settled();
     await result.pull();
     await result.pull();
 

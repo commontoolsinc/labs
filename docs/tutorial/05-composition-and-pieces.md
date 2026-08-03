@@ -156,13 +156,15 @@ sentence is the product.
 
 ## Background execution
 
-A piece can keep working with no browser open. A pattern that exposes a
-`bgUpdater` stream (or registers via the `cf-updater` component) gets picked
-up by the **background piece service**, which re-runs each registered piece
-on a fixed cadence (every 60 s by default), sending to that stream
-server-side — same graph, same cells, headless executor (details in
-Chapter 11). This is how "summarize my feed every morning" works without
-anyone keeping a tab open.
+> **Not currently available.** The **background piece service** used to
+> re-run registered pieces on a fixed cadence (every 60 s), sending to a
+> `bgUpdater` stream server-side with no browser open. That service has
+> been retired — it was a server process that ran pieces by impersonating
+> a client, and it is being replaced by server-side execution proper
+> (Chapter 11). Patterns may still expose a `bgUpdater` stream and still
+> register via the `cf-updater` component, but nothing polls them today;
+> such a stream fires only when something sends to it, such as a button in
+> the UI.
 
 ---
 

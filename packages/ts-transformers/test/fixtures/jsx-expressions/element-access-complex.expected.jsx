@@ -600,7 +600,7 @@ const __cfLift_18 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: element-access-complex
 // Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in a lift-applied computation
 //   state.matrix[state.row]![state.col]         → lift(...)({ matrix, row, col })

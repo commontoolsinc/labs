@@ -199,6 +199,31 @@ describe("scheduler run gates", () => {
     expect(queued).toBe(2);
   });
 
+  it("keeps a claimed remote-speculation grace on its leading edge", () => {
+    const action: Action = function claimedRemoteComputation() {};
+    let queued = 0;
+    const { gates, nodes } = makeGates({ queued: () => queued++ });
+    const node = nodes.register(action, "computation");
+    const now = performance.now();
+    const firstDeadline = now + 30_000;
+
+    try {
+      gates.holdClaimedRemoteSpeculation(action, firstDeadline);
+      gates.holdClaimedRemoteSpeculation(action, firstDeadline + 30_000);
+
+      expect(gates.eligibleAt(node)).toBe(firstDeadline);
+      expect(gates.isEligible(node, firstDeadline - 1)).toBe(false);
+      expect(gates.isEligible(node, firstDeadline)).toBe(true);
+
+      gates.releaseClaimedRemoteSpeculation(action);
+      expect(gates.isEligible(node, now)).toBe(true);
+      expect(gates.hasWakeTimer()).toBe(false);
+      expect(queued).toBe(1);
+    } finally {
+      gates.cancelWake();
+    }
+  });
+
   it("does not arm wake timers after scheduler disposal", () => {
     let queued = 0;
     const { gates } = makeGates({

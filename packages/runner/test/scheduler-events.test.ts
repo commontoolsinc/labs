@@ -23,6 +23,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -100,6 +101,61 @@ describe("event handling", () => {
     expect(eventCount).toBe(2);
     expect(eventCell.get()).toBe(0); // Events are _not_ written to cell
     expect(eventResultCell.get()).toBe(2);
+  });
+
+  it("keeps handler runs out of persistent action observations", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "handler observation exclusion event",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "handler observation exclusion result",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    resultCell.set(0);
+    await tx.commit();
+
+    let schedulerObservationWrites = 0;
+    const originalEdit = runtime.edit.bind(runtime);
+    runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
+      const handlerTx = originalEdit(...args);
+      const originalSet = handlerTx.setSchedulerObservation?.bind(handlerTx);
+      handlerTx.setSchedulerObservation = (observation: FabricValue) => {
+        schedulerObservationWrites++;
+        originalSet?.(observation);
+      };
+      return handlerTx;
+    }) as typeof runtime.edit;
+
+    const handler = Object.assign(
+      ((handlerTx: IExtendedStorageTransaction, event: unknown) => {
+        resultCell.withTx(handlerTx).send(event as number);
+      }) as EventHandler,
+      {
+        implementationHash: "cf:module/test-handler:observation-exclusion",
+        schedulerObservationIdentity: {
+          ownerSpace: space,
+          branch: "",
+          pieceId: "space:handler-observation-exclusion",
+          processGeneration: 1,
+        },
+      },
+    );
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 7);
+    await resultCell.pull();
+
+    expect(resultCell.get()).toBe(7);
+    expect(schedulerObservationWrites).toBe(0);
   });
 
   it("awaits presyncInputs before running the handler body", async () => {

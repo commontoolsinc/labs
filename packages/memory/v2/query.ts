@@ -69,6 +69,7 @@ const addTraverserStats = (
   stats: QueryTraversalStats,
   traverser: SchemaObjectTraverser<FabricValue>,
 ): void => {
+  stats.coveredSelectorSkips += traverser.coveredLinkSkips;
   stats.schemaTraversals += traverser.traverseWithSchemaCalls;
   stats.pointerTraversals += traverser.traversePointerCalls;
   stats.arrayTraversals += traverser.traverseArrayCalls;
@@ -82,6 +83,7 @@ export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
   #details = new Map<string, {
     seq: number;
+    scopeKey: string;
     document: NonNullable<Engine.EntityState["document"]>;
   }>();
   #missing = new Set<string>();
@@ -145,6 +147,7 @@ export class EngineObjectManager implements ObjectStorageManager {
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
       seq: state.seq,
+      scopeKey: state.scopeKey,
       document: state.document,
     });
     return attestation;
@@ -200,6 +203,16 @@ export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
 };
 
+/** P1 covered growth pulls (client-passivity §0 step 1): the caller's live
+ * tracked watch surface. Seeding the query traversal's schema tracker with
+ * these (docKey, selector) pairs makes every covered descent skip through
+ * the EXISTING `loadFactsForDoc` covers check (counted as
+ * coveredSelectorSkips), and the result omits every seeded doc — the wave
+ * path owns their delivery. The tracker is read only, never mutated. */
+export interface QueryGraphCoverage {
+  covered: MapSetStringToPathSelectors;
+}
+
 export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
@@ -247,10 +260,19 @@ const snapshotForDocKey = (
   const type = "application/json";
   const detail = manager.detail({ id, type, scope });
   const state = detail === undefined ? manager.readState(id, scope) : null;
+  // RESOLVED scope key (C1.4b): carried on every snapshot so sync frames
+  // attribute per lane. An absent doc still resolves its instance key from
+  // the evaluation's scope context.
+  const scopeKey = detail?.scopeKey ?? state?.scopeKey ??
+    Engine.resolveScopeKey(scope, {
+      principal: manager.principal,
+      sessionId: manager.sessionId,
+    });
   return {
     branch,
     id,
     ...(scope !== DEFAULT_SCOPE ? { scope } : {}),
+    scopeKey,
     seq: detail?.seq ?? state?.seq ?? 0,
     document: detail?.document === undefined
       ? state?.document === null || state?.document === undefined
@@ -265,9 +287,11 @@ const entitiesFromTracker = (
   tracker: MapSetStringToPathSelectors,
   manager: EngineObjectManager,
   branch: string,
+  omitDocKeys?: ReadonlySet<string>,
 ): Map<QueryDocKey, EntitySnapshot> => {
   const entities = new Map<QueryDocKey, EntitySnapshot>();
   for (const [key] of tracker) {
+    if (omitDocKeys?.has(key)) continue;
     const snapshot = snapshotForDocKey(
       space,
       manager,
@@ -287,6 +311,7 @@ export const trackGraph = (
   query: GraphQuery,
   reuse?: QueryGraphReuseContext,
   options: TrackGraphOptions = {},
+  coverage?: QueryGraphCoverage,
 ): {
   serverSeq: number;
   state: TrackedGraphState;
@@ -314,6 +339,21 @@ export const trackGraph = (
     JSONSchema | undefined
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
+  // P1 covered growth pulls: seed the fresh traversal tracker with the
+  // caller's tracked coverage so every covered (docKey, selector) descent
+  // skips through the existing `loadFactsForDoc` covers check, and record
+  // the seeded doc keys so their snapshots are OMITTED from the result
+  // (the wave path owns their delivery). The caller's tracker is only
+  // read; the seeds are copied into this traversal's private tracker.
+  const coveredDocKeys = coverage === undefined ? undefined : new Set<string>();
+  if (coverage !== undefined) {
+    for (const [key, selectors] of coverage.covered) {
+      coveredDocKeys!.add(key);
+      for (const selector of selectors) {
+        schemaTracker.add(key, selector);
+      }
+    }
+  }
   const cfc = new ContextualFlowControl();
   const traversalContext = createTraversalContext(
     tracker,
@@ -363,6 +403,7 @@ export const trackGraph = (
         schemaTracker,
         manager,
         branch,
+        coveredDocKeys,
       ),
       memo: sharedMemo,
       manager,
@@ -463,18 +504,23 @@ export const queryGraph = (
   query: GraphQuery,
   reuse?: QueryGraphReuseContext,
   options: TrackGraphOptions = {},
+  coverage?: QueryGraphCoverage,
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
+  stats: QueryTraversalStats;
 } => {
   const tracked = trackGraph(space, engine, query, reuse, {
     ...options,
     readSeq: query.atSeq,
-  });
+  }, coverage);
   return {
     serverSeq: tracked.serverSeq,
     entities: [...tracked.state.entities.values()]
       .toSorted((left, right) => left.id.localeCompare(right.id)),
+    // Observability seam only: the server accumulates this per operation and
+    // must strip it before the result crosses the wire (GraphQueryResult).
+    stats: tracked.stats,
   };
 };
 

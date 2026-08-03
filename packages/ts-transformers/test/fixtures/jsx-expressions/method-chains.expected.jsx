@@ -53,7 +53,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -78,7 +78,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -99,7 +99,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -127,7 +127,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_5 = __cfHelpers.lift<{
     x: number;
     state: {
@@ -152,7 +152,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["x", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -212,7 +212,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["x", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -297,7 +297,7 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -329,7 +329,7 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         names: string[];
@@ -385,7 +385,7 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_11 = __cfHelpers.lift<{
     name: string;
 }, string>(({ name }) => name.trim().toLowerCase().replace(" ", "-"), {
@@ -398,7 +398,7 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["name"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const name = __cf_pattern_input.key("element");
     return (<li>{__cfLift_11({ name: name })}</li>);
@@ -458,7 +458,7 @@ const __cfLift_12 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_13 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -487,7 +487,7 @@ const __cfLift_13 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_14 = __cfHelpers.lift<{
     state: {
         prices: number[];
@@ -515,7 +515,7 @@ const __cfLift_14 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_15 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -540,7 +540,7 @@ const __cfLift_15 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_16 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -566,7 +566,7 @@ const __cfLift_16 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_17 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
@@ -603,7 +603,7 @@ const __cfLift_17 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_18 = __cfHelpers.lift<{
     u: {
         name: string;
@@ -624,7 +624,7 @@ const __cfLift_18 = __cfHelpers.lift<{
     required: ["u"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_19 = __cfHelpers.lift<{
     u: {
         name: string;
@@ -645,7 +645,7 @@ const __cfLift_19 = __cfHelpers.lift<{
     required: ["u"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const u = __cf_pattern_input.key("element");
     return (<li>{__cfHelpers.ifElse({
@@ -735,7 +735,7 @@ const __cfLift_20 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_21 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
@@ -765,7 +765,7 @@ const __cfLift_21 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_22 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -790,7 +790,7 @@ const __cfLift_22 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_23 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -815,7 +815,7 @@ const __cfLift_23 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_24 = __cfHelpers.lift<{
     state: {
         words: string[];
@@ -843,7 +843,7 @@ const __cfLift_24 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: method-chains
 // Verifies: chained method calls and array method chains in JSX are wrapped in a lift-applied computation
 //   state.text.trim().toLowerCase()          → lift(...)({ text })

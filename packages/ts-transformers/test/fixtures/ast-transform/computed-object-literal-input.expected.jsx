@@ -27,7 +27,7 @@ const __cfLift_1 = lift((value: string) => value, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-object-literal-input
 // Verifies: cell(), lift(), and computed() all get schemas injected from type annotations
 //   cell<string>("initial")             → cell<string>("initial", { type: "string" })
@@ -39,19 +39,19 @@ const __cfLift_2 = lift((count: number) => count, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const attempts = __cfHelpers.__cf_data(__cfLift_2(attemptCount).for("attempts", true));
 const __cfLift_3 = lift((count: number) => count, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const accepted = __cfHelpers.__cf_data(__cfLift_3(acceptedCount).for("accepted", true));
 const __cfLift_4 = lift((count: number) => count, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const rejected = __cfHelpers.__cf_data(__cfLift_4(rejectedCount).for("rejected", true));
 const __cfLift_5 = __cfHelpers.lift(() => `stage:${normalizedStage} attempts:${attempts}` +
     ` accepted:${accepted} rejected:${rejected}`, false, undefined, { completeSchedulerScopeSummary: true });

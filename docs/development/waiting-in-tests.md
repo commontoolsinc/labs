@@ -835,6 +835,15 @@ and its success asserted. A wait on runtime-API readiness would have been no
 better, because that condition flips with no DOM mutation behind it and would
 fall back to the in-page waiter's coarse backstop for something already true.
 
+`packages/patterns/integration/server-execution-measurement.ts` fences a
+profiling sample on two cross-process snapshot APIs: Toolshed server-health
+counters and browser runtime routing diagnostics. Neither API publishes a
+completion notification to the test process, and a DOM mutation does not imply
+that either snapshot changed, so a bounded poll is the honest readiness and
+drain check. The workload itself still uses the browser runtime's deterministic
+settling barriers; this exception covers only starting and finishing the
+instrumentation window.
+
 ### A shared state primitive
 
 `packages/integration/shell-utils.ts`'s `waitForState` compares the shell's

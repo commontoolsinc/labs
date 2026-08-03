@@ -1,12 +1,21 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import {
   buildFilteredTestArgs,
+  expectPersistentSchedulerState,
   findIntegrationTestFiles,
   integrationTestDir,
   runFilteredIntegration,
   runPackageIntegration,
   selectIntegrationTestFiles,
 } from "./integration.ts";
+
+Deno.test("expectPersistentSchedulerState follows the default-on rollback flag", () => {
+  assertEquals(expectPersistentSchedulerState(undefined), true);
+  assertEquals(expectPersistentSchedulerState("true"), true);
+  assertEquals(expectPersistentSchedulerState("false"), false);
+  // The canonical parser ignores invalid values, leaving the default on.
+  assertEquals(expectPersistentSchedulerState("1"), true);
+});
 
 Deno.test("selectIntegrationTestFiles keeps .test.ts files matching the filter", () => {
   const files = [

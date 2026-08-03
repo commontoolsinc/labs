@@ -27,7 +27,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["prefix", "count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: parameterized-inline-call-root
 // Verifies: helper-owned parameterized inline-function call roots lower as a
 // shared post-closure lift-applied computation around the whole call, not as a lift-applied computation inside the

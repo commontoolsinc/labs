@@ -12,6 +12,10 @@ import {
   LLMResponse,
 } from "@commonfabric/llm";
 import {
+  llmClientOptions,
+  type LLMServerBuiltinId,
+} from "./llm-client-options.ts";
+import {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
@@ -22,6 +26,7 @@ import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { mapSubschemas } from "../schema-walk.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
@@ -37,6 +42,7 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import { scopedCell } from "./scope-policy.ts";
 import {
@@ -344,10 +350,11 @@ async function executeWithToolsLoop(params: {
   observationMaxConfidentiality?: readonly CfcConfClause[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
-  space: any;
+  space: MemorySpace;
   getCurrentRun: () => number;
   thisRun: number;
   onComplete: (llmResult: LLMResponse) => Promise<void>;
+  serverBuiltinId?: LLMServerBuiltinId;
 }): Promise<void> {
   const {
     llmParams,
@@ -360,6 +367,7 @@ async function executeWithToolsLoop(params: {
     getCurrentRun,
     thisRun,
     onComplete,
+    serverBuiltinId,
   } = params;
 
   const executeRecursive = async (
@@ -382,14 +390,11 @@ async function executeWithToolsLoop(params: {
     // module-level default endpoint — like the fetch builtins, hostForSpace's
     // apiUrl fallback is NOT used, because deployments may split the
     // pattern-facing api host from the runtime's memory host.
-    const mappedLlmHost = runtime.mappedHostFor(space);
     const llmResult = await client.sendRequest(
       requestParams,
       updatePartial,
       undefined,
-      mappedLlmHost
-        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-        : undefined,
+      llmClientOptions(runtime, space, serverBuiltinId),
     );
 
     if (thisRun !== getCurrentRun()) return;
@@ -632,8 +637,9 @@ export function llm(
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof LLMResultSchema>>;
   let cellScope: CellScope | undefined;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       system,
@@ -675,6 +681,17 @@ export function llm(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    // The `{ llm: { result: cause } }` document is minted here, not registered
+    // as an output cell, so the generically-minted `ServerBuiltinActionDescriptor`
+    // (runner.ts) cannot see it. Publish it as a runtime write — exactly as
+    // generateText/generateObject do — or a claimed server run writes
+    // `pending`/`result`/`error`/`partial`/`requestHash` outside its declared
+    // surface and de-claims fail-closed at the firewall.
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      resultCell.getAsNormalizedFullLink(),
+    );
 
     const thisRun = ++currentRun;
     const pendingWithLog = resultCell.key("pending").withTx(tx);
@@ -791,6 +808,7 @@ export function llm(
                 space: parentCell.space,
                 getCurrentRun: getRunForCancellation,
                 thisRun,
+                serverBuiltinId: "llm",
                 onComplete: async (llmResult) => {
                   // Skip if a newer request has already superseded this one.
                   if (hash !== previousCallHash) return;
@@ -862,10 +880,17 @@ export function llm(
             )
           ),
           parentCell,
+          { externalEffect: true },
         );
       },
     );
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      previousCallHash = undefined;
+    },
+  });
 }
 
 /**
@@ -957,8 +982,9 @@ export function generateText(
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
   let cellScope: CellScope | undefined;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       system,
@@ -1000,6 +1026,11 @@ export function generateText(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      resultCell.getAsNormalizedFullLink(),
+    );
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
@@ -1136,6 +1167,7 @@ export function generateText(
                 space: parentCell.space,
                 getCurrentRun: getRunForCancellation,
                 thisRun,
+                serverBuiltinId: "generateText",
                 onComplete: async (llmResult) => {
                   await runtime.idle();
 
@@ -1204,10 +1236,17 @@ export function generateText(
             )
           ),
           parentCell,
+          { externalEffect: true },
         );
       },
     );
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      previousCallHash = undefined;
+    },
+  });
 }
 
 /**
@@ -1244,8 +1283,9 @@ export function generateObject<T extends Record<string, unknown>>(
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
   let cellScope: CellScope | undefined;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       prompt,
@@ -1298,6 +1338,11 @@ export function generateObject<T extends Record<string, unknown>>(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      resultCell.getAsNormalizedFullLink(),
+    );
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const messagesWithLog = resultCell.key("messages").withTx(tx);
@@ -1574,16 +1619,15 @@ export function generateObject<T extends Record<string, unknown>>(
                   messages: currentMessages,
                 };
 
-                const mappedLlmHost = runtime.mappedHostFor(
-                  parentCell.space,
-                );
                 const llmResult = await client.sendRequest(
                   requestParams,
                   updatePartial,
                   undefined,
-                  mappedLlmHost
-                    ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-                    : undefined,
+                  llmClientOptions(
+                    runtime,
+                    parentCell.space,
+                    "generateObject",
+                  ),
                 );
 
                 if (isRunCancelled()) return;
@@ -1904,9 +1948,6 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...liveContextDocs.observedConfidentiality,
               ]).length,
             });
-            const mappedLlmHost = runtime.mappedHostFor(
-              parentCell.space,
-            );
             const response = await client.generateObject(
               {
                 ...generateObjectParams,
@@ -1914,9 +1955,11 @@ export function generateObject<T extends Record<string, unknown>>(
                   "You are a helpful assistant.",
               },
               undefined,
-              mappedLlmHost
-                ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-                : undefined,
+              llmClientOptions(
+                runtime,
+                parentCell.space,
+                "generateObject",
+              ),
             ) as {
               object: T;
             };
@@ -2027,4 +2070,10 @@ export function generateObject<T extends Record<string, unknown>>(
       );
     }
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      previousCallHash = undefined;
+    },
+  });
 }

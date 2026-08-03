@@ -1,25 +1,41 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
+  actionClaimMapKey,
+  type ActionSettlement,
+  actionSettlementFromFrontier,
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
+  type DocsReadQuery,
+  type DocsReadResult,
   encodeMemoryBoundary,
   type EntityId,
   type EntityIdListOptions,
   type EntityIdListResult,
   type EntityIdLookupResult,
   type EntitySnapshot,
+  type ExecutionClaim,
+  type ExecutionControlEvent,
+  type ExecutionDemandSetResult,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  type GraphQueryTrigger,
+  type LegacyBackgroundExclusion,
+  type LegacyBackgroundExclusionReleaseResult,
+  type LegacyBackgroundExclusionStatus,
+  type LegacyBackgroundExclusionStatusResult,
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
+  type SchedulerExecutionContextKey,
   type SchedulerSnapshotListResult,
+  type SchedulerWritersForTargetsQuery,
+  type SchedulerWritersForTargetsResult,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
@@ -33,6 +49,8 @@ import {
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
+  type WireMemoryProtocolFlags,
+  wireMemoryProtocolFlags,
 } from "../v2.ts";
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
@@ -49,11 +67,15 @@ export type Transport = {
 
 export type ConnectOptions = {
   transport: Transport;
+  /** Optional per-client capability override, primarily for skew tests and
+   *  hosts whose client and server runtimes use different rollout settings. */
+  protocolFlags?: Partial<WireMemoryProtocolFlags>;
 };
 
 export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
+  executionFeedSeq?: number;
   sessionToken?: string;
 };
 
@@ -72,6 +94,36 @@ export type SessionOpenAuthFactory = (
   session: MountOptions,
   context: SessionOpenAuthContext,
 ) => Promise<SessionOpenAuth | undefined> | SessionOpenAuth | undefined;
+
+/**
+ * Per-request read options (C1.4b lane-scoped read seam): a lease-bound
+ * executor session may act under one of its open lane grants for a single
+ * read, watch registration, scheduler listing, or writer lookup. The host
+ * validates the acting context against the live lane grant BEFORE resolving
+ * any scope key; ordinary client sessions never send one.
+ */
+/**
+ * Per-commit options (C1.4b write-side seam, slice 1 of the claim deletion):
+ * a lease-bound executor session names the lane its commit ACTS AS, validated
+ * host-side against the live lane grant exactly like a read's acting context.
+ * Ordinary client sessions and space-lane executor commits never send one.
+ */
+export interface SessionCommitOptions {
+  actingContext?: SchedulerExecutionContextKey;
+}
+
+export interface SessionReadOptions {
+  actingContext?: SchedulerExecutionContextKey;
+  /** FA5/FB12 trigger attribution for graph.query accounting (wave-triggered
+   * refresh vs demand-triggered pull). Accounting only; optional. */
+  trigger?: GraphQueryTrigger;
+  /** P1 covered growth pulls: ask the server to omit docs this session's
+   * tracked watch surface already covers (delta reply). See
+   * `GraphQueryRequest.omitWatchCovered` for the contract — the caller
+   * MUST merge the reply (never replace) and MUST NOT set this on
+   * never-held retries. graph.query only; other reads ignore it. */
+  omitWatchCovered?: boolean;
+}
 
 export type WatchMutationResult = {
   view: WatchView;
@@ -107,13 +159,20 @@ const compareEntitySnapshot = (
   (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
   left.id.localeCompare(right.id);
 
+type SessionRestoreResult = "restored" | "fresh-connection-required";
+interface PendingRequest {
+  deferred: PromiseWithResolvers<unknown>;
+  beforeResolve?: (response: ResponseMessage<unknown>) => void;
+}
+
 export class Client {
-  #pending = new Map<string, PromiseWithResolvers<unknown>>();
+  #pending = new Map<string, PendingRequest>();
   #spaces = new Set<SpaceSession>();
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
+  #advertisedFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
@@ -128,13 +187,14 @@ export class Client {
 
   private constructor(
     private readonly transport: Transport,
+    private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
   ) {
     this.transport.setReceiver((payload) => this.onMessage(payload));
     this.transport.setCloseReceiver?.((error) => this.onClose(error));
   }
 
   static async connect(options: ConnectOptions): Promise<Client> {
-    const client = new Client(options.transport);
+    const client = new Client(options.transport, options.protocolFlags);
     await client.hello();
     return client;
   }
@@ -144,6 +204,11 @@ export class Client {
    *  optional-capability consumers fail closed by reading this. */
   get serverFlags(): MemoryProtocolFlags | null {
     return this.#serverFlags;
+  }
+
+  get serverPrimaryExecutionV1(): boolean {
+    return this.#advertisedFlags?.serverPrimaryExecutionV1 === true &&
+      this.#serverFlags?.serverPrimaryExecutionV1 === true;
   }
 
   async close(): Promise<void> {
@@ -167,17 +232,25 @@ export class Client {
       options,
       this.sessionOpenAuthContext(),
     );
-    const result = await this.openSession(space, options, auth);
-    const session = new SpaceSession(
-      this,
-      space,
-      result.sessionId,
-      result.sessionToken,
-      result.serverSeq,
-      openAuthFactory,
-    );
-    this.#spaces.add(session);
-    return session;
+    let mountedSession: SpaceSession | undefined;
+    await this.requestOpenSession(space, options, auth, (result) => {
+      mountedSession = new SpaceSession(
+        this,
+        space,
+        result.sessionId,
+        result.sessionToken,
+        result.serverSeq,
+        openAuthFactory,
+      );
+      if (result.sync !== undefined) {
+        mountedSession.initializeSync(result.sync);
+      }
+      this.#spaces.add(mountedSession);
+    });
+    if (mountedSession === undefined) {
+      throw protocolError("session.open response did not install the session");
+    }
+    return mountedSession;
   }
 
   forgetSession(session: SpaceSession): void {
@@ -186,18 +259,45 @@ export class Client {
 
   async request<Result>(message: FabricPlainObject): Promise<Result> {
     await this.ensureConnected();
+    return await this.requestConnected(message);
+  }
+
+  /**
+   * Dispatch only when the active connection advertises the capability.
+   * Checking after ensureConnected keeps a reconnect from carrying a cached
+   * capable-server decision onto an older peer.
+   */
+  async requestIfServerSupports<Result>(
+    capability: keyof MemoryProtocolFlags,
+    message: FabricPlainObject,
+  ): Promise<Result | undefined> {
+    await this.ensureConnected();
+    if (
+      this.#advertisedFlags?.[capability] !== true ||
+      this.#serverFlags?.[capability] !== true
+    ) {
+      return undefined;
+    }
+    return await this.requestConnected(message);
+  }
+
+  private async requestConnected<Result>(
+    message: FabricPlainObject,
+    beforeResolve?: (response: ResponseMessage<unknown>) => void,
+  ): Promise<Result> {
     // `ensureConnected()` is async even when the transport is already live, so
-    // close() can run while this request is suspended there. Recheck before
+    // close() can run while the caller is suspended there. Recheck before
     // registering the request; otherwise it can miss close()'s rejectPending()
-    // sweep and wait forever for a response on the closed transport.
+    // sweep and wait forever for a response on the closed transport. Both
+    // entry points above await first, so the recheck belongs here.
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
     const requestId = message.requestId as string;
-    const pending = Promise.withResolvers<unknown>();
-    this.#pending.set(requestId, pending);
+    const deferred = Promise.withResolvers<unknown>();
+    this.#pending.set(requestId, { deferred, beforeResolve });
     await this.transport.send(encodeMemoryBoundary(message));
-    const result = await pending.promise as ResponseMessage<Result>;
+    const result = await deferred.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
       error.name = result.error.name;
@@ -208,6 +308,10 @@ export class Client {
       if (result.error.retryAfterSeq !== undefined) {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
+      }
+      if (result.error.diagnosticCode !== undefined) {
+        (error as Error & { diagnosticCode?: string }).diagnosticCode =
+          result.error.diagnosticCode;
       }
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
@@ -223,15 +327,30 @@ export class Client {
     session: MountOptions,
     auth?: SessionOpenAuth,
   ): Promise<SessionOpenResult> {
-    const result = await this.request<SessionOpenResult>({
+    return await this.requestOpenSession(space, session, auth);
+  }
+
+  private async requestOpenSession(
+    space: string,
+    session: MountOptions,
+    auth?: SessionOpenAuth,
+    install?: (result: SessionOpenResult) => void,
+  ): Promise<SessionOpenResult> {
+    await this.ensureConnected();
+    return await this.requestConnected<SessionOpenResult>({
       type: "session.open",
       requestId: this.nextRequestId(),
       space,
       session,
       ...(auth ? auth : {}),
+    }, (response) => {
+      if (response.error !== undefined) {
+        return;
+      }
+      const result = response.ok as SessionOpenResult;
+      this.updateSessionOpenAuthContext(result.sessionOpen);
+      install?.(result);
     });
-    this.updateSessionOpenAuthContext(result.sessionOpen);
-    return result;
   }
 
   isConnected(): boolean {
@@ -260,10 +379,18 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    const flags = parseMemoryProtocolFlags({
+      ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+      ...this.protocolFlags,
+    });
+    if (flags === null) {
+      throw protocolError("memory client protocol flags are malformed");
+    }
+    this.#advertisedFlags = flags;
     await this.transport.send(encodeMemoryBoundary({
       type: "hello",
       protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
+      flags: wireMemoryProtocolFlags(flags),
     }));
     try {
       await ack.promise;
@@ -300,7 +427,10 @@ export class Client {
     if (this.#helloPending !== null) {
       const helloOk = parseHelloOk(message);
       if (helloOk !== null) {
-        const expectedFlags = getMemoryProtocolFlags();
+        const expectedFlags = parseMemoryProtocolFlags({
+          ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+          ...this.protocolFlags,
+        })!;
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           // A data-model wire-contract mismatch: this client and server cannot
           // talk at all, and no retry changes that. Mark it permanent so a
@@ -352,39 +482,45 @@ export class Client {
       return;
     }
 
-    if (isSessionEffect(message)) {
-      for (const session of this.#spaces) {
-        if (
-          session.sessionId === message.sessionId &&
-          session.space === message.space
-        ) {
-          session.handleEffect(message.effect);
-        }
-      }
-      return;
-    }
-    if (isSessionRevoked(message)) {
-      for (const session of this.#spaces) {
-        if (
-          session.sessionId === message.sessionId &&
-          session.space === message.space
-        ) {
-          session.handleRevoked(message.reason);
-        }
-      }
+    if (isSessionEffect(message) || isSessionRevoked(message)) {
+      this.deliverSessionMessage(message);
       return;
     }
     if (isResponse(message)) {
       const pending = this.#pending.get(message.requestId);
       if (pending) {
-        pending.resolve(message);
-        this.#pending.delete(message.requestId);
+        try {
+          pending.beforeResolve?.(message);
+          pending.deferred.resolve(message);
+        } catch (error) {
+          pending.deferred.reject(error);
+        } finally {
+          this.#pending.delete(message.requestId);
+        }
       }
     }
   }
 
   private nextRequestId(): string {
     return `req:${this.#nextRequest++}`;
+  }
+
+  private deliverSessionMessage(
+    message: SessionEffectMessage | SessionRevokedMessage,
+  ): void {
+    for (const session of this.#spaces) {
+      if (
+        session.sessionId !== message.sessionId ||
+        session.space !== message.space
+      ) {
+        continue;
+      }
+      if (message.type === "session/effect") {
+        session.handleEffect(message.effect);
+      } else {
+        session.handleRevoked(message.reason);
+      }
+    }
   }
 
   private async ensureConnected(): Promise<void> {
@@ -432,8 +568,24 @@ export class Client {
       while (!this.#closed) {
         try {
           await this.hello();
+          let needsFreshSessionOpenChallenge = false;
           for (const session of this.#spaces) {
-            await session.restore();
+            if (await session.restore() === "fresh-connection-required") {
+              needsFreshSessionOpenChallenge = true;
+              break;
+            }
+          }
+          if (needsFreshSessionOpenChallenge) {
+            // session.open authentication challenges are single-use, including
+            // when the server rejects the open. Rotate the physical connection
+            // after terminalizing that one session so unrelated spaces reopen
+            // with a fresh challenge instead of failing authentication too.
+            this.#connected = false;
+            for (const session of this.#spaces) {
+              session.handleDisconnect();
+            }
+            await this.transport.close();
+            continue;
           }
           return;
         } catch (error) {
@@ -485,7 +637,7 @@ export class Client {
 
   private rejectPending(error: Error): void {
     for (const pending of this.#pending.values()) {
-      pending.reject(error);
+      pending.deferred.reject(error);
     }
     this.#pending.clear();
     this.#helloPending?.reject(error);
@@ -497,6 +649,9 @@ export class SpaceSession {
   #outstandingCommits = new Map<number, {
     commit: ClientCommit;
     pending: PromiseWithResolvers<AppliedCommit>;
+    /** C1.4b write-side seam: the lane this commit acts as, retained beside
+     * the commit so a reconnect replay re-sends it unchanged. */
+    actingContext?: SchedulerExecutionContextKey;
   }>();
   #watchSpecs: WatchSpec[] = [];
   #watchView: WatchView | null = null;
@@ -504,7 +659,9 @@ export class SpaceSession {
   #sessionToken: string | undefined;
   #serverSeq: number;
   #ackedSeq = 0;
+  #ackedExecutionFeedSeq = 0;
   #pendingAckSeq = 0;
+  #pendingAckExecutionFeedSeq = 0;
   #ackScheduled = false;
   #ackFlushing = false;
   #background = new Set<Promise<void>>();
@@ -537,6 +694,14 @@ export class SpaceSession {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
   }[] = [];
+  #executionDemands = new Map<string, readonly string[]>();
+  #executionFeedSeq = 0;
+  #executionDataSeq = 0;
+  #executionClaims = new Map<string, ExecutionClaim>();
+  #executionControlListeners = new Set<
+    (event: ExecutionControlEvent) => void
+  >();
+  #pendingSettlements: ActionSettlement[] = [];
 
   constructor(
     private readonly client: Client,
@@ -564,6 +729,52 @@ export class SpaceSession {
     return this.#serverSeq;
   }
 
+  get executionClaims(): readonly ExecutionClaim[] {
+    return Object.freeze(
+      [...this.#executionClaims.values()].sort((left, right) =>
+        left.branch.localeCompare(right.branch) ||
+        actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
+      ),
+    );
+  }
+
+  get executionFeedSeq(): number {
+    return this.#executionFeedSeq;
+  }
+
+  subscribeExecutionControl(
+    listener: (event: ExecutionControlEvent) => void,
+  ): () => void {
+    this.#executionControlListeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      this.#executionControlListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Called by the replica after it has applied an accepted local commit. The
+   * transact response alone is not sufficient: resolving it precedes
+   * SpaceReplica.confirmPending(), while settlement must never clear an
+   * overlay before that data application barrier.
+   */
+  noteAppliedCommit(seq: number): void {
+    if (!Number.isSafeInteger(seq) || seq < 0) {
+      throw new TypeError("applied commit sequence must be non-negative");
+    }
+    this.#executionDataSeq = Math.max(this.#executionDataSeq, seq);
+    this.#flushPendingSettlements();
+  }
+
+  initializeSync(sync: SessionSync): void {
+    this.noteResult(sync.toSeq);
+    this.#executionDataSeq = Math.max(this.#executionDataSeq, sync.toSeq);
+    this.#applyExecution(sync);
+    this.scheduleAck(sync.toSeq, sync.execution?.toFeedSeq);
+  }
+
   /** The error this session was terminated with, or undefined while it is open.
    *  A permanent reopen denial stores its `AuthorizationError` here (see
    *  `restore`), which is what `#assertOpen` rethrows; a storage subscriber reads
@@ -579,7 +790,10 @@ export class SpaceSession {
     }
   }
 
-  async transact(commit: ClientCommit): Promise<AppliedCommit> {
+  async transact(
+    commit: ClientCommit,
+    options?: SessionCommitOptions,
+  ): Promise<AppliedCommit> {
     this.#assertOpen();
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
@@ -590,6 +804,9 @@ export class SpaceSession {
     this.#outstandingCommits.set(commit.localSeq, {
       commit,
       pending,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
     });
 
     const outstanding = this.#outstandingCommits.get(commit.localSeq);
@@ -607,13 +824,44 @@ export class SpaceSession {
     return await pending.promise;
   }
 
-  async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
+  async queryGraph(
+    query: GraphQuery,
+    options?: SessionReadOptions,
+  ): Promise<GraphQueryResult> {
     this.#assertOpen();
     const result = await this.client.request<GraphQueryResult>({
       type: "graph.query",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
+      ...(options?.trigger !== undefined ? { trigger: options.trigger } : {}),
+      ...(options?.omitWatchCovered === true ? { omitWatchCovered: true } : {}),
+      query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  /** F2 point reads: exact per-doc engine reads with no traversal — the
+   * replica-maintenance read for docs this session already tracks. Accepts
+   * the C1.4b `actingContext` seam from day one (FA6). */
+  async readDocs(
+    query: DocsReadQuery,
+    options?: SessionReadOptions,
+  ): Promise<DocsReadResult> {
+    this.#assertOpen();
+    const result = await this.client.request<DocsReadResult>({
+      type: "docs.read",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
       query,
     });
 
@@ -665,11 +913,15 @@ export class SpaceSession {
     return result;
   }
 
-  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  /** Run a server-side read-only SQLite query against a cell-derived db.
+   * Accepts the C1.4b `actingContext` seam (G1): a `user`/`session`-scoped db
+   * resolves its on-disk file from the named lane's identity, not the
+   * lease-bound sponsor's. */
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: SessionReadOptions,
   ): Promise<SqliteQueryResult> {
     this.#assertOpen();
     return await this.client.request<SqliteQueryResult>({
@@ -677,6 +929,9 @@ export class SpaceSession {
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
       db,
       sql,
       params,
@@ -709,6 +964,7 @@ export class SpaceSession {
 
   async listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
+    options?: SessionReadOptions,
   ): Promise<SchedulerSnapshotListResult> {
     this.#assertOpen();
     if (!getPersistentSchedulerStateConfig()) {
@@ -719,11 +975,129 @@ export class SpaceSession {
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
       query,
     });
 
     this.noteResult(result.serverSeq);
     return result;
+  }
+
+  async writersForTargets(
+    query: SchedulerWritersForTargetsQuery,
+    options?: SessionReadOptions,
+  ): Promise<SchedulerWritersForTargetsResult> {
+    this.#assertOpen();
+    if (!getPersistentSchedulerStateConfig()) {
+      return { serverSeq: this.#serverSeq, writers: [] };
+    }
+    const result = await this.client
+      .requestIfServerSupports<SchedulerWritersForTargetsResult>(
+        "schedulerWriterLookup",
+        {
+          type: "scheduler.writer.list",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          ...(options?.actingContext !== undefined
+            ? { actingContext: options.actingContext }
+            : {}),
+          query,
+        },
+      );
+    if (result === undefined) {
+      return { serverSeq: this.#serverSeq, writers: [] };
+    }
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async setExecutionDemand(
+    branch: string,
+    pieces: readonly string[],
+  ): Promise<boolean> {
+    this.#assertOpen();
+    const result = await this.client
+      .requestIfServerSupports<ExecutionDemandSetResult>(
+        "serverPrimaryExecutionV1",
+        {
+          type: "session.execution.demand.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          branch,
+          pieces: [...pieces],
+        },
+      );
+    if (result === undefined) return false;
+    this.noteResult(result.serverSeq);
+    if (pieces.length === 0) {
+      this.#executionDemands.delete(branch);
+    } else {
+      this.#executionDemands.set(branch, Object.freeze([...pieces]));
+    }
+    return true;
+  }
+
+  async acquireLegacyBackgroundExclusion(
+    branch: string,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    this.#assertOpen();
+    const result = await this.client.requestIfServerSupports<
+      LegacyBackgroundExclusionStatusResult
+    >("serverPrimaryExecutionV1", {
+      type: "session.execution.legacy-background.acquire",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+    });
+    if (result === undefined) return undefined;
+    this.noteResult(result.serverSeq);
+    return result.status;
+  }
+
+  async renewLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    this.#assertOpen();
+    const result = await this.client.requestIfServerSupports<
+      LegacyBackgroundExclusionStatusResult
+    >("serverPrimaryExecutionV1", {
+      type: "session.execution.legacy-background.renew",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+      exclusionGeneration,
+    });
+    if (result === undefined) return undefined;
+    this.noteResult(result.serverSeq);
+    return result.status;
+  }
+
+  async releaseLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined> {
+    this.#assertOpen();
+    const result = await this.client.requestIfServerSupports<
+      LegacyBackgroundExclusionReleaseResult
+    >("serverPrimaryExecutionV1", {
+      type: "session.execution.legacy-background.release",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+      exclusionGeneration,
+    });
+    if (result === undefined) return undefined;
+    this.noteResult(result.serverSeq);
+    return result.released;
   }
 
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {
@@ -736,7 +1110,10 @@ export class SpaceSession {
     return result.view;
   }
 
-  async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+  async watchSetSync(
+    watches: WatchSpec[],
+    options?: SessionReadOptions,
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.runWatchMutation(
       () =>
@@ -745,6 +1122,9 @@ export class SpaceSession {
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
+          ...(options?.actingContext !== undefined
+            ? { actingContext: options.actingContext }
+            : {}),
           watches,
         }),
       (result) => {
@@ -755,7 +1135,12 @@ export class SpaceSession {
         } else {
           this.#watchView.applySync(result.sync, false);
         }
-        this.scheduleAck(result.serverSeq);
+        this.#executionDataSeq = Math.max(
+          this.#executionDataSeq,
+          result.sync.toSeq,
+        );
+        this.#applyExecution(result.sync);
+        this.scheduleAck(result.serverSeq, result.sync.execution?.toFeedSeq);
         return {
           view: this.#watchView,
           sync: result.sync,
@@ -774,7 +1159,10 @@ export class SpaceSession {
     return result.view;
   }
 
-  async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+  async watchAddSync(
+    watches: WatchSpec[],
+    options?: SessionReadOptions,
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.runWatchMutation(
       () =>
@@ -783,6 +1171,9 @@ export class SpaceSession {
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
+          ...(options?.actingContext !== undefined
+            ? { actingContext: options.actingContext }
+            : {}),
           watches,
         }),
       (result) => {
@@ -797,7 +1188,12 @@ export class SpaceSession {
         } else {
           this.#watchView.applySync(result.sync, false);
         }
-        this.scheduleAck(result.serverSeq);
+        this.#executionDataSeq = Math.max(
+          this.#executionDataSeq,
+          result.sync.toSeq,
+        );
+        this.#applyExecution(result.sync);
+        this.scheduleAck(result.serverSeq, result.sync.execution?.toFeedSeq);
         return {
           view: this.#watchView,
           sync: result.sync,
@@ -810,8 +1206,17 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    if (!this.client.isConnected() || seenSeq <= this.#ackedSeq) {
+    const executionFeedSeq = this.#executionFeedSeq;
+    if (
+      !this.client.isConnected() ||
+      (seenSeq <= this.#ackedSeq &&
+        executionFeedSeq <= this.#ackedExecutionFeedSeq)
+    ) {
       this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
+      this.#ackedExecutionFeedSeq = Math.max(
+        this.#ackedExecutionFeedSeq,
+        executionFeedSeq,
+      );
       return;
     }
     await this.client.request({
@@ -820,8 +1225,13 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       seenSeq,
+      executionFeedSeq,
     });
     this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
+    this.#ackedExecutionFeedSeq = Math.max(
+      this.#ackedExecutionFeedSeq,
+      executionFeedSeq,
+    );
   }
 
   handleEffect(effect: SessionSync): void {
@@ -834,13 +1244,15 @@ export class SpaceSession {
     } else {
       this.#watchView.applySync(effect, true);
     }
-    this.scheduleAck(effect.toSeq);
+    this.#executionDataSeq = Math.max(this.#executionDataSeq, effect.toSeq);
+    this.#applyExecution(effect);
+    this.scheduleAck(effect.toSeq, effect.execution?.toFeedSeq);
     this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
-  async restore(): Promise<void> {
+  async restore(): Promise<SessionRestoreResult> {
     if (this.#closed) {
-      return;
+      return "restored";
     }
     this.#restoring = true;
     this.#readyOnConnection = false;
@@ -852,24 +1264,21 @@ export class SpaceSession {
       } catch (error) {
         if (isSessionRevokedError(error)) {
           this.handleRevoked("taken-over");
-          return;
+          return "fresh-connection-required";
+        }
+        if (isProtocolError(error)) {
+          this.terminateSession(error);
+          return "fresh-connection-required";
         }
         throw error;
       }
       if (this.#closed) {
-        return;
+        return "restored";
       }
       this.#readyOnConnection = true;
       replayedThroughLocalSeq = Math.max(
         0,
         ...this.#outstandingCommits.keys(),
-      );
-      const replayTasks = [...this.#outstandingCommits.entries()].map((
-        [localSeq, pendingCommit],
-      ) =>
-        this.sendOutstandingCommit(localSeq, pendingCommit, {
-          throwOnConnectionError: true,
-        })
       );
       if (restored.sync) {
         this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
@@ -878,6 +1287,11 @@ export class SpaceSession {
         } else {
           this.#watchView.applySync(restored.sync, false);
         }
+        this.#executionDataSeq = Math.max(
+          this.#executionDataSeq,
+          restored.sync.toSeq,
+        );
+        this.#applyExecution(restored.sync);
         if (
           !isEmptySync(restored.sync) ||
           restored.sync.caughtUpLocalSeq !== undefined
@@ -890,7 +1304,10 @@ export class SpaceSession {
             );
           }
         }
-        this.scheduleAck(restored.serverSeq);
+        this.scheduleAck(
+          restored.serverSeq,
+          restored.sync.execution?.toFeedSeq,
+        );
       } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
         this.scheduleAck(restored.serverSeq);
       }
@@ -905,7 +1322,21 @@ export class SpaceSession {
           view.emit(sync);
         }
       }
+      // Demand belongs to the physical connection, not the resumable logical
+      // session. Re-establish it after authoritative catch-up and before any
+      // retained derived commits are replayed.
+      for (const [branch, pieces] of this.#executionDemands) {
+        if (!await this.setExecutionDemand(branch, pieces)) break;
+      }
+      const replayTasks = [...this.#outstandingCommits.entries()].map((
+        [localSeq, pendingCommit],
+      ) =>
+        this.sendOutstandingCommit(localSeq, pendingCommit, {
+          throwOnConnectionError: true,
+        })
+      );
       await Promise.all(replayTasks);
+      return "restored";
     } catch (error) {
       // A permanent authorization denial ANYWHERE in the reopen — the initial
       // session.open OR the watch re-establishment (watchSetSync) that follows a
@@ -913,10 +1344,11 @@ export class SpaceSession {
       // error: its pending commits and waiters reject with it, and its next watch
       // or transact rethrows it. It must NOT propagate to the client-wide
       // reconnect loop, which would then fail sessions for other spaces on the
-      // same client. Every other error propagates so the loop retries it.
+      // same client (which is why it reports "restored" rather than asking for a
+      // fresh connection). Every other error propagates so the loop retries it.
       if (isPermanentAuthorizationError(error)) {
         this.terminateSession(error as Error);
-        return;
+        return "restored";
       }
       throw error;
     } finally {
@@ -931,6 +1363,16 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
+    if (
+      this.client.isConnected() && this.#readyOnConnection &&
+      this.#executionDemands.size > 0
+    ) {
+      await Promise.allSettled(
+        [...this.#executionDemands.keys()].map((branch) =>
+          this.setExecutionDemand(branch, [])
+        ),
+      );
+    }
     this.#closed = true;
     this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
@@ -944,6 +1386,10 @@ export class SpaceSession {
     }
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#executionDemands.clear();
+    this.#executionClaims.clear();
+    this.#pendingSettlements = [];
+    this.#executionControlListeners.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -965,6 +1411,9 @@ export class SpaceSession {
    * Shared by session revocation and a permanent reopen authorization denial.
    */
   private terminateSession(error: Error): void {
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
@@ -975,6 +1424,10 @@ export class SpaceSession {
     this.rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#executionDemands.clear();
+    this.#executionClaims.clear();
+    this.#pendingSettlements = [];
+    this.#executionControlListeners.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -993,11 +1446,15 @@ export class SpaceSession {
     this.#background.add(tracked);
   }
 
-  private scheduleAck(seenSeq: number): void {
+  private scheduleAck(seenSeq: number, executionFeedSeq = 0): void {
     if (this.#closed) {
       return;
     }
     this.#pendingAckSeq = Math.max(this.#pendingAckSeq, seenSeq);
+    this.#pendingAckExecutionFeedSeq = Math.max(
+      this.#pendingAckExecutionFeedSeq,
+      executionFeedSeq,
+    );
     if (this.#ackScheduled || this.#ackFlushing) {
       return;
     }
@@ -1012,11 +1469,16 @@ export class SpaceSession {
         } finally {
           this.#ackFlushing = false;
           if (
-            this.#pendingAckSeq > this.#ackedSeq &&
+            (this.#pendingAckSeq > this.#ackedSeq ||
+              this.#pendingAckExecutionFeedSeq >
+                this.#ackedExecutionFeedSeq) &&
             !this.#closed &&
             this.client.isConnected()
           ) {
-            this.scheduleAck(this.#pendingAckSeq);
+            this.scheduleAck(
+              this.#pendingAckSeq,
+              this.#pendingAckExecutionFeedSeq,
+            );
           }
         }
       })(),
@@ -1026,10 +1488,18 @@ export class SpaceSession {
   private async flushScheduledAcks(): Promise<void> {
     while (true) {
       const target = this.#pendingAckSeq;
+      const executionTarget = this.#pendingAckExecutionFeedSeq;
       if (
-        this.#closed || target <= this.#ackedSeq || !this.client.isConnected()
+        this.#closed ||
+        (target <= this.#ackedSeq &&
+          executionTarget <= this.#ackedExecutionFeedSeq) ||
+        !this.client.isConnected()
       ) {
         this.#ackedSeq = Math.max(this.#ackedSeq, target);
+        this.#ackedExecutionFeedSeq = Math.max(
+          this.#ackedExecutionFeedSeq,
+          executionTarget,
+        );
         return;
       }
       await this.client.request({
@@ -1038,9 +1508,17 @@ export class SpaceSession {
         space: this.space,
         sessionId: this.#sessionId,
         seenSeq: target,
+        executionFeedSeq: executionTarget,
       });
       this.#ackedSeq = Math.max(this.#ackedSeq, target);
-      if (this.#pendingAckSeq <= this.#ackedSeq) {
+      this.#ackedExecutionFeedSeq = Math.max(
+        this.#ackedExecutionFeedSeq,
+        executionTarget,
+      );
+      if (
+        this.#pendingAckSeq <= this.#ackedSeq &&
+        this.#pendingAckExecutionFeedSeq <= this.#ackedExecutionFeedSeq
+      ) {
         return;
       }
     }
@@ -1111,6 +1589,189 @@ export class SpaceSession {
 
   private noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
+  }
+
+  #emitExecutionControl(event: ExecutionControlEvent): void {
+    for (const listener of this.#executionControlListeners) {
+      try {
+        listener(event);
+      } catch {
+        // One consumer must not prevent the authoritative control view from
+        // reaching the others.
+      }
+    }
+  }
+
+  #claimMatchesLive(claim: ExecutionClaim): boolean {
+    const live = this.#executionClaims.get(actionClaimMapKey(claim));
+    return live !== undefined &&
+      live.leaseGeneration === claim.leaseGeneration &&
+      live.claimGeneration === claim.claimGeneration;
+  }
+
+  #deliverOrBufferSettlement(settlement: ActionSettlement): void {
+    if (!this.#claimMatchesLive(settlement.claim)) return;
+    if (
+      settlement.outcome === "committed" &&
+      settlement.acceptedCommitSeq > this.#executionDataSeq
+    ) {
+      this.#pendingSettlements.push(settlement);
+      return;
+    }
+    this.#emitExecutionControl({
+      type: "session.execution.settlement",
+      settlement,
+    });
+  }
+
+  #flushPendingSettlements(): void {
+    const pending = this.#pendingSettlements;
+    this.#pendingSettlements = [];
+    for (const settlement of pending) {
+      if (!this.#claimMatchesLive(settlement.claim)) continue;
+      if (
+        settlement.outcome === "committed" &&
+        settlement.acceptedCommitSeq > this.#executionDataSeq
+      ) {
+        this.#pendingSettlements.push(settlement);
+      } else {
+        this.#emitExecutionControl({
+          type: "session.execution.settlement",
+          settlement,
+        });
+      }
+    }
+  }
+
+  #prunePendingSettlements(): void {
+    this.#pendingSettlements = this.#pendingSettlements.filter((settlement) =>
+      this.#claimMatchesLive(settlement.claim)
+    );
+  }
+
+  #applyExecutionEvent(event: ExecutionControlEvent): void {
+    switch (event.type) {
+      case "session.execution.claim.set": {
+        const key = actionClaimMapKey(event.claim);
+        const current = this.#executionClaims.get(key);
+        if (
+          current === undefined ||
+          event.claim.claimGeneration > current.claimGeneration
+        ) {
+          this.#executionClaims.set(key, event.claim);
+          this.#prunePendingSettlements();
+          this.#emitExecutionControl(event);
+        }
+        return;
+      }
+      case "session.execution.claim.revoke": {
+        const key = actionClaimMapKey(event.claim);
+        const current = this.#executionClaims.get(key);
+        if (
+          current !== undefined &&
+          current.leaseGeneration === event.leaseGeneration &&
+          current.claimGeneration === event.claimGeneration
+        ) {
+          this.#executionClaims.delete(key);
+          this.#prunePendingSettlements();
+          this.#emitExecutionControl(event);
+        }
+        return;
+      }
+      case "session.execution.settlement":
+        this.#deliverOrBufferSettlement(event.settlement);
+        return;
+      case "session.execution.navigate":
+        // An EXPLICIT arm, not a fall-through. This switch has no default, so a
+        // fourth variant with no case would be silently dropped here and a lost
+        // navigation would be indistinguishable from a message that never
+        // arrived (navigate-to-server-side.md §6 item 4).
+        //
+        // Nothing touches `#executionClaims` or the pending settlements: a
+        // navigate uses its claim only for ADDRESSING — it neither grants nor
+        // revokes authority — so there is no claim state to reconcile and no
+        // ordering barrier to respect. Emit it straight to listeners.
+        this.#emitExecutionControl(event);
+        return;
+    }
+  }
+
+  #applyExecution(sync: SessionSync): void {
+    const batch = sync.execution;
+    if (batch === undefined || batch.toFeedSeq <= this.#executionFeedSeq) {
+      return;
+    }
+    if (
+      batch.snapshot === undefined &&
+      batch.fromFeedSeq !== this.#executionFeedSeq
+    ) {
+      // A live ordered stream may never skip authority changes. Clear claims
+      // fail-open; reconnect will install a full snapshot barrier.
+      this.#executionClaims.clear();
+      this.#prunePendingSettlements();
+      return;
+    }
+    if (batch.snapshot !== undefined) {
+      // Claim changes precede the authoritative snapshot barrier. Settlement
+      // events are replayed only after the snapshot installs the exact live
+      // incarnations they are allowed to reconcile.
+      for (const event of batch.events) {
+        if (event.type !== "session.execution.settlement") {
+          this.#applyExecutionEvent(event);
+        }
+      }
+      const next = new Map(
+        batch.snapshot.claims.map((claim) => [actionClaimMapKey(claim), claim]),
+      );
+      const previous = this.#executionClaims;
+      this.#executionClaims = next;
+      this.#prunePendingSettlements();
+      for (const [key, claim] of previous) {
+        const replacement = next.get(key);
+        if (
+          replacement === undefined ||
+          replacement.leaseGeneration !== claim.leaseGeneration ||
+          replacement.claimGeneration !== claim.claimGeneration
+        ) {
+          this.#emitExecutionControl({
+            type: "session.execution.claim.revoke",
+            branch: claim.branch,
+            claim,
+            leaseGeneration: claim.leaseGeneration,
+            claimGeneration: claim.claimGeneration,
+          });
+        }
+      }
+      for (const [key, claim] of next) {
+        const prior = previous.get(key);
+        if (
+          prior === undefined ||
+          prior.leaseGeneration !== claim.leaseGeneration ||
+          prior.claimGeneration !== claim.claimGeneration
+        ) {
+          this.#emitExecutionControl({
+            type: "session.execution.claim.set",
+            claim,
+          });
+        }
+      }
+      for (const frontier of batch.snapshot.settlementFrontiers ?? []) {
+        this.#deliverOrBufferSettlement(
+          actionSettlementFromFrontier(frontier),
+        );
+      }
+      for (const event of batch.events) {
+        if (event.type === "session.execution.settlement") {
+          this.#applyExecutionEvent(event);
+        }
+      }
+    } else {
+      for (const event of batch.events) {
+        this.#applyExecutionEvent(event);
+      }
+    }
+    this.#executionFeedSeq = batch.toFeedSeq;
+    this.#flushPendingSettlements();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -1186,6 +1847,7 @@ export class SpaceSession {
     const session = {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
+      executionFeedSeq: this.#executionFeedSeq,
       sessionToken: this.#sessionToken,
     };
     const auth = await this.openAuthFactory?.(
@@ -1196,6 +1858,7 @@ export class SpaceSession {
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
+      executionFeedSeq: this.#executionFeedSeq,
       sessionToken: this.#sessionToken,
     }, auth);
     const sessionChanged = restored.sessionId !== oldSessionId;
@@ -1218,6 +1881,11 @@ export class SpaceSession {
       }
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
+      this.#executionFeedSeq = 0;
+      this.#ackedExecutionFeedSeq = 0;
+      this.#pendingAckExecutionFeedSeq = 0;
+      this.#executionClaims.clear();
+      this.#pendingSettlements = [];
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
     }
     this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
@@ -1248,6 +1916,7 @@ export class SpaceSession {
     pendingCommit: {
       commit: ClientCommit;
       pending: PromiseWithResolvers<AppliedCommit>;
+      actingContext?: SchedulerExecutionContextKey;
     },
     options: {
       throwOnConnectionError?: boolean;
@@ -1269,6 +1938,9 @@ export class SpaceSession {
           space: this.space,
           sessionId: this.#sessionId,
           commit: pendingCommit.commit,
+          ...(pendingCommit.actingContext !== undefined
+            ? { actingContext: pendingCommit.actingContext }
+            : {}),
         });
         this.noteResult(applied.seq);
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
@@ -1390,30 +2062,54 @@ export class WatchView {
   applySync(sync: SessionSync, emit: boolean): void {
     const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      upserts.set(watchKey(upsert.branch, upsert.id, upsert.scope), {
-        branch: upsert.branch,
-        id: upsert.id,
-        ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
-        seq: upsert.seq,
-        document: upsert.doc ?? null,
-      });
+      // F2/FA6: the RESOLVED scope key (when the frame carries one) is the
+      // instance identity — two lanes' instances of one declared doc must not
+      // collide — and rides the stored snapshot for downstream attribution.
+      upserts.set(
+        watchKey(upsert.branch, upsert.id, upsert.scopeKey ?? upsert.scope),
+        {
+          branch: upsert.branch,
+          id: upsert.id,
+          ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
+          ...(upsert.scopeKey !== undefined
+            ? { scopeKey: upsert.scopeKey }
+            : {}),
+          seq: upsert.seq,
+          document: upsert.doc ?? null,
+        },
+      );
     }
 
     const removeKeys = new Set<string>();
     for (const remove of sync.removes) {
-      const key = watchKey(remove.branch, remove.id, remove.scope);
+      const key = watchKey(
+        remove.branch,
+        remove.id,
+        remove.scopeKey ?? remove.scope,
+      );
       removeKeys.add(key);
     }
 
     let changedEntities = false;
     for (const [key, entity] of upserts) {
+      // A same-frame remove still wins over its own frame's upsert (a
+      // structural drop the diff resolved), preserving the deterministic batch
+      // contract; only the cross-frame guard below protects newer instances.
       if (!removeKeys.has(key)) {
         this.#entities.set(key, entity);
         changedEntities = true;
       }
     }
 
+    // FA8 monotonic guard, paralleling the upsert seq guard: a remove evicts
+    // only when this frame's watermark is at or past the stored instance's seq
+    // — a stale or reordered remove frame never wipes a newer value. F3
+    // server-side membership shrink emits no removes at all (a document
+    // deletion stays a deleted-upsert), so the removes that reach here are
+    // genuine topology-diff evictions.
     for (const key of removeKeys) {
+      const existing = this.#entities.get(key);
+      if (existing !== undefined && existing.seq > sync.toSeq) continue;
       changedEntities = this.#entities.delete(key) || changedEntities;
     }
 
@@ -1708,3 +2404,6 @@ const isEmptySync = (sync: SessionSync): boolean =>
 
 const isSessionRevokedError = (error: unknown): boolean =>
   error instanceof Error && error.name === "SessionRevokedError";
+
+const isProtocolError = (error: unknown): error is Error =>
+  error instanceof Error && error.name === "ProtocolError";

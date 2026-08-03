@@ -38,7 +38,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     cell: {
         value: number;
@@ -59,7 +59,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: str-template-call-interpolation
 // Verifies: reactive lowering of expressions interpolated into a str`` tagged template.
 //   The str runtime lifts its interpolation over the values it receives, so any value

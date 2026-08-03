@@ -20,6 +20,7 @@ import {
   revertWorkspace,
   runBuildBinaries,
   runBuildWithSignalCleanup,
+  toolshedCompileArgs,
 } from "./build-binaries.ts";
 import {
   computeCompilerVersion,
@@ -95,7 +96,6 @@ function recordingBuildDependencies(
     buildShell: record("buildShell"),
     prepareWorkspace: record("prepareWorkspace"),
     buildToolshed: record("buildToolshed"),
-    buildBgPieceService: record("buildBgPieceService"),
     buildCli: record("buildCli"),
     revertWorkspace: record("revertWorkspace"),
     ...overrides,
@@ -187,12 +187,15 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
       join(root, "packages", "toolshed", "index.ts"),
     );
     assertEquals(
-      config.bgPieceServiceEntryPath(),
-      join(root, "packages", "background-piece-service", "src", "main.ts"),
-    );
-    assertEquals(
-      config.bgPieceServiceWorkerPath(),
-      join(root, "packages", "background-piece-service", "src", "worker.ts"),
+      config.toolshedExecutorWorkerPath(),
+      join(
+        root,
+        "packages",
+        "runner",
+        "src",
+        "executor",
+        "executor-worker.ts",
+      ),
     );
     assertEquals(
       config.toolshedEnvPath(),
@@ -235,8 +238,26 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
   }
 });
 
+Deno.test("toolshed compile includes the server executor Worker module", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const config = new BuildConfig({
+      root,
+      toolshedFlags: ["--allow-net"],
+    });
+    const args = toolshedCompileArgs(config);
+    const workerIndex = args.indexOf(config.toolshedExecutorWorkerPath());
+
+    assertNotEquals(workerIndex, -1);
+    assertEquals(args[workerIndex - 1], "--include");
+    assertEquals(args.at(-1), config.toolshedEntryPath());
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("requestedBinaries selects all binaries or named subsets", () => {
-  assertEquals(requestedBinaries([]), ["toolshed", "bg-piece-service", "cf"]);
+  assertEquals(requestedBinaries([]), ["toolshed", "cf"]);
   assertEquals(requestedBinaries(["toolshed"]), ["toolshed"]);
   assertEquals(requestedBinaries(["cf", "toolshed"]), ["toolshed", "cf"]);
   assertEquals(requestedBinaries(["cf", "cf"]), ["cf"]);
@@ -247,7 +268,7 @@ Deno.test("requestedBinaries rejects unknown build targets", () => {
   assertThrows(
     () => requestedBinaries(["unknown"]),
     Error,
-    'Unknown binary "unknown". Expected one or more of: toolshed, bg-piece-service, cf',
+    'Unknown binary "unknown". Expected one or more of: toolshed, cf',
   );
   assertThrows(
     () => requestedBinaries(["--cli-only", "toolshed"]),
@@ -298,7 +319,6 @@ Deno.test("BuildConfig selects named binaries and rejects conflicting options", 
     assertEquals(config.binaries, ["toolshed", "cf"]);
     assertEquals(config.cliOnly, false);
     assertEquals(config.builds("toolshed"), true);
-    assertEquals(config.builds("bg-piece-service"), false);
     assertEquals(config.builds("cf"), true);
 
     const duplicateCliConfig = new BuildConfig({
@@ -341,15 +361,6 @@ Deno.test("build runs only the steps required by each binary", async () => {
           "buildShell",
           "prepareWorkspace",
           "buildToolshed",
-          "revertWorkspace",
-        ],
-      },
-      {
-        binaries: ["bg-piece-service"] as const,
-        expected: [
-          "ensureDistDir",
-          "prepareWorkspace",
-          "buildBgPieceService",
           "revertWorkspace",
         ],
       },

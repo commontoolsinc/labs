@@ -36,7 +36,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["r"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return __cfLift_1({ r: {
@@ -102,7 +102,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["r"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return __cfLift_2({ r: {

@@ -1407,6 +1407,42 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
     });
     assertEquals(snapshots.ok?.snapshots, []);
 
+    const bobWriterRequestId = nextRequestId("acl-scheduler-writers");
+    await bob.connection.receive(encodeMemoryBoundary({
+      type: "scheduler.writer.list",
+      requestId: bobWriterRequestId,
+      space,
+      sessionId: bobSession.ok.sessionId,
+      query: {
+        branch: "",
+        targets: [{ id: "of:output", path: ["value"] }],
+      },
+    }));
+    const writers = assertResponse<{ serverSeq: number; writers: unknown[] }>(
+      shiftMessage(bob.messages),
+    );
+    assertEquals(writers.requestId, bobWriterRequestId);
+    assertEquals(writers.ok?.writers, []);
+
+    // Capabilities are hierarchical: WRITE implies READ, so Carol may use
+    // this READ-class lookup just like Bob.
+    const carolWriterRequestId = nextRequestId("acl-scheduler-writers-write");
+    await carol.connection.receive(encodeMemoryBoundary({
+      type: "scheduler.writer.list",
+      requestId: carolWriterRequestId,
+      space,
+      sessionId: carolSession.ok.sessionId,
+      query: {
+        branch: "",
+        targets: [{ id: "of:output", path: ["value"] }],
+      },
+    }));
+    const carolWriters = assertResponse<{
+      serverSeq: number;
+      writers: unknown[];
+    }>(shiftMessage(carol.messages));
+    assertEquals(carolWriters.requestId, carolWriterRequestId);
+    assertEquals(carolWriters.ok?.writers, []);
     const entityIds = await server.listEntityIds({
       type: "entity-id.list",
       requestId: nextRequestId("acl-entity-identifiers"),

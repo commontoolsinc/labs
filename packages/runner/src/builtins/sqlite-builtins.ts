@@ -34,8 +34,14 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
+import {
+  resultCellMintCause,
+  type ResultCellMinterKey,
+} from "./scope-policy.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { getTransactionSourceAction } from "../storage/transaction-source-context.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
@@ -43,9 +49,13 @@ import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { stripEntityUriScheme } from "../entity-kind.ts";
 import {
   columnDeclaresIfc,
+  parseSessionExecutionContextKey,
+  principalOfUserContextKey,
+  type SchedulerExecutionContextKey,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
 } from "@commonfabric/memory/v2";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
@@ -66,18 +76,25 @@ const errMsg = (error: unknown): string =>
 /** Allocate a result cell linked to the parent/pattern cells, at `scope` (the
  *  author-declared scope of the SqliteDb / its query result). The base entity
  *  id is scope-independent; `scope` only re-addresses which scoped instance the
- *  value lands in, matching how the server partitions the on-disk db. */
+ *  value lands in, matching how the server partitions the on-disk db.
+ *
+ *  The mint cause comes from the shared `resultCellMintCause` rather than being
+ *  spelled inline: `sqliteDatabase` carries a W2.15a computation descriptor,
+ *  and the runner re-derives THIS document at registration to declare it
+ *  (`selectorBuiltinResultCause` → the descriptor's `mintedDocuments`). The two
+ *  sites MUST agree on the cause or every minting run de-claims fail-closed at
+ *  the dynamic write firewall. */
 function makeResultCell<T>(
   runtime: Runtime,
   parentCell: Cell<any>,
   cause: unknown,
-  label: string,
+  label: ResultCellMinterKey,
   tx: IExtendedStorageTransaction,
   scope: CellScope = "space",
 ): Cell<T> {
   const base = runtime.getCell<T>(
     parentCell.space,
-    { [label]: { result: cause } },
+    resultCellMintCause(label, cause),
     undefined,
     tx,
   );
@@ -91,6 +108,77 @@ function makeResultCell<T>(
   setPatternCell(cell, parentCell.key("pattern"));
   cell.sync();
   return cell as Cell<T>;
+}
+
+/**
+ * The principal a handle minted by THIS run belongs to (CFC Phase 3 `owner`).
+ *
+ * The db is created on the server, and the server knows which user it is
+ * running for: every scheduler-driven run on the executor executes under its
+ * resolved execution lane as the AMBIENT acting lane (the Worker's
+ * `runtime.scheduler.setActionRunWrapper` → `storage.runWithExecutionLane`,
+ * C1.9c), and that lane's context key names the acting principal. This is the
+ * runner-side twin of the `actingContext` a lane-bound `sqlite.query` sends on
+ * the wire (C1.4b / A5-G1), and it is the only identity available here that is
+ * the USER rather than whoever happens to be executing: on the executor Worker
+ * the ambient `trustSnapshotProvider()` is the LEASE SPONSOR, so an
+ * unqualified server-side first run mints the handle owned by the executor and
+ * hands `dbOwner()` row rules and `{__ctDbOwner}` ceiling placeholders the
+ * wrong principal.
+ *
+ * Strictly additive, exactly like the read seam: naming a lane NARROWS to that
+ * lane's principal; absence (`"space"`, i.e. every client run and every
+ * space-rank executor run) keeps the pre-existing trust-snapshot derivation
+ * byte-identically. Read synchronously — `sqliteDatabase`'s mint is in the
+ * action body's synchronous extent, which is exactly what the run wrapper
+ * covers and where a lane capture is valid.
+ */
+function actingHandleOwner(
+  runtime: Runtime,
+  space: MemorySpace,
+): string | undefined {
+  return actingPrincipalOfLane(
+    runtime,
+    actingExecutionLane(runtime, space),
+  );
+}
+
+/**
+ * The execution lane this run is acting as, or undefined for the space lane
+ * (every client run and every space-rank executor run).
+ *
+ * MUST be called synchronously inside the action's own extent:
+ * `runWithExecutionLane` restores the previous ambient lane on synchronous
+ * exit, so a post-await read sees the space lane. That is precisely why
+ * `sqliteQuery` captures it in the action body and carries it into the
+ * post-commit flush rather than letting `Replica.sqliteQuery` read
+ * `#actingLane` the way every other read verb does.
+ */
+function actingExecutionLane(
+  runtime: Runtime,
+  space: MemorySpace,
+): SchedulerExecutionContextKey | undefined {
+  const lane = runtime.storageManager.actingExecutionLane?.(
+    space,
+    getTransactionSourceAction(),
+  );
+  return lane === undefined || lane === "space" ? undefined : lane;
+}
+
+/** The principal a lane names, falling back to the ambient trust snapshot for
+ *  the space lane. Naming a lane only NARROWS: absence keeps the pre-existing
+ *  derivation byte-identically. */
+function actingPrincipalOfLane(
+  runtime: Runtime,
+  lane: SchedulerExecutionContextKey | undefined,
+): string | undefined {
+  if (lane !== undefined) {
+    const session = parseSessionExecutionContextKey(lane);
+    if (session !== undefined) return session.principal;
+    const principal = principalOfUserContextKey(lane);
+    if (principal !== undefined) return principal;
+  }
+  return runtime.trustSnapshotProvider()?.actingPrincipal;
 }
 
 function readDbRef(value: unknown): SqliteDbRef {
@@ -549,7 +637,7 @@ export function sqliteDatabase(
       // fails closed) rather than adopting a later opener.
       const owner = prior !== undefined
         ? prior.owner
-        : runtime.trustSnapshotProvider()?.actingPrincipal;
+        : actingHandleOwner(runtime, parentCell.space);
       // Materialize to plain JSON: the stored handle must be SELF-CONTAINED.
       // A raw `set` of the inputs proxy would capture `tables` as a LINK into
       // this pattern's doc graph — whose rule-term splits no schema-driven
@@ -619,6 +707,21 @@ export function sqliteQuery(
   let result: Cell<QueryState>;
   let resultScope: CellScope | undefined;
   const space = parentCell.space;
+  // R5: the effect descriptor's declaration of the ONE document this builtin
+  // mints. `makeResultCell` allocates it at a scope discovered per transaction
+  // (the narrowest of the output binding, the db handle's scope and the
+  // clearance floor), so it is not a registered output cell and the runner can
+  // only learn about it here — `runner.ts` reads this array off the returned
+  // action and folds it into `ServerBuiltinActionDescriptor.runtimeWrites`.
+  // The router renders each entry at BOTH its value-root address and its
+  // DOCUMENT root, which is what covers the `["result"]` / `["pattern"]`
+  // provenance meta paths `makeResultCell` stamps beside `["value"]` (the same
+  // coverage `sqliteDatabase`'s computation descriptor buys through
+  // `mintedDocuments`). Declared at the scope actually allocated, so a scoped
+  // instance is admitted only at a lane of matching rank
+  // (`servability.ts` `laneAdmitsScope`) — a space-rank claim can never serve
+  // a per-user query result.
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
     const inputs = inputsCell.withTx(tx).get() as {
@@ -674,10 +777,26 @@ export function sqliteQuery(
       initialized = true;
       resultScope = scope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      result.getAsNormalizedFullLink(),
+    );
 
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
     const db = readDbRef(inputs.db);
+    // A5/G1 — captured HERE, in the action's synchronous extent, because that
+    // is the only place it is readable: the RPC and every identity read below
+    // happen in the post-commit flush, after `runWithExecutionLane` has
+    // restored the ambient lane. A cell-db is a FILE and the scope context is
+    // its selector, so a lease-bound executor that fails to name the lane it
+    // is serving opens the executor principal's db and returns its rows;
+    // `resolveCeilingPlaceholders` and the read-clearance reader would resolve
+    // the same wrong principal. Undefined on every client run and every
+    // space-rank executor run, which keeps both byte-identical.
+    const actingContext = actingExecutionLane(runtime, space);
+    const actingPrincipal = actingPrincipalOfLane(runtime, actingContext);
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
     try {
@@ -700,22 +819,49 @@ export function sqliteQuery(
       // reader is part of the query identity (belt-and-suspenders with the
       // per-user result scope above — a cleared result is never keyed only by
       // the boolean). Absent for non-clearance queries so they do not re-hash.
-      clearanceReader: inputs.readClearance
-        ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
-        : null,
+      clearanceReader: inputs.readClearance ? (actingPrincipal ?? null) : null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
     // in-memory flag — see fetch.ts). Re-issue otherwise.
     if (result.withTx(tx).get()?.requestHash === hash) return;
-    result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
-    tx.enqueuePostCommitEffect({
-      id: `sqliteQuery:${hash}`,
-      idempotencyKey: `sqliteQuery:${hash}`,
-      kind: "sqlite-query",
-      async flush() {
+    const effectId = `sqliteQuery:${hash}`;
+    // CFC sink-request snapshot: what identifies this read AT THE SINK, plus
+    // the value-bearing parts the ceiling check gates on. `db.tables` is the
+    // handle's label SPEC rather than query data — it is already folded into
+    // `hash` above — so it stays out of the snapshot.
+    const requestSnapshot = {
+      db: {
+        id: db.id,
+        ...(db.scope !== undefined ? { scope: db.scope } : {}),
+      },
+      sql,
+      params: (params ?? null) as FabricValue,
+    };
+    // Double-execution gate, consulted BEFORE the dedup marker is written.
+    // `externalSinkDisposition()` is the single place that decides whether
+    // THIS side issues the effect: it pins the transaction's effect authority
+    // to "server" (and answers "suppress") once the source action carries a
+    // server effect claim, and the executor Worker's own policy answers
+    // "suppress" for an unclaimed run. It is idempotent, so the
+    // `enqueueSinkRequestPostCommitEffect` below re-reads the same answer.
+    //
+    // The marker must NOT be written on the suppressed side: every later run
+    // returns early on `requestHash === hash`, so a suppressed run that wrote
+    // it would leave the result permanently `pending` AND wedge the side that
+    // was supposed to issue.
+    if (tx.externalSinkDisposition() === "suppress") return;
+    result.withTx(tx).set({ pending: true, requestHash: hash });
+
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "sqliteQuery",
+      effectId,
+      requestSnapshot,
+      "sqlite-query",
+      async () => {
         // Write an error result for THIS request, guarded against a newer query
         // (different inputs -> different hash) that superseded it mid-flight.
         const failQuery = (error: string) =>
@@ -735,7 +881,12 @@ export function sqliteQuery(
                 "(sqliteQuery unavailable)",
             );
           }
-          const res = await provider.sqliteQuery(db, sql, params);
+          const res = await provider.sqliteQuery(
+            db,
+            sql,
+            params,
+            actingContext !== undefined ? { actingContext } : undefined,
+          );
           // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
           // OBJECTS so a typed consumer's asCell schema rehydrates them to live
           // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
@@ -782,8 +933,7 @@ export function sqliteQuery(
           let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
           if (ceiling !== undefined) {
             const resolved = resolveCeilingPlaceholders(ceiling, {
-              actingPrincipal: runtime.trustSnapshotProvider()
-                ?.actingPrincipal,
+              actingPrincipal,
               owner: db.owner,
             });
             if ("error" in resolved) {
@@ -803,7 +953,7 @@ export function sqliteQuery(
             // Phase 3.b read-time clearance: the reader is the acting principal
             // (same identity the ceiling placeholders resolve against).
             readClearance: inputs.readClearance
-              ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+              ? { reader: actingPrincipal }
               : undefined,
           });
           if ("error" in rowLabels) {
@@ -899,7 +1049,11 @@ export function sqliteQuery(
           await failQuery(errMsg(error));
         }
       },
-    });
+    );
   };
-  return { action };
+  // The effect kind stays declared ONCE, in the registration
+  // (`builtins/index.ts`, `raw(sqliteQuery, { isEffect: true })`) — `runner.ts`
+  // resolves `module.isEffect ?? builtinIsEffect`, so repeating it here would
+  // only add a second source of truth for the same fact.
+  return { action: Object.assign(action, { serverBuiltinRuntimeWrites }) };
 }

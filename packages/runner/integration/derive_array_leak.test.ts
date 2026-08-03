@@ -14,6 +14,7 @@ import { env } from "@commonfabric/integration";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { compileAndSavePattern, Runtime } from "../src/index.ts";
 import { PieceManager } from "@commonfabric/piece";
+import { deploymentRuntimeOptions } from "./runtime-options.ts";
 
 (Error as any).stackTraceLimit = 100;
 
@@ -99,10 +100,9 @@ async function runTest() {
   });
 
   // Create runtime
-  const runtime = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager,
-  });
+  const runtime = new Runtime(
+    deploymentRuntimeOptions(new URL(API_URL), storageManager),
+  );
 
   // Create piece manager for the specified space
   const pieceManager = new PieceManager(session, runtime);

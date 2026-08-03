@@ -22,5 +22,29 @@ installFakeClock({
     // Under the fake clock the delay is a frozen test-file timer that pull/idle
     // wait on, so the resume deadlocks; the real clock delivers them as intended.
     "list-resume-preserve",
+    // The server-execution real-Worker e2e seam. A spawned Worker runs in its
+    // OWN realm on the real clock, so the host-side barriers these files race
+    // against it are wall-clock by construction: the Worker keeps the host loop
+    // refed, auto-advance never fires the host's own timers, and the control
+    // barriers never resolve. Each was checked individually — all hang or fail
+    // under the fake clock and pass on the real one. Converting them means
+    // driving BOTH realms' time together, which is its own change.
+    // Giving the Worker realm the same fake clock would let these drop.
+    "executor-candidate-claim",
+    "executor-claim-e2e",
+    "executor-drain-barrier",
+    "executor-pending-demand",
+    "executor-piece-linger",
+    "executor-provider-parity",
+    "executor-scoped-egress-e2e",
+    "server-execution-rollout-products",
+    // Same class one layer down: a lease-bound `HostStorageManager` (the
+    // executor host provider) whose sponsor attachment and cold-refresh
+    // cooldown are wall-clock. Under the fake clock the sponsor reads as
+    // detached ("execution lease sponsor is no longer attached") or the
+    // cooldown never elapses. All three pass on the real clock.
+    "executor-foreign-read-value",
+    "executor-provider-foreign-point-reads",
+    "executor-provider-point-reads",
   ],
 });

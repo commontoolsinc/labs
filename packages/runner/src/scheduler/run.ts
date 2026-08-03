@@ -2,7 +2,8 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
-import { normalizeCellScope } from "../scope.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -10,10 +11,13 @@ import type {
 } from "../storage/interface.ts";
 import {
   isConflictRejection,
+  isExecutionLeaseFenceRejection,
   isPermanentRejection,
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
+import { isReadIgnoredForScheduling } from "../storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "../storage/transaction-inspection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -27,7 +31,12 @@ import {
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
-import { buildSchedulerActionObservation } from "./persistent-observation.ts";
+import {
+  buildSchedulerActionObservation,
+  type CompleteActionScopeSummary,
+  type CompleteActionScopeSummaryInput,
+  type SchedulerActionObservation,
+} from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
@@ -40,6 +49,14 @@ import type {
   TelemetryAnnotations,
 } from "./types.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
+import {
+  builtinImplementationHash,
+  isServerComputationBuiltinId,
+  isServerMaterializerBuiltinId,
+  type ServerBuiltinComputationDescriptor,
+  serverBuiltinImplementationHash,
+  type ServerBuiltinMaterializerDescriptor,
+} from "../builtins/server-execution.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -105,11 +122,31 @@ export function startReactiveActionCommit(state: {
   return commitPromise;
 }
 
+/** P4 defer-then-(b) residual backoff (client-passivity §0 step 2): the
+ * catch-up gate resolves in ~1ms under live contention, so a claimed
+ * attempt can re-run and re-lose in a 0ms-gap micro-burst until the
+ * contention window passes (measured: one map action 36 straight
+ * conflicts, gaps 0ms, on the post-step-1 chat leg — down from the 594
+ * pre-step-1, but pure wasted server work). After the SECOND consecutive
+ * conflict the re-queue waits 25·2^(n-2) ms, capped; any success clears
+ * the streak (the map is keyed by action identity, entries die with the
+ * action). First conflicts stay undelayed — the common single-loss race
+ * keeps its immediate catch-up-gated retry. */
+const CONFLICT_STREAK_BACKOFF_BASE_MS = 25;
+const CONFLICT_STREAK_BACKOFF_CAP_MS = 400;
+export const conflictStreakBackoffMs = (streak: number): number =>
+  streak < 2 ? 0 : Math.min(
+    CONFLICT_STREAK_BACKOFF_CAP_MS,
+    CONFLICT_STREAK_BACKOFF_BASE_MS * 2 ** (streak - 2),
+  );
+
 export function watchReactiveActionCommit(state: {
   readonly action: Action;
+  readonly actionId: string;
   readonly tx: IExtendedStorageTransaction;
   readonly log: ReactivityLog;
   readonly retries: WeakMap<Action, number>;
+  readonly conflictStreaks?: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
@@ -117,12 +154,17 @@ export function watchReactiveActionCommit(state: {
   readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
+  readonly onCommitRejected?: (
+    error: unknown,
+    disposition: ActionCommitRejectionDisposition,
+  ) => ActionCommitRejectionDirective;
   readonly getActionId: (action: Action) => string;
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
+      state.conflictStreaks?.delete(state.action);
       state.offBudgetRetries.delete(state.action);
       return;
     }
@@ -132,6 +174,21 @@ export function watchReactiveActionCommit(state: {
       "Error committing transaction",
       error,
     );
+    const reportRejection = (
+      disposition: ActionCommitRejectionDisposition,
+    ): boolean => {
+      try {
+        return state.onCommitRejected?.(error, disposition) ===
+          "suppress-retry";
+      } catch (callbackError) {
+        logger.warn(
+          "action-commit-rejection-callback",
+          "Action commit rejection callback failed",
+          callbackError,
+        );
+        return false;
+      }
+    };
 
     // A reactive compute is not a transactional retrier. A stale-basis rejection
     // means the value the action read is no longer current, so re-running against
@@ -163,6 +220,10 @@ export function watchReactiveActionCommit(state: {
     // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
     // transaction still carries their flow labels.
     if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
+      if (reportRejection("retrying")) {
+        state.retries.delete(state.action);
+        return;
+      }
       // This retry rides off the bounded budget on the assumption that the
       // subscription eventually delivers the awaited value — true for
       // pattern-created reactive functions, which go through the cell machinery.
@@ -189,6 +250,7 @@ export function watchReactiveActionCommit(state: {
       // reader-dirty can re-trigger the action while we wait for the catch-up.
       state.restoreInvalidCauses();
       state.resubscribe(state.action, state.log);
+      const readinessStartedAt = Date.now();
       const readyToRetry =
         (error as { readyToRetry?: () => unknown }).readyToRetry;
       if (typeof readyToRetry === "function") {
@@ -207,23 +269,55 @@ export function watchReactiveActionCommit(state: {
           );
         }
       }
+      // P4 residual backoff: a streak of consecutive conflicts on ONE
+      // action means the catch-up gate is winning instantly while the
+      // contention window persists — defer the re-attempt briefly rather
+      // than burn a 0ms-gap re-loss.
+      const streak = (state.conflictStreaks?.get(state.action) ?? 0) + 1;
+      state.conflictStreaks?.set(state.action, streak);
+      const backoffMs = state.conflictStreaks === undefined
+        ? 0
+        : conflictStreakBackoffMs(streak);
+      if (backoffMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+      // P4 retry-anatomy attribution (client-passivity §0 step 2): one
+      // line per conflict re-queue with the catch-up wait it paid and the
+      // streak backoff added. Client-side conflicts are the rare
+      // client-commit class; the volume rides the executor realm, whose
+      // stdout lands in the toolshed log.
+      console.debug(
+        "[P4] conflict-retry:",
+        `t=${Date.now()}`,
+        `waitMs=${Date.now() - readinessStartedAt}`,
+        `gated=${typeof readyToRetry === "function" ? 1 : 0}`,
+        `streak=${streak}`,
+        `backoffMs=${backoffMs}`,
+        state.actionId,
+      );
       state.markInvalid(state.action);
       state.pending.add(state.action);
       state.queueExecution();
       return;
     }
 
-    // Permanent (precondition) and terminal (deterministic commit-rule refusal —
-    // `isTerminalRejection`) rejections are never retried: re-running recomputes
-    // the identical refused write, and the doomed re-runs would starve
-    // concurrent siblings. This definitively ENDS the current retry sequence, so
-    // clear the counter — exactly like the success path above — before returning:
-    // a later re-run triggered by changed inputs is a fresh sequence that must
-    // keep its full bounded budget for a genuinely transient failure, not inherit
-    // a count accumulated by earlier transient attempts or the terminal one.
-    // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
-    // change re-triggers.
-    if (isPermanentRejection(error) || isTerminalRejection(error)) {
+    // Permanent (precondition), terminal (deterministic commit-rule refusal —
+    // `isTerminalRejection`), and exact execution-authority fence rejections are
+    // never retried. The first two would recompute the identical refused write;
+    // the fence names a lease/claim incarnation that can never become current
+    // again. Doomed re-runs would only starve concurrent siblings. This
+    // definitively ENDS the current retry sequence, so clear the counter —
+    // exactly like the success path above — before returning: a later re-run
+    // triggered by changed inputs is a fresh sequence that must keep its full
+    // bounded budget for a genuinely transient failure, not inherit a count
+    // accumulated by earlier transient attempts or the terminal one. Resubscribe
+    // still happens (finalizeReactiveActionCommit), so a real input change
+    // re-triggers and may receive a fresh claim.
+    if (
+      isPermanentRejection(error) || isTerminalRejection(error) ||
+      isExecutionLeaseFenceRejection(error)
+    ) {
+      reportRejection("abandoned");
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
       return;
@@ -239,6 +333,10 @@ export function watchReactiveActionCommit(state: {
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
+      if (reportRejection("retrying")) {
+        state.retries.delete(state.action);
+        return;
+      }
       // Resubscribe sets up dependencies/triggers from the log so the action
       // re-runs when its inputs change. The run still exists only because of the
       // consumed trigger reads (§8.9.2), so restore them for its tx.
@@ -248,6 +346,7 @@ export function watchReactiveActionCommit(state: {
       state.pending.add(state.action);
       state.queueExecution();
     } else {
+      reportRejection("abandoned");
       // WATCH(scheduler-v2): exhausted retries can leave a piece registered
       // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
@@ -259,6 +358,13 @@ export function watchReactiveActionCommit(state: {
     );
   });
 }
+
+export type ActionCommitRejectionDisposition = "retrying" | "abandoned";
+
+/** Host-only control can end the generic scheduler retry sequence after it
+ * synchronously revokes attempt-specific authority. Ordinary runtimes install
+ * no handler and retain the existing bounded retry behavior. */
+export type ActionCommitRejectionDirective = "suppress-retry" | undefined;
 
 export function appendActionRunTrace(state: {
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -307,6 +413,7 @@ export interface SchedulerActionRunState {
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
   readonly retries: WeakMap<Action, number>;
+  conflictStreaks: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -341,6 +448,21 @@ export interface SchedulerActionRunState {
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
+  readonly handleActionCommitRejected: (
+    action: Action,
+    error: unknown,
+    disposition: ActionCommitRejectionDisposition,
+  ) => ActionCommitRejectionDirective;
+  /**
+   * Optional per-run wrapper around one action run's synchronous extent —
+   * transaction creation plus the action body's synchronous invocation
+   * (C1.9c). The executor Worker installs one that resolves the action's
+   * execution lane and runs the body under it as the ambient acting lane, so
+   * every rerun path (host wake, local differential, conflict retry) reads
+   * that lane's document instances. The wrapper MUST call `run` exactly once
+   * and return its result.
+   */
+  readonly wrapActionRun?: <T>(action: Action, run: () => T) => T;
 }
 
 export async function runSchedulerAction(
@@ -362,62 +484,71 @@ export async function runSchedulerAction(
   const runningPromise = state.getRunningPromise();
   if (runningPromise) await runningPromise;
 
-  const tx = state.runtime.edit({
-    changeGroup: state.actionChangeGroups.get(action),
-  });
-  const record = state.nodes.get(action);
-  const invalidCauses = record ? takeInvalidCauses(record) : undefined;
-  if (record) {
-    state.nodes.setStatus(action, "clean");
-  }
-  // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
-  // run to the transaction so flow-label derivation can taint its writes
-  // even when this run's branch never re-reads them. Consumed once; if the
-  // run aborts and is retried (RetryImmediately, commit conflict) the
-  // consumed addresses are restored below so the retry inherits them.
-  if (invalidCauses !== undefined && invalidCauses.length > 0) {
-    tx.addCfcTriggerReads(invalidCauses);
-  }
-  (tx.tx as { debugActionId?: string }).debugActionId = actionId;
-  tx.tx.sourceAction = action;
-  const actionStartTime = performance.now();
+  // The wrapper covers the run's synchronous extent — transaction creation
+  // and the action body's synchronous reads — so an executor-installed lane
+  // wrapper (C1.9c) makes every rerun path read the acting lane's document
+  // instances. The commit itself finalizes in a later microtask; its lane is
+  // re-resolved per source action at the storage commit entry.
+  const wrapActionRun = state.wrapActionRun ??
+    ((_action: Action, run: () => Promise<unknown>) => run());
+  const nextRunningPromise = wrapActionRun(action, () => {
+    const tx = state.runtime.edit({
+      changeGroup: state.actionChangeGroups.get(action),
+    });
+    const record = state.nodes.get(action);
+    const invalidCauses = record ? takeInvalidCauses(record) : undefined;
+    if (record) {
+      state.nodes.setStatus(action, "clean");
+    }
+    // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
+    // run to the transaction so flow-label derivation can taint its writes
+    // even when this run's branch never re-reads them. Consumed once; if the
+    // run aborts and is retried (RetryImmediately, commit conflict) the
+    // consumed addresses are restored below so the retry inherits them.
+    if (invalidCauses !== undefined && invalidCauses.length > 0) {
+      tx.addCfcTriggerReads(invalidCauses);
+    }
+    (tx.tx as { debugActionId?: string }).debugActionId = actionId;
+    tx.tx.sourceAction = action;
+    const actionStartTime = performance.now();
 
-  let result: any;
-  const nextRunningPromise = new Promise((resolve) => {
-    const finalizeAction = (error?: unknown) => {
-      finalizeSchedulerAction(state, {
+    let result: any;
+    return new Promise((resolve) => {
+      const finalizeAction = (error?: unknown) => {
+        finalizeSchedulerAction(state, {
+          action,
+          actionId,
+          tx,
+          actionStartTime,
+          invalidCauses,
+          result,
+          error,
+          resolve,
+        });
+      };
+
+      invokeReactiveAction({
+        runtime: state.runtime,
+        setExecutingAction: state.setExecutingAction,
+        clearExecutingAction: state.clearExecutingAction,
+      }, {
         action,
         actionId,
         tx,
         actionStartTime,
-        invalidCauses,
-        result,
-        error,
-        resolve,
-      });
-    };
-
-    invokeReactiveAction({
-      runtime: state.runtime,
-      setExecutingAction: state.setExecutingAction,
-      clearExecutingAction: state.clearExecutingAction,
-    }, {
-      action,
-      actionId,
-      tx,
-      actionStartTime,
-    })
-      .then((invocation) => {
-        if (invocation.ok) {
-          result = invocation.result;
-          finalizeAction();
-        } else {
-          finalizeAction(invocation.error);
-        }
       })
-      .catch((error) => {
-        finalizeAction(error);
-      });
+        .then((invocation) => {
+          if (invocation.ok) {
+            result = invocation.result;
+            finalizeAction();
+          } else {
+            finalizeAction(invocation.error);
+          }
+        })
+        .catch((error) => {
+          finalizeAction(error);
+        });
+    });
   });
   state.setRunningPromise(nextRunningPromise);
 
@@ -546,17 +677,31 @@ function finalizeReactiveActionCommit(
   // outbox, before the async flush clears it): does this commit have
   // asynchronous post-commit work that `settled()` must wait on?
   let hasPostCommitEffects = false;
-  const commitPromise = startReactiveActionCommit({
-    runtime: state.runtime,
-    tx: args.tx,
-  }, {
-    beforeCommit: () => {
-      log = txToReactivityLog(args.tx);
-      warnOnWriteSurfaceViolations(state, args, log);
-      attachSchedulerActionObservation(state, args, log);
-      hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
-    },
-  });
+  // The commit kickoff runs under the same wrapper as the action body
+  // (C1.9c): commit-time validation re-reads each document from the replica,
+  // and a lane run's documents only resolve under its lane's ambient acting
+  // context — an unwrapped validate would compare against another lane's
+  // instances and reject the commit as inconsistent.
+  const wrapActionRun = state.wrapActionRun ??
+    ((
+      _action: Action,
+      run: () => ReturnType<typeof startReactiveActionCommit>,
+    ) => run());
+  const commitPromise = wrapActionRun(
+    args.action,
+    () =>
+      startReactiveActionCommit({
+        runtime: state.runtime,
+        tx: args.tx,
+      }, {
+        beforeCommit: () => {
+          log = txToReactivityLog(args.tx);
+          warnOnWriteSurfaceViolations(state, args, log);
+          attachSchedulerActionObservation(state, args, log);
+          hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
+        },
+      }),
+  );
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
   }
@@ -573,9 +718,11 @@ function finalizeReactiveActionCommit(
   const committedLog = log;
   watchReactiveActionCommit({
     action: args.action,
+    actionId: args.actionId,
     tx: args.tx,
     log: committedLog,
     retries: state.retries,
+    conflictStreaks: state.conflictStreaks,
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
@@ -593,6 +740,8 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    onCommitRejected: (error, disposition) =>
+      state.handleActionCommitRejected(args.action, error, disposition),
   });
 
   logger.debug("schedule-run-complete", () => [
@@ -705,7 +854,20 @@ function attachSchedulerActionObservation(
   );
   const runtimeFingerprint = schedulerRuntimeFingerprint();
   const completeScopeSummary = annotated.completeSchedulerScopeSummary;
-  const observation = buildSchedulerActionObservation({
+  // This run's scheduler-ignored (framework-owned) reads — folded into EVERY
+  // trusted summary source so the engine's claimed-commit admission covers the
+  // link-resolution/argument reads the commit actually carries (W2.14's fold,
+  // applied uniformly; the certificate path had the C2.10 residual gap).
+  const ignoredReads = schedulerIgnoredReadAddresses(args.tx);
+  // The certificate's own space bounds the certificate-path fold; reads only,
+  // never writes, so a wrong fold can only fail closed at the firewall.
+  const certificateFoldReads = completeScopeSummary
+    ? sameSpaceLaneInstanceReads(
+      ignoredReads,
+      toMemorySpaceAddress(completeScopeSummary.piece).space,
+    )
+    : [];
+  const baseObservation = buildSchedulerActionObservation({
     ...(observationIdentity.ownerSpace !== undefined
       ? { ownerSpace: observationIdentity.ownerSpace }
       : {}),
@@ -735,20 +897,10 @@ function attachSchedulerActionObservation(
     ),
     ...(completeScopeSummary && implementationFingerprint.startsWith("impl:")
       ? {
-        completeActionScopeSummary: {
-          version: 1 as const,
-          complete: true as const,
-          piece: toMemorySpaceAddress(completeScopeSummary.piece),
-          reads: completeScopeSummary.reads.map(toMemorySpaceAddress),
-          writes: completeScopeSummary.writes.map(toMemorySpaceAddress),
-          materializerWriteEnvelopes: completeScopeSummary
-            .materializerWriteEnvelopes.map(
-              toMemorySpaceAddress,
-            ),
-          directOutputs: completeScopeSummary.directOutputs.map(
-            toMemorySpaceAddress,
-          ),
-        },
+        completeActionScopeSummary: transformerCertificateScopeSummaryInput(
+          completeScopeSummary,
+          certificateFoldReads,
+        ),
       }
       : {}),
     ...(actionOptions ? { actionOptions } : {}),
@@ -757,6 +909,69 @@ function attachSchedulerActionObservation(
       ? { errorFingerprint: schedulerErrorFingerprint(args.error) }
       : {}),
   });
+  const serverBuiltin = annotated.serverBuiltin;
+  const previousBuiltinSummary =
+    annotated.serverBuiltinPreviousScopeSummary?.implementationFingerprint ===
+        implementationFingerprint &&
+      annotated.serverBuiltinPreviousScopeSummary?.runtimeFingerprint ===
+        runtimeFingerprint
+      ? annotated.serverBuiltinPreviousScopeSummary
+      : undefined;
+  const observation = serverBuiltin !== undefined &&
+      baseObservation.actionKind === "effect" &&
+      implementationFingerprint ===
+        `impl:${serverBuiltinImplementationHash(serverBuiltin.id)}`
+    ? {
+      ...baseObservation,
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true as const,
+        implementationFingerprint,
+        runtimeFingerprint,
+        piece: toMemorySpaceAddress(serverBuiltin.piece),
+        reads: sortAndCompactPaths([
+          ...serverBuiltin.reads.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map((link) => ({
+            ...toMemorySpaceAddress(link),
+            path: [],
+          })),
+          ...(previousBuiltinSummary?.reads ?? []),
+          ...baseObservation.reads,
+          ...baseObservation.shallowReads,
+        ]),
+        writes: sortAndCompactPaths([
+          ...serverBuiltin.writes.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map((link) => ({
+            ...toMemorySpaceAddress(link),
+            path: [],
+          })),
+          ...serverBuiltin.directOutputs.map(toMemorySpaceAddress),
+          ...(previousBuiltinSummary?.writes ?? []),
+          ...(previousBuiltinSummary?.materializerWriteEnvelopes ?? []),
+          ...(previousBuiltinSummary?.directOutputs ?? []),
+          ...baseObservation.actualChangedWrites,
+          ...baseObservation.currentKnownWrites,
+          ...(baseObservation.declaredWrites ?? []),
+          ...baseObservation.materializerWriteEnvelopes,
+          ...(baseObservation.ignoredSchedulingWrites ?? []),
+        ]),
+        materializerWriteEnvelopes: sortAndCompactPaths(
+          [
+            ...(previousBuiltinSummary?.materializerWriteEnvelopes ?? []),
+            ...baseObservation.materializerWriteEnvelopes,
+          ],
+        ),
+        directOutputs: serverBuiltin.directOutputs.map(toMemorySpaceAddress),
+      },
+    }
+    : withRuntimeComputationScopeSummary(
+      baseObservation,
+      annotated.serverBuiltinComputation,
+      annotated.serverBuiltinMaterializer,
+      ignoredReads,
+    );
 
   try {
     observationTarget.setSchedulerObservation(observation);
@@ -814,6 +1029,595 @@ export function schedulerImplementationFingerprint(
 
 export function schedulerRuntimeFingerprint(): string {
   return "runner:scheduler:v3";
+}
+
+/**
+ * The transformer-certificate summary source (certified lifts): convert the
+ * complete certificate to raw memory addresses, add the structurally fixed
+ * `["cfc"]` sibling reads (CFC preparation reads the raw document-level label
+ * envelope beside statically declared value inputs and outputs — normalized
+ * cell links can only express paths below `["value"]`), and fold
+ * `certificateFoldReads` — this run's scheduler-ignored (framework) reads,
+ * pre-filtered to the certificate's own space (`sameSpaceLaneInstanceReads`).
+ *
+ * The fold is the same one every runtime summary source applies (W2.14):
+ * entity-link resolution records a whole-`["value"]` confirmed read of each
+ * link document (at the acting lane's scoped instance under a scoped claim)
+ * that the certificate only names at the narrower link position, so without
+ * it every claimed run whose reads traverse entity links rejects
+ * `unobserved-read` at the engine's claimed-commit admission (the C2.10
+ * placement-harness defect — the certificate path was the residual gap).
+ * READS only — the certificate's write envelope is never widened, so a wrong
+ * fold can only fail closed at the firewall.
+ *
+ * Fingerprints are deliberately absent (`CompleteActionScopeSummaryInput`):
+ * `buildSchedulerActionObservation` stamps both from the observation's own
+ * fingerprints.
+ */
+export function transformerCertificateScopeSummaryInput(
+  certificate: NonNullable<
+    TelemetryAnnotations["completeSchedulerScopeSummary"]
+  >,
+  certificateFoldReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummaryInput {
+  return {
+    version: 1 as const,
+    complete: true as const,
+    piece: toMemorySpaceAddress(certificate.piece),
+    reads: sortAndCompactPaths([
+      ...certificate.reads.map(toMemorySpaceAddress),
+      ...certificateFoldReads.map(cloneMemoryAddress),
+      ...[
+        ...certificate.reads,
+        ...certificate.writes,
+        ...certificate.materializerWriteEnvelopes,
+        ...certificate.directOutputs,
+      ].map(toMemorySpaceAddress).map((address) => ({
+        ...address,
+        path: ["cfc"],
+      })),
+      ...certificateFoldReads.map((address) => ({
+        ...cloneMemoryAddress(address),
+        path: ["cfc"],
+      })),
+    ]),
+    writes: certificate.writes.map(toMemorySpaceAddress),
+    materializerWriteEnvelopes: certificate.materializerWriteEnvelopes.map(
+      toMemorySpaceAddress,
+    ),
+    directOutputs: certificate.directOutputs.map(toMemorySpaceAddress),
+  };
+}
+
+/**
+ * W2.14 (RC-3b): assemble a runtime write-empty `completeActionScopeSummary`
+ * for a computation whose registered write surface is empty beyond its single
+ * direct root output. This covers trusted `impl:` computations the transformer
+ * cannot certify — e.g. backlinks-index's `computeMentionable`, a recursive
+ * read-only `lift()` that is statically unprovable but provably write-free.
+ *
+ * The summary declares NO side writes: only the single direct output, echoed
+ * into `writes` to satisfy the classifier's directOutput ∈ writes invariant.
+ * Reads come from the observed log and are admitted dynamically at the firewall
+ * (C0), so they carry no static envelope obligation. Soundness is fail-closed
+ * by construction: the engine firewall bounds every claimed commit's writes to
+ * this envelope (`dynamic-write-outside-static-surface`,
+ * `servability.ts`), so a wrong write-empty belief de-claims the action rather
+ * than corrupting state — it never trusts the belief.
+ *
+ * "Empty registered write surface" is the runner's own registration-time
+ * knowledge (`currentKnownWrites`/materializer envelopes/`declaredWrites`), not
+ * a static claim: exactly one registered write that is a same-space,
+ * space-scoped root value address, with no materializer or declared writes
+ * beyond it. Effects are excluded (they keep `unknown-effect-surface`), and a
+ * present certificate or effect-descriptor summary is never overridden.
+ *
+ * `ignoredReads` is this run's scheduler-ignored (framework-owned) read set —
+ * argument/piece/internal resolution reads deliberately excluded from the
+ * reactive log. The engine's claimed-commit admission requires every commit
+ * read to be covered by observation ∪ summary reads, so every trusted summary
+ * source folds them in (the certificate path folds them beside its exhaustive
+ * static certificate — C2.10 closed its residual gap) or every claimed run
+ * rejects `unobserved-read`. Only same-space, lane-instance-scoped addresses
+ * are folded (`sameSpaceLaneInstanceReads`) — anything else stays uncovered
+ * and fails closed.
+ */
+export function runtimeWriteEmptyComputationScopeSummary(
+  observation: SchedulerActionObservation,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummary | undefined {
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate or an effect-descriptor summary.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Trusted identity only: an `action:…` fingerprint is untrusted-implementation.
+  if (!observation.implementationFingerprint.startsWith("impl:")) {
+    return undefined;
+  }
+  // Canonical builtins (`impl:cf:builtin/<id>…`, per `builtinImplementationHash`)
+  // are covered ONLY by explicit, individually vetted per-builtin descriptors
+  // (W2.15+), never this blanket heuristic. Their write surfaces are not simply
+  // "one direct output": map/filter/flatMap carry output-collection envelopes
+  // and wish is a resolver, so a generic write-empty belief must never bless
+  // them. The target class here is authored `cf:module` computeds the
+  // transformer cannot certify (recursion), e.g. `computeMentionable`.
+  if (observation.implementationFingerprint.startsWith("impl:cf:builtin/")) {
+    return undefined;
+  }
+  const ownerSpace = observation.ownerSpace;
+  if (ownerSpace === undefined || ownerSpace.length === 0) return undefined;
+
+  // The registered write surface must be empty beyond the single direct output.
+  if (observation.materializerWriteEnvelopes.length > 0) return undefined;
+  if ((observation.declaredWrites?.length ?? 0) > 0) return undefined;
+  if (observation.currentKnownWrites.length !== 1) return undefined;
+  const directOutput = observation.currentKnownWrites[0]!;
+  if (!isSameSpaceRootValueAddress(directOutput, ownerSpace)) return undefined;
+
+  // Reconstruct the space piece root the pieceId was keyed from (`space:<uri>`):
+  // the definitional inverse of the runner's `${scope}:${id}` pieceId keying.
+  // Reuse the direct output's `space` (already proven equal to `ownerSpace`) so
+  // the piece carries the branded `MemorySpace`, not a bare observation string.
+  const piece = spacePieceRootFromPieceId(
+    observation.pieceId,
+    directOutput.space,
+  );
+  if (piece === undefined) return undefined;
+
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    // Observed-log reads; C0 admits them dynamically at the firewall. A scoped
+    // or foreign read still trips the classifier's same-space check, so pass
+    // them through rather than suppressing the evidence.
+    reads: claimedCommitAdmissionReads(
+      [
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceLaneInstanceReads(ignoredReads, ownerSpace),
+      ],
+      [directOutput],
+    ),
+    writes: [cloneMemoryAddress(directOutput)],
+    materializerWriteEnvelopes: [],
+    directOutputs: [cloneMemoryAddress(directOutput)],
+  };
+}
+
+/**
+ * Attach a runtime-assembled computation `completeActionScopeSummary` when one
+ * of the alternative certificate sources applies. Certified computations and
+ * server-builtin effects already carry a summary before reaching here. The
+ * explicit per-builtin descriptors take precedence over the generic runtime
+ * heuristics; the four sources are mutually exclusive by identity/surface (each
+ * returns `undefined` outside its class), so the order is a stable priority, not
+ * a conflict resolution:
+ *
+ * 1. single-output result-minter descriptor (W2.15a) — `cf:builtin`
+ *    ifElse/when/unless/inspectConfLabel;
+ * 2. list-builtin materializer descriptor (W2.16) — `cf:builtin`
+ *    map/filter/flatMap with an envelope write surface;
+ * 3. runtime materializer summary (W2.16) — authored `cf:module` writers that
+ *    carry registered materializer envelopes but no certificate (computeIndex);
+ * 4. write-empty heuristic (W2.14) — authored `cf:module` computeds the
+ *    transformer cannot certify but that provably write nothing beyond one
+ *    direct output (computeMentionable).
+ *
+ * The two `cf:builtin` descriptors never overlap the two `cf:module` heuristics
+ * (the heuristics reject `cf:builtin` identities); the materializer heuristic
+ * requires registered envelopes and the write-empty heuristic requires none, so
+ * they never both apply either.
+ */
+function withRuntimeComputationScopeSummary(
+  observation: SchedulerActionObservation,
+  computationDescriptor: ServerBuiltinComputationDescriptor | undefined,
+  materializerDescriptor: ServerBuiltinMaterializerDescriptor | undefined,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): SchedulerActionObservation {
+  const summary = serverBuiltinComputationScopeSummary(
+    observation,
+    computationDescriptor,
+    ignoredReads,
+  ) ??
+    serverBuiltinMaterializerScopeSummary(
+      observation,
+      materializerDescriptor,
+      ignoredReads,
+    ) ??
+    runtimeMaterializerComputationScopeSummary(observation, ignoredReads) ??
+    runtimeWriteEmptyComputationScopeSummary(observation, ignoredReads);
+  return summary === undefined
+    ? observation
+    : { ...observation, completeActionScopeSummary: summary };
+}
+
+/**
+ * This run's scheduler-ignored (framework-owned) reads: argument/piece/internal
+ * resolution reads deliberately kept out of the reactive log so they never
+ * drive wakes. Claimed-commit admission still requires them covered by the
+ * summary, so the runtime summary assemblers fold them in per run.
+ */
+function schedulerIgnoredReadAddresses(
+  tx: IExtendedStorageTransaction,
+): IMemorySpaceAddress[] {
+  const reads: IMemorySpaceAddress[] = [];
+  for (const activity of getTransactionReadActivities(tx)) {
+    if (!isReadIgnoredForScheduling(activity.meta)) continue;
+    reads.push({
+      space: activity.space,
+      scope: normalizeCellScope(activity.scope),
+      id: activity.id,
+      path: [...activity.path],
+    });
+  }
+  return reads;
+}
+
+/**
+ * The same-space framework reads a claimed summary may fold: any lane-instance
+ * scope (the broad space instance, or the acting principal's user/session
+ * instance — the lane's §2 chain). A claimed run at scoped rank resolves
+ * entity links through the acting lane's SCOPED instances, and the commit then
+ * carries whole-`["value"]` confirmed reads of those scoped link documents
+ * (recorded at link-resolution time, scheduler-ignored); a fold that admits
+ * only the space-scoped subset leaves them uncovered, so every such run
+ * rejects `unobserved-read` at the engine's claimed-commit admission — the
+ * C2.10 placement-harness defect (selector/lift runs over entity-link reads).
+ * Folding scoped reads stays fail-closed: READS only, same-space only, and
+ * the engine still lane-checks every summary read against the claim's own
+ * chain (`assertLaneScopedAddress`), so a foreign lane's instance read keeps
+ * rejecting the commit. Malformed scope values (anything outside the
+ * CellScope alphabet) stay excluded and fail closed.
+ */
+function sameSpaceLaneInstanceReads(
+  reads: readonly IMemorySpaceAddress[],
+  space: string,
+): IMemorySpaceAddress[] {
+  return reads.filter((address) =>
+    address.space === space &&
+    isCellScope(normalizeCellScope(address.scope))
+  ).map(cloneMemoryAddress);
+}
+
+/**
+ * The read set the engine's claimed-commit admission is checked against.
+ * Mirrors the certified path's structural addition: CFC preparation reads the
+ * raw document-level label envelope beside the value reads, so every summary
+ * doc gets a `["cfc"]` sibling read.
+ */
+function claimedCommitAdmissionReads(
+  reads: readonly IMemorySpaceAddress[],
+  writesAndOutputs: readonly IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  return sortAndCompactPaths([
+    ...reads,
+    ...[...reads, ...writesAndOutputs].map((address) => ({
+      ...address,
+      path: ["cfc"],
+    })),
+  ]);
+}
+
+/**
+ * W2.15a: assemble a claim-ready `completeActionScopeSummary` from a trusted
+ * per-builtin COMPUTATION descriptor for the single-output result minters (the
+ * pure structural selectors plus `inspectConfLabel`), keyed on the exact
+ * `impl:cf:builtin/<id>:v1` fingerprint
+ * (W2.11). Mirrors the effect-descriptor path but is fail-closed: the write
+ * envelope is EXACTLY the descriptor's declared surface plus the single direct
+ * output — observed runtime writes are never folded in — so a member that
+ * ever writes outside its declared output de-claims at the firewall. Reads come
+ * from the descriptor's registered inputs plus the observed log; C0 admits reads
+ * dynamically, so they carry no envelope obligation.
+ */
+export function serverBuiltinComputationScopeSummary(
+  observation: SchedulerActionObservation,
+  descriptor: ServerBuiltinComputationDescriptor | undefined,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummary | undefined {
+  if (descriptor === undefined || descriptor.version !== 1) return undefined;
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate already present.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Identity must be the exact canonical builtin the descriptor names.
+  if (!isServerComputationBuiltinId(descriptor.id)) return undefined;
+  if (
+    observation.implementationFingerprint !==
+      `impl:${builtinImplementationHash(descriptor.id)}`
+  ) {
+    return undefined;
+  }
+  if (descriptor.directOutputs.length !== 1) return undefined;
+
+  const piece = toMemorySpaceAddress(descriptor.piece);
+  const writes = sortAndCompactPaths([
+    ...descriptor.writes.map(toMemorySpaceAddress),
+    ...descriptor.directOutputs.map(toMemorySpaceAddress),
+    ...provenanceMetaWriteEnvelopes(descriptor.mintedDocuments),
+  ]);
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    reads: claimedCommitAdmissionReads(
+      [
+        ...descriptor.reads.map(toMemorySpaceAddress),
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceLaneInstanceReads(ignoredReads, piece.space),
+      ],
+      writes,
+    ),
+    writes,
+    materializerWriteEnvelopes: [],
+    directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
+  };
+}
+
+/**
+ * The PROVENANCE META paths a declared minted document implicitly covers
+ * (client-passivity §5h.2): `["result"]` and `["pattern"]`, and nothing else.
+ *
+ * Every mint that runs through `setResultCell`/`setPatternCell`
+ * (`result-utils.ts`) stamps these two DOCUMENT-ROOT siblings of `["value"]` on
+ * the document it allocates — `["result"]` unconditionally, `["pattern"]` only
+ * when the parent pattern cell has a raw value. They are parent back-pointers
+ * production code walks to resolve piece ownership (`ensure-piece-running.ts`,
+ * `piece/manager.ts`), so they are not optional; but a minted-document
+ * declaration is a value-root link, which `toMemorySpaceAddress` renders
+ * `["value"]`, so without this expansion they fall outside the envelope and
+ * every minting run de-claims `dynamic-write-outside-static-surface`
+ * (measured for `sqliteDatabase` in `sqlite-database-servability.test.ts`).
+ *
+ * Deliberately NOT the materializer summary's blanket value-root → document-root
+ * lift (FB19/CA6): that lift bounds the WHOLE document, and it cannot be applied
+ * here because the same descriptor declares the node's direct OUTPUT SPOT at
+ * link path `[]` too — bounding that document would be far too wide. The two
+ * paths are enumerated instead, and `covers()` matches a path PREFIX, so an
+ * envelope at `["result"]` already covers `["result", …anything]` with no new
+ * matching machinery.
+ *
+ * Declaring a path a run does not write is harmless: the envelope bounds WHICH
+ * addresses may be written, never what is written there, so the conditional
+ * `["pattern"]` write costs nothing when it is skipped. A non-value-root minted
+ * link is ignored — it names a subtree, not a whole minted document, and a
+ * subtree has no provenance meta of its own.
+ */
+function provenanceMetaWriteEnvelopes(
+  mintedDocuments: readonly NormalizedFullLink[],
+): IMemorySpaceAddress[] {
+  const envelopes: IMemorySpaceAddress[] = [];
+  for (const minted of mintedDocuments) {
+    if (minted.path.length !== 0) continue;
+    const document = toMemorySpaceAddress(minted);
+    for (const metaField of ["result", "pattern"] as const) {
+      envelopes.push({ ...document, path: [metaField] });
+    }
+  }
+  return envelopes;
+}
+
+/**
+ * W2.16: assemble a claim-ready `completeActionScopeSummary` from a trusted
+ * per-builtin MATERIALIZER descriptor for the container-minting list builtins
+ * (map/filter/flatMap), keyed on the exact `impl:cf:builtin/<id>:v1` fingerprint
+ * (W2.11). Mirrors the selector descriptor path but the write surface is
+ * ENVELOPE-shaped: the container prefix rides in `materializerWriteEnvelopes`
+ * (checkable and honest for a data-dependent per-slot writer), while `writes`
+ * carries only the declared surface plus the direct output. Fail-closed: the
+ * envelope is exactly the descriptor's container plus the direct output —
+ * observed runtime writes are never folded in — so a run that writes anywhere
+ * else (e.g. a first reconcile instantiating per-element children) de-claims at
+ * the firewall. Reads come from the descriptor's inputs plus the observed log;
+ * C0 admits reads dynamically, so they carry no envelope obligation.
+ */
+export function serverBuiltinMaterializerScopeSummary(
+  observation: SchedulerActionObservation,
+  descriptor: ServerBuiltinMaterializerDescriptor | undefined,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummary | undefined {
+  if (descriptor === undefined || descriptor.version !== 1) return undefined;
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate already present.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Identity must be the exact canonical builtin the descriptor names.
+  if (!isServerMaterializerBuiltinId(descriptor.id)) return undefined;
+  if (
+    observation.implementationFingerprint !==
+      `impl:${builtinImplementationHash(descriptor.id)}`
+  ) {
+    return undefined;
+  }
+  if (descriptor.directOutputs.length !== 1) return undefined;
+  // An envelope-shaped writer with no envelope is not a materializer: refuse
+  // rather than mint an exact-surface summary that would reject its own
+  // container write on the first commit.
+  if (descriptor.materializerWriteEnvelopes.length === 0) return undefined;
+
+  const piece = toMemorySpaceAddress(descriptor.piece);
+  // A value-root envelope (link path `[]`) means "the whole minted container
+  // document", so lift it to a DOCUMENT-root prefix rather than the
+  // `["value"]` prefix `toMemorySpaceAddress` renders (CA6/FB19): the mint
+  // branch also writes the container's `["result"]`/`["pattern"]` meta links
+  // (`setResultCell`/`setPatternCell`) and the CFC label envelope lives at
+  // `["cfc"]` — all document-root siblings of `["value"]` that a
+  // value-relative envelope can never cover, de-claiming every cold
+  // container-minting run. The container is wholly this node's minted output
+  // (identity derived from the registration cause), so the document-root
+  // bound stays exact and fail-closed. Deeper envelope paths keep their
+  // value-relative rendering.
+  const materializerWriteEnvelopes = sortAndCompactPaths(
+    descriptor.materializerWriteEnvelopes.map((link) =>
+      link.path.length === 0
+        ? { ...toMemorySpaceAddress(link), path: [] }
+        : toMemorySpaceAddress(link)
+    ),
+  );
+  const writes = sortAndCompactPaths([
+    ...descriptor.writes.map(toMemorySpaceAddress),
+    ...descriptor.directOutputs.map(toMemorySpaceAddress),
+  ]);
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    reads: claimedCommitAdmissionReads(
+      [
+        ...descriptor.reads.map(toMemorySpaceAddress),
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceLaneInstanceReads(ignoredReads, piece.space),
+      ],
+      [...writes, ...materializerWriteEnvelopes],
+    ),
+    writes,
+    materializerWriteEnvelopes,
+    directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
+  };
+}
+
+/**
+ * W2.16 (RC-3a): assemble a runtime materializer `completeActionScopeSummary`
+ * for an AUTHORED (`cf:module`) computation that carries no transformer
+ * certificate but HAS registered materializer write envelopes — computeIndex's
+ * shape, pending its transformer certificate. The write bound is exactly those
+ * envelopes plus the single direct root output; the registered surface must be
+ * bounded by them (every registered write envelope- or direct-output-covered)
+ * or the action stays `incomplete-static-surface`. This is the authored analog
+ * of the per-builtin materializer descriptor: builtins arrive via descriptors
+ * (`serverBuiltinMaterializerScopeSummary`) and are excluded here, exactly as
+ * the write-empty heuristic excludes them.
+ *
+ * Soundness is fail-closed by construction: the firewall bounds every claimed
+ * commit's writes to `envelopes ∪ directOutput`, so a run that writes outside
+ * them de-claims rather than corrupting state. `ignoredReads` folds the
+ * framework-owned reads exactly as the write-empty path does.
+ */
+export function runtimeMaterializerComputationScopeSummary(
+  observation: SchedulerActionObservation,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummary | undefined {
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate or an effect-descriptor summary.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Trusted identity only: an `action:…` fingerprint is untrusted-implementation.
+  if (!observation.implementationFingerprint.startsWith("impl:")) {
+    return undefined;
+  }
+  // Canonical builtins are served ONLY through their explicit per-builtin
+  // descriptors (map/filter/flatMap via serverBuiltinMaterializerScopeSummary),
+  // never this authored-writer path.
+  if (observation.implementationFingerprint.startsWith("impl:cf:builtin/")) {
+    return undefined;
+  }
+  // Materializer, not write-empty (W2.14): it must carry registered envelopes.
+  if (observation.materializerWriteEnvelopes.length === 0) return undefined;
+  const ownerSpace = observation.ownerSpace;
+  if (ownerSpace === undefined || ownerSpace.length === 0) return undefined;
+
+  // Exactly one direct root output, same-space and space-scoped.
+  if (observation.currentKnownWrites.length !== 1) return undefined;
+  const directOutput = observation.currentKnownWrites[0]!;
+  if (!isSameSpaceRootValueAddress(directOutput, ownerSpace)) return undefined;
+
+  // Every registered envelope must itself be same-space and space-scoped, else
+  // this run cannot be served — refuse rather than mint a summary the firewall
+  // rejects address-by-address anyway.
+  const materializerWriteEnvelopes = sortAndCompactPaths(
+    observation.materializerWriteEnvelopes.map(cloneMemoryAddress),
+  );
+  for (const envelope of materializerWriteEnvelopes) {
+    if (
+      envelope.space !== ownerSpace ||
+      normalizeCellScope(envelope.scope) !== "space"
+    ) {
+      return undefined;
+    }
+  }
+
+  const directOutputWrite = cloneMemoryAddress(directOutput);
+  const writeEnvelopes = [directOutputWrite, ...materializerWriteEnvelopes];
+  // Every registered write must be envelope- or direct-output-covered, so the
+  // summary honestly bounds the registered surface. A declared side write
+  // outside them means the envelopes do not describe this writer; leave it
+  // incomplete-static-surface rather than assemble an unsound bound.
+  for (
+    const registered of [
+      ...observation.currentKnownWrites,
+      ...(observation.declaredWrites ?? []),
+    ]
+  ) {
+    if (
+      !writeEnvelopes.some((envelope) =>
+        surfaceCoversWrite(envelope, registered)
+      )
+    ) {
+      return undefined;
+    }
+  }
+
+  const piece = spacePieceRootFromPieceId(
+    observation.pieceId,
+    directOutput.space,
+  );
+  if (piece === undefined) return undefined;
+
+  const writes = [directOutputWrite];
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    reads: claimedCommitAdmissionReads(
+      [
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceLaneInstanceReads(ignoredReads, ownerSpace),
+      ],
+      writeEnvelopes,
+    ),
+    writes,
+    materializerWriteEnvelopes,
+    directOutputs: [cloneMemoryAddress(directOutput)],
+  };
+}
+
+function isSameSpaceRootValueAddress(
+  address: IMemorySpaceAddress,
+  space: string,
+): boolean {
+  return address.space === space &&
+    (address.scope ?? "space") === "space" &&
+    address.path.length === 1 && address.path[0] === "value";
+}
+
+function spacePieceRootFromPieceId(
+  pieceId: string,
+  space: IMemorySpaceAddress["space"],
+): IMemorySpaceAddress | undefined {
+  const prefix = "space:";
+  if (!pieceId.startsWith(prefix)) return undefined;
+  const id = pieceId.slice(prefix.length);
+  if (id.length === 0) return undefined;
+  return {
+    space,
+    scope: "space",
+    id: id as IMemorySpaceAddress["id"],
+    path: ["value"],
+  };
+}
+
+function cloneMemoryAddress(
+  address: IMemorySpaceAddress,
+): IMemorySpaceAddress {
+  return { ...address, path: [...address.path] };
 }
 
 function schedulerActionOptions(

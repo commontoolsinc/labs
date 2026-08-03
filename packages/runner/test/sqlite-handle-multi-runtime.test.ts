@@ -218,6 +218,9 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
         { as: signer },
         server,
       ),
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     runtimeB = undefined;
   });
@@ -299,6 +302,11 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
         { as: signer },
         server,
       ),
+      // B must be ABLE to egress, or "B dedups against the settled result"
+      // would pass for the wrong reason — a suppressed B issues no request
+      // whatever the request hash says, which is exactly the red failure mode
+      // this test exists to catch, made invisible.
+      externalSinkDisposition: "server-executor",
     });
     // Count B's server reads: with a stable request hash B must DEDUP against
     // the settled shared result, never issue its own request. (The red failure

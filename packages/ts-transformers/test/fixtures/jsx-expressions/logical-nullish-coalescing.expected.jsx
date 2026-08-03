@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
 }, boolean>(({ config }) => (config.get().retries ?? 3) > 0, {
@@ -53,7 +53,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
 }, string | false>(({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"), {
@@ -75,7 +75,7 @@ const __cfLift_3 = __cfHelpers.lift<{
             type: "boolean",
             "enum": [false]
         }]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
 // FIXTURE: logical-nullish-coalescing

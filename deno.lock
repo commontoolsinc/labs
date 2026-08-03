@@ -2016,17 +2016,6 @@
           "npm:typescript@6.0.3"
         ]
       },
-      "packages/background-piece-service": {
-        "dependencies": [
-          "npm:@opentelemetry/api@^1.9.1",
-          "npm:@opentelemetry/context-async-hooks@^2.9.0",
-          "npm:@opentelemetry/exporter-metrics-otlp-proto@0.220",
-          "npm:@opentelemetry/exporter-trace-otlp-proto@0.220",
-          "npm:@opentelemetry/resources@^2.9.0",
-          "npm:@opentelemetry/sdk-metrics@^2.9.0",
-          "npm:@opentelemetry/sdk-trace-base@^2.9.0"
-        ]
-      },
       "packages/cf-harness": {
         "dependencies": [
           "jsr:@db/sqlite@0.13.0"

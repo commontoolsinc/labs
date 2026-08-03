@@ -41,7 +41,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cost", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const cost = __cf_pattern_input.key("element", "price");
     const state = __cf_pattern_input.key("params", "state");

@@ -1,7 +1,8 @@
 /**
- * A minimal async-context store: read the current value with `getStore()`, and
- * bind a value for the (sync or async) duration of `run`. A thin shared shape
- * over Deno/Node `AsyncLocalStorage` and the promise-aware fallback below.
+ * A minimal context-store shape: read the current value with `getStore()`, and
+ * bind a value while `run` invokes its callback. Native AsyncLocalStorage and
+ * the general fallback propagate through promises; the authority-safe
+ * synchronous implementation below deliberately does not.
  *
  * This module is intentionally free of top-level `await`: resolving the Deno
  * `AsyncLocalStorage` constructor needs `await import("node:async_hooks")`,
@@ -17,6 +18,31 @@
 export interface AsyncLocalStore<T> {
   getStore(): T | undefined;
   run<R>(value: T, fn: () => R): R;
+}
+
+/**
+ * Context store for authority-sensitive browser call sites that must never
+ * confuse overlapping async chains. The value is available only during the
+ * synchronous invocation of `fn`; promise continuations are deliberately
+ * unbound. Callers that need true propagation across `await` must use native
+ * `AsyncLocalStorage` or thread the value explicitly.
+ */
+export class SynchronousContextStore<T> implements AsyncLocalStore<T> {
+  #store: T | undefined;
+
+  getStore(): T | undefined {
+    return this.#store;
+  }
+
+  run<R>(value: T, fn: () => R): R {
+    const previous = this.#store;
+    this.#store = value;
+    try {
+      return fn();
+    } finally {
+      this.#store = previous;
+    }
+  }
 }
 
 /**

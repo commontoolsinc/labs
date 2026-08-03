@@ -77,7 +77,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
 }, readonly string[]>(({ path }) => path.get(), {
@@ -97,7 +97,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     entries: Writable<Default<Entry[], [
     ]>>;

@@ -70,6 +70,14 @@ const POST_COMMIT_WITHOUT_TRACKED_WORK: Record<string, string> = {
   // while a stream is connected.
   "stream-data.ts":
     "an open-ended stream subscription, with no completion for a barrier to wait for",
+  // Deliberately fire-and-forget: awaiting the compile + nested pattern run
+  // would make the scheduler's action commit block on an arbitrary compiled
+  // pattern running to completion. `hasPendingPostCommitEffects()` already
+  // makes the commit tracked async work (scheduler/run.ts), so `settled()`
+  // waits for the flush to have STARTED the compile. See the outbox docblock
+  // in `src/builtins/compile-and-run.ts`.
+  "compile-and-run.ts":
+    "a fire-and-forget outbox flush; the commit promise covers its start, not the nested run",
 };
 
 const OK_SCHEMA = {
@@ -91,6 +99,11 @@ describe("async builtin work registration", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // The effects under test are exactly the post-commit sink dispatches the
+      // flip suppresses by default; this runtime is the sole party performing
+      // them, so it declares that authority (runtime.ts). Without it the work
+      // is never dispatched and the barriers return with nothing to cover.
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
     builder = createTrustedBuilder(runtime).commonfabric;

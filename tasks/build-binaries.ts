@@ -14,7 +14,7 @@ export interface BuildConfigInitializer {
   cliOnly?: boolean;
 }
 
-export const BINARY_NAMES = ["toolshed", "bg-piece-service", "cf"] as const;
+export const BINARY_NAMES = ["toolshed", "cf"] as const;
 export type BinaryName = (typeof BINARY_NAMES)[number];
 
 export function requestedBinaries(args: readonly string[]): BinaryName[] {
@@ -125,16 +125,13 @@ export class BuildConfig {
     return this.path("packages", "toolshed", "index.ts");
   }
 
-  bgPieceServiceEntryPath() {
-    return this.path("packages", "background-piece-service", "src", "main.ts");
-  }
-
-  bgPieceServiceWorkerPath() {
+  toolshedExecutorWorkerPath() {
     return this.path(
       "packages",
-      "background-piece-service",
+      "runner",
       "src",
-      "worker.ts",
+      "executor",
+      "executor-worker.ts",
     );
   }
 
@@ -188,7 +185,6 @@ export type BuildDependencies = {
   buildShell(config: BuildConfig): Promise<void>;
   prepareWorkspace(config: BuildConfig): Promise<void>;
   buildToolshed(config: BuildConfig): Promise<void>;
-  buildBgPieceService(config: BuildConfig): Promise<void>;
   buildCli(config: BuildConfig): Promise<void>;
   revertWorkspace(config: BuildConfig): Promise<void>;
 };
@@ -198,7 +194,6 @@ export const defaultBuildDependencies: BuildDependencies = {
   buildShell,
   prepareWorkspace,
   buildToolshed,
-  buildBgPieceService,
   buildCli,
   revertWorkspace,
 };
@@ -215,9 +210,6 @@ export async function build(
     if (config.builds("toolshed")) await dependencies.buildShell(config);
     await dependencies.prepareWorkspace(config);
     if (config.builds("toolshed")) await dependencies.buildToolshed(config);
-    if (config.builds("bg-piece-service")) {
-      await dependencies.buildBgPieceService(config);
-    }
     if (config.builds("cf")) await dependencies.buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
@@ -277,29 +269,7 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     env: {
       OTEL_DENO: "true",
     },
-    args: [
-      ...lockedCompileArgs(config),
-      // Run `--no-check` here, as the `--include`'d
-      // `es2023.d.ts` file will attempt to be checked
-      // as a non-static asset. Checking should be done
-      // prior to building.
-      "--no-check",
-      "--unstable-otel",
-      "--output",
-      config.distPath("toolshed"),
-      "--include",
-      config.toolshedShellFrontendPath(),
-      "--include",
-      config.toolshedShellFrontendPathDev(),
-      "--include",
-      config.toolshedEnvPath(),
-      "--include",
-      config.staticAssetsPath(),
-      "--include",
-      config.patternsPath(),
-      ...config.toolshedFlags,
-      config.toolshedEntryPath(),
-    ],
+    args: toolshedCompileArgs(config),
     cwd: config.toolshedProjectPath(),
     stdout: "inherit",
     stderr: "inherit",
@@ -310,34 +280,35 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
   console.log("Toolshed binary built successfully");
 }
 
-async function buildBgPieceService(config: BuildConfig): Promise<void> {
-  console.log("Building background piece service binary...");
-  const { success } = await new Deno.Command(Deno.execPath(), {
-    args: [
-      ...lockedCompileArgs(config),
-      // Run `--no-check` here, as the `--include`'d
-      // `es2023.d.ts` file will attempt to be checked
-      // as a non-static asset. Checking should be done
-      // prior to building.
-      "--no-check",
-      "--output",
-      config.distPath("bg-piece-service"),
-      "--include",
-      config.bgPieceServiceWorkerPath(),
-      "--include",
-      config.staticAssetsPath(),
-      "-A", // All permissions
-      "--unstable-worker-options", // Required by bg-piece-service
-      config.bgPieceServiceEntryPath(),
-    ],
-    cwd: config.root,
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output();
-  if (!success) {
-    throw new Error("Failed to build background piece service binary");
-  }
-  console.log("Background piece service binary built successfully");
+export function toolshedCompileArgs(config: BuildConfig): string[] {
+  return [
+    ...lockedCompileArgs(config),
+    // Run `--no-check` here, as the `--include`'d
+    // `es2023.d.ts` file will attempt to be checked
+    // as a non-static asset. Checking should be done
+    // prior to building.
+    "--no-check",
+    "--unstable-otel",
+    "--output",
+    config.distPath("toolshed"),
+    "--include",
+    config.toolshedShellFrontendPath(),
+    "--include",
+    config.toolshedShellFrontendPathDev(),
+    "--include",
+    config.toolshedEnvPath(),
+    "--include",
+    config.staticAssetsPath(),
+    "--include",
+    config.patternsPath(),
+    // Worker modules are not followed by `deno compile` static analysis.
+    // Include the server-primary executor realm explicitly so the first
+    // claimed lane can boot in the shipped toolshed binary.
+    "--include",
+    config.toolshedExecutorWorkerPath(),
+    ...config.toolshedFlags,
+    config.toolshedEntryPath(),
+  ];
 }
 
 async function buildCli(config: BuildConfig): Promise<void> {

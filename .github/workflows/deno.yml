@@ -339,30 +339,6 @@ jobs:
           path: ./dist/toolshed
           if-no-files-found: error
 
-  build-bg-piece-service:
-    name: "Build Binary (bg-piece-service)"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v7
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 🔍 Verify lock file & install dependencies
-        uses: ./.github/actions/deno-install
-
-      - name: 🏗️ Build bg-piece-service binary
-        run: deno task build-binaries bg-piece-service
-
-      - name: 📤 Upload bg-piece-service binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: binary-bg-piece-service
-          path: ./dist/bg-piece-service
-          if-no-files-found: error
-
   build-cf:
     name: "Build Binary (cf)"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -890,15 +866,21 @@ jobs:
           fi
 
       # Both kinds of coverage — see the note on pattern-integration-test above.
-      - name: 🧩 Run pattern reload integration tests
+      - name: 🧩 Run default-on pattern reload integration tests
         run: |
-          mkdir -p test-results
+          mkdir -p test-results/default
           HEADLESS=1 \
-          EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
-          CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
+          DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
+          deno task integration --junit-dir=test-results/default patterns-reload
+
+      - name: ↩️ Run pattern reload integration tests with rollback override
+        run: |
+          mkdir -p test-results/rollback
+          HEADLESS=1 \
+          EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false \
           CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-reload" \
           DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
-          deno task integration --junit-dir=test-results patterns-reload
+          deno task integration --junit-dir=test-results/rollback patterns-reload
 
       - name: 🧾 Write coverage report
         if: always()
@@ -1010,7 +992,6 @@ jobs:
       - check
       - test
       - build-toolshed
-      - build-bg-piece-service
       - build-cf
       - package-integration-test
       - cli-integration-test
@@ -1087,7 +1068,6 @@ jobs:
       - test
       - runner-test
       - build-toolshed
-      - build-bg-piece-service
       - build-cf
       - generated-patterns-integration-test
       - package-integration-test
@@ -1129,7 +1109,6 @@ jobs:
         "pattern-vintage",
         "baselines-append-only",
         "build-toolshed",
-        "build-bg-piece-service",
         "build-cf",
         "runner-test",
         "pattern-integration-test",
@@ -1153,12 +1132,6 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: binary-toolshed
-          path: common-binaries
-
-      - name: 📥 Download bg-piece-service binary
-        uses: actions/download-artifact@v8
-        with:
-          name: binary-bg-piece-service
           path: common-binaries
 
       - name: 📥 Download cf binary
@@ -1211,20 +1184,6 @@ jobs:
           cp ./dist/toolshed ./signed/
           cp ./dist/toolshed.sig ./signed/
 
-          # Process bg-piece-service binary
-          echo "Processing binary: bg-piece-service"
-          sha256sum ./dist/bg-piece-service > ./dist/bg-piece-service.hash.txt
-          BG_PIECE_SERVICE_HASH=$(cat ./dist/bg-piece-service.hash.txt | awk '{print $1}')
-          echo "bg-piece-service hash: $BG_PIECE_SERVICE_HASH"
-          echo "bg_piece_service_hash=$BG_PIECE_SERVICE_HASH" >> $GITHUB_OUTPUT
-
-          # Sign the bg-piece-service binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-piece-service.sig ./dist/bg-piece-service
-
-          # Copy to signed directory
-          cp ./dist/bg-piece-service ./signed/
-          cp ./dist/bg-piece-service.sig ./signed/
-
           # Process cf binary
           echo "Processing binary: cf"
           sha256sum ./dist/cf > ./dist/cf.hash.txt
@@ -1256,13 +1215,6 @@ jobs:
           subject-name: ./dist/toolshed
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
-      - name: 📝 Generate attestation for bg-piece-service binary
-        id: attest_bg_piece_service
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-name: ./dist/bg-piece-service
-          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_piece_service_hash }}
-
       - name: 📝 Generate attestation for cf binary
         id: attest_cf
         uses: actions/attest-build-provenance@v1
@@ -1284,7 +1236,6 @@ jobs:
           if-no-files-found: error
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
-            ${{ steps.attest_bg_piece_service.outputs.bundle-path }}
             ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
@@ -1311,17 +1262,6 @@ jobs:
             echo -e "\033[32m✓ toolshed attestation verified successfully\033[0m"
           else
             echo -e "\033[31m✗ toolshed attestation verification failed\033[0m"
-            exit 1
-          fi
-
-          # Verify bg-piece-service binary attestation
-          echo "::group::bg-piece-service attestation details"
-          gh attestation verify ./dist/bg-piece-service -R ${{ github.repository }} --format json | jq
-          echo "::endgroup::"
-          if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ bg-piece-service attestation verified successfully\033[0m"
-          else
-            echo -e "\033[31m✗ bg-piece-service attestation verification failed\033[0m"
             exit 1
           fi
 

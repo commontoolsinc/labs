@@ -24,12 +24,16 @@ Deno.test("memory v2 engine bootstraps the revision schema", async () => {
       schemaRows.map((row) => row.name),
       [
         "authorization",
+        "authorization_epoch",
         "blob_store",
         "branch",
         "commit",
+        "execution_lease",
         "head",
         "invocation",
+        "legacy_background_exclusion",
         "revision",
+        "scheduler_action_cause",
         "scheduler_action_snapshot",
         "scheduler_action_state",
         "scheduler_context_floor",
@@ -110,6 +114,108 @@ Deno.test("memory v2 engine replays identical (sessionId, localSeq) commits and 
         }),
       ProtocolError,
       "commit replay mismatch",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Merge-rebased patch revisions carry the authoritative post-apply document
+// (C2.10 defect-1 root fix). A patch landing on a head ANOTHER session
+// authored is applied against a base the origin client may never have seen —
+// its locally materialized post-commit value then diverges from the accepted
+// head, and the FA14 echo suppression (a session never receives its own
+// committed write back) makes that divergence PERMANENT unless the commit
+// RESPONSE carries the truth. Same-session heads stay slim: the origin's
+// local chain replay is byte-equal by induction. Found by the C2.10
+// lunch-poll placement harness (the second concurrent voter's replica kept
+// the pre-merge votes list forever).
+Deno.test("memory v2 engine marks merge-rebased patch revisions with the post-apply document", async () => {
+  const { engine, path } = await createEngine();
+  const id = "of:merge-rebase:votes";
+
+  try {
+    // Session A seeds the doc and then patches its OWN head: both revisions
+    // stay slim (set carries its own payload; the self-head patch must NOT
+    // carry a document — the uncontended hot path).
+    applyCommit(engine, {
+      sessionId: "session:a",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set" as const,
+          id,
+          value: { value: { list: ["seed"] } },
+        }],
+      },
+    });
+    const selfPatch = applyCommit(engine, {
+      sessionId: "session:a",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch" as const,
+          id,
+          patches: [{ op: "add", path: "/value/list/1", value: "A" }],
+        }],
+      },
+    });
+    assertEquals(selfPatch.revisions.length, 1);
+    assertEquals(selfPatch.revisions[0].op, "patch");
+    assertEquals(
+      selfPatch.revisions[0].document,
+      undefined,
+      "a patch on the session's OWN head must stay slim (no document)",
+    );
+
+    // Session B patches the same doc without having seen session A's head:
+    // the engine rebases the patch onto A's head, so B's local replay cannot
+    // know the result — the revision must carry the authoritative document.
+    const mergedPatch = applyCommit(engine, {
+      sessionId: "session:b",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch" as const,
+          id,
+          patches: [{ op: "add", path: "/value/list/1", value: "B" }],
+        }],
+      },
+    });
+    assertEquals(mergedPatch.revisions.length, 1);
+    assertEquals(mergedPatch.revisions[0].op, "patch");
+    assertEquals(
+      mergedPatch.revisions[0].document,
+      { value: { list: ["seed", "B", "A"] } },
+      "a merge-rebased patch revision must carry the post-apply document",
+    );
+    // The carried document IS the accepted head truth.
+    assertEquals(read(engine, { id }), mergedPatch.revisions[0].document);
+
+    // Replays cannot re-derive the original merge decision cheaply, so they
+    // fail toward authority: the replayed revision carries the document too.
+    const replay = applyCommit(engine, {
+      sessionId: "session:b",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch" as const,
+          id,
+          patches: [{ op: "add", path: "/value/list/1", value: "B" }],
+        }],
+      },
+    });
+    assertEquals(replay.seq, mergedPatch.seq);
+    assertEquals(
+      replay.revisions[0].document,
+      { value: { list: ["seed", "B", "A"] } },
+      "a replayed patch revision must carry the post-apply document",
     );
   } finally {
     close(engine);

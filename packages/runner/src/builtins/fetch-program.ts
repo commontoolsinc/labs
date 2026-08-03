@@ -11,6 +11,8 @@ import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { getPatternEnvironment } from "../builder/env.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 
 /**
  * How long a `fetching` cache entry left by another replica is believed before
@@ -156,6 +158,8 @@ export function fetchProgram(
   let cache: Cell<Record<string, FetchCacheEntry>>;
   let cellScope: CellScope | undefined;
   let abortController: AbortController | undefined = undefined;
+  let claimedRerunRequested = false;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
   // Input hash to the claim id this replica wrote for it, for every resolution
   // running here right now. The claim id carries `runtime.id`, which is unique
   // per storage manager and so per replica; the entry's `requestId` used to be
@@ -205,7 +209,7 @@ export function fetchProgram(
     }
   });
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
     const outputScope = tx.getNarrowestReadScope();
@@ -279,6 +283,14 @@ export function fetchProgram(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      pending.getAsNormalizedFullLink(),
+      result.getAsNormalizedFullLink(),
+      error.getAsNormalizedFullLink(),
+      cache.getAsNormalizedFullLink(),
+    );
 
     const { url } = requestSnapshot;
     const inputHash = computeInputHashFromValue(requestSnapshot);
@@ -295,7 +307,25 @@ export function fetchProgram(
     // Get current state for this input hash
     const allEntries = cache.withTx(tx).get();
     const cacheEntry = allEntries[inputHash];
-    const state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    let state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    // A shadow incarnation can leave durable pending/error state without a
+    // live request after claim activation aborts its local work. Keep the
+    // marker through an initial idle->fetching transition so a suppressed
+    // shadow outbox entry can be re-opened on the following run. Normal client
+    // incarnations must not take over another incarnation's in-flight fetch.
+    const reopenClaimedWork = claimedRerunRequested && state.type !== "idle" &&
+      (state.type === "error" ||
+        (state.type === "fetching" &&
+          inFlight.get(inputHash) !== state.requestId));
+    if (claimedRerunRequested && state.type !== "idle") {
+      claimedRerunRequested = false;
+    }
+    if (reopenClaimedWork) {
+      state = { type: "idle" };
+      cache.withTx(tx).update({
+        [inputHash]: { inputHash, state },
+      });
+    }
 
     // State machine transitions. A resolution running in this replica ends
     // when its promise settles, so an entry in `inFlight` is left alone
@@ -339,8 +369,10 @@ export function fetchProgram(
             startFetch(
               runtime,
               cache,
+              inputsCell,
               inputHash,
               url,
+              { pending, result, error },
               abortController.signal,
             ).finally(() => {
               if (inFlight.get(inputHash) === requestId) {
@@ -348,6 +380,7 @@ export function fetchProgram(
               }
             }),
             parentCell,
+            { externalEffect: true },
           );
         },
       );
@@ -368,6 +401,17 @@ export function fetchProgram(
 
     sendResult(tx, { pending, result, error });
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      abortController?.abort("fetchProgram claim incarnation changed");
+      abortController = undefined;
+      // Main replaced the single `myRequestId` marker with the per-hash
+      // `inFlight` map; forgetting this replica's claims is the same act.
+      inFlight.clear();
+      claimedRerunRequested = true;
+    },
+  });
 }
 
 /**
@@ -382,17 +426,61 @@ export function fetchProgram(
  * requests without one, so this checks the signal between steps: it suppresses
  * a writeback from a resolution nobody is waiting for, and does not end the
  * resolution.
+ *
+ * The writeback PUBLISHES the outputs itself rather than leaving the action's
+ * next run to project them off the cache, which is what every other async
+ * builtin here already does (`fetch.ts`'s `startFetch` takes the same three
+ * cells; `llm`, `llmDialog`, `compileAndRun` and `sqliteQuery` all write their
+ * own results from the continuation). It has to: the arc propagates the run's
+ * `sourceAction` into its async continuations — the post-commit outbox flushes
+ * each effect inside `runWithTransactionSourceAction`, and `Runtime.edit()`
+ * adopts it (`compile-and-run.ts` documents why: without it the writes are
+ * unattributable and no executor claim can cover them) — so this transaction
+ * carries the fetchProgram action as its `sourceAction` and the scheduler
+ * classifies the change as `skip-own-commit-source` (scheduler-v2 P5,
+ * `scheduler/invalidation.ts`). No wake follows, so a cache-only writeback
+ * strands `pending` at true with no result and no error, forever. Publishing
+ * here cannot disagree with the projection: both are the same function of the
+ * same entry, under the same "still `fetching`" and "inputs unchanged" guards.
  */
 async function startFetch(
   runtime: Runtime,
   cache: Cell<Record<string, FetchCacheEntry>>,
+  inputsCell: Cell<{ url: string; result?: ProgramResult }>,
   inputHash: string,
   url: string,
+  outputs: {
+    pending: Cell<boolean>;
+    result: Cell<ProgramResult | undefined>;
+    error: Cell<any | undefined>;
+  },
   abortSignal: AbortSignal,
 ) {
   try {
+    const mappedHost = runtime.mappedHostFor(cache.space);
+    const apiBase = new URL(mappedHost ?? getPatternEnvironment().apiUrl);
+    const resolvedMain = new URL(url, apiBase);
+    const beganRelative = !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(url.trim()) &&
+      !/^[\\/]{2}/.test(url.trim());
     // Create HTTP program resolver
-    const resolver = new HttpProgramResolver(url);
+    const resolver = new HttpProgramResolver(
+      resolvedMain,
+      (input, init) => {
+        const target = input instanceof URL ? input : new URL(
+          input instanceof Request ? input.url : input,
+          resolvedMain,
+        );
+        const rawTarget = beganRelative && target.origin === resolvedMain.origin
+          ? `${target.pathname}${target.search}`
+          : target.href;
+        return runtime.fetchBuiltin(
+          "fetchProgram",
+          rawTarget,
+          target,
+          { ...init, signal: abortSignal },
+        );
+      },
+    );
 
     // Program resolution parses; load the deferred compiler stack first.
     const { resolveProgram, ts } = await ensureCompilerStack();
@@ -413,17 +501,15 @@ async function startFetch(
     await runtime.editWithRetry((tx) => {
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
-      if (entry?.state.type === "fetching") {
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: {
-              type: "success",
-              data: { files: program.files, main: program.main },
-            },
-          },
-        });
-      }
+      if (entry?.state.type !== "fetching") return;
+      const data = { files: program.files, main: program.main };
+      cache.withTx(tx).update({
+        [inputHash]: { inputHash, state: { type: "success", data } },
+      });
+      publishOutputs(tx, inputsCell, inputHash, outputs, {
+        result: data,
+        error: undefined,
+      });
     });
   } catch (err) {
     // Don't write errors if request was aborted
@@ -435,17 +521,46 @@ async function startFetch(
     await runtime.editWithRetry((tx) => {
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
-      if (entry?.state.type === "fetching") {
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: {
-              type: "error",
-              message: err instanceof Error ? err.message : String(err),
-            },
-          },
-        });
-      }
+      if (entry?.state.type !== "fetching") return;
+      const message = err instanceof Error ? err.message : String(err);
+      cache.withTx(tx).update({
+        [inputHash]: { inputHash, state: { type: "error", message } },
+      });
+      publishOutputs(tx, inputsCell, inputHash, outputs, {
+        result: undefined,
+        error: message,
+      });
     });
   }
+}
+
+/**
+ * Project a settled cache entry onto the output cells, exactly as the action's
+ * own tail does — same `pending: false`, same `result`/`error` pairing.
+ *
+ * Guarded on the inputs still hashing to the entry this resolution owns. A
+ * resolution that outlives an input change has already lost the outputs to the
+ * newer request (the action re-ran and republished from the newer entry), and
+ * its cache write remains useful — a later run for these inputs reads it — but
+ * publishing here would overwrite the current request's outputs with an
+ * unrelated program. `fetch.ts`'s error path takes the same guard.
+ */
+function publishOutputs(
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<{ url: string; result?: ProgramResult }>,
+  inputHash: string,
+  outputs: {
+    pending: Cell<boolean>;
+    result: Cell<ProgramResult | undefined>;
+    error: Cell<any | undefined>;
+  },
+  settled: { result: ProgramResult | undefined; error: string | undefined },
+): void {
+  const currentHash = computeInputHashFromValue(
+    snapshotFetchProgramInputs(inputsCell.withTx(tx)),
+  );
+  if (currentHash !== inputHash) return;
+  outputs.pending.withTx(tx).set(false);
+  outputs.result.withTx(tx).set(settled.result);
+  outputs.error.withTx(tx).set(settled.error);
 }

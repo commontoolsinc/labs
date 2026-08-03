@@ -31,6 +31,15 @@ const identityLogger = getLogger("lib-shell.identity", {
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
+  serverPrimaryExecution?: boolean;
+  // Browser own-side half of the F5 doc-set-watch subcapability, layered
+  // above serverPrimaryExecution; threaded to the worker Runtime like the
+  // base flag.
+  serverPrimaryExecutionDocSetWatch?: boolean;
+  // Browser own-side half of the C1.7 context-lattice-claims-v1
+  // subcapability, layered above serverPrimaryExecution; threaded to the
+  // worker Runtime like the base flag.
+  serverPrimaryExecutionContextLatticeClaims?: boolean;
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
 };

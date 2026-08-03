@@ -264,7 +264,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["isExpanded"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_6 = __cfHelpers.lift<{
     isExpanded: boolean;
 }, boolean>(({ isExpanded }) => !isExpanded, {
@@ -277,7 +277,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["isExpanded"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element", "entry");
     const index = __cf_pattern_input.key("element", "index");

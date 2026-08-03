@@ -146,7 +146,7 @@ dial is not yet producing. The states a deployment is expected to pass through:
 | State | enforcement | flow | write-floor | trigger | Meaning |
 |---|---|---|---|---|---|
 | **Operator (explicitly disabled)** | `disabled` | `off` | `off` | `false` | CFC descriptive only; provenance mints run, nothing rejects. Requires explicitly passing `cfcEnforcementMode: "disabled"` — no shipped host does today. |
-| **Server hosts today (toolshed, background-piece-service)** | `enforce-explicit` | `off` | `off` | `false` | Neither host passes any CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts), [background-piece-service main.ts](../../packages/background-piece-service/src/main.ts)), so both inherit the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
+| **Server host today (toolshed)** | `enforce-explicit` | `off` | `off` | `false` | The host passes no CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts)), so it inherits the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
 | **Shell today** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
 | **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
 | **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects; complete on flow-endorsed writes (flow persists). |
@@ -241,6 +241,5 @@ Grounded in the four implemented dials — `cfcEnforcementMode`
 SC-13 rollout constraint in `cfc-spec-changes.md` and the current host
 postures: shell
 ([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
-`enforce-explicit` + flow `persist`, H2); toolshed and
-background-piece-service (no CFC options passed → `Runtime` defaults,
-`enforce-explicit` + flow `off`).
+`enforce-explicit` + flow `persist`, H2); toolshed (no CFC options passed →
+`Runtime` defaults, `enforce-explicit` + flow `off`).

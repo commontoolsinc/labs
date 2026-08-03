@@ -82,10 +82,12 @@ export function verifySinkRequestRelease(
 }
 
 export function enqueueSinkRequestPostCommitEffect(
-  tx: Pick<
-    IExtendedStorageTransaction,
-    "enqueuePostCommitEffect" | "recordCfcWritePolicyInput"
-  >,
+  tx:
+    & Pick<
+      IExtendedStorageTransaction,
+      "enqueuePostCommitEffect" | "recordCfcWritePolicyInput"
+    >
+    & Partial<Pick<IExtendedStorageTransaction, "externalSinkDisposition">>,
   sink: string,
   effectId: string,
   request: FabricValue,
@@ -94,6 +96,7 @@ export function enqueueSinkRequestPostCommitEffect(
 ): void {
   const policyInput = createSinkRequestPolicyInput(sink, effectId, request);
   tx.recordCfcWritePolicyInput(policyInput);
+  if (tx.externalSinkDisposition?.() === "suppress") return;
   tx.enqueuePostCommitEffect({
     id: effectId,
     idempotencyKey: effectId,

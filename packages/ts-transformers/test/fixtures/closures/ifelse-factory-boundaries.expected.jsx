@@ -30,7 +30,7 @@ const moduleHasSettings = lift(({ piece }: {
     required: ["piece"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const selectMessage = handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -137,7 +137,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["msg"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const msg = __cf_pattern_input.key("element");
     const selectedId = __cf_pattern_input.key("params", "selectedId");

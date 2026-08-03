@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items", "index"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: element-access-both-opaque
 // Verifies: element access where both array and index are cell-backed Reactives is wrapped in a lift-applied computation
 //   items.get()[index.get()] → lift(({items, index}) => items.get()[index.get()])({ items, index })

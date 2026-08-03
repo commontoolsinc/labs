@@ -33,6 +33,7 @@ import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
+  listBuiltinResultContainerCause,
   narrowestCellScope,
   outputSpotFromBinding,
   scopedCell,
@@ -220,7 +221,11 @@ export function flatMap(
       }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        { flatMap: parentCell.entityId, outputSpot },
+        listBuiltinResultContainerCause(
+          "flatMap",
+          parentCell.entityId,
+          outputSpot,
+        ),
         resultSchema,
         tx,
       );

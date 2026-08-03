@@ -12,7 +12,11 @@
  * bundles.
  */
 
-import { encodeMemoryBoundary } from "../v2.ts";
+import {
+  applyServerPrimaryExecutionEnvConfig,
+  applyServerPrimaryExecutionGraphRetirementEnvConfig,
+  encodeMemoryBoundary,
+} from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 import { Identity } from "@commonfabric/identity";
@@ -43,6 +47,41 @@ export class StandaloneMemoryServer {
     this.url = new URL(`http://127.0.0.1:${address.port}/`);
   }
 
+  /** Live feed counters of the wrapped server — the same object toolshed
+   * exports via /api/health/stats. Read-only observability for multi-runtime
+   * harnesses and gates; not a mutation surface. */
+  get feedStats(): MemoryServer.Server["feedStats"] {
+    return this.#memory.feedStats;
+  }
+
+  /**
+   * Read-only C1.7 cohort gauge: how many live sessions of `principal` in
+   * `space` this server tracks, and how many of them negotiated
+   * `context-lattice-claims-v1` on their current attach — the per-session
+   * flag `principalCohortNegotiatesContextLatticeClaims` (the amendment-11
+   * user-lane cohort gate) reduces over.
+   *
+   * Reports the PAIR rather than the gate's own boolean because that boolean
+   * is an `every()` over the cohort and is therefore vacuously true for a
+   * principal with no sessions at all. A gate asserting negotiation must see
+   * `sessions > 0` too, or a mistyped space DID passes for free.
+   *
+   * Observability only, like {@link feedStats}; not a mutation surface.
+   */
+  contextLatticeClaimsCohort(
+    space: string,
+    principal: string,
+  ): { sessions: number; negotiating: number } {
+    const sessions = this.#memory.sessionsForPrincipal(space, principal);
+    return {
+      sessions: sessions.length,
+      negotiating:
+        sessions.filter((session) =>
+          session.serverPrimaryExecutionContextLatticeClaimsV1
+        ).length,
+    };
+  }
+
   static start(
     options: {
       /** Space ACL config, passed through to the memory server. Default:
@@ -53,6 +92,16 @@ export class StandaloneMemoryServer {
       };
     } = {},
   ): StandaloneMemoryServer {
+    // FW5 (FB10): the F5 per-space doc-set admission dial is env-reachable on
+    // every host that constructs a memory server, so the W2.9 measurement
+    // protocol is executable against a real deployment.
+    applyServerPrimaryExecutionGraphRetirementEnvConfig(Deno.env.get);
+    // FW6: the ADVERTISEMENT dials too — this realm hosts no runner Runtime
+    // (whose constructor is the only other installer), so without this the
+    // server advertises every server-primary capability false whatever the
+    // env says, and realm-separated clients can never negotiate the
+    // protocol (the 2026-07-24 F5-unreachable finding).
+    applyServerPrimaryExecutionEnvConfig(Deno.env.get);
     const memory = new MemoryServer.Server({
       authorizeSessionOpen,
       sessionOpenAuth: {

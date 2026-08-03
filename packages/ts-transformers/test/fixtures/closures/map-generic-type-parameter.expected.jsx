@@ -89,7 +89,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         },
         required: ["id", "type"]
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 export default pattern((state) => {
     const results = __cfLift_1({ state: {
             emails: state.key("emails"),

@@ -122,6 +122,7 @@ Deno.test("memory v2 queryGraph reads the declared scoped root instance", async 
       branch: "",
       id: "of:scoped-query-root",
       scope: "user",
+      scopeKey: "user:did%3Akey%3Aalice",
       seq: 1,
       document: { value: { name: "alice" } },
     }]);
@@ -225,7 +226,12 @@ Deno.test("memory v2 query reports read and traversal stats", async () => {
       fixture.initialReachableIds.length,
     );
     assert(tracked.stats.schemaTraversals > 0);
-    assertEquals(tracked.stats.coveredSelectorSkips, 0);
+    // Interior link-coverage skips fire WITHIN a single traversal too: a
+    // doc reached through several links is walked once and every later
+    // descent skips (the unscoped-link coverage-key fix made these
+    // engage; loads above stay one-per-doc). Zero would mean the interior
+    // dedup regressed to re-walking shared subgraphs.
+    assert(tracked.stats.coveredSelectorSkips > 0);
 
     const extended = extendTrackedGraph(space, engine, tracked.state, {
       roots: [{
@@ -316,6 +322,7 @@ Deno.test("memory v2 query does not include linked opaque cells in graph entitie
     assertEquals(result.entities, [{
       branch: "",
       id: rootId,
+      scopeKey: "space",
       seq: 1,
       document: {
         value: {
@@ -416,6 +423,7 @@ Deno.test("memory v2 query does not walk nested links inside inline opaque cells
     assertEquals(result.entities, [{
       branch: "",
       id: rootId,
+      scopeKey: "space",
       seq: 1,
       document: {
         value: {
@@ -1227,6 +1235,7 @@ Deno.test("memory v2 queryGraph supports branch-scoped atSeq reads", async () =>
     assertEquals(result.entities, [{
       branch: "feature",
       id: rootId,
+      scopeKey: "space",
       seq: 1,
       document: {
         value: {

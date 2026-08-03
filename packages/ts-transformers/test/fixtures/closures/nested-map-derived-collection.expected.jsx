@@ -122,7 +122,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["id"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     ranked: OptionTally[];
 }, OptionTally[]>(({ ranked }) => enrichTallies(ranked), {
@@ -205,7 +205,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["id"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const voter = __cf_pattern_input.key("element");
     return <span>{voter.key("name")}</span>;

@@ -169,6 +169,9 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     tx = runtime.edit();
     ({ commonfabric: builder } = createTrustedBuilder(runtime));
@@ -570,6 +573,9 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
       cfcEnforcementMode: "disabled",
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const disabledTx = disabledRuntime.edit();
     const { commonfabric } = createTrustedBuilder(disabledRuntime);
@@ -619,6 +625,9 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
       cfcEnforcementMode: "disabled",
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
     const disabledTx = disabledRuntime.edit();
     const { commonfabric } = createTrustedBuilder(disabledRuntime);

@@ -87,6 +87,24 @@ describe("SES security regressions", () => {
     });
   });
 
+  it("removes raw fetch from executor module and callback compartments", async () => {
+    engine.disableCompatibilityFetch();
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [{
+        name: "/main.ts",
+        contents: "export default function probe() { return typeof fetch; }",
+      }],
+    };
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect(main?.default()).toBe("undefined");
+
+    const callback = engine.getInvocation(
+      "function probe() { return typeof fetch; }",
+    ) as () => string;
+    expect(callback()).toBe("undefined");
+  });
+
   it("exposes frozen host constructors and prototypes to module compartments", () => {
     const globals = createModuleCompartmentGlobals();
     const headersCtor = globals.Headers as typeof Headers;

@@ -80,8 +80,10 @@ import {
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
+  type ExecutionRoutingDiagnosticsResponse,
   type GetActionRunTraceRequest,
   type GetCellRequest,
+  type GetExecutionRoutingDiagnosticsRequest,
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
@@ -553,11 +555,9 @@ export class RuntimeProcessor {
       });
     });
 
-    let pieceManager: PieceManager | undefined = undefined;
-    let processor: RuntimeProcessor | undefined = undefined;
     // Everything below goes through the browserWorker preset (CT-1814):
     // host-decided data via the params mapper, plus this worker's declared
-    // deltas (the postMessage bridges for console/navigate/piece/errors).
+    // deltas (the postMessage bridges for console/navigate/errors).
     const runtime = new Runtime(runtimePresets.browserWorker({
       ...browserWorkerParamsFromInitializationData(
         data,
@@ -587,28 +587,6 @@ export class RuntimeProcessor {
         });
       },
 
-      pieceCreatedCallback: (piece) => {
-        const writeContext = runtime.getWriteDebugContext();
-        // Register the piece in ITS space's list: a piece created by a
-        // running foreign-space pattern routes to that space's manager
-        // (the context exists — it started the pattern). Fallback to
-        // the home manager, the sole pre-multi-space behavior.
-        const manager = (piece.space && processor?.managerFor(piece.space)) ??
-          pieceManager;
-        if (!manager) return;
-        void runtime.withWriteDebugContext(
-          writeContext,
-          () => manager.add([piece]),
-        ).catch((e: unknown) => {
-          console.error(
-            "[RuntimeProcessor] Failed to add created piece:",
-            {
-              error: e instanceof Error ? e.message : e,
-            },
-          );
-        });
-      },
-
       errorHandlers: [postContextualRuntimeError],
     }));
 
@@ -618,10 +596,10 @@ export class RuntimeProcessor {
 
     // Allow the worker to acknowledge initialization immediately. Consumers
     // that need storage/piece-manager convergence should call `synced()`.
-    pieceManager = new PieceManager(session, runtime);
+    const pieceManager = new PieceManager(session, runtime);
     const cc = new PiecesController(pieceManager);
 
-    processor = new RuntimeProcessor(
+    const processor = new RuntimeProcessor(
       runtime,
       pieceManager,
       cc,
@@ -738,10 +716,11 @@ export class RuntimeProcessor {
   }
 
   /**
-   * The PieceManager already serving a space, if any. Used by the
-   * piece-created callback to register a piece in its own space's
-   * list; deliberately does NOT create a context (a piece can only be
-   * created by a pattern some existing context started).
+   * The PieceManager already serving a space, if any. Deliberately does NOT
+   * create a context — the caller is asking about a space this processor is
+   * already serving. Its one production caller was the piece-created callback
+   * (registering a compiled piece in its own space's list); that callback is
+   * gone, so today this is exercised only by its own unit test.
    */
   managerFor(space: DID): PieceManager | undefined {
     return this.spaces.get(space)?.pieceManager;
@@ -1435,6 +1414,17 @@ export class RuntimeProcessor {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
 
+  getExecutionRoutingDiagnostics(
+    request: GetExecutionRoutingDiagnosticsRequest,
+  ): ExecutionRoutingDiagnosticsResponse {
+    const diagnostics = this.runtime.storageManager
+      .getExecutionRoutingDiagnostics?.(request.query);
+    if (diagnostics === undefined) {
+      throw new Error("Execution-routing diagnostics are unavailable");
+    }
+    return { diagnostics };
+  }
+
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
@@ -1731,6 +1721,8 @@ export class RuntimeProcessor {
         return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
+      case RequestType.GetExecutionRoutingDiagnostics:
+        return this.getExecutionRoutingDiagnostics(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
       case RequestType.GetPatternCoverage:

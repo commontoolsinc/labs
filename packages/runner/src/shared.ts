@@ -63,6 +63,12 @@ export type {
   WriteStackTraceMatcher,
   WriteStackTraceMatchMode,
 } from "./storage/write-stack-trace.ts";
+export type {
+  ExecutionRoutingActionDiagnostics,
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
+  ExecutionRoutingSettlementCounts,
+} from "./storage/interface.ts";
 // Type-only: the plain-JSON shape the worker returns for a pattern-coverage
 // dump. No runtime import (the module's value exports never load here).
 export type {

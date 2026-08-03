@@ -2,6 +2,7 @@ import { type Cell, createCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function navigateTo(
@@ -16,6 +17,27 @@ export function navigateTo(
   let navigated = false;
   let navigationAttempt = 0;
   let resultCell: Cell<boolean>;
+  /**
+   * The SESSION-scoped result instance this node mints and writes. It is not a
+   * registered output cell — the registered output holds only a link to it — so
+   * the generically minted `ServerBuiltinActionDescriptor` (`runner.ts`) cannot
+   * see it, and without publishing it here a claimed server-side run writes
+   * outside its declared surface and de-claims fail-closed. Same
+   * splice-in-place idiom as `llm-dialog.ts`: the runner captures this array's
+   * IDENTITY at registration (`runner.ts`, `serverBuiltinRuntimeWrites`) and
+   * reads it fresh on every run, so the first run's mint reaches the descriptor
+   * that was authored before it.
+   *
+   * This declaration is also the design's safety hinge
+   * (`docs/specs/server-side-execution/navigate-to-server-side.md` §6 item 2).
+   * `session` scope is admitted ONLY at session lane rank
+   * (`scheduler/servability.ts` `laneAdmitsScope`), so declaring it is what
+   * pins the action's `contextRank` to `"session"` and makes a space- or
+   * user-rank navigate claim — the shapes that would reach a co-tenant or
+   * another device — structurally unreachable. Drop it and the action silently
+   * becomes space rank, where claim delivery has no principal filter at all.
+   */
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
   const targetCellSchema = {
     type: "object",
     properties: {},
@@ -48,6 +70,12 @@ export function navigateTo(
       );
 
       resultCell.sync();
+
+      serverBuiltinRuntimeWrites.splice(
+        0,
+        serverBuiltinRuntimeWrites.length,
+        resultCell.getAsNormalizedFullLink(),
+      );
 
       sendResult(tx, resultCell);
 
@@ -117,8 +145,16 @@ export function navigateTo(
     }
   };
 
+  // Attached to a named const rather than inline in the returned literal, for
+  // the reason `llm-dialog.ts` records: the effect-kind pin in
+  // `test/builtin-effect-registry.test.ts` regex-matches
+  // `return { … isEffect: true` and cannot see past a nested brace, so an
+  // inline `Object.assign(action, { … })` reads to it as "the factory stopped
+  // declaring isEffect". Keep the plumbing out of the literal.
+  const navigateAction = Object.assign(action, { serverBuiltinRuntimeWrites });
+
   return {
-    action,
+    action: navigateAction,
     isEffect: true,
     useDeclaredReadsAsDependencies: true,
   };

@@ -52,6 +52,109 @@ export function outputSpotFromBinding(
   return { space: binding.space, id: binding.id, path: [...binding.path] };
 }
 
+/** The output-spot identity coordinates a list builtin keys its container on. */
+export type ListBuiltinOutputSpot = NonNullable<
+  ReturnType<typeof outputSpotFromBinding>
+>;
+
+/** Canonical registry names of the container-minting list builtins. */
+export type ListBuiltinContainerKey = "map" | "filter" | "flatMap";
+
+/**
+ * The `getCell` cause map/filter/flatMap key their result container on
+ * (CT-1623): the builtin name paired with the parent entity and the
+ * position-derived output spot. The container is a side document distinct from
+ * the node's direct output — the builtin writes the whole output collection
+ * (array plus per-slot element links) into it. Extracted as the single source
+ * of that identity so the servability layer can re-derive the SAME container
+ * entity at registration for the materializer write envelope (W2.16). Both
+ * sites MUST agree on this cause or a claimed run de-claims fail-closed. Schema
+ * and scope deliberately do not participate (see `outputSpotFromBinding`), so a
+ * caller may pass any schema/tx to `getCell` and still land the same entity id.
+ */
+export function listBuiltinResultContainerCause(
+  builtinKey: ListBuiltinContainerKey,
+  parentEntityId: unknown,
+  outputSpot: ListBuiltinOutputSpot,
+): Record<string, unknown> {
+  return { [builtinKey]: parentEntityId, outputSpot };
+}
+
+/**
+ * Canonical registry names of the single-output result-minting builtins: the
+ * pure selectors, `inspectConfLabel` whose surface is the same shape (one
+ * minted side document, written from its inputs, and nothing else), `wish`
+ * whose resolved state document is the same shape one level deeper, and
+ * `sqliteDatabase` whose handle document is that shape again (its mint runs
+ * through `makeResultCell`, see {@link resultCellMintCause}). Kept in
+ * lockstep with `SERVER_COMPUTATION_BUILTIN_IDS`: the runner re-derives the
+ * minted document for exactly the ids in that registry, so a registry member
+ * missing here is a type error rather than a silently wrong write surface.
+ */
+export type SelectorBuiltinKey =
+  | "ifElse"
+  | "when"
+  | "unless"
+  | "inspectConfLabel"
+  | "wish"
+  | "sqliteDatabase";
+
+/**
+ * Canonical registry names of the builtins whose minted side document is
+ * allocated by `makeResultCell` (`sqlite-builtins.ts`), whose `getCell` cause
+ * has always been `{ <label>: { result: <registration cause> } }`. The entity
+ * id is causal, so this shape is frozen by every committed handle / query
+ * state document — it is expressed here, not inline at the mint, so the
+ * servability layer can re-derive the SAME document for the computation
+ * descriptor's minted-document declaration.
+ */
+export type ResultCellMinterKey = "sqliteDatabase" | "sqliteQuery";
+
+/** The `getCell` cause `makeResultCell` keys its minted document on. */
+export function resultCellMintCause(
+  label: ResultCellMinterKey,
+  cause: unknown,
+): Record<string, unknown> {
+  return { [label]: { result: cause } };
+}
+
+/**
+ * The `getCell` cause each single-output result minter keys its minted result
+ * document on: the builtin name paired with the per-node registration cause
+ * (the `{ inputs, parents, outputSpot }` object the runner hands every raw
+ * builtin). The minted result is a side document distinct from the node's direct
+ * output spot — the spot only ever stores a link to it, while every
+ * output-producing run writes the result INTO it (the selectors
+ * `setRawUntyped` the selected branch's reference; `inspectConfLabel` `set`s
+ * the introspection outcome; `wish` `set`s the resolved `WishState`). Extracted
+ * as the single source of that identity so the servability layer can re-derive
+ * the SAME minted document at registration for the computation descriptor's
+ * write surface (W2.15a re-open, FB3) — the exact
+ * `listBuiltinResultContainerCause` precedent. Both sites MUST agree on this
+ * cause or every output-producing run de-claims fail-closed at the dynamic
+ * write firewall.
+ *
+ * Two members' causes are not the bare `{ <key>: cause }` shape, and for the
+ * same reason in both cases — the entity id is causal, so re-keying would
+ * orphan every already-committed document:
+ *  - `wish` has minted `{ wish: { state: cause } }` since long before this
+ *    helper existed;
+ *  - `sqliteDatabase` mints through `makeResultCell`, whose cause is
+ *    `{ sqliteDatabase: { result: cause } }` ({@link resultCellMintCause}).
+ * Both nestings are expressed HERE rather than left inline at the mint site
+ * precisely so the two sites keep reading them from one place.
+ */
+export function selectorBuiltinResultCause(
+  builtinKey: SelectorBuiltinKey,
+  cause: unknown,
+): Record<string, unknown> {
+  if (builtinKey === "wish") return { wish: { state: cause } };
+  if (builtinKey === "sqliteDatabase") {
+    return resultCellMintCause(builtinKey, cause);
+  }
+  return { [builtinKey]: cause };
+}
+
 export function cellIdentityKey(cell: Cell<any>): {
   dedupKey: string;
   linkKey: readonly unknown[];

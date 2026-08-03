@@ -68,10 +68,16 @@
  * |                            | localhost fallback); constructor default in the  |
  * |                            | local presets (patternTest/localDev/unitTest)    |
  * | fetch                      | real everywhere; patternTest delta (mock)        |
+ * | externalSinkDisposition    | core-default everywhere, and that default is     |
+ * |                            | GATED on serverPrimaryExecution: "suppress" with |
+ * |                            | it (no preset egresses by declaring nothing),    |
+ * |                            | "claim-conditional" without it (no executor      |
+ * |                            | exists, so the client must still egress);        |
+ * |                            | productionServer delta: the executor declares    |
+ * |                            | server-executor (its own egress authority)       |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
  * | navigateCallback           | delta (patternTest, remoteClient, browserWorker) |
- * | pieceCreatedCallback       | delta (browserWorker only)                       |
  * | telemetry                  | delta (productionServer, browserWorker)          |
  * | moduleByteCache            | delta (patternTest, remoteClient, unitTest)      |
  * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
@@ -92,6 +98,11 @@
  * | hideInternalStackFrames    | core-default everywhere                          |
  */
 
+import {
+  SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV,
+  SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
+  SERVER_PRIMARY_EXECUTION_ENV,
+} from "@commonfabric/memory/v2";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -99,7 +110,10 @@ import type {
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import type { IStorageManager } from "./storage/interface.ts";
+import type {
+  ExternalSinkDispositionPolicy,
+  IStorageManager,
+} from "./storage/interface.ts";
 import type { RuntimeTelemetry } from "./telemetry.ts";
 import type {
   ConsoleHandler,
@@ -108,7 +122,6 @@ import type {
   ModuleByteCache,
   NavigateCallback,
   PatternInstantiationObserver,
-  PieceCreatedCallback,
   RuntimeFetch,
   RuntimeOptions,
 } from "./runtime.ts";
@@ -133,7 +146,6 @@ export const RUNTIME_OPTION_KEYS = [
   "errorHandlers",
   "patternEnvironment",
   "navigateCallback",
-  "pieceCreatedCallback",
   "debug",
   "telemetry",
   "experimental",
@@ -155,6 +167,7 @@ export const RUNTIME_OPTION_KEYS = [
   "patternCoverage",
   "onPatternInstantiated",
   "fetch",
+  "externalSinkDisposition",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
 export type RuntimeOptionKey = (typeof RUNTIME_OPTION_KEYS)[number];
@@ -190,6 +203,38 @@ export type EnvReader = (name: string) => string | undefined;
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
   persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
+  // The two server-primary names are imported from @commonfabric/memory/v2:
+  // memory owns the spelling (its `applyServerPrimaryExecutionEnvConfig`
+  // applies the same vars at server construction, and memory cannot import
+  // the runner), so referencing the constants here keeps the one mapping
+  // canonical without a second copy that could drift.
+  serverPrimaryExecution: SERVER_PRIMARY_EXECUTION_ENV,
+  // C1 rollout dial: flipped programmatically by the C1.9 measurement
+  // fixture alongside the memory-side claim-rank dial; no env exposure.
+  serverPrimaryExecutionUserRankCandidates: null,
+  // C2 rollout dial (session rank, C2.5): fixture-only like the user-rank
+  // dial above; the CA4 ordering invariant forbids ambient enablement
+  // before C2.6 lands, so no env exposure.
+  serverPrimaryExecutionSessionRankCandidates: null,
+  // C3 rollout dial (cross-space-read, C3.6): fixture-only like the rank
+  // dials above; the CA4/C3A17 ordering invariant forbids ambient enablement
+  // until the memory-side `cross-space-read` stage AND the
+  // `cross-space-claims-v1` cohort gate are both in place, so no env exposure.
+  serverPrimaryExecutionCrossSpaceReadCandidates: null,
+  // P0 demand-shrink-gate hold: NUMERIC, programmatic-only (tests shorten it
+  // to assert the held-shrink contract; production keeps the gate's 10s
+  // default, matching the pool's demand grace). No env exposure — the env
+  // loop below is boolean-valued by construction.
+  serverPrimaryExecutionDemandShrinkHoldMs: null,
+  serverPrimaryExecutionDocSetWatch: SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
+  // C1.7 NEGOTIATION dial (not a rank dial): the client half of
+  // context-lattice-claims-v1. Env-exposed because the amendment-11 cohort
+  // gate needs EVERY session of a principal to have negotiated before a user
+  // lane may open, so a browser-shaped client with no path to it makes every
+  // server-side rank dial inert (client-passivity §5g item 5). The rank dials
+  // above stay `null`.
+  serverPrimaryExecutionContextLatticeClaims:
+    SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV,
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
@@ -207,6 +252,14 @@ export const EXPERIMENTAL_ENV_VARS = {
  * default". Anything else is ignored WITH A WARNING rather than coerced —
  * the old wirings silently coerced garbage, in opposite directions.
  */
+/** Keys of {@link ExperimentalOptions} whose value is boolean — the only
+ * kind the env mapping may expose (non-boolean options must map to `null`
+ * above). */
+type BooleanExperimentalKey = {
+  [K in keyof ExperimentalOptions]-?: ExperimentalOptions[K] extends
+    boolean | undefined ? K : never;
+}[keyof ExperimentalOptions];
+
 export function experimentalOptionsFromEnv(
   env: EnvReader,
 ): ExperimentalOptions {
@@ -221,7 +274,9 @@ export function experimentalOptionsFromEnv(
     const raw = env(envVar);
     if (raw === undefined) continue;
     if (raw === "true" || raw === "false") {
-      opts[key] = raw === "true";
+      // Env-exposed keys are boolean-valued by construction (see the map's
+      // null entries for the numeric/programmatic dials).
+      opts[key as BooleanExperimentalKey] = raw === "true";
     } else {
       console.warn(
         `[runtime-presets] Ignoring ${envVar}="${raw}" — ` +
@@ -288,6 +343,9 @@ export interface ProductionServerPresetParams extends CoreParams {
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   telemetry?: RuntimeTelemetry;
+  /** Executor workers inject a deny/broker boundary; ordinary servers omit. */
+  fetch?: typeof globalThis.fetch;
+  externalSinkDisposition?: ExternalSinkDispositionPolicy;
 }
 
 export interface RemoteClientPresetParams extends CoreParams {
@@ -326,7 +384,6 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
-  pieceCreatedCallback?: PieceCreatedCallback;
   /** Statement-coverage collector, set only on the coverage-collecting shell build. */
   patternCoverage?: PatternCoverageCollector;
 }
@@ -360,6 +417,10 @@ export const runtimePresets = {
         : {}),
       ...(params.telemetry !== undefined
         ? { telemetry: params.telemetry }
+        : {}),
+      ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
+      ...(params.externalSinkDisposition !== undefined
+        ? { externalSinkDisposition: params.externalSinkDisposition }
         : {}),
     };
   },
@@ -461,9 +522,6 @@ export const runtimePresets = {
         : {}),
       ...(params.navigateCallback !== undefined
         ? { navigateCallback: params.navigateCallback }
-        : {}),
-      ...(params.pieceCreatedCallback !== undefined
-        ? { pieceCreatedCallback: params.pieceCreatedCallback }
         : {}),
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }

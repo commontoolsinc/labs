@@ -34,7 +34,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     properties: {
         result: true
     }
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
 // Verifies: destructured opaque temporaries preserve generated root suffixes
 //   const { result } = generateObject(...) uses the synthesized __cf_destructure_* binding consistently

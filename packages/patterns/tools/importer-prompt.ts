@@ -2528,7 +2528,9 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
   - \`loginEndpoint="/api/integrations/${providerName}-oauth/login"\`
   - \`tokenField="accessToken"\`
 - Handle token refresh via \`/api/integrations/${providerName}-oauth/refresh\`
-- Include a \`bgUpdater\` stream handler for background-piece-service
+- Include a \`bgUpdater\` stream handler (note: nothing polls it on a schedule
+  today — the service that used to has been retired — but it is still the
+  conventional entry point for a refresh, and the UI can send to it)
 - Type renderable output fields as \`VNode\`, including \`userChip\` and \`[TILE_UI]\`. Do not type renderable UI fields as \`unknown\`.
 - Define scope checkboxes matching the available scopes:
 ${

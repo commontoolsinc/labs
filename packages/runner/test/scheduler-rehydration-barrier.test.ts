@@ -43,6 +43,7 @@ function makeState(opts: {
     isLiveAction: () => true,
     hasActiveDebounceTimer: () => false,
     getNextEligibleRunTime: () => undefined,
+    isClaimedRemoteSpeculationDeferred: () => false,
     hasPendingInitialRehydrations: () => opts.rehydrationsPending,
     isConvergenceHoldActive: () => true,
     isConvergenceBackoffDeferred: () => false,

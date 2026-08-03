@@ -28,6 +28,9 @@ describe("CFC runtime stats", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      // Sole party performing the effect under test, so it declares that
+      // authority; a runtime that declares nothing is "suppress" (runtime.ts).
+      externalSinkDisposition: "server-executor",
     });
 
     expect(runtime.getCfcStats()).toEqual({

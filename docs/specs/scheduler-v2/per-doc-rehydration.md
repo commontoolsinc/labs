@@ -80,10 +80,13 @@ What must be tightened so the mapping is *reliable*:
   `schedulerObservationIdentity` is absent; the fallback function is deleted.
   Every remaining row then satisfies the invariant: `pieceId` names the doc
   its actions derive.
-- The `sendToBindings === false` variant (output binding links an existing
-  non-redirect cell) keeps the invariant: the deriver is still the one
-  instantiating node; the doc id comes from the stable binding rather than a
-  `resultFor` mint.
+- **Enforce one direct-root primary binding.** The transformer emits exactly
+  one root write-redirect for every normal computation, and the runner rejects
+  a missing, nested, or multiple primary binding at registration. The resolved
+  direct binding is therefore the stable output spot used by the `resultFor`
+  mint. General Cell aliases remain supported, while static side writes and
+  materializer envelopes remain separate declared write surfaces; neither is a
+  substitute primary binding.
 
 No *reverse* (deriver→docs) index is required for restore: derivation is
 re-walked top-down at resume (parents instantiate children), so each piece
@@ -252,16 +255,17 @@ the boot load is paginated and off the hot path (parallel to the pre-sync).
   map-children test rather than a timing-sensitive unit gate.
 - `reload-rehydration.test.ts`: the asserted listing query shape becomes the
   space-scoped one.
-- Reload churn: the ≤ 1 residual gate lives in the flag-OFF integration run,
-  where fresh child first-runs are inherent (v1 reached 0 via its populate
-  pass; v2 flag-off has no restore to lean on). A flag-ON churn assertion in
-  `integration/reload/` (the `pattern-reload-integration-test` job) pins
-  flag-ON at "never worse than flag-off". Measured: the rows rehydrate, but
-  the always-run coordinator's first reconcile still reads one cold hop
-  through the field-level alias chain, so the same coupled 1-conflict
-  residual remains. It reaches zero when resume-time runners pre-warm their
-  persisted read sets — an application of the incremental
-  observation-adoption direction (see below), not of the boot listing.
+- Reload churn: both the general integration population and the dedicated
+  `pattern-reload-integration-test` job now run default-on. The ≤ 1 residual
+  bound is retained from the historical rollback-off baseline; the dedicated
+  job additionally requires a positive rehydration count, so default-on cannot
+  silently degrade to fresh runs. Measured: the rows rehydrate, but the
+  always-run coordinator's first reconcile still reads one cold hop through
+  the field-level alias chain, so the same coupled 1-conflict residual remains.
+  It reaches zero when resume-time runners pre-warm their persisted read sets —
+  an application of the incremental observation-adoption direction (see below),
+  not of the boot listing. Explicit-false rollback is covered by the same
+  browser suite re-run with the flag off.
 
 ## 7.1 Live counterpart: incremental adoption
 

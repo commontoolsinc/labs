@@ -4,6 +4,22 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
+import { createNativeErrorBrandCheck } from "./native-error-brand.ts";
+
+// SES lockdown replaces/tames selected intrinsics, including removing newer
+// Error statics. Capture the host-realm brand check while the module graph is
+// initialized so async builtin error writebacks can still recognize errors
+// after a Runtime installs SES. Browsers without Error.isError retain the
+// intrinsic DOMException check and otherwise fail closed for cross-realm
+// ordinary Errors.
+//
+// Exported because `runner`'s sandbox result normalization needs the same
+// brand check; it must be THIS captured-intrinsic one and not a call-time
+// re-read of `Error.isError`, which is exactly what SES removes.
+export const isNativeError: (value: unknown) => boolean =
+  createNativeErrorBrandCheck(
+    typeof Error.isError === "function" ? Error.isError.bind(Error) : undefined,
+  );
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
@@ -42,20 +58,6 @@ export const NATIVE_TAGS = Object.freeze(
 
 /** One of the native-instance tag strings. */
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
-
-/**
- * Checks whether a value is a native `Error`.
- *
- * `Error.isError()` recognizes errors from other realms when the engine
- * provides it. Engines without it fall back to `instanceof`, which recognizes
- * errors that share the current realm's prototype hierarchy.
- */
-export function isNativeError(value: unknown): value is Error {
-  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
-  return typeof isError === "function"
-    ? isError(value)
-    : value instanceof Error;
-}
 
 /**
  * Maps a constructor to its native-instance tag. Returns the tag string if
@@ -185,6 +187,11 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (typeof ctor === "function") {
     tag = tagFromNativeClass(ctor);
   }
+
+  // A value-controlled `constructor` property is not proof of an Error brand.
+  // Require the captured intrinsic even when constructor dispatch matched a
+  // standard Error class; this also rejects Proxies around real Errors.
+  if (tag === NATIVE_TAGS.Error && !isNativeError(value)) tag = null;
 
   // `tagFromNativeClass()` handles dedicated types (`Error`, `Date`, `Map`, etc.) and
   // returns `HasToJSON` for classes whose prototype has `toJSON()`. For those,

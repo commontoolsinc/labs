@@ -15,10 +15,16 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // F6c (docs/specs/scheduler-v2/per-doc-rehydration.md): a resumed piece with
-// map rows must re-attach the per-element child runs. Dynamic map callbacks do
-// not have a complete structural scope certificate, so W0.1 keeps their
-// durable scheduler state session-qualified. A different session runs the rows
-// fresh, then leaves them live for later updates.
+// map rows must re-attach the per-element child runs. Since W2.12/W2.13
+// (2b65b4d65) the read-only map callback CERTIFIES: its structural scope
+// certificate is complete, so the per-element rows persist SPACE-keyed and a
+// different session ADOPTS them instead of re-running (pre-W2.12 the
+// callback was R4-incomplete, the rows were session-qualified, and a new
+// session ran them fresh — the expectation this test carried until the
+// first full-battery sweep caught up with it). What must hold under EITHER
+// classification is the liveness half: adoption may skip the redundant
+// recompute, but the rows must re-attach so a later write re-derives
+// exactly its row (the stranded-rows failure mode).
 //
 // Two managers with their OWN replicas loopback-connected to one in-process
 // server (same shape as resume-argument-link-target-presync.test.ts), so
@@ -121,7 +127,7 @@ describe("reload isolation: map per-element children", () => {
     await server?.close();
   });
 
-  it("resumed map rows run fresh across sessions and stay live", async () => {
+  it("resumed map rows adopt across sessions and stay live", async () => {
     // Session 1: create + settle, then dispose ENTIRELY.
     const rt1 = newRuntime(managerA);
     const tx1 = rt1.edit();
@@ -188,14 +194,15 @@ describe("reload isolation: map per-element children", () => {
       await rt2.storageManager.synced();
       await rt2.idle();
 
-      // Dynamic map callbacks do not carry a complete structural certificate,
-      // so their durable rows are session-keyed. A different authenticated
-      // session must run the three rows fresh rather than adopting session 1's
-      // state. The coordinator still re-attaches the rows for live updates.
+      // W2.12/W2.13: the read-only map callback carries a complete
+      // structural certificate, so its durable rows are SPACE-keyed and a
+      // different authenticated session ADOPTS all three instead of running
+      // them fresh — zero op runs, three rehydrations. The liveness block
+      // below is what guards against adoption stranding the rows.
       const resumeTrace = rt2.scheduler.getActionRunTrace();
-      expect(opRuns(resumeTrace).length).toBe(3);
+      expect(opRuns(resumeTrace).length).toBe(0);
       const counts = rehydrationCounts();
-      expect(counts.ok).toBe(0);
+      expect(counts.ok).toBe(3);
 
       expect(await resultCell2.key("vs").pull()).toEqual([2, 4, 6]);
 

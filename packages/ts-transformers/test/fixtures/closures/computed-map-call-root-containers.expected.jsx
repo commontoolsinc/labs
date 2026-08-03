@@ -87,7 +87,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["row"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     row: {
         done: boolean;
@@ -108,7 +108,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["row"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     return ({
@@ -173,7 +173,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["row"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     return __cfLift_4({ row: {
