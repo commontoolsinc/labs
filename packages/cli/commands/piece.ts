@@ -458,17 +458,31 @@ export function resolveInvocationId(
  * still holds the exact id to retry with, and the retry deduplicates instead
  * of executing a second time. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
+ *
+ * `announcePhases` is a test-harness hook (reached via the
+ * `CF_TEST_ANNOUNCE_INVOCATION_PHASES` env var at the call site): every phase
+ * advance is additionally announced as `invocation: <id> phase: <phase>` —
+ * the shape failure exits already print. Integration scenarios that must act
+ * inside a specific window block on a phase line instead of racing a clock:
+ * the dropped-response fixture kills its call only after reading
+ * `phase: committed`, which the observer emits only once the handling's
+ * durable commit has been acknowledged. Off by default, so normal output is
+ * byte-identical with the hook absent.
  */
 export function invocationPhaseReporter(
   invocationId: string,
   onAdvance: (phase: InvocationPhase) => void,
   announce: (message: string) => void = console.error,
+  announcePhases = false,
 ): (phase: InvocationPhase) => void {
   let announced = false;
   return (next) => {
     if (next === "dispatched" && !announced) {
       announced = true;
       announce(`invocation: ${invocationId}`);
+    }
+    if (announcePhases) {
+      announce(`invocation: ${invocationId} phase: ${next}`);
     }
     onAdvance(next);
   };
@@ -1462,6 +1476,8 @@ after --. Handlers interpret piped input when no input argument is present.`,
           onPhase: invocationPhaseReporter(
             invocationId,
             observer.onPhase,
+            undefined,
+            Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
           ),
         },
       ).catch((error) =>
