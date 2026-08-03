@@ -1,9 +1,9 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  FabricInstance,
   FabricPrimitive,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -42,6 +42,22 @@ export type CellAliasResolver = (
   path: readonly PropertyKey[],
   ignoreSelfAliases: boolean,
 ) => AliasBinding | null | undefined;
+
+/**
+ * The refusal a `FabricInstance` gets from the binding walks: it is a container
+ * reached by its codec contents rather than by property name, and nothing here
+ * can do that yet.
+ *
+ * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+ * point this becomes a walk rather than a refusal. See "Flag-gated tripwires"
+ * in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ */
+function refuseFabricInstance(value: FabricInstance): Error {
+  return new Error(
+    `Cannot yet handle \`${value.constructor.name}\` (a \`FabricInstance\`) ` +
+      "in a pattern binding.",
+  );
+}
 
 export function withAliasBindings(
   value: FactoryInput<any>,
@@ -124,28 +140,39 @@ export function withAliasBindings(
     );
   }
 
-  // An object here that is neither a pattern nor an inert plain object is
-  // either a native carrying a canonical fabric form (a `Uint8Array`, a
-  // `Date`) or something not representable at all. Hand it to the sanctioned
-  // conversion, which mints the fabric form or rejects.
-  //
-  // Without this, the `for...in` copy below rebuilds such a value by property
-  // name, which does not merely lose it -- it LAUNDERS it. A `Uint8Array`
-  // becomes `{"0":7,"1":9}` and a `Date` becomes `{}`, and both of those are
-  // inert plain objects, so they satisfy `isFabricValue()` and are stored as
-  // legal values meaning something else entirely. Nothing downstream can
-  // notice, because by then the evidence is gone.
-  if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
-    value = shallowFabricFromNativeValue(value);
-  }
-
   // A `FabricPrimitive` is an atomic value whose state lives in private fields
-  // (zero enumerable own-props). The `for...in` copy branch below would flatten
-  // it to `{}`, so return it unchanged here — whether the author built one or
-  // the conversion above just minted it — after the cell / alias / array
-  // handling, which must still win for those forms.
-  if (value instanceof FabricPrimitive) {
-    return value;
+  // (zero enumerable own-props), so the `for...in` copy below would flatten it
+  // to `{}`. It leaves whole, and it leaves FIRST: it is also a record, so an
+  // `isRecord()` test would otherwise claim it.
+  if (value instanceof FabricPrimitive) return value;
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // `for...in` copy would rebuild it from zero enumerable own properties as
+  // `{}`. It refuses instead of doing that quietly.
+  if (value instanceof FabricInstance) throw refuseFabricInstance(value);
+
+  // What remains that is an object, and not a pattern, is either a native
+  // carrying a canonical fabric form (a `Uint8Array`, a `Date`) or something
+  // not representable at all. Hand it to the sanctioned conversion, which
+  // mints the fabric form or rejects. An inert plain object comes back from it
+  // unchanged (modulo the clone-to-freeze), so it needs no test here.
+  //
+  // Without this, the `for...in` copy rebuilds such a value by property name,
+  // which does not merely lose it -- it LAUNDERS it. A `Uint8Array` becomes
+  // `{"0":7,"1":9}` and a `Date` becomes `{}`, and both of those are inert
+  // plain objects, so they satisfy `isFabricValue()` and are stored as legal
+  // values meaning something else entirely. Nothing downstream can notice,
+  // because by then the evidence is gone.
+  //
+  // A pattern is excluded because its metadata (program, derivation link) is
+  // held in WeakMaps keyed by object identity, which a clone would not carry.
+  if (isRecord(value) && !isPattern(value)) {
+    value = shallowFabricFromNativeValue(value);
+    // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
+    // an `Error` a `FabricError`.
+    if (value instanceof FabricPrimitive) return value;
+    if (value instanceof FabricInstance) throw refuseFabricInstance(value);
   }
 
   // If this is an object or a pattern, process each key recursively.
@@ -170,13 +197,6 @@ export function withAliasBindings(
       : (value as Record<string, any>);
 
     const result: any = {};
-    // TODO(danfuzz): A `FabricPrimitive` is now returned atomically above, but
-    // the other special-object type, `FabricInstance` (a container), still
-    // reaches this `for...in` copy and is walked by its internal slots (zero
-    // enumerable own-props) instead of its codec contents. Unlike a primitive it
-    // *does* need descending into — but by its actual contents, which this walk
-    // won't do correctly. This site will need attention once FabricInstances see
-    // real use.
     for (const key in valueToProcess as any) {
       const jsonValue = withAliasBindings(
         valueToProcess[key],

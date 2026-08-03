@@ -8,6 +8,7 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 import {
   createJsonSchema,
@@ -808,6 +809,21 @@ describe("json-utils", () => {
       ) as any;
       expect(nested.v).toBeInstanceOf(FabricBytes);
       expect([...nested.v.slice()]).toEqual([4, 5]);
+    });
+
+    it("refuses a FabricInstance rather than flattening it", () => {
+      // A `FabricInstance` is a CONTAINER reached by its codec contents, not by
+      // property name. The `for...in` copy would rebuild it from zero
+      // enumerable own-props as `{}`, so it refuses instead -- the same
+      // disposition the sibling binding walk uses.
+      const err = FabricError.fromNativeError(new Error("boom"));
+      expect(() => withAliasBindings(err as any)).toThrow("FabricError");
+      expect(() => withAliasBindings({ e: err } as any)).toThrow("FabricError");
+
+      // ...including one the conversion itself mints, from a native `Error`.
+      expect(() => withAliasBindings({ e: new Error("x") } as any)).toThrow(
+        "FabricError",
+      );
     });
 
     it("leaves ordinary containers alone", () => {
