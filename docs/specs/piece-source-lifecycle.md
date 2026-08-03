@@ -35,13 +35,13 @@ link before site-table hydration completed.
 This lifecycle slice is partial. Revisions retain the existing verified
 `pattern:<identity>` source-document closure rather than the complete authored
 program manifest specified below. Fabric URL creation, the remaining web URL
-creation paths, live mutable fabric subscriptions, complete cross-space policy
-enforcement, forking, and runtime-fingerprint handling still require work. The
-specialized updater still reconciles roots before bootstrap and checks other
-successfully instantiated same-toolshed system-source patterns in the
-background. A space root remains an ordinary piece in the target model.
-Cross-space history repoint is rejected until the checked source-replication
-path exists.
+creation paths, host-qualified fabric-link receipt, live mutable fabric
+subscriptions, complete cross-space policy enforcement, forking, and
+runtime-fingerprint handling still require work. The specialized updater still
+reconciles roots before bootstrap and checks other successfully instantiated
+same-toolshed system-source patterns in the background. A space root remains an
+ordinary piece in the target model. Cross-space history repoint is rejected
+until the checked source-replication path exists.
 
 Status labels in this document have exact meanings:
 
@@ -58,7 +58,7 @@ otherwise complete first-time creation command into an unimplemented command.
 
 ## Last updated
 
-2026-07-29
+2026-08-03
 
 ## Terms
 
@@ -618,11 +618,119 @@ durably records it in the home-space site table. It then opens and resolves the
 origin space. The operation may commit a hostless canonical origin only after
 registration and persistence succeed.
 
+Every route source uses one origin-only grammar. A route is an absolute HTTP or
+HTTPS origin with no credentials, path beyond `/`, query, or fragment. It is
+normalized with a trailing slash. Production routes require HTTPS. An explicit
+local-development or test policy may permit HTTP. This grammar applies to the
+default host, `spaceHostMap` seeds, live registration, site-table hydration,
+host-qualified share links, and the effective host returned to an embedder. An
+invalid default or seed fails runtime initialization. An invalid live hint is
+rejected before it changes the route. Hydration ignores invalid legacy entries
+and selects the last valid entry for each DID.
+
+The authority in `cf://<authority>/<space-did>/<ref>` does not carry a transport
+scheme. Lifecycle ingestion derives HTTPS by default. Under the explicit local
+HTTP policy, a loopback authority derives HTTP instead. The resulting absolute
+origin passes through the same route normalization before registration. No
+caller derives this scheme from the shell frontend origin.
+
 If persistence fails after registration, the transition leaves the piece
 unchanged. The accepted hint may remain available in that runtime until it
 stops. A retry can confirm the same hint and attempt the durable write again.
 The operation never persists a hint that the live registry has already
 rejected.
+
+Registration and persistence use one dedicated runtime operation. The
+runtime-client exposes it to embedders through a dedicated request. Lifecycle
+code in the worker calls the same underlying operation directly. The operation
+validates the DID and host again. It synchronizes the home-space site-table cell
+before reading its value or changing the live route. A synchronization failure
+fails the operation. After synchronization, it selects the last valid existing
+route for the target DID by the same rule as hydration. It offers that route to
+the live registry before it offers the newly supplied hint. A rejection of the
+existing table route means that a seed or earlier live route is already
+authoritative. The operation then offers the supplied hint to that same
+registry. A conflict fails the operation without writing. This direct ordering
+does not depend on the asynchronous hydration watcher having processed the
+table.
+
+An accepted or confirmed supplied route is transactionally appended to the
+site-table value that was synchronized. The entry contains the DID, normalized
+host, operation-specific source, and an ISO timestamp assigned by the worker.
+The transaction keeps the synchronized table value as a commit precondition.
+
+The operation awaits `transaction.commit()` and inspects its result. It returns
+success only for an `ok` result. A resolved result containing `ConflictError` or
+`StoreError` fails the operation, as does a thrown commit error. The operation
+does not retry any of these failures automatically. A live route accepted
+before a commit failure may remain until the runtime stops.
+
+Generic optimistic cell writes do not satisfy this contract. The current
+`CellHandle.set()` and `CellHandle.push()` paths do not propagate remote commit
+failure to their caller. The dedicated request must expose live conflict and
+durable commit failure separately so a lifecycle operation or the shell can
+stop before using the target.
+
+### Host-qualified fabric-link receipt
+
+The shell can also learn a route from a user-facing fabric link that opens
+existing data instead of selecting a piece's source. Link receipt is not a
+source lifecycle transition. It uses the same route registry and durable site
+table because later lifecycle operations and ordinary pattern reads must agree
+about where the named space lives.
+
+The browser-facing share-link form is a shell URL:
+
+`<shell-http-or-https-origin>/<space-did>[/<piece-id-or-slug>]?spaceHost=<encoded-toolshed-origin>`
+
+`spaceHost` occurs exactly once. Its decoded value is an absolute HTTP or HTTPS
+origin with no credentials, path beyond `/`, query, or fragment. The receiver
+normalizes it with a trailing slash. The path contains an explicit space DID.
+It names either the space root or a piece that the ordinary shell `AppView`
+supports. A host-qualified `cf://` source reference is a different input form.
+Its bare authority does not supply the explicit HTTP or HTTPS scheme required
+by this browser-facing link.
+
+The outer URL origin identifies the shell frontend. Production share links use
+HTTPS. Local-development and test shells may use HTTP. The shell may use
+`globalThis.location.origin` for this outer origin. That value never supplies
+`spaceHost`. The shell's **Copy link** action obtains `spaceHost` from the
+effective host reported by the runtime's per-space storage manager. It does not
+substitute the shell's default API host when the space has a different
+effective host.
+
+A shell URL without `spaceHost` is an ordinary hostless navigation and supplies
+no new route. A URL with a malformed or repeated `spaceHost`, or with a space
+name instead of a DID, fails link receipt without navigation. Receiving a valid
+link does not grant read access. Ordinary fabric authorization and content
+verification still apply.
+
+Before the shell opens, mounts, or navigates to the target, it performs these
+steps:
+
+1. Parse the shell path into its DID-based `AppView`. Validate and normalize the
+   `spaceHost` toolshed origin.
+2. Send that DID and host through the dedicated failure-propagating route
+   request. The worker uses the live registry behavior exposed by
+   `RuntimeClient.registerSpaceHost` and records `source: "share-link"` in the
+   site-table entry.
+3. Wait for the request to confirm the durable transaction. Then remove
+   `spaceHost` and hand the canonical hostless `AppView` to ordinary shell
+   navigation.
+
+A rejected live hint is a route conflict. The shell does not persist that hint
+or navigate to the target through it. If persistence fails after live
+registration, the shell reports that link receipt failed and does not navigate.
+The accepted route may remain live until the runtime stops. Repeating receipt
+can confirm the same route and attempt the durable write again.
+
+Patterns receive no new routing API. They continue to store and follow
+hostless fabric references. A later runtime hydrates their routes from the
+home-space site table. Hydration may finish after a running pattern has already
+read the target space through the provisional default host. The replacement
+and replay rules below must then update that same running pattern with the
+intended data. This recovery does not require a page reload or a pattern
+restart.
 
 The runtime does not open a short-lived secondary session for origin
 resolution. A seeded route can only be confirmed. Once a late hint is accepted,
@@ -681,8 +789,11 @@ replicated-host failover remain open design work.
 | Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and the first accepted late hint becomes authoritative |
 | Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
 | Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
-| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last valid HTTP or HTTPS entry for each space, and registers those hints. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
+| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last route that passes the current HTTP or HTTPS check for each space, and registers those hints. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
+| Apply one origin-only grammar to every route | **Route normalization required** | `normalizeSpaceHost` checks the HTTP or HTTPS scheme but still accepts credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration all use that permissive rule. Bare `cf://` authorities use a lifecycle-local scheme heuristic rather than a shared route rule |
+| Append an accepted route with commit acknowledgement | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
+| Receive a host-qualified fabric link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path emits or receives the `spaceHost` share-link form, asks the runtime for the effective per-space host, or waits for acknowledged route persistence before navigation |
 | Replace an explicit route after host failure or space movement | **Reliability design required** | There is no authenticated route-change or failover protocol after a seed or late hint becomes authoritative |
 
 ## Reconciliation when a piece loads
@@ -980,7 +1091,11 @@ The implementation evidence for this table is concentrated in:
   including against a later table update.
   IPC callers must check the registration result and stop before mounting on a
   conflict. Historical fabric origin resolution can register a matching live
-  route, but it does not yet persist that route through the site table.
+  route, but it does not yet persist that route through the site table. Generic
+  runtime-client cell writes do not propagate remote commit failure, so they
+  cannot provide acknowledged site-table persistence. The shell's **Copy link**
+  action copies its frontend URL and cannot ask the runtime for a space's
+  effective host.
 - Tooling exposes the immutable source ref, optional repository locator,
   authored entry path, current origin, revision history, and lifecycle actions
   separately.
@@ -1082,7 +1197,80 @@ The implementation evidence for this table is concentrated in:
    table. Design reliable discovery, authenticated route replacement, host
    failover, and explicit close-and-reopen behavior for unavailable or moved
    spaces.
-9. Add CI golden replays that carry representative durable state from each
+9. Tighten `normalizeSpaceHost` to the origin-only grammar and use it for the
+   default host, `spaceHostMap` seeds, live registration, site-table hydration,
+   share-link receipt, and effective-host results. Reject invalid defaults and
+   seeds during initialization. Reject an invalid live hint before registration.
+   Ignore invalid legacy site-table entries. Move the `cf://` authority scheme
+   rule into the shared route-normalization module. Use HTTPS by default and
+   permit derived HTTP only for loopback under an explicit local-development or
+   test policy.
+   Test credentials, paths, queries, and fragments through every route input.
+   Test initialization failure, live rejection, legacy-entry filtering, and both
+   transport outcomes for a bare fabric authority.
+10. Add a dedicated failure-propagating route operation and expose it through
+   the runtime-client protocol. Revalidate its DID and normalized origin in the
+   worker. Synchronize the home site table before reading it or registering the
+   live route. Apply the synchronized table's last valid candidate for the
+   target DID to the live registry before evaluating the supplied hint. Do not
+   rely on the asynchronous hydration watcher to establish that ordering.
+   Return a conflict without writing when the supplied route is rejected. For an
+   accepted route, transactionally append the site-table entry with the
+   synchronized table read as a commit precondition. Await the commit and
+   inspect its result before returning success. Propagate resolved
+   `ConflictError` and `StoreError` results as well as thrown commit failures. Do
+   not retry them. Do not implement this operation with the optimistic
+   `CellHandle.set()` or `CellHandle.push()` paths. Expose the effective host for
+   a space through runtime IPC so share-link creation uses the per-space route.
+11. Add host-qualified fabric-link creation and receipt to the shell. **Copy
+   link** emits the specified DID-based shell URL and `spaceHost` parameter.
+   Receipt validates the shell path and toolshed origin, calls the dedicated
+   route request, and removes the parameter before ordinary `AppView`
+   navigation. Intercept an initial share URL before the target `AppView` opens
+   its space. Report malformed links, live conflicts, and durable-write failures
+   without navigating. Keep this route discovery outside pattern APIs and
+   source-origin state.
+12. Add a browser-level shell integration test with two independent toolshed
+   servers and real patterns as the user interface. Put the target data only on
+   the non-default toolshed. Open that target in a producing shell and invoke its
+   production **Copy link** action. Read the emitted URL from the browser
+   clipboard. Assert that its outer origin is the shell frontend, its path names
+   the target by explicit DID, and its sole `spaceHost` value equals the
+   non-default effective host reported by the runtime. Open that exact copied URL
+   in a receiving shell. Prove that receipt records the route durably.
+
+   Tear down the receiving runtime. Start a fresh shell runtime with the same
+   identity and durable home space. Do not provide a `spaceHostMap` seed, call
+   live registration directly, or write the site table through test setup. Run a
+   pattern whose retained input contains the corresponding hostless cross-space
+   reference. Use an observable test gate to let its provisional default-host
+   read report the missing target before site-table hydration publishes the
+   receipt's persisted hint. Then release hydration and prove that the same
+   running pattern renders the target data without a page reload or pattern
+   restart. The test may control event ordering, but it must not inject the hint
+   through a test-only registration endpoint.
+
+   Add worker-path persistence cases. Begin receipt before the initial local
+   site-table value has synchronized while the remote table already contains an
+   unrelated entry. Prove that receipt synchronizes first and preserves that
+   entry. Make synchronization fail and prove that no live registration, append,
+   navigation, or retry occurs.
+
+   Put a conflicting route for the target DID in the remote table. Hold the
+   asynchronous hydration watcher before it registers that route. Prove that
+   receipt itself applies the synchronized table candidate first, rejects the
+   supplied hint, and performs no append or navigation.
+
+   Start two receipts for different target DIDs from one synchronized table
+   snapshot. Use an event gate after both transactions capture that snapshot.
+   Commit one append, then prove that the other resolves with a real
+   `ConflictError` from the table precondition. The final table retains its
+   original entries and the successful append. The conflicted receipt does not
+   navigate or retry. Separately make an awaited commit resolve with a
+   `StoreError` and require the same shell failure behavior. A main-thread stub
+   that fails before the worker attempts the commit does not cover this
+   contract.
+13. Add CI golden replays that carry representative durable state from each
    supported prior source to its proposed replacement. These tests cover
    stable keys and causes, intended migration, and behavior that schemas cannot
    prove. Extend the current synthetic system-root replays with general
