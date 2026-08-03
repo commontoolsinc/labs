@@ -798,6 +798,22 @@ describe("cli piece parsing", () => {
     expect(callFlags).toContain("--verbose");
   });
 
+  it("offers wait control for piece call", () => {
+    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(callFlags).toContain("--await");
+    expect(callFlags).toContain("--wait");
+    expect(callFlags).toContain("--no-wait");
+  });
+
+  it("offers result-link annotation for piece call", () => {
+    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(callFlags).toContain("--show-links");
+  });
+
   it("steps, reads, syncs, and stops in one get operation", async () => {
     const order: string[] = [];
     const controller = {

@@ -9,7 +9,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   createJsonSchema,
   moduleToJSON,
-  toJSONWithAliasBindings,
+  withAliasBindings,
 } from "../src/builder/json-utils.ts";
 import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
@@ -674,7 +674,7 @@ describe("json-utils", () => {
     });
   });
 
-  describe("toJSONWithAliasBindings", () => {
+  describe("withAliasBindings", () => {
     it("should serialize shared object references correctly", () => {
       // Regression test: shared style objects used across siblings in .map()
       // should all serialize with full data, not {} for the 3rd+ occurrence.
@@ -696,7 +696,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithAliasBindings(tree as any) as any;
+      const result = withAliasBindings(tree as any) as any;
 
       // All 5 children should have the full style object
       for (let i = 0; i < 5; i++) {
@@ -712,7 +712,7 @@ describe("json-utils", () => {
       const circular: any = { name: "root", child: {} };
       circular.child.parent = circular; // true circular reference
 
-      const result = toJSONWithAliasBindings(circular as any) as any;
+      const result = withAliasBindings(circular as any) as any;
 
       // The root should serialize, but the circular back-reference should be {}
       expect(result.name).toEqual("root");
@@ -729,7 +729,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithAliasBindings(tree as any) as any;
+      const result = withAliasBindings(tree as any) as any;
 
       expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
       expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
@@ -746,7 +746,7 @@ describe("json-utils", () => {
         path: [],
       });
 
-      const result = toJSONWithAliasBindings(
+      const result = withAliasBindings(
         cellWithFalseSchema as any,
         (cell) => {
           const { schema, scope } = cell.export();
@@ -782,7 +782,7 @@ describe("json-utils", () => {
       // pass through unchanged.
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
 
-      const result = toJSONWithAliasBindings({ payload: bytes } as any) as any;
+      const result = withAliasBindings({ payload: bytes } as any) as any;
 
       expect(result.payload).toBe(bytes);
     });

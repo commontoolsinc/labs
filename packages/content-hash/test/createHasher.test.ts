@@ -39,6 +39,33 @@ for (const createFunc of createFuncs) {
     let testId = -1;
     let oneLength = 10; // For multi-byte variety; updated pseudorandomly.
 
+    describe("after digest()", () => {
+      const alreadyDone = /`digest\(\)` already done/;
+
+      // A small update is the interesting case: implementations that buffer
+      // small writes can satisfy one without consulting the underlying hasher.
+      it("rejects a small update()", () => {
+        const hasher = createFunc();
+        hasher.update(new Uint8Array([1, 2, 3]));
+        hasher.digest();
+        expect(() => hasher.update(new Uint8Array([4]))).toThrow(alreadyDone);
+      });
+
+      it("rejects an update() too large to buffer", () => {
+        const hasher = createFunc();
+        hasher.update(new Uint8Array([1, 2, 3]));
+        hasher.digest();
+        expect(() => hasher.update(new Uint8Array(4096))).toThrow(alreadyDone);
+      });
+
+      it("rejects a second digest()", () => {
+        const hasher = createFunc();
+        hasher.update(new Uint8Array([1, 2, 3]));
+        hasher.digest();
+        expect(() => hasher.digest()).toThrow(alreadyDone);
+      });
+    });
+
     for (const { bytes, sha256: hashStr } of FIXTURES) {
       const hashMsg = `\`${hashStr.slice(0, 8)}...\``;
       const hashBytes = fromBase64url(hashStr);

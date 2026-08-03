@@ -233,23 +233,21 @@ export class CFChat extends BaseElement {
   private _updateThemeProperties() {
     // Apply standard theme properties with custom spacing for chat-specific needs
     applyThemeToElement(this, this._computedTheme, {
-      additionalSpacing: {
-        "message-bottom": getSemanticSpacing(
-          this._computedTheme.density,
-          "sm",
-          "tight",
-        ),
-        "padding-bubble": getSemanticSpacing(
-          this._computedTheme.density,
-          "lg",
-          "normal",
-        ),
-        "padding-bubble-horizontal": getSemanticSpacing(
-          this._computedTheme.density,
-          "xl",
-          "normal",
-        ),
-      },
+      "message-bottom": getSemanticSpacing(
+        this._computedTheme.density,
+        "sm",
+        "tight",
+      ),
+      "padding-bubble": getSemanticSpacing(
+        this._computedTheme.density,
+        "lg",
+        "normal",
+      ),
+      "padding-bubble-horizontal": getSemanticSpacing(
+        this._computedTheme.density,
+        "xl",
+        "normal",
+      ),
     });
   }
 

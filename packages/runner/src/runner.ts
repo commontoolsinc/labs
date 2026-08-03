@@ -13,11 +13,13 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
   type CellScope,
+  type FabricExecValue,
   type Frame,
   isModule,
   isPattern,
@@ -148,6 +150,13 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   level: "warn",
   logCountEvery: 0,
 });
+
+/**
+ * How many prepared/stopped result shortcuts one runner keeps. Sized well
+ * above any plausible number of simultaneously live pieces, so the bound is
+ * reached only by a pattern churning through results it will not revisit.
+ */
+const RESULT_SHORTCUT_LIMIT = 4096;
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -708,8 +717,8 @@ type DeferredStartResult<R> = {
 };
 
 type BoundNodeIO = {
-  inputs: FabricValue;
-  outputs: FabricValue;
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
 };
@@ -989,14 +998,20 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
-  private locallyPreparedResults = new Map<
+  // Both maps record that this runner prepared or stopped a result, so a later
+  // start of the same result can reuse the cells it already assembled instead
+  // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
+  // a missing entry costs a slower start, never a wrong one. They are bounded
+  // for that reason — a result key names one result document, and a pattern
+  // that keeps starting and stopping children adds keys it will never revisit.
+  private locallyPreparedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
-  private locallyStoppedResults = new Map<
+  >(RESULT_SHORTCUT_LIMIT);
+  private locallyStoppedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
+  >(RESULT_SHORTCUT_LIMIT);
   // Successful event-result starts that are still live in this runner. This is
   // intentionally local and bounded by live starts: it lets a sequential
   // redelivery avoid re-materializing an already-won result before the
@@ -4034,8 +4049,8 @@ export class Runner {
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -4125,8 +4140,8 @@ export class Runner {
   }
 
   private bindNodeIO(
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
   ): BoundNodeIO {
@@ -4665,7 +4680,7 @@ export class Runner {
    * @returns
    */
   private resolveJavaScriptStreamLink(
-    inputs: FabricValue,
+    inputs: FabricExecValue,
     base: NormalizedFullLink,
     tx: IExtendedStorageTransaction,
   ): {
@@ -4677,7 +4692,10 @@ export class Runner {
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
     // binding, which must not be followed at this level.
-    let value: FabricValue = inputs.$event;
+    // Narrowing, not papering over: `$event` is a sigil link, which IS a
+    // `FabricValue`. Only the exec-typed container widens it here, and the
+    // sigil-only invariant above is what licenses the assertion.
+    let value = inputs.$event as FabricValue;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
@@ -5116,9 +5134,13 @@ export class Runner {
     resultHasReactives: boolean,
     frame: Frame,
     resultCell: Cell<any>,
-    outputs: FabricValue,
+    outputs: FabricExecValue,
     addCancel: AddCancel,
-    _resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
+    _resultFor: {
+      inputs: FabricExecValue;
+      outputs: FabricExecValue;
+      fn: string;
+    },
     previousResultCellRef: JavaScriptActionResultCells,
     narrowestReadScope?: CellScope,
   ): any {
@@ -5841,8 +5863,8 @@ export class Runner {
   private instantiateJavaScriptNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6011,7 +6033,7 @@ export class Runner {
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
-    inputBindings: FabricValue,
+    inputBindings: FabricExecValue,
   ): void {
     if (
       moduleRefName !== "map" && moduleRefName !== "filter" &&
@@ -6043,8 +6065,8 @@ export class Runner {
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6337,8 +6359,8 @@ export class Runner {
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
     _module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     _addCancel: AddCancel,
     pattern: Pattern,
@@ -6372,8 +6394,8 @@ export class Runner {
   private instantiatePatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,

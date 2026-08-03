@@ -17,7 +17,7 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
   digest(encoding: "base64url"): string;
   digest(encoding: string | undefined): Uint8Array | string;
   digest(encoding?: string | undefined): Uint8Array | string {
-    this.#throwIfDone();
+    this._throwIfDone();
 
     const result = this._rawDigest(encoding);
     this.#done = true;
@@ -42,15 +42,15 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
 
   /** @inheritDoc */
   update(data: Uint8Array) {
-    this.#throwIfDone();
+    this._throwIfDone();
     this._rawUpdate(data);
   }
 
   /**
-   * Helper for `digest()` and `update()`, which throws if this instance
-   * has already been finalized via `digest()`.
+   * Throws if this instance has already been finalized via `digest()`.
+   * Subclasses that override `update()` must call this before accepting data.
    */
-  #throwIfDone() {
+  protected _throwIfDone() {
     if (this.#done) {
       throw new Error("Cannot use instance: `digest()` already done.");
     }

@@ -3,7 +3,9 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import {
+  type CallableCellLike,
   CF_RUNTIME_ERROR_LOG,
+  collectInvocationResultLinks,
   normalizeAbsentVerbPayload,
   runtimeErrorLog,
   schemaIsObjectShaped,
@@ -18,6 +20,7 @@ import {
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { ValidationError } from "@cliffy/command";
 import {
+  boundedSettlement,
   exitPieceCallFailure,
   exitWithDataError,
   invocationJson,
@@ -31,7 +34,9 @@ import {
   renderPieceCallOutcome,
   reportVerbInputErrorOrRethrow,
   resolveInvocationId,
+  resolveWaitControl,
   verbInputErrorReport,
+  WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
 import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
@@ -1061,6 +1066,19 @@ function createPieceCallableHarness(options: {
    * precondition "receipt-exists" while the link addresses the winner's
    * original receipt. */
   receiptExists?: boolean;
+  /** Hold settlement open: `send` records the dispatch but never invokes the
+   * commit callback, so anything awaiting acknowledgement waits forever.
+   * This is how a test proves a path does NOT await the commit — the path
+   * completes anyway — or exercises a wait bound against a call that can
+   * never beat it. */
+  neverCommit?: boolean;
+  /** Replace the readback receipt cell wholesale — for --show-links tests,
+   * whose receipt must support key()/resolveAsCell link traversal. */
+  receiptCell?: CallableCellLike;
+  /** Omit the stream cell's `send`: the dispatch falls back to a plain data
+   * write, the path with no per-handling commit acknowledgement and no
+   * receipt — the shape --no-wait must refuse. */
+  withoutSend?: boolean;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -1104,7 +1122,7 @@ function createPieceCallableHarness(options: {
     callableSchema,
     {
       scope: options.callableScope,
-      ...(options.callableKind === "handler"
+      ...(options.callableKind === "handler" && !options.withoutSend
         ? {
           send: (
             value: unknown,
@@ -1125,6 +1143,7 @@ function createPieceCallableHarness(options: {
             if (options.handlerFailureMessage) {
               runtimeErrors.push({ message: options.handlerFailureMessage });
             }
+            if (options.neverCommit) return;
             onCommit?.({
               status: () =>
                 options.handlerFailureMessage
@@ -1203,10 +1222,10 @@ function createPieceCallableHarness(options: {
     },
   };
 
-  const receiptCell = {
+  const defaultReceiptCell = {
     get: () => options.receiptValue,
     pull: () => Promise.resolve(options.receiptValue),
-    key: (_key: string) => receiptCell,
+    key: (_key: string) => defaultReceiptCell,
   };
 
   const manager = {
@@ -1219,7 +1238,7 @@ function createPieceCallableHarness(options: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       getCellFromLink: (link: { id?: string }) => {
         tracker.receiptLinkRequested = link;
-        return receiptCell;
+        return options.receiptCell ?? defaultReceiptCell;
       },
       storageManager: {
         synced: async () => {},
@@ -1997,6 +2016,892 @@ describe("piece call stdin payloads", () => {
   });
 });
 
+describe("piece call wait control", () => {
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+
+  it("waits for settlement by default, with --await as its explicit spelling", () => {
+    expect(resolveWaitControl({})).toEqual({ mode: "settle" });
+    expect(resolveWaitControl({ await: true })).toEqual({ mode: "settle" });
+  });
+
+  it("maps --no-wait to a commit-acknowledged, readback-skipped exit", () => {
+    expect(resolveWaitControl({ wait: false })).toEqual({ mode: "commit" });
+  });
+
+  it("refuses the --await --no-wait contradiction", () => {
+    expect(() => resolveWaitControl({ await: true, wait: false })).toThrow(
+      /--await and --no-wait contradict/,
+    );
+  });
+
+  it("carries the --wait bound in seconds, compatible with --await", () => {
+    // --await is the explicit spelling of "wait", and --wait names the
+    // patience of that same wait, so the two compose rather than conflict.
+    expect(resolveWaitControl({ wait: 5 })).toEqual({
+      mode: "settle",
+      boundSeconds: 5,
+    });
+    expect(resolveWaitControl({ await: true, wait: 2.5 })).toEqual({
+      mode: "settle",
+      boundSeconds: 2.5,
+    });
+  });
+
+  it('refuses a bound that spells "don\'t wait"', () => {
+    expect(() => resolveWaitControl({ wait: 0 })).toThrow(/positive/);
+    expect(() => resolveWaitControl({ wait: -1 })).toThrow(/positive/);
+    expect(() => resolveWaitControl({ wait: Number.NaN })).toThrow(/positive/);
+  });
+
+  it("returns the settlement untouched when no bound is chosen", () => {
+    const settlement = Promise.resolve("done");
+    // The same promise, not a wrapper: the default path must not gain a
+    // deadline, a race, or any timer at all.
+    expect(boundedSettlement(settlement, undefined)).toBe(settlement);
+  });
+
+  it("resolves a settlement that beats the bound and disarms the deadline", async () => {
+    // The op sanitizer proves the second half: a deadline timer left armed
+    // after settlement would leak past the end of this test and fail it.
+    await expect(boundedSettlement(Promise.resolve("done"), 60)).resolves.toBe(
+      "done",
+    );
+  });
+
+  it("propagates a settlement failure unchanged", async () => {
+    await expect(
+      boundedSettlement(Promise.reject(new Error("boom")), 60),
+    ).rejects.toThrow("boom");
+  });
+
+  it("expires with WaitBoundExpired when the call outlives the caller's patience", async () => {
+    // A promise that never settles holds the wait open by construction, so
+    // the deadline firing is the only way this test can complete — nothing
+    // races, and no timing alignment is being relied on. The real (tiny)
+    // timer is deliberate: the deadline mechanism itself is what is under
+    // test here.
+    const never = new Promise<never>(() => {});
+    const error = await boundedSettlement(never, 0.01).catch((e) => e);
+    expect(error).toBeInstanceOf(WaitBoundExpired);
+    // The wording is pinned: the handler runs in THIS process, so an expiry
+    // must not claim the invocation "continues settling" — it may never have
+    // executed or committed, and the same-id re-invoke is the recovery.
+    expect((error as WaitBoundExpired).message).toMatch(
+      /--wait bound of 0\.01s expired: the invocation may not have executed or committed — re-invoke with the same invocation id/,
+    );
+    expect((error as WaitBoundExpired).seconds).toBe(0.01);
+  });
+
+  it("skips only the readback under --no-wait: commit acknowledged, receipt never read", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+    const phases: string[] = [];
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-no-readback",
+        skipReadback: true,
+        onPhase: (phase) => phases.push(phase),
+      },
+    );
+
+    // Status is "committed", not "settled": the JSON must not claim a
+    // settlement nobody observed. And not "dispatched" either — the handler
+    // ran HERE and its commit was acknowledged before this returned.
+    expect(result.invocation).toEqual({
+      id: "inv-no-readback",
+      status: "committed",
+    });
+    expect(phases).toEqual(["dispatched", "committed"]);
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-no-readback" },
+    ]);
+    // The receipt was never opened — the readback (sync + read) is the whole
+    // saving — and no quiescence drain crept in either.
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+    expect(harness.tracker.idleCalls).toBe(0);
+    expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("still awaits the commit acknowledgement under --no-wait", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      // The commit callback never fires. --no-wait must NOT return: exiting
+      // before the acknowledgement would abandon the invocation un-executed
+      // (the handler runs in this process), not leave it settling elsewhere.
+      neverCommit: true,
+    });
+    const phases: string[] = [];
+
+    const error = await boundedSettlement(
+      executePieceCallable(config, "addComment", ["--message", "milk"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-held-commit",
+        skipReadback: true,
+        onPhase: (phase) => phases.push(phase),
+      }),
+      0.01,
+    ).catch((e) => e);
+
+    // Only the deadline got us out — the skip-readback path was still
+    // parked on the commit acknowledgement, exactly where it must wait.
+    expect(error).toBeInstanceOf(WaitBoundExpired);
+    expect(phases).toEqual(["dispatched"]);
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
+
+  it("reports a deduplicated collision without reading the receipt back", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptExists: true,
+      receiptValue: { commentId: "c-original" },
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-dup-no-readback",
+        skipReadback: true,
+      },
+    );
+
+    // The collision is still a success — the ORIGINAL commit stands and is
+    // durable — but the original outcome is not fetched; a later same-id
+    // call reads it back.
+    expect(result.invocation).toEqual({
+      id: "inv-dup-no-readback",
+      status: "committed",
+      deduplicated: true,
+    });
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
+
+  it("surfaces a commit failure under --no-wait as a normal failure", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      handlerFailureMessage: "Bad message payload",
+    });
+
+    // Skipping the readback must not skip the verdict: a commit that fails
+    // is reported exactly as it would be on the default path.
+    await expect(
+      executePieceCallable(config, "recordMessage", ["--message", "milk"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-failed-commit",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
+  });
+
+  it("requires an invocation id to skip the readback", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+    });
+
+    await expect(
+      executePieceCallable(config, "refresh", [], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/requires an invocation id/);
+
+    // Refused BEFORE dispatch: skipping the readback is only sound when a
+    // later same-id call can fetch the outcome, and that needs the id.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
+  it("keeps the pre-dispatch gate ahead of a readback-skipping dispatch", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await expect(
+      executePieceCallable(
+        config,
+        "recordMessage",
+        ["--json", '{"mesage":"milk"}'],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          invocationId: "inv-no-wait-typo",
+          skipReadback: true,
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "recordMessage"/);
+
+    // A --no-wait caller never sees the settled outcome, so the gate
+    // refusing a bad payload locally — id unspent — matters even more than
+    // usual.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  it("refuses --no-wait for a tool run", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { ok: true },
+    });
+
+    await expect(
+      executePieceCallable(config, "search", ["--query", "tea"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-tool-no-wait",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/--no-wait is not available for tool "search"/);
+
+    // The run was never started: an abandoned half-run would be worse than
+    // the refusal.
+    expect(harness.tracker.toolRunPattern).toBeUndefined();
+  });
+
+  it("refuses --no-wait for a handler that dispatches without a receipt", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+      },
+      withoutSend: true,
+    });
+
+    await expect(
+      executePieceCallable(config, "recordMessage", ["--message", "hi"], {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-set-fallback-no-wait",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(
+      /--no-wait is not available for "recordMessage": this callable dispatches without an invocation receipt/,
+    );
+
+    // Refused before the data write: the set-fallback dispatch would leave
+    // nothing a later same-id call could read an outcome back from.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
+  it("carries the furthest phase as status for an unsettled invocation", () => {
+    expect(invocationJson({ id: "inv-1", status: "dispatched" })).toEqual({
+      invocation: "inv-1",
+      status: "dispatched",
+    });
+    expect(invocationJson({ id: "inv-1", status: "committed" })).toEqual({
+      invocation: "inv-1",
+      status: "committed",
+    });
+  });
+
+  it("closes the in-flight span as detached under --no-wait --verbose", () => {
+    const lines: string[] = [];
+    let t = 3000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 3020;
+    observer.onPhase("dispatched");
+    t = 3050;
+    observer.onPhase("committed");
+    t = 3051;
+    observer.finish("detached");
+    // "settled" would be a lie here — the readback was skipped, so nobody
+    // observed a settlement. The span sequence also documents where
+    // --no-wait stops: after the commit acknowledgement, never before it.
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 20.0ms",
+      "timing: dispatched → committed 30.0ms",
+      "timing: committed → detached 1.0ms",
+    ]);
+  });
+});
+
+/** The address of a backing document in the linked-receipt mock below. */
+interface MockLinkedDoc {
+  id: string;
+  space: string;
+  scope?: "space" | "user" | "session";
+  /** Where inside the backing doc the link points (a link below its root). */
+  path?: (string | number)[];
+}
+
+/** One node of a mock receipt tree: `doc` marks the value at this path as a
+ * reference into another document (on the ROOT node, a stored result that is
+ * itself a reference); children without one live in the enclosing doc. */
+interface MockLinkedNode {
+  doc?: MockLinkedDoc;
+  children?: Record<string, MockLinkedNode>;
+}
+
+/**
+ * A receipt cell whose key()/resolveAsCell traversal mirrors the runner's:
+ * `key(segment)` reports the ENCLOSING doc's address extended by the segment
+ * (the cell's own link), and only `resolveAsCell()` reveals the backing
+ * document a stored reference points at — including at the root, where the
+ * receipt cell reports the receipt's address and resolving reveals whether
+ * the stored result is itself a reference. A collector that skipped the
+ * resolve step would read every path as receipt-internal and emit no links.
+ *
+ * Unresolved wrappers refuse traversal outright (`key()` hands back a
+ * barren cell), pinning that the collector reads descendants from RESOLVED
+ * cells only — a same-document link can redirect elsewhere, and children
+ * live under its target.
+ */
+function linkedReceiptCell(
+  receiptDoc: MockLinkedDoc,
+  value: unknown,
+  root: MockLinkedNode = {},
+): CallableCellLike {
+  const barren: CallableCellLike = {
+    get: () => undefined,
+    key: () => barren,
+  };
+  const build = (
+    node: MockLinkedNode,
+    doc: MockLinkedDoc,
+    pathInDoc: (string | number)[],
+  ): CallableCellLike => {
+    const cell: CallableCellLike = {
+      get: () => value,
+      pull: () => Promise.resolve(value),
+      resolveAsCell: () => cell,
+      getAsNormalizedFullLink: () => ({
+        id: doc.id,
+        space: doc.space,
+        scope: doc.scope,
+        path: pathInDoc,
+      }),
+      key: (segment: string) => {
+        const childNode = node.children?.[segment] ?? {};
+        const resolved = childNode.doc
+          ? build(childNode, childNode.doc, childNode.doc.path ?? [])
+          : build(childNode, doc, [...pathInDoc, segment]);
+        return {
+          get: () => undefined,
+          key: () => barren,
+          resolveAsCell: () => resolved,
+          getAsNormalizedFullLink: () => ({
+            id: doc.id,
+            space: doc.space,
+            scope: doc.scope,
+            path: [...pathInDoc, segment],
+          }),
+        };
+      },
+    };
+    return cell;
+  };
+  const resolvedRoot = root.doc
+    ? build(root, root.doc, root.doc.path ?? [])
+    : build(root, receiptDoc, receiptDoc.path ?? []);
+  return {
+    get: () => value,
+    pull: () => Promise.resolve(value),
+    key: () => barren,
+    resolveAsCell: () => resolvedRoot,
+    getAsNormalizedFullLink: () => ({
+      id: receiptDoc.id,
+      space: receiptDoc.space,
+      scope: receiptDoc.scope,
+      path: receiptDoc.path ?? [],
+    }),
+  };
+}
+
+describe("collectInvocationResultLinks", () => {
+  const receiptLink = { id: "of:receipt-1", space: "did:key:test-home" };
+  const receiptRef = {
+    space: "did:key:test-home",
+    id: "of:receipt-1",
+    scope: "space",
+  };
+
+  it("yields just the receipt for a plain-JSON-only result", () => {
+    const value = { total: 3, tags: ["a", "b"], nested: { deep: true } };
+    const cell = linkedReceiptCell(receiptLink, value);
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+    });
+  });
+
+  it("skips a child key() refuses to address, keeping its siblings' links", () => {
+    // The walk's catch-and-continue: a value entry the receipt cell cannot
+    // address as a child (key() throws) contributes no link and must not
+    // abort the walk — its addressable siblings still annotate.
+    const value = { weird: { x: 1 }, comment: { body: "hi" } };
+    const inner = linkedReceiptCell(receiptLink, value, {
+      children: {
+        comment: { doc: { id: "of:comment-1", space: "did:key:test-home" } },
+      },
+    });
+    // Wrap the RESOLVED root: the outer wrapper is deliberately unresolved
+    // (its own key() refuses traversal), so the throwing key must shadow the
+    // cell the walk actually descends through.
+    const innerRoot = inner.resolveAsCell!();
+    const cell: CallableCellLike = {
+      ...innerRoot,
+      resolveAsCell: () => cell,
+      key: (segment: string) => {
+        if (segment === "weird") throw new Error("not addressable");
+        return innerRoot.key!(segment);
+      },
+    };
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/comment": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+    });
+  });
+
+  it("annotates each hop to a different backing document, rebasing below it", () => {
+    const value = {
+      comment: { body: "hi", author: { name: "b" } },
+      count: 1,
+    };
+    const cell = linkedReceiptCell(receiptLink, value, {
+      children: {
+        comment: {
+          doc: { id: "of:comment-1", space: "did:key:test-home" },
+          children: {
+            author: {
+              doc: {
+                id: "of:author-1",
+                space: "did:key:test-home",
+                scope: "user",
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/comment": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+      // Compared against of:comment-1, not the receipt — each hop is
+      // annotated exactly once, where the document changes. The scope is
+      // part of the address and rides along.
+      "/comment/author": {
+        space: "did:key:test-home",
+        id: "of:author-1",
+        scope: "user",
+      },
+      // No "/comment/body", no "/count": a path inside the same plain JSON
+      // needs no link.
+    });
+  });
+
+  it("addresses an array element reference by its index", () => {
+    const value = { items: [{ t: "inline" }, { t: "linked" }] };
+    const cell = linkedReceiptCell(receiptLink, value, {
+      children: {
+        items: {
+          children: {
+            "1": { doc: { id: "of:item-b", space: "did:key:test-home" } },
+          },
+        },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/items/1": {
+        space: "did:key:test-home",
+        id: "of:item-b",
+        scope: "space",
+      },
+    });
+  });
+
+  it("keeps the sub-document path of a link below a doc's root", () => {
+    const value = { pick: { t: "third entry" } };
+    const cell = linkedReceiptCell(receiptLink, value, {
+      children: {
+        pick: {
+          doc: {
+            id: "of:list-1",
+            space: "did:key:test-home",
+            path: ["entries", 3],
+          },
+        },
+      },
+    });
+    // Without the path the address would name the wrong value — the list
+    // document's root rather than the entry the result actually references.
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/pick": {
+        space: "did:key:test-home",
+        id: "of:list-1",
+        scope: "space",
+        path: ["entries", 3],
+      },
+    });
+  });
+
+  it("escapes pointer-special characters in path keys (RFC 6901)", () => {
+    const value = { "a/b": { linked: true } };
+    const cell = linkedReceiptCell(receiptLink, value, {
+      children: {
+        "a/b": { doc: { id: "of:odd-key", space: "did:key:test-home" } },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/a~1b": {
+        space: "did:key:test-home",
+        id: "of:odd-key",
+        scope: "space",
+      },
+    });
+  });
+
+  it("resolves a result that is itself a reference — a scalar that is its own doc", () => {
+    // The design's motivating case for provenance-beside-the-value: an
+    // inline marker cannot annotate a scalar, and a scalar can be its own
+    // doc. "/" must expose the document that BACKS the value, not the
+    // receipt it was read through — and the receipt address stays available
+    // under the reserved bare key (pointer keys always start with "/", so
+    // no result path can collide with it).
+    const cell = linkedReceiptCell(receiptLink, 42, {
+      doc: { id: "of:answer-1", space: "did:key:test-home" },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, 42)).toEqual({
+      "/": { space: "did:key:test-home", id: "of:answer-1", scope: "space" },
+      receipt: receiptRef,
+    });
+  });
+
+  it("rebases children of a reference-backed root onto its document", () => {
+    const value = { body: "hi", author: { name: "b" } };
+    const cell = linkedReceiptCell(receiptLink, value, {
+      doc: { id: "of:comment-1", space: "did:key:test-home" },
+      children: {
+        author: { doc: { id: "of:author-1", space: "did:key:test-home" } },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+      receipt: receiptRef,
+      "/author": {
+        space: "did:key:test-home",
+        id: "of:author-1",
+        scope: "space",
+      },
+      // No "/body": it lives in the ROOT's backing document — comparing it
+      // against the receipt instead would wrongly annotate every child.
+    });
+  });
+
+  it("carries the receipt's own scope on the root entry", () => {
+    const scoped = {
+      id: "of:receipt-2",
+      space: "did:key:test-home",
+      scope: "session" as const,
+    };
+    expect(
+      collectInvocationResultLinks(scoped, linkedReceiptCell(scoped, {}), {}),
+    ).toEqual({
+      "/": { space: "did:key:test-home", id: "of:receipt-2", scope: "session" },
+    });
+  });
+
+  it("degrades to the root entry alone without a receipt cell to walk", () => {
+    expect(
+      collectInvocationResultLinks(receiptLink, undefined, { a: { b: 1 } }),
+    ).toEqual({ "/": receiptRef });
+  });
+});
+
+describe("piece call --show-links", () => {
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+  const commentValue = {
+    comment: { body: "hi" },
+    count: 1,
+  };
+  const commentReceipt = () =>
+    linkedReceiptCell(
+      // Must match the harness's handlingReceiptLink, or every path would
+      // read as a foreign document.
+      { id: "of:receipt-1", space: "did:key:test-home" },
+      commentValue,
+      {
+        children: {
+          comment: {
+            doc: { id: "of:comment-1", space: "did:key:test-home" },
+          },
+        },
+      },
+    );
+  const handlerOptions = {
+    callableKind: "handler" as const,
+    cellKey: "addComment",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+      required: ["message"],
+    } as JSONSchema,
+  };
+
+  it("emits the links dictionary beside the result", async () => {
+    const harness = createPieceCallableHarness({
+      ...handlerOptions,
+      receiptCell: commentReceipt(),
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-links",
+        showLinks: true,
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-links",
+      status: "settled",
+      result: commentValue,
+      links: {
+        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+        "/comment": {
+          space: "did:key:test-home",
+          id: "of:comment-1",
+          scope: "space",
+        },
+      },
+    });
+    // And the stdout JSON carries it as a sibling of result — beside the
+    // value, never inline in it.
+    const json = invocationJson(result.invocation!);
+    expect(Object.keys(json)).toEqual([
+      "invocation",
+      "status",
+      "result",
+      "links",
+    ]);
+  });
+
+  it("leaves the Invocation JSON untouched without the flag", async () => {
+    const harness = createPieceCallableHarness({
+      ...handlerOptions,
+      receiptCell: commentReceipt(),
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-no-links",
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-no-links",
+      status: "settled",
+      result: commentValue,
+    });
+    expect(invocationJson(result.invocation!)).not.toHaveProperty("links");
+  });
+
+  it("annotates a value-less verb with just the receipt", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptCell: linkedReceiptCell(
+        { id: "of:receipt-1", space: "did:key:test-home" },
+        {},
+      ),
+    });
+
+    const result = await executePieceCallable(config, "refresh", [], {
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+      isStdinTerminal: () => true,
+      invocationId: "inv-void-links",
+      showLinks: true,
+    });
+
+    // No result key — the existence-only receipt stays distinguishable from
+    // a verb that returned a value — but the receipt's address is real and
+    // the caller asked for it.
+    expect(result.invocation).toEqual({
+      id: "inv-void-links",
+      status: "settled",
+      links: {
+        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+      },
+    });
+  });
+
+  it("keeps the tool path unchanged: resultRef stays the tool's address surface", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { ok: true },
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "search",
+      ["--query", "tea"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        showLinks: true,
+      },
+    );
+
+    // Links ride the Invocation JSON, which only handler invocations emit;
+    // the tool's own address already rides resultRef (WS-B), unchanged.
+    expect(result.invocation).toBeUndefined();
+    expect(JSON.parse(result.outputText!)).toEqual({ ok: true });
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+    });
+  });
+
+  it("refuses --show-links with --no-wait, and allows it with a wait", () => {
+    expect(() => resolveWaitControl({ wait: false, showLinks: true })).toThrow(
+      /--show-links needs the receipt readback/,
+    );
+    expect(resolveWaitControl({ showLinks: true })).toEqual({ mode: "settle" });
+    expect(resolveWaitControl({ wait: 5, showLinks: true })).toEqual({
+      mode: "settle",
+      boundSeconds: 5,
+    });
+  });
+});
+
 describe("piece get data errors", () => {
   it("classifies unresolved-path failures as data errors, not usage errors", () => {
     expect(
@@ -2519,7 +3424,11 @@ describe("renderPieceCallOutcome", () => {
   const observerRecorder = () => {
     const finishes: (string | undefined)[] = [];
     return {
-      observer: { finish: (end?: "settled" | "failed") => finishes.push(end) },
+      observer: {
+        finish: (end?: "settled" | "failed" | "detached") => {
+          finishes.push(end);
+        },
+      },
       finishes,
     };
   };

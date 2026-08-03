@@ -12,6 +12,7 @@ import {
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
+  type FabricExecValue,
   type FactoryInput,
   isPattern,
   type JSONSchema,
@@ -42,15 +43,16 @@ export type CellAliasResolver = (
   ignoreSelfAliases: boolean,
 ) => AliasBinding | null | undefined;
 
-export function toJSONWithAliasBindings(
+export function withAliasBindings(
   value: FactoryInput<any>,
   resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
-): JSONValue | undefined {
-  // Turn strongly typed builder values into legacy JSON structures while
-  // preserving alias metadata for consumers that still rely on it.
+): FabricExecValue {
+  // Turn strongly typed builder values into the serialized binding structure:
+  // cell references become `$alias` records, and data leaves come through as
+  // the fabric values they are.
 
   // Convert regular cells and results from Cell.get() to opaque refs
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
@@ -59,7 +61,7 @@ export function toJSONWithAliasBindings(
     const { external, frame } = value.export();
 
     // If this is an external reference, just copy the reference as is.
-    if (external) return external as JSONValue;
+    if (external) return external as FabricExecValue;
 
     // Verify that opaque refs are not in a parent frame
     if (frame !== getTopFrame()) {
@@ -76,7 +78,7 @@ export function toJSONWithAliasBindings(
       ignoreSelfAliases,
     );
     if (alias === null) return undefined;
-    if (alias !== undefined) return alias as unknown as JSONValue;
+    if (alias !== undefined) return alias as unknown as FabricExecValue;
     throw new Error(`Cell not found in pattern aliases`);
   }
 
@@ -115,7 +117,7 @@ export function toJSONWithAliasBindings(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
-      toJSONWithAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
+      withAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,
         i,
       ], seen)
@@ -143,7 +145,7 @@ export function toJSONWithAliasBindings(
   // the conversion above just minted it — after the cell / alias / array
   // handling, which must still win for those forms.
   if (value instanceof FabricPrimitive) {
-    return value as unknown as JSONValue;
+    return value;
   }
 
   // If this is an object or a pattern, process each key recursively.
@@ -176,7 +178,7 @@ export function toJSONWithAliasBindings(
     // won't do correctly. This site will need attention once FabricInstances see
     // real use.
     for (const key in valueToProcess as any) {
-      const jsonValue = toJSONWithAliasBindings(
+      const jsonValue = withAliasBindings(
         valueToProcess[key],
         resolveCellAlias,
         ignoreSelfAliases,
@@ -389,7 +391,7 @@ export function moduleToJSON(module: Module) {
   // the actual pattern structure. This caused "Invalid pattern" errors at runtime
   // because isPattern() check failed on the string.
   //
-  // Why this helps: Using toJSONWithAliasBindings ensures nested $alias bindings
+  // Why this helps: Using withAliasBindings ensures nested $alias bindings
   // get their nesting level incremented properly. Without this, aliases could be
   // bound to a specific doc too early, causing handlers to point at stale docs
   // when the pattern is later executed in a different context.
@@ -400,7 +402,7 @@ export function moduleToJSON(module: Module) {
   if (
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
-    implementation = toJSONWithAliasBindings(
+    implementation = withAliasBindings(
       implementation as unknown as FactoryInput<any>,
     ) as unknown as Pattern;
     return {
@@ -480,7 +482,7 @@ export function moduleToJSON(module: Module) {
 
 // Ambient context: true while serializing the runtime-INTERNAL graph
 // representation (builder-time node serialization via
-// `toJSONWithAliasBindings`, and through it the `$opFallback` eviction
+// `withAliasBindings`, and through it the `$opFallback` eviction
 // fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
 // JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
 // the content-addressed `$patternRef` on top of the graph; internal
@@ -494,7 +496,7 @@ let internalGraphSerialization = false;
 /**
  * Serialize a pattern's full node-graph — the runtime-internal representation
  * (design §7: the graph is internal; the boundary speaks refs-first). Used by
- * `toJSONWithAliasBindings` (builder-time node serialization, which the
+ * `withAliasBindings` (builder-time node serialization, which the
  * `$opFallback` graphs descend from) and debug tooling.
  *
  * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:
