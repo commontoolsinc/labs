@@ -1,8 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
@@ -13,9 +15,23 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 // catch around binding/resolution; the other is the resolution simply coming
 // back undefined, which happens when a node's outputs hold no write redirect
 // the scan can resolve (outputs consisting only of deferred partialCause
-// aliases are the shape seen live). Neither exit may be silent: the pre-sync
-// prevents the cold-cache commit-revert race, and a skipped subtree is
-// otherwise only discoverable by console probing.
+// aliases are the shape seen live). Both hide a skipped subtree that is
+// otherwise only discoverable by console probing, so both emit under the
+// `resume-owned-cells` key with the same identity payload.
+//
+// Their LEVELS differ, and that difference is what these tests pin:
+//
+//   - the catch exit WARNS. Outputs that cannot even be bound are a genuine
+//     failure of an expectation.
+//   - the undefined exit DEBUGS. It is the by-design outcome for outputs made
+//     only of deferred partialCause aliases — #5143 deliberately moved that
+//     case off the throwing path — and the real home pattern takes it several
+//     times per healthy run. Warning there would be noise, not signal.
+//
+// So there are two obligations, and a test each way: the positive cases prove
+// each line still carries what a stranded-piece investigation needs, and the
+// healthy-home case proves an ordinary run stays SILENT at warn level. Putting
+// the debug back to warn fails the latter.
 //
 // resume-output-redirect-partialcause.test.ts asserts the scan's return value;
 // this asserts the consequence at the call site.
@@ -23,42 +39,58 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("resume owned cells skip log");
 const space = signer.did();
 
-const ownedCellWarns = (): number => {
-  const counts = getLoggerCountsBreakdown()["runner"] ?? {};
-  return (counts as Record<string, { warn?: number }>)["resume-owned-cells"]
-    ?.warn ?? 0;
-};
+type Emission = { level: "debug" | "warn"; key: string; parts: unknown[] };
 
 /**
- * Run `fn` with `console.warn` captured. The runner logger writes warns to
- * `console.warn` unless `LOG_TO_STDERR=1`, so that sink is forced off for the
- * duration and restored afterwards.
+ * Record every `debug`/`warn` the runner's logger emits while `fn` runs,
+ * resolving each call's lazy message thunk the way the logger itself does.
+ *
+ * This captures at the logger rather than at the console on purpose: the LEVEL
+ * of the call is what is under test, and reading the console would conflate it
+ * with the runner logger's own configured level (`warn`, so its debug calls
+ * never reach the console at all) and with `LOG_TO_STDERR`.
  */
-const captureWarnings = async (
+const captureRunnerLog = async (
   fn: () => Promise<void>,
-): Promise<unknown[][]> => {
-  const captured: unknown[][] = [];
-  const originalWarn = console.warn;
-  const originalStderrFlag = Deno.env.get("LOG_TO_STDERR");
-  Deno.env.set("LOG_TO_STDERR", "0");
-  console.warn = (...args: unknown[]) => {
-    captured.push(args);
-  };
+): Promise<Emission[]> => {
+  const logger = getLogger("runner") as unknown as Record<
+    "debug" | "warn",
+    (key: string, ...messages: unknown[]) => void
+  >;
+  const emissions: Emission[] = [];
+  const originals = { debug: logger.debug, warn: logger.warn };
+  const record =
+    (level: "debug" | "warn") => (key: string, ...messages: unknown[]) => {
+      emissions.push({
+        level,
+        key,
+        parts: messages.flatMap((message) => {
+          const resolved = typeof message === "function" ? message() : message;
+          return Array.isArray(resolved) ? resolved : [resolved];
+        }),
+      });
+      // Delegate, so the run under test logs exactly as it would in production
+      // (and the logger's own counters stay honest).
+      originals[level].call(logger, key, ...messages);
+    };
+  logger.debug = record("debug");
+  logger.warn = record("warn");
   try {
     await fn();
   } finally {
-    console.warn = originalWarn;
-    if (originalStderrFlag === undefined) Deno.env.delete("LOG_TO_STDERR");
-    else Deno.env.set("LOG_TO_STDERR", originalStderrFlag);
+    logger.debug = originals.debug;
+    logger.warn = originals.warn;
   }
-  return captured;
+  return emissions;
 };
 
-// A sub-pattern node whose whole outputs record holds only a DEFERRED
-// partialCause alias. Such an alias denotes a derived internal cell of the
-// level it was deferred to, never this node's reserved result spot, so
-// firstResolvedOutputRedirect returns undefined for the node as a whole and the
-// walk skips it.
+const skipEmissions = (emissions: Emission[]): Emission[] =>
+  emissions.filter((emission) => emission.key === "resume-owned-cells");
+
+/** The identity payload is the trailing record argument of the log call. */
+const payloadOf = (emission: Emission): unknown =>
+  emission.parts[emission.parts.length - 1];
+
 const childPattern: Pattern = {
   argumentSchema: {},
   resultSchema: {},
@@ -66,7 +98,12 @@ const childPattern: Pattern = {
   nodes: [],
 };
 
-const patternWithUnresolvableSubPatternOutputs = {
+// A sub-pattern node whose whole outputs record holds only a DEFERRED
+// partialCause alias. Such an alias denotes a derived internal cell of the
+// level it was deferred to, never this node's reserved result spot, so
+// firstResolvedOutputRedirect returns undefined for the node as a whole and the
+// walk skips it without an error.
+const unresolvableOutputsPattern = {
   argumentSchema: {},
   resultSchema: {},
   result: {},
@@ -84,66 +121,185 @@ const patternWithUnresolvableSubPatternOutputs = {
   ],
 } as unknown as Pattern;
 
-describe("resume owned-cell walk skip logging", () => {
-  it("warns, with node identity, when a sub-pattern node's outputs resolve to no redirect", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    try {
-      // Seed run: a trivial pattern whose setup writes the result cell's
-      // argument meta link, so the resume below is a real resume.
-      const seedPattern: Pattern = {
-        argumentSchema: {},
-        resultSchema: {},
-        result: {},
-        nodes: [],
-      };
-      const rt1 = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-      });
-      const rc1 = rt1.getCell(space, "owned-cells-skip-log");
-      await rt1.runSynced(rc1, trustExecutable(rt1, seedPattern), {});
-      await rc1.pull();
-      await rt1.dispose();
+// A sub-pattern node whose outputs alias the ARGUMENT doc. On a first run the
+// result cell has no argument meta link yet, so binding the outputs throws and
+// the walk takes its catch exit.
+const unbindableOutputsPattern = {
+  argumentSchema: {},
+  resultSchema: {},
+  result: {},
+  nodes: [
+    {
+      description: "sub-pattern node whose outputs alias the argument doc",
+      module: { type: "pattern", implementation: childPattern },
+      inputs: {},
+      outputs: { $alias: { cell: "argument", path: ["child"] } },
+    },
+  ],
+} as unknown as Pattern;
 
-      const rt2 = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-      });
-      const rc2 = rt2.getCell(space, "owned-cells-skip-log");
-      const resultCellId = rc2.getAsNormalizedFullLink().id;
-      const before = ownedCellWarns();
-      const warnings = await captureWarnings(async () => {
-        try {
-          await rt2.runSynced(
-            rc2,
-            trustExecutable(rt2, patternWithUnresolvableSubPatternOutputs),
+type SkipCase = {
+  name: string;
+  pattern: Pattern;
+  /**
+   * Seed the result cell with a prior run, so the run under test resumes a
+   * stored root whose argument meta link is already written.
+   */
+  seedFirst: boolean;
+  level: "debug" | "warn";
+  message: string;
+  node: string;
+  /** Parts the call carries ahead of the identity payload. */
+  leadingParts: number;
+  /** How the run under test is expected to end. */
+  rejectsWith?: RegExp;
+};
+
+const cases: SkipCase[] = [
+  {
+    name: "outputs resolve to no write redirect",
+    pattern: unresolvableOutputsPattern,
+    seedFirst: true,
+    level: "debug",
+    message:
+      "skipping a sub-pattern node whose outputs resolved to no write redirect",
+    node: "sub-pattern node with no resolvable output spot",
+    leadingParts: 1,
+    // The same outputs that gave the walk nothing to resolve also give
+    // instantiation nothing to anchor the child's identity on, so the run
+    // rejects. Pinned rather than swallowed, so this fixture cannot go green
+    // for some later, unrelated reason.
+    rejectsWith: /requires a write-redirect output binding/,
+  },
+  {
+    name: "outputs cannot be bound",
+    pattern: unbindableOutputsPattern,
+    seedFirst: false,
+    level: "warn",
+    message:
+      "skipping a sub-pattern node whose outputs did not bind or resolve",
+    node: "sub-pattern node whose outputs alias the argument doc",
+    // message, error, payload.
+    leadingParts: 2,
+  },
+];
+
+describe("resume owned-cell walk skip logging", () => {
+  for (const testCase of cases) {
+    it(`logs at ${testCase.level} when a sub-pattern node's ${testCase.name}`, async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const cause = `owned-cells-skip-log-${testCase.level}`;
+      try {
+        if (testCase.seedFirst) {
+          // A trivial pattern whose setup writes the result cell's argument
+          // meta link, so the run under test is a real resume.
+          const seedPattern: Pattern = {
+            argumentSchema: {},
+            resultSchema: {},
+            result: {},
+            nodes: [],
+          };
+          const seedRuntime = new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager,
+          });
+          const seedCell = seedRuntime.getCell(space, cause);
+          await seedRuntime.runSynced(
+            seedCell,
+            trustExecutable(seedRuntime, seedPattern),
             {},
           );
-        } catch {
-          // Instantiation rejects the same outputs (a pattern node needs a
-          // write-redirect output binding); the resume walk must already have
-          // warned and skipped the node by then.
+          await seedCell.pull();
+          await seedRuntime.dispose();
         }
-      });
-      expect(ownedCellWarns()).toBeGreaterThan(before);
-      await rt2.dispose();
 
-      // The warn must carry enough to act on from a production console trace:
-      // which result cell was being resumed, and which node was skipped.
-      const rendered = warnings
-        .filter((args) => args.some((a) => a === "resume-owned-cells"))
-        .map((args) => JSON.stringify(args));
-      expect(rendered.length).toBeGreaterThan(0);
-      const skipLine = rendered.find((line) =>
-        line.includes("resolved to no write redirect")
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+        });
+        const resultCell = runtime.getCell(space, cause);
+        const resultCellId = resultCell.getAsNormalizedFullLink().id;
+        const emissions = await captureRunnerLog(async () => {
+          const run = runtime.runSynced(
+            resultCell,
+            trustExecutable(runtime, testCase.pattern),
+            {},
+          );
+          if (testCase.rejectsWith !== undefined) {
+            await expect(run).rejects.toThrow(testCase.rejectsWith);
+          } else {
+            await run;
+          }
+        });
+        await runtime.dispose();
+
+        const skips = skipEmissions(emissions);
+        const emission = skips.find((candidate) =>
+          candidate.parts[0] === testCase.message
+        );
+        expect(emission).toBeDefined();
+        // The level is the finding: the by-design exit must not warn, and the
+        // genuine binding failure must.
+        expect(emission!.level).toBe(testCase.level);
+        expect(emission!.parts.length).toBe(testCase.leadingParts + 1);
+        // Asserted as a whole object, so a field that silently stops being
+        // populated — `space` and `childPattern` are advertised but only ever
+        // read from a production trace — fails here.
+        expect(payloadOf(emission!)).toEqual({
+          resultCell: resultCellId,
+          space,
+          nodeIndex: 0,
+          node: testCase.node,
+          childPattern: "pattern:nodes=0",
+        });
+        // No emission of the OTHER kind slipped in alongside it.
+        expect(skips.every((candidate) => candidate.level === testCase.level))
+          .toBe(true);
+      } finally {
+        await storageManager.close();
+      }
+    });
+  }
+
+  // The negative half, and the reason the undefined exit is a debug: a healthy
+  // run of the REAL home pattern takes that exit repeatedly. While it was a
+  // warn, this run emitted the warning twice, and CI showed eight occurrences
+  // across passing home tests. This fails if the log goes back to warn — and,
+  // via the "really does take the exit" assertion, also if the branch stops
+  // being reached, so the silence it proves cannot go vacuous.
+  it("stays silent at warn level through a healthy home pattern run", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const patternsRoot = join(import.meta.dirname!, "..", "..", "patterns");
+      const program = await runtime.harness.resolve(
+        new FileSystemProgramResolver(
+          join(patternsRoot, "system", "home.tsx"),
+          patternsRoot,
+        ),
       );
-      expect(skipLine).toBeDefined();
-      expect(skipLine).toContain(resultCellId);
-      expect(skipLine).toContain('"nodeIndex":0');
-      expect(skipLine).toContain(
-        "sub-pattern node with no resolvable output spot",
-      );
+      const homePattern = await runtime.patternManager.compilePattern(program, {
+        space,
+      });
+
+      const resultCell = runtime.getCell(space, "healthy-home-instance");
+      const emissions = await captureRunnerLog(async () => {
+        const home = await runtime.runSynced(resultCell, homePattern, {});
+        await home.pull();
+        await runtime.idle();
+      });
+
+      const skips = skipEmissions(emissions);
+      // The healthy run really does take the skip exit — otherwise the
+      // silence below would prove nothing.
+      expect(skips.length).toBeGreaterThan(0);
+      expect(skips.filter((emission) => emission.level === "warn")).toEqual([]);
+      expect(skips.every((emission) => emission.level === "debug")).toBe(true);
     } finally {
+      await runtime.dispose();
       await storageManager.close();
     }
   });

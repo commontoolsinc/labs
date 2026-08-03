@@ -48,28 +48,38 @@ Always check the actual stored value before assuming a write failed — see
 
 ### A sub-pattern's cell reads as `undefined` at the id you have
 
-A sub-pattern node's output spot exists as **two entity ids that differ only by
-URI scheme**: `of:fid1:<hash>` and `computed:fid1:<hash>`. Both are minted from
-the same cause, so they share a hash — the scheme carries the entity kind, and
-the kind is part of the identity, so these are two distinct entities. See
-[computed cell identity](../../specs/computed-cell-identity.md).
+`instantiatePatternNode` (`packages/runner/src/runner.ts`) binds a sub-pattern
+node's output spot twice, from the same cause, so both mints share a hash:
 
-The runner mints both, for different jobs (`instantiatePatternNode`,
-`packages/runner/src/runner.ts`):
+- the **identity bind** never sees the pattern's `derivedInternalCells`
+  manifest, so it has no entity kind and always lands on `of:fid1:<hash>`. Its
+  job is to name the child result cell as its `resultFor` cause, and it is the
+  spot the resume owned-cell walk keys on;
+- the **value bind** sees the manifest, so it mints under the descriptor's kind
+  — and the child link is sent to whatever that bind produced, so that is the
+  id holding the value.
 
-- **`of:fid1:<hash>` is identity only.** It names the child result cell as its
-  `resultFor` cause, and it is the spot the resume owned-cell walk keys on.
-  Nothing writes a value there.
-- **`computed:fid1:<hash>` holds the value.** The child link is sent to this
-  one, so this is the id to read.
+Whether those are one entity or two therefore depends on the descriptor. The
+URI scheme carries the kind, and the kind is part of the identity (see
+[computed cell identity](../../specs/computed-cell-identity.md)):
 
-A read at the `of:` id therefore returns `undefined` for a perfectly healthy
-piece — that is the expected answer at that id, not evidence that a sub-piece
-is missing. Read the `computed:` id before concluding anything:
+- **descriptor classified `kind: "computed"`** — the value bind mints
+  `computed:fid1:<hash>`, a **distinct entity from `of:fid1:<hash>`, differing
+  only by scheme**. Nothing writes a value at the `of:` id, so a read there
+  returns `undefined` for a perfectly healthy piece — that is the expected
+  answer at that id, not evidence that a sub-piece is missing. Read the
+  `computed:` id before concluding anything;
+- **kindless descriptor** — the classifier declined the node, or
+  `experimental.computedCellIds` is off (see
+  [experimental options](../EXPERIMENTAL_OPTIONS.md)). Both binds land on the
+  same `of:fid1:<hash>` entity, and the child link is written there. A read at
+  the `of:` id returns the value, and there is no `computed:` sibling.
+
+So an `undefined` read is only diagnostic once you have tried both ids:
 
 ```javascript
 // Shown at module scope.
-// Same hash, two kinds — read the computed one for the value.
+// Same hash, two possible kinds — try both before concluding anything.
 await commonfabric.readCell({ space: "did:key:z6Mkm...", id: "of:fid1:HASH" })
 await commonfabric.readCell({
   space: "did:key:z6Mkm...",
@@ -77,12 +87,12 @@ await commonfabric.readCell({
 })
 ```
 
-The same trap applies to any offline scan that enumerates a space by matching
-the `of:fid1:` prefix: it will not see the cells holding sub-pattern children.
-In `cf inspect` output the distinction is there but quiet — it abbreviates ids
-by stripping `of:` while keeping a `computed:` scheme visible, so a bare
-`fid1:<hash>` in a row is the `of:` form and its `computed:` sibling is a
-separate row.
+Where the pair does exist, the same trap applies to any offline scan that
+enumerates a space by matching the `of:fid1:` prefix: it will not see the cells
+holding sub-pattern children. In `cf inspect` output the distinction is there
+but quiet — it abbreviates ids by stripping `of:` while keeping a `computed:`
+scheme visible, so a bare `fid1:<hash>` in a row is the `of:` form and its
+`computed:` sibling, when there is one, is a separate row.
 
 ### What's actually rendered?
 
