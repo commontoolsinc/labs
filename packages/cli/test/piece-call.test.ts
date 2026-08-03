@@ -2494,6 +2494,39 @@ function linkedReceiptCell(
   };
 }
 
+/**
+ * A fully addressable receipt cell that logs every `key()` segment the
+ * walk requests into `requested` (as `/`-joined paths) — the observable
+ * seam for "the walk never addresses inside a live object". Descent is cut
+ * off after a small budget, so an errant walk fails a path assertion
+ * deterministically instead of racing the stack limit, whose overflow the
+ * walk's own addressability catch can swallow.
+ */
+function recordingReceiptCell(
+  doc: MockLinkedDoc,
+  requested: string[],
+  path: string[] = [],
+): CallableCellLike {
+  const cell: CallableCellLike = {
+    get: () => undefined,
+    resolveAsCell: () => cell,
+    getAsNormalizedFullLink: () => ({
+      id: doc.id,
+      space: doc.space,
+      path,
+    }),
+    key: (segment: string) => {
+      if (requested.length >= 32) {
+        throw new Error("fake cell budget exhausted");
+      }
+      const next = [...path, segment];
+      requested.push(next.join("/"));
+      return recordingReceiptCell(doc, requested, next);
+    },
+  };
+  return cell;
+}
+
 describe("collectInvocationResultLinks", () => {
   const receiptLink = { id: "of:receipt-1", space: "did:key:test-home" };
   const receiptRef = {
@@ -2736,34 +2769,38 @@ describe("collectInvocationResultLinks", () => {
     }
     const value = { child: { touch: new FakeStream() } };
     const requested: string[] = [];
-    const recording = (path: string[]): CallableCellLike => {
-      const cell: CallableCellLike = {
-        get: () => undefined,
-        resolveAsCell: () => cell,
-        getAsNormalizedFullLink: () => ({
-          id: receiptLink.id,
-          space: receiptLink.space,
-          path,
-        }),
-        key: (segment: string) => {
-          if (requested.length >= 32) {
-            throw new Error("fake cell budget exhausted");
-          }
-          const next = [...path, segment];
-          requested.push(next.join("/"));
-          return recording(next);
-        },
-      };
-      return cell;
-    };
     const links = collectInvocationResultLinks(
       receiptLink,
-      recording([]),
+      recordingReceiptCell(receiptLink, requested),
       value,
     );
     // The stream itself is addressed — it is a property of the result and
     // may carry a document of its own. Nothing below it is.
     expect(requested).toEqual(["child", "child/touch"]);
+    expect(links).toEqual({ "/": receiptRef });
+  });
+
+  it("addresses nothing when the result is itself a live object", () => {
+    // The same contract at the root: the walk's entry guard — not only the
+    // per-child check — is what keeps a live result's properties
+    // unaddressed. With the guard on children alone, the walk enumerated a
+    // root instance and addressed "scheduler".
+    class FakeScheduler {
+      runtime!: FakeRuntime;
+    }
+    class FakeRuntime {
+      scheduler = new FakeScheduler();
+      constructor() {
+        this.scheduler.runtime = this;
+      }
+    }
+    const requested: string[] = [];
+    const links = collectInvocationResultLinks(
+      receiptLink,
+      recordingReceiptCell(receiptLink, requested),
+      new FakeRuntime(),
+    );
+    expect(requested).toEqual([]);
     expect(links).toEqual({ "/": receiptRef });
   });
 });
