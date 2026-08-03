@@ -58,7 +58,32 @@ security guarantees beyond today's unless trivial (owner,
 2026-08-02); tightening is future work.
 
 **The transaction identity model (RULED, owner 2026-08-03 — the
-modeling that closes ledger LD3 and LD5).** Today every transaction
+modeling that closes ledger LD3 and LD5).** In the owner's words
+(lightly edited):
+
+> In the current state a transaction comes from one client, so one
+> session id and one user principal. Inside the transaction, scopes
+> are named by kind — `scope: "user"` — and it is in memory where
+> that gets mapped to the actual user/session keys, derived from
+> the session that had the commit. In this proposal, execution for
+> all clients — at once, so acting as multiple users — moves to the
+> server, and every derived data step combines into one
+> transaction. That transaction comes from the server itself; it no
+> longer carries user principals and session ids. Those become
+> annotations on the actual changes inside, grouped by action — the
+> scheduling information and CFC enforcement are by action, and so
+> are the user and session keys. So yes, clients can't send keys —
+> or rather they do, but as part of the session overall, not per
+> commit — and we introduce a variant of server-driven commits that
+> do contain those inside. — owner, 2026-08-03
+
+(One sharpening where the quote meets the letter of this spec: "by
+action" is normatively BY ACTION RUN — `action × instance` — per
+the attribution bullet below and serving-loop.md §3c; under fan-out
+one action acts as N principals in one wave, and action granularity
+would merge them.)
+
+Stated normatively, with anchors. Today every transaction
 comes from ONE client, so identity rides the ENVELOPE: the session
 carries the user principal and session id — established once, at
 session open, never sent per commit — and scoped writes inside the
@@ -84,6 +109,33 @@ ONE sanctioned commit variant that carries explicit user/session
 keys inside; §2's read row is the same variant's read half (ledger
 LD5), and the shared key vocabulary the annotations force is ledger
 LD3 (key-vocabulary.md §3).
+
+**Implementer disorientation guide.** Every intuition today's code
+teaches is the ENVELOPE model, so mid-implementation several v2
+shapes look like bugs. If one of these feels wrong, re-read the
+quote above before "fixing" it:
+
+- *"This commit's envelope has no user principal or session id —
+  where does identity come from?"* From inside: the per-action-run
+  annotations. Only `authored` commits still carry identity at the
+  envelope.
+- *"`resolveScopeKey` throws without a principal / would resolve
+  `user:<serviceDID>` here."* That function DERIVES identity from
+  the authenticated session — the client-commit model. Server-side
+  runs never derive identity from their own session: identity
+  arrives WITH the work (the demand, or the stamped `firedAt`) and
+  is carried into keys, not resolved from ambient state (scopes.md
+  §5; key-vocabulary.md §3).
+- *"One transaction writes as MANY different users at once — is
+  that a bug?"* It is the point of the variant: the server acts for
+  every client in one pass, which is exactly why its envelope
+  cannot name one principal.
+- *"Clients get rejected for naming a `scope_key` but the server
+  does not — inconsistent?"* Two halves of one model: a client's
+  keys derive from its session (sent as part of the session
+  overall, never per commit); the lease holder names keys
+  explicitly because no session of its own could supply them (§2's
+  derived and read rows).
 
 Identity at the derived envelope (R-Q6b, RULED, owner 2026-08-02):
 `derived` is a DIFFERENT TRUST CLASS from `authored`. An authored
