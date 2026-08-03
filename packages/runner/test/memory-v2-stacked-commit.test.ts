@@ -2655,6 +2655,43 @@ Deno.test("memory v2 stacked commits: an undecided dependent above the marker su
   }
 });
 
+Deno.test("memory v2 stacked commits: losing the sync consumer applies parked accepts immediately (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const b = beginSet(harness, DOCS.B, valueFor("optimistic"));
+    await assertResultOk(b.promise);
+    assertEquals(hasPendingOverlay(harness, DOCS.B), true);
+
+    // The server revokes the session: the watch view closes and the marker
+    // channel dies with it — no marker can ever arrive for the parked
+    // accept. Teardown must apply it immediately (the legacy verdict-time
+    // semantics), never strand it waiting on frames that cannot come.
+    harness.transport.emitRevoked();
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "parked application at consumer teardown",
+    );
+    expectVisible(harness, { B: valueFor("optimistic") });
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: a server without verdictCatchUpMarkers gets immediate verdict application (CT-1927)", async () => {
   // The DEFAULT harness transport models exactly this old server, so the
   // legacy path is what every other fixture in this file exercises; this

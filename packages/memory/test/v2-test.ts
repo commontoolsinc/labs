@@ -345,6 +345,27 @@ describe("parseMemoryProtocolFlags", () => {
     );
   });
 
+  it("accepts the verdictCatchUpMarkers capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        verdictCatchUpMarkers: true,
+      }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
+        verdictCatchUpMarkers: true,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
   it("accepts the pendingReadStacks capability key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
@@ -420,6 +441,10 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTable: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ verdictCatchUpMarkers: "true" }),
+      null,
+    );
     assertEquals(
       parseMemoryProtocolFlags({ sqliteCommitRowLabelEval: "true" }),
       null,

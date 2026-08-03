@@ -262,6 +262,17 @@ export abstract class ScriptedSessionTransport
       effect: sync,
     });
   }
+
+  /** Revoke the session from the server side: the client terminates it and
+   * closes its watch view — the sync/marker channel dies with it. */
+  emitRevoked(reason: "taken-over" | "unauthorized" = "taken-over"): void {
+    this.respond({
+      type: "session/revoked",
+      space: this.script.space,
+      sessionId: this.script.sessionId,
+      reason,
+    });
+  }
 }
 
 export class SingleSessionFactory implements SessionFactory {
