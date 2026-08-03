@@ -4,7 +4,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 
 import {
   createJsonSchema,
@@ -785,6 +788,38 @@ describe("json-utils", () => {
       const result = withAliasBindings({ payload: bytes } as any) as any;
 
       expect(result.payload).toBe(bytes);
+    });
+
+    it("converts a native to its canonical fabric form", () => {
+      // A `Uint8Array` is NOT a `FabricValue`. Left to the `for...in` copy it
+      // is rebuilt by property name into `{"0":7,"1":9}` -- which IS an inert
+      // plain object and so passes `isFabricValue()`. That is the hazard: not
+      // a lost value, but a legal one meaning something else, stored with no
+      // trace of what it was. A `Date` goes the same way, to `{}`.
+      const fromBytes = withAliasBindings(new Uint8Array([7, 9]) as any) as any;
+      expect(fromBytes).toBeInstanceOf(FabricBytes);
+      expect([...fromBytes.slice()]).toEqual([7, 9]);
+
+      const fromDate = withAliasBindings(new Date(0) as any) as any;
+      expect(fromDate).toBeInstanceOf(FabricEpochNsec);
+
+      const nested = withAliasBindings(
+        { v: new Uint8Array([4, 5]) } as any,
+      ) as any;
+      expect(nested.v).toBeInstanceOf(FabricBytes);
+      expect([...nested.v.slice()]).toEqual([4, 5]);
+    });
+
+    it("leaves ordinary containers alone", () => {
+      // The conversion above must not reach an inert plain object or an array;
+      // those are already fabric values and are walked, not converted.
+      const obj = withAliasBindings({ a: 1, b: "x" } as any) as any;
+      expect(obj).toEqual({ a: 1, b: "x" });
+      expect(obj.constructor).toBe(Object);
+
+      const arr = withAliasBindings([1, "x"] as any) as any;
+      expect(arr).toEqual([1, "x"]);
+      expect(Array.isArray(arr)).toBe(true);
     });
   });
 });

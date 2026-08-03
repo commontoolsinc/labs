@@ -136,7 +136,7 @@ export function withAliasBindings(
   // legal values meaning something else entirely. Nothing downstream can
   // notice, because by then the evidence is gone.
   if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
-    value = shallowFabricFromNativeValue(value) as typeof value;
+    value = shallowFabricFromNativeValue(value);
   }
 
   // A `FabricPrimitive` is an atomic value whose state lives in private fields
