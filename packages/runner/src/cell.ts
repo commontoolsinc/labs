@@ -1129,7 +1129,21 @@ export class CellImpl<T extends FabricValue>
    *          dependencies have been computed.
    */
   pull(): Promise<Readonly<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.synced) {
+      // Register the kicked first sync in the settled pool the convergence
+      // loop below drains. sync() resolves once the doc is confirmed —
+      // arrived or absent — and an UNREGISTERED kick is exactly the race
+      // sync()'s own doc comment warns about: over a low-latency link the
+      // doc lands before the scheduler goes idle, so the read sees it; over
+      // a real network it does not, and pull() resolved from held,
+      // not-yet-loaded state (measured: a same-id retry's receipt readback
+      // returned undefined against a remote host while identical calls
+      // passed against a local toolshed). Failures are swallowed like
+      // link-resolution's kicks: the read still resolves from the replica.
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     // Check if we need to traverse the result to register all dependencies.
     // This is needed when there's no schema or when the schema is TrueSchema ("any"),
