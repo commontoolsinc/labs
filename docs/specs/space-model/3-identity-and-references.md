@@ -58,7 +58,7 @@ Example:
 **`$alias` format** — no longer a link. Generic link recognition and parsing
 (`isWriteRedirectLink`, `parseLink`, `isCellLink`) are sigil-only, so an
 `$alias` record found in data is a plain value. The form survives solely as
-Pattern *binding* vocabulary (produced by `toJSONWithAliasBindings`, consumed
+Pattern *binding* vocabulary (produced by `withAliasBindings`, consumed
 via `isAliasBinding`/`parseAliasBinding`), where it marks intermediate
 bindings — e.g.
 ```json
@@ -68,7 +68,7 @@ bindings — e.g.
 
 The plain-value reading applies to *data* only. Inside a Pattern object the
 interpretation is positional and shape-based with no escape encoding: pattern
-serialization (`toJSONWithAliasBindings`) treats any `$alias`-shaped record it
+serialization (`withAliasBindings`) treats any `$alias`-shaped record it
 encounters as a binding. A literal `{ "$alias": { "path": [...] } }` object
 passed as factory inputs (via `.with(...)`/`.bind(...)`, captured closure
 state, or a pattern's outputs) is therefore not preserved as data: the

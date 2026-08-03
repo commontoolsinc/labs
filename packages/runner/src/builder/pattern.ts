@@ -45,7 +45,7 @@ import {
   type CellAliasResolver,
   moduleToJSON,
   patternToJSON,
-  toJSONWithAliasBindings,
+  withAliasBindings,
 } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
@@ -531,7 +531,7 @@ function factoryFromPattern<T, R>(
     }
   };
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithAliasBindings(
+  const result = withAliasBindings(
     outputs ?? {},
     resolveCellAlias,
     true,
@@ -554,17 +554,17 @@ function factoryFromPattern<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
-    const module = toJSONWithAliasBindings(
+    const module = withAliasBindings(
       node.module,
       resolveCellAlias,
       false,
     ) as unknown as Module;
-    const inputs = toJSONWithAliasBindings(
+    const inputs = withAliasBindings(
       node.inputs,
       resolveCellAlias,
       false,
     )!;
-    const outputs = toJSONWithAliasBindings(
+    const outputs = withAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,
