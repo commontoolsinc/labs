@@ -248,6 +248,10 @@ disabled (README §3.5).
   never envelope identity (R-Q6b, §1) — the explicit `scope_key` on
   every scoped write and the acting principal on every action's
   writes. Anything further needs a spec edit here first.
+- Basis-index rows (serving-loop.md §3b) ride INSIDE the derived
+  commit's store transaction as engine table rows — sanctioned
+  carriage, NOT metadata: nothing crosses the wire, admission never
+  reads them, and the closed list above is not breached by them.
 - All metadata is small and fixed-shape, with one bounded carve-out:
   `consequenceOf` scales with the wave's INPUT (the events drained that
   wave), never with graph size. The v1 failure mode — 130 KB of

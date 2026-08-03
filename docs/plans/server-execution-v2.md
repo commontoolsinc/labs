@@ -76,6 +76,35 @@ Success criteria:
 
 - [ ] Flag registered; a no-op ON arm passes CI identically to OFF.
 
+## Interim postures — who does what, in the arm you are building
+
+One table, one lookup: per milestone, who runs and who commits each
+class of work. Postures BETWEEN the named milestones do not exist as
+shipped states (spec §3.4 — no shippable intermediates); Phase 6
+hardens without changing the posture, so it adds no row. Three
+rulings shape the surprising cells: **L14** — the old Phases 1+2
+merged, so "server derives" and "client does not" ship as ONE state
+and a two-deriver interim never ships (owner, 2026-08-02; Phase 2
+below); **F10** — client HANDLER writes stay authored-class until
+Phase 3, a handler interim, never a derivation interim
+(protocol.md §1's authored row); **D-v2-1** — events become the
+client's only computational commit (spec §3.6).
+
+| milestone | derivations: run by / committed by | handlers: run by / the client commits | effects performed by | client posture |
+| --- | --- | --- | --- | --- |
+| OFF baseline (the OFF arm of every phase until Phase 7) | every client runtime / the clients | the firing client / the handler's writes, as today | the client running the node (cross-tab mutex arbitrates — runtime-mapping.md N44) | today, byte-for-byte; any OFF-arm diff is a phase-gate failure (testing.md §2) |
+| Phase 1 stages A–F (flag OFF throughout) | as OFF baseline — the serving loop lands dark | as OFF baseline | as OFF baseline | unchanged; a local ON flip CAS-storms against still-deriving clients — expected, local-only, never shipped (L14) |
+| Phase 2 ON — server derives, client does not (first ON milestone; L14) | SpaceServer / SpaceServer, derived-class under lease; the client runs the same graph as overlay speculation only | the firing client, authoritatively / its handler writes, still authored-class (F10 — protocol.md §1) | server only (stage F outbox); the client reads effectful nodes through to last committed results | loses exactly one right — committing derivations (by construction); still commits UI-binding writes and handler writes |
+| Phase 3 ON — events down (D-v2-1) | unchanged | SpaceServer, reacting to the event commit / ONLY the event append; the local run is speculative echo, and the client handler-write commit path DELETES (events.md §7 — F10's interim ends) | unchanged | commits nothing but intent: event appends + UI-binding writes; echo via overlay |
+| Phase 4 ON — effect channel | unchanged | unchanged | external effects: server only; session effects (navigate): the server COMPUTES the intent, the client ENACTS and acks by nonce (protocol.md §5) | adds the effects-doc subscription and the enact/ack duty (the ack is an authored write) |
+| Phase 5 ON — cross-space | home SpaceServer over foreign reads, under the piece's granted authority / commits HOME only — never derived into a foreign space (protocol.md §2b) | unchanged; cross-space mutation leaves ONLY as outbox event appends; `.inSpace` provisioning lands authored-class, foreign-first, under the event's acting principal | unchanged; the outbox also carries the cross-space appends | unchanged |
+| Phase 7 flip | SpaceServer only — the OFF path is removed | SpaceServer / events only | server, plus the client-enacted channel | final: speculate freely, commit only intent; flag retired |
+
+A surface a milestone has not yet landed (navigateTo before
+Phase 4, cross-space before Phase 5) has no defined interim
+posture: the ON arm skips it via explicit per-phase skip lists
+(testing.md §2), never silently.
+
 ## Phase 1 — The serving loop, landed dark (six stages, flag OFF)
 
 The executor hosts one committing runtime per space: wake on accepted

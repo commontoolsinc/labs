@@ -64,6 +64,49 @@ per-space check: stream head past `eventWatermark` means undelivered
 events, so activate. A park racing an incoming commit self-heals: the
 hook re-fires on the next admission.
 
+Wiring, by plane. Every byte between these components travels on
+exactly ONE of two planes; the split is what keeps bookkeeping off
+the commit stream (README §3.3):
+
+```
+loopback-runtime plane               direct-engine plane
+(storage protocol — carries every    (raw engine-table access —
+commit the host produces)            carries no commit, ever)
+
+SpaceServer runtime ◄──────────┐     ExecutorHost
+  │ (a)                    (d) │       │ (c)
+  ▼                            │       ▼
+IStorageManager                │     execution_lease table
+  │ (a)                        │     (same engine-v3 store)
+  ▼                            │
+memory server ─────────────────┘
+  │ (b)
+  ▼
+ExecutorHost ── activate ──► SpaceServer
+
+SpaceServer outbox ──(e)──► network; results re-enter via (a)
+```
+
+- **(a) runtime → IStorageManager → memory server**: the ONLY
+  commit path — each wave's one derived commit (final values, basis
+  rows, watermark doc — §3, §3b) and the outbox's AUTHORED commits
+  (cross-space event appends, `.inSpace` provisioning —
+  protocol.md §2b) all enter the store here.
+- **(b) memory server → ExecutorHost**, in-process: the
+  admission-hook activation feed — an authored admission into a
+  space with no live lease activates that space (this section;
+  never a poll).
+- **(c) ExecutorHost → engine tables**: lease acquire and renew by
+  direct table update — the direct-engine plane's ONLY traffic, and
+  a renewal is NEVER a commit (§2).
+- **(d) memory server → runtime**: the space subscription delivers
+  accepted commits from the activation scan's head (§3, §6); the
+  loop's own derived commits return here too and are skipped by
+  class + holder (self-echo, §3).
+- **(e) outbox → network**: post-commit external effects,
+  at-least-once under memo-key dedupe (§4–§5); completions re-enter
+  as derived commits on (a), dirtiness injected in-process (§4).
+
 ## 2. The lease (single-deriver, operationally)
 
 The invariant "derived state has exactly one deriving committer" holds by
@@ -244,6 +287,90 @@ executing:
   persisted forms; commit REPLAY bears nothing — recovery never replays
   (§6). Client reload needs none of this: every derived value is
   committed, so client reload is read-and-render.
+
+The index's DDL, authored (closes scopes.md §8 item 1). This is the
+engine-v3 migration Phase 1 stage C reduces the observation tables
+to. The NORMATIVE content is the columns, the keys, and the drops;
+SQL types and secondary indexes (e.g. an entity-keyed lookup mirror
+of today's `idx_scheduler_read_index_lookup`) are implementation
+detail:
+
+```sql
+-- One standalone table. No FOREIGN KEY clauses anywhere: v1's
+-- satellites all hung off scheduler_observation; the v2 index
+-- references nothing and nothing references it.
+CREATE TABLE scheduler_basis (
+  branch           TEXT,    -- engine-v3 branch, as on every table
+  action           TEXT,    -- durable action identity/fingerprint;
+                            --   restart-stable (a per-process
+                            --   component would empty the index
+                            --   exactly when recovery reads it)
+  action_scope_key TEXT,    -- the INSTANCE that ran (scopes.md §7
+                            --   M2 re-keying; scope_key vocabulary
+                            --   is today's `resolveScopeKey` —
+                            --   packages/memory/v2/engine.ts:98)
+  entity_space     TEXT,    -- the input doc's space: foreign reads
+                            --   are logged reads too (cross-space
+                            --   bullet above)
+  entity           TEXT,    -- the input doc id
+  entity_scope_key TEXT,    -- the input INSTANCE read
+  seq              INTEGER, -- the input's seq at read time, in the
+                            --   entity's own space's sequence;
+                            --   in-wave reads share the wave's
+                            --   commit seq
+  PRIMARY KEY (branch, action, action_scope_key,
+               entity_space, entity, entity_scope_key)
+);
+```
+
+Rules the shape carries, binding:
+
+- **Overwrite in place, per (action, instance)**: a run of
+  (`action`, `action_scope_key`) — scopes.md §8's overwrite unit —
+  REPLACES that instance's rows as a set. Never append beside a
+  previous run's rows: per-run history is the evidence log's
+  signature (§8).
+- **Doc-granular, ids + seqs ONLY**: no path column, no payloads.
+  Path precision stays in-memory in the reactivity log; a JSON path
+  column is the first step back toward evidence.
+- **Carriage**: rows are written INSIDE the wave's derived store
+  transaction (above — never own commits). protocol.md §7 carries
+  the matching sanction, so the closed metadata list stays closed:
+  basis rows ride the commit envelope as table rows, they are not
+  commit metadata.
+- Retirement of a retired session's instance rows belongs to the
+  session-data GC design — OPEN (scopes.md §8).
+
+Dropped WHOLE in the same migration — the payload/history tables,
+the two the new schema replaces, and the write index:
+
+```sql
+DROP TABLE scheduler_observation;         -- payload evidence (§8)
+DROP TABLE scheduler_action_snapshot;     -- per-run history
+DROP TABLE scheduler_observation_replay;  -- replay FORBIDDEN (§6)
+DROP TABLE scheduler_context_floor;       -- nothing left to floor:
+                                          --   it gated SHARED
+                                          --   snapshots across
+                                          --   principals; the v2
+                                          --   index shares nothing
+                                          --   (scopes.md §7, ruled)
+DROP TABLE scheduler_read_index;          -- REPLACED (below)
+DROP TABLE scheduler_action_state;        -- REPLACED (below)
+DROP TABLE scheduler_write_index;         -- write links are
+                                          --   evidence, not basis:
+                                          --   staleness is decided
+                                          --   by READS alone
+```
+
+`scheduler_read_index` and `scheduler_action_state` are REPLACED,
+not reshaped — this section's NEW-schema ruling above. Both FK into
+`scheduler_observation` (dropped, so the spine is gone) and both
+key by `process_generation`, which accumulates per-process history
+where v2 overwrites in place; reshaping would rewrite every column
+and both keys — a replacement wearing an ALTER costume. The plan's
+stage-C criterion is the backstop: after this migration the basis
+index is the ONLY persisted scheduler state besides W and
+`eventWatermark`.
 
 ## 3c. CFC: the enforcement boundary is the action run
 
