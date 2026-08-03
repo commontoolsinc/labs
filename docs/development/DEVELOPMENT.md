@@ -18,6 +18,10 @@ covered in [Dependencies](DEPENDENCIES.md).
 - [Committed-write backpressure](committed-write-backpressure.md) explains how
   the scheduler surfaces or retries a committed write that the server rejects
   under contention.
+- [`data:` cell identifiers](data-uri-identifiers.md) explains the identifiers
+  that carry their own frozen value, why the runtime has both a broad and a
+  narrow test for them, and what follows from there being no document behind
+  one.
 - [Code coverage in CI](COVERAGE.md) explains the runtime and authored-pattern
   coverage mechanisms. Its
   [one-line guard note](deno-coverage-guard-line-artifact.md) explains a V8
