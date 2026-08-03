@@ -131,7 +131,7 @@ Status legend:
 | --- | --- | --- | --- | --- |
 | 59 | Persistent scheduler state (experimental): payload-carrying observation rows, snapshots, replay table, read/write indexes, action state, context floors | tables `packages/memory/v2/engine.ts:153-325`; writer `scheduler/run.ts:667-772`; shape `scheduler/persistent-observation.ts:64-96` | serving-loop §3b | CHANGED |
 | 60 | Rehydration eligibility by execution-context rank (space/user/session) against `completeActionScopeSummary` | `scheduler/facade.ts:184-191`, `210-278`, `927-953` | serving-loop §8 (tripwire identifiers) | GAP |
-| 61 | `completeSchedulerScopeSummary` emission (transformer marker; runner fills addresses) | `scheduler/types.ts:26-33`, `runner.ts:5682-5745`, ts-transformers (4 files) | README §5 (delete list), serving-loop §8 | CHANGED |
+| 61 | `completeSchedulerScopeSummary` / `completeActionScopeSummary` emission (transformer marker; runner fills addresses) — two identifiers, one surface | `scheduler/types.ts:26-33`, `runner.ts:5682-5745`, ts-transformers (4 files) | README §5 (delete list), serving-loop §8 | CHANGED |
 | 62 | Incremental observation adoption (adopt another client's committed run instead of re-running) | `scheduler/facade.ts:1019-1167`, `scheduler/invalidation.ts:39-49` | none | GAP |
 
 ### 1j. Protocol seams the specs assume
@@ -440,9 +440,13 @@ documented pattern feature. "One committing runtime per space"
 answers space-scoped derivations only. RULED 2026-08-02 (batch 3):
 the SpaceServer derives EVERY instance of every scoped node — scope
 keys instances, never authority; scope is discovered by running,
-narrowing is written as redirects, and a narrowing discovery fans
-out per-principal instances in the discovering wave. The normative
-semantics now live in [scopes.md](scopes.md). The alternatives this
+narrowing is written as redirects, and a narrowing discovery writes
+the redirect plus the discovering run's OWN instance, with sibling
+instances materializing on their own demand (scopes.md §2, as
+corrected 2026-08-02). The normative
+semantics now live in [scopes.md](scopes.md), with the
+key-construction inventory in
+[key-vocabulary.md](key-vocabulary.md). The alternatives this
 row weighed (session-scoped derivations as client-speculation-only,
 scoped state reclassified authored-adjacent) are rejected — scoped
 derived state stays derived and server-committed, keeping today's
@@ -479,13 +483,19 @@ observation rows (full read/write address lists,
 `persistent-observation.ts:64-96`) plus snapshot and replay tables
 (`engine.ts:183-238`) — by serving-loop §3b's own test ("payloads or
 per-run history ⇒ evidence"), today's shape is on the *forbidden*
-side of the line, while its `scheduler_read_index` /
-`scheduler_action_state` tables are the kept basis index. v2 must
-therefore *slim* the pre-arc feature, not merely not-extend it:
-basis rows (ids + seqs, overwritten in place) stay; observation
-payload/snapshot/replay rows and the context-floor ladder go or stay
-OFF-arm-only. The context-rank machinery (row 60,
-`facade.ts:184-278`) and `completeSchedulerScopeSummary` emission
+side of the line. An earlier version of this note called
+`scheduler_read_index` / `scheduler_action_state` "the kept basis
+index"; that is WRONG and serving-loop §3b governs: both tables are
+DROPPED and REPLACED by the new `scheduler_basis` schema, not
+reshaped into it (they FK into the dropped `scheduler_observation`
+and key by `process_generation`, which is per-process history where
+v2 overwrites in place). What v2 keeps from the pre-arc feature is
+the DECISION it made — warm start from recorded reads — not any of
+its tables. Defer to serving-loop §3b for the drop list (SEVEN
+tables), the new DDL, and the no-backfill rule. The context-rank
+machinery (row 60,
+`facade.ts:184-278`) and `completeSchedulerScopeSummary` /
+`completeActionScopeSummary` emission
 (row 61) exist *only* to decide cross-context sharing of persisted
 state — with one deriver per space there is nothing to share, so
 both delete with D-2026-08-02, including the four ts-transformers

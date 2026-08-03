@@ -82,14 +82,20 @@ child arrives.
 
 Split contract (protocol.md §5): the SERVED half computes the target
 (existing `navigate-to.ts` logic minus any client assumption) and writes
-`{ nonce, kind: "navigate", args: { target } }` to the firing session's
-effects doc as part of the wave's derived commit. The CLIENT half
+`{ nonce, kind: "navigate", args: { target } }` into the firing
+session's effects INSTANCE — the effects doc addressed by that
+session's `scope_key` (protocol.md §5, T9) — as part of the wave's
+derived commit. The CLIENT half
 subscribes to its effects doc, enacts, acks by nonce. Optimistic
 enactment from the speculative handler run is allowed; the nonce
 reconciles it.
 
-Implementation note: the served half needs the firing session's identity
-— it comes from the event (`firedAt.session`, events.md §1). A
+Implementation note: the served half needs the firing session's
+identity — it comes from the event's `firedAt`, which is
+SERVER-STAMPED from the authenticated commit envelope and carries
+both user and session (events.md §1, protocol.md §2). The served half
+CONSUMES that value; it never re-derives, defaults, or trusts a
+client-supplied one. A
 navigation computed outside any event context (pure derivation) has no
 session, and a server-fired event (`firedAt.session = server`,
 events.md §2) has no client to enact — both are the SAME runtime

@@ -88,10 +88,15 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
 ```
 
 - **(a) runtime → IStorageManager → memory server**: the ONLY
-  commit path — each wave's one derived commit (final values, basis
-  rows, watermark doc — §3, §3b) and the outbox's AUTHORED commits
+  commit path — each wave's one derived commit (final values,
+  watermark doc — §3) and the outbox's AUTHORED commits
   (cross-space event appends, `.inSpace` provisioning —
-  protocol.md §2b) all enter the store here.
+  protocol.md §2b) all enter the store here. Basis-index rows (§3b)
+  travel on this plane too, but as part of the store TRANSACTION —
+  never as part of the commit REPRESENTATION: they are engine table
+  rows, they are not pushed to any subscriber (protocol.md §3), and
+  admission never reads them (protocol.md §7). "On the storage
+  protocol" must not be read as "on the wire".
 - **(b) memory server → ExecutorHost**, in-process: the
   admission-hook activation feed — an authored admission into a
   space with no live lease activates that space (this section;
@@ -253,9 +258,13 @@ executing:
   scope.
 - **Scope discovery is part of read discovery**: a run's scope is the
   narrowest scope of anything it read, so it too is discovered by
-  running. A narrowing discovery writes only the broad-slot redirect;
-  per-principal instances materialize on demand like any other
-  undemanded derivation (scopes.md §2, ruled 2026-08-02 batch 4).
+  running. A narrowing discovery writes the broad-slot redirect AND
+  the discovering run's own instance; SIBLING instances materialize
+  on their own demand like any other undemanded derivation
+  (scopes.md §2, ruled 2026-08-02 batch 4, corrected by the S3
+  review). The redirect write dirties the broad slot's readers in
+  the same wave, and demanded siblings are ordinary demanded work
+  under §3's budget rule.
 - Read sets are authoritative IN MEMORY. Two persisted forms are
   distinguished, and confusing them is how v1 died:
   1. **The basis index (CORRECTNESS-BEARING for recovery)**: compact
@@ -334,12 +343,30 @@ Rules the shape carries, binding:
   Path precision stays in-memory in the reactivity log; a JSON path
   column is the first step back toward evidence.
 - **Carriage**: rows are written INSIDE the wave's derived store
-  transaction (above — never own commits). protocol.md §7 carries
-  the matching sanction, so the closed metadata list stays closed:
-  basis rows ride the commit envelope as table rows, they are not
-  commit metadata.
-- Retirement of a retired session's instance rows belongs to the
-  session-data GC design — OPEN (scopes.md §8).
+  TRANSACTION (above — never own commits). protocol.md §3 and §7
+  carry the matching sanctions, so the closed metadata list stays
+  closed: basis rows are engine table rows on the loopback store
+  transaction, never commit metadata, never pushed, never read at
+  admission.
+- **Narrowing DELETES the rows it stranded** (S4, binding): a run
+  whose DISCOVERED scope is narrower than the instance key its rows
+  are recorded under MUST delete that key's rows for that action, in
+  the SAME wave transaction that writes the narrowed rows. Without
+  this the old key's rows survive forever and §6's re-mark rule
+  re-dirties a zombie at every activation — and a `space`-key zombie
+  has no runnable identity, so it can never overwrite its own rows
+  and never stops being dirty. Deleting is sound for the same reason
+  overwriting is: the rows are a basis cache, not history.
+- **Interim retention is UNBOUNDED, and that is accepted** (S8).
+  Rows at `space` and `user:<p>` keys are touched by no session
+  retirement; main's 32-per-action execution-context cap
+  (`packages/memory/v2/engine.ts:55`) dies with the dropped tables
+  and `scheduler_basis` specifies no replacement bound. The
+  narrowing rule above removes the one case that would grow without
+  a run to overwrite it; everything else is bounded in practice by
+  overwrite-in-place per (action, instance). A real bound is the
+  session-data GC design's job — OPEN, and it must cover
+  non-session keys too (scopes.md §8 item 2).
 
 Dropped WHOLE in the same migration — the payload/history tables,
 the two the new schema replaces, and the write index:
@@ -372,6 +399,76 @@ stage-C criterion is the backstop: after this migration the basis
 index is the ONLY persisted scheduler state besides W and
 `eventWatermark`.
 
+**WARNING — the drop list is SEVEN tables; main's own constant
+enumerates SIX** (D6). `CORE_SCHEDULER_TABLES`
+(`packages/memory/v2/engine.ts:1275-1282`) lists
+`scheduler_observation`, `scheduler_action_snapshot`,
+`scheduler_observation_replay`, `scheduler_read_index`,
+`scheduler_write_index`, `scheduler_action_state` — and does NOT
+include `scheduler_context_floor`, which is created and dropped
+through separate statements (`engine.ts:2233-2245`). An
+implementation that mechanically drives the migration off that
+constant WILL leave the floor table behind and fail the plan's
+stage-C criterion for a reason that reads like a mystery. Drive the
+drop from the seven-table list above, not from the constant.
+
+**NO BACKFILL** (D10). `scheduler_read_index` and
+`scheduler_action_state` rows are NOT migrated into
+`scheduler_basis`. The new table starts empty. A store that had
+opted into `persistentSchedulerState` therefore loses warm start
+ONCE, at the migration — acceptable because the index is a cache:
+the first activation after the migration re-marks everything dirty
+and recomputes, which is exactly what an absent index means (§6). A
+migration that reads old rows would have to reinterpret
+`process_generation` history as overwrite-in-place state, which is
+the reshaping this section already rejected.
+
+**Old client / new server compat is already answered** (D11): the
+capability is negotiated at hello, and a client whose server did not
+advertise `persistentSchedulerState` treats the state as absent and
+runs fresh (`packages/runner/src/storage/v2.ts:2142` — the
+`serverFlags?.persistentSchedulerState !== true` degrade path). A
+server that has migrated advertises nothing to negotiate, so an old
+client takes the same fresh path it already takes today. No version
+handshake is added for this.
+
+**Protocol-layer deletions ride the same migration** (D7). With the
+persisted form gone the flag gates nothing, so the following delete
+WITH the machinery — this is derivable, not a fork, and is listed
+here so no one re-derives it mid-PR:
+
+- the `persistentSchedulerState` experimental flag and its ambient
+  control point (`setPersistentSchedulerStateConfig`);
+- its `serverFlags` capability negotiation at hello (both sides);
+- the `scheduler.snapshot.list` RPC and its client wrapper;
+- `CommitData.schedulerObservation` — the commit-carried
+  observation payload.
+
+**Collateral that "byte-identical" gates do NOT cover** (D9, S7).
+Dev tooling and live docs read these tables directly and break
+silently, since no product test exercises them:
+
+- `packages/state-inspector/scheduler.ts:15-19` (the five-table
+  requirements map) and its readers at `246-281` — the inspector
+  queries every dropped table by name;
+- the `cf inspect` CLI surface that renders that output;
+- `packages/memory/v2/sqlite/guard.ts:16-33` — the `CORE_TABLE_NAMES`
+  blocklist that a pattern statement may never reference: the
+  dropped names come OUT and `scheduler_basis` goes IN, or pattern
+  SQL gains a reachable engine table;
+- the two live specs that describe the persisted form:
+  `docs/specs/persistent-scheduler-state.md` and
+  `docs/specs/scheduler-v2/per-doc-rehydration.md`.
+
+The stage-C PR that carries this migration also deletes the
+certificate surface it ships beside (`completeSchedulerScopeSummary`
+/ `completeActionScopeSummary` — README §5), and that half is NOT a
+hand edit: ~110 fixture files under
+`packages/ts-transformers/test/fixtures/` embed the emitted marker,
+so the GOLDEN-REGENERATION procedure is a required step of the
+change, not a follow-up. Plan Phase 1 stage C sizes the full
+surface.
+
 ## 3c. CFC: the enforcement boundary is the action run
 
 Batching commits MUST NOT coarsen CFC granularity. If flow control
@@ -383,10 +480,19 @@ action's public write. Therefore, normatively:
   logged read set (§3b) — the same Runtime code path as a client today,
   including the existing rejected-write drop
   (`reportDroppedCfcRejectedWrite`, `scheduler/events.ts`).
+- **The unit is the RUN, and a run is `action × instance`** (S5). Say
+  "per action run", never "per action": under scope fan-out ONE
+  action runs N times as N principals inside ONE wave (scopes.md
+  §2), so an action-granular unit would merge N principals'
+  provenance inside the load-bearing enforcement — the same
+  over-tainting this section exists to prevent, one level down.
+  Labels evaluate PER INSTANCE RUN.
 - The wave transaction carries only writes that individually passed
-  their action's check; each write keeps per-action provenance for label
-  purposes (the `cfcFlowLabels` ladder applies unchanged). The commit is
-  transport; enforcement already happened per action, in memory.
+  their action run's check; each write keeps per-action-run
+  provenance for label purposes (the `cfcFlowLabels` ladder applies
+  unchanged), and protocol.md §1/§7 carries attribution at exactly
+  this granularity. The commit is transport; enforcement already
+  happened per action run, in memory.
 - Handler runs are actions: a server-side handler run gets per-run CFC
   exactly as its client run did. D-v2-1 moves WHERE handlers run, never
   the enforcement unit.
@@ -440,6 +546,22 @@ Dropping would be unsound for authored values, which is one more reason
 the classes never share a commit. Whole-wave CAS failure is FORBIDDEN
 (livelock under sustained authored traffic), as are blind derived
 writes (clobber).
+
+**The event REQUEUE above is not events.md §5's event DROP** (T3).
+Two different conflict notions share the vocabulary of this section
+and must not be collapsed:
+
+| | when it applies | consequence |
+| --- | --- | --- |
+| REQUEUE (this section) | the handler RAN and its consequence commit lost a per-doc basis CAS — the event is valid, only raced | rolled back to unconsequenced and retried in a later wave |
+| DROP (events.md §5) | the handler CANNOT RUN AT ALL — its preconditions are gone (target stream/doc deleted, CAS base unrecoverable) | no consequences; a dropped-event notice on the stream entry, `eventWatermark` advances past it |
+
+(The per-doc DROP of a superseded DERIVED WRITE, first bullet above,
+is a third thing again — a write, not an event.) The event-drop
+predicate is stated once, in events.md §5; this section cites it and
+never restates it. A raced event is never dropped, and an unrunnable
+event is never requeued — requeueing one would wedge the stream,
+which is the failure `eventWatermark` advancement exists to prevent.
 
 **Multi-space seals** (`.inSpace(...)` provisioning): one tx writes one
 space by DEFAULT; a tx crosses only via the explicit opt-in chain —
@@ -559,11 +681,15 @@ If any of these identifiers (or obvious synonyms) appear in NEW v2
 code, the survival test was skipped — reject the diff:
 
 `claim`, `candidate`, `settlement`, `fence`, `rank`, `contextKey`,
-`completeSchedulerScopeSummary`, `scopeSummary`, `evidence`,
-`observationReplay`, `shadowRun`, `admissionCertificate`.
+`completeSchedulerScopeSummary`, `completeActionScopeSummary`,
+`scopeSummary`, `evidence`, `observationReplay`, `shadowRun`,
+`admissionCertificate`.
 
 Scope: the tripwires bind NEW v2 code. Main still carries a
-`completeSchedulerScopeSummary`/observation surface pre-deletion; its
+`completeSchedulerScopeSummary` / `completeActionScopeSummary`
+observation surface pre-deletion — the certificate has TWO
+identifiers, and naming only the first has already let inventories
+undercount the surface; its
 removal is tracked as plan Phase 1 work, and the existing main files do
 not trip the list until that deletion lands.
 

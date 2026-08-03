@@ -14,17 +14,23 @@ latencies, no latency quoted above load ~5, causation by ablation.
 
 Main carries no executor (no `packages/runner/src/executor/`, no
 `serverPrimaryExecution` in `packages/memory/v2.ts`) — but it DOES
-carry the certificate/observation surface:
-`completeSchedulerScopeSummary` is emitted and consumed across ~10
-source files (ts-transformers `core/transformers.ts`,
-`schema-injection.ts`, `lift-applied-strategy.ts`,
-`capability-analysis.ts`, plus runner consumers), and
+carry the certificate/observation surface, and it is BIGGER than an
+earlier draft of this paragraph claimed (~10 source files). Measured
+2026-08-02: **~25 source files across FIVE packages** —
+`ts-transformers` (4: `core/transformers.ts`, `schema-injection.ts`,
+`lift-applied-strategy.ts`, `capability-analysis.ts`), `runner` (13),
+`memory` (4), `state-inspector` (3), `cli` (1) — plus **~110 golden
+fixtures** under `packages/ts-transformers/test/fixtures/`, whose
+regeneration is a required step of the change rather than a
+follow-up. The surface has TWO identifiers, not one:
+`completeSchedulerScopeSummary` and `completeActionScopeSummary`; an
+inventory greping only the first undercounts it. Alongside it,
 `persistentSchedulerState` (OFF by default) persists full-JSON
 `scheduler_observation` payloads. Phase 1 is therefore partly a
-REDUCTION OF MAIN — delete that surface, reduce the observation tables
-to the v2 basis index — and partly a build. The spec §5 deletion list
-is enforced by deleting on main and *not rebuilding*, with the survival
-test as the gate on anything that feels needed.
+REDUCTION OF MAIN — delete that surface, replace the observation
+tables with the v2 basis index — and partly a build. The spec §5
+deletion list is enforced by deleting on main and *not rebuilding*,
+with the survival test as the gate on anything that feels needed.
 
 ## Phase 0 — Rulings and guardrails
 
@@ -52,12 +58,25 @@ Tasks:
       keys instances, never authority). Scout complete 2026-08-02:
       scopes.md anchored (§Anchors verified), the five
       main-vs-SpaceServer mismatches M1–M5 recorded (scopes.md §7).
-      Batch-4 closures 2026-08-02: watermark × fan-out (composition —
-      a narrowing writes only the redirect; instances materialize on
-      demand), `scheduler_context_floor` (deletes with the
-      observation machinery), the M3 write path (R-Q6b). scopes.md
-      §8 now carries two residual opens: basis-index DDL authoring +
-      session-data GC design.
+      Batch-4 closures 2026-08-02: watermark × fan-out (composition
+      — undemanded instances never hold W back; corrected below),
+      `scheduler_context_floor` (deletes with the
+      observation machinery), the M3 write path (R-Q6b). Adversary
+      round 3, 2026-08-02: the M3 ruling's READ half is now closed
+      too — reads may name an explicit `entity_scope_key`,
+      admissible only for the space's live lease holder (scopes.md
+      §7 M1, protocol.md §2; ledger LD5, a protocol read-surface
+      change the owner should see), and run identity for
+      non-handler runs is per DEMANDED INSTANCE (scopes.md §5). The
+      batch-4 fan-out closure was CORRECTED: the discovering wave
+      writes the redirect AND its own run's instance, and W waits on
+      demanded siblings (scopes.md §2). The residual open that
+      remains is session-data GC — the basis-index DDL is authored
+      in serving-loop.md §3b — and that GC must cover non-session
+      keys too. Ledger LD3 — who owns the runner-side
+      `resolveScopeKey` twin, and whether the runner may import
+      engine scope-key vocabulary — is UNRESOLVED and blocks
+      Phase 1 stage E.
 - [ ] Name the single flag — NAMED 2026-08-02:
       `EXPERIMENTAL_SERVER_EXECUTION` (RuntimeOptions key
       `serverExecution`), deliberately distinct from v1's
@@ -90,22 +109,22 @@ Phase 3, a handler interim, never a derivation interim
 (protocol.md §1's authored row); **D-v2-1** — events become the
 client's only computational commit (spec §3.6).
 
-| milestone | derivations: run by / committed by | handlers: run by / the client commits | effects performed by | client posture |
-| --- | --- | --- | --- | --- |
-| OFF baseline (the OFF arm of every phase until Phase 7) | every client runtime / the clients | the firing client / the handler's writes, as today | the client running the node (cross-tab mutex arbitrates — runtime-mapping.md N44) | today, byte-for-byte; any OFF-arm diff is a phase-gate failure (testing.md §2) |
-| Phase 1 stages A–F (flag OFF throughout) | as OFF baseline — the serving loop lands dark | as OFF baseline | as OFF baseline | unchanged; a local ON flip CAS-storms against still-deriving clients — expected, local-only, never shipped (L14) |
-| Phase 2 ON — server derives, client does not (first ON milestone; L14) | SpaceServer / SpaceServer, derived-class under lease; the client runs the same graph as overlay speculation only | the firing client, authoritatively / its handler writes, still authored-class (F10 — protocol.md §1) | server only (stage F outbox); the client reads effectful nodes through to last committed results | loses exactly one right — committing derivations (by construction); still commits UI-binding writes and handler writes |
-| Phase 3 ON — events down (D-v2-1) | unchanged | SpaceServer, reacting to the event commit / ONLY the event append; the local run is speculative echo, and the client handler-write commit path DELETES (events.md §7 — F10's interim ends) | unchanged | commits nothing but intent: event appends + UI-binding writes; echo via overlay |
-| Phase 4 ON — effect channel | unchanged | unchanged | external effects: server only; session effects (navigate): the server COMPUTES the intent, the client ENACTS and acks by nonce (protocol.md §5) | adds the effects-doc subscription and the enact/ack duty (the ack is an authored write) |
-| Phase 5 ON — cross-space | home SpaceServer over foreign reads, under the piece's granted authority / commits HOME only — never derived into a foreign space (protocol.md §2b) | unchanged; cross-space mutation leaves ONLY as outbox event appends; `.inSpace` provisioning lands authored-class, foreign-first, under the event's acting principal | unchanged; the outbox also carries the cross-space appends | unchanged |
-| Phase 7 flip | SpaceServer only — the OFF path is removed | SpaceServer / events only | server, plus the client-enacted channel | final: speculate freely, commit only intent; flag retired |
+| milestone | derivations: run by / committed by | handlers: run by / the client commits | effects performed by | scoped state (user/session instances) | client posture |
+| --- | --- | --- | --- | --- | --- |
+| OFF baseline (the OFF arm of every phase until Phase 7) | every client runtime / the clients | the firing client / the handler's writes, as today | the client running the node (cross-tab mutex arbitrates — runtime-mapping.md N44) | cardinality 1 per runtime: each client derives ONLY its own instance, keyed by scope NAME (scopes.md §7 M2) — sound because the identity is the runtime's own | today, byte-for-byte; any OFF-arm diff is a phase-gate failure (testing.md §2). Commits carry a `class`, and every client commit is `authored` — `derived` is never claimed off the flag (protocol.md §1) |
+| Phase 1 stages A–G (flag OFF throughout) | as OFF baseline — the serving loop lands dark | as OFF baseline | as OFF baseline | as OFF baseline; stage E re-keys the vocabulary per instance WITHOUT changing OFF-arm behavior (at cardinality 1 the instance dimension is derivable from the session) | unchanged; a local ON flip CAS-storms against still-deriving clients — expected, local-only, never shipped (L14) |
+| Phase 2 ON — server derives, client does not (first ON milestone; L14) | SpaceServer / SpaceServer, derived-class under lease; the client runs the same graph as overlay speculation only | the firing client, authoritatively / its handler writes, still authored-class (F10 — protocol.md §1) | server only (stage G outbox); the client reads effectful nodes through to last committed results | SpaceServer derives EVERY demanded instance: per-instance run identity (M1, stage F), per-instance keys (M2, stage E), per-`scope_key` push filtering (M4, stage F) — all three MUST be in before this gate | loses exactly one right — committing derivations (by construction); still commits UI-binding writes and handler writes; receives only its own applicable `scope_key`s (protocol.md §3) |
+| Phase 3 ON — events down (D-v2-1) | unchanged | SpaceServer, reacting to the event commit / ONLY the event append; the local run is speculative echo, and the client handler-write commit path DELETES (events.md §7 — F10's interim ends) | unchanged | handler consequences land in the ACTING principal's instances, resolved from the server-stamped `firedAt` (scopes.md §5, protocol.md §2) | commits nothing but intent: event appends + UI-binding writes; echo via overlay |
+| Phase 4 ON — effect channel | unchanged | unchanged | external effects: server only; session effects (navigate): the server COMPUTES the intent, the client ENACTS and acks by nonce (protocol.md §5) | the effects doc is itself a session-scoped instance; the ack is written into the session's own instance (protocol.md §5) | adds the effects-doc subscription and the enact/ack duty (the ack is an authored write) |
+| Phase 5 ON — cross-space | home SpaceServer over foreign reads, under the piece's granted authority / commits HOME only — never derived into a foreign space (protocol.md §2b) | unchanged; cross-space mutation leaves ONLY as outbox event appends; `.inSpace` provisioning lands authored-class, foreign-first, under the event's acting principal | unchanged; the outbox also carries the cross-space appends | foreign reads name their instance explicitly, lease-holder-only (protocol.md §2's read row) | unchanged |
+| Phase 7 flip | SpaceServer only — the OFF path is removed | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2) | final: speculate freely, commit only intent; flag retired |
 
 A surface a milestone has not yet landed (navigateTo before
 Phase 4, cross-space before Phase 5) has no defined interim
 posture: the ON arm skips it via explicit per-phase skip lists
 (testing.md §2), never silently.
 
-## Phase 1 — The serving loop, landed dark (six stages, flag OFF)
+## Phase 1 — The serving loop, landed dark (seven stages, flag OFF)
 
 The executor hosts one committing runtime per space: wake on accepted
 commit, run the affected graph to fixpoint, commit derived changes. No
@@ -113,15 +132,16 @@ shadow pass, no claims, no evidence log. Placement from input links;
 activation resolves demanded values and queued events — there is no
 piece-start policy (serving-loop.md §1, RULED 2026-08-02).
 
-The six-PR cut below lands with the FLAG OFF THROUGHOUT: every stage
-merges with the OFF arm byte-identical to today, and no stage makes
-the ON arm a shipped state. The first ON-arm milestone is Phase 2's,
+The seven-stage cut below lands with the FLAG OFF THROUGHOUT: every
+stage merges with the OFF arm byte-identical to today, and no stage
+makes the ON arm a shipped state. The first ON-arm milestone is
+Phase 2's,
 merged from the old Phases 1+2 (owner, 2026-08-02): server derives
 AND client does not — a two-deriver interim never ships. A dev may
 flip the flag locally mid-Phase-1 and will see CAS storming between
 the server and still-deriving clients; expected, local-only, fine.
 
-Stages, one PR each:
+Stages, one PR each except C, which is a three-PR train (below):
 
 - [ ] **A — flag + commit class + CI**: register the single flag
       (Phase 0's naming; `EXPERIMENTAL_OPTIONS.md`, OFF is today
@@ -133,45 +153,107 @@ Stages, one PR each:
       migration — none exists on main; v1-branch shape as prior art),
       the acquire/renew/expire cycle, and the derived-class admission
       equality check (serving-loop.md §2).
-- [ ] **C — main reduction**: delete main's certificate surface —
-      `completeSchedulerScopeSummary` emission (ts-transformers) and
-      every consumer (runner); reduce the observation tables to the
-      v2 basis index — standalone `(action, entity, seq)` rows,
-      keyed per scope INSTANCE (scopes.md §8), replacing the
-      full-JSON payload form (serving-loop.md §3b);
-      `scheduler_context_floor` deletes with them — nothing is left
-      to floor once the index is per-instance (scopes.md §7, ruled
-      2026-08-02).
+- [ ] **C — main reduction** (a THREE-PR TRAIN, not one PR — the
+      surface is ~25 source files across five packages plus ~110
+      goldens, and the seams below are where it cuts cleanly):
+  - [ ] **C.1 — emission + consumers + goldens**: delete
+        `completeSchedulerScopeSummary` /
+        `completeActionScopeSummary` emission (ts-transformers) and
+        every consumer (runner), and REGENERATE the ~110 fixtures
+        under `packages/ts-transformers/test/fixtures/` in the same
+        PR. Deleting at the source collapses the rest (spec §4's
+        measured lesson).
+  - [ ] **C.2 — protocol + engine + client + tools**: replace the
+        observation tables with the v2 basis index — standalone
+        `(action, entity, seq)` rows keyed per scope INSTANCE
+        (scopes.md §8), NOT reshaped from `scheduler_read_index` /
+        `scheduler_action_state`, which drop with the rest
+        (serving-loop.md §3b). Drive the migration off §3b's
+        SEVEN-table list, not off `CORE_SCHEDULER_TABLES`
+        (`packages/memory/v2/engine.ts:1275-1282`), which enumerates
+        six and omits `scheduler_context_floor`. NO BACKFILL — the
+        new table starts empty and opted-in stores lose warm start
+        once (§3b). Carry the protocol-layer deletions that fall out
+        with it: the `persistentSchedulerState` flag, its
+        `serverFlags` hello negotiation, the
+        `scheduler.snapshot.list` RPC, and
+        `CommitData.schedulerObservation`; old-client compat is the
+        existing hello-degrade path
+        (`packages/runner/src/storage/v2.ts:2142`). Collateral that
+        no byte-identical gate covers: `packages/state-inspector`
+        (`scheduler.ts:15-19`, `246-281`), the `cf inspect` surface
+        that renders it, and
+        `packages/memory/v2/sqlite/guard.ts:16-33` — drop the dead
+        names from the `CORE_TABLE_NAMES` blocklist and ADD
+        `scheduler_basis`.
+  - [ ] **C.3 — flag retirement + doc archival**: retire the
+        `persistentSchedulerState` entry in
+        `EXPERIMENTAL_OPTIONS.md`, and archive
+        `docs/specs/persistent-scheduler-state.md` plus
+        `docs/specs/scheduler-v2/per-doc-rehydration.md`'s account of
+        the persisted form per the documentation lifecycle.
 - [ ] **D — seal-into-wave**: action transactions seal into the wave
       accumulator server-side; per-doc CAS with per-write-class
-      conflict handling; CFC stays per action run
-      (serving-loop.md §3c–§3d).
-- [ ] **E — host + SpaceServer + watermark + gates**: executor host,
+      conflict handling; CFC stays per action RUN — `action ×
+      instance`, never per action (serving-loop.md §3c–§3d).
+- [ ] **E — instance re-keying (scopes.md §7 M2)**, declared
+      **OFF-ARM NEUTRAL**: re-key the scheduler, the dependency
+      graph, and the basis index from scope NAME to scope INSTANCE
+      at every site in
+      [key-vocabulary.md](../specs/server-side-execution/key-vocabulary.md).
+      Neutrality is structural, not a hope: in the OFF arm scoped
+      cardinality is 1 per runtime, so the instance dimension is
+      derivable from the authenticated session and the re-keyed form
+      computes the same partition today's name-keyed form does.
+      This is the single biggest scope cost of the arc (scopes.md §7
+      M2) and it is landed DARK, ahead of anything that depends on
+      it — which is why it is its own stage rather than a task
+      inside F. LD3 (who owns the runner-side `resolveScopeKey` twin,
+      and whether importing engine vocabulary into the runner is
+      legal layering) MUST be ruled before this stage builds.
+- [ ] **F — host + SpaceServer + watermark + gates**: executor host,
       per-space activation/park with demand-driven value pull — no
       per-piece start/stop (serving-loop.md §1, §3); pure structural
-      built-ins served (spec §3.5 row 1); pattern-source watcher +
+      built-ins served (spec §3.5 row 1); **M1 — per-instance run
+      identity**: a derivation runs per DEMANDED instance and the
+      demand supplies the identity, handlers take the event's
+      server-stamped actor, and reads name their
+      `entity_scope_key` explicitly under the lease (scopes.md §5,
+      §7 M1; protocol.md §2); **M4 — push keyed by `scope_key`**:
+      dirtiness and delivery both key by `scope_key`, and a
+      subscriber receives only its applicable set (protocol.md §3);
+      pattern-source watcher +
       hot-swap in the SpaceServer — the `systemPatternAutoUpdate`
       posture flips server-side (serving-loop.md §3e;
       `pattern-update-testing.md` scenarios are the acceptance
       surface); the watermark doc + `derivedThrough` +
       `waitForSettled(space, seq)` (protocol.md §4, testing.md §3);
       the §7 counters.
-- [ ] **F — effectful + outbox**: serve `fetch*`, `generate*`,
+- [ ] **G — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
       performed only here (effect authority per README §3.8; quota
       attribution deferred); recovery = basis-index re-marking,
       recompute pure nodes, reuse memoized effect results, no replay
       (serving-loop.md §4–§6).
 
+M1, M2 and M4 (scopes.md §7) are therefore all landed BEFORE the
+first ON gate, by name: M2 is stage E, M1 and M4 are stage F tasks.
+Phase 2 flips ON with the SpaceServer deriving scoped instances on
+per-instance machinery — never on scope-NAME-keyed machinery.
+
 Success criteria (flag OFF — the ON gates are Phase 2's):
 
 - [ ] Every stage lands with the OFF arm byte-identical to today
       (testing.md §2); the ON arm runs in CI from stage A with
       explicit skip lists, never silent filtering.
-- [ ] Stage C leaves no `completeSchedulerScopeSummary` reference on
+- [ ] Stage C leaves no `completeSchedulerScopeSummary` or
+      `completeActionScopeSummary` reference on
       main, no full-JSON observation payload tables, and no
       `scheduler_context_floor`; the basis index is the only
       persisted scheduler state besides W and `eventWatermark`.
+- [ ] Stage E lands with the OFF arm byte-identical: the re-keyed
+      vocabulary partitions state exactly as the scope-NAME form did
+      at cardinality 1.
 
 ## Phase 2 — Flag ON: server derives and the client does not
 

@@ -26,12 +26,28 @@ An event is an **authored append to a stream document**:
   "stream": <entity link to the stream doc>,
   "eventId": <durable id from event-identity>,     // client-minted
   "payload": <JSON>,                                // see §3
-  "firedAt": { "session": <sessionId>, "clientSeq": n }
+  "firedAt": {                    // SERVER-STAMPED — see below
+    "user": <principal DID>,      //   from the commit envelope
+    "session": <sessionId>,       //   from the commit envelope
+    "clientSeq": n                //   client-minted; orders one
+  }                               //   session's own appends only
 }
 ```
 
 Admission (protocol.md §2): append authority on the stream doc + CAS.
 Nothing about the event says or implies "I ran something."
+
+**Field provenance, normatively (T1 + S6).** `eventId` and `firedAt`
+are ENVELOPE fields for admission, not payload — admission reads
+both (protocol.md §2, §7). `firedAt` is **server-stamped**: the
+memory server writes `user` and `session` from the authenticated
+commit envelope at admission, and a client-supplied `firedAt` that
+disagrees is REJECTED, never corrected. It carries the USER as well
+as the session because scopes.md §5 resolves a handler's scoped
+reads and writes against the acting user; deriving the user from the
+append later would reintroduce exactly the binding the stamp already
+made. `payload` is the only client-authored content field, and
+`clientSeq` the only client-minted part of `firedAt`.
 
 The shape is settled as specced — every field above is load-bearing
 (RULED 2026-08-02); a later follow-up adds integrity provenance to
@@ -63,6 +79,14 @@ handler fires
   are otherwise identical. One path, two producers. When the target
   stream lives in ANOTHER space, the append travels via the outbox as an
   authored commit — the only cross-space mutation (protocol.md §2b).
+  **A SESSIONLESS actor has no session instance**: if such a handler
+  run attempts a SESSION-SCOPED write, there is no instance to write
+  — that is a runtime ERROR naming this bullet, not a fallback to
+  the space instance and not a silently minted session. It is the
+  same rule, for the same reason, as the sessionless `navigateTo`
+  error (builtins.md §4); scopes.md §5 states the scope-side half.
+  User-scoped writes under a server-fired event are equally an error
+  unless the event carries an acting user.
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
   beyond the space's commit sequence — same as today.
@@ -148,17 +172,39 @@ handler-run provenance records.
   the consequence — else a poison event wedges the stream), push.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
-  in fired order. A discharged event whose handler run CONFLICTS with
-  state that landed meanwhile is DROPPED — no consequences commit —
-  and the client MUST be signaled so the UI can react: a
-  dropped-event notice naming the eventId and the reason, written as
-  that event's consequence (advancing `eventWatermark` past it — the
-  same non-wedging rule as the error case above). The UI treatment
-  itself is a follow-up: components that send authored commits
-  already handle conflict feedback gracefully today, and events
-  reuse that posture. The speculative echo stands while offline;
-  reconciliation is ordinary (speculation.md §4), and the notice
-  retires the dropped event's overlay entries like any consequence.
+  in fired order. A discharged event whose PRECONDITIONS are gone is
+  DROPPED — no consequences commit — and the client MUST be signaled
+  so the UI can react.
+
+  **The DROP predicate, named once (T3).** An event drops iff its
+  handler CANNOT RUN AT ALL against current state: the target stream
+  or a doc the handler must write was deleted meanwhile, or the CAS
+  base the append was minted against is unrecoverable. The test is
+  "no runnable handler", never "the run raced". Do NOT confuse this
+  with serving-loop.md §3d's REQUEUE, which is the opposite
+  situation: there the event RAN and only its consequence commit lost
+  a per-doc basis CAS, so the event is still valid and is rolled back
+  to unconsequenced and retried. Drop = the event is unrunnable;
+  requeue = the event is fine and the commit was raced. §3d cites
+  this predicate rather than restating it.
+
+  **Where the notice lives, and when it retires (T7).** The
+  dropped-event notice — `{ status: "dropped", reason }` naming the
+  eventId — is a FIELD ON THE STREAM DOC'S OWN ENTRY for that event,
+  written as that event's consequence and advancing `eventWatermark`
+  past it (the same non-wedging rule as the error case above). No new
+  doc, no commit-metadata replay to depend on: the client re-reads
+  the stream on reconnect, so the notice survives reconnect by
+  construction. It RETIRES with its entry when the stream compacts
+  below `eventWatermark` (§4's compaction allowance) — the notice
+  never outlives the entry it annotates, and nothing accumulates.
+
+  The UI treatment itself is a follow-up: components that send
+  authored commits already handle conflict feedback gracefully
+  today, and events reuse that posture. The speculative echo stands
+  while offline; reconciliation is ordinary (speculation.md §4), and
+  the notice retires the dropped event's overlay entries like any
+  consequence.
 - Duplicate submission (client retry after ambiguous network outcome):
   the append is CAS-guarded by `eventId` uniqueness above the dedupe
   horizon (§4) — a duplicate of a not-yet-consequenced event is

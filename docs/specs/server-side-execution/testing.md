@@ -75,7 +75,7 @@ v2 gate set. Existing product tests double as gates where noted.
 
 | phase | gate tests |
 | --- | --- |
-| 1 | stages A–F land dark: OFF arm byte-identical per stage (§2); ON arm runs in CI with explicit skip lists (no ON gates — the first ON milestone is Phase 2's) |
+| 1 | stages A–G land dark: OFF arm byte-identical per stage (§2), stage E's instance re-keying included (OFF-arm neutral by construction); ON arm runs in CI with explicit skip lists (no ON gates — the first ON milestone is Phase 2's) |
 | 2 | `sx2-serving-loop` (counters, amplification, restart-memo) and `sx2-speculation` (echo latency, overlay retirement, zero client derived commits); existing `counter`, `cfc-group-chat-demo-multi-runtime` in ON arm; byte-identical suite both arms |
 | 3 | `sx2-events` (two-user lunch poll via server handlers; kill-between-event-and-consequence restart; duplicate-submit rejection; rapid-fire coalescing: N events fired faster than wave time yield ≪N derived commits and final-only values); propagation ≤300 ms p50 measured on `lunch-poll-vote` UNMODIFIED |
 | 4 | `sx2-effect-channel` (navigate intent/ack; reload between intent and ack; optimistic-enact reconcile); existing `topics-navigation` ON |

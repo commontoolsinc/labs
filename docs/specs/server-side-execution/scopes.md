@@ -52,7 +52,10 @@ runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
 - **Dirtiness**: storage-side reader matching is by exact
   `scope_key` (`packages/memory/v2/engine.ts:3024-3066`); the
   client dependency graph is keyed by scope NAME only —
-  `${space}/${scope}/${id}` (`scheduler/keys.ts:6-8`).
+  `${space}/${scope}/${id}` (`entityKey`,
+  `scheduler/keys.ts:5-9`). The full inventory of key-construction
+  sites that carry the scope NAME is
+  [key-vocabulary.md](key-vocabulary.md).
 
 ## 1. North star
 
@@ -120,16 +123,27 @@ faced them:
   many instances a node has depends on the scope its runs discover
   and on how many principals exist at that scope — and principals
   keep arriving (a new session, a new user) after the narrowing.
-- **A narrowing discovery writes ONLY the redirect (RULED
-  2026-08-02, batch 4).** Fan-out is a cardinality fact, not a wave
-  event: the discovering wave writes the broad-slot redirect and
-  nothing more; instances MATERIALIZE ON DEMAND, like any other
-  undemanded derivation (demand-driven materialization,
-  serving-loop.md §1/§3b — a subscription or an event is the
-  demand). This also closes watermark × fan-out by composition: W
-  covers DEMANDED derivations only (protocol.md §4), so it never
-  waits on undemanded instances — a narrowing multiplies ADDRESSES,
-  never a wave's work.
+- **A narrowing discovery writes the redirect AND the discovering
+  run's OWN instance (RULED 2026-08-02, batch 4; corrected S3).**
+  Fan-out is a cardinality fact, not a wave event — but the
+  discovering run is itself a run at some instance, and it has a
+  value to write. So the discovering wave writes exactly two things:
+  the broad-slot redirect, and the value at the discovering run's own
+  instance address. SIBLING instances (every other principal at that
+  scope) materialize on THEIR OWN demand, like any other undemanded
+  derivation (demand-driven materialization, serving-loop.md §1/§3b
+  — a subscription or an event is the demand).
+  Watermark × fan-out closes by composition, but state the bound
+  exactly: W covers DEMANDED derivations (protocol.md §4), so a wave
+  DOES wait on demanded siblings — several subscribers demanding
+  several instances is ordinary demanded work, bounded like all wave
+  work by serving-loop.md §3's budget-exhaustion rule (an
+  unquiescing cascade commits and does not advance W). Only
+  UNDEMANDED siblings are free. A narrowing multiplies ADDRESSES;
+  what it costs a wave is exactly what is demanded of it.
+  Note also that the redirect write is an ordinary write: it dirties
+  the broad slot's readers IN THE SAME WAVE, so those readers
+  recompute against the redirect before the wave quiesces.
 - **This is NEW complexity, and v2 owns it.** Today's client
   scheduler never faced fan-out: per client runtime, scoped
   cardinality is exactly 1 — each client computes only its own
@@ -173,12 +187,14 @@ stays — and it retires when its session retires. "Session" does NOT
 mean "short": a mobile app may be one very long session; nothing
 may treat session instances as ephemeral or cache-like.
 
-The lifecycle MIRRORS the client-effect doc's (protocol.md §5): a
-session is minted at connect, persists across reloads, and retires
-explicitly on logout or by TTL; a retired session's scoped
-instances retire with it, exactly as its effects doc does. **ONE
-retirement rule for both** — session-scoped derived state and the
-effects doc retire together, under the same rule.
+The lifecycle IS the client-effect doc's, not a mirror of it
+(protocol.md §5, T9: the effects doc is itself a session-SCOPED
+instance keyed by `scope_key`, not a path convention). A session is
+minted at connect, persists across reloads, and retires explicitly
+on logout or by TTL; a retired session's scoped instances retire
+with it, its effects instance among them. **ONE retirement rule for
+both** — because there are not two mechanisms to reconcile, only
+one kind of session-scoped instance.
 
 FORBIDDEN: a second session-lifecycle mechanism.
 
@@ -199,16 +215,36 @@ apply as written (speculation.md §1–§4).
 ## 5. Events: consequences land in the actor's instances (S4)
 
 Handler consequences land in the ACTING principal's scoped
-instances. The event names its actor — `firedAt` gives user +
-session — so the server-side handler run resolves scoped reads and
-writes against THAT principal, never against a SpaceServer-ambient
-identity. (events.md §1's sketched shape spells only the session;
-whether `firedAt` carries the user explicitly or derives it from
-the authenticated append is a shape detail the 2026-08-02 scout
-pass did not settle; it stays with the Phase 0 review. The wider
-served-effect identity surface is RULED — R-Q6b: attribution within
-the derived commit, never a SpaceServer-ambient identity
-(protocol.md §1/§7; runtime-mapping.md N57).)
+instances. The event names its actor — `firedAt` carries BOTH user
+and session, SERVER-STAMPED from the authenticated commit envelope
+at admission (events.md §1, protocol.md §2; a disagreeing
+client-supplied value is rejected, never corrected) — so the
+server-side handler run resolves scoped reads and writes against
+THAT principal, never against a SpaceServer-ambient identity. This
+is settled, not a shape detail: the earlier "whether `firedAt`
+carries the user explicitly" hedge is CLOSED — it does, and it is
+stamped. The wider served-effect identity surface is RULED —
+R-Q6b: attribution within the derived commit, never a
+SpaceServer-ambient identity (protocol.md §1/§7;
+runtime-mapping.md N57).
+
+**A sessionless actor has no session instance.** A server-fired
+event (`firedAt.session = "server"`, events.md §2) whose handler
+attempts a SESSION-SCOPED write is a runtime ERROR — there is no
+instance to write, and neither falling back to the space instance
+nor minting a session is permitted. Same for a user-scoped write
+with no acting user. This is the same rule as the sessionless
+`navigateTo` error (builtins.md §4), stated on the scope side.
+
+**Run identity, for runs that are NOT handlers (S1).** A derivation
+has no `firedAt` to read, and the SpaceServer's own envelope is not
+an answer (it would resolve `user:<serviceDID>` and silently read an
+empty instance — protocol.md §2). The rule: a derivation runs PER
+DEMANDED INSTANCE, and the DEMAND supplies the identity — a
+subscribing client demands its own instance, and the run reads and
+writes as that instance. Before any narrowing, a node runs at SPACE
+scope and needs no principal at all. Handlers are the other case and
+take the event's actor, above. Those are the only two sources.
 
 An event MAY operate ENTIRELY within user or session scope: when
 the state a handler modifies is user- or session-scoped, its
@@ -246,13 +282,32 @@ Phases 1–5 meet them wherever scoped state appears.
   (`packages/memory/v2/engine.ts:3990-4004`). → v2: the server must
   evaluate per-instance just to DISCOVER per-instance scope — N
   runs under N identities, with N time-varying (§2).
+  The READ side is the half R-Q6b did not cover, and it is now
+  RULED (S1, ledger LD5): reads may name an explicit
+  `entity_scope_key`, admissible ONLY for the space's live lease
+  holder (protocol.md §2's read row) — the same trust argument and
+  the same one equality check as derived writes. Without it a
+  SpaceServer read under its service envelope resolves
+  `user:<serviceDID>` and returns an EMPTY instance silently:
+  `resolveScopeKey` (`packages/memory/v2/engine.ts:98-126`) throws
+  on a MISSING principal, never on a wrong one. Which identity a
+  run assumes is §5's run-identity rule.
 - **M2 — Every in-memory identity key uses the scope NAME, never
   the scope_key.** `getDocKey` (`runner.ts:3201-3204`), `entityKey`
-  (`scheduler/keys.ts:6-8`), `byScope` (`runner.ts:5068`) — all
-  `${space}/${scope}/${id}`, sound only at cardinality 1;
-  per-instance keying exists only in storage columns. → v2: the
-  scheduler, the dependency graph, and the basis index must re-key
-  per instance — the single biggest scope cost of the arc.
+  (`scheduler/keys.ts:5-9`), `byScope` (`runner.ts:708`,
+  `5068-5092`, `5456`) — all `${space}/${scope}/${id}`, sound only
+  at cardinality 1; per-instance keying exists only in storage
+  columns. Three subsystems is an UNDERCOUNT: the same scope-NAME
+  key shape is built at `data-updating.ts:102` (`seedMemoKey`),
+  `traverse.ts:1693` and `traverse.ts:1962` (`getTrackerKey`),
+  `storage/v2.ts:1247` (pending-load key),
+  `storage/transaction/address.ts:4` (`toString`), and
+  `scheduler/graph-snapshot.ts:245` (`formatAddress`). All nine
+  sites, with their required instance dimension and OFF-arm-neutral
+  form, are inventoried in
+  [key-vocabulary.md](key-vocabulary.md). → v2: the scheduler, the
+  dependency graph, and the basis index must re-key per instance —
+  the single biggest scope cost of the arc.
 - **M3 — There is no all-principals write path.** `resolveScopeKey`
   binds to the authenticated session
   (`packages/memory/v2/server.ts:1577-1580`), and mirrors refuse to
@@ -292,12 +347,16 @@ Nothing of the floor survives as per-instance keying evidence.
 Closed by the scout pass, 2026-08-02: widen-back (NO — §2
 Permanence) and the redirect's on-disk shape (§Anchors). Closed by
 the batch-4 rulings, 2026-08-02: watermark × fan-out (§2 — the
-discovering wave writes only the redirect; instances materialize on
-demand, and the demanded-only W never waits on them),
+discovering wave writes the redirect and its own run's instance;
+siblings materialize on their own demand, and W waits on the
+DEMANDED ones only, bounded by serving-loop.md §3's budget rule),
 `scheduler_context_floor` (§7 — deletes whole with the observation
 machinery), and the M3 write path (§7 M3 — R-Q6b: explicit
 `scope_key` per scoped write WITHIN the derived commit; admission
-stays the lease check). Still open:
+stays the lease check). Closed 2026-08-02 by S1 (ledger LD5): the
+READ side — reads may name an explicit `entity_scope_key`, lease
+holder only (§7 M1, protocol.md §2) — and run identity for
+non-handler runs (§5). Still open:
 
 1. **Basis-index DDL authoring.** Per-instance keying is the
    settled shape — the §7 closures lean on it (the index shares
@@ -308,7 +367,15 @@ stays the lease check). Still open:
    observation tables to (M2 names the re-keying cost).
 2. **Session-data GC (M5).** The mechanism that actually retires a
    retired session's scoped instances — none exists today, so §3's
-   ONE retirement rule needs it designed, not assumed.
+   ONE retirement rule needs it designed, not assumed. It MUST also
+   cover NON-SESSION keys (S8): narrowing strands basis rows at
+   `space` and `user:<p>` keys that no session retirement ever
+   touches, and main's 32-per-action execution-context cap
+   (`packages/memory/v2/engine.ts:55`) dies with the dropped tables
+   while `scheduler_basis` specifies no bound of its own. The
+   deletion rule in serving-loop.md §3b keeps the stranding from
+   growing without bound in the narrowing case; a retirement design
+   still owes the general one.
 
 ## 9. Tripwires
 

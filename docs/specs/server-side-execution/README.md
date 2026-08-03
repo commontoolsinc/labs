@@ -23,6 +23,7 @@ domain:
 | [`speculation.md`](speculation.md) | client overlay, read-through, reconciliation, offline | 2 |
 | [`events.md`](events.md) | handler events end to end, payload capture, idempotency, failure semantics | 3 |
 | [`scopes.md`](scopes.md) | the scope lattice, run-time scope discovery, redirect narrowing, instance fan-out, per-instance speculation/events/effects | 0, 1–5 |
+| [`key-vocabulary.md`](key-vocabulary.md) | inventory: every site that builds a scope-NAME identity key today, its required instance dimension, and its OFF-arm-neutral form (the M2 re-keying surface) | 0, 1 |
 | [`protocol.md`](protocol.md) | commit classes, the whole admission table, push, watermark, client-effect channel, wire discipline | 1–4 |
 | [`builtins.md`](builtins.md) | per-built-in contracts: placement, memo keys, navigateTo split, deferred list | 1, 4, 5 |
 | [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |
@@ -113,10 +114,13 @@ that single obligation generated the bulk of v1's complexity:
   commit an action, meaningful only while two parties might.
 - **The rank ladder and context-lattice negotiation** — which subset of
   actions the server had authority over, meaningful only mid-migration.
-- **`completeSchedulerScopeSummary` certificates** — compiler-issued
+- **`completeSchedulerScopeSummary` / `completeActionScopeSummary`
+  certificates** — compiler-issued
   evidence bounding a computation's writes so a commit produced elsewhere
   could be admitted. 13 source files, 214 golden fixtures, reaching from
-  ts-transformers through the runner into the memory protocol.
+  ts-transformers through the runner into the memory protocol. Both
+  identifiers name the same surface; an inventory that greps only the
+  first undercounts it.
 - **Shadow/authoritative double execution** — every served action ran
   twice: once privately to prove a candidate, once for real after the claim
   round trip.
@@ -407,7 +411,8 @@ intent, the following have no decision left to make:
 - the claim lifecycle (candidates, issuance, revocation, settlement,
   fences, incarnations) and its storage tables
 - rank ladder, context-lattice claim negotiation, per-rank candidate dials
-- `completeSchedulerScopeSummary` emission and every consumer, through to
+- `completeSchedulerScopeSummary` / `completeActionScopeSummary`
+  emission and every consumer, through to
   the memory protocol's claimed-commit admission
 - shadow/authoritative action-transaction routing
 - the observation evidence log (observation / snapshot / replay tables
@@ -419,11 +424,12 @@ intent, the following have no decision left to make:
   grant time; client computational commits narrow to event appends)
 
 Two entries are live on MAIN, not only on the archived branches:
-`completeSchedulerScopeSummary` emission and its consumers (~10 source
-files across ts-transformers and the runner), and
+`completeSchedulerScopeSummary`/`completeActionScopeSummary` emission
+and its consumers, and
 `persistentSchedulerState`'s observation tables (full-JSON payloads,
 OFF by default). For those two, "delete" is live Phase 1 deletion work
-on main — tracked in the plan — not merely "do not rebuild"; the
+on main — tracked in the plan, which carries the measured size —
+not merely "do not rebuild"; the
 observation tables reduce to the v2 basis index
 (serving-loop.md §3b).
 
@@ -466,6 +472,15 @@ Still open:
   documents the v1 dials as they exist on the archived branches; the
   entries retire when v2 lands its single flag.
 - The pre-arc, still-live behaviour specs this document leans on:
-  [`persistent-scheduler-state.md`](../persistent-scheduler-state.md)
-  (returns to its pre-arc scope),
   [`scheduler-v2/`](../scheduler-v2/), [`memory-v2/`](../memory-v2/).
+- [`persistent-scheduler-state.md`](../persistent-scheduler-state.md)
+  does NOT return to its pre-arc scope, as an earlier draft of this
+  section claimed. Phase 1 stage C drops the entire PERSISTED form it
+  specifies — the observation, snapshot, replay, read-index,
+  write-index, action-state and context-floor tables — and REPLACES
+  it with the v2 basis index (serving-loop.md §3b). What the feature
+  decided (warm start from recorded reads) survives in a new schema
+  under a new owner; the spec that describes the old form archives
+  when stage C lands, along with
+  [`scheduler-v2/per-doc-rehydration.md`](../scheduler-v2/per-doc-rehydration.md)'s
+  account of it.

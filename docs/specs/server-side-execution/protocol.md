@@ -27,6 +27,24 @@ FORBIDDEN: a fourth class; per-class subtypes that alter admission;
 clients producing `derived` (there must be no client code path that can
 even construct one).
 
+**Both arms carry a class; only the ON arm enforces one.** `class`
+metadata is WRITTEN in every arm from stage A onward and ENFORCED
+(the §2 admission rows) only under the flag. In the OFF arm the
+client still commits derivation results (plan §Interim postures, OFF
+baseline) — those commits are `authored`, exactly like every other
+client commit today. `derived` names the single-deriver posture, so
+nothing outside the flag may claim it; the OFF arm therefore has no
+unclassed commit and no third answer.
+
+**The SpaceServer's own writes.** Not every write inside a derived
+commit belongs to a user. The watermark advance (§4), the
+narrowing redirect written at a broad slot (scopes.md §2), and the
+retirement of acked effect entries (§5) are the SpaceServer's OWN
+writes under its SERVICE identity — the same identity before any
+per-user delegation exists and after it does. They carry addressing
+(a `scope_key` where the target is scoped) and NO acting principal;
+nothing is being attributed to a user, so nothing is missing.
+
 Threat model, stated honestly (RULED, owner 2026-08-02): the
 single-deriver invariant is by construction against HONEST clients —
 no client code path constructs a `derived` commit. It is NOT new ACL
@@ -47,13 +65,28 @@ does not: the server admitting it also DID the work, so producer
 and admitter share one trust environment at the envelope, and
 envelope identity verifies nothing there. The SpaceServer therefore
 commits under its own service identity — the envelope principal IS
-the lease holder §2 checks — and ATTRIBUTION rides WITHIN the
-commit: an explicit `scope_key` on every scoped write, and the
-acting principal on every action's writes (the same per-action
-granularity as serving-loop.md §3c's CFC provenance). Attributed,
-not signed, today. The considered alternative — N commits per wave,
-one per session, each attributed at its envelope — is recorded and
-rejected as the other extreme of the same axis: the wave stays ONE
+the lease holder §2 checks — and TWO DISTINCT things ride WITHIN
+the commit. Conflating them is the error this paragraph exists to
+prevent:
+
+- **ADDRESSING — the explicit `scope_key`, one per scoped write.**
+  It names WHICH INSTANCE the row is. The engine keys rows by it
+  (`(branch, id, scope_key)`, scopes.md §Anchors), and memo and
+  clearance identity read it (builtins.md §2, scopes.md §6). It
+  attributes nothing to anybody: an address is not a claim about
+  who acted.
+- **ATTRIBUTION — the acting principal, one per action RUN.** The
+  unit is the RUN, `action × instance`, NEVER the action: under
+  fan-out one action runs N times as N principals inside ONE wave
+  commit (scopes.md §2), so per-ACTION attribution would merge N
+  principals' provenance inside the load-bearing enforcement
+  (serving-loop.md §3c). CFC labels evaluate per instance run for
+  the same reason.
+
+Attributed, not signed, today. The considered alternative — N
+commits per wave, one per session, each attributed at its
+envelope — is recorded and rejected as the other extreme of the
+same axis: the wave stays ONE
 commit (§7's amplification budget). Anticipated, not built:
 per-user server-generated keys under user-delegated authority; when
 delegation exists, attribution graduates to acting-key signatures
@@ -66,15 +99,56 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | commit class | checks, in order |
 | --- | --- |
 | `authored` doc write | session authenticated → write authority on doc/path (existing ACL) → CAS on base revision |
-| `authored` event append | session authenticated → append authority on stream doc → `eventId` unique among stream entries above the stream's `eventWatermark` (CAS — the dedupe horizon, events.md §4) |
+| `authored` event append | session authenticated → append authority on stream doc → `eventId` unique among stream entries above the stream's `eventWatermark` (CAS — the dedupe horizon, events.md §4) → the memory server STAMPS `firedAt` from the commit envelope (authenticated principal + session); a client-supplied `firedAt` that disagrees is REJECTED, never corrected |
 | `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries `actingPrincipal` + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → CAS |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
+| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1) | requester holds the live `execution_lease` for the space (the SAME one equality check) → the named instance is read. A non-holder naming a `scope_key` is REJECTED exactly as today; a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
 
-That is the ENTIRE admission surface. No scope reasoning, no read-set
+That is the ENTIRE admission surface — the last row is the one
+READ-side check; every row above it is commit admission. No scope
+reasoning, no read-set
 validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
+
+**`firedAt` is SERVER-STAMPED, never client-minted (T1 + S6).** It
+carries BOTH the acting user and the session —
+`{ user, session, clientSeq }` — because scopes.md §5 resolves a
+handler's scoped reads and writes against the user, not the session
+alone. It steers consequences: which scope INSTANCES a handler's
+writes land in (scopes.md §5), and which session an effect intent is
+addressed to (§5, builtins.md §4). Nothing else in the append binds
+it. STAMPING beats checking: the memory server writes `user` and
+`session` from the authenticated commit envelope at admission, so a
+forged actor is UNREPRESENTABLE rather than merely validated, and a
+disagreeing client value is rejected rather than silently overwritten.
+`clientSeq` stays client-minted — it orders one session's own appends
+and steers nothing.
+This PRESERVES a guarantee the store gives today rather than adding
+one: `resolveScopeKey` binds scope to the authenticated session
+(scopes.md §7 M3), so cross-principal scoped writes are impossible on
+main. It is the trivial case README §1's no-new-guarantees rule
+exempts — one equality check at one site.
+
+**Read addressing, and why it needed a row.** Writes name their
+instance explicitly (R-Q6b); reads did not, and the asymmetry was a
+hole, not a simplification. A SpaceServer reading under its service
+envelope would resolve `user:<serviceDID>` — `resolveScopeKey` throws
+only on a MISSING principal, never on a wrong one, so the failure
+mode is a SILENT read of an empty instance, not an error. The row
+above closes it by extending Q6b's own trust argument symmetrically:
+the lease holder is the party the server already trusts to derive
+every instance, so it may NAME an instance to read.
+
+**Run identity for a derivation (S1).** A derivation runs PER
+DEMANDED INSTANCE and the DEMAND supplies the identity — a
+subscribing client demands its own instance, and that instance is
+what the run reads and writes as. Before any narrowing, a node runs
+at space scope and needs NO principal at all. Handlers are the other
+case and keep the event's actor (scopes.md §5, server-stamped
+`firedAt` above). There is no third source of run identity, and
+"whatever the SpaceServer's own envelope resolves to" is never one.
 
 Note what the table does NOT do: `authored` admission checks write
 authority on the TARGET only — nothing marks a doc as derived-output,
@@ -170,6 +244,23 @@ the target's `eventWatermark` makes processing exactly-once.
 - Clients subscribe to docs/queries as today
   (`packages/runner/src/storage/query.ts` path). The SpaceServer
   subscribes to the whole space's accepted-commit feed from a seq.
+- **Push is FILTERED PER RECIPIENT by `scope_key`** (T4). One derived
+  commit legitimately carries several principals' instances (§1's
+  fan-out); pushing it whole would replicate other principals'
+  scoped state to every subscriber and break scopes.md §4's promise
+  that a client never holds a foreign instance. A subscriber
+  therefore receives ONLY the rows whose `scope_key` is in its
+  APPLICABLE SET — `space`, `user:me`, `session:me:<sid>` — the
+  shape main already computes for the observation path
+  (`packages/memory/v2/server.ts:185-201`,
+  `schedulerApplicableContextKeys`). The commit's remaining rows are
+  invisible to that subscriber: not redacted, not empty — absent.
+  This pairs with scopes.md §7 M4's re-keying: the push path must
+  key dirtiness by `scope_key`, and the same key decides delivery.
+- **Basis-index rows are NOT part of the pushed commit** (T2). They
+  ride the loopback store TRANSACTION only (serving-loop.md §1 plane
+  (a), §3b); nothing about them crosses the wire to a subscriber,
+  and admission never reads them.
 - **Push priority** (Phase 6 hardening, but the contract is fixed now):
   when flushing a batch to a client socket, `derived` commits touching
   docs that client subscribes to go first; everything else follows.
@@ -204,9 +295,23 @@ the target's `eventWatermark` makes processing exactly-once.
 
 Session-scoped, server-computed, client-enacted effects (README §3.7).
 
-- One doc per session at a deterministic path:
-  `session/<sessionId>/effects` (exact path constant to be fixed in code;
-  one constant, exported once).
+- One doc per session, addressed as a SESSION-SCOPED INSTANCE — not
+  a path convention (T9, RULED here; owner-notable, it changes this
+  section's addressing). The effects doc is one well-known doc id
+  whose per-session instances are keyed by `scope_key`
+  (`session:<principal>:<sessionId>`) exactly like every other
+  session-scoped instance (scopes.md §Anchors). A path form
+  (`session/<id>/effects`) was the earlier draft and is REJECTED: it
+  would make the effects doc the one session-lifetime thing NOT
+  instanced by `scope_key`, and scopes.md §3 promises ONE retirement
+  rule for both. One doc id constant, exported once; the instance
+  comes from the key, never from the path.
+- **Write authority for the ack** is the owning session's own scope
+  instance: the session writes its `{ ackedNonce }` into the
+  instance its authenticated `scope_key` resolves to, so no session
+  can ack another's intents and no new ACL is needed. The
+  SpaceServer writes the intents into the same instance by naming
+  the `scope_key` explicitly (§1 addressing).
 - Shape: append-list of
   `{ nonce, kind, args, issuedIn: <derived commit seq> }`;
   v2 ships exactly one kind: `navigate` with
@@ -223,8 +328,10 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
 - Session lifecycle: `sessionId` is minted at client connect, persisted
   client-side across reloads, and retired explicitly on logout or by
   TTL. Effects docs are session-lifetime: a dead session's unacked
-  intents retire with its effects doc. Nothing global, nothing
-  cross-session.
+  intents retire with its effects doc — which, being a session-scoped
+  instance, is retired by the SAME session-data GC as every other
+  session instance (scopes.md §3, §8 item 2). One mechanism, as
+  scopes.md §3 already claims.
 
 FORBIDDEN: new kinds without a spec edit here; a push channel outside the
 doc/subscription model; server-side retries of enactment.
@@ -244,25 +351,42 @@ disabled (README §3.5).
   (derived only), `derivedThrough` (derived only), `consequenceOf`
   (derived only), `eventId`/`firedAt` (event appends),
   `actingPrincipal`/`capabilityRef` (server-produced authored commits
-  only — §2); plus, WITHIN a derived commit's body — attribution,
-  never envelope identity (R-Q6b, §1) — the explicit `scope_key` on
-  every scoped write and the acting principal on every action's
-  writes. Anything further needs a spec edit here first.
+  only — §2); plus, WITHIN a derived commit's body, the ADDRESSING
+  and ATTRIBUTION pair §1 defines — never envelope identity (R-Q6b):
+  the explicit `scope_key` on every scoped write (addressing) and
+  the acting principal on every action RUN's writes (attribution,
+  `action × instance`). Anything further needs a spec edit here
+  first.
+- **`eventId` and `firedAt` are ENVELOPE fields for admission** (T8),
+  not payload: admission reads them (`eventId` for the uniqueness
+  CAS above the dedupe horizon, `firedAt` because the server STAMPS
+  it from the authenticated envelope — §2). events.md §1 states the
+  same classification; if the two ever disagree, this section and
+  events.md §1 are the pair to reconcile, and neither is a payload
+  claim.
+- **A read may name an `entity_scope_key`** (S1, §2's read row).
+  That is the only read-side addition to the wire: one optional
+  field on the read, admissible only for the space's live lease
+  holder. Reads that name nothing are unchanged.
 - Basis-index rows (serving-loop.md §3b) ride INSIDE the derived
-  commit's store transaction as engine table rows — sanctioned
-  carriage, NOT metadata: nothing crosses the wire, admission never
-  reads them, and the closed list above is not breached by them.
+  commit's store TRANSACTION as engine table rows — sanctioned
+  carriage, NOT metadata and NOT part of the commit representation:
+  nothing about them crosses the wire (§3 excludes them from push),
+  admission never reads them, and the closed list above is not
+  breached by them.
 - All metadata is small and fixed-shape, with one bounded carve-out:
   `consequenceOf` scales with the wave's INPUT (the events drained that
   wave), never with graph size. The v1 failure mode — 130 KB of
   serialized read links per record — is structurally impossible if this
   list is respected. A metadata field that scales with GRAPH size is
   FORBIDDEN.
-- Writes inside a `derived` commit keep PER-ACTION provenance for CFC
-  label purposes (serving-loop.md §3c), carried in the write PAYLOAD,
-  never as commit metadata: the commit is a transport batch, never a
-  label boundary. R-Q6b's attribution (§1) rides at the same
-  granularity — `scope_key` per scoped write, acting principal per
-  action — attributed, not signed, today; when per-user delegated
-  keys exist (anticipated, not built), attribution graduates to
-  acting-key signatures without changing the envelope model.
+- Writes inside a `derived` commit keep PER-ACTION-RUN provenance for
+  CFC label purposes (serving-loop.md §3c), carried in the write
+  PAYLOAD, never as commit metadata: the commit is a transport batch,
+  never a label boundary. R-Q6b's attribution (§1) rides at the same
+  granularity — acting principal per action RUN (`action ×
+  instance`), with the `scope_key` per scoped write doing the
+  separate ADDRESSING job — attributed, not signed, today; when
+  per-user delegated keys exist (anticipated, not built),
+  attribution graduates to acting-key signatures without changing the
+  envelope model.
