@@ -563,6 +563,53 @@ export default pattern(() => {
     (board.crossrefs?.[0]?.refsOut ?? []).length === 0
   );
 
+  // --- index: the compact discovery surface ---
+
+  // Reference-plus-summary rows mirror the board at the two-topic point: the
+  // summary scalars answer the survey questions directly, and no edges are
+  // claimed before any prose references exist.
+  const assert_index_baseline = assert(() =>
+    (board.index ?? []).length === 2 &&
+    board.index?.[0]?.title === "First topic" &&
+    board.index?.[0]?.topic?.title === "First topic" &&
+    (board.index?.[0]?.createdAt ?? 0) > 0 &&
+    board.index?.[0]?.createdBy?.kind === "agent" &&
+    board.index?.[0]?.createdBy?.name === "Sol" &&
+    board.index?.[0]?.commentCount === 1 &&
+    (board.index?.[0]?.lastActivityAt ?? 0) >=
+      (board.index?.[0]?.createdAt ?? 0) &&
+    board.index?.[1]?.title === "Second topic" &&
+    (board.index?.[0]?.refsOut ?? []).length === 0 &&
+    (board.index?.[1]?.refsOut ?? []).length === 0
+  );
+
+  // The prose edge surfaces in the index as title-only sibling references.
+  const assert_index_edge = assert(() =>
+    (board.index?.[1]?.refsOut ?? []).length === 1 &&
+    board.index?.[1]?.refsOut?.[0]?.title === "First topic" &&
+    (board.index?.[0]?.referencedBy ?? []).length === 1 &&
+    board.index?.[0]?.referencedBy?.[0]?.title === "Second topic"
+  );
+
+  // The bound itself: serializing the whole index carries no expanded piece
+  // content (body/comments/links), no verb streams, and no runtime values —
+  // the declared schema, not reader discipline, is the guarantee. Every
+  // reference in a row exposes exactly the title-only projection.
+  const assert_index_bounded = assert(() => {
+    const rows = board.index ?? [];
+    if (rows.length < 2) return false;
+    const serialized = JSON.stringify(rows);
+    return !serialized.includes('"body"') &&
+      !serialized.includes('"comments"') &&
+      !serialized.includes('"links"') &&
+      !serialized.includes('"addComment"') &&
+      !serialized.includes('"setBody"') &&
+      !serialized.includes('"addLink"') &&
+      !serialized.includes("vnode") &&
+      Object.keys(rows[0]?.topic ?? {}).join(",") === "title" &&
+      Object.keys(rows[1]?.refsOut?.[0] ?? {}).join(",") === "title";
+  });
+
   // Detail-page view of the same edge: each board-created topic derives its
   // own row from the mentionable siblings wired at creation (piece-valued,
   // resolved from `mentionable` = the board's own list), while a piece with no
@@ -766,8 +813,11 @@ export default pattern(() => {
       { assertion: assert_second_topic },
       { render: board[UI] },
       { assertion: assert_crossrefs_baseline },
+      { assertion: assert_index_baseline },
       { action: action_body_ref_first },
       { assertion: assert_body_edge },
+      { assertion: assert_index_edge },
+      { assertion: assert_index_bounded },
       { render: board[UI] },
       { assertion: assert_detail_edges },
       { assertion: assert_lone_edgeless },
