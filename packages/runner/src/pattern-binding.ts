@@ -433,13 +433,6 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * silently unbound. Neither disposition is correct, so this one takes the
    * one that reports itself, and names the class and the work it needs.
    *
-   * This throw is EXPECTED to fire under an experiment flag, and that is its
-   * purpose: with `modernCellRep` on, a link is a `FabricLink` and hence a
-   * `FabricInstance`, so ordinary links reach here. See "Flag-gated tripwires"
-   * in `docs/development/EXPERIMENTAL_OPTIONS.md` for what that obliges, both
-   * when meeting this throw and when adding something that would reach it. The
-   * rule cross-cuts every such check, so it is recorded there rather than here.
-   *
    * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
    * point the throw becomes a rebind. The two sibling walks in this file carry
    * `Latent` markers for the same hazard.
