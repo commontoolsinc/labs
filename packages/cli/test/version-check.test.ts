@@ -1,9 +1,8 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
-  fetchServerGitSha,
   SKIP_VERSION_CHECK_ENV,
+  startVersionCheck,
   versionMismatchWarning,
-  warnOnVersionMismatch,
 } from "../lib/version-check.ts";
 
 const API = "http://localhost:8000";
@@ -39,16 +38,64 @@ Deno.test("versionMismatchWarning", async (t) => {
   });
 });
 
-Deno.test("fetchServerGitSha returns null instead of throwing when the fetch fails", async () => {
-  // The test task grants no net permission, so the fetch fails immediately;
-  // the helper must swallow that (connectivity is the health check's job).
-  assertEquals(await fetchServerGitSha("http://localhost:9"), null);
-});
+/** Deps whose every effect records itself, so skipping is observable. */
+function recordingDeps(envValue: string | undefined) {
+  const calls: string[] = [];
+  return {
+    calls,
+    deps: {
+      env: (key: string) =>
+        key === SKIP_VERSION_CHECK_ENV ? envValue : undefined,
+      resolveCliSha: () => {
+        calls.push("resolveCliSha");
+        return Promise.resolve("aaa111");
+      },
+      warn: (_message: string) => {
+        calls.push("warn");
+      },
+    },
+  };
+}
 
-Deno.test("warnOnVersionMismatch is skipped entirely by the env override", async () => {
-  // With the override set, the check resolves without touching git or the
-  // network — observable here because neither failure mode surfaces.
-  await warnOnVersionMismatch("http://localhost:9", {
-    env: (key) => key === SKIP_VERSION_CHECK_ENV ? "1" : undefined,
+Deno.test("startVersionCheck", async (t) => {
+  await t.step(
+    "skip env set: resolves nothing and warns nothing, even on mismatch",
+    async () => {
+      const { calls, deps } = recordingDeps("1");
+      await startVersionCheck(deps).finish("bbb222", API);
+      assertEquals(calls, []);
+    },
+  );
+
+  await t.step(
+    "any non-empty value skips, including '0' and 'false'",
+    async () => {
+      for (const value of ["0", "false"]) {
+        const { calls, deps } = recordingDeps(value);
+        await startVersionCheck(deps).finish("bbb222", API);
+        assertEquals(calls, []);
+      }
+    },
+  );
+
+  await t.step("empty/unset does not skip: resolves and warns", async () => {
+    for (const value of [undefined, ""]) {
+      const { calls, deps } = recordingDeps(value);
+      await startVersionCheck(deps).finish("bbb222", API);
+      assertEquals(calls, ["resolveCliSha", "warn"]);
+    }
+  });
+
+  await t.step("matching commits resolve but do not warn", async () => {
+    const { calls, deps } = recordingDeps(undefined);
+    await startVersionCheck(deps).finish("aaa111", API);
+    assertEquals(calls, ["resolveCliSha"]);
+  });
+
+  await t.step("a rejecting resolver is swallowed, not thrown", async () => {
+    const { calls, deps } = recordingDeps(undefined);
+    deps.resolveCliSha = () => Promise.reject(new Error("git exploded"));
+    await startVersionCheck(deps).finish("bbb222", API);
+    assertEquals(calls, []);
   });
 });

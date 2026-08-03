@@ -154,6 +154,49 @@ describe("Runtime.hostForSpace", () => {
     }
   });
 
+  it("healthCheck captures the default host's gitSha; other hosts don't overwrite it", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const body = String(input).startsWith("http://host-a.test")
+        ? JSON.stringify({ status: "OK", gitSha: "  abc123  " })
+        : JSON.stringify({ status: "OK", gitSha: "not-the-default-host" });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    }) as typeof fetch;
+    const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
+    try {
+      expect(runtime.serverGitSha).toBe(null);
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("abc123");
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck reports null gitSha for non-JSON or field-less bodies, and resets a stale capture", async () => {
+    const realFetch = globalThis.fetch;
+    let body = JSON.stringify({ status: "OK", gitSha: "abc123" });
+    globalThis.fetch =
+      (() =>
+        Promise.resolve(new Response(body, { status: 200 }))) as typeof fetch;
+    const runtime = makeRuntime();
+    try {
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("abc123");
+      // An older server answering plain text must reset the capture.
+      body = "ok";
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe(null);
+      // A JSON body without the field stays null too.
+      body = JSON.stringify({ status: "OK" });
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe(null);
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
   it("healthCheck is false when any host is unreachable", async () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = ((input: RequestInfo | URL) =>

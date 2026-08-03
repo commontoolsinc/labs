@@ -71,7 +71,7 @@ import {
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
-import { warnOnVersionMismatch } from "./version-check.ts";
+import { startVersionCheck } from "./version-check.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import {
   derivePieceGetValue,
@@ -386,15 +386,16 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   ] = runtimeErrors;
 
   return await withRuntimeCleanupOnFailure(runtime, async () => {
-    // Runs concurrently with the health check's round-trip; awaited on both
-    // paths so no fetch/subprocess op outlives a thrown error, and the
-    // warning lands before any command output.
-    const versionCheck = warnOnVersionMismatch(config.apiUrl);
+    // The server's commit rides the health response the check below already
+    // fetches; only cf's own local resolution (baked metadata or git) runs
+    // concurrently here, and finish() settles it on both paths so no
+    // subprocess op outlives a thrown error.
+    const versionCheck = startVersionCheck();
     const healthy = await timeCliPhase(
       "loadManager.healthCheck",
       () => runtime.healthCheck(),
     );
-    await versionCheck;
+    await versionCheck.finish(runtime.serverGitSha, config.apiUrl);
     if (!healthy) {
       throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
     }

@@ -18,5 +18,7 @@ Deno.test("health routes", async (t) => {
     const json = await response.json();
     assertEquals(json.status, "OK");
     assertEquals(typeof json.timestamp, "number");
+    // Test env: no baked metadata and no COMMIT_SHA, so the commit is unknown.
+    assertEquals(json.gitSha, null);
   });
 });

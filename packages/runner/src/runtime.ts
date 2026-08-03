@@ -2209,12 +2209,26 @@ export class Runtime {
   }
 
   /**
+   * The default host's self-reported git commit, captured from its
+   * `/_health` response body by the most recent `healthCheck()` call.
+   * Null before any check, when the host omits the field (older
+   * servers), or when the body is not JSON. Rides the health round
+   * trip so learning it costs no extra request.
+   */
+  get serverGitSha(): string | null {
+    return this.#serverGitSha;
+  }
+  #serverGitSha: string | null = null;
+
+  /**
    * True iff the default host AND every distinct mapped host are
    * reachable — one runtime can span hosts, so health is the
    * conjunction over all of them.
    */
   async healthCheck(): Promise<boolean> {
-    const hosts = new Set([this.apiUrl.toString()]);
+    this.#serverGitSha = null;
+    const defaultHost = this.apiUrl.toString();
+    const hosts = new Set([defaultHost]);
     for (
       const host of [
         ...Object.values(this.spaceHostMap ?? {}),
@@ -2230,11 +2244,27 @@ export class Runtime {
     const checks = [...hosts].map(async (host) => {
       try {
         const res = await fetch(new URL("/_health", host));
+        if (host === defaultHost) {
+          this.#serverGitSha = await gitShaFromHealthBody(res);
+        }
         return res.ok;
       } catch (_) {
         return false;
       }
     });
     return (await Promise.all(checks)).every(Boolean);
+  }
+}
+
+/** The trimmed `gitSha` out of a `/_health` response body, or null when the
+ * body is not JSON or the field is absent/empty (older servers). */
+async function gitShaFromHealthBody(res: Response): Promise<string | null> {
+  try {
+    const body = await res.json();
+    if (typeof body !== "object" || body === null) return null;
+    const sha = (body as { gitSha?: unknown }).gitSha;
+    return typeof sha === "string" && sha.trim() ? sha.trim() : null;
+  } catch {
+    return null;
   }
 }

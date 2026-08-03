@@ -37,9 +37,12 @@ to equal `?identity` before changing the persisted root.
 
 The cf CLI resolves its own commit the same way (baked build metadata for
 compiled binaries, the checkout's HEAD for source runs) and compares it
-against `/api/meta.gitSha` on every server-touching command, warning on
-stderr when the two differ. Set `CF_SKIP_VERSION_CHECK=1` to skip the check
-when running mismatched versions on purpose.
+against the server's self-reported commit on every server-touching command,
+warning on stderr when the two differ. The server side rides the `/_health`
+response the CLI's health check already fetches (the same value `/api/meta`
+reports), so the check adds no request of its own. Set
+`CF_SKIP_VERSION_CHECK=1` to skip the check when running mismatched versions
+on purpose.
 
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use

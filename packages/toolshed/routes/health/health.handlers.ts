@@ -1,6 +1,7 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
 
+import { resolveGitSha } from "@/lib/build-info.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   DashRoute,
@@ -18,8 +19,14 @@ import {
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),
   timestamp: z.number(),
+  // The commit this server runs (same resolution as /api/meta). Rides the
+  // health response so clients can detect version skew without an extra
+  // request; null when unknown.
+  gitSha: z.string().nullable(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+
+const GIT_SHA = resolveGitSha();
 
 export const LLMHealthResponseSchema = z.object({
   status: z.enum(["healthy", "degraded", "unhealthy"]),
@@ -45,6 +52,7 @@ export const index: AppRouteHandler<IndexRoute> = (c) => {
   const response: HealthResponse = {
     status: "OK",
     timestamp: Date.now(),
+    gitSha: GIT_SHA,
   };
   return c.json(response, HttpStatusCodes.OK);
 };
