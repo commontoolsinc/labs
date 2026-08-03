@@ -139,6 +139,39 @@ describe("pull() and the first sync of an unseen doc", () => {
     }
   });
 
+  it("resolves from the replica when the first sync fails outright", async () => {
+    // The swallow arm: a failed first sync must degrade to what the replica
+    // holds (here: nothing), never reject or hang the pull. Same stance as
+    // link-resolution's kicks — the read still resolves.
+    const readerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerStorage,
+    });
+    try {
+      const link = writerRt
+        .getCell(space, RECEIPT_CAUSE, undefined)
+        .getAsNormalizedFullLink();
+
+      const originalSyncCell = readerStorage.syncCell.bind(readerStorage);
+      readerStorage.syncCell = (<T>(cell: Cell<T>): Promise<Cell<T>> => {
+        const target = cell.getAsNormalizedFullLink();
+        if (target.id === link.id) {
+          return Promise.reject(new Error("network unreachable"));
+        }
+        return originalSyncCell(cell);
+      }) as typeof readerStorage.syncCell;
+
+      const receipt = readerRt.getCellFromLink<typeof RECEIPT_VALUE>(link);
+      expect(await receipt.pull()).toBeUndefined();
+    } finally {
+      await readerRt.dispose();
+      await readerStorage.close();
+    }
+  });
+
   it("still resolves promptly when the doc is already in the replica (control)", async () => {
     // The writer's own replica: pull() must not begin waiting on network
     // confirmation it already has.
