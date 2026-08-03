@@ -45,6 +45,10 @@ Tasks:
       user/session-derived-state question (README §6 Q7, was ledger
       L10; runtime-mapping.md N56). Inherits Q6's non-quota remainder:
       per-run identity for served effects (runtime-mapping.md N57).
+      **In progress 2026-08-02**: the batch-3 rulings are drafted as
+      [scopes.md](../specs/server-side-execution/scopes.md) (scope
+      keys instances, never authority); a scope-mechanics scout is
+      verifying anchors; scopes.md §7 carries the residual opens.
 - [ ] Name the single flag, register it in `EXPERIMENTAL_OPTIONS.md` with
       both states defined; OFF is today byte-for-byte.
 - [ ] CI runs a flag-ON arm of the integration suites from the first PR

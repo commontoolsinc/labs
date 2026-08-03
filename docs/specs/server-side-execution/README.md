@@ -22,6 +22,7 @@ domain:
 | [`serving-loop.md`](serving-loop.md) | executor host, lease, wake→fixpoint→commit, memoization, outbox, recovery, counters | 1 |
 | [`speculation.md`](speculation.md) | client overlay, read-through, reconciliation, offline | 2 |
 | [`events.md`](events.md) | handler events end to end, payload capture, idempotency, failure semantics | 3 |
+| [`scopes.md`](scopes.md) | the scope lattice, run-time scope discovery, redirect narrowing, instance fan-out, per-instance speculation/events/effects | 0, 1–5 |
 | [`protocol.md`](protocol.md) | commit classes, the whole admission table, push, watermark, client-effect channel, wire discipline | 1–4 |
 | [`builtins.md`](builtins.md) | per-built-in contracts: placement, memo keys, navigateTo split, deferred list | 1, 4, 5 |
 | [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |

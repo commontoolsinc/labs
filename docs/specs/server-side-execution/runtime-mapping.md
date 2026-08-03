@@ -121,7 +121,7 @@ Status legend:
 | 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:761`, `786`, `968-972`; `runner.ts:4733-4748` | protocol §2b | COVERED |
 | 54 | `.inSpace()` provisioning: destinationSpace-threaded writes, foreign-first commit order, name cache | `storage/interface.ts:1269`, `runtime.ts:671` (name cache), rows 14/53 | protocol §2b | COVERED |
 | 55 | Cross-space reads and foreign-commit wakes (per-doc client subscriptions today) | `runner.ts:1034-1036`, `storage/query.ts` | README §3.1, serving-loop §3b | CHANGED |
-| 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | none | GAP |
+| 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | scopes.md (RULED 2026-08-02) | CHANGED |
 | 57 | Runtime bound to one user identity; outbound fetch signed as that user | `runtime.ts:669`, `666`, `toolshed-http-auth.ts` | README §3.8 (quota deferred; identity to the Phase 0 scopes review) | CHANGED |
 | 58 | ACL admission for authored writes | `acl-manager.ts:16` | protocol §2 (unchanged) | COVERED |
 
@@ -436,18 +436,19 @@ runtime writes scoped slots outside declared surfaces
 (`scheduler/run.ts:630-643`), navigateTo's result is session-scoped
 (`navigate-to.ts:46`), and per-user/per-session UI state is a
 documented pattern feature. "One committing runtime per space"
-answers space-scoped derivations only. Open: who derives and commits
-user- and session-scoped derived state under the flag? Options the
-ruling must weigh: the SpaceServer derives all scopes (it needs
-session enumeration and multiplies work per session); session-scoped
-derivations become client-speculation-only and *uncommitted* (loses
-today's reload persistence); or scoped derivations are reclassified
-as authored-adjacent. The persisted-state context ladder (row 60) is
-today's machinery for exactly this and is tripwired in v2. Must be
-ruled before Phase 2 (speculation reads scoped state) and Phase 4
-(the effects doc is session-scoped by construction). Plan Phase 0
-now carries the owner + spec review of cell scopes end to end
-(README §6 Q7, was ledger L10) — this row is what it must settle.
+answers space-scoped derivations only. RULED 2026-08-02 (batch 3):
+the SpaceServer derives EVERY instance of every scoped node — scope
+keys instances, never authority; scope is discovered by running,
+narrowing is written as redirects, and a narrowing discovery fans
+out per-principal instances in the discovering wave. The normative
+semantics now live in [scopes.md](scopes.md). The alternatives this
+row weighed (session-scoped derivations as client-speculation-only,
+scoped state reclassified authored-adjacent) are rejected — scoped
+derived state stays derived and server-committed, keeping today's
+reload persistence. The persisted-state context ladder (row 60)
+stays tripwired. The Phase 0 review continues (README §6 Q7, was
+ledger L10): scopes.md §7 lists what it still owes, and row 57's
+identity remainder stays with it.
 
 **N57 (identity/authority).** Today one runtime = one
 `userIdentityDID` (`runtime.ts:669`) and all first-party HTTP is
