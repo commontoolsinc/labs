@@ -659,6 +659,7 @@ const createHarness = (
   return {
     model,
     transport,
+    sessionFactory,
     storageManager,
     provider,
     replica,
@@ -2651,6 +2652,45 @@ Deno.test("memory v2 stacked commits: an undecided dependent above the marker su
     expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
   } finally {
     gate3.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: session replacement applies parked accepts (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const b = beginSet(harness, DOCS.B, valueFor("optimistic"));
+    await assertResultOk(b.promise);
+    assertEquals(hasPendingOverlay(harness, DOCS.B), true);
+
+    // A restore against the scripted server comes back NON-resumed: the
+    // session is replaced and the marker epoch resets. The old session's
+    // staged obligations are gone — no marker for the parked accept can
+    // ever arrive — so replacement must apply it immediately, consuming
+    // the pending overlay before the reinstall sync could land on top of a
+    // still-standing non-idempotent layer.
+    await harness.sessionFactory.session!.restore();
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "parked application at session replacement",
+    );
+    expectVisible(harness, { B: valueFor("optimistic") });
+  } finally {
     await harness.close();
   }
 });

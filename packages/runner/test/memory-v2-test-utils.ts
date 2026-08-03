@@ -277,6 +277,7 @@ export abstract class ScriptedSessionTransport
 
 export class SingleSessionFactory implements SessionFactory {
   client: MemoryV2Client.Client | null = null;
+  session: MemoryV2Client.SpaceSession | null = null;
 
   constructor(private readonly transport: MemoryV2Client.Transport) {}
 
@@ -289,6 +290,7 @@ export class SingleSessionFactory implements SessionFactory {
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     this.client = client;
+    this.session = session;
     return { client, session };
   }
 }

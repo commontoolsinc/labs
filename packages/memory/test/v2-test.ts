@@ -25,6 +25,7 @@ import {
   toDocumentPath,
   toDocumentSelector,
   toValuePath,
+  wireMemoryProtocolFlags,
 } from "../v2.ts";
 
 const toEntityDocument = (
@@ -343,6 +344,14 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdLookup: false,
       },
     );
+  });
+
+  it("round-trips verdictCatchUpMarkers through the wire flags shape", () => {
+    const flags = getMemoryProtocolFlags();
+    assertEquals(flags.verdictCatchUpMarkers, true);
+    const wire = wireMemoryProtocolFlags(flags);
+    assertEquals(wire.verdictCatchUpMarkers, true);
+    assertEquals(parseMemoryProtocolFlags(wire), flags);
   });
 
   it("accepts the verdictCatchUpMarkers capability key", () => {

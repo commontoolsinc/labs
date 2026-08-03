@@ -4627,6 +4627,15 @@ class SpaceReplica implements ISpaceReplica {
           }
           this.#sessionClient = resolved.client;
           this.#sessionSession = resolved.session;
+          // Session replacement resets the marker epoch: markers for the
+          // parked accepts' localSeqs can never arrive from the fresh
+          // session, so apply them immediately (the same rule as consumer
+          // teardown). Promotion consumes the pending overlays, so the
+          // authoritative reinstall sync that follows replaces — never
+          // double-applies — their contribution.
+          resolved.session.onSessionReplaced = () => {
+            this.applyParkedAcceptsNow();
+          };
           return resolved;
         },
       ).catch((error) => {

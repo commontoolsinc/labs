@@ -1095,12 +1095,17 @@ Deno.test("acl enforce: owner removing their own access still gets the commit re
       selfRemove.ok,
       "self-removal commit must succeed and report ok, not a revocation",
     );
-    // No session/revoked was pushed to the writing connection for its own tx.
+    // The terminal session/revoked ARRIVES — but only AFTER the verdict
+    // (transactSet consumed the response above, so it ordered first). The
+    // detached session can never be delivered a catch-up marker, and the
+    // revocation is what tells the client its sync channel is gone so a
+    // parked accept applies immediately (CT-1927).
     assertEquals(
-      alice.messages.length,
-      0,
-      "writer must not be revoked before its own response",
+      alice.messages.map((message) => (message as { type?: string }).type),
+      ["session/revoked"],
+      "the writer is revoked only after its own response",
     );
+    alice.messages.length = 0;
 
     // The writer's session was still dropped from the registry (so it receives
     // no further pushes without READ): its next message fails closed as an

@@ -53,6 +53,7 @@ The client MUST declare its protocol version in the first WebSocket message:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
     "entityIdLookup": true
@@ -70,6 +71,7 @@ If the server accepts the protocol, it returns:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
     "entityIdLookup": true
@@ -153,6 +155,13 @@ advertises the capability.
 `entity-id.exists`. Both default to `false` when absent. A client connected to
 an older server may make the historical unpaginated list request, but must not
 send continuation fields or an existence request.
+
+`verdictCatchUpMarkers` advertises that the server stages a `caughtUpLocalSeq`
+catch-up obligation for accepts and conflict rejections, delivered on the
+batched fan-out (section 4.11.2). It is build-inherent (always advertised by
+this build) and defaults to `false` when absent: against an older server that
+stamps markers only for conflicts, the client applies verdicts immediately
+instead of parking them.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -981,11 +990,13 @@ parking instead of server-side response queuing (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
-- for EVERY transact verdict — accepts as well as conflict rejections — the
-  server MUST stage a catch-up obligation for the committing session, and
-  the next frame the batched fan-out sends that session MUST carry
+- for every accept and every `ConflictError` rejection, the server MUST
+  stage a catch-up obligation for the committing session, and the next
+  frame the batched fan-out sends that session MUST carry
   `caughtUpLocalSeq` at or above the verdict's localSeq — an
-  otherwise-empty frame when nothing the session watches is dirty
+  otherwise-empty frame when nothing the session watches is dirty. Other
+  rejection kinds (protocol, authorization, apply errors) carry no marker
+  obligation; the client applies them immediately
 - the marker means "every verdict of yours through this localSeq is
   decided, and this frame reflects those outcomes for the docs it covers."
   The session's own ACCEPTED writes are echo-suppressed from frames

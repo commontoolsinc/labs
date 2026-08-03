@@ -459,12 +459,85 @@ Deno.test("memory v2 server: a durable write is visible to a concurrent flush wh
     ],
   );
 
+  // The gated writer's marker was staged SYNCHRONOUSLY with its dirty
+  // marking — before the side-effect await — so the concurrent flush above
+  // already delivered it (an otherwise-empty frame, own write suppressed)
+  // even though the verdict is still parked. Staged any later, that flush
+  // would have consumed the dirty batch and the obligation would ride
+  // nothing: the parked promotion would strand (CT-1927 review, round 5).
+  const marker = assertEffect(shiftMessage(secondMessages));
+  assertEquals((marker.effect as SessionSync).caughtUpLocalSeq, 1);
+  assertEquals((marker.effect as SessionSync).upserts, []);
+
   gate.resolve();
   await secondCommit;
   const verdict = assertResponse<{ seq: number }>(
     shiftMessage(secondMessages),
   );
   assertEquals(verdict.ok?.seq, 2);
+  assertEquals(secondMessages.length, 0);
+});
+
+Deno.test("memory v2 server: a failed send retains the computed sync for the session's next flush", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-retained-send",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-a",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  assertEquals(
+    assertResponse<{ seq: number }>(shiftMessage(committerMessages)).ok?.seq,
+    2,
+  );
+
+  // The send boundary is the commit point for sync state: watch evaluation
+  // advances the session cache and consumes the pending marker BEFORE the
+  // effect reaches the wire, so a throwing send must retain the computed
+  // effect — a plain dirty-batch requeue could not reconstruct it (the
+  // advanced cache elides everything as sameSnapshot on recomputation).
+  const originalPush = committerMessages.push.bind(committerMessages);
+  let failNextEffect = true;
+  committerMessages.push = ((message: ServerMessage) => {
+    if (failNextEffect && message.type === "session/effect") {
+      failNextEffect = false;
+      throw new Error("synthetic send failure");
+    }
+    return originalPush(message);
+  }) as typeof committerMessages.push;
+
+  // The flush survives the failed send (the effect is retained, not lost,
+  // and not treated as a fan-out failure that would requeue the batch).
+  await server.flushSessions([space]);
+  assertEquals(committerMessages.length, 0);
+
+  // The next flush delivers the RETAINED effect: the parked foreign write
+  // and the accept's marker — nothing about them is stranded or replayed
+  // from state the cache no longer reports as novel.
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(
+    sync.upserts.map((upsert) => ({ id: upsert.id, seq: upsert.seq })),
+    [{ id: "of:doc:b", seq: 1 }],
+  );
+  assertEquals(committerMessages.length, 0);
 });
 
 Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {

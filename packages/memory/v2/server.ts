@@ -360,6 +360,56 @@ type DirtyOrigin = {
   seq: number;
 };
 
+/** Merge two sync effects addressed to one session, oldest first. Frames
+ * carry per-doc snapshots, so the union is latest-wins per doc (an upsert
+ * cancels an older remove of the same doc and vice versa); the bounds span
+ * both frames and the marker is the max of the two. Used to fold a
+ * retained undelivered effect into the session's next sync. */
+const mergeSessionEffects = (
+  older: SessionEffectMessage,
+  newer: SessionEffectMessage,
+): SessionEffectMessage => {
+  const key = (entry: { branch: string; id: string; scope?: string }) =>
+    `${entry.branch}\0${entry.id}\0${entry.scope ?? ""}`;
+  const upserts = new Map<string, SessionSync["upserts"][number]>();
+  const removes = new Map<string, SessionSync["removes"][number]>();
+  for (const frame of [older.effect, newer.effect]) {
+    for (const upsert of frame.upserts) {
+      removes.delete(key(upsert));
+      upserts.set(key(upsert), upsert);
+    }
+    for (const remove of frame.removes) {
+      upserts.delete(key(remove));
+      removes.set(key(remove), remove);
+    }
+  }
+  const caughtUpLocalSeq = older.effect.caughtUpLocalSeq !== undefined ||
+      newer.effect.caughtUpLocalSeq !== undefined
+    ? Math.max(
+      older.effect.caughtUpLocalSeq ?? 0,
+      newer.effect.caughtUpLocalSeq ?? 0,
+    )
+    : undefined;
+  const observations = [
+    ...(older.effect.observations ?? []),
+    ...(newer.effect.observations ?? []),
+  ];
+  return {
+    type: "session/effect",
+    space: newer.space,
+    sessionId: newer.sessionId,
+    effect: {
+      type: "sync",
+      fromSeq: Math.min(older.effect.fromSeq, newer.effect.fromSeq),
+      toSeq: Math.max(older.effect.toSeq, newer.effect.toSeq),
+      ...(caughtUpLocalSeq !== undefined ? { caughtUpLocalSeq } : {}),
+      upserts: [...upserts.values()],
+      removes: [...removes.values()],
+      ...(observations.length > 0 ? { observations } : {}),
+    },
+  };
+};
+
 class Connection {
   #ready = false;
   #closed = false;
@@ -663,6 +713,12 @@ class Connection {
         // application (accept promotion / rejection drop) until that marker
         // covers it. See 04-protocol.md §4.11.2.
         this.send(await this.server.transact(parsed));
+        // A self-deauthorizing ACL commit defers the writer's terminal
+        // session/revoked until after its verdict; deliver it now.
+        this.server.deliverDeferredSelfRevocation(
+          parsed.space,
+          parsed.sessionId,
+        );
         return;
       }
       case "graph.query":
@@ -870,15 +926,34 @@ class Connection {
         { adoptionObservations: this.#persistentSchedulerState },
       );
       if (this.#closed) {
+        // Evaluation already advanced the session cache past this content;
+        // retain it so the session's next sync (a later connection, or a
+        // resume) still delivers it.
+        if (effect !== null) {
+          this.server.retainUnsentEffect(space, sessionId, effect);
+        }
         return;
       }
       // ACL revocation can remove the session while watch evaluation awaits
-      // its engine. Never emit the already-computed effect after that removal.
+      // its engine. Never emit the already-computed effect after that removal
+      // (the session is gone from the registry — nothing to retain for).
       if (this.shouldSuppressSessionSend(space, sessionId)) {
         continue;
       }
       if (effect !== null) {
-        this.send(effect);
+        try {
+          this.send(effect);
+        } catch (error) {
+          // The send boundary is the commit point for sync state: evaluation
+          // already advanced the session cache and cleared the pending
+          // marker, so a lost effect cannot be recomputed — retain it for
+          // the session's next sync instead (CT-1927 review, round 5).
+          this.server.retainUnsentEffect(space, sessionId, effect);
+          console.warn(
+            "memory v2: sync send failed; effect retained for the session's next sync",
+            error,
+          );
+        }
       }
     }
   }
@@ -1248,6 +1323,26 @@ export class Server {
    *  receives no further pushes — but is NOT sent the terminal revocation, so
    *  it gets this transact's response first (a self-removal otherwise reads as
    *  a failure). Its next message fails closed as an unknown session. */
+  // Writer sessions that de-authorized themselves in a commit: their
+  // session/revoked is held until after the transact verdict goes out.
+  #deferredSelfRevocations = new Map<string, string | null>();
+
+  deliverDeferredSelfRevocation(space: string, sessionId: string): void {
+    const key = `${space}\0${sessionId}`;
+    const connectionId = this.#deferredSelfRevocations.get(key);
+    if (connectionId === undefined) {
+      return;
+    }
+    this.#deferredSelfRevocations.delete(key);
+    if (connectionId !== null) {
+      this.#connections.get(connectionId)?.revokeSession(
+        space,
+        sessionId,
+        "unauthorized",
+      );
+    }
+  }
+
   #revokeDeauthorizedSessions(
     engine: Engine.Engine,
     space: string,
@@ -1262,11 +1357,17 @@ export class Server {
       // pushes, and its next message fails closed (Unknown session).
       this.#sessions.remove(space, session.id);
       if (session.id === writerSessionId) {
-        // The writer's own session — it just removed its own access. Removal
-        // already stopped its pushes and denies its next message; do NOT also
-        // send the terminal session/revoked, which the client treats as
-        // terminal and would turn this transact's successful self-removal into
-        // a reported failure.
+        // The writer's own session — it just removed its own access. Do not
+        // send the terminal session/revoked BEFORE its transact response
+        // (the client treats it as terminal and would turn this successful
+        // self-removal into a reported failure) — but it MUST still arrive
+        // after the verdict: the session is detached, so no marker frame
+        // can ever reach it, and the revocation is what releases the
+        // client's parked accept (consumer-teardown application).
+        this.#deferredSelfRevocations.set(
+          `${space}\0${session.id}`,
+          session.ownerConnectionId,
+        );
         continue;
       }
       if (session.ownerConnectionId !== null) {
@@ -2183,12 +2284,43 @@ export class Server {
               seq: commit.seq,
             },
           );
+          // CT-1927: stage the accept's catch-up obligation SYNCHRONOUSLY
+          // with the dirty-marking above — before any await. A flush pass
+          // running during the scheduler side-effect await below consumes
+          // the dirty batch; an obligation staged only afterwards would
+          // ride nothing and schedule nothing, stranding the client's
+          // parked promotion forever (CT-1927 review, round 5). Staged
+          // here, the obligation either rides that concurrent pass (the
+          // marker may then precede the verdict on the socket — the client
+          // handles both orders) or the still-scheduled batch timer. The
+          // batched fan-out stamps `caughtUpLocalSeq >= this localSeq` on
+          // the next frame to this session (an otherwise-empty frame if
+          // nothing it watches is dirty), and the CLIENT holds the
+          // accepted commit's promotion — pending overlay to confirmed
+          // mirror — until that marker arrives, so promotion always
+          // extrapolates over a base that reflects the foreign novelty the
+          // accept was applied on top of. The stamping contract: the frame
+          // reflects every decided outcome ≤ W for the docs it COVERS.
+          // The session's own accepted writes are echo-suppressed by
+          // dirty-origin tracking (the parked verdict carries their truth
+          // — with CT-1926's post-apply document where the server provides
+          // it); REJECTED commits' docs are staged origin-less
+          // (stageConflictRefreshDirtyIds), so repair frames DO cover them.
+          session.pendingCaughtUpLocalSeq = Math.max(
+            session.pendingCaughtUpLocalSeq,
+            message.commit.localSeq,
+          );
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
             // before its own transact response (the client treats session/revoked
-            // as terminal). It's still dropped from the registry, so a
-            // self-deauthorized writer receives no further pushes.
+            // as terminal). It is dropped from the registry immediately —
+            // fan-out resolves registered sessions only — and its terminal
+            // session/revoked is DEFERRED until after the verdict is sent
+            // (deliverDeferredSelfRevocation): the revocation is what tells
+            // the client its marker channel is gone, so its parked accept
+            // applies immediately instead of waiting for a marker no
+            // detached session will ever be delivered.
             this.#revokeDeauthorizedSessions(
               engine,
               message.space,
@@ -2201,24 +2333,6 @@ export class Server {
             schedulerObservations,
             previousReadSpaces,
             session,
-          );
-          // CT-1927: stage the accept's catch-up obligation. The batched
-          // fan-out stamps `caughtUpLocalSeq >= this localSeq` on the next
-          // frame to this session (an otherwise-empty frame if nothing it
-          // watches is dirty), and the CLIENT holds the accepted commit's
-          // promotion — pending overlay to confirmed mirror — until that
-          // marker arrives, so promotion always extrapolates over a base
-          // that reflects the foreign novelty the accept was applied on
-          // top of. The stamping contract: the frame reflects every
-          // decided outcome ≤ W for the docs it COVERS. The session's own
-          // accepted writes are echo-suppressed by dirty-origin tracking
-          // (the parked verdict carries their truth — with CT-1926's
-          // post-apply document where the server provides it); REJECTED
-          // commits' docs are staged origin-less
-          // (stageConflictRefreshDirtyIds), so repair frames DO cover them.
-          session.pendingCaughtUpLocalSeq = Math.max(
-            session.pendingCaughtUpLocalSeq,
-            message.commit.localSeq,
           );
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
@@ -2915,6 +3029,27 @@ export class Server {
     };
   }
 
+  /** Retain a computed-but-undelivered sync effect for a session: its
+   * evaluation already advanced the session cache and watermarks, so the
+   * content cannot be recomputed — the next sync for the session merges it
+   * in (frames are per-doc snapshots, so the merge is a per-doc
+   * latest-wins union). */
+  retainUnsentEffect(
+    space: string,
+    sessionId: string,
+    effect: SessionEffectMessage,
+  ): void {
+    const session = this.#sessions.get(space, sessionId);
+    if (session === null) {
+      // The session is gone (revoked/expired): its cache dies with it, so
+      // nothing is stranded — a future session re-evaluates from scratch.
+      return;
+    }
+    session.unsentEffect = session.unsentEffect === null
+      ? effect
+      : mergeSessionEffects(session.unsentEffect, effect);
+  }
+
   syncSessionForConnection(
     space: string,
     sessionId: string,
@@ -2926,9 +3061,22 @@ export class Server {
     if (session === null) {
       return Promise.resolve(null);
     }
+    // A previously computed effect that never reached the wire: deliver it
+    // with (merged into) this sync — its content is already reflected in
+    // the session cache, so it is invisible to recomputation.
+    const retained = session.unsentEffect;
+    session.unsentEffect = null;
     return tracer.startActiveSpan(
       "memory.subscriber.sync",
       async (span): Promise<SessionEffectMessage | null> => {
+        const finishWithRetained = (
+          result: SessionEffectMessage | null,
+        ): SessionEffectMessage | null =>
+          retained === null
+            ? result
+            : result === null
+            ? retained
+            : mergeSessionEffects(retained, result);
         span.setAttribute("space.did", space);
         if (
           session.principal !== undefined &&
@@ -3001,7 +3149,7 @@ export class Server {
             return message;
           };
           if (session.watches.length === 0) {
-            return await emptyCatchUp();
+            return finishWithRetained(await emptyCatchUp());
           }
           if (dirtyIds !== undefined) {
             const startedAt = performance.now();
@@ -3014,7 +3162,7 @@ export class Server {
             }
             span.setAttribute("ct.touched", touched);
             if (!touched) {
-              return await emptyCatchUp();
+              return finishWithRetained(await emptyCatchUp());
             }
 
             const engine = await this.openEngine(space);
@@ -3055,7 +3203,7 @@ export class Server {
             }
 
             if (updates.size === 0) {
-              return await emptyCatchUp();
+              return finishWithRetained(await emptyCatchUp());
             }
 
             const upserts: SessionCacheEntry[] = [];
@@ -3088,22 +3236,24 @@ export class Server {
               // explicitly, so this does not mutate the bounds of this sync (the
               // Cubic fix keeps fromSeq pinned to the pre-refresh value).
               session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
-              return await emptyCatchUp(fromSeq, toSeq);
+              return finishWithRetained(await emptyCatchUp(fromSeq, toSeq));
             }
             session.lastSyncedSeq = toSeq;
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
-            return await finishCatchUp({
-              type: "sync",
-              fromSeq,
-              toSeq,
-              upserts: upserts.toSorted((left, right) =>
-                left.branch.localeCompare(right.branch) ||
-                left.id.localeCompare(right.id)
-              ),
-              removes: [],
-            });
+            return finishWithRetained(
+              await finishCatchUp({
+                type: "sync",
+                fromSeq,
+                toSeq,
+                upserts: upserts.toSorted((left, right) =>
+                  left.branch.localeCompare(right.branch) ||
+                  left.id.localeCompare(right.id)
+                ),
+                removes: [],
+              }),
+            );
           }
 
           const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
@@ -3126,9 +3276,11 @@ export class Server {
           session.trackedIds = trackedIdsFromEntries(entities.values());
           session.lastSyncedSeq = serverSeq;
           if (isEmptySync(sync)) {
-            return await emptyCatchUp(sync.fromSeq, sync.toSeq);
+            return finishWithRetained(
+              await emptyCatchUp(sync.fromSeq, sync.toSeq),
+            );
           }
-          return await finishCatchUp(sync);
+          return finishWithRetained(await finishCatchUp(sync));
         } finally {
           span.end();
         }

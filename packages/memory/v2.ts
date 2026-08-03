@@ -317,8 +317,8 @@ export type MemoryProtocolFlags = {
   pendingReadStacks: boolean;
   /**
    * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
-   * catch-up obligation for EVERY transact verdict — accepts as well as
-   * conflict rejections — so the batched fan-out's next frame to the
+   * catch-up obligation for every accept and every conflict rejection —
+   * other rejection kinds carry none — so the batched fan-out's next frame to the
    * committing session carries a marker covering the verdict (an
    * otherwise-empty frame if nothing it watches is dirty). The CLIENT keys
    * verdict parking on this: it holds an accepted commit's promotion
