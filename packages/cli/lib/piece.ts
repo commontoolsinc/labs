@@ -75,6 +75,7 @@ import { stderrConsoleHandler } from "./json-output.ts";
 import {
   derivePieceGetValue,
   type PieceGetTransform,
+  PieceGetTransformError,
 } from "./piece-get-transform.ts";
 
 export interface EntryConfig {
@@ -2228,11 +2229,21 @@ export async function getCellValue(
         }
         throw error;
       }
+      const sourceWasAbsent = typeof targetCell.getRaw === "function" &&
+        targetCell.getRaw() === undefined;
       if (
         !options.input && transformed === undefined &&
         await resultProjectionFailedAtPath(piece, path)
       ) {
         throw new PieceResultProjectionError(path, shouldStep);
+      }
+      if (transformed === undefined && !sourceWasAbsent) {
+        throw new PieceGetTransformError(
+          "Cannot read transformed value: the filter/schema expression did " +
+            "not materialize a JSON-renderable value. This is not JSON " +
+            "null. Retry with --step for a computed result, or inspect the " +
+            "selected source data and schema.",
+        );
       }
       return transformed;
     }

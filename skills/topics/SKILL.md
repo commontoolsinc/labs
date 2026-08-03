@@ -58,9 +58,9 @@ deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
   --schema title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 ```
 
-The defensive title predicate removes null or currently unavailable rows before
-the concise projection. Without it, one such row can collapse the whole
-projected array to JSON `null`.
+The title predicate keeps discovery output uniformly object-shaped by omitting
+valid null rows. Concise projection itself preserves nullable rows and follows
+declared nested arrays without exposing sibling fields.
 
 `--filter` is useful for exact field and range searches. It runs before
 `--schema`, so a predicate can inspect a field that the result omits:
@@ -189,11 +189,11 @@ verification succeeded.
 - If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
   do not call the board empty. Preserve the input evidence and report the
   result-materialization failure.
-- If a compact Topic-array read with `--schema` returns JSON `null`, do not call
-  it empty or claim there were no matches. A null or unavailable element can
-  currently void the whole concise projection. Filter those rows before the
-  projection, for example with `--filter '.title != null'` on the board, and
-  report that unavailable entries may have been omitted.
+- A compact transformed read of a present source exits nonzero when its value
+  cannot materialize and explicitly says the failure is not JSON `null`. A
+  printed `null` is a valid projected null or an absent optional source, not an
+  empty array or proof of no matches; use `--filter '.title != null'` when null
+  Topic rows are irrelevant.
 - Do not substitute `piece ls` for the board's topic list. Pieces created inside
   handlers can be absent from that listing; `crossrefs --step` is the canonical
   fid index, with `topics --input` as the durable fallback.
