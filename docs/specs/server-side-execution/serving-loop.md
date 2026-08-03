@@ -205,6 +205,38 @@ or admission time; a server bypass ("the server is trusted") — the
 server is trusted with AUTHORITY, not with skipping flow control over
 user data.
 
+## 3d. Transactions: the action tx seals into the wave
+
+Today 1 action run = 1 `IExtendedStorageTransaction`, and the per-action
+bookkeeping (reactivity log, CFC at close, basis capture, failure
+isolation) hangs off it. v2 KEEPS that object and interface — `action(tx)`
+is unchanged — and changes only the destination: server-side, an action
+tx SEALS into the wave accumulator instead of committing to the store.
+Sealing fires everything commit fires today: the read log feeds the graph
+and basis rows (§3b), CFC evaluates against this action's reads (§3c),
+and the action's passed writes join the wave.
+
+- The accumulator is a layered view: store snapshot at the wave's input
+  seq + previously sealed writes. Actions run serially per space, so a
+  later action reads earlier ones' sealed writes; intra-wave ordering is
+  the scheduler's ordering.
+- Failure isolation is per action: an aborted tx discards only its own
+  writes; the wave keeps the rest.
+- On a client (OFF arm, and speculation in the ON arm) seal == commit /
+  overlay-apply as today — one abstraction, two destinations. Anchor:
+  `packages/runner/src/storage/extended-storage-transaction.ts`.
+
+**Mid-wave concurrency rule**: the wave commit CASes PER DOC against the
+wave's read basis. A doc whose head advanced past the basis (a concurrent
+authored commit landed mid-wave) has its derived write DROPPED from the
+wave commit — the concurrent commit is already the next wave's input and
+recomputes that derivation from fresher state. Dropping is sound exactly
+because derived values are re-derivable; it would be unsound for
+authored values, which is one more reason the classes never share a
+commit. Count drops as `wave.supersededWrites`. Whole-wave CAS failure is
+FORBIDDEN (livelock under sustained authored traffic), as are blind
+derived writes (clobber).
+
 ## 4. Effectful nodes: memoization contract
 
 For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
