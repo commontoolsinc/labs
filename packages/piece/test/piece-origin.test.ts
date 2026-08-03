@@ -7,15 +7,21 @@ import {
   getPieceSourceSnapshot,
   type MemorySpace,
   preparePieceSourceTransitionBaseline,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 import {
-  DEFAULT_APP_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The route that ref resolves to.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
 import {
   classifyOrigin,
   PieceOriginError,
@@ -490,7 +496,7 @@ describe("reading a piece's source state", () => {
 
   beforeEach(async () => {
     restoreFetch = installFetchStub({
-      [DEFAULT_APP_PATTERN_URL]: DEFAULT_APP_SOURCE,
+      [DEFAULT_APP_PATTERN_PATH]: DEFAULT_APP_SOURCE,
     });
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -536,16 +542,16 @@ describe("reading a piece's source state", () => {
     });
   });
 
-  it("reports a space root's stamped path as an absolute web origin", async () => {
+  it("reports a space root's stamped ref as an absolute web origin", async () => {
     const root = await controller.ensureDefaultPattern();
 
     const state = await readPieceSourceState(runtime, root.getCell());
-    // The root is stamped with a toolshed-relative path; the origin that comes
-    // back is absolute, with the recorded form kept alongside it.
+    // The root is stamped with a `system:` ref; the origin that comes back is
+    // the absolute route it resolves to, with the ref kept alongside it.
     expect(state.origin).toEqual({
-      url: `http://toolshed.test${DEFAULT_APP_PATTERN_URL}`,
+      url: `http://toolshed.test${DEFAULT_APP_PATTERN_PATH}`,
       kind: "web",
-      recorded: DEFAULT_APP_PATTERN_URL,
+      recorded: DEFAULT_APP_PATTERN_SOURCE,
     });
     expect(state.files.length).toBeGreaterThan(0);
     expect(state.files[0].name).toBe(state.entry);
@@ -570,16 +576,16 @@ describe("reading a piece's source state", () => {
       baseline,
       timestamp: 42,
       operation: "origin-update",
-      origin: DEFAULT_APP_PATTERN_URL,
+      origin: DEFAULT_APP_PATTERN_PATH,
       expected,
     });
     await tx.commit();
 
     const state = await readPieceSourceState(runtime, cell);
     expect(state.origin).toEqual({
-      url: `http://toolshed.test${DEFAULT_APP_PATTERN_URL}`,
+      url: `http://toolshed.test${DEFAULT_APP_PATTERN_PATH}`,
       kind: "web",
-      recorded: DEFAULT_APP_PATTERN_URL,
+      recorded: DEFAULT_APP_PATTERN_PATH,
     });
     expect(state.history.at(-1)?.origin).toEqual(state.origin);
   });

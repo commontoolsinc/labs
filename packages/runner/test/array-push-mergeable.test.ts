@@ -13,6 +13,7 @@ import {
   getDirectTransactionNativeCommit,
 } from "../src/storage/transaction-inspection.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 
 // A storage manager with its OWN per-space client replicas, loopback-connected
 // to a SHARED in-process memory server (mirrors cross-space-value-read.test.ts).
@@ -1875,6 +1876,104 @@ describe("mergeable array appends", () => {
       expect(() => cell.increment(0)).toThrow();
       await tx.commit();
     } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A stale framed addUnique must not rewrite the array's existing prefix.
+  // Its base-array read is excluded from the commit's conflict set, which is
+  // only safe while the op writes nothing below the tail: anchoring (or
+  // otherwise rewriting) untouched inline prefix elements would let this
+  // stale commit apply positional replacements over a newer concurrent
+  // element edit without any conflict, silently losing that edit.
+  it("a stale framed addUnique does not clobber a concurrent element edit", async () => {
+    const OBJ_CAUSE = "mergeable-addunique-objects";
+    const objListSchema = {
+      type: "array",
+      items: { type: "object", additionalProperties: true },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    type Item = { v: number };
+
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      // Seed the durable array with INLINE object elements (a raw write, so
+      // no anchoring), and get it durable.
+      const tx0 = rt1.edit();
+      const seedCell = rt1.getCell<Item[]>(
+        space,
+        OBJ_CAUSE,
+        objListSchema,
+        tx0,
+      );
+      seedCell.setRaw([{ v: 1 }, { v: 2 }]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2 loads the seeded state; its replica now holds the same base.
+      const cell2 = rt2.getCell<Item[]>(space, OBJ_CAUSE, objListSchema);
+      await cell2.sync();
+      await cell2.pull();
+      expect(cell2.get()?.length).toBe(2);
+
+      // Session 1 edits an existing element and commits.
+      const txA = rt1.edit();
+      rt1.getCell<Item[]>(space, OBJ_CAUSE, objListSchema, txA).key(0).set(
+        { v: 9 },
+      );
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2, WITHOUT having observed that edit, performs a framed
+      // addUnique. The candidate is new, so it is accepted and anchored; the
+      // stale inline prefix must pass through untouched.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "stale addUnique",
+        reactives: new Set(),
+      });
+      try {
+        const txB = rt2.edit();
+        rt2.getCell<Item[]>(space, OBJ_CAUSE, objListSchema, txB).addUnique(
+          { v: 3 },
+        );
+        await txB.commit();
+      } finally {
+        popFrame(frame);
+      }
+      await rt2.storageManager.synced();
+
+      // Durable truth from a fresh session: the concurrent edit AND the
+      // added value both survive.
+      const storage3 = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt3 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage3,
+      });
+      try {
+        const cell3 = rt3.getCell<Item[]>(space, OBJ_CAUSE, objListSchema);
+        await cell3.sync();
+        await cell3.pull();
+        const durable = (cell3.get() ?? []) as Item[];
+        expect(durable.length).toBe(3);
+        expect(durable[0]).toEqual({ v: 9 });
+        expect(durable[1]).toEqual({ v: 2 });
+        expect(durable[2]).toEqual({ v: 3 });
+      } finally {
+        await rt3.dispose();
+        await storage3.close();
+      }
+    } finally {
+      await rt2.dispose();
       await rt1.dispose();
     }
   });

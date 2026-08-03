@@ -235,6 +235,65 @@ describe("pattern update validates the stored argument", () => {
     ).toBe(vintageIdentity);
   });
 
+  it("accepts an optional property a handler stored as undefined", async () => {
+    // The shape a real deployed pattern writes. `packages/patterns/topics/
+    // topic.tsx`'s `addComment` builds `comments.push({ author, ... })` from a
+    // variable that is undefined whenever no `agentName` was supplied, so the
+    // KEY lands with no value under it, and the codec stores that presence.
+    //
+    // JavaScript cannot tell `{ author: undefined }` from `{}` on read, so the
+    // pattern has not said anything different by writing it — but validating
+    // the key as a value asks whether `undefined` is an object, which nothing
+    // answers yes to. Measured on the committed topics vintage before this was
+    // fixed: `comments: 0: author: value does not match type object`, refusing
+    // the update of a document the pattern itself had written. The refusal is
+    // permanent (see the roll-forward case above), so this is a piece that
+    // never opens again rather than one that logs and recovers.
+    const stored = {
+      comments: [{ author: undefined, authorName: "Old Agent", body: "old" }],
+    };
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      stored,
+      "optional-undefined-property",
+    );
+
+    // The premise, checked rather than assumed: if the codec dropped the key on
+    // the way to storage there would be nothing here to validate, and this
+    // case would pass without ever exercising the rule it exists for.
+    const storedLink = getMetaLink(cell, "argument")!;
+    const storedRaw = rt.getCellFromLink(storedLink).getRaw() as {
+      comments: Record<string, unknown>[];
+    };
+    expect(
+      Object.hasOwn(storedRaw.comments[0], "author"),
+      "the stored argument does not carry `author` at all, so this case no " +
+        "longer reaches the present-but-undefined rule it was written for",
+    ).toBe(true);
+    expect(storedRaw.comments[0].author).toBeUndefined();
+
+    const { error, thrown } = await rollForward(
+      cell,
+      programOf([
+        "import { pattern } from 'commonfabric';",
+        "interface Author { kind: string; name: string }",
+        "interface Comment { author?: Author; authorName?: string; body?: string }",
+        "interface Args { comments?: Comment[]; [key: string]: any }",
+        "export default pattern<Args, { marker: string }>(() => {",
+        '  return { marker: "v2" };',
+        "});",
+        "",
+      ].join("\n")),
+    );
+
+    expect(
+      error,
+      "a property the pattern wrote as undefined was measured against its " +
+        "declared type, so the update the pattern's own data provoked is refused",
+    ).toBeUndefined();
+    expect(isStoredArgumentSchemaRefusal(thrown)).toBe(false);
+  });
+
   it("lets a MARKERLESS root through, and marks it on the way", async () => {
     // The deliberate exemption, pinned so it is a decision rather than an
     // assumption. `storedSetupMarker` reports an absent `patternSetupIdentity`

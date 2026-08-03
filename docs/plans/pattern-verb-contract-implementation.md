@@ -548,7 +548,12 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   retryable under the same invocation id.~~ — **done (D5)**: the shared gate
   (`assertVerbInputSatisfiesSchema`, both entry points) normalizes an absent
   payload to `{}` where the schema — after `localRefTarget` resolves a
-  top-level local `$ref` — is an object schema, and dispatches exactly what
+  top-level local `$ref` — is an object schema: directly object-shaped, or
+  an `allOf` conjunction with an object-schema branch (a conjunction with an
+  object branch IS an object schema, no branch choice involved — added on
+  review, 2026-07-31; disjunctive `anyOf`/`oneOf` roots remain out of scope
+  per this bullet's combinator boundary, since normalizing there would pick
+  among alternatives on the caller's behalf). It dispatches exactly what
   it judged, so an all-defaulted verb now receives a defaults-populated
   object instead of `undefined`; the refusal reuses
   `VerbInputValidationError` with a "no payload was supplied … send a

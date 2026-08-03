@@ -99,9 +99,9 @@ describe("CodecRegistry", () => {
       it(`given ${exampleStr}, finds the ${sourceName} codec by class`, () => {
         const { first, handler, last, registry } = buildRegistry(
           cls,
-          example as FabricValue,
+          example,
         );
-        expect(registry.codecFromValue(example as FabricValue)).toBe(handler);
+        expect(registry.codecFromValue(example)).toBe(handler);
         // Only the class-matched codec is consulted -- there is no linear scan.
         expect(first.canEncodeCalled).toBe(false);
         expect(handler.canEncodeCalled).toBe(true);
@@ -111,9 +111,9 @@ describe("CodecRegistry", () => {
       it(`returns undefined for ${counterStr} (no ${sourceName} match)`, () => {
         const { first, handler, last, registry } = buildRegistry(
           cls,
-          example as FabricValue,
+          example,
         );
-        expect(registry.codecFromValue(counter as FabricValue)).toBeUndefined();
+        expect(registry.codecFromValue(counter)).toBeUndefined();
         // A class miss consults no codec (no linear scan).
         expect(first.canEncodeCalled).toBe(false);
         expect(handler.canEncodeCalled).toBe(false);
@@ -124,7 +124,7 @@ describe("CodecRegistry", () => {
     it("returns undefined for a null-prototype object", () => {
       const { registry } = buildRegistry(
         FabricRegExp,
-        new FabricRegExp(/x/) as FabricValue,
+        new FabricRegExp(/x/),
       );
       const nullProto = Object.create(null) as Record<string, FabricValue>;
       nullProto.a = 1;

@@ -4,7 +4,6 @@ import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
   getCellOrThrow,
-  ID as FABRIC_ID,
   isCell,
   isCellResult,
   type JSONSchema,
@@ -43,11 +42,17 @@ import {
   localPatternEntry,
   normalizeApiUrl,
   parseLink,
+  parsePieceGetTransformOptions,
   parsePieceOptions,
   parseSpaceOptions,
   piece,
   setPieceSourceFromCommand,
 } from "../commands/piece.ts";
+import {
+  parsePieceGetFilter,
+  parsePieceGetProjection,
+  PieceGetTransformError,
+} from "../lib/piece-get-transform.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -545,11 +550,244 @@ describe("cli piece parsing", () => {
     );
   });
 
-  it("offers a one-session step option for piece result reads", () => {
+  it("offers computed transforms for piece reads", () => {
     const getFlags = piece.getCommand("get")!.getOptions().flatMap((option) =>
       option.flags
     );
     expect(getFlags).toContain("--step");
+    expect(getFlags).toContain("--filter");
+    expect(getFlags).toContain("--schema");
+  });
+
+  it("parses piece get transform options", async () => {
+    expect(await parsePieceGetTransformOptions({})).toBeUndefined();
+
+    const filterOnly = await parsePieceGetTransformOptions({
+      filter: ".active",
+    });
+    expect(filterOnly?.filter?.source).toBe(".active");
+    expect(filterOnly?.projection).toBeUndefined();
+
+    const schemaOnly = await parsePieceGetTransformOptions({
+      schema: "id,name",
+    });
+    expect(schemaOnly?.filter).toBeUndefined();
+    expect(schemaOnly?.projection?.source).toBe("id,name");
+
+    const both = await parsePieceGetTransformOptions({
+      filter: ".active",
+      schema: "id",
+    });
+    expect(both?.filter?.source).toBe(".active");
+    expect(both?.projection?.source).toBe("id");
+  });
+
+  it("passes parsed transforms through the piece get command action", async () => {
+    const { code, stderr } = await cf(
+      "piece get " +
+        "--identity ./definitely-missing-piece-get-review.key " +
+        "--api-url https://cf.dev --space common-knowledge " +
+        `--piece ${PIECE} --filter .active --schema id`,
+    );
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain(
+      "definitely-missing-piece-get-review.key",
+    );
+  });
+
+  it("applies get transforms to the selected path cell", async () => {
+    const targetCell = { marker: "selected-path-cell" };
+    const rootCell = {
+      key: (...path: Array<string | number>) => {
+        expect(path).toEqual(["items"]);
+        return targetCell;
+      },
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => {
+              throw new Error("transform reads must not materialize result");
+            },
+            getCell: () => Promise.resolve(rootCell),
+          },
+        }),
+    };
+    const manager = {
+      runtime: { marker: "runtime" },
+      getSpace: () => "did:key:test-space",
+    };
+    const filter = parsePieceGetFilter(".id == 2");
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["items"],
+      { transform: { filter } },
+      {
+        loadManager: () => Promise.resolve(manager as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+        derivePieceGetValue: (runtime, space, source, transform) => {
+          expect(runtime).toBe(manager.runtime as any);
+          expect(space).toBe("did:key:test-space");
+          expect(source).toBe(targetCell as any);
+          expect(transform.filter).toBe(filter);
+          return Promise.resolve([{ id: 2 }]);
+        },
+      },
+    );
+
+    expect(value).toEqual([{ id: 2 }]);
+  });
+
+  it("preserves transform errors that are not result projection failures", async () => {
+    const transformError = new PieceGetTransformError("invalid transform");
+    const targetCell = {};
+    const rootCell = { key: () => targetCell };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      { transform: { filter: parsePieceGetFilter(".active") } },
+      {
+        loadManager: () =>
+          Promise.resolve({
+            runtime: {},
+            getSpace: () => "did:key:test-space",
+          } as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+        derivePieceGetValue: () => Promise.reject(transformError),
+      },
+    )).rejects.toBe(transformError);
+  });
+
+  it("reports projection failures encountered during transformed reads", async () => {
+    const targetCell = {
+      schema: { type: "number" },
+      getRaw: () => ({ "/": "missing-session-count" }),
+    };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      },
+      key: () => targetCell,
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+    };
+    const deps = {
+      loadManager: () =>
+        Promise.resolve({
+          runtime: {},
+          getSpace: () => "did:key:test-space",
+        } as any),
+      resolvePieceAddress: (_manager: any, id: string) => Promise.resolve(id),
+      createController: () => controller as any,
+    };
+    const options = {
+      transform: { filter: parsePieceGetFilter(".active") },
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () =>
+          Promise.reject(
+            new Error('Cannot access path "count" - property not found'),
+          ),
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
+  });
+
+  it("distinguishes failed transforms, JSON null, and absent sources", async () => {
+    let sourceRaw: unknown;
+    const targetCell = {
+      schema: { type: ["object", "null"] },
+      getRaw: () => sourceRaw,
+    };
+    const rootCell = { key: () => targetCell };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { getCell: () => Promise.resolve(rootCell) },
+        }),
+    };
+
+    const options = {
+      input: true,
+      transform: { projection: await parsePieceGetProjection("id") },
+    };
+    const deps = {
+      loadManager: () =>
+        Promise.resolve({
+          runtime: {},
+          getSpace: () => "did:key:test-space",
+        } as any),
+      resolvePieceAddress: (_manager: any, id: string) => Promise.resolve(id),
+      createController: () => controller as any,
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => {
+          sourceRaw = { id: "loaded-during-transform" };
+          return Promise.resolve(undefined);
+        },
+      },
+    )).rejects.toThrow("This is not JSON null");
+
+    sourceRaw = null;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(null),
+      },
+    )).resolves.toBeNull();
+
+    sourceRaw = undefined;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).resolves.toBeUndefined();
   });
 
   it("offers per-phase timing output for piece call", () => {
@@ -963,7 +1201,10 @@ describe("cli piece parsing", () => {
           searchablePiece(
             "of:internal-symbol",
             "Internal symbol metadata",
-            { [FABRIC_ID]: "Needle in internal identity metadata" },
+            {
+              [Symbol("internal metadata")]:
+                "Needle in internal identity metadata",
+            },
             {},
           ),
           searchablePiece(

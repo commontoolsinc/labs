@@ -111,51 +111,41 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/required field.*default/i);
   });
 
-  it("exempts an additive required STREAM slot from the default requirement", () => {
-    // A stream (`asCell: ["stream"]`) is a runtime-materialized capability
-    // marker, not stored document data, so an old doc that predates it has
-    // nothing to preserve and no meaningful default a `Stream<…>` could carry
-    // (estuary home handler streams). Additive-required WITHOUT a default is
-    // therefore allowed — the pattern re-materializes the marker on every run.
+  it("allows additive required fields anywhere in a generated result document", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
-      properties: { secret: { type: "string" } },
+      properties: {
+        secret: { type: "string" },
+        meta: {
+          type: "object",
+          properties: { existing: { type: "string" } },
+          required: ["existing"],
+        },
+      },
       required: ["secret"],
     }, {
       type: "object",
       properties: {
         secret: { type: "string" },
-        evt: { type: "object", asCell: ["stream"] },
+        meta: {
+          type: "object",
+          properties: {
+            existing: { type: "string" },
+            generated: { type: "string" },
+          },
+          required: ["existing", "generated"],
+        },
       },
-      required: ["secret", "evt"],
-    }) as JSONSchemaObj;
-    expect(merged.required).toEqual(["secret", "evt"]);
+      required: ["secret", "meta"],
+    }, { generatedOutputPaths: [[]] }) as JSONSchemaObj;
+    expect(merged.required).toEqual(["secret", "meta"]);
+    expect((merged.properties?.meta as JSONSchemaObj).required).toEqual([
+      "existing",
+      "generated",
+    ]);
   });
 
-  it("exempts an additive required stream slot in the scoped-descriptor dialect", () => {
-    // The outer `asCell` entry may be a `{ kind, scope }` descriptor rather than
-    // a bare string; the exemption keys on the normalized KIND, so a scoped
-    // stream is still a stream. A bare `.includes("stream")` missed this.
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: { secret: { type: "string" } },
-      required: ["secret"],
-    }, {
-      type: "object",
-      properties: {
-        secret: { type: "string" },
-        evt: { type: "object", asCell: [{ kind: "stream", scope: "user" }] },
-      },
-      required: ["secret", "evt"],
-    }) as JSONSchemaObj;
-    expect(merged.required).toEqual(["secret", "evt"]);
-  });
-
-  it("does NOT exempt an additive required CELL that merely nests a stream", () => {
-    // `["cell", "stream"]` is a CELL of a stream: its IMMEDIATE outer slot is a
-    // cell, so it DOES hold preservable data and an additive-required instance
-    // still needs a default. The prior `asCell.includes("stream")` wrongly
-    // exempted this (#4967 review, Blocking 3) — only the FIRST entry decides.
+  it("does not infer output role from the value's stream capability", () => {
     expect(() =>
       mergeCfcSchemaEnvelopes({
         type: "object",
@@ -165,11 +155,59 @@ describe("mergeCfcSchemaEnvelopes", () => {
         type: "object",
         properties: {
           secret: { type: "string" },
-          nested: { type: "object", asCell: ["cell", "stream"] },
+          evt: {
+            type: "object",
+            asCell: [{ kind: "stream", scope: "user" }],
+          },
         },
-        required: ["secret", "nested"],
+        required: ["secret", "evt"],
       })
     ).toThrow(/required field.*default/i);
+  });
+
+  it("scopes the generated-output exemption to the declared path", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          generated: { type: "object", properties: {} },
+          retained: { type: "object", properties: {} },
+        },
+      }, {
+        type: "object",
+        properties: {
+          generated: {
+            type: "object",
+            properties: { output: { type: "string" } },
+            required: ["output"],
+          },
+          retained: {
+            type: "object",
+            properties: { input: { type: "string" } },
+            required: ["input"],
+          },
+        },
+      }, { generatedOutputPaths: [["generated"]] })
+    ).toThrow(/required field input needs a default/i);
+
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        generated: { type: "object", properties: {} },
+      },
+    }, {
+      type: "object",
+      properties: {
+        generated: {
+          type: "object",
+          properties: { output: { type: "string" } },
+          required: ["output"],
+        },
+      },
+    }, { generatedOutputPaths: [["generated"]] }) as JSONSchemaObj;
+    expect(
+      (merged.properties?.generated as JSONSchemaObj).required,
+    ).toEqual(["output"]);
   });
 
   it("rejects weakened ifc constraints", () => {

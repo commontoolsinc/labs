@@ -1,6 +1,5 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import {
@@ -1564,7 +1563,7 @@ export class RuntimeProcessor {
     const body = blobUploadEncoding.encode({
       type: request.contentType,
       body: new FabricBytes(bytes),
-    } as FabricValue);
+    });
     const response = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

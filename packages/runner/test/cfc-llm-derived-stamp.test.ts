@@ -9,11 +9,12 @@ import {
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { waitForLlmMessages } from "./support/llm-result.ts";
@@ -126,7 +127,7 @@ describe("CFC LlmDerived stamping mechanism", () => {
   });
 
   it("stamps a split element on its own doc", async () => {
-    // Exercises the generic split mechanism directly, via an `[ID]` sigil.
+    // Exercises the generic split mechanism directly, via frame anchoring.
     // Dialog messages reach the same shape by a different route -- the dialog
     // creates each message's document explicitly -- and either way the stamp
     // must land on the split doc and surface through the element's label view.
@@ -142,17 +143,25 @@ describe("CFC LlmDerived stamping mechanism", () => {
         kind: "builtin",
         builtinId: "llm-dialog",
       });
-      const stamping = runtime.getCell(
-        signer.did(),
-        "llm-derived-id-split",
-        stampingMessagesSchema,
-        modelTx,
-      );
-      stamping.push({
-        [ID]: { llmDialog: { message: "m", id: "id-split-1" } },
-        role: "assistant",
-        content: "model bytes",
-      } as unknown as { role: string; content: string });
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "llm-derived-id-split",
+        reactives: new Set(),
+      });
+      try {
+        const stamping = runtime.getCell(
+          signer.did(),
+          "llm-derived-id-split",
+          stampingMessagesSchema,
+          modelTx,
+        );
+        stamping.push({
+          role: "assistant",
+          content: "model bytes",
+        } as unknown as { role: string; content: string });
+      } finally {
+        popFrame(frame);
+      }
       modelTx.prepareCfc();
       expect((await modelTx.commit()).ok).toBeDefined();
 

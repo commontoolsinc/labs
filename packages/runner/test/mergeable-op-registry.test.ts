@@ -149,7 +149,7 @@ describe("mergeable tail-op build guards", () => {
       buildMergeableIntent(
         { op: "append", path: ["value"], count: 1 },
         {
-          workingArray: punched as FabricValue[],
+          workingArray: punched,
           hadInitialArray: true,
           hadInitialValue: true,
           initialArray: ["a", "b", "c"],
@@ -167,7 +167,7 @@ describe("mergeable tail-op build guards", () => {
       buildMergeableIntent(
         { op: "append", path: ["value"], count: 2 },
         {
-          workingArray: sparseTail as FabricValue[],
+          workingArray: sparseTail,
           hadInitialArray: true,
           hadInitialValue: true,
           initialArray: ["a", "b"],
@@ -187,7 +187,7 @@ describe("mergeable tail-op build guards", () => {
       buildMergeableIntent(
         { op: "append", path: ["value"], count: 1 },
         {
-          workingArray: sparse as FabricValue[],
+          workingArray: sparse,
           hadInitialArray: false,
           hadInitialValue: false,
         },
@@ -275,7 +275,7 @@ describe("mergeable remove-by-value build guards", () => {
   // distinct from a value (and from a stored `undefined`) rather than flattening
   // the distinction the way a length check would.
   it("abandons the intent when a hole in the base was filled", () => {
-    const base: FabricValue[] = ["a", , "c"] as FabricValue[];
+    const base: FabricValue[] = ["a", , "c"];
     expect(
       buildMergeableIntent(removeIntent("c"), ctx(["a", "b"], base)),
     ).toEqual({ ops: [], suppress: [], abandon: true });

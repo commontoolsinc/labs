@@ -13,12 +13,11 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 // The cold-start-setup-repair materializes the real home pattern over a home
 // root doc that predates some of home's fields, and CFC schema-merge's
 // additive-required guard ("required field <name> needs a default to preserve
-// old documents") refuses the setup commit. #4933 defaulted the six DATA
-// fields (favorites/journal/spaces/defaultAppUrl/profiles/mru), but that only
-// advanced the rejection to the next required-no-default field: `defaultProfile`
-// (genuinely `… | undefined`, so it should be optional) and then the six
-// exported handler streams — which cannot carry a meaningful `Default<>` and
-// so cannot be healed the #4933 way.
+// old documents") refused the setup commit. #4933 defaulted six data fields,
+// but a result projection can also contain required fields for which a
+// migration default is not the right contract. The relevant distinction is
+// provenance: setup rewrites the complete generated result, while ordinary
+// document paths must still preserve older values.
 //
 // These tests run with CFC enforcement ON (the runtime default,
 // "enforce-explicit"); the piece cold-start harness runs with enforcement
@@ -73,11 +72,10 @@ const compileHomePattern = async (
 };
 
 describe("CFC additive-required default preserves old documents", () => {
-  // Tight pin on the guard itself: a newly-required STREAM slot must not need
-  // a default (a stream carries no preservable document value), while a plain
-  // newly-required data field still must. This isolates the schema-merge fix
-  // from the full home compile.
-  it("exempts an additive-required stream slot from the default requirement", () => {
+  // Tight pin on the guard itself: a generated output does not need a default,
+  // while an unclassified document field still does. This isolates the
+  // role-aware schema-merge rule from the full home compile.
+  it("exempts an additive-required generated output from the default requirement", () => {
     const stored: JSONSchema = {
       type: "object",
       properties: { owner: { type: "string" } },
@@ -97,8 +95,9 @@ describe("CFC additive-required default preserves old documents", () => {
       },
       required: ["owner", "addFavorite"],
     };
-    // Before the fix this threw: "required field addFavorite needs a default".
-    const merged = mergeCfcSchemaEnvelopes(stored, candidate) as JSONSchemaObj;
+    const merged = mergeCfcSchemaEnvelopes(stored, candidate, {
+      generatedOutputPaths: [[]],
+    }) as JSONSchemaObj;
     expect(merged.required).toContain("addFavorite");
   });
 

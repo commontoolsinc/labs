@@ -26,6 +26,7 @@ import {
   JSONValue,
   type Module,
   NAME,
+  type Node,
   type NodeFactory,
   type Pattern,
   UI,
@@ -292,6 +293,7 @@ const recordOutputSchemaPolicyInputs = (
           path: [...targetLink.path],
         },
         schema,
+        schemaRole: "output",
       });
     }
     return;
@@ -329,6 +331,7 @@ const recordSchemaPolicyInputForLink = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   if (schema === undefined) {
     return;
@@ -342,6 +345,7 @@ const recordSchemaPolicyInputForLink = (
       path: [...link.path],
     },
     schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -368,8 +372,8 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
         ),
     );
     const schema = bindingLink.schema ?? link.schema;
-    recordSchemaPolicyInputForLink(tx, bindingLink, schema);
-    recordSchemaPolicyInputForLink(tx, link, schema);
+    recordSchemaPolicyInputForLink(tx, bindingLink, schema, "output");
+    recordSchemaPolicyInputForLink(tx, link, schema, "output");
     return;
   }
 
@@ -453,6 +457,7 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     tx,
     result.getAsNormalizedFullLink(),
     result.schema,
+    "output",
   );
 };
 
@@ -512,6 +517,27 @@ export function firstResolvedOutputRedirect(
     }
   }
   return undefined;
+}
+
+/**
+ * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
+ * both of `collectResumeOwnedCells`'s skip exits so a console trace names the
+ * same things either way: the result cell being resumed and enough about the
+ * node to find it in the pattern that was resumed.
+ */
+function describeSkippedSubPatternNode(
+  resultCellLink: NormalizedFullLink,
+  nodeIndex: number,
+  node: Node,
+  childPattern: Pattern,
+): Record<string, unknown> {
+  return {
+    resultCell: resultCellLink.id,
+    space: resultCellLink.space,
+    nodeIndex,
+    ...(node.description !== undefined && { node: node.description }),
+    childPattern: describePatternOrModule(childPattern),
+  };
 }
 
 const recordSetupProjectionPolicyInputs = (
@@ -1283,7 +1309,23 @@ export class Runner {
       argumentSchema,
       validationArgument,
       argumentSchema,
-      { acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink },
+      {
+        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+        // An OPTIONAL key holding `undefined` carries no data, and a handler
+        // mints one without meaning to: `comments.push({ author, ... })` with
+        // no author in hand writes the key, and the codec stores that presence.
+        // Measuring it here asks whether `undefined` satisfies the property's
+        // declared type, which nothing ordinary answers yes to — and THIS
+        // refusal is permanent, because the same identity refuses identically
+        // (see `isStoredArgumentSchemaRefusal`). A pattern would be unable to
+        // update documents it wrote itself. Measured on `topics/topic.tsx`
+        // (`author`) and `lunch-poll/main.tsx` (`imageUrl`).
+        //
+        // Scoped to THIS caller rather than made the validator's rule: writing
+        // `undefined` where a number is declared is still a mistake worth
+        // rejecting at a result write, while the caller can still see it.
+        optionalUndefinedIsAbsent: true,
+      },
     );
     if (validationFailure !== undefined) {
       throw new Error(
@@ -1341,7 +1383,7 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     if (!deepEqual(previous, resultSchema)) {
-      cell.setMetaRaw("schema", resultSchema as FabricValue);
+      cell.setMetaRaw("schema", resultSchema);
     }
   }
 
@@ -1467,9 +1509,12 @@ export class Runner {
       );
       // Convert-and-freeze (default): a deep-frozen value lets the storage
       // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze.
+      // deep-cloning-to-freeze. The result root marks the whole result
+      // document as generated: setup rewrites the complete projection.
       writableResultCell.setRawUntyped(
         fabricFromNativeValue(result),
+        false,
+        "output",
       );
     }
   }
@@ -2466,7 +2511,23 @@ export class Runner {
         // Without cleanup the piece stays registered in `this.cancels`, so
         // every later start() reports "already running" for a piece that has
         // no nodes or event handlers — events sent to it are then dropped.
-        cleanup();
+        //
+        // Cleanup runs every registered cancel, any of which may itself throw.
+        // Letting that escape would REPLACE the error being handled, so what
+        // surfaced would describe the cleanup rather than the failure that
+        // caused it — and a cancel running against half-initialized state
+        // fails in ways that look nothing like the original. Report it and
+        // rethrow what actually went wrong.
+        try {
+          cleanup();
+        } catch (cleanupError) {
+          logger.warn(
+            "start",
+            "Cleanup failed while handling a start error; reporting the " +
+              "start error, which is the one that matters.",
+            cleanupError,
+          );
+        }
         throw error;
       }
       if (!doNotUpdateOnPatternChange) {
@@ -3707,7 +3768,7 @@ export class Runner {
     // (CT-1897).
     const argumentLink = getMetaLink(resultCell, "argument");
 
-    for (const node of pattern.nodes) {
+    for (const [nodeIndex, node] of pattern.nodes.entries()) {
       const module = node.module;
       if (module.type !== "pattern" || !isPattern(module.implementation)) {
         continue;
@@ -3746,10 +3807,39 @@ export class Runner {
         logger.warn("resume-owned-cells", () => [
           "skipping a sub-pattern node whose outputs did not bind or resolve",
           error,
+          describeSkippedSubPatternNode(link, nodeIndex, node, childPattern),
         ]);
         continue;
       }
-      if (spotLink === undefined) continue;
+      if (spotLink === undefined) {
+        // The same two skips as the catch above — this node's owned-cell
+        // pre-sync AND the recursion that would reach the child's own
+        // `derivedInternalCells` manifest — reached without an error: the
+        // outputs bound, but held no write redirect the scan could resolve
+        // (e.g. they consist only of deferred partialCause aliases, which
+        // denote a deeper level's derived internal cells rather than this
+        // node's reserved result spot).
+        //
+        // DEBUG, not warn: this is the BY-DESIGN outcome for such outputs, not
+        // a failure. #5143 deliberately moved that case off the throwing path,
+        // and ordinary healthy runs of the home pattern take this exit several
+        // times per resume — warning here would be noise, not signal. It still
+        // hides a skipped subtree, so it carries the same key and the same
+        // identity payload as its sibling, and turning this logger up to debug
+        // brings it back for someone tracing a stranded piece:
+        // `commonfabric.logger["runner"].level = "debug"` on the main thread,
+        // `commonfabric.rt.setLoggerLevel("debug", "runner")` for the worker
+        // the runner actually lives in. (`CF_LOG_LEVEL` will NOT do it: it is a
+        // floor, and this logger's own configured level — `warn` — is the more
+        // restrictive of the two.) A console filter on `resume-owned-cells`
+        // then catches both exits. `resume-owned-cells-skip-log.test.ts` pins
+        // the level in both directions.
+        logger.debug("resume-owned-cells", () => [
+          "skipping a sub-pattern node whose outputs resolved to no write redirect",
+          describeSkippedSubPatternNode(link, nodeIndex, node, childPattern),
+        ]);
+        continue;
+      }
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -4586,7 +4676,7 @@ export class Runner {
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
     // binding, which must not be followed at this level.
-    let value: FabricValue = inputs.$event as FabricValue;
+    let value: FabricValue = inputs.$event;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
@@ -5873,11 +5963,20 @@ export class Runner {
    * index is session-lifetime, and the op's module evaluated in this session by
    * construction (the sentinel is stamped from its live artifact right here),
    * so the builtin's sync resolution cannot miss short of a bug — and a bug
-   * should be loud, not silently served a stale graph. `inputBindings` here is
-   * the freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindToDoc`; its pattern values carry their derivation
-   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`).
+   * should be loud, not silently served a stale graph.
+   *
+   * The `op` substitution below writes through `inputBindings`, so it needs
+   * that record to be a fresh copy rather than the node's own `inputs`.
+   * `unwrapOneLevelAndBindToDoc` shares structure — it returns the original for
+   * any container under which nothing rebound — so the copy is not guaranteed
+   * in general. It is guaranteed HERE: this path runs only for the list
+   * builtins, whose `list` input is an alias, so the root always rebinds and is
+   * always copied.
+   *
+   * Either way the ref resolves. A copied pattern value carries its derivation
+   * link (`noteDerivedCopy`), and a shared one simply IS the original, so
+   * `getArtifactEntryRef` finds the ref (assigned post-eval by
+   * `registerEvaluatedModules`) in both cases.
    *
    * An op with NO known ref but a LIVE trusted original is a KEYLESS pattern
    * — hand-built through the in-process builder DSL, or evaluated through the
@@ -6294,6 +6393,16 @@ export class Runner {
         sourceSchemas: { argument: pattern.argumentSchema },
       },
     );
+    // VALUE BIND (kind: the descriptor's). Binding WITH the manifest resolves a
+    // partialCause output to the descriptor's derived internal cell, so
+    // `getDerivedInternalCellLink` mints its id under the descriptor's kind:
+    // `computed:fid1:<hash>` for a descriptor classified `kind: "computed"`,
+    // and the same `of:fid1:<hash>` the identity bind below mints for a kindless
+    // one (the classifier declines the node, or `experimental.computedCellIds`
+    // is off). This is the binding the child link is SENT to
+    // (`sendValueToBinding` below), so this is where the child's value actually
+    // lives — at a DIFFERENT entity from the identity bind's only when the
+    // descriptor carries a kind. See the identity bind for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
@@ -6334,6 +6443,27 @@ export class Runner {
       // `bindPatterns: false` — output bindings never carry sub-patterns to
       // instantiate, so skip that work; we only need the pseudo-cell aliases
       // resolved to their concrete links.
+      //
+      // IDENTITY BIND (kind: always `of:`). CT-1943: this omits
+      // `derivedInternalCells` where the value bind above passes it, and the
+      // manifest descriptor is what carries the entity kind. Same cause, same
+      // hash preimage — but no descriptor means no kind, so this mint always
+      // lands on the unkinded `of:fid1:<hash>`
+      // (docs/specs/computed-cell-identity.md: the preimage is kind-free, the
+      // URI scheme IS the kind). Whether that is a SECOND entity depends on the
+      // descriptor the value bind saw:
+      //   - descriptor with `kind: "computed"` — the value bind minted
+      //     `computed:fid1:<hash>`, so the two binds address two distinct
+      //     entities that differ only by scheme, and the child link lives on
+      //     the `computed:` one;
+      //   - kindless descriptor (the classifier declined the node, or
+      //     `experimental.computedCellIds` is off) — both binds land on this
+      //     same `of:` entity, and the child link is written here.
+      // The split is fine here, and in `collectResumeOwnedCells`, because both
+      // use the link purely as the `resultFor` CAUSE — a stable coordinate,
+      // never read for a value. But anything that wants to READ the child link
+      // must use the id the VALUE bind minted: where the descriptor was
+      // computed, reading the `of:` one returns undefined for a healthy piece.
       const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
         this.runtime.cfc,
         outputBindings,
@@ -6710,7 +6840,7 @@ function initializePieceSourceHistory(
     source: sourceRetentionLink(runtime, resultCell, tx, pattern),
     ...(origin === undefined ? {} : { origin }),
     operation: "create",
-  }] as unknown as FabricValue);
+  }]);
 }
 
 function samePieceSourceSnapshot(

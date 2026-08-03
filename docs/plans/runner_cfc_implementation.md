@@ -391,8 +391,10 @@ Phase-1 merge rules:
   divergent branches; we do not support different label sets per branch
 - the merged schema must not invalidate data that was previously structurally
   valid
-- a merge may add a required field only when the merged schema also provides a
-  default that preserves validity/materialization for existing documents
+- a merge may add a required field when the merged schema provides a default
+  that preserves validity/materialization for existing documents, or when the
+  write-policy input identifies that path as a generated output materialized by
+  the running module
 - every merged result is canonicalized with `internSchema(..., true)` before
   persistence to its `cid:<hash>` schema document
 
@@ -663,7 +665,8 @@ Tasks:
 - [x] Ensure IFC keys never weaken under merge and never appear only inside a
       divergent `anyOf`/`oneOf`/`allOf` branch
 - [x] Ensure structural merge does not invalidate previously valid data; adding
-      a required field requires a default
+      a required input or unclassified document field requires a default, while
+      a generated output path may be required without one
 - [x] Resolve input labels from stored CFC metadata and persisted
       `cid:<hash>`-backed schema documents; no coarse-label fallback
 - [x] Implement `confidentiality`, `integrity`, `addIntegrity`,

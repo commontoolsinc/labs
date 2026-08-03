@@ -1,4 +1,4 @@
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
@@ -178,11 +178,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // `isEncodedInstance()` guaranteed a single-property object, so this
-    // destructures that one entry. (`isPlainObject()` is not a type guard, so
-    // narrow explicitly for the type-checker.)
-    const [key, value] = Object.entries(
-      data as Record<string, JsonWireValue>,
-    )[0]!;
+    // destructures that one entry.
+    const [key, value] = Object.entries(data)[0]!;
     return { tag: key.slice(1), state: value };
   }
 
@@ -271,7 +268,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
         } else {
           result.push(
-            this.#encodeValue(value[i] as FabricValue, seen, registry),
+            this.#encodeValue(value[i], seen, registry),
           );
           i++;
         }
@@ -352,7 +349,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // `CODEC_META_TAGS.quote` literal handling (Section 5.6).
       if (tag === CODEC_META_TAGS.quote) {
-        return rawState as FabricValue;
+        return rawState;
       }
 
       // `CODEC_META_TAGS.object` unwrapping (Section 5.6).
@@ -360,6 +357,15 @@ export class JsonEncodingContext implements SerializationContext<string> {
         const inner = rawState as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
+          // Same reservation as the plain-object arm below: the assignment
+          // cannot rebuild these names.
+          if (isUnsafeObjectKey(key)) {
+            return new ProblematicValue(
+              key,
+              inner,
+              `object contains a key this runtime reserves: "${key}"`,
+            );
+          }
           result[key] = this.#decodeValue(val, context, registry);
         }
         return Object.freeze(result);
@@ -375,9 +381,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (tag === "") {
         return new ProblematicValue(
           tag,
-          state as unknown as FabricValue,
+          state,
           `object has bare "/" key`,
-        ) as unknown as FabricValue;
+        );
       }
 
       // Registry-based (tag lookup) dispatch
@@ -399,9 +405,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
             return deepFreeze(
               new ProblematicValue(
                 tag,
-                state as unknown as FabricValue,
+                state,
                 e instanceof Error ? e.message : String(e),
-              ) as unknown as FabricValue,
+              ),
             );
           }
         }
@@ -459,9 +465,21 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (key.startsWith("/")) {
         return new ProblematicValue(
           key.slice(1),
-          data as unknown as FabricValue,
+          data,
           `object contains reserved /-prefixed key: "${key}"`,
-        ) as unknown as FabricValue;
+        );
+      }
+      // A name this runtime reserves cannot be rebuilt by the assignment
+      // below: `__proto__` would repoint the result's prototype instead of
+      // becoming a property. Such a record cannot have been written by this
+      // implementation, whose write path refuses it, so report it rather than
+      // decoding something the bytes do not say.
+      if (isUnsafeObjectKey(key)) {
+        return new ProblematicValue(
+          key,
+          data,
+          `object contains a key this runtime reserves: "${key}"`,
+        );
       }
       result[key] = this.#decodeValue(val, context, registry);
     }

@@ -695,7 +695,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -758,7 +758,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -822,7 +822,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -1368,7 +1368,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // receives that self-contained schema and must resolve the $ref before
     // deciding whether undefined is a valid substitute.
     const docValue = ["hello", true];
-    const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+    const { store, docUri, type } = makeArrayDoc(docValue);
 
     const schema = {
       type: "array",
@@ -1386,7 +1386,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
           type,
           path: ["value"],
         },
-        value: docValue as FabricValue[],
+        value: docValue,
       });
 
     // After fix: $ref is resolved to { type: "string" }, which does not allow

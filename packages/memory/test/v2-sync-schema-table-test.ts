@@ -1010,7 +1010,7 @@ Deno.test("schema table and reserved-ref detection handle modern cell-rep links"
               id: "of:contact",
               path: [],
               schema,
-            }) as unknown as FabricValue,
+            }),
           },
         } as unknown as EntityDocument,
       }],

@@ -130,6 +130,11 @@ One line per archived document; each document's header carries the fuller
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [pattern-update-state-continuity.md](plans/pattern-update-state-continuity.md)
+  — the Tier 2 state-continuity gate: capture and replay machinery,
+  test-populated vintages, and value comparison, executed 2026-07/08. Records
+  the measurements that decided the design, including the ones that reversed
+  it (raw beats gzipped storage; a cross-DID restore reads fine).
 - [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
   operand reporting for pattern-test assertions, with the compile-time
   constraints that shaped it, executed 2026-07.

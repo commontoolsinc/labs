@@ -101,7 +101,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     const blob = new FabricBytes(new Uint8Array([1, 2, 3]));
     const { traverser, doc } = traverserOver(
       "of:dispatch-primitive",
-      { field: blob } as unknown as FabricValue,
+      { field: blob },
       objectSelector,
     );
 
@@ -135,7 +135,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
         {
           "of:dispatch-link-target": {
             name: "linked",
-          } as FabricValue,
+          },
         },
       );
 
@@ -166,7 +166,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
         {
           "of:unconstrained-link-target": {
             name: "linked",
-          } as FabricValue,
+          },
         },
       );
 
@@ -187,7 +187,7 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     const failure = FabricError.fromNativeError(new Error("loud"));
     const { traverser, doc } = traverserOver(
       "of:dispatch-instance",
-      { field: failure } as unknown as FabricValue,
+      { field: failure },
       objectSelector,
     );
 
@@ -214,7 +214,7 @@ describe("plain-schema fast path: FabricSpecialObject subclasses", () => {
     const blob = new FabricBytes(new Uint8Array([7, 7]));
     const { traverser, doc } = traverserOver(
       "of:plan-primitive",
-      [blob] as unknown as FabricValue,
+      [blob],
       planSelector,
       false,
     );
@@ -227,7 +227,7 @@ describe("plain-schema fast path: FabricSpecialObject subclasses", () => {
     const failure = FabricError.fromNativeError(new Error("loud"));
     const { traverser, doc } = traverserOver(
       "of:plan-instance",
-      [failure] as unknown as FabricValue,
+      [failure],
       planSelector,
       false,
     );

@@ -294,10 +294,12 @@ export class VerbInputValidationError extends Error {
  * Normalize an absent payload to `{}` where the verb's event schema — after
  * resolving a top-level local `$ref` (a stream's schema is often
  * `{ $ref: "#/$defs/X", asCell: ["stream"], $defs: {...} }`) — is an object
- * schema. Everything else passes through untouched: schema `undefined` /
- * `true`, boolean `false` (an absent payload must pass; a supplied one is
- * already refused), non-object schemas, and an unresolvable `$ref` (fail-open
- * on uncertainty — refuse only on proof).
+ * schema: directly object-shaped, or an `allOf` conjunction with an
+ * object-schema branch (see `schemaIsObjectShaped`; `anyOf`/`oneOf` roots
+ * stay untouched). Everything else passes through untouched: schema
+ * `undefined` / `true`, boolean `false` (an absent payload must pass; a
+ * supplied one is already refused), non-object schemas, and an unresolvable
+ * `$ref` (fail-open on uncertainty — refuse only on proof).
  *
  * Why `{}` rather than refusing absence outright (settled 2026-07-30,
  * measured on #5147): the runtime materializes a property's `default` only
@@ -318,10 +320,35 @@ export function normalizeAbsentVerbPayload(
   if (!isSchemaObject(schema)) return input;
   const target = localRefTarget(schema, schema);
   if (!isSchemaObject(target)) return input;
-  if (target.type !== "object" && !isSchemaObject(target.properties)) {
-    return input;
-  }
+  if (!schemaIsObjectShaped(target, schema)) return input;
   return {};
+}
+
+/**
+ * Whether a resolved event schema describes an object payload — directly, or
+ * as an `allOf` conjunction with an object-schema branch (a conjunction that
+ * includes an object schema IS an object schema, no branch choice involved).
+ * `anyOf`/`oneOf` roots deliberately return false: normalizing `{}` there
+ * would pick among alternatives on the caller's behalf, the combinator
+ * boundary the D5 rule records (refuse or normalize only on proof) — the
+ * plan's D5 bullet names disjunctive roots out of scope.
+ */
+export function schemaIsObjectShaped(
+  target: JSONSchema,
+  root: JSONSchema,
+): boolean {
+  if (!isSchemaObject(target)) return false;
+  if (target.type === "object" || isSchemaObject(target.properties)) {
+    return true;
+  }
+  if (Array.isArray(target.allOf)) {
+    return target.allOf.some((branch) => {
+      const resolved = localRefTarget(branch, root);
+      return isSchemaObject(resolved) &&
+        (resolved.type === "object" || isSchemaObject(resolved.properties));
+    });
+  }
+  return false;
 }
 
 /**
