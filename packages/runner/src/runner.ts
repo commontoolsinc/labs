@@ -67,6 +67,7 @@ import {
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   type AddCancel,
   type Cancel,
@@ -1215,19 +1216,20 @@ export class Runner {
       undefined,
       tx,
     );
-    argumentCell.set(argument);
+    const storable = flattenBuilderArtifacts(argument);
+    argumentCell.set(storable);
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
       argumentCell,
       argumentSchema,
-      argument,
+      storable,
     );
     diffAndUpdate(
       this.runtime,
       tx,
       argumentLink,
-      argument,
+      storable,
       argumentLink,
     );
   }
@@ -1490,7 +1492,7 @@ export class Runner {
       // deep-cloning-to-freeze. The result root marks the whole result
       // document as generated: setup rewrites the complete projection.
       writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result),
+        fabricFromNativeValue(flattenBuilderArtifacts(result)),
         false,
         "output",
       );

@@ -6,6 +6,7 @@ import {
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -1999,7 +2000,9 @@ export class Runtime {
     // (this data is immutable as given). `fabricFromNativeValue()` converts
     // what callers actually pass -- notably `Cell`s, which become sigil
     // links via their `toJSON()` -- into an encodable `FabricValue`.
-    const asDataURI = dataUriFromValue(fabricFromNativeValue(data));
+    const asDataURI = dataUriFromValue(
+      fabricFromNativeValue(flattenBuilderArtifacts(data)),
+    );
     return createCell(
       this,
       {
