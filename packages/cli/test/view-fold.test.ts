@@ -4,6 +4,7 @@ import {
   buildFoldPlan,
   diffFiles,
   identityFold,
+  isMarkdownPath,
   isTestPath,
 } from "../lib/view/fold.ts";
 import type { Document, Line } from "../lib/view/model.ts";
@@ -15,6 +16,7 @@ import { diffSource } from "../lib/view/diffedit.ts";
 import { renderFrame, type ViewState } from "../lib/view/render.ts";
 import { stripAnsi } from "../lib/view/ansi.ts";
 import { frameTop } from "../lib/view/actions.ts";
+import { languageForFile } from "../lib/view/languages/language.ts";
 
 const TWO_FILES = [
   "diff --git a/src/app.ts b/src/app.ts",
@@ -42,9 +44,11 @@ Deno.test("diffFiles: ranges, counts, test flag, and summary text", () => {
   assertEquals(files[0].headerLine, 0);
   assertEquals(files[0].endLine, 7);
   assertEquals(files[0].isTest, false);
+  assertEquals(files[0].isMarkdown, false);
   assertEquals(files[0].summary.text, "▸ src/app.ts  +1 −1");
   assertEquals(files[1].path, "src/app.test.ts");
   assertEquals(files[1].isTest, true, "a .test.ts file is a test file");
+  assertEquals(files[1].isMarkdown, false);
   assertEquals(files[1].summary.text, "▸ src/app.test.ts  +1 −0");
 });
 
@@ -167,6 +171,27 @@ Deno.test("buildFoldPlan: nothing collapsed is the identity", () => {
 });
 
 // --- test-path detection -----------------------------------------------------
+
+Deno.test("isMarkdownPath: matches the pager's filename classification", () => {
+  for (
+    const path of [
+      "README.md",
+      "docs/guide.MARKDOWN",
+      "notes.mdown",
+      "notes.mkd",
+      "components/example.MDX",
+      "src/app.ts",
+      "notes.md.ts",
+      "docs/markdown",
+    ]
+  ) {
+    assertEquals(
+      isMarkdownPath(path),
+      languageForFile(path).id === "markdown",
+      path,
+    );
+  }
+});
 
 Deno.test("isTestPath: directories and basenames", () => {
   for (
@@ -368,8 +393,9 @@ Deno.test("fold: F hides all files, E shows all files", () => {
   assertEquals(s.displayDoc().lines.length, full, "E restores every file");
 });
 
-Deno.test("fold: T hides only test / test-support files", () => {
+Deno.test("fold: T hides shown test files and shows them when all are hidden", () => {
   const s = foldSession(TWO_FILES);
+  const full = s.displayDoc().lines.length;
   press(s, "T");
   const lines = s.displayDoc().lines.map((l) => l.text);
   // The test file is a summary; the source file is shown in full.
@@ -380,6 +406,72 @@ Deno.test("fold: T hides only test / test-support files", () => {
     "the source file is not collapsed",
   );
   assert(s.view().message.includes("Hid 1 test file"), s.view().message);
+
+  press(s, "T");
+  assertEquals(s.displayDoc().lines.length, full, "T shows the hidden test");
+  assertEquals(s.view().message, "Showing 1 test file.");
+});
+
+const CATEGORY_FILES = [
+  "diff --git a/src/app.ts b/src/app.ts",
+  "--- a/src/app.ts",
+  "+++ b/src/app.ts",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new",
+  "diff --git a/docs/README.md b/docs/README.md",
+  "--- a/docs/README.md",
+  "+++ b/docs/README.md",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new",
+  "diff --git a/src/app.test.ts b/src/app.test.ts",
+  "--- a/src/app.test.ts",
+  "+++ b/src/app.test.ts",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new",
+  "diff --git a/docs/guide.test.md b/docs/guide.test.md",
+  "--- a/docs/guide.test.md",
+  "+++ b/docs/guide.test.md",
+  "@@ -1 +1 @@",
+  "-old",
+  "+new",
+  "",
+].join("\n");
+
+Deno.test("fold: M toggles every Markdown file", () => {
+  const s = foldSession(CATEGORY_FILES);
+  const full = s.displayDoc().lines.length;
+  press(s, "M");
+  const hidden = s.displayDoc().lines.map((line) => line.text);
+  assert(hidden.includes("▸ docs/README.md  +1 −1"));
+  assert(hidden.includes("▸ docs/guide.test.md  +1 −1"));
+  assert(!hidden.includes("▸ src/app.ts  +1 −1"));
+  assert(!hidden.includes("▸ src/app.test.ts  +1 −1"));
+  assertEquals(s.view().message, "Hid 2 Markdown files.");
+
+  press(s, "M");
+  assertEquals(s.displayDoc().lines.length, full, "M shows all Markdown files");
+  assertEquals(s.view().message, "Showing 2 Markdown files.");
+});
+
+Deno.test("fold: a category key reports when the diff has no matching files", () => {
+  const s = foldSession(TWO_FILES);
+  const full = s.displayDoc().lines.length;
+  press(s, "M");
+  assertEquals(s.displayDoc().lines.length, full);
+  assertEquals(s.view().message, "No Markdown files.");
+});
+
+Deno.test("fold: a partly hidden category is made fully hidden", () => {
+  const s = foldSession(CATEGORY_FILES);
+  press(s, "M");
+  press(s, "T");
+  const lines = s.displayDoc().lines.map((line) => line.text);
+  assert(lines.includes("▸ src/app.test.ts  +1 −1"));
+  assert(lines.includes("▸ docs/guide.test.md  +1 −1"));
+  assertEquals(s.view().message, "Hid 1 test file.");
 });
 
 Deno.test("fold: bulk commands preserve a wrapped viewport column", () => {
@@ -402,7 +494,7 @@ Deno.test("fold: bulk commands preserve a wrapped viewport column", () => {
   const anchor = s.view().top;
   assert(anchor > firstRow, "the viewport starts on a continuation row");
 
-  for (const key of ["T", "T", "F", "F", "E", "E"]) {
+  for (const key of ["T", "T", "M", "M", "F", "F", "E", "E"]) {
     press(s, key);
     assertEquals(s.view().top, anchor, `${key} preserves the continuation`);
   }
@@ -597,7 +689,7 @@ Deno.test("fold: a selected node and a search match map onto the summary row", (
   );
 });
 
-Deno.test("fold: F / E / T are refused on a non-diff view", () => {
+Deno.test("fold: F / E / T / M are refused on a non-diff view", () => {
   const doc = {
     text: "const x = 1;\n",
     lines: [{ text: "const x = 1;", spans: [] }],
@@ -609,7 +701,7 @@ Deno.test("fold: F / E / T are refused on a non-diff view", () => {
     width: 80,
     height: 10,
   });
-  for (const k of ["F", "E", "T"]) {
+  for (const k of ["F", "E", "T", "M"]) {
     press(s, k);
     assert(s.view().message.includes("diff view"), `${k}: ${s.view().message}`);
   }
