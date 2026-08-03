@@ -11,6 +11,7 @@ import type {
   SchemaGenerator as ISchemaGenerator,
   TypeFormatter,
 } from "./interface.ts";
+import { attachUiContract, getUiContractHint } from "./ui-contract.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
@@ -546,45 +547,8 @@ export class SchemaGenerator implements ISchemaGenerator {
     schema: MutableJSONSchema,
     context: GenerationContext,
   ): MutableJSONSchema {
-    if (!context.schemaHints || !context.typeNode) {
-      return schema;
-    }
-
-    const hint = context.schemaHints.get(context.typeNode) ??
-      context.schemaHints.get(ts.getOriginalNode(context.typeNode));
-    if (!hint?.cfcUiContract) {
-      return schema;
-    }
-
-    return this.attachUiContract(schema, hint.cfcUiContract);
-  }
-
-  private attachUiContract(
-    schema: MutableJSONSchema,
-    uiContract: {
-      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-      action?: string;
-      surface?: string;
-      role?: string;
-      kind?: string;
-      trustedPattern?: string;
-      requiredEventIntegrity?: string[];
-    },
-  ): MutableJSONSchema {
-    if (typeof schema === "boolean") {
-      return schema === false
-        ? { not: true, ifc: { uiContract } }
-        : { ifc: { uiContract } };
-    }
-
-    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
-    return {
-      ...schema,
-      ifc: {
-        ...existingIfc,
-        uiContract,
-      },
-    };
+    const hint = getUiContractHint(context);
+    return hint ? attachUiContract(schema, hint) : schema;
   }
 
   /**
