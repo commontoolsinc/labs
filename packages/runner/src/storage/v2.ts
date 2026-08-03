@@ -153,6 +153,7 @@ import {
 } from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 
 export { watchIdForEntry } from "./v2-watch.ts";
 export type { SessionFactory } from "./v2-remote-session.ts";
@@ -1327,7 +1328,7 @@ export class StorageManager implements IStorageManager {
   }
 
   shouldPullDoc(space: MemorySpace, id: URI, scope?: CellScope): boolean {
-    if (id.startsWith("data:")) {
+    if (hasDataUriScheme(id)) {
       return false;
     }
     const key = `${space}\0${docKey(id, scope)}`;
@@ -1493,7 +1494,7 @@ export class StorageManager implements IStorageManager {
       throw new Error("No space set");
     }
 
-    if (id.startsWith("data:")) {
+    if (hasDataUriScheme(id)) {
       return this.syncDataURICell(cell, space, id, schema, scope);
     }
 
@@ -1672,7 +1673,7 @@ export class StorageManager implements IStorageManager {
 
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
-      if (link.id && !link.id.startsWith("data:")) {
+      if (link.id && !hasDataUriScheme(link.id)) {
         const space = link.space ?? base.space!;
         const scope = normalizeCellScope(
           link.scope as CellScope | undefined,
@@ -3909,7 +3910,7 @@ class SpaceReplica implements ISpaceReplica {
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        read.id.startsWith("data:")
+        hasDataUriScheme(read.id)
       ) {
         continue;
       }
