@@ -51,7 +51,7 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
@@ -842,10 +842,14 @@ export function normalizeAndDiff(
   // deliberately does not carry over: inlined content in an array slot stores
   // inline, exactly as the annotation scheme (which never looked behind
   // links) stored it.
+  //
+  // The re-entry hands on what `findAndInlineDataUriLinks` produced, so the
+  // check accepts exactly the media type that call inlines: this codec's
+  // own. A `data:` URI of any other media type stores as an ordinary link.
   const newValueLinkId = isCellLink(newValue)
     ? parseLink(newValue, link).id
     : undefined;
-  if (newValueLinkId !== undefined && hasDataUriScheme(newValueLinkId)) {
+  if (newValueLinkId !== undefined && isFabricDataUri(newValueLinkId)) {
     return normalizeAndDiff(
       runtime,
       tx,
