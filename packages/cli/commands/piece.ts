@@ -19,6 +19,7 @@ import {
   newPiece,
   PieceConfig,
   PieceResultProjectionError,
+  PieceVerbReadError,
   recreateSpaceRootPattern,
   removePiece,
   resetHomePattern,
@@ -179,14 +180,18 @@ export function localPatternEntry(
 
 /**
  * A `piece get` failure caused by a data condition rather than bad arguments:
- * a path that doesn't resolve, a result schema that can't project stored data,
- * or a filter/projection that doesn't fit the selected value. Reported as a
- * plain error on stderr with exit 1, never as a Cliffy ValidationError (which
- * would dump the usage screen and read as an arg-parse failure).
+ * a path that doesn't resolve, a result schema that can't project stored data
+ * (PieceResultProjectionError), a filter/projection that doesn't fit the
+ * selected value (PieceGetTransformError), or a path that lands on a verb
+ * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
+ * Reported as a plain error on stderr with exit 1, never as a Cliffy
+ * ValidationError (which would dump the usage screen and read as an arg-parse
+ * failure).
  */
 export function isPieceGetDataError(error: unknown): error is Error {
   return error instanceof PieceResultProjectionError ||
     error instanceof PieceGetTransformError ||
+    error instanceof PieceVerbReadError ||
     (error instanceof Error &&
       error.message.startsWith("Cannot access path"));
 }
@@ -196,7 +201,8 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
  * already carries its own `--step` guidance, transform errors stand alone,
- * and an input-mode read has nothing more to suggest — only a result-mode
+ * a verb refusal already carries its `cf piece call` redirect, and an
+ * input-mode read has nothing more to suggest — only a result-mode
  * unresolved path gets the `--input` tip.
  */
 export function pieceGetDataErrorReport(
@@ -207,6 +213,7 @@ export function pieceGetDataErrorReport(
   if (
     error instanceof PieceResultProjectionError ||
     error instanceof PieceGetTransformError ||
+    error instanceof PieceVerbReadError ||
     opts.input
   ) {
     return { message: error.message };

@@ -19,6 +19,7 @@ import {
   ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
+  VerbReturnValidationTransformer,
   WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
@@ -57,6 +58,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "MergeablePushValidationTransformer",
     create: (options) => new MergeablePushValidationTransformer(options),
+  },
+  {
+    name: "VerbReturnValidationTransformer",
+    create: (options) => new VerbReturnValidationTransformer(options),
   },
   {
     name: "CfcPolicyAuthoringTransformer",
