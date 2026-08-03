@@ -433,6 +433,13 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * silently unbound. Neither disposition is correct, so this one takes the
    * one that reports itself, and names the class and the work it needs.
    *
+   * This throw is EXPECTED to fire once `modernCellRep` is on, and that is its
+   * purpose. Under that flag a link is a `FabricLink`, hence a
+   * `FabricInstance`, so ordinary links reach here — which is how the work
+   * still owed before the flag can be turned on gets found, at the sites that
+   * owe it. It is a discovery instrument, not a hazard to route around: do not
+   * add a class-by-class exemption to quiet it.
+   *
    * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
    * point the throw becomes a rebind. The two sibling walks in this file carry
    * `Latent` markers for the same hazard.
