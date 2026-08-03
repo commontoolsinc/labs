@@ -36,7 +36,6 @@ import type {
   GetPatternEnvironmentFunction,
   HandlerFunction,
   HFunction,
-  ID as IDSymbol,
   IfElseFunction,
   InspectConfLabelFunction,
   JSONSchema,
@@ -77,7 +76,6 @@ import {
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
-export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -130,7 +128,6 @@ export type {
   HKT,
   ICell,
   IDerivable,
-  IDFields,
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
@@ -426,7 +423,6 @@ export interface BuilderFunctionsAndConstants {
   entityRefToString: EntityRefToStringFunction;
 
   // Constants
-  ID: typeof ID;
   SELF: typeof SELF;
   TYPE: typeof TYPE;
   NAME: typeof NAME;

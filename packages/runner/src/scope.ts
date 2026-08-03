@@ -113,6 +113,19 @@ export function scopeRank(scope: CellScope): number {
   return scopeRankByValue[scope];
 }
 
+/**
+ * The narrower (more restrictive) of two schema follow caps. `undefined` and
+ * `"any"` mean "no cap", so they lose to any real one.
+ */
+export function narrowerScopeCap(
+  a: SchemaScope | undefined,
+  b: SchemaScope | undefined,
+): SchemaScope | undefined {
+  if (a === undefined || a === "any") return b;
+  if (b === undefined || b === "any") return a;
+  return scopeRank(a) <= scopeRank(b) ? a : b;
+}
+
 export function narrowestScope(
   scopes: Iterable<CellScope | undefined>,
 ): CellScope {

@@ -25,6 +25,7 @@ import {
   verbInputErrorReport,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
+import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
 
 describe("executePieceCallable", () => {
   it("preserves plain-text mode while resolving a callable", async () => {
@@ -1715,6 +1716,19 @@ describe("piece get data errors", () => {
     // the generic --input tip (a different remedy).
     expect(report?.message).toMatch(/schema could not resolve/);
     expect(report?.message).toMatch(/--step/);
+    expect(report?.hint).toBeUndefined();
+  });
+
+  it("reports transform failures without an unrelated --input hint", () => {
+    const transformError = new PieceGetTransformError(
+      "--filter can only be applied to an array",
+    );
+    expect(isPieceGetDataError(transformError)).toBe(true);
+    const report = pieceGetDataErrorReport(transformError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    expect(report?.message).toBe("--filter can only be applied to an array");
     expect(report?.hint).toBeUndefined();
   });
 });

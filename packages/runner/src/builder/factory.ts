@@ -15,7 +15,6 @@ import {
   AuthSchema,
   CHIP_UI,
   FS,
-  ID,
   NAME,
   schema as schemaIdentity,
   SELF,
@@ -272,7 +271,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     entityRefToString,
 
     // Constants
-    ID,
     SELF,
     TYPE,
     NAME,

@@ -47,7 +47,7 @@ describe("json-encoding", () => {
   });
 
   it("round-trips `bigint`", () => {
-    expect(roundTrip(42n as FabricValue)).toBe(42n);
+    expect(roundTrip(42n)).toBe(42n);
   });
 
   it("`jsonFromValue()` encodes `undefined` to tagged JSON", () => {
@@ -55,7 +55,7 @@ describe("json-encoding", () => {
   });
 
   it("`jsonFromValue()` encodes `bigint` to tagged JSON", () => {
-    expectWireFormat(42n as FabricValue, { "/BigInt@1": "Kg" });
+    expectWireFormat(42n, { "/BigInt@1": "Kg" });
   });
 
   it("`valueFromJson()` decodes tagged `undefined`", () => {
@@ -69,12 +69,12 @@ describe("json-encoding", () => {
   });
 
   it("round-trips plain objects", () => {
-    const value = { a: 1, b: "two" } as FabricValue;
+    const value = { a: 1, b: "two" };
     expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
   });
 
   it("round-trips arrays", () => {
-    const value = [1, "two", null] as FabricValue;
+    const value = [1, "two", null];
     expect(roundTrip(value)).toEqual([1, "two", null]);
   });
 
@@ -83,25 +83,25 @@ describe("json-encoding", () => {
   });
 
   it("JSON-safe primitives stringify normally (under the encoding prefix)", () => {
-    expect(jsonFromValue(42 as FabricValue)).toBe("fvj1:42");
-    expect(jsonFromValue("hello" as FabricValue)).toBe('fvj1:"hello"');
-    expect(jsonFromValue(true as FabricValue)).toBe("fvj1:true");
+    expect(jsonFromValue(42)).toBe("fvj1:42");
+    expect(jsonFromValue("hello")).toBe('fvj1:"hello"');
+    expect(jsonFromValue(true)).toBe("fvj1:true");
     expect(jsonFromValue(null)).toBe("fvj1:null");
   });
 
   describe("edge case", () => {
     it("round-trips object with slash-prefixed key", () => {
-      const value = { "/foo": "bar" } as FabricValue;
+      const value = { "/foo": "bar" };
       expect(roundTrip(value)).toEqual({ "/foo": "bar" });
     });
 
     it("decoded objects are frozen", () => {
-      const value = { a: 1, b: "two" } as FabricValue;
+      const value = { a: 1, b: "two" };
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
     it("decoded arrays are frozen", () => {
-      const value = [1, 2, 3] as FabricValue;
+      const value = [1, 2, 3];
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
@@ -110,7 +110,7 @@ describe("json-encoding", () => {
         name: "test",
         count: 42n,
         missing: undefined,
-      } as FabricValue;
+      };
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
       expect(decoded.count).toBe(42n);
@@ -124,7 +124,7 @@ describe("json-encoding", () => {
       // /object, read path unwraps it.
       const slashObject = {
         "/": { kind: "widget", tags: ["a", "b"], size: 3 },
-      } as FabricValue;
+      };
       expect(roundTrip(slashObject)).toEqual(slashObject);
     });
 
@@ -132,7 +132,7 @@ describe("json-encoding", () => {
       const value = {
         name: "test",
         slashKeyed: { "/": { inner: { flag: true }, count: 0 } },
-      } as FabricValue;
+      };
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
       expect(decoded.slashKeyed).toEqual(
@@ -143,19 +143,19 @@ describe("json-encoding", () => {
     it('`{ "/": "string" }` round-trips via `/object` escaping', () => {
       // An arbitrary string-valued `/` key — not an entity ref; exercises the
       // escaping for the `/` key per se.
-      const slashKeyed = { "/": "an arbitrary string" } as FabricValue;
+      const slashKeyed = { "/": "an arbitrary string" };
       expect(roundTrip(slashKeyed)).toEqual(slashKeyed);
     });
 
     it("`$stream` marker passes through unchanged", () => {
-      const value = { $stream: true } as FabricValue;
+      const value = { $stream: true };
       expect(roundTrip(value)).toEqual({ $stream: true });
     });
 
     it("`@Error` marker passes through unchanged", () => {
       const value = {
         "@Error": { name: "TypeError", message: "oops", stack: "" },
-      } as FabricValue;
+      };
       expect(roundTrip(value)).toEqual({
         "@Error": { name: "TypeError", message: "oops", stack: "" },
       });
@@ -167,7 +167,7 @@ describe("json-encoding", () => {
           path: ["value", "name"],
           cell: { "/": "an arbitrary string" },
         },
-      } as FabricValue;
+      };
       expect(roundTrip(value)).toEqual({
         $alias: {
           path: ["value", "name"],
@@ -181,7 +181,7 @@ describe("json-encoding", () => {
         count: 42n,
         slashKeyed: { "/": { values: [1, 2, 3], note: "hello" } },
         items: [1, { "/": "another arbitrary string" }, undefined],
-      } as FabricValue;
+      };
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.count).toBe(42n);
       expect(decoded.slashKeyed).toEqual(
@@ -198,7 +198,7 @@ describe("json-encoding", () => {
       const value = [
         { "/": { count: 1 } },
         { "/": { labels: ["x"], ready: true } },
-      ] as FabricValue;
+      ];
       expect(roundTrip(value)).toEqual(value);
     });
   });
@@ -215,7 +215,7 @@ describe("json-encoding", () => {
     });
 
     it("recognizes the actual output of `jsonFromValue()` (round-trip check)", () => {
-      const encoded = jsonFromValue({ a: 1, b: 42n } as FabricValue);
+      const encoded = jsonFromValue({ a: 1, b: 42n });
       expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
 
@@ -283,13 +283,13 @@ describe("json-encoding", () => {
       expect(valueFromJson("fvj1:42")).toBe(42);
       expect(valueFromJson('fvj1:{"a":1}')).toEqual({ a: 1 });
       expect(valueFromJson('fvj1:{"\/Undefined@1":null}')).toBe(undefined);
-      expect(roundTrip(7 as FabricValue)).toBe(7);
+      expect(roundTrip(7)).toBe(7);
     });
   });
 
   describe("plainObjectFromJson", () => {
     it("returns the decoded plain object", () => {
-      const json = jsonFromValue({ a: 1, b: 42n } as FabricValue);
+      const json = jsonFromValue({ a: 1, b: 42n });
       const result = plainObjectFromJson<{ a: number; b: bigint }>(json);
       expect(result.a).toBe(1);
       expect(result.b).toBe(42n);
@@ -297,7 +297,7 @@ describe("json-encoding", () => {
 
     it("throws on a class instance (`FabricError`)", () => {
       const err = FabricError.fromNativeError(new Error("test"));
-      const json = jsonFromValue(err as FabricValue);
+      const json = jsonFromValue(err);
       expect(() => plainObjectFromJson(json)).toThrow(/instance/);
     });
 

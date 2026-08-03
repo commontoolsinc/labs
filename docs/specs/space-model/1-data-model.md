@@ -49,17 +49,28 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 - Non-index keys cause rejection as non-fabric, `length` aside: named
   (string-keyed) and symbol-keyed properties alike, whether or not they are
   enumerable
+- Every present index must hold a *data* property; an accessor-backed
+  (getter and/or setter) index causes rejection as non-fabric
 
 See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
 authoritative statement of these rules.
 
 #### Objects
 
-- Plain objects only (no class instances)
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself, so class instances and null-prototype objects alike cause rejection
 - Keys must be strings; symbol keys cause rejection as non-fabric
+- Every property must be an enumerable *data* property; accessor-backed
+  (getter and/or setter) and non-enumerable properties cause rejection as
+  non-fabric
+- The names `__proto__` and `constructor` cause rejection in the JavaScript
+  implementation. This is a reservation of that implementation — one name its
+  copy loops cannot rebuild, one that its other boundaries already refuse —
+  rather than a rule of the model; see Section 1.5 of
+  `space-model-formal-spec/1-fabric-values.md`
 - Values must be valid fabric values
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- Reconstruction produces regular plain objects, which is the only object
+  shape a fabric value has
 
 ### Special Values
 
@@ -89,7 +100,7 @@ Symbol handling at the fabric-value conversion gate:
   returns a string) are first-class fabric values, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
-  `"Cannot store unique (uninterned) symbol"`
+  ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
 - Round-trip via the `Symbol@1` JSON envelope (see
   `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
   byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
@@ -454,8 +465,8 @@ The system aims for an **immutable-forward** design:
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects
+- Reconstruction always produces regular plain objects, that being the only
+  object shape a fabric value has
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.

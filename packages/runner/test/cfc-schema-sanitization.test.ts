@@ -313,6 +313,148 @@ describe("cfc schema sanitization", () => {
     }, ["ok"])).toBeUndefined();
   });
 
+  it("reads an optional property holding undefined as absent ONLY on request", () => {
+    // `undefined` is a value in this system, not a hole: the codec stores its
+    // presence as `{"/Undefined@1": null}` and `type: "undefined"` is a type
+    // this validator supports. So measuring it is the DEFAULT, and
+    // `pull-materialization.test.ts` pins both halves of that contract with
+    // "does not hide present explicit undefined behind an optional alias" and
+    // "retains explicit undefined at an optional derived Cell root".
+    //
+    // One caller opts out: the stored-argument check a pattern update runs.
+    // Its refusal is PERMANENT — see `isStoredArgumentSchemaRefusal` in
+    // runner.ts, the same identity refuses identically — and a handler mints
+    // the shape without meaning to. Measured: `topics/topic.tsx` pushes
+    // `{ author, ... }` from `addComment` whenever no `agentName` is supplied,
+    // so the document REFUSED its own pattern's next update with
+    // `comments: 0: author: value does not match type object`;
+    // `lunch-poll/main.tsx` did the same through `imageUrl`.
+    const lenient = { optionalUndefinedIsAbsent: true } as const;
+    const optionalObject = {
+      type: "object",
+      properties: {
+        author: { type: "object", properties: { name: { type: "string" } } },
+        body: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    // Omitted is fine either way — the control that says the cases below are
+    // about PRESENCE of undefined, not about the key being optional.
+    expect(validateSchemaValue(optionalObject, { body: "old" }))
+      .toBeUndefined();
+    expect(
+      validateSchemaValue(optionalObject, { body: "old" }, undefined, lenient),
+    )
+      .toBeUndefined();
+
+    // Default: measured, and it fails. Opted in: absent.
+    const present = { author: undefined, body: "old" };
+    expect(validateSchemaValue(optionalObject, present))
+      .toBe("author: value does not match type object");
+    expect(validateSchemaValue(optionalObject, present, undefined, lenient))
+      .toBeUndefined();
+
+    // The same, inside an array — where the topics document actually holds it.
+    const inArray = { type: "array", items: optionalObject } as const;
+    const rows = [{ author: undefined, body: "old" }];
+    expect(validateSchemaValue(inArray, rows))
+      .toBe("0: author: value does not match type object");
+    expect(validateSchemaValue(inArray, rows, undefined, lenient))
+      .toBeUndefined();
+
+    // The opt-in stops at OPTIONAL. A required object holding undefined keeps
+    // failing on its type even when asked to be lenient.
+    expect(validateSchemaValue(
+      {
+        type: "object",
+        properties: { author: { type: "object" } },
+        required: ["author"],
+      },
+      { author: undefined },
+      undefined,
+      lenient,
+    ))
+      .toBe("author: value does not match type object");
+
+    // Why required is measured rather than read as absent: a REQUIRED property
+    // declared `type: "undefined"` holds undefined legitimately and must still
+    // be ACCEPTED. Reading undefined as absence everywhere reports this as a
+    // missing property — caught by `runner.test.ts`'s "preserves explicit
+    // undefined while combining union defaults", which validates a defaults
+    // object built from exactly this shape.
+    expect(validateSchemaValue(
+      {
+        type: "object",
+        properties: { x: { type: "undefined" } },
+        required: ["x"],
+      },
+      { x: undefined },
+      undefined,
+      lenient,
+    )).toBeUndefined();
+
+    // The opt-in reaches DECLARED properties only. An undeclared key is still
+    // measured, opt-in or not: `required` may name a key that `properties`
+    // does not, so skipping undefined-valued keys in the additional-property
+    // scans let a required-but-undeclared one bypass both
+    // `additionalProperties: false` and an `additionalProperties` subschema
+    // (reported by review on #5251). Nothing measured needed that leniency —
+    // `topic.tsx`'s `author` and `lunch-poll`'s `imageUrl` are both declared.
+    const closed = {
+      type: "object",
+      properties: { body: { type: "string" } },
+      additionalProperties: false,
+    } as const;
+    const withExtra = { body: "old", extra: undefined };
+    expect(validateSchemaValue(closed, withExtra))
+      .toBe("additional property extra");
+    expect(validateSchemaValue(closed, withExtra, undefined, lenient))
+      .toBe("additional property extra");
+    expect(validateSchemaValue(
+      {
+        type: "object",
+        properties: {},
+        required: ["x"],
+        additionalProperties: false,
+      },
+      { x: undefined },
+      undefined,
+      lenient,
+    )).toBe("additional property x");
+  });
+
+  it("drops the undefined-is-absent opt-in inside allOf branches", () => {
+    // `optionalUndefinedIsAbsent` decides "optional" from the `required` array
+    // on the node doing the check, and `allOf` is the combinator that can put
+    // `required` on one node and `properties` on another. Without dropping it
+    // for the branches, the branch that TYPES `x` sees no `required` and skips
+    // the check, accepting `{x: undefined}` against a required string
+    // (reported by review on #5251).
+    //
+    // Dropped rather than plumbed: nothing needs it. `packages/schema-generator`
+    // emits no `allOf` at all and no committed pattern baseline contains one,
+    // so a pattern argument schema — the only place the opt-in is enabled —
+    // cannot reach this branch. Strict is the safe direction for a shape that
+    // does not occur.
+    const split = {
+      allOf: [
+        { required: ["x"] },
+        { properties: { x: { type: "string" } } },
+      ],
+    } as const satisfies JSONSchema;
+    const lenient = { optionalUndefinedIsAbsent: true } as const;
+
+    expect(validateSchemaValue(split, { x: undefined }))
+      .toBe("x: value does not match type string");
+    expect(validateSchemaValue(split, { x: undefined }, undefined, lenient))
+      .toBe("x: value does not match type string");
+    // The control: the branch is still doing its ordinary work either way.
+    expect(validateSchemaValue(split, { x: 1 }, undefined, lenient))
+      .toBe("x: value does not match type string");
+    expect(validateSchemaValue(split, { x: "ok" }, undefined, lenient))
+      .toBeUndefined();
+  });
+
   it("strictly validates Common Fabric values for schema migrations", () => {
     expect(validateSchemaValue({ type: "undefined" }, undefined))
       .toBeUndefined();

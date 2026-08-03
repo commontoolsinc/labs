@@ -146,7 +146,7 @@ export const applyMutablePathWrite = (
       nextKeyAfterPath: leafKey,
       force: false,
     });
-    newRoot = result.value as FabricValue;
+    newRoot = result.value;
     parent = result.pathValue as
       | Record<string, FabricValue>
       | FabricValue[];
@@ -215,7 +215,7 @@ export const applyMutablePathWrite = (
   if (leafKey in obj && valueEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
-  obj[leafKey] = value as FabricValue;
+  obj[leafKey] = value;
   return { ok: { root: newRoot, previousValue, changed: true } };
 };
 

@@ -61,7 +61,7 @@ describe("FabricMap", () => {
         expect(result).not.toBe(fm);
         expect(result).toBeInstanceOf(Map);
         expect(result).not.toBeInstanceOf(FrozenMap);
-        expect(result.get("a" as FabricValue)).toBe(1);
+        expect(result.get("a")).toBe(1);
       });
     });
 

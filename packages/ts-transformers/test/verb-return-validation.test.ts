@@ -176,6 +176,26 @@ Deno.test("plain-shaped returns error: templates and concatenation", async () =>
   assertEquals(concat.length, 1);
 });
 
+Deno.test("signed numeric literals are plain-shaped", async () => {
+  const negative = await errorsIn(`
+    const verb = action((id: string) => {
+      if (id.length === 0) {
+        return -1;
+      }
+      selected.set(id);
+    });
+  `);
+  assertEquals(negative.length, 1);
+
+  // Unary over a non-plain operand stays unjudged, like the operand itself.
+  const negatedRead = await errorsIn(`
+    const verb = action((id: string) => {
+      return -id.length;
+    });
+  `);
+  assertEquals(negatedRead.length, 0);
+});
+
 Deno.test("an any-assertion opts the return out (fail-open)", async () => {
   const errors = await errorsIn(`
     const verb = action((id: string) => {
@@ -183,6 +203,35 @@ Deno.test("an any-assertion opts the return out (fail-open)", async () => {
     });
   `);
   assertEquals(errors.length, 0);
+});
+
+Deno.test("verbs authored inline in JSX attributes are judged too", async () => {
+  // The stock ts.visitEachChild skips JsxExpression.expression (the repo's
+  // documented visitor trap); the JSX-aware visitor keeps the guard honest
+  // for verbs written directly in attributes.
+  const source = `
+    import { action, cell, pattern } from "commonfabric";
+    export default pattern(() => {
+      const selected = cell("");
+      return {
+        ui: (
+          <button
+            type="button"
+            onClick={action((id: string) => {
+              return { picked: id };
+            })}
+          >
+            Pick
+          </button>
+        ),
+        selected,
+      };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: COMMONFABRIC_TYPES,
+  });
+  assertEquals(undeclaredReturnErrors(diagnostics).length, 1);
 });
 
 Deno.test("a handler declaring its result is legal", async () => {

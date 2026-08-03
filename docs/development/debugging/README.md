@@ -115,7 +115,9 @@ guide:
 
 - [Console Commands](console-commands.md) - `globalThis.commonfabric.*` browser console reference
   - Starts with common tasks: read piece data, dump the rendered VDOM, diagnose
-    churn, find dead handlers, watch values, agent-browser recipes
+    churn, find dead handlers, watch values, agent-browser recipes — including
+    why a sub-pattern's cell can read `undefined` at an `of:` id while its value
+    lives at the `computed:` id of the same hash
   - Reference tail covers logger counts/timing/baselines/flags and worker traces
 - **Server-side write trace** — set `CF_DEBUG_MEMORY_WRITES=1` on the toolshed to
   log every memory write as `[memwrite] c=<conn> op=… id=… scope=… vhash=…`,

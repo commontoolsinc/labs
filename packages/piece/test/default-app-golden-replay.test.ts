@@ -4,6 +4,7 @@ import {
   getPatternIdentityRef,
   isLink,
   resolveEntryIdentity,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import {
@@ -13,9 +14,15 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 import {
-  DEFAULT_APP_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The route that ref expands to — what the toolshed serves, and what the
+// worker names the module by when it compiles the pattern over HTTP.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
 
 // Golden replay for non-home root state across an in-place update.
 //
@@ -108,9 +115,9 @@ const SEEDED_PIECES = ["note:groceries", "note:standup", "notebook:trip"];
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(source: string): Promise<string> {
   return resolveEntryIdentity(
-    DEFAULT_APP_PATTERN_URL,
+    DEFAULT_APP_PATTERN_PATH,
     (name) =>
-      name === DEFAULT_APP_PATTERN_URL
+      name === DEFAULT_APP_PATTERN_PATH
         ? Promise.resolve(source)
         : Promise.reject(new Error(`not found: ${name}`)),
   );
@@ -133,7 +140,7 @@ function installFetchStub(): StubControls {
       : input.url;
     const url = new URL(href);
 
-    if (url.pathname === DEFAULT_APP_PATTERN_URL) {
+    if (url.pathname === DEFAULT_APP_PATTERN_PATH) {
       if (url.searchParams.has("identity")) {
         return new Response(await identityForSource(source), {
           headers: { "content-type": "text/plain" },
@@ -392,8 +399,8 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     stub.setSource(ROOT_V2);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: ROOT_V2 }],
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: ROOT_V2 }],
       },
       { space: manager.getSpace() },
     );

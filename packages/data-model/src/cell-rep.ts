@@ -261,7 +261,7 @@ function assertWireLinkRefPayloadShape(
   if (!isPlainObject(value)) {
     throw new Error("Cell-link wire payload must be a plain object.");
   }
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, val] of Object.entries(value)) {
     if (isUnsafeObjectKey(key)) {
       throw new Error(`Cell-link wire payload has a forbidden key: "${key}".`);
     }

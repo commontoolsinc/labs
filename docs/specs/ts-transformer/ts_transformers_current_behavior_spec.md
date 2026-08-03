@@ -158,7 +158,7 @@ worth calling out:
   former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
   even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
   spec revisions listing those two as distinct stages are obsolete.
-- The final five stages (19–23) run last so they operate on fully lowered and
+- The final five stages (20–24) run last so they operate on fully lowered and
   schema-injected output; they are documented stage by stage in §13–§17.
 - `MergeablePushValidationTransformer` (stage 5; #4450/#4505) is
   validation-only and is documented with the other validators (§6.9).
@@ -446,7 +446,8 @@ Diagnostics emitted in all modes:
   - the message names the mechanism per kind: a getter or `toJSON()` member
     runs once when the result is stored and freezes its return to a snapshot; a
     method, setter, or function-valued property is a function value the
-    reactive data model cannot store (it throws `Cannot store function per se`)
+    reactive data model cannot store (it throws
+    ``Not representable as a `FabricValue`: function per se``)
   - exempt: members inside compute wrappers (computed/lift/handler/action),
     object literals outside pattern/render context, JSX event handlers,
     array-method/render callbacks, and a `toJSON` member that reads no reactive
@@ -1752,10 +1753,10 @@ verifier compares against (§14.4). The transformer performs no dedupe or
 collision check: it does not look for existing declarations of the guard names
 before inserting.
 
-### 14.3 Ordering (why stage 20)
+### 14.3 Ordering (why stage 21)
 
-The stage sits in the trailing module-scope emission group (19
-`ModuleScopeShadowing`, 20 `ModuleScopeCfData`, 22
+The stage sits in the trailing module-scope emission group (21
+`ModuleScopeShadowing`, 22 `ModuleScopeCfData`, 24
 `ModuleScopeFunctionHardening`), which runs after lowering and schema work is
 complete (§3). It is purely syntactic — no checker, `typeRegistry`, or
 capability state — so no output from schema generation (stage 19) feeds it;

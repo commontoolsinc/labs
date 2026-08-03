@@ -39,10 +39,7 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { stripEntityUriScheme } from "../entity-kind.ts";
 import {
   columnDeclaresIfc,
@@ -572,7 +569,7 @@ export function sqliteDatabase(
       // that resolves fully (the creator, at least) writes the inline form.
       if (prior === undefined || dbTablesResolved(tables)) {
         // RAW write, not `.set()`: this first action run can execute inside
-        // the pattern's builder frame, where `set` [ID]-anchors every object
+        // the pattern's builder frame, where `set` anchors every object
         // in an array — splitting a rule's term list into per-element entity
         // docs (the very shape the materialization above exists to avoid).
         // The raw write stores the subtree verbatim; `onlyIfDifferent` keeps
@@ -586,7 +583,7 @@ export function sqliteDatabase(
             // Carry db.exec's write revision forward — dropping it would make
             // this re-derivation look like "new inputs" to every handle hasher.
             ...(typeof prior?.rev === "number" && { rev: prior.rev }),
-          }) as FabricValue,
+          }),
           true,
         );
       }
