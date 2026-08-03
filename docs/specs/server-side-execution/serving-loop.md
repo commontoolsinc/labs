@@ -43,6 +43,18 @@ A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (runtime disposed, lease released).
 Activation on: session open, event append, or explicit warm request.
 
+What activation LOADS (RULED 2026-08-02): there is NO piece-start
+policy in v2. The space is ONE lazy reactive graph, and activation
+loads graph structure sufficient to resolve the demanded values and
+the queued events — never "instantiate the pieces" as a step of its
+own. Demand is value-granular client pull: a subscription to a value
+recomputes that value and its upstream, nothing else. Events run
+their handlers eagerly. Undemanded derivations stay
+dirty-unmaterialized indefinitely — `idle()` already excludes them
+(§3b's pull-based laziness). Per-piece start/stop, root-piece
+bootstrap, and auto-start-on-event are client-era framings with no
+server analogue (runtime-mapping.md N22/N31).
+
 Activation mechanics: the memory server notifies the ExecutorHost on
 any AUTHORED admission into a space with no live lease — an
 admission-side hook, not a poll (prior art: the no-handler auto-load
@@ -89,6 +101,8 @@ on activate(space):
   acquire lease (else park)
   runtime = new Runtime(serverPosture)   // flag ON, egress allow,
                                          // builtins registered
+  load graph structure for demanded values + queued events (§1 —
+    no piece-start step; undemanded nodes stay unmaterialized)
   W = read watermark doc (0 if absent)
   re-mark the dirty frontier from the basis index (§3b, §6):
     a node is dirty iff a recorded input seq is behind that doc's head
@@ -378,8 +392,11 @@ On activate after crash or deploy:
    re-firing completed effects; memo misses re-fire effects whose
    results never landed. External effects are therefore at-least-once
    across crash/lease-handover (the request may have left the process
-   before the crash); a fired-marker alternative is pending owner
-   ruling (ledger L1).
+   before the crash) — RULED and accepted (owner, 2026-08-02). A
+   fired-marker (a durable "request left" write ahead of each effect)
+   was considered and REJECTED: it costs a commit per effect yet
+   cannot close the window — the marker write and the request can
+   still straddle a crash.
 4. Undelivered events — stream head past `eventWatermark`, the §1 boot
    check — reprocess (events.md §5); events at/below the watermark are
    skipped by the idempotency rule.

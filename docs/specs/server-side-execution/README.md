@@ -72,6 +72,15 @@ invariant it actually is:
 > absorb: effects fire twice, stale results flap against fresh ones,
 > and N clients recomputing everything is the conflict storm itself.
 
+"By construction" binds honest clients; it is not a new ACL. A
+malicious client holding today's write authority on a doc can still
+author into it — derived-output docs and the watermark doc included
+(forgery possible, accepted for now). v2 defines the outcome rather
+than a defense: the intruding write is ordinary authored input and
+the next wave recomputes over it (protocol.md §1). **v2 adds no
+security guarantees beyond today's unless trivial (owner,
+2026-08-02); tightening is future work.**
+
 The egress rule falls out of the same line: **speculate on anything you can
 throw away; never on anything you can't take back.** A derived value is
 discarded for free, so clients may speculate it. A webhook cannot be
@@ -426,6 +435,11 @@ survival test before it triggers implementation.
 6. **Effect authority for multi-user triggers** (§3.8): whose grant powers
    a served effect reacting to another user's data — wiring user (default)
    or acting user? CFC implications either way.
+7. **Cell scopes (`user`/`session`), end to end.** Who derives and
+   commits user- and session-scoped derived state under the flag
+   (runtime-mapping.md N56)? Plan Phase 0 carries an owner + spec
+   review of cell scopes end to end — v1's scope confusion must not
+   carry into v2; that review blocks this question (was ledger L10).
 
 ## 7. Relationship to prior documents
 

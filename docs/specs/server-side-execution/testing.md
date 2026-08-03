@@ -50,10 +50,15 @@ for *what* rendered; the watermark answers *when*.
 tests assert counters, not logs:
 
 - amplification, ONE metric: `derivedCommits / (authoredSeen −
-  effectAcks) ≤ 2` on pure workloads (lunch-poll, the Phase 1 gate; v1
-  measured 60×) and `≤ 3` on workloads with effectful nodes (their
-  completion commits are derived-class). A logical write is one
-  authored commit excluding effect-channel acks.
+  effectAcks) ≤ 2` on pure workloads (lunch-poll, the first ON-arm
+  gate; v1 measured 60×) and `≤ 3` on workloads with effectful nodes
+  (their completion commits are derived-class). A logical write is
+  one authored commit excluding effect-channel acks. The budget is a
+  TRIGGER, not a hard gate (owner, 2026-08-02): exceeding it fails
+  the test UNTIL a human inspects the why — a breach is a question to
+  answer, not only a number to fix. The inspection either fixes the
+  amplification or re-baselines the budget with the reason recorded
+  here; it is never silenced in the test.
 - single-run: `waves == authored input batches` ballpark;
   `memo.hits/misses` sane on restart tests.
 - idempotency: `events.skippedIdempotent` == replayed-event count in the
@@ -69,8 +74,8 @@ v2 gate set. Existing product tests double as gates where noted.
 
 | phase | gate tests |
 | --- | --- |
-| 1 | `sx2-serving-loop` (counters, amplification, restart-memo); existing `counter`, `cfc-group-chat-demo-multi-runtime` in ON arm |
-| 2 | `sx2-speculation` (echo latency, overlay retirement, zero client derived commits); byte-identical suite both arms |
+| 1 | stages A–F land dark: OFF arm byte-identical per stage (§2); ON arm runs in CI with explicit skip lists (no ON gates — the first ON milestone is Phase 2's) |
+| 2 | `sx2-serving-loop` (counters, amplification, restart-memo) and `sx2-speculation` (echo latency, overlay retirement, zero client derived commits); existing `counter`, `cfc-group-chat-demo-multi-runtime` in ON arm; byte-identical suite both arms |
 | 3 | `sx2-events` (two-user lunch poll via server handlers; kill-between-event-and-consequence restart; duplicate-submit rejection; rapid-fire coalescing: N events fired faster than wave time yield ≪N derived commits and final-only values); propagation ≤300 ms p50 measured on `lunch-poll-vote` UNMODIFIED |
 | 4 | `sx2-effect-channel` (navigate intent/ack; reload between intent and ack; optimistic-enact reconcile); existing `topics-navigation` ON |
 | 5 | existing `shared-profile`, `profile-embed`, `sqlite-read-clearance-multi-runtime` green ON — the v1 stragglers are the acceptance tests |

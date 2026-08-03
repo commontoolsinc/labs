@@ -22,6 +22,8 @@ Status legend:
 - **GAP** — no v2 doc places it. Each GAP note states the default the
   mapping recommends; a GAP whose row a phase touches must be ruled
   before that phase builds.
+- **RULED** — a former GAP closed by an owner ruling; the note
+  records the ruling and the v2 section that now carries it.
 
 ## 1. Summary tables
 
@@ -60,7 +62,7 @@ Status legend:
 | 19 | Stream send → `queueEvent`; lifts cannot emit | `cell.ts:1300-1339`, guard `cell.ts:1307-1312` | events §2 (one path, two producers) | COVERED |
 | 20 | Durable event ids minted per origin tx; caller ids scoped to the stream | `scheduler/event-identity.ts:26-84` | events §1 | COVERED |
 | 21 | Per-(stream,handler) FIFO with W4 backlog cap 256, last-wins collapse, chained onCommit | `scheduler/events.ts:272-321`, `scheduler/constants.ts:39` | README §3.8 (backpressure hook only) | GAP |
-| 22 | Event for a not-running piece: FIFO slot reserved, piece auto-started | `scheduler/events.ts:331-395`, `ensure-piece-running.ts:97-175` | events §Anchors (registration at instantiation) | GAP |
+| 22 | Event for a not-running piece: FIFO slot reserved, piece auto-started | `scheduler/events.ts:331-395`, `ensure-piece-running.ts:97-175` | serving-loop §1, §3 (demand-driven pull; the event is the demand) | RULED |
 | 23 | Preflight: `populateDependencies`, recompute dirty inputs on demand before dispatch, load-park (CT-1795) | `scheduler/events.ts:503-708` | serving-loop §3, events §2 (cited as the freshness rule) | COVERED |
 | 24 | `presyncInputs` await before dispatch | `scheduler/types.ts:60-68`, `scheduler/events.ts:907-917` | none (moot server-side) | CHANGED |
 | 25 | Handler dispatch: immediate tx, `dispatchedEventId/Time`, commit not awaited | `scheduler/events.ts:929-949`, `1071-1086` | events §2; serving-loop §3d | CHANGED |
@@ -74,7 +76,7 @@ Status legend:
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
 | 30 | `setup` / `start` / `run` / `runSynced`: argument staging, setup state, node instantiation | `runner.ts:1077`, `1941`, `2950`, `3052`, `startCore` `runner.ts:2037-2530` | serving-loop §3 (hosted runtime) | COVERED |
-| 31 | Who starts pieces: shell navigation, `ensurePieceRunning` on event, CLI, roots at bootstrap | `ensure-piece-running.ts:97`, `runner.ts:2343-2530` | serving-loop §1 (space-level activation only) | GAP |
+| 31 | Who starts pieces: shell navigation, `ensurePieceRunning` on event, CLI, roots at bootstrap | `ensure-piece-running.ts:97`, `runner.ts:2343-2530` | serving-loop §1 (no piece-start policy; demand-driven pull) | RULED |
 | 32 | `stop` / `stopAll`: cancel groups, start-generation tombstones, lifecycle epochs | `runner.ts:3807-3852`, `3926-3956`, `2056-2077` | serving-loop §1 (park = dispose) | COVERED |
 | 33 | Child pieces from list coordinators (map/filter/flatMap): per-element `runner.run`, identity reuse, stop-on-removal, `resumeMode: "always-run"` | `builtins/map.ts:344-412`, registration `scheduler/facade.ts:316-322` | builtins §1 (listed as pure) | CHANGED |
 | 34 | Resume compensation for list builtins (`resume-recover`, `resume-republish`) | `builtins/resume-recover.ts:29-46`, used `builtins/filter.ts:165`, `flatmap.ts:105` | builtins §5 (do not port) | COVERED |
@@ -243,19 +245,17 @@ FIFO needs *some* bound because events now arrive from N clients into
 one queue; recommended default: keep W4 in the SpaceServer unchanged,
 add binding-layer shaping in Phase 6 as specced.
 
-**N22 (auto-start on event).** Today an event whose handler is not
-registered starts the piece (`ensurePieceRunning`) while holding the
-FIFO slot (`events.ts:331-395`). The SpaceServer needs exactly this
-path on activation-by-event (serving-loop §1) — but see row 31: v2
-never says *which pieces* a SpaceServer instantiates when a space
-activates. The event path self-answers (start the piece the event
-targets); the derivation path does not (a commit dirties docs read by
-pieces that are not running — nothing today starts a piece because
-its *inputs* changed; the client happened to have UI-relevant pieces
-running). Recommended default: SpaceServer activation starts every
-piece reachable from the space's root list plus on-demand starts via
-the event path; needs a ruling in Phase 1 — this is the single
-biggest unstated policy in the serving loop.
+**N22 (auto-start on event) — RULED 2026-08-02, with N31.** There is
+NO piece-start policy in v2: the space is one lazy reactive graph
+(serving-loop §1). Today's auto-start (`ensurePieceRunning` holding
+the FIFO slot, `events.ts:331-395`) maps to loading graph structure
+sufficient to run the event's handler — the event IS the demand for
+its handler; events run handlers eagerly. The derivation path needs
+no analogue: a commit dirtying docs read by unmaterialized nodes
+leaves them dirty-unmaterialized until a value-granular client pull
+(a subscription) demands them and their upstream — `idle()` already
+excludes them. Nothing starts a piece because its *inputs* changed,
+and nothing "starts pieces" on activation at all.
 
 **N24 (presync).** `presyncInputs` exists so a handler's synchronous
 replica reads don't race doc-carrying storage responses. On the
@@ -289,12 +289,15 @@ cross-space event (`events.ts:717-737` becomes: append via outbox
 after wave commit). The piece-stop compensation
 (`runner.ts:4906-4919`) maps to per-action failure isolation in §3d.
 
-**N31 (piece-start policy).** See N22. Also note the space root
-bootstrap (`startEnsuredDefaultPattern`, default-root reconcile
-`pattern-updater.ts:111`) runs client-side today before rendering;
-under v2 the SpaceServer must guarantee root pieces run (they carry
-most handlers). Nothing in serving-loop §1's activation covers root
-discovery. Same ruling as N22.
+**N31 (piece-start policy) — RULED 2026-08-02: none exists.** See
+N22. The space root bootstrap (`startEnsuredDefaultPattern`,
+default-root reconcile `pattern-updater.ts:111`) stays a client-era
+framing: the SpaceServer never guarantees "root pieces run" — it
+resolves demanded values and queued events, and handler registration
+rides the structure load for exactly those, not a start step
+(serving-loop §1). A root piece's handlers become reachable when a
+client subscribes to its values or an event targets its streams;
+until then its derivations stay dirty-unmaterialized by design.
 
 **N33 (list coordinators are not "pure").** builtins §1 classifies
 map/filter/flatMap as pure structural with "port cost: none". The
@@ -302,10 +305,12 @@ functions are deterministic, but the coordinators *start child
 pattern runs* (`map.ts:355-395`), own their lifecycle
 (stop-on-removal, `map.ts:392`), and register `always-run` on resume
 because a clean skip would strand children (`map.ts:412`,
-`facade.ts:316-322`). Port cost is real: the SpaceServer must run
-coordinators on activation (see N22/N31) and the client's speculative
-run of a coordinator must keep child starts overlay-local (see N37).
-Amend builtins §1 when Phase 1 lands them.
+`facade.ts:316-322`). Port cost is real: server-side a coordinator
+materializes under demand like any node (the N22/N31 ruling — no
+activation start step), and the client's speculative run of a
+coordinator keeps child starts overlay-local (see N37 — allowed
+since the 2026-08-02 reversal). Amend builtins §1 when Phase 1 lands
+them.
 
 **N35 (resume machinery).** The whole client-resume complex — per-doc
 snapshot buckets (`runner.ts:3296`), sync-holds
@@ -330,15 +335,17 @@ ownership, N26) and navigateTo-bearing results defer starting until
 the tx commits (`runner.ts:4826-4847`) so the target is durable.
 v2 placement: these run wherever the graph runs — server
 authoritatively (the child joins the space's graph, as builtins §3
-says for compileAndRun), client speculatively. Three unstated
-consequences need spec text: (a) speculative child *starts* on the
-client must be overlay-scoped — registrations are not writes
-(`runner.ts:4906-4908`), so the overlay contract (speculation §1
-covers values only) needs a line about speculative piece lifecycle
-and its retirement on reconcile; (b) the lift-result re-instantiate
-happens inside a served wave — its writes are wave writes, fine, but
-the JSON-stringify compare is the *memo*; name it so nobody adds a
-second one; (c) the navigateTo deferral becomes moot under §3.7
+says for compileAndRun), client speculatively. Three consequences,
+one now ruled: (a) speculative child *starts* on the client are
+ALLOWED and overlay-scoped (owner, 2026-08-02, reversing the earlier
+no-children rule) — registrations are not writes
+(`runner.ts:4906-4908`); ids derive from cause so the speculative
+child converges with the authoritative one by identity, and
+speculation §2 now carries the lifecycle + retirement line; (b) the
+lift-result re-instantiate happens inside a served wave — its writes
+are wave writes, fine, but the JSON-stringify compare is the *memo*;
+name it so nobody adds a second one; (c) the navigateTo deferral
+becomes moot under §3.7
 (intent lands in the wave's derived commit; the client enacts) —
 delete the deferral in the ON arm rather than porting it.
 
@@ -436,7 +443,9 @@ today's reload persistence); or scoped derivations are reclassified
 as authored-adjacent. The persisted-state context ladder (row 60) is
 today's machinery for exactly this and is tripwired in v2. Must be
 ruled before Phase 2 (speculation reads scoped state) and Phase 4
-(the effects doc is session-scoped by construction).
+(the effects doc is session-scoped by construction). Plan Phase 0
+now carries the owner + spec review of cell scopes end to end
+(README §6 Q7, was ledger L10) — this row is what it must settle.
 
 **N57 (identity/authority).** Today one runtime = one
 `userIdentityDID` (`runtime.ts:669`) and all first-party HTTP is

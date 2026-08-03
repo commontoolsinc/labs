@@ -43,7 +43,19 @@ key; client speculation reads through (speculation.md §2).
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
 | `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
-| `sqlite*` | database link, statement, params, **reader principal** | cleared rows per reader | read served under the reader's clearance | reader in the key is what "per-reader row admissibility" means mechanically (Phase 5 gate) |
+| `sqlite*` | database link, statement, params (+ reader principal iff mechanism 2 below is picked) | cleared rows (shape per the pending pick) | read served under the reader's clearance | clearance mechanism PENDING OWNER PICK — see below (Phase 5 gate) |
+
+`sqlite*` row clearance — the mechanism is PENDING OWNER PICK
+(flagged 2026-08-02) among three candidates; do not build ahead of
+the pick:
+
+1. **One-run + delivery-filter**: one uncleared query run; rows are
+   filtered per reader at delivery time, where the read is served.
+2. **Per-reader materialization** (the table row's original shape):
+   reader principal in the memo key; one cleared result cell per
+   reader.
+3. **Superset + derived views**: one superset result cell; per-reader
+   cleared views derived from it as ordinary derivations.
 
 FORBIDDEN: any of these executing in a client runtime under the flag;
 result caches outside the cell (no process LRU that survives the memo
@@ -63,8 +75,14 @@ pattern, instantiated into a deterministic result cell — is a RUNNER
 path distinct from `compile-and-run` (no compilation step), and it runs
 server-side as an ordinary consequence of the graph run: the child
 joins the space's graph the same way (runtime-mapping.md N37/N38).
-Client speculation NEVER instantiates child pieces on either path
-(speculation.md §2).
+Client speculation MAY instantiate result-as-pattern children
+overlay-locally (owner, 2026-08-02 — REVERSING the earlier
+no-speculative-children rule): child ids derive from cause, so the
+speculative child converges with the authoritative one by identity;
+overlay containment applies — nothing commits (speculation.md §2).
+`compile-and-run` children stay unspeculated: compilation is an
+effectful step, so the branch reads through until the authoritative
+child arrives.
 
 ## 4. Client-enacted — `navigate-to`
 

@@ -12,8 +12,9 @@ Normative spec for Phase 3 (D-v2-1). Assumes
   `event-preflight-dependencies.ts`. The server-side handler run reuses
   this machinery inside the SpaceServer's runtime — do not build a second
   event executor.
-- Handler registration happens when the SpaceServer's runtime instantiates
-  the pattern; `addSchedulerEventHandler` is already the hook.
+- Handler registration rides the SpaceServer's graph-structure load
+  for demanded values and queued events (serving-loop.md §1 — no
+  piece-start step); `addSchedulerEventHandler` is already the hook.
 
 ## 1. The event, as data
 

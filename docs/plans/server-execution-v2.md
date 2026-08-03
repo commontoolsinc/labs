@@ -36,6 +36,10 @@ Tasks:
 - [ ] Owner rules Q1 (offline event queueing) and Q6 (effect authority for
       multi-user triggers) far enough to unblock Phases 3 and 1
       respectively; the rest of §6 can trail.
+- [ ] Owner + spec review of cell SCOPES (`user`/`session`) end to
+      end — v1's scope confusion must not carry into v2; blocks the
+      user/session-derived-state question (README §6 Q7, was ledger
+      L10; runtime-mapping.md N56).
 - [ ] Name the single flag, register it in `EXPERIMENTAL_OPTIONS.md` with
       both states defined; OFF is today byte-for-byte.
 - [ ] CI runs a flag-ON arm of the integration suites from the first PR
@@ -49,60 +53,78 @@ Success criteria:
 
 - [ ] Flag registered; a no-op ON arm passes CI identically to OFF.
 
-## Phase 1 — The serving loop (derivations)
+## Phase 1 — The serving loop, landed dark (six stages, flag OFF)
 
 The executor hosts one committing runtime per space: wake on accepted
 commit, run the affected graph to fixpoint, commit derived changes. No
-shadow pass, no claims, no evidence log. Placement from input links.
+shadow pass, no claims, no evidence log. Placement from input links;
+activation resolves demanded values and queued events — there is no
+piece-start policy (serving-loop.md §1, RULED 2026-08-02).
 
-Interim posture: until Phase 3 lands, client HANDLER writes continue to
-ride authored-class commits exactly as today (protocol.md §1); Phase 1
-changes who commits derivations, not who commits handler writes, and
-the client derivation-commit path is removed in Phase 2.
+The six-PR cut below lands with the FLAG OFF THROUGHOUT: every stage
+merges with the OFF arm byte-identical to today, and no stage makes
+the ON arm a shipped state. The first ON-arm milestone is Phase 2's,
+merged from the old Phases 1+2 (owner, 2026-08-02): server derives
+AND client does not — a two-deriver interim never ships. A dev may
+flip the flag locally mid-Phase-1 and will see CAS storming between
+the server and still-deriving clients; expected, local-only, fine.
 
-Tasks:
+Stages, one PR each:
 
-- [ ] Executor host + per-space runtime lifecycle (start, wake, idle,
-      stop); borrow lessons, not code, from the archived pool.
-- [ ] Create the `execution_lease` table (engine-v3 migration — none
-      exists on main; v1-branch shape as prior art) and the lease
-      acquire/renew/expire cycle (serving-loop.md §2).
-- [ ] Delete main's certificate surface: `completeSchedulerScopeSummary`
-      emission (ts-transformers) and every consumer (runner); reduce the
-      observation tables to the v2 basis index — standalone
-      `(action, entity, seq)` rows replacing the full-JSON payload form
-      (serving-loop.md §3b).
-- [ ] Serve pure structural built-ins (spec §3.5 table, row 1).
-- [ ] Serve effectful built-ins server-side — `fetch*`, `generate*`,
-      `sqlite*` — behind request-hash memoization; egress performed only
-      here (effect authority per Q6 ruling).
-- [ ] Recovery: restart → basis-index re-marking, recompute pure nodes,
-      reuse memoized effect results; no replay (serving-loop.md §6).
-- [ ] Settled-ness watermark ("derived current through seq N") rides
-      derived commits + the watermark doc; `waitForSettled(space, seq)`
-      test helper lands with it (protocol.md §4, testing.md §3).
-- [ ] Pattern-source watcher + hot-swap run in the SpaceServer under
-      the flag — the `systemPatternAutoUpdate` posture flips
-      server-side (serving-loop.md §3e; `pattern-update-testing.md`
-      scenarios are the acceptance surface).
-- [ ] Disable `stream-data` under the flag (deferred per spec §3.5).
+- [ ] **A — flag + commit class + CI**: register the single flag
+      (Phase 0's naming; `EXPERIMENTAL_OPTIONS.md`, OFF is today
+      byte-for-byte); land the `class` commit metadata (protocol.md
+      §1, §7); stand up the OFF+ON CI arms with explicit skip lists
+      (testing.md §2); disable `stream-data` under the flag (spec
+      §3.5).
+- [ ] **B — lease**: create the `execution_lease` table (engine-v3
+      migration — none exists on main; v1-branch shape as prior art),
+      the acquire/renew/expire cycle, and the derived-class admission
+      equality check (serving-loop.md §2).
+- [ ] **C — main reduction**: delete main's certificate surface —
+      `completeSchedulerScopeSummary` emission (ts-transformers) and
+      every consumer (runner); reduce the observation tables to the
+      v2 basis index — standalone `(action, entity, seq)` rows
+      replacing the full-JSON payload form (serving-loop.md §3b).
+- [ ] **D — seal-into-wave**: action transactions seal into the wave
+      accumulator server-side; per-doc CAS with per-write-class
+      conflict handling; CFC stays per action run
+      (serving-loop.md §3c–§3d).
+- [ ] **E — host + SpaceServer + watermark + gates**: executor host,
+      per-space activation/park with demand-driven value pull — no
+      per-piece start/stop (serving-loop.md §1, §3); pure structural
+      built-ins served (spec §3.5 row 1); pattern-source watcher +
+      hot-swap in the SpaceServer — the `systemPatternAutoUpdate`
+      posture flips server-side (serving-loop.md §3e;
+      `pattern-update-testing.md` scenarios are the acceptance
+      surface); the watermark doc + `derivedThrough` +
+      `waitForSettled(space, seq)` (protocol.md §4, testing.md §3);
+      the §7 counters.
+- [ ] **F — effectful + outbox**: serve `fetch*`, `generate*`,
+      `sqlite*` behind request-hash memoization; the outbox; egress
+      performed only here (effect authority per Q6 ruling); recovery
+      = basis-index re-marking, recompute pure nodes, reuse memoized
+      effect results, no replay (serving-loop.md §4–§6).
 
-Success criteria:
+Success criteria (flag OFF — the ON gates are Phase 2's):
 
-- [ ] `counter` and `cfc-group-chat-demo-multi-runtime` green in the ON
-      arm (client derivation commits stay enabled until Phase 2, client
-      handler writes until Phase 3 — the interim posture above).
-- [ ] `sx2-` gate tests settle on `waitForSettled`, no text-polling
-      (testing.md §3).
-- [ ] One authoritative run per upstream change (scheduler-run and commit
-      counters, not logs).
-- [ ] **~1 protocol commit per logical write** on the lunch-poll workload
-      (v1 measured 60×; the counters exist — use them; the gate metric
-      is testing.md §4's single ratio, ≤ 2 on pure workloads).
-- [ ] Server restart mid-test: derived state reconverges, effectful nodes
-      do not re-fire (store shows no duplicate effect results).
+- [ ] Every stage lands with the OFF arm byte-identical to today
+      (testing.md §2); the ON arm runs in CI from stage A with
+      explicit skip lists, never silent filtering.
+- [ ] Stage C leaves no `completeSchedulerScopeSummary` reference on
+      main and no full-JSON observation payload tables; the basis
+      index is the only persisted scheduler state besides W and
+      `eventWatermark`.
 
-## Phase 2 — Client: speculation and authored writes only
+## Phase 2 — Flag ON: server derives and the client does not
+
+The first ON-arm milestone, MERGED from the old Phases 1+2 (owner,
+2026-08-02): the SpaceServer committing derivations and the client
+losing its derivation-commit path ship as ONE state — a two-deriver
+interim never ships (local bring-up runs of it are fine, per
+Phase 1's note). Client HANDLER writes still commit authored-class
+until Phase 3 lands events — that interim is Phase-3-related, not a
+derivation interim, and stays (protocol.md §1).
 
 Tasks:
 
@@ -112,16 +134,32 @@ Tasks:
       immediately, replace on authoritative arrival (drop authority,
       never the ability to run).
 - [ ] Effectful nodes read through to last committed results — never
-      speculated.
+      speculated. Result-as-pattern children may instantiate
+      overlay-locally, converging by cause-derived identity
+      (speculation.md §2, owner 2026-08-02).
 - [ ] UI bindings untouched: authored writes under existing ACL + CAS.
 
-Success criteria:
+Success criteria (the old Phase-1 ON gates land here, merged):
 
+- [ ] `counter` and `cfc-group-chat-demo-multi-runtime` green in the
+      ON arm (client handler writes still authored-class until
+      Phase 3).
 - [ ] Byte-identical workload tests pass in both arms.
-- [ ] Actor-side interactive latency at parity (v1 measured 292 vs 318 ms).
-- [ ] Client derivation commits disabled (moved here from Phase 1): the
-      store session-attribution query shows zero client-committed
-      derived writes in the ON arm.
+- [ ] `sx2-` gate tests settle on `waitForSettled`, no text-polling
+      (testing.md §3).
+- [ ] One authoritative run per upstream change (scheduler-run and
+      commit counters, not logs).
+- [ ] **~1 protocol commit per logical write** on the lunch-poll
+      workload (v1 measured 60×; the counters exist — use them; the
+      gate metric is testing.md §4's single ratio, ≤ 2 on pure
+      workloads — a trigger, not a hard gate: a breach fails until a
+      human inspects the why).
+- [ ] Server restart mid-test: derived state reconverges, effectful
+      nodes do not re-fire (store shows no duplicate effect results).
+- [ ] Actor-side interactive latency at parity (v1 measured 292 vs
+      318 ms).
+- [ ] Client derivation commits gone: the store session-attribution
+      query shows zero client-committed derived writes in the ON arm.
 
 ## Phase 3 — Events-down handlers (D-v2-1)
 

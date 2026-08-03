@@ -37,11 +37,17 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   one idempotent GET".
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
   is reversible. The overlay records the nonce it acted on.
-- Child-piece instantiation (result-as-pattern and `compile-and-run`,
-  builtins.md §3): client speculation NEVER instantiates child pieces.
-  The overlay renders a placeholder — the branch's ordinary loading
-  state — until the authoritative push delivers the instantiated child
-  (runtime-mapping.md N37/N38).
+- Child-piece instantiation (builtins.md §3): result-as-pattern
+  children MAY instantiate speculatively, overlay-local (owner,
+  2026-08-02 — reversing the earlier no-children rule). Child ids
+  derive from cause, so the speculative child converges with the
+  authoritative one by identity when the push arrives; overlay
+  containment applies — the child's registrations and writes are
+  overlay-side, nothing commits, and they retire with their origin
+  entry on reconcile (§4). `compile-and-run` children are NOT
+  speculable (compilation is an effectful step): that branch renders
+  its ordinary loading state until the authoritative push delivers
+  the child (runtime-mapping.md N37/N38).
 - **Unreplicated inputs**: a speculative read of a doc/path the client
   has not replicated is PENDING for that branch — speculation NEVER
   blocks on a fetch and never triggers a network read. The branch

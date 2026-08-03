@@ -27,6 +27,18 @@ FORBIDDEN: a fourth class; per-class subtypes that alter admission;
 clients producing `derived` (there must be no client code path that can
 even construct one).
 
+Threat model, stated honestly (RULED, owner 2026-08-02): the
+single-deriver invariant is by construction against HONEST clients —
+no client code path constructs a `derived` commit. It is NOT new ACL
+protection: derived-output docs get none in v2, so a malicious client
+holding today's write authority on a doc can still author into it,
+docs the SpaceServer derives into and the watermark doc included
+(watermark forgery is possible and accepted for now). v2 defines the
+outcome, not a defense: such a write is an ordinary authored input,
+and the next wave recomputes the derivation over it. v2 adds no
+security guarantees beyond today's unless trivial (owner,
+2026-08-02); tightening is future work.
+
 ## 2. Admission, the whole table
 
 | commit class | checks, in order |
@@ -41,6 +53,11 @@ That is the ENTIRE admission surface. No scope reasoning, no read-set
 validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
+
+Note what the table does NOT do: `authored` admission checks write
+authority on the TARGET only — nothing marks a doc as derived-output,
+so admission protects derived docs no more than today does (§1's
+threat model; the next wave recomputes over an intruding write).
 
 ## 2b. Cross-space writes
 
@@ -141,8 +158,11 @@ the target's `eventWatermark` makes processing exactly-once.
 
 ## 4. The watermark
 
-- Definition: `W(space)` = highest seq such that every authored commit
-  ≤ W has all its derived consequences committed.
+- Definition (sharpened by the 2026-08-02 demand ruling): `W(space)` =
+  highest seq such that every authored commit ≤ W has all handler
+  consequences committed AND all DEMANDED derivations current through
+  W (demand per serving-loop.md §1/§3b — undemanded derivations stay
+  dirty-unmaterialized without holding W back).
 - Carried: in every `derived` commit's metadata (`derivedThrough: W`) and
   in one well-known doc per space (updated in the same transaction; never
   its own commit).
@@ -188,10 +208,12 @@ doc/subscription model; server-side retries of enactment.
 
 ## 6. Streaming (deferred, boundary fixed)
 
-Settled-result-only commits are the v2 baseline. If/when LLM partials
-ship, they use an ephemeral session channel OUTSIDE the commit stream —
-partials never become commits, never touch the watermark, never wake the
-serving loop. `stream-data` stays disabled (README §3.5).
+Settled-result-only commits are the v2 baseline; the interim loss of
+LLM token streaming under the flag is ACCEPTED (owner, 2026-08-02).
+If/when LLM partials ship, they use an ephemeral session channel
+OUTSIDE the commit stream — partials never become commits, never touch
+the watermark, never wake the serving loop. `stream-data` stays
+disabled (README §3.5).
 
 ## 7. Wire-shape discipline
 
