@@ -1,5 +1,9 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
-import { validateSchemaValue } from "@commonfabric/runner/cfc";
+import {
+  localRefTarget,
+  relaxDefaultedRequired,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc/schema-sanitization";
 import {
   type CallableKind,
   classifyCallableEntry,
@@ -233,125 +237,70 @@ export class VerbInputValidationError extends Error {
   }
 }
 
+// `localRefTarget` and `relaxDefaultedRequired` live beside the runtime's
+// own validator (`@commonfabric/runner/cfc/schema-sanitization`), so this
+// gate and the server-side closed-world enforcement (C5) share one
+// implementation of "what does a default satisfy" instead of drifting apart.
+
 /**
- * Follow local `#/$defs/...` / `#/definitions/...` references to the schema
- * they name, so a `default` behind one is still seen. Chains are followed to
- * their end; anything unresolvable (a remote ref, a missing entry, a cycle)
- * yields the last schema reached rather than failing.
+ * Normalize an absent payload to `{}` where the verb's event schema — after
+ * resolving a top-level local `$ref` (a stream's schema is often
+ * `{ $ref: "#/$defs/X", asCell: ["stream"], $defs: {...} }`) — is an object
+ * schema: directly object-shaped, or an `allOf` conjunction with an
+ * object-schema branch (see `schemaIsObjectShaped`; `anyOf`/`oneOf` roots
+ * stay untouched). Everything else passes through untouched: schema
+ * `undefined` / `true`, boolean `false` (an absent payload must pass; a
+ * supplied one is already refused), non-object schemas, and an unresolvable
+ * `$ref` (fail-open on uncertainty — refuse only on proof).
+ *
+ * Why `{}` rather than refusing absence outright (settled 2026-07-30,
+ * measured on #5147): the runtime materializes a property's `default` only
+ * for a PRESENT object payload — a wholly absent event bypasses default
+ * materialization entirely, the handler sees `undefined`, and the receipt
+ * still spends the invocation id. Normalizing lets absence flow through the
+ * same gate as any payload: `{}` fails the relaxed schema exactly when
+ * top-level `required` survives `relaxDefaultedRequired` (refusal, id never
+ * spent), and dispatching `{}` where every required property carries a
+ * default makes the runtime fill those defaults in — where an absent event
+ * would have delivered nothing.
  */
-function localRefTarget(
-  schema: JSONSchema,
-  root: JSONSchema,
-): JSONSchema {
-  let current = schema;
-  const visited = new Set<object>();
-  while (isSchemaObject(current)) {
-    const ref = current.$ref;
-    if (typeof ref !== "string" || !isSchemaObject(root)) return current;
-    if (visited.has(current)) return current;
-    visited.add(current);
-    // `$defs` only, deliberately — NOT `definitions`. Hoisting emits `$defs`
-    // and `#/$defs/...` (schema-generator AGENTS.md: "anything that says
-    // `definitions` is out of date"), so a `definitions` ref is one the
-    // runtime cannot resolve either. Following it here would relax a required
-    // field on the strength of a default that never gets injected, letting an
-    // invalid payload through and spending its invocation id on a handling
-    // that receives no event — the exact failure this gate exists to stop.
-    // Unresolvable refs keep the field required, so the call is refused before
-    // dispatch and the id survives.
-    const match = /^#\/\$defs\/(.+)$/.exec(ref);
-    if (!match) return current;
-    const pool = (root as Record<string, unknown>).$defs;
-    if (!isSchemaObject(pool as JSONSchema)) return current;
-    const target = (pool as Record<string, JSONSchema>)[match[1]];
-    if (target === undefined) return current;
-    current = target;
-  }
-  return current;
+export function normalizeAbsentVerbPayload(
+  input: unknown,
+  schema: JSONSchema | undefined,
+): unknown {
+  if (input !== undefined) return input;
+  if (!isSchemaObject(schema)) return input;
+  const target = localRefTarget(schema, schema);
+  if (!isSchemaObject(target)) return input;
+  if (!schemaIsObjectShaped(target, schema)) return input;
+  return {};
 }
 
 /**
- * A copy of `schema` whose `required` lists omit properties that carry their
- * own `default`.
- *
- * The runtime injects a property's default when the payload leaves it out (the
- * schema read path in runner `schema.ts`), so such a property is satisfiable
- * without the caller supplying it. Validating against the unrelaxed schema
- * would reject payloads the verb would have accepted.
- *
- * `seen` both memoizes and breaks reference cycles: the relaxed copy is
- * registered before its children are filled in, so a schema that reaches
- * itself resolves to the copy already under construction.
+ * Whether a resolved event schema describes an object payload — directly, or
+ * as an `allOf` conjunction with an object-schema branch (a conjunction that
+ * includes an object schema IS an object schema, no branch choice involved).
+ * `anyOf`/`oneOf` roots deliberately return false: normalizing `{}` there
+ * would pick among alternatives on the caller's behalf, the combinator
+ * boundary the D5 rule records (refuse or normalize only on proof) — the
+ * plan's D5 bullet names disjunctive roots out of scope.
  */
-function relaxDefaultedRequired(
-  schema: JSONSchema,
+export function schemaIsObjectShaped(
+  target: JSONSchema,
   root: JSONSchema,
-  seen: Map<object, JSONSchema>,
-): JSONSchema {
-  if (!isSchemaObject(schema)) return schema;
-  const cached = seen.get(schema);
-  if (cached !== undefined) return cached;
-
-  const relaxed: Record<string, unknown> = { ...schema };
-  seen.set(schema, relaxed as JSONSchema);
-
-  const properties = schema.properties;
-  if (isSchemaObject(properties)) {
-    const defaulted = new Set<string>();
-    const next: Record<string, JSONSchema> = {};
-    for (
-      const [key, propSchema] of Object.entries(
-        properties as Record<string, JSONSchema>,
-      )
-    ) {
-      const target = localRefTarget(propSchema, root);
-      if (isSchemaObject(target) && target.default !== undefined) {
-        defaulted.add(key);
-      }
-      next[key] = relaxDefaultedRequired(propSchema, root, seen);
-    }
-    relaxed.properties = next;
-    if (Array.isArray(schema.required)) {
-      relaxed.required = (schema.required as string[]).filter(
-        (key) => !defaulted.has(key),
-      );
-    }
+): boolean {
+  if (!isSchemaObject(target)) return false;
+  if (target.type === "object" || isSchemaObject(target.properties)) {
+    return true;
   }
-
-  // `items` is a single schema here; the validator rejects the tuple form
-  // outright ("schema must be an object or boolean").
-  if (schema.items !== undefined) {
-    relaxed.items = relaxDefaultedRequired(
-      schema.items as JSONSchema,
-      root,
-      seen,
-    );
+  if (Array.isArray(target.allOf)) {
+    return target.allOf.some((branch) => {
+      const resolved = localRefTarget(branch, root);
+      return isSchemaObject(resolved) &&
+        (resolved.type === "object" || isSchemaObject(resolved.properties));
+    });
   }
-
-  const fields = schema as Record<string, unknown>;
-  for (const combinator of ["anyOf", "oneOf", "allOf"]) {
-    const branches = fields[combinator];
-    if (Array.isArray(branches)) {
-      relaxed[combinator] = (branches as JSONSchema[]).map((entry) =>
-        relaxDefaultedRequired(entry, root, seen)
-      );
-    }
-  }
-
-  for (const pool of ["$defs", "definitions"]) {
-    const defs = fields[pool];
-    if (isSchemaObject(defs as JSONSchema)) {
-      const next: Record<string, JSONSchema> = {};
-      for (
-        const [key, entry] of Object.entries(defs as Record<string, JSONSchema>)
-      ) {
-        next[key] = relaxDefaultedRequired(entry, root, seen);
-      }
-      relaxed[pool] = next;
-    }
-  }
-
-  return relaxed as JSONSchema;
+  return false;
 }
 
 /**
@@ -367,10 +316,11 @@ function relaxDefaultedRequired(
  * key: an id that was never dispatched is still spendable by the corrected
  * retry.
  *
- * A verb invoked with no payload at all is left alone. `$event` is genuinely
- * optional in the generated handler schema — value-less verbs are a supported
- * shape — so the rule is that a payload which *was* supplied must fit, not
- * that every verb must be given one.
+ * An absent payload reaches this function only after
+ * `normalizeAbsentVerbPayload`: against an object schema it arrives as `{}`
+ * and is judged like any supplied payload; against everything else it stays
+ * `undefined` and passes — `$event` is genuinely optional in the generated
+ * handler schema, and value-less verbs are a supported shape.
  */
 export function verbInputSchemaError(
   input: unknown,
@@ -384,15 +334,30 @@ export function verbInputSchemaError(
   );
 }
 
+/**
+ * The shared pre-dispatch gate. Returns the input to dispatch — the caller's
+ * own payload, or `{}` when an absent payload was normalized against an
+ * object schema — and throws `VerbInputValidationError` when that input
+ * cannot satisfy the schema. The absent-payload refusal says so explicitly:
+ * "send a payload" has to read differently from "fix your payload".
+ */
 function assertVerbInputSatisfiesSchema(
   verb: string,
   input: unknown,
   schema: JSONSchema | undefined,
-): void {
-  const detail = verbInputSchemaError(input, schema);
+): unknown {
+  const normalized = normalizeAbsentVerbPayload(input, schema);
+  const detail = verbInputSchemaError(normalized, schema);
   if (detail !== undefined) {
-    throw new VerbInputValidationError(verb, detail);
+    throw new VerbInputValidationError(
+      verb,
+      input === undefined
+        ? `no payload was supplied, and this verb cannot run without one ` +
+          `(${detail}) — send a payload`
+        : detail,
+    );
   }
+  return normalized;
 }
 
 function cloneWithoutBoundToolKeys(
@@ -522,8 +487,10 @@ export async function executeResolvedCallable(
     const send = resolved.callableCell.send;
     if (typeof send === "function") {
       // Before anything is dispatched, and so before the invocation id can be
-      // spent on a handling that would run with no event.
-      assertVerbInputSatisfiesSchema(
+      // spent on a handling that would run with no event. An absent payload
+      // is normalized to `{}` against an object schema (D5), so what goes out
+      // is what the gate judged.
+      const dispatchInput = assertVerbInputSatisfiesSchema(
         resolved.cellKey,
         input,
         resolved.callableCell.schema,
@@ -537,7 +504,7 @@ export async function executeResolvedCallable(
           try {
             send.call(
               resolved.callableCell,
-              input,
+              dispatchInput,
               resolve,
               invocationId !== undefined
                 ? { eventId: invocationId }

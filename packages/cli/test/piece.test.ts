@@ -24,6 +24,7 @@ import {
   listPieces,
   newPiece,
   PieceResultProjectionError,
+  PieceVerbReadError,
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
@@ -873,6 +874,9 @@ describe("cli piece parsing", () => {
       "runtime.idle",
       "manager.synced",
       "result.get",
+      // The read-path guard classifies the read path after the value read
+      // (verb contract WS-F), descending to the same key once more.
+      "result.key:value",
       `stop:${PIECE}`,
     ]);
   });
@@ -975,6 +979,31 @@ describe("cli piece parsing", () => {
     )).rejects.toThrow(PieceResultProjectionError);
   });
 
+  it("rethrows a read failure that is not a path/projection condition", async () => {
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.reject(new Error("network unreachable")),
+            getCell: () =>
+              Promise.resolve({ schema: undefined, getRaw: () => undefined }),
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      {},
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    )).rejects.toThrow("network unreachable");
+  });
+
   it("preserves schema-valid undefined over present raw data", async () => {
     const rawCell = {
       schema: {
@@ -1003,6 +1032,232 @@ describe("cli piece parsing", () => {
         createController: () => controller as any,
       },
     )).resolves.toBeUndefined();
+  });
+
+  describe("read-path guard (verb contract WS-F)", () => {
+    /** Minimal cell double for the guard's classification walk: value
+     * access, key() descent, and asSchemaFromLinks identity — the same
+     * surface piece-verbs.test.ts doubles for listPieceCallables. Its
+     * asSchema models the real forced-cast semantics: the cast schema
+     * survives resolution for inline values and schema-less links, so a
+     * forced probe answers "stream" for ANY name. The guard is certain-only
+     * and must never consult that cast — the data reads below go through
+     * this double to pin it. */
+    function guardCell(value: unknown): {
+      get: () => unknown;
+      getRaw: () => unknown;
+      asSchemaFromLinks: () => unknown;
+      asSchema: (schema: unknown) => unknown;
+      key: (...segments: (string | number)[]) => unknown;
+    } {
+      const self = {
+        get: () => value,
+        getRaw: () => value,
+        asSchemaFromLinks: () => self,
+        asSchema: (_schema: unknown) => ({
+          key: (_name: string) => ({ isStream: () => true }),
+        }),
+        key: (...segments: (string | number)[]) => {
+          let child: unknown = value;
+          for (const segment of segments) {
+            child = typeof child === "object" && child !== null
+              ? (child as Record<string | number, unknown>)[segment]
+              : undefined;
+          }
+          return guardCell(child);
+        },
+      };
+      return self;
+    }
+
+    const readPath = (value: unknown, path: (string | number)[]): unknown =>
+      path.reduce(
+        (current: unknown, segment) =>
+          typeof current === "object" && current !== null
+            ? (current as Record<string | number, unknown>)[segment]
+            : undefined,
+        value,
+      );
+
+    const RESULT_VALUE = {
+      title: "Groceries",
+      addItem: { $stream: true },
+      nested: {
+        list: ["milk"],
+        removeItem: { $stream: true },
+      },
+      search: {
+        pattern: { argumentSchema: { type: "object" } },
+        extraParams: {},
+      },
+    };
+
+    const guardDeps = (piece: unknown) => ({
+      loadManager: () => Promise.resolve({} as never),
+      resolvePieceAddress: (_manager: unknown, id: string) =>
+        Promise.resolve(id),
+      createController: () => ({ get: () => Promise.resolve(piece) }) as never,
+    });
+
+    const guardPiece = (
+      resultValue: unknown,
+      pieceCell?: unknown,
+      inputValue?: unknown,
+    ) => ({
+      input: {
+        get: (path: (string | number)[]) =>
+          Promise.resolve(readPath(inputValue, path)),
+        getCell: () => Promise.resolve(guardCell(inputValue)),
+      },
+      result: {
+        get: (path: (string | number)[]) =>
+          Promise.resolve(readPath(resultValue, path)),
+        getCell: () => Promise.resolve(guardCell(resultValue)),
+      },
+      ...(pieceCell ? { getCell: () => pieceCell } : {}),
+    });
+
+    const config = {
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+    };
+
+    it("refuses a root verb path, pointing at cf piece call", async () => {
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      const error = await getCellValue(config, ["addItem"], {}, deps)
+        .catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toBe(
+        `Path resolves to a verb; use 'cf piece call --piece ${PIECE} addItem' instead.`,
+      );
+
+      // A root verb on the input cell redirects the same way: the dispatcher
+      // resolves result root then input root, so it is callable by name.
+      const inputDeps = guardDeps(
+        guardPiece(undefined, undefined, { setup: { $stream: true } }),
+      );
+      await expect(
+        getCellValue(config, ["setup"], { input: true }, inputDeps),
+      ).rejects.toThrow(/use 'cf piece call/);
+    });
+
+    it("refuses on the stored schema marker even when the value reads empty", async () => {
+      // The second definite signal: the link-derived schema answers as a
+      // stream while the read value is an empty object (the marker survives
+      // in stored links even when the serialization is bare).
+      const rootCell = {
+        get: () => ({ notify: {} }),
+        key: (name: string) => ({
+          asSchemaFromLinks: () => ({ isStream: () => name === "notify" }),
+        }),
+      };
+      const piece = {
+        input: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(guardCell(undefined)),
+        },
+        result: {
+          get: () => Promise.resolve({}),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
+        .rejects.toThrow(/use 'cf piece call/);
+    });
+
+    it("refuses a nested verb path without suggesting an uncallable command", async () => {
+      // `cf piece call` resolves root-level names only, so `cf piece call
+      // removeItem` would fail — the refusal must not suggest it. It says
+      // why the read refused and where to go instead.
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      const error = await getCellValue(
+        config,
+        ["nested", "removeItem"],
+        {},
+        deps,
+      ).catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toBe(
+        "Path resolves to a verb that is not directly callable: verbs are " +
+          "invoked at the piece's root surface. Read the parent object " +
+          "instead, or list the callable verbs with " +
+          `'cf piece verbs --piece ${PIECE}'.`,
+      );
+      expect((error as Error).message).not.toContain("cf piece call");
+    });
+
+    it("reads a probe-classifiable but marker-less output (fails open)", async () => {
+      // The CTS integration shape: a plain data output the forced-stream
+      // probe would classify as callable (the cast schema survives
+      // resolution, so the probe answers "stream" for it), with no stored
+      // marker and no sentinel. The dispatcher and the listing may
+      // over-include it — a read guard must not: the read succeeds.
+      const pieceCell = {
+        asSchema: () => ({
+          key: (_name: string) => ({ isStream: () => true }),
+        }),
+      };
+      const deps = guardDeps(
+        guardPiece(
+          { lastMessage: { text: "hi" }, count: 3 },
+          pieceCell,
+        ),
+      );
+      await expect(getCellValue(config, ["lastMessage"], {}, deps))
+        .resolves.toEqual({ text: "hi" });
+      await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
+    });
+
+    it("fails open when classification itself fails", async () => {
+      // A cell surface that throws during the guard's walk must never turn
+      // a successful read into a refusal: the guard swallows the failure
+      // and the value wins.
+      const throwingRoot = {
+        get: () => ({ field: "ok" }),
+        key: () => {
+          throw new Error("no traversal surface");
+        },
+      };
+      const piece = {
+        input: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(guardCell(undefined)),
+        },
+        result: {
+          get: () => Promise.resolve("ok"),
+          getCell: () => Promise.resolve(throwingRoot),
+        },
+      };
+      await expect(getCellValue(config, ["field"], {}, guardDeps(piece)))
+        .resolves.toBe("ok");
+    });
+
+    it("still reads plain data, tool bindings, and a verb's parent object", async () => {
+      const deps = guardDeps(
+        guardPiece(RESULT_VALUE, undefined, { config: { retries: 2 } }),
+      );
+      await expect(getCellValue(config, ["title"], {}, deps)).resolves.toBe(
+        "Groceries",
+      );
+      await expect(getCellValue(config, ["nested", "list"], {}, deps))
+        .resolves.toEqual(["milk"]);
+      await expect(
+        getCellValue(config, ["config"], { input: true }, deps),
+      ).resolves.toEqual({ retries: 2 });
+      // A tool binding reads as data — the llm-dialog read tool reads tools
+      // too; only streams have a serialization no reader wants.
+      await expect(getCellValue(config, ["search"], {}, deps)).resolves
+        .toEqual(RESULT_VALUE.search);
+      // Only the path that lands ON the verb refuses: its parent object —
+      // named or the path-less full result — keeps reading, verbs included.
+      await expect(getCellValue(config, ["nested"], {}, deps)).resolves
+        .toEqual(RESULT_VALUE.nested);
+      await expect(getCellValue(config, [], {}, deps)).resolves.toEqual(
+        RESULT_VALUE,
+      );
+    });
   });
 
   it("rejects repository metadata when resetting the home pattern", async () => {
