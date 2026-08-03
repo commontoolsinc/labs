@@ -92,8 +92,8 @@ Deno.test("jumplist: i lists the diff's files, dirs summarised", () => {
   const s = diffSession(TWO_FILES);
   press(s, "i");
   assertEquals(entryText(s), [
-    "▸ src/app.ts  +1 −1",
-    "▸ src/app.test.ts  +1 −0",
+    "   ▸ src/app.ts  +1 −1",
+    " T ▸ src/app.test.ts  +1 −0",
   ]);
   assertEquals(s.view().inputLine, "jump to: ");
   assertEquals(s.view().overlay?.title, "Jump to file or commit");
@@ -105,8 +105,8 @@ Deno.test("jumplist: a git show lists the commit message before its files", () =
   press(s, "i");
   assertEquals(entryText(s), [
     "● commit 012345678  Fix the widget alignment",
-    "▸ src/app.ts  +1 −1",
-    "▸ src/app.test.ts  +1 −0",
+    "   ▸ src/app.ts  +1 −1",
+    " T ▸ src/app.test.ts  +1 −0",
   ]);
 });
 
@@ -156,7 +156,7 @@ Deno.test("jumplist: typing filters the list", () => {
   const s = diffSession(SHOW);
   press(s, "i");
   type(s, "test");
-  assertEquals(entryText(s), ["▸ src/app.test.ts  +1 −0"]);
+  assertEquals(entryText(s), [" T ▸ src/app.test.ts  +1 −0"]);
   assertEquals(s.view().inputLine, "jump to: test");
   // Backspacing widens it again.
   press(s, "backspace", "backspace", "backspace", "backspace");
@@ -243,9 +243,9 @@ Deno.test("jumplist: git log -p interleaves each commit with its own files", () 
   press(s, "i");
   assertEquals(entryText(s), [
     "● commit a1a1a1a1a  Second change",
-    "▸ b.ts  +1 −1",
+    "   ▸ b.ts  +1 −1",
     "● commit b2b2b2b2b  First change",
-    "▸ a.ts  +1 −1",
+    "   ▸ a.ts  +1 −1",
   ]);
 });
 
@@ -254,6 +254,13 @@ Deno.test("jumplist: files stay listed and jumpable while collapsed", () => {
   press(s, "F"); // collapse every file to a summary line
   press(s, "i");
   assertEquals(entryText(s).length, 3, "commit and both files still listed");
+  const fileLines = s.view().overlay!.lines.slice(1);
+  assert(
+    fileLines.every((line) =>
+      line.spans.every((span) => span.cls === "comment")
+    ),
+    "collapsed file rows are muted",
+  );
   press(s, "down", "down", "enter"); // commit -> app.ts -> app.test.ts
   assert(s.view().message.includes("src/app.test.ts"));
   // The jump scrolls the collapsed file's summary row into the viewport.
@@ -264,6 +271,45 @@ Deno.test("jumplist: files stay listed and jumpable while collapsed", () => {
     summaryRow >= top && summaryRow < top + 5,
     `summary row ${summaryRow} visible in [${top}, ${top + 5})`,
   );
+});
+
+const CATEGORY_FILES = [
+  "src/app.ts",
+  "docs/README.md",
+  "src/app.test.ts",
+  "docs/guide.test.md",
+].flatMap((path) => [
+  `diff --git a/${path} b/${path}`,
+  `--- a/${path}`,
+  `+++ b/${path}`,
+  "@@ -1 +1 @@",
+  "-old",
+  "+new",
+]).concat("").join("\n");
+
+Deno.test("jumplist: file rows use an aligned category-toggle column", () => {
+  const s = diffSession(CATEGORY_FILES);
+  press(s, "i");
+  assertEquals(entryText(s), [
+    "   ▸ src/app.ts  +1 −1",
+    "M  ▸ docs/README.md  +1 −1",
+    " T ▸ src/app.test.ts  +1 −1",
+    "MT ▸ docs/guide.test.md  +1 −1",
+  ]);
+});
+
+Deno.test("jumplist: only currently collapsed file rows are muted", () => {
+  const s = diffSession(CATEGORY_FILES);
+  press(s, "M", "i");
+  const lines = s.view().overlay!.lines;
+  for (const line of lines) {
+    const markdown = line.text.startsWith("M");
+    assertEquals(
+      line.spans.every((span) => span.cls === "comment"),
+      markdown,
+      line.text,
+    );
+  }
 });
 
 Deno.test("jumplist: i on a non-diff view says it is diff-only", () => {
@@ -302,7 +348,7 @@ Deno.test("jumplist: an email patch shows and filters by its Subject", () => {
   press(s, "i");
   assertEquals(entryText(s), [
     "● commit 012345678  Fix the widget alignment",
-    "▸ src/app.ts  +1 −1",
+    "   ▸ src/app.ts  +1 −1",
   ]);
   // The subject (with its [PATCH] prefix stripped) is filterable.
   type(s, "widget");
@@ -313,7 +359,7 @@ Deno.test("jumplist: a plain diff with no commit lists only files", () => {
   const s = diffSession(TWO_FILES);
   press(s, "i");
   assert(
-    entryText(s).every((t) => t.startsWith("▸")),
+    entryText(s).every((text) => text.includes("▸")),
     "no commit entry without a commit header",
   );
 });

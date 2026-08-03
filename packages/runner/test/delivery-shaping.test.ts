@@ -305,6 +305,35 @@ describe("wake shaper (event path)", () => {
     shaper.dispose();
   });
 
+  it("carries runtimeInjectedEventKeys through both burst and overflow delivery", async () => {
+    // Injection provenance must ride a held delivery unchanged: dropping it
+    // at release would strip the closed-world gate's exemption from a shaped
+    // event, turning a legitimate runtime-injected key into a rejection.
+    const calls: Array<{ opts: DeliverOpts }> = [];
+    const deliver: DeliverFn = (
+      _eventLink,
+      _event,
+      _retries,
+      _onCommit,
+      opts,
+    ) => {
+      calls.push({ opts });
+    };
+    const shaper = eventShaper(deliver, 0, 1); // burst budget of 1
+    shaper.hold(undefined, link("a"), { n: 1 }, true, undefined, {
+      runtimeInjectedEventKeys: ["result"],
+    }); // burst
+    shaper.hold(undefined, link("a"), { n: 2 }, true, undefined, {
+      runtimeInjectedEventKeys: ["result"],
+    }); // overflow
+    await shaper.whenDrained();
+    expect(calls.map((c) => c.opts.runtimeInjectedEventKeys)).toEqual([
+      ["result"],
+      ["result"],
+    ]);
+    shaper.dispose();
+  });
+
   it("delivers no held overflow after dispose", async () => {
     const { calls, deliver } = recorder();
     const shaper = eventShaper(deliver, 0, 1); // burst 1

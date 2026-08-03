@@ -135,6 +135,7 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+import { normalizeSpaceHost } from "./space-host.ts";
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -219,9 +220,12 @@ export interface ExperimentalOptions {
    * instead of the empty `{}` witness, so a caller — or a same-id retry that
    * collides on the receipt — can read the verb's result back by receipt
    * address. Reactive-bearing returns already project via the result-pattern
-   * path; this covers plain values, which are otherwise discarded. Default
-   * off; flips after the invocation-protocol integration proof (verb
-   * contract, docs/plans/pattern-verb-contract-implementation.md WS-C/WS-D).
+   * path; this covers plain values, which are otherwise discarded. Defaults
+   * to on since the invocation-protocol integration proof (#5244's
+   * three-topic fixture; verb contract,
+   * docs/plans/pattern-verb-contract-implementation.md WS-C/WS-D). Pass
+   * `false` (or `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`) as a temporary
+   * rollback override while the flag exists.
    */
   plainResultReceipts?: boolean | undefined;
   /**
@@ -969,10 +973,13 @@ export class Runtime {
       }
     }
 
-    // Unlike ambient flags, computedCellIds is consumed from this Runtime's
-    // builder frame. Normalize its local default after override logging so an
-    // omitted option does not appear as an explicit `true` override.
+    // Unlike ambient flags, computedCellIds and plainResultReceipts are
+    // consumed from this Runtime instance (the builder frame and the runner's
+    // receipt-only branch respectively). Normalize their local defaults after
+    // override logging so an omitted option does not appear as an explicit
+    // `true` override.
     this.experimental.computedCellIds ??= true;
+    this.experimental.plainResultReceipts ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -1006,9 +1013,10 @@ export class Runtime {
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
     // space, not mid-builtin as a bare Invalid URL.
+    const normalizedSpaceHostMap: Record<string, string> = {};
     for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
       try {
-        new URL(host);
+        normalizedSpaceHostMap[space] = normalizeSpaceHost(host).toString();
       } catch (cause) {
         throw new Error(
           `Invalid spaceHostMap entry for ${space}: "${host}"`,
@@ -1021,7 +1029,7 @@ export class Runtime {
     // space → host never changes), so a caller mutating their object
     // after construction must not change routing.
     this.spaceHostMap = options.spaceHostMap
-      ? Object.freeze({ ...options.spaceHostMap })
+      ? Object.freeze(normalizedSpaceHostMap)
       : undefined;
     // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
     // preserving the existing behavior where a test overrides the global AFTER
@@ -2186,16 +2194,26 @@ export class Runtime {
   }
 
   /**
-   * Record a runtime-learned host hint for a space (the v0 site-table
-   * flow). Storage decides first — the seed map wins and an opened
-   * space is never silently re-pointed — and compute routing follows
-   * exactly when storage accepted, keeping the two layers in agreement.
-   * Returns whether the hint is in effect.
+   * Record a runtime-learned HTTP or HTTPS host hint for a space (the v0
+   * site-table flow). Storage decides first. A seed or an accepted late hint
+   * fixes the route for the session. A default-host provider stays provisional
+   * while it is read-only. The first hint can replace it and replay its reads.
+   * Compute routing follows when storage accepts the hint. Returns whether
+   * storage accepted or confirmed the hint.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
-    const accept = this.storageManager.registerSpaceHost?.(space, host);
+    let normalized: string;
+    try {
+      normalized = normalizeSpaceHost(host).toString();
+    } catch (cause) {
+      throw new Error(
+        `Invalid host for space ${space}: "${host}"`,
+        { cause },
+      );
+    }
+    const accept = this.storageManager.registerSpaceHost?.(space, normalized);
     if (accept === undefined) return false; // manager has no remote resolution
-    if (accept) this.#dynamicHosts.set(space, host);
+    if (accept) this.#dynamicHosts.set(space, normalized);
     return accept;
   }
 

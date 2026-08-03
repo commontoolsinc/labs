@@ -1,5 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  shallowFabricFromNativeValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -8,6 +13,7 @@ import {
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
+  type FabricExecValue,
   type FactoryInput,
   isPattern,
   type JSONSchema,
@@ -39,15 +45,32 @@ export type CellAliasResolver = (
   ignoreSelfAliases: boolean,
 ) => AliasBinding | null | undefined;
 
-export function toJSONWithAliasBindings(
+/**
+ * The refusal a `FabricInstance` gets from the binding walks: it is a container
+ * reached by its codec contents rather than by property name, and nothing here
+ * can do that yet.
+ *
+ * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+ * point this becomes a walk rather than a refusal. See "Flag-gated tripwires"
+ * in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ */
+function refuseFabricInstance(value: FabricInstance): Error {
+  return new Error(
+    `Cannot yet handle \`${value.constructor.name}\` (a \`FabricInstance\`) ` +
+      "in a pattern binding.",
+  );
+}
+
+export function withAliasBindings(
   value: FactoryInput<any>,
   resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
-): JSONValue | undefined {
-  // Turn strongly typed builder values into legacy JSON structures while
-  // preserving alias metadata for consumers that still rely on it.
+): FabricExecValue {
+  // Turn strongly typed builder values into the serialized binding structure:
+  // cell references become `$alias` records, and data leaves come through as
+  // the fabric values they are.
 
   // Convert regular cells and results from Cell.get() to opaque refs
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
@@ -56,7 +79,7 @@ export function toJSONWithAliasBindings(
     const { external, frame } = value.export();
 
     // If this is an external reference, just copy the reference as is.
-    if (external) return external as JSONValue;
+    if (external) return external as FabricExecValue;
 
     // Verify that opaque refs are not in a parent frame
     if (frame !== getTopFrame()) {
@@ -73,7 +96,7 @@ export function toJSONWithAliasBindings(
       ignoreSelfAliases,
     );
     if (alias === null) return undefined;
-    if (alias !== undefined) return alias as unknown as JSONValue;
+    if (alias !== undefined) return alias as unknown as FabricExecValue;
     throw new Error(`Cell not found in pattern aliases`);
   }
 
@@ -112,7 +135,7 @@ export function toJSONWithAliasBindings(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
-      toJSONWithAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
+      withAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,
         i,
       ], seen)
@@ -120,11 +143,42 @@ export function toJSONWithAliasBindings(
   }
 
   // A `FabricPrimitive` is an atomic value whose state lives in private fields
-  // (zero enumerable own-props). The `for...in` copy branch below would flatten
-  // it to `{}`, so return it unchanged here — after the cell / alias / array
-  // handling above, which must still win for those forms.
-  if (value instanceof FabricPrimitive) {
-    return value as unknown as JSONValue;
+  // (zero enumerable own-props), so the `for...in` copy below would flatten it
+  // to `{}`. It leaves whole, and it leaves FIRST: it is also a record, so an
+  // `isRecord()` test would otherwise claim it.
+  if (value instanceof FabricPrimitive) return value;
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // `for...in` copy would rebuild it from zero enumerable own properties as
+  // `{}`. It refuses instead of doing that quietly.
+  if (value instanceof FabricInstance) throw refuseFabricInstance(value);
+
+  // What remains that is an object, is not a pattern, and is not a plain
+  // object is either a native carrying a canonical fabric form (a
+  // `Uint8Array`, a `Date`) or something not representable at all. Hand it to
+  // the sanctioned conversion, which mints the fabric form or rejects.
+  //
+  // The INERT plain-object test is what keeps this function's output vetted,
+  // and it is not interchangeable with a plain-object test. An inert plain
+  // object is a container already known good, so it skips the conversion and
+  // is walked in place -- no clone allocated only to be dropped when the
+  // `for...in` below rebuilds it. Every other record goes to the conversion
+  // and is converted or REJECTED there.
+  //
+  // A plain object that is not inert must be among the rejected. Excluding it
+  // here instead would launder it exactly as a native would be laundered: the
+  // `for...in` rebuild silently drops a symbol key and a non-enumerable
+  // property, EVALUATES an accessor into a data property, and reparents a
+  // null-prototype object -- each producing a plain object that satisfies
+  // `isFabricValue()` while meaning something else. Nothing downstream can
+  // catch it, because what it produces is genuinely valid.
+  if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
+    value = shallowFabricFromNativeValue(value);
+    // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
+    // an `Error` a `FabricError`.
+    if (value instanceof FabricPrimitive) return value;
+    if (value instanceof FabricInstance) throw refuseFabricInstance(value);
   }
 
   // If this is an object or a pattern, process each key recursively.
@@ -132,6 +186,12 @@ export function toJSONWithAliasBindings(
     // Guard against circular object references (e.g. schema objects with
     // shared identity between $defs and sibling properties).
     if (!seen) seen = new WeakMap();
+    // Circularity is keyed on object identity, and identity can CHANGE on the
+    // way here: the conversion above hands back a different object when it
+    // clones in order to freeze. So both identities are marked -- the value as
+    // received and the value as converted -- and a cycle pointing at either is
+    // caught. Keying only the converted object would let a cycle back to the
+    // original recurse undetected until the stack dies.
     const depth = seen.get(value as object) ?? 0;
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
@@ -149,23 +209,16 @@ export function toJSONWithAliasBindings(
       : (value as Record<string, any>);
 
     const result: any = {};
-    // TODO(danfuzz): A `FabricPrimitive` is now returned atomically above, but
-    // the other special-object type, `FabricInstance` (a container), still
-    // reaches this `for...in` copy and is walked by its internal slots (zero
-    // enumerable own-props) instead of its codec contents. Unlike a primitive it
-    // *does* need descending into — but by its actual contents, which this walk
-    // won't do correctly. This site will need attention once FabricInstances see
-    // real use.
     for (const key in valueToProcess as any) {
-      const jsonValue = toJSONWithAliasBindings(
+      const boundValue = withAliasBindings(
         valueToProcess[key],
         resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
       );
-      if (jsonValue !== undefined) {
-        result[key] = jsonValue;
+      if (boundValue !== undefined) {
+        result[key] = boundValue;
       }
     }
 
@@ -370,7 +423,7 @@ export function moduleToJSON(module: Module) {
   // the actual pattern structure. This caused "Invalid pattern" errors at runtime
   // because isPattern() check failed on the string.
   //
-  // Why this helps: Using toJSONWithAliasBindings ensures nested $alias bindings
+  // Why this helps: Using withAliasBindings ensures nested $alias bindings
   // get their nesting level incremented properly. Without this, aliases could be
   // bound to a specific doc too early, causing handlers to point at stale docs
   // when the pattern is later executed in a different context.
@@ -381,7 +434,7 @@ export function moduleToJSON(module: Module) {
   if (
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
-    implementation = toJSONWithAliasBindings(
+    implementation = withAliasBindings(
       implementation as unknown as FactoryInput<any>,
     ) as unknown as Pattern;
     return {
@@ -461,7 +514,7 @@ export function moduleToJSON(module: Module) {
 
 // Ambient context: true while serializing the runtime-INTERNAL graph
 // representation (builder-time node serialization via
-// `toJSONWithAliasBindings`, and through it the `$opFallback` eviction
+// `withAliasBindings`, and through it the `$opFallback` eviction
 // fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
 // JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
 // the content-addressed `$patternRef` on top of the graph; internal
@@ -475,7 +528,7 @@ let internalGraphSerialization = false;
 /**
  * Serialize a pattern's full node-graph — the runtime-internal representation
  * (design §7: the graph is internal; the boundary speaks refs-first). Used by
- * `toJSONWithAliasBindings` (builder-time node serialization, which the
+ * `withAliasBindings` (builder-time node serialization, which the
  * `$opFallback` graphs descend from) and debug tooling.
  *
  * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:

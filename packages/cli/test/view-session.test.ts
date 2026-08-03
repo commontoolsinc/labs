@@ -1043,7 +1043,8 @@ Deno.test("session: the help overlay documents file folding and scrolling", () =
   assert(text.includes("Diff files"), "has a Diff files section");
   assert(/hide\s*\/\s*show/.test(text), "documents hide/show");
   assert(text.includes("hide all files"), "documents hide all");
-  assert(text.includes("hide test"), "documents hiding test files");
+  assert(text.includes("show test"), "documents toggling test files");
+  assert(text.includes("Markdown files"), "documents toggling Markdown files");
   assert(
     text.includes("line wrapping: off / hard / word"),
     "documents line wrapping",

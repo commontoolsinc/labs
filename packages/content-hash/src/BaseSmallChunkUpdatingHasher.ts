@@ -32,15 +32,17 @@ export abstract class BaseSmallChunkUpdatingHasher
 
   /** @inheritDoc */
   override update(data: Uint8Array) {
+    // The small-data path below returns without reaching `super.update()`,
+    // which is where the finalized-state check otherwise happens.
+    this._throwIfDone();
+
     const length = data.length;
 
     if (length <= SMALLS_SIZE) {
       const smallsOffset = this.#smallsOffset;
 
       if (length <= (SMALLS_SIZE - smallsOffset)) {
-        // The given `data` fits in the space available in `#smalls`. Note:
-        // We accept that in the case where the instance is done, a call that
-        // ends up here won't throw the "already done" error.
+        // The given `data` fits in the space available in `#smalls`.
         this.#smalls.set(data, smallsOffset);
         this.#smallsOffset += length;
         return;

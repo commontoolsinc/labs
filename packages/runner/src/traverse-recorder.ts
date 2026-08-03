@@ -4,6 +4,7 @@ import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -185,7 +186,7 @@ export class TraverseCaptureRecorder {
     address: IMemorySpaceAddress,
   ): void {
     // data: URIs carry their value in the id; replay decodes them directly.
-    if (address.id.startsWith("data:")) return;
+    if (hasDataUriScheme(address.id)) return;
     const key = fixtureDocKey(address);
     if (this.docs.has(key)) return;
     const { ok } = tx.read(

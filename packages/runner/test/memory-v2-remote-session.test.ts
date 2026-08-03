@@ -1,15 +1,24 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
+} from "@commonfabric/memory/v2";
 import {
   createStorageAddressResolver,
   MEMORY_STORAGE_PATH,
+  RemoteSessionFactory,
+  storageAddressForHost,
   toSpaceWebSocketAddress,
   toWebSocketAddress,
   WebSocketTransport,
 } from "../src/storage/v2-remote-session.ts";
 import { StorageManager } from "../src/storage/v2.ts";
+import { TEST_HELLO_SESSION_OPEN } from "./memory-v2-test-utils.ts";
 
 describe("memory v2 remote session websocket address", () => {
   it("upgrades http and https urls to websocket protocols", () => {
@@ -56,6 +65,25 @@ describe("per-space storage address resolution", () => {
     expect(resolve(spaceB).toString()).toBe(
       `https://host-a.test${MEMORY_STORAGE_PATH}`,
     );
+  });
+
+  it("preserves a WebSocket-only default memory host", () => {
+    const resolve = createStorageAddressResolver(
+      new URL("wss://host-a.test/some/base/"),
+    );
+    expect(resolve(spaceA).toString()).toBe(
+      `wss://host-a.test${MEMORY_STORAGE_PATH}`,
+    );
+    expect(toSpaceWebSocketAddress(resolve(spaceA), spaceA).protocol).toBe(
+      "wss:",
+    );
+  });
+
+  it("rejects an unsupported default memory host protocol", () => {
+    expect(() => createStorageAddressResolver(new URL("ftp://host-a.test")))
+      .toThrow("Unsupported memory host protocol: ftp:");
+    expect(() => createStorageAddressResolver(new URL("memory://local")))
+      .toThrow("Unsupported memory host protocol: memory:");
   });
 
   it("resolves a mapped space to its host and others to the default", () => {
@@ -105,6 +133,19 @@ describe("per-space storage address resolution", () => {
       createStorageAddressResolver(
         new URL("https://host-a.test"),
         { [spaceB]: "not a url" },
+      )
+    ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+  });
+
+  it("rejects a host protocol that cannot serve storage and compute", () => {
+    expect(() => storageAddressForHost("ftp://host-b.test"))
+      .toThrow("Unsupported space host protocol");
+    expect(() => storageAddressForHost("wss://host-b.test"))
+      .toThrow("Unsupported space host protocol");
+    expect(() =>
+      createStorageAddressResolver(
+        new URL("https://host-a.test"),
+        { [spaceB]: "ftp://host-b.test" },
       )
     ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
   });
@@ -180,8 +221,8 @@ describe("StorageManager per-space host wiring", () => {
   });
 });
 
-// Site-table v0: runtime-learned host hints. The registry's refusal
-// semantics ARE the contract — seed wins, opened spaces never re-point.
+// Site-table v0: runtime-learned host hints. A default-host connection remains
+// provisional until the first configured or accepted route is known.
 describe("StorageManager.registerSpaceHost", () => {
   const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
   const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
@@ -207,14 +248,19 @@ describe("StorageManager.registerSpaceHost", () => {
       .toBe(false);
   });
 
-  it("never re-points an opened space, and the hint routes a fresh open", async () => {
+  it("keeps an accepted hint stable and replaces a provisional default route", async () => {
     const realWebSocket = globalThis.WebSocket;
     (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
     RecordingWebSocket.dialed.length = 0;
+    let manager: Awaited<ReturnType<typeof makeManager>> | undefined;
     try {
-      const manager = await makeManager();
+      manager = await makeManager();
       expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test"))
         .toBe(true);
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test/"))
+        .toBe(true);
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-c.test"))
+        .toBe(false);
       manager.open(spaceLearned).sync("of:register-probe" as URI)
         .catch(() => {});
       await RecordingWebSocket.whenDialed(1);
@@ -229,9 +275,17 @@ describe("StorageManager.registerSpaceHost", () => {
       manager.open(spaceOpened).sync("of:register-probe" as URI)
         .catch(() => {});
       await RecordingWebSocket.whenDialed(2);
+      expect(new URL(RecordingWebSocket.dialed[1]).host).toBe("host-a.test");
       expect(manager.registerSpaceHost(spaceOpened, "http://host-d.test"))
+        .toBe(true);
+      await RecordingWebSocket.whenDialed(3);
+      expect(new URL(RecordingWebSocket.dialed[2]).host).toBe("host-d.test");
+      expect(manager.registerSpaceHost(spaceOpened, "http://host-d.test"))
+        .toBe(true);
+      expect(manager.registerSpaceHost(spaceOpened, "http://host-e.test"))
         .toBe(false);
     } finally {
+      await manager?.closeNow();
       (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
     }
   });
@@ -240,6 +294,20 @@ describe("StorageManager.registerSpaceHost", () => {
     const manager = await makeManager();
     expect(() => manager.registerSpaceHost(spaceLearned, "not a url"))
       .toThrow(`Invalid host for space ${spaceLearned}`);
+  });
+
+  it("rejects an unusable first hint without fixing the route", async () => {
+    const manager = await makeManager();
+    expect(() =>
+      manager.registerSpaceHost(
+        spaceLearned,
+        "mailto:memory@example.test",
+      )
+    ).toThrow(`Invalid host for space ${spaceLearned}`);
+    expect(() => manager.registerSpaceHost(spaceLearned, "wss://host-b.test"))
+      .toThrow(`Invalid host for space ${spaceLearned}`);
+    expect(manager.registerSpaceHost(spaceLearned, "https://host-b.test"))
+      .toBe(true);
   });
 });
 
@@ -254,12 +322,39 @@ describe("WebSocketTransport failure signalling", () => {
     static readonly CLOSED = 3;
     static instances: DrivableWebSocket[] = [];
     readyState = DrivableWebSocket.CONNECTING;
+    readonly sent: string[] = [];
+    #sentWaiters: Array<{ count: number; resolve: () => void }> = [];
     constructor(readonly url: string | URL) {
       super();
       DrivableWebSocket.instances.push(this);
     }
-    send(_payload: string): void {}
-    close(): void {}
+    send(payload: string): void {
+      this.sent.push(payload);
+      this.#sentWaiters = this.#sentWaiters.filter((waiter) => {
+        if (this.sent.length >= waiter.count) {
+          waiter.resolve();
+          return false;
+        }
+        return true;
+      });
+    }
+    whenSent(count: number): Promise<void> {
+      if (this.sent.length >= count) return Promise.resolve();
+      return new Promise((resolve) =>
+        this.#sentWaiters.push({ count, resolve })
+      );
+    }
+    openConnection(): void {
+      this.readyState = DrivableWebSocket.OPEN;
+      this.dispatchEvent(new Event("open"));
+    }
+    receive(payload: string): void {
+      this.dispatchEvent(new MessageEvent("message", { data: payload }));
+    }
+    close(): void {
+      this.readyState = DrivableWebSocket.CLOSED;
+      this.dispatchEvent(new Event("close"));
+    }
   }
 
   // Install the drivable socket, hand the body a transport and its socket, then
@@ -302,6 +397,170 @@ describe("WebSocketTransport failure signalling", () => {
       // A close before opening is not an error, so the receiver gets none.
       expect(closeCalled).toBe(true);
       expect(closeError).toBeUndefined();
+    });
+  });
+
+  it("cancels a remote session while its websocket is opening", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cancel-opening-remote-session",
+    );
+    const space = signer.did();
+    const controller = new AbortController();
+    const reason = new Error("memory replica route replaced");
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      const opening = factory.create(
+        space,
+        signer,
+        {},
+        controller.signal,
+      );
+
+      controller.abort(reason);
+
+      await expect(opening).rejects.toBe(reason);
+      expect(socket().readyState).toBe(DrivableWebSocket.CLOSED);
+    });
+  });
+
+  it("cancels a remote session while its session signature is pending", async () => {
+    const identity = await Identity.fromPassphrase(
+      "cancel-signing-remote-session",
+    );
+    const signingStarted = Promise.withResolvers<void>();
+    const releaseSigning = Promise.withResolvers<void>();
+    const signer: Signer = {
+      did: () => identity.did(),
+      verifier: identity.verifier,
+      async sign(payload) {
+        signingStarted.resolve();
+        await releaseSigning.promise;
+        return await identity.sign(payload);
+      },
+    };
+    const controller = new AbortController();
+    const reason = new Error("memory replica route replaced");
+
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      const opening = factory.create(
+        signer.did(),
+        signer,
+        {},
+        controller.signal,
+      );
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      activeSocket.receive(encodeMemoryBoundary({
+        type: "hello.ok",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+        sessionOpen: TEST_HELLO_SESSION_OPEN,
+      }));
+      await signingStarted.promise;
+
+      controller.abort(reason);
+
+      await expect(opening).rejects.toBe(reason);
+      expect(activeSocket.readyState).toBe(DrivableWebSocket.CLOSED);
+      expect(activeSocket.sent).toHaveLength(1);
+      releaseSigning.resolve();
+    });
+  });
+
+  it("cancels reconnect session signing before closing the old client", async () => {
+    const identity = await Identity.fromPassphrase(
+      "cancel-reconnect-signing-remote-session",
+    );
+    const reconnectSigningStarted = Promise.withResolvers<void>();
+    const releaseReconnectSigning = Promise.withResolvers<void>();
+    let signatures = 0;
+    const signer: Signer = {
+      did: () => identity.did(),
+      verifier: identity.verifier,
+      async sign(payload) {
+        signatures++;
+        if (signatures === 2) {
+          reconnectSigningStarted.resolve();
+          await releaseReconnectSigning.promise;
+        }
+        return await identity.sign(payload);
+      },
+    };
+    const controller = new AbortController();
+    const reason = new Error("memory replica route replaced");
+
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      let opened:
+        | Awaited<ReturnType<RemoteSessionFactory["create"]>>
+        | undefined;
+      try {
+        const opening = factory.create(
+          signer.did(),
+          signer,
+          {},
+          controller.signal,
+        );
+        const initialSocket = socket();
+        initialSocket.openConnection();
+        await initialSocket.whenSent(1);
+        initialSocket.receive(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+          sessionOpen: TEST_HELLO_SESSION_OPEN,
+        }));
+        await initialSocket.whenSent(2);
+        const initialOpen = decodeMemoryBoundary(initialSocket.sent[1]) as {
+          requestId: string;
+        };
+        initialSocket.receive(encodeMemoryBoundary({
+          type: "response",
+          requestId: initialOpen.requestId,
+          ok: {
+            sessionId: "session:cancel-reconnect-signing",
+            sessionToken: "token:cancel-reconnect-signing",
+            serverSeq: 0,
+            sessionOpen: TEST_HELLO_SESSION_OPEN,
+          },
+        }));
+        opened = await opening;
+
+        initialSocket.close();
+        const reconnectSocket = socket();
+        expect(reconnectSocket).not.toBe(initialSocket);
+        reconnectSocket.openConnection();
+        await reconnectSocket.whenSent(1);
+        reconnectSocket.receive(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+          sessionOpen: TEST_HELLO_SESSION_OPEN,
+        }));
+        await reconnectSigningStarted.promise;
+
+        controller.abort(reason);
+        await opened.client.close();
+
+        expect(reconnectSocket.readyState).toBe(DrivableWebSocket.CLOSED);
+        expect(reconnectSocket.sent).toHaveLength(1);
+        expect(signatures).toBe(2);
+      } finally {
+        controller.abort(reason);
+        releaseReconnectSigning.resolve();
+        await opened?.client.close();
+      }
     });
   });
 

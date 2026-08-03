@@ -50,6 +50,37 @@ export interface SetBodyEvent extends AgentAuthoredEvent {
   body: string;
 }
 
+// ===== Verb results =====
+//
+// Each mutating verb returns exactly what it recorded, so a caller learns the
+// outcome from the call instead of following it with a verification read. The
+// records carry the fields the pattern resolved — the structured author it
+// derived from `agentName`, and the write-time timestamp — which a caller
+// cannot compute for itself. Counts are deliberately absent: every append here
+// is a mergeable op, so a length observed inside one handling is not a fact
+// about the resulting list.
+
+export interface AddCommentResult {
+  /** The comment as appended, including resolved author and `sentAt`. */
+  comment: TopicComment;
+}
+
+export interface AddLinkResult {
+  /** The link as appended, including resolved `addedBy` and `addedAt`. */
+  link: TopicLink;
+}
+
+export interface SetBodyResult {
+  /** The body as persisted — verbatim, so a caller can confirm that
+   * whitespace-sensitive Markdown survived the round trip. */
+  body: string;
+  /** Attribution written for this save. Both are absent when the caller sent
+   * no `agentName`: an unattributed save leaves the previous attribution
+   * standing rather than overwriting it. */
+  bodyUpdatedBy?: TopicAuthor;
+  bodyUpdatedAt?: number;
+}
+
 export interface TopicComment {
   /** Snapshot taken at write time (profile enrichment comes later; never gate
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
@@ -130,9 +161,9 @@ export interface TopicReference {
   commentCount: number | Default<0> | undefined;
   /** Max of creation, comments, body saves, and link additions. */
   lastActivityAt: number | Default<0> | undefined;
-  addComment: Stream<AddCommentEvent>;
-  addLink: Stream<AddLinkEvent>;
-  setBody: Stream<SetBodyEvent>;
+  addComment: Stream<AddCommentEvent, AddCommentResult>;
+  addLink: Stream<AddLinkEvent, AddLinkResult>;
+  setBody: Stream<SetBodyEvent, SetBodyResult>;
 }
 
 /**
@@ -558,27 +589,34 @@ export default pattern<TopicInput, TopicOutput>(
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
-    const addComment = action(({ body: text, agentName }: AddCommentEvent) => {
-      const trimmed = (text ?? "").trim();
-      const author = topicAuthorFromAgent(agentName ?? "");
-      if (agentName !== undefined && !author) {
-        rejectMutation("addComment", "agentName must be non-blank when given");
-      }
-      if (!trimmed) rejectMutation("addComment", "body must be non-empty");
-      const legacyName = author
-        ? topicAuthorLabel(author)
-        : (myName.get() ?? "").trim() || "someone";
-      // Mergeable append: concurrent comments from different users all land.
-      comments.push({
-        author,
-        authorName: legacyName,
-        body: trimmed,
-        sentAt: Date.now(),
-      });
-    });
+    const addComment = action<AddCommentEvent, AddCommentResult>(
+      ({ body: text, agentName }) => {
+        const trimmed = (text ?? "").trim();
+        const author = topicAuthorFromAgent(agentName ?? "");
+        if (agentName !== undefined && !author) {
+          rejectMutation(
+            "addComment",
+            "agentName must be non-blank when given",
+          );
+        }
+        if (!trimmed) rejectMutation("addComment", "body must be non-empty");
+        const legacyName = author
+          ? topicAuthorLabel(author)
+          : (myName.get() ?? "").trim() || "someone";
+        const comment = {
+          author,
+          authorName: legacyName,
+          body: trimmed,
+          sentAt: Date.now(),
+        };
+        // Mergeable append: concurrent comments from different users all land.
+        comments.push(comment);
+        return { comment };
+      },
+    );
 
-    const addLink = action(
-      ({ kind, url, label, agentName }: AddLinkEvent) => {
+    const addLink = action<AddLinkEvent, AddLinkResult>(
+      ({ kind, url, label, agentName }) => {
         const trimmedUrl = (url ?? "").trim();
         const author = topicAuthorFromAgent(agentName ?? "");
         if (agentName !== undefined && !author) {
@@ -588,27 +626,37 @@ export default pattern<TopicInput, TopicOutput>(
         if (!isSafeLinkUrl(trimmedUrl)) {
           rejectMutation("addLink", "url must be http(s)");
         }
-        links.push({
+        const link = {
           kind: kind ?? "web",
           url: trimmedUrl,
           label: (label ?? "").trim() || trimmedUrl,
           addedBy: author,
           addedAt: Date.now(),
-        });
+        };
+        links.push(link);
+        return { link };
       },
     );
 
-    const setBody = action(({ body: text, agentName }: SetBodyEvent) => {
-      const author = topicAuthorFromAgent(agentName ?? "");
-      if (agentName !== undefined && !author) {
-        rejectMutation("setBody", "agentName must be non-blank when given");
-      }
-      body.set(text ?? "");
-      if (author) {
+    const setBody = action<SetBodyEvent, SetBodyResult>(
+      ({ body: text, agentName }) => {
+        const author = topicAuthorFromAgent(agentName ?? "");
+        if (agentName !== undefined && !author) {
+          rejectMutation("setBody", "agentName must be non-blank when given");
+        }
+        const persisted = text ?? "";
+        body.set(persisted);
+        if (!author) return { body: persisted };
+        const bodyUpdatedAtValue = Date.now();
         bodyUpdatedBy.set(author);
-        bodyUpdatedAt.set(Date.now());
-      }
-    });
+        bodyUpdatedAt.set(bodyUpdatedAtValue);
+        return {
+          body: persisted,
+          bodyUpdatedBy: author,
+          bodyUpdatedAt: bodyUpdatedAtValue,
+        };
+      },
+    );
 
     // --- UI-side actions (close over session drafts) ---
 

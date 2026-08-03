@@ -1,10 +1,15 @@
-import { Cache, CacheOptions, LRUCache, LRUCacheNaive } from "./cache.ts";
+import {
+  Cache,
+  LRUCache,
+  LRUCacheNaive,
+  WeightedCacheOptions,
+} from "./cache.ts";
 
 const CACHE_SIZE = 1000;
 const OPERATIONS = 10000;
 
 function createCache<K, V>(
-  Ctor: new (options: CacheOptions) => Cache<K, V>,
+  Ctor: new (options: WeightedCacheOptions<K, V>) => Cache<K, V>,
 ): Cache<K, V> {
   return new Ctor({ capacity: CACHE_SIZE });
 }
