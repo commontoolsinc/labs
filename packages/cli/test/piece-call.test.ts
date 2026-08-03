@@ -2510,6 +2510,38 @@ describe("collectInvocationResultLinks", () => {
     });
   });
 
+  it("skips a child key() refuses to address, keeping its siblings' links", () => {
+    // The walk's catch-and-continue: a value entry the receipt cell cannot
+    // address as a child (key() throws) contributes no link and must not
+    // abort the walk — its addressable siblings still annotate.
+    const value = { weird: { x: 1 }, comment: { body: "hi" } };
+    const inner = linkedReceiptCell(receiptLink, value, {
+      children: {
+        comment: { doc: { id: "of:comment-1", space: "did:key:test-home" } },
+      },
+    });
+    // Wrap the RESOLVED root: the outer wrapper is deliberately unresolved
+    // (its own key() refuses traversal), so the throwing key must shadow the
+    // cell the walk actually descends through.
+    const innerRoot = inner.resolveAsCell!();
+    const cell: CallableCellLike = {
+      ...innerRoot,
+      resolveAsCell: () => cell,
+      key: (segment: string) => {
+        if (segment === "weird") throw new Error("not addressable");
+        return innerRoot.key!(segment);
+      },
+    };
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/comment": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+    });
+  });
+
   it("annotates each hop to a different backing document, rebasing below it", () => {
     const value = {
       comment: { body: "hi", author: { name: "b" } },
