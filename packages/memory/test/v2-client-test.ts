@@ -110,6 +110,189 @@ const asyncHandshakeTransport = (helloOk: FabricValue): Transport => {
   };
 };
 
+const abortAfterResponse = (
+  controller: AbortController,
+  responseType: "hello" | "session.open",
+  reason: unknown,
+): Transport => {
+  const transport = handshakeTransport(HELLO_OK);
+  return {
+    ...transport,
+    async send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as { type?: string };
+      await transport.send(payload);
+      if (message.type === responseType) controller.abort(reason);
+    },
+  };
+};
+
+const abortAfterListenerRemovals = (
+  controller: AbortController,
+  count: number,
+  reason: unknown,
+): AbortSignal => {
+  let removals = 0;
+  return new Proxy(controller.signal, {
+    get(target, property) {
+      if (property === "removeEventListener") {
+        return (
+          ...args: Parameters<AbortSignal["removeEventListener"]>
+        ): void => {
+          target.removeEventListener(...args);
+          removals++;
+          if (removals === count) controller.abort(reason);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+};
+
+Deno.test("memory v2 client rejects an already cancelled connection", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("cancel before connect"));
+  const base = handshakeTransport(HELLO_OK);
+  let sends = 0;
+  const transport: Transport = {
+    ...base,
+    send(payload: string): Promise<void> {
+      sends++;
+      return base.send(payload);
+    },
+  };
+
+  await assertRejects(
+    () => connect({ transport, signal: controller.signal }),
+    Error,
+    "cancel before connect",
+  );
+  assertEquals(sends, 0);
+});
+
+Deno.test("memory v2 client observes cancellation after hello", async () => {
+  const controller = new AbortController();
+  const reason = new Error("cancel after hello");
+
+  await assertRejects(
+    () =>
+      connect({
+        transport: abortAfterResponse(controller, "hello", reason),
+        signal: controller.signal,
+      }),
+    Error,
+    reason.message,
+  );
+});
+
+Deno.test("memory v2 client rejects an already cancelled mount", async () => {
+  const client = await connect({ transport: handshakeTransport(HELLO_OK) });
+  const controller = new AbortController();
+  controller.abort(new Error("cancel before mount"));
+  let authCalls = 0;
+  try {
+    await assertRejects(
+      () =>
+        client.mount(
+          "did:key:z6Mk-memory-v2-cancel-before-mount",
+          {},
+          () => {
+            authCalls++;
+          },
+          controller.signal,
+        ),
+      Error,
+      "cancel before mount",
+    );
+    assertEquals(authCalls, 0);
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client propagates a synchronous mount auth failure", async () => {
+  const client = await connect({ transport: handshakeTransport(HELLO_OK) });
+  const controller = new AbortController();
+  try {
+    await assertRejects(
+      () =>
+        client.mount(
+          "did:key:z6Mk-memory-v2-mount-auth-failure",
+          {},
+          () => {
+            throw new Error("mount auth failed");
+          },
+          controller.signal,
+        ),
+      Error,
+      "mount auth failed",
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client observes cancellation during mount auth", async () => {
+  const client = await connect({ transport: handshakeTransport(HELLO_OK) });
+  const controller = new AbortController();
+  const reason = new Error("cancel during mount auth");
+  try {
+    await assertRejects(
+      () =>
+        client.mount(
+          "did:key:z6Mk-memory-v2-cancel-during-mount-auth",
+          {},
+          () => {
+            controller.abort(reason);
+          },
+          controller.signal,
+        ),
+      Error,
+      reason.message,
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client observes cancellation after session open", async () => {
+  const cases = [
+    {
+      reason: new Error("cancel after session open"),
+      message: "cancel after session open",
+    },
+    {
+      reason: "cancel after session open without an error",
+      message: "memory session mount cancelled",
+    },
+  ];
+
+  for (const [index, testCase] of cases.entries()) {
+    const client = await connect({ transport: handshakeTransport(HELLO_OK) });
+    const controller = new AbortController();
+    const signal = abortAfterListenerRemovals(
+      controller,
+      2,
+      testCase.reason,
+    );
+    try {
+      await assertRejects(
+        () =>
+          client.mount(
+            `did:key:z6Mk-memory-v2-cancel-after-session-open-${index}`,
+            {},
+            undefined,
+            signal,
+          ),
+        Error,
+        testCase.message,
+      );
+    } finally {
+      await client.close();
+    }
+  }
+});
+
 Deno.test("memory v2 client marks only a new outstanding commit as issued", async () => {
   const client = await connect({
     transport: handshakeTransport(HELLO_OK),
