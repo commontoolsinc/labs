@@ -26,6 +26,7 @@ import {
   JSONValue,
   type Module,
   NAME,
+  type Node,
   type NodeFactory,
   type Pattern,
   UI,
@@ -516,6 +517,27 @@ export function firstResolvedOutputRedirect(
     }
   }
   return undefined;
+}
+
+/**
+ * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
+ * both of `collectResumeOwnedCells`'s skip exits so a console trace names the
+ * same things either way: the result cell being resumed and enough about the
+ * node to find it in the pattern that was resumed.
+ */
+function describeSkippedSubPatternNode(
+  resultCellLink: NormalizedFullLink,
+  nodeIndex: number,
+  node: Node,
+  childPattern: Pattern,
+): Record<string, unknown> {
+  return {
+    resultCell: resultCellLink.id,
+    space: resultCellLink.space,
+    nodeIndex,
+    ...(node.description !== undefined && { node: node.description }),
+    childPattern: describePatternOrModule(childPattern),
+  };
 }
 
 const recordSetupProjectionPolicyInputs = (
@@ -3746,7 +3768,7 @@ export class Runner {
     // (CT-1897).
     const argumentLink = getMetaLink(resultCell, "argument");
 
-    for (const node of pattern.nodes) {
+    for (const [nodeIndex, node] of pattern.nodes.entries()) {
       const module = node.module;
       if (module.type !== "pattern" || !isPattern(module.implementation)) {
         continue;
@@ -3785,10 +3807,25 @@ export class Runner {
         logger.warn("resume-owned-cells", () => [
           "skipping a sub-pattern node whose outputs did not bind or resolve",
           error,
+          describeSkippedSubPatternNode(link, nodeIndex, node, childPattern),
         ]);
         continue;
       }
-      if (spotLink === undefined) continue;
+      if (spotLink === undefined) {
+        // The same two skips as the catch above — this node's owned-cell
+        // pre-sync AND the recursion that would reach the child's own
+        // `derivedInternalCells` manifest — reached without an error: the
+        // outputs bound, but held no write redirect the scan could resolve
+        // (e.g. they consist only of deferred partialCause aliases, which
+        // denote a deeper level's derived internal cells rather than this
+        // node's reserved result spot). Log it at the same level and with the
+        // same identity as its sibling, so neither exit is silent.
+        logger.warn("resume-owned-cells", () => [
+          "skipping a sub-pattern node whose outputs resolved to no write redirect",
+          describeSkippedSubPatternNode(link, nodeIndex, node, childPattern),
+        ]);
+        continue;
+      }
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -6342,6 +6379,13 @@ export class Runner {
         sourceSchemas: { argument: pattern.argumentSchema },
       },
     );
+    // VALUE BIND (kind: `computed:`). Binding WITH the manifest resolves a
+    // partialCause output to the descriptor's derived internal cell, so
+    // `getDerivedInternalCellLink` mints its id under the descriptor's kind —
+    // `computed:fid1:<hash>` for an ordinary derived internal cell. This is the
+    // binding the child link is SENT to (`sendValueToBinding` below), so this
+    // is where the child's value actually lives. The identity bind below
+    // resolves the SAME hash under the `of:` kind; see it for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
@@ -6382,6 +6426,21 @@ export class Runner {
       // `bindPatterns: false` — output bindings never carry sub-patterns to
       // instantiate, so skip that work; we only need the pseudo-cell aliases
       // resolved to their concrete links.
+      //
+      // IDENTITY BIND (kind: `of:`). CT-1943: this omits
+      // `derivedInternalCells` where the value bind above passes it, and the
+      // manifest descriptor is what carries the entity kind. Same cause, same
+      // hash preimage — but no descriptor means no kind, so the mint falls back
+      // to the unkinded `of:fid1:<hash>` while the value bind used the
+      // descriptor's kind, `computed:fid1:<hash>` whenever the internal is
+      // classified computed (docs/specs/computed-cell-identity.md: the preimage
+      // is kind-free, the URI scheme IS the kind). Those are then two distinct
+      // entities differing only by scheme; only for a kind-less descriptor do
+      // the two binds land on the same entity. The split is fine here, and in
+      // `collectResumeOwnedCells`, because both use the link purely as the
+      // `resultFor` CAUSE — a stable coordinate, never read for a value.
+      // Anything that wants to READ the child link must use the `computed:`
+      // id; reading the `of:` one returns undefined for a healthy piece.
       const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
         this.runtime.cfc,
         outputBindings,

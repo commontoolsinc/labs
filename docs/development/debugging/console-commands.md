@@ -46,6 +46,44 @@ await commonfabric.readArgumentCell({ path: ["name"] })
 Always check the actual stored value before assuming a write failed — see
 [browser-stale-ui](gotchas/browser-stale-ui.md).
 
+### A sub-pattern's cell reads as `undefined` at the id you have
+
+A sub-pattern node's output spot exists as **two entity ids that differ only by
+URI scheme**: `of:fid1:<hash>` and `computed:fid1:<hash>`. Both are minted from
+the same cause, so they share a hash — the scheme carries the entity kind, and
+the kind is part of the identity, so these are two distinct entities. See
+[computed cell identity](../../specs/computed-cell-identity.md).
+
+The runner mints both, for different jobs (`instantiatePatternNode`,
+`packages/runner/src/runner.ts`):
+
+- **`of:fid1:<hash>` is identity only.** It names the child result cell as its
+  `resultFor` cause, and it is the spot the resume owned-cell walk keys on.
+  Nothing writes a value there.
+- **`computed:fid1:<hash>` holds the value.** The child link is sent to this
+  one, so this is the id to read.
+
+A read at the `of:` id therefore returns `undefined` for a perfectly healthy
+piece — that is the expected answer at that id, not evidence that a sub-piece
+is missing. Read the `computed:` id before concluding anything:
+
+```javascript
+// Shown at module scope.
+// Same hash, two kinds — read the computed one for the value.
+await commonfabric.readCell({ space: "did:key:z6Mkm...", id: "of:fid1:HASH" })
+await commonfabric.readCell({
+  space: "did:key:z6Mkm...",
+  id: "computed:fid1:HASH",
+})
+```
+
+The same trap applies to any offline scan that enumerates a space by matching
+the `of:fid1:` prefix: it will not see the cells holding sub-pattern children.
+In `cf inspect` output the distinction is there but quiet — it abbreviates ids
+by stripping `of:` while keeping a `computed:` scheme visible, so a bare
+`fid1:<hash>` in a row is the `of:` form and its `computed:` sibling is a
+separate row.
+
 ### What's actually rendered?
 
 ```javascript
