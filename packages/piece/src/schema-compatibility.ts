@@ -39,6 +39,20 @@ interface CompatibilityContext {
   allowTargetDefaults: boolean;
   /** Whether defaults describe a pattern migration or link materialization. */
   defaultComparison: "evolution" | "target";
+  /**
+   * True below a node both contracts mark `asCell: ["stream"]` — a verb, so
+   * everything beneath is the verb's EVENT schema. There, a boolean
+   * `additionalProperties` is an enforcement dial rather than a data
+   * contract: the runtime schema-strips undeclared event fields before any
+   * handler runs, so an open event's "acceptance" of extras was never
+   * observable behavior (accepted-and-STRIPPED was never contract — verb
+   * contract WS-C, decided 2026-08-03), and closing one surfaces the silent
+   * loss as the typed rejection rule 1 requires. The reverse transition is
+   * equally free: rejection of undeclared fields is not a capability a
+   * caller can depend on, and generator cleanup of `never`-derived closures
+   * must not read as a contract break.
+   */
+  verbEvent?: boolean;
 }
 
 export interface SchemaSubsetOptions {
@@ -276,10 +290,18 @@ function schemaSubsetIssue(
   }
   const source = sourceResolution.schema;
   const target = targetResolution.schema;
+  // The stream marker rides the REFERENCING node (`{$ref, asCell:["stream"]}`),
+  // so test the pre-resolution inputs as well as the resolved schemas. Both
+  // contracts must agree the node is a verb: a one-sided marker is a shape
+  // change the ordinary rules judge, not an exemption.
+  const entersVerbEvent = !context.verbEvent &&
+    (declaresVerbStream(sourceInput) || declaresVerbStream(source)) &&
+    (declaresVerbStream(targetInput) || declaresVerbStream(target));
   context = {
     ...context,
     sourceRoot: sourceResolution.root,
     targetRoot: targetResolution.root,
+    ...(entersVerbEvent ? { verbEvent: true } : {}),
   };
   if (
     context.defaultComparison === "target" &&
@@ -670,6 +692,12 @@ function matchingPatternPropertySchemas(
   return matches;
 }
 
+function declaresVerbStream(schema: JSONSchema): boolean {
+  if (typeof schema !== "object" || schema === null) return false;
+  const asCell = (schema as SchemaObject).asCell;
+  return Array.isArray(asCell) && asCell.includes("stream");
+}
+
 function additionalPropertiesSubsetIssue(
   source: SchemaObject,
   target: SchemaObject,
@@ -678,6 +706,17 @@ function additionalPropertiesSubsetIssue(
 ): string | undefined {
   const sourceAdditional = source.additionalProperties ?? true;
   const targetAdditional = target.additionalProperties ?? true;
+  // Verb events: a boolean↔boolean additionalProperties transition is free
+  // in both directions (see CompatibilityContext.verbEvent). Schema-valued
+  // additionalProperties on either side still compares — a constraint on the
+  // extras' SHAPE is a data contract even on an event.
+  if (
+    context.verbEvent &&
+    typeof sourceAdditional === "boolean" &&
+    typeof targetAdditional === "boolean"
+  ) {
+    return undefined;
+  }
   if (sourceAdditional === false || targetAdditional === true) return undefined;
   if (sourceAdditional === true && targetAdditional === false) {
     return `${path}: additional properties accepted previously would now be rejected`;
