@@ -4,6 +4,14 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-31 (second pass)**, C5 measured outcome: dispatch-side
+closed-world enforcement shipped (the runner refuses a present payload that
+fails an event schema declaring `additionalProperties: false`, through the
+existing thrown-handler path), while the schema-generator EMISSION of
+`additionalProperties: false` is stopped on a measured pattern-update-gate
+refusal for argument-side verbs — see the WS-C bullet for what shipped and
+Risks for the migration step landing the emission now requires.
+
 **Amended 2026-07-31**, C3 withdrawn in review (Berni): no result-schema
 emission for now — values flow schema-free through receipts, discovery falls
 back to prose descriptions, and the durable shape waits for the Fabric-types
@@ -349,11 +357,70 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   and agents cannot learn a result's shape before calling; the interim for
   both is prose in the verb's `description`. Revisit as part of the
   Fabric-types stream design, not before.
-  Verb **input**
+  ~~Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
-  in the mapping spec.
+  in the mapping spec.~~ — **dispatch enforcement done (C5); the emission is
+  stopped on a measured update-gate refusal.** What shipped: the runner's
+  handler wrapper refuses a PRESENT payload that cannot satisfy an event
+  schema declaring `additionalProperties: false` (checked on `$event` itself
+  and on the def a top-level local `$ref` names), judging the relaxed schema
+  with the D6 helpers — the same relax-then-validate composition as the CLI
+  gate, which is why D6 moved them. Rejection fails the handling through the
+  EXISTING thrown-handler path: the body never runs, the transaction aborts,
+  no receipt is created so the event id survives for a corrected same-id
+  retry, onError fires, and the commit callback settles errored — no new
+  receipt shape or error class (WS-E owns codes). Absent payloads stay
+  deliverable as `undefined` (the D5 measured table holds), and OPEN schemas
+  keep the characterized behavior — measured before the gate: an undeclared
+  extra field was silently STRIPPED, the body ran, and the receipt spent the
+  id. One measured carve-out: the LLM tool-call path INJECTS a `result` cell
+  into every handler-tool payload (`llm-dialog.ts` sends
+  `{ ...input, result }` and hides the slot from the advertised schema via
+  `stripInjectedResult`; the CLI's `cloneWithoutBoundToolKeys` does the
+  same) — the runtime cannot refuse a field the runtime itself injected,
+  and the unmodified gate rejected every closed-schema tool call in the CFC
+  integrity suites. The exemption is PROVENANCE, not shape (review,
+  2026-07-31): the injection site names its keys through the send's
+  internal options (`runtimeInjectedEventKeys`, cell.ts
+  `StreamSendOptions`), which travel out-of-band through the queued event
+  to the dispatch transaction
+  (`tx.dispatchedRuntimeInjectedEventKeys`) — payload data can never
+  express them, so a caller-supplied `result`, cell-link-valued or not,
+  arrives unmarked and is refused like any other undeclared field. Pinned
+  both ways in `packages/runner/test/scheduler-event-receipts.test.ts`
+  ("closed-world event schemas at dispatch"), and end-to-end by the CFC
+  tool-integrity suites, which dispatch through the real injection site. What stopped: emitting
+  `additionalProperties: false` on generated event schemas fails
+  `deno task pattern-compat` — the update gate judges a stream property
+  under its enclosing role, and the argument-role additionalProperties rule
+  refuses open→closed against every recorded baseline (measured 2026-07-31:
+  calendar/calendar.tsx `argument.events[].setDate: additional properties
+  accepted previously would now be rejected`; lunch-poll/
+  poll-option-card.tsx `argument.castVote`; notes/note.tsx
+  `argument.parentNotebook`; 28 baseline groups carry verbs in argument
+  schemas). Emission cannot be position-scoped either: one hoisted def
+  serves a type's every use, and the same verb type legitimately appears on
+  both sides. Landing it needs the migration step now named under Risks;
+  until then closure is a per-schema author opt-in that the dispatch gate
+  honors, and the open event side is pinned as a decision in
+  `packages/schema-generator/test/stream-result.test.ts`.
+
+  **Review outcome (Berni, 2026-08-03, on the PR):** the boundary the
+  exemption depends on is CONFIRMED — the mint lives in runner internals no
+  pattern compartment can reach, and an enforcement gate may depend on
+  that. The injection itself, though, is a pre-receipts hack: now that
+  receipts exist, `llm-dialog`'s `{ ...input, result }` slot should be
+  REMOVED entirely and the tool result delivered through the handling's
+  receipt. Design for that world. **Follow-up task:** retire the
+  injection — deliver the tool result via receipt, then drop the marker
+  machinery (`markRuntimeInjectedEventKeys`, the dispatch exemption, this
+  carve-out) with its only production mint site, along with the
+  `stripInjectedResult` / `cloneWithoutBoundToolKeys` schema-hiding it
+  forced. Sequencing: leans on receipt delivery of plain-JSON results, so
+  it slots naturally after the `plainResultReceipts` flip decision
+  (#5245); piece-carrying results already flow on the production default.
 
   **A value-less verb wants `{ type: "object", properties: {} }`, not the
   generic `void` sentinel**, which lowers to `{ asCell: ["opaque"] }` — a
@@ -933,6 +1000,39 @@ change that alters them.
   copy of them. It does not measure commit rates, so the rehearsal above
   stands; what it removes is discovering an incompatibility by attempting the
   swap on the live board.
+- **Closed-world event emission needs a compat-gate migration step first**
+  (WS-C, measured on C5): adding `additionalProperties: false` to generated
+  event schemas fails the pattern-update gate for every verb reachable
+  through a piece's ARGUMENT schema — the checker judges the event object
+  under the enclosing property's role, and the argument-role rule correctly
+  refuses open→closed ("additional properties accepted previously would now
+  be rejected"). This is not a covariant-direction addition the gate can
+  wave through: closing an event genuinely refuses callers that previously
+  sent extra fields (they were accepted-and-stripped, per the C5
+  characterization), so the gate is doing its job under its current rules.
+  The unblock was a design decision, not a workaround, and it is DECIDED
+  (Berni, 2026-08-03, on #5246): a verb-event-role rule in the checker —
+  the (a) fork — taking the position that accepted-and-STRIPPED was never
+  contract, defensible precisely because the runtime never delivered an
+  undeclared field to any handler. Implementation note from the same
+  review: the closed shapes already in argument-side baselines likely
+  derive from `never`-typed events that were never meant to assert "only
+  empty events are valid" — clean that up in the generator eventually;
+  until then the exemptions carry the cost. The chosen rule must still
+  weigh the
+  FORWARD skew case the stripped-was-never-contract argument does not cover:
+  adding an optional event field is legal argument widening, but during any
+  deploy window a newer client sends that field to a still-running older
+  piece whose closed schema does not declare it — today stripped and
+  harmless, under closed-world a hard reject at dispatch. Mixed-version
+  callers are exactly the live board's incident history (the cross-version
+  write storms, the legacy-field mirroring `topics` still carries), so the
+  decision needs a story for widened payloads against not-yet-updated
+  pieces — deploy ordering, a skew-tolerant reject-only-on-collision rule,
+  or an explicit versioning step — before emission lands. Until the rule
+  and its skew story land, generated event schemas stay open and
+  closed-world enforcement is per-schema opt-in at dispatch (C5's runner
+  gate).
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.

@@ -1336,6 +1336,13 @@ export class Scheduler {
       eventId?: string;
       originTx?: IExtendedStorageTransaction;
       time?: number;
+      /**
+       * Payload keys the RUNTIME itself injected into `event`'s value —
+       * provenance for the closed-world gate, forwarded from the send's
+       * internal options (never derivable from payload data). See
+       * `StreamSendOptions` (cell.ts).
+       */
+      runtimeInjectedEventKeys?: readonly string[];
     } = {},
   ): void {
     // Bind the event's wall-clock time at its causal origin. A pre-supplied time
@@ -1364,7 +1371,12 @@ export class Scheduler {
         event,
         retries,
         onCommit,
-        { eventId: opts.eventId, originTx: opts.originTx, time },
+        {
+          eventId: opts.eventId,
+          originTx: opts.originTx,
+          time,
+          runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+        },
       );
       return;
     }
@@ -1377,6 +1389,7 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
       time,
+      runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
     });
   }
 
@@ -1398,6 +1411,7 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
       time: opts.time,
+      runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's
