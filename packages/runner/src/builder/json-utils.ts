@@ -8,6 +8,7 @@ import {
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
+  type FabricExecValue,
   type FactoryInput,
   isPattern,
   type JSONSchema,
@@ -44,7 +45,7 @@ export function withAliasBindings(
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
-): JSONValue | undefined {
+): FabricExecValue | undefined {
   // Turn strongly typed builder values into legacy JSON structures while
   // preserving alias metadata for consumers that still rely on it.
 
@@ -55,7 +56,7 @@ export function withAliasBindings(
     const { external, frame } = value.export();
 
     // If this is an external reference, just copy the reference as is.
-    if (external) return external as JSONValue;
+    if (external) return external as FabricExecValue;
 
     // Verify that opaque refs are not in a parent frame
     if (frame !== getTopFrame()) {
@@ -72,7 +73,7 @@ export function withAliasBindings(
       ignoreSelfAliases,
     );
     if (alias === null) return undefined;
-    if (alias !== undefined) return alias as unknown as JSONValue;
+    if (alias !== undefined) return alias as unknown as FabricExecValue;
     throw new Error(`Cell not found in pattern aliases`);
   }
 
@@ -123,7 +124,7 @@ export function withAliasBindings(
   // it to `{}`, so return it unchanged here — after the cell / alias / array
   // handling above, which must still win for those forms.
   if (value instanceof FabricPrimitive) {
-    return value as unknown as JSONValue;
+    return value;
   }
 
   // If this is an object or a pattern, process each key recursively.
