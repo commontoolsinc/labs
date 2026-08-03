@@ -149,15 +149,20 @@ Projection schemas support structural `properties`, `items`, and scalar leaf
 schemas. In an array-item projection, a scalar leaf whose declared type does not
 match the stored value is omitted by the runtime rather than reported as an
 error; prefer `true` leaves unless that type filtering is intentional. Schema
-combinators and references are rejected.
+combinators and references are rejected. Concise dotted paths traverse object
+properties, not nested array items: use an inline/file JSON Schema with `items`
+for a shape such as selected fields from every `comments` entry.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 The runtime's list filter/map builtins therefore handle CFC exactly as authored
 pattern expressions do: predicate observations label array membership,
 projection reads propagate labels, and filtered elements retain their source
-links. The source cell's schema remains authoritative for Common Fabric
-metadata. A caller cannot introduce or override `ifc`, `asCell`, `scope`, or
-`default` through `--schema`.
+links. Projection map/lift nodes construct the requested shape from a
+source-schema-selected read rather than returning a widening identity alias.
+Nested non-stream Cell handles are materialized before the predicate/projection
+JavaScript runs; stream handles remain capabilities. The source cell's schema
+remains authoritative for Common Fabric metadata. A caller cannot introduce or
+override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
 ## Built Binary
 

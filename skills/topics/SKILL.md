@@ -179,7 +179,8 @@ verification succeeded.
 ## Troubleshooting
 
 - If initial CLI synchronization times out, no piece read or mutation ran.
-  Report the deployment or authorization blocker unless external state changes.
+  Report the blocker; rerun only after Tailnet/API reachability or identity
+  authorization has been re-established.
 - If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
   do not call the board empty. Preserve the input evidence and report the
   result-materialization failure.

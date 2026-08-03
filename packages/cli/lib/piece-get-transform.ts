@@ -7,6 +7,7 @@ import {
   KeepAsCell,
   type MemorySpace,
   type Runtime,
+  sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
 import { isRecord } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
@@ -771,7 +772,8 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
 }
 
 function projectValue(value: unknown, schema: JSONSchema): unknown {
-  if (schema === true || schema === false || value === null) return value;
+  if (typeof schema === "boolean") return schema ? value : undefined;
+  if (value === null) return value;
   if (Array.isArray(value)) {
     const itemSchema = schema.items ?? true;
     return value.map((item) => projectValue(item, itemSchema));
@@ -954,7 +956,7 @@ function resolveProjection(
 }
 
 export interface DerivePieceGetDependencies {
-  onResultCell?: (cell: Cell<unknown>) => void;
+  onOutputCell?: (cell: Cell<unknown>) => void;
 }
 
 /**
@@ -963,10 +965,11 @@ export interface DerivePieceGetDependencies {
  * The filter uses the runner's list builtin, so predicate observations taint
  * collection membership exactly as they do in authored patterns. Array
  * projection uses the map builtin for pointwise labels. Object/scalar
- * projection uses a lift. Projection nodes are identities over runtime
- * `asSchema` reads: the source-derived read schema performs the structural
- * projection while preserving authoritative source CFC metadata. Caller
- * schemas describe output shape only and cannot replace source metadata.
+ * projection uses a lift. Projection nodes construct the caller-requested
+ * shape from source-schema-selected reads, preventing an identity alias from
+ * widening back to a broader linked target. Caller schemas describe output
+ * shape only; source schemas remain authoritative for CFC and other Fabric
+ * metadata.
  */
 export async function derivePieceGetValue(
   runtime: Runtime,
@@ -975,10 +978,6 @@ export async function derivePieceGetValue(
   transform: PieceGetTransform,
   deps: DerivePieceGetDependencies = {},
 ): Promise<unknown> {
-  // Match ordinary piece path reads: a selected slot can itself be a link to
-  // the value being read (for example TopicsInput.topics). The transform must
-  // execute over that target, not over the Cell wrapper stored in the slot.
-  sourceCell = sourceCell.resolveAsCell();
   const declaredSourceSchema = sourceCell.schema;
   const sourceSchema = isRecord(declaredSourceSchema) &&
       declaredSourceSchema.asCell !== undefined
@@ -1053,7 +1052,10 @@ export async function derivePieceGetValue(
     const argumentSchema: JSONSchema = {
       type: "object",
       properties: {
-        element: dereferencedElementSchema(elementSchema),
+        element: sanitizeSchemaForLinks(
+          dereferencedElementSchema(elementSchema),
+          KeepAsCell.OnlyStream,
+        ),
         params: paramsSchema,
       },
       required: ["element", "params"],
@@ -1085,7 +1087,10 @@ export async function derivePieceGetValue(
     const argumentSchema: JSONSchema = {
       type: "object",
       properties: {
-        element: dereferencedElementSchema(elementSchema),
+        element: sanitizeSchemaForLinks(
+          dereferencedElementSchema(elementSchema),
+          KeepAsCell.OnlyStream,
+        ),
       },
       required: ["element"],
       additionalProperties: false,
@@ -1105,7 +1110,10 @@ export async function derivePieceGetValue(
   const directProjectionArgumentSchema: JSONSchema = {
     type: "object",
     properties: {
-      value: sourceReadSchema,
+      value: sanitizeSchemaForLinks(
+        sourceReadSchema,
+        KeepAsCell.OnlyStream,
+      ),
     },
     required: ["value"],
     additionalProperties: false,
@@ -1204,7 +1212,7 @@ export async function derivePieceGetValue(
         `Could not apply piece get transform: ${recorded.message}`,
       );
     }
-    deps.onResultCell?.(result as Cell<unknown>);
+    deps.onOutputCell?.(outputCell);
     return outputValue;
   } finally {
     runtime.runner.stop(resultCell);
