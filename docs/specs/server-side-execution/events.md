@@ -59,15 +59,20 @@ handler fires
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
   beyond the space's commit sequence — same as today.
-- **Batching (D-v2-2, proposed)**: a wave drains every queued event
-  before the derivation fixpoint runs (serving-loop.md §3). Rapid-fire
-  events therefore share one derived commit whose `consequenceOf` lists
-  them all, and only the LATEST derived values are ever computed.
-  Handler-visible consequence: handlers in one batch read derived state
-  as of the last completed wave, not state refreshed between events. A
-  handler chain that requires inter-event propagation is a pattern
-  smell; if a real need appears, it escalates to an owner ruling rather
-  than a scheduler mode.
+- **Batching is at the COMMIT level only (D-v2-2, ruled 2026-08-02)**:
+  the wave commits once, at scheduler idle, with `consequenceOf`
+  listing every event processed. Handler-visible semantics are
+  UNCHANGED from today's client: the scheduler recomputes a dirty
+  computed input on demand before the handler that reads it runs
+  (`event-preflight-dependencies.ts`) — the common case being not
+  rapid-fire but a lazy computed nothing has pulled yet, which the
+  handler must and does see fresh. An earlier proposal to drain all
+  handlers ahead of derivations (handlers reading last-wave state) was
+  REJECTED by the owner: events drain as part of regular execution —
+  the loop is simply not idle until all events are processed. Rapid-
+  fire efficiency falls out of pull-based laziness (superseded
+  intermediates are never demanded, so never computed), with the single
+  derived commit as the only batching.
 
 ## 3. Payload capture rule
 

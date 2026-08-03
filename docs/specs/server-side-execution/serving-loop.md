@@ -79,16 +79,22 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
     mark dirty: resolve c's written docs/paths against the dependency
     graph's input links (the scheduler's existing dirtiness path)
     if c.class == event-append: enqueue for handler processing (events.md)
-  // COALESCING: drain ALL queued events through their handlers first,
-  // in per-stream seq order; handler writes accumulate in memory.
-  // Handlers in the batch read derived state as of the last completed
-  // wave (D-v2-2) — intermediate derived states for superseded inputs
-  // are never computed at all.
-  run every queued handler
-  run the derivation fixpoint ONCE, to QUIESCENCE — scheduler.idle()
-  (packages/runner/src/scheduler/facade.ts) resolves; this INCLUDES the
-  scheduler's eager/idle-scheduled actions and whatever they cascade
-  into. There is no separate commit for idle-time work.
+  // The wave is THE REGULAR SCHEDULER run to idle — no phase split,
+  // no event handling outside it (D-v2-2, ruled 2026-08-02). Events
+  // enter the scheduler's ordinary queue; idle() does not resolve
+  // until every queued event is processed, same as a client today.
+  // Handler-input freshness is the scheduler's existing rule: a dirty
+  // computed input is recomputed ON DEMAND before the handler that
+  // reads it runs, and only then (anchor:
+  // scheduler/event-preflight-dependencies.ts). Pull-based laziness
+  // therefore still skips derived work nothing demands — which is
+  // where rapid-fire coalescing comes from: superseded intermediates
+  // are skipped by laziness, not by an explicit drain phase.
+  run scheduler to QUIESCENCE — scheduler.idle()
+  (packages/runner/src/scheduler/facade.ts) resolves; this includes all
+  queued events, handler-demanded recomputes, AND the eager/
+  idle-scheduled actions and their cascades. There is no separate
+  commit for idle-time work.
   commit one derived-class transaction containing:
     - all derived cell changes of this wave (final values only)
     - consequenceOf: every eventId drained this wave
