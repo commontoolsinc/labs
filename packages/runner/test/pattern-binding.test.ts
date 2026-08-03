@@ -22,6 +22,7 @@ import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -650,6 +651,20 @@ describe("pattern-binding", () => {
       // Same at the root, and inside an array.
       expect(bind(stamp)).toBe(stamp);
       expect(bind([stamp, alias()])[0]).toBe(stamp);
+    });
+
+    it("throws on a FabricInstance rather than handing it back unbound", () => {
+      // A `FabricInstance` is a CONTAINER of other `FabricValue`s, reached by
+      // its codec contents rather than by property name. This walk cannot yet
+      // descend one, and handing it back whole would read as success while
+      // leaving a bound alias in its contents silently unbound.
+      const err = FabricError.fromNativeError(new Error("boom"));
+
+      expect(() => bind({ err })).toThrow("FabricError");
+      // ...at the root, and inside an array, on both the shared and copy paths.
+      expect(() => bind(err)).toThrow("FabricError");
+      expect(() => bind([err])).toThrow("FabricError");
+      expect(() => bind({ err, aliased: alias() })).toThrow("FabricError");
     });
 
     it("hands an Array subclass's species the same length `map()` would", () => {

@@ -365,12 +365,13 @@ board topic). Until that lands, board-level routing
 the target shape.
 
 `cf piece get` lets an agent control how much data an exploratory read returns:
-`--filter` narrows array membership and `--schema` projects fields through the
-runtime's `asSchema` read path. Both execute through computed pattern nodes so
-their CFC behavior matches pattern expressions. A limit on the number of
-records returned from a large array remains deferred, blocking nothing. It is
-adjacent CLI work for when board scale demands it, not an ask on any workstream
-in this implementation plan.
+`--filter` narrows array membership and `--schema` constructs a projected value
+from source-schema-selected reads. Both execute through computed pattern nodes
+so their CFC behavior matches pattern expressions, without returning an
+identity alias that can widen to a linked target's schema. A limit on the
+number of records returned from a large array remains deferred, blocking
+nothing. It is adjacent CLI work for when board scale demands it, not an ask on
+any workstream in this implementation plan.
 
 **A set of verbs wants to be a structural interface, and the machinery for that
 already exists.** Schemas are the type system, so a verb set is a schema

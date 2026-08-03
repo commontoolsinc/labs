@@ -149,15 +149,29 @@ Projection schemas support structural `properties`, `items`, and scalar leaf
 schemas. In an array-item projection, a scalar leaf whose declared type does not
 match the stored value is omitted by the runtime rather than reported as an
 error; prefer `true` leaves unless that type filtering is intentional. Schema
-combinators and references are rejected.
+combinators and references are rejected in caller-supplied projection schemas.
+Concise dotted paths follow the declared source schema through nested arrays, so
+`comments.body` selects `body` from every comment without retaining comment
+siblings. The projection preserves source-declared nullable items and
+properties, including `type` arrays and `anyOf` unions. When the source schema
+does not identify a nested container, the concise form applies the same field
+mask across arrays encountered in the value so siblings still cannot leak; use
+an explicit JSON Schema when the output schema itself must be fixed. If a
+present source value cannot materialize the transform, the command exits nonzero
+and states that the failure is not JSON `null`. An absent optional source
+remains the ordinary successful `null` CLI response, as does a valid projected
+null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 The runtime's list filter/map builtins therefore handle CFC exactly as authored
 pattern expressions do: predicate observations label array membership,
 projection reads propagate labels, and filtered elements retain their source
-links. The source cell's schema remains authoritative for Common Fabric
-metadata. A caller cannot introduce or override `ifc`, `asCell`, `scope`, or
-`default` through `--schema`.
+links. Projection map/lift nodes construct the requested shape from a
+source-schema-selected read rather than returning a widening identity alias.
+Nested non-stream Cell handles are materialized before the predicate/projection
+JavaScript runs; stream handles remain capabilities. The source cell's schema
+remains authoritative for Common Fabric metadata. A caller cannot introduce or
+override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
 ## Built Binary
 

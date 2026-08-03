@@ -714,6 +714,44 @@ run_piece_call_retry() {
     error "The corrected retry's payload should stand, got lastMessage: $LAST_5"
   fi
 
+  # --- 6. An absent payload the verb cannot run without is refused, id intact.
+  # The mirror of scenario 5 for the second-most-likely agent mistake:
+  # forgetting the payload rather than misspelling a field. `recordNote`'s
+  # event schema sits behind a top-level local $ref, so the CLI derives no
+  # flags from it and an explicit `invoke` with no payload parses to an
+  # absent (undefined) event. Before the absent-payload gate (verb contract
+  # D5) this dispatched: the handler ran with no event, recorded
+  # "(no event)", and the receipt spent the invocation id — the corrected
+  # same-id retry then reported deduplicated with the correction never
+  # applied. Now the gate normalizes absence to {} against the resolved
+  # object schema and refuses because `required` survives relaxation, so
+  # nothing dispatches and the same id still buys the corrected call.
+  RETRY_PIECE_6=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_6=$(new_invocation_id)
+  set +e
+  ABSENT_OUT=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
+    recordNote -- invoke 2>&1)
+  ABSENT_STATUS=$?
+  set -e
+  if [ "$ABSENT_STATUS" -eq 0 ]; then
+    error "An absent payload against a required-fields verb should fail, got: $ABSENT_OUT"
+  fi
+  case "$ABSENT_OUT" in
+    *'Invalid input for "recordNote"'*'no payload was supplied'*) ;;
+    *) error "An absent-payload refusal should say no payload was supplied, got: $ABSENT_OUT" ;;
+  esac
+  assert_message_count "$RETRY_PIECE_6" 0 \
+    "A refused absent-payload call must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
+    recordNote -- --json '{"note":"corrected"}' > /dev/null
+  assert_message_count "$RETRY_PIECE_6" 1 \
+    "The refused call never spent its id, so the corrected retry should record one"
+  LAST_6=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_6" lastMessage)
+  if [ "$LAST_6" != '"corrected"' ]; then
+    error "The corrected retry's payload should stand, got lastMessage: $LAST_6"
+  fi
+
   echo "Successfully ran CLI piece call retry integration tests for ${API_URL}."
 }
 

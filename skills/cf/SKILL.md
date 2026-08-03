@@ -64,7 +64,12 @@ what this looks like when it bites.
   argument, or schema-derived flags after `--`. Empty stdin fails loudly.
 - A `piece get` path that doesn't resolve is a data error: one-line message on
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
-  (missing source/target piece or path) reports the same way.
+  (missing source/target piece or path) reports the same way. So does a
+  `piece get` path that lands on a handler verb: reading a stream refuses — read
+  data, call verbs. A root verb's refusal points at `cf piece call`; a nested
+  verb is not directly callable, so it points at reading the parent object or
+  `cf piece verbs`. The verb's parent object still reads, and tool bindings read
+  as data.
 
 ## Environment Setup
 
@@ -235,11 +240,20 @@ comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
 fields apply per item for arrays, while JSON Schema describes the whole output.
 In an array-item projection, a typed scalar leaf that does not match stored data
 is omitted rather than reported as an error; prefer `true` leaves unless type
-filtering is intentional. The two flags compose as filter-then-project. Both run
-through runtime filter/map/lift nodes, so CFC behavior is the same as a computed
-pattern expression. Source schema metadata is authoritative; projection schemas
-cannot supply `ifc`, `asCell`, `scope`, or `default`. See
-`packages/cli/README.md` for the exact syntax and supported schema subset.
+filtering is intentional. Concise dotted paths follow declared source schemas
+through nested arrays: `comments.body` selects `body` from every comment and
+drops its siblings. Source-declared nullable items and properties remain null.
+If a present source cannot materialize the transform, the command exits nonzero
+with an explicit "not JSON null" error; an absent optional source retains the
+ordinary successful `null` response. If the source schema does not identify a
+nested container, concise projection still applies its field mask across
+encountered arrays to prevent sibling disclosure; use an explicit schema for a
+fixed output contract. The two flags compose as filter-then-project. Both run
+through runtime filter/map/lift nodes, which construct projected values from
+source-schema-selected reads, so CFC behavior is the same as a computed pattern
+expression. Source schema metadata is authoritative; projection schemas cannot
+supply `ifc`, `asCell`, `scope`, or `default`. See `packages/cli/README.md` for
+the exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

@@ -48,7 +48,7 @@ import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
-import { isHandlerCell } from "../../fuse/callables.ts";
+import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import {
   callableCommandSpec,
@@ -75,6 +75,7 @@ import { stderrConsoleHandler } from "./json-output.ts";
 import {
   derivePieceGetValue,
   type PieceGetTransform,
+  PieceGetTransformError,
 } from "./piece-get-transform.ts";
 
 export interface EntryConfig {
@@ -112,6 +113,28 @@ export interface GetCellValueOptions {
   input?: boolean;
   step?: boolean;
   transform?: PieceGetTransform;
+}
+
+/** A `cf piece get` path that lands ON a verb. Reading a verb returns the
+ * stream's serialization — never what the caller wanted — so the read refuses
+ * and redirects instead, mirroring the llm-dialog read tool's "Path resolves
+ * to a handler; use invoke() instead." (verb contract WS-F, read-path guard).
+ * `callable` is whether `cf piece call <verb>` actually resolves the verb —
+ * the dispatcher resolves root-level names only — so the refusal never
+ * suggests a command that would fail: a nested verb points at reading the
+ * parent object or the root-level verbs listing instead. */
+export class PieceVerbReadError extends Error {
+  constructor(verb: string, piece: string, callable: boolean) {
+    super(
+      callable
+        ? `Path resolves to a verb; use 'cf piece call --piece ${piece} ${verb}' instead.`
+        : `Path resolves to a verb that is not directly callable: verbs are ` +
+          `invoked at the piece's root surface. Read the parent object ` +
+          `instead, or list the callable verbs with ` +
+          `'cf piece verbs --piece ${piece}'.`,
+    );
+    this.name = "PieceVerbReadError";
+  }
 }
 
 export class PieceResultProjectionError extends Error {
@@ -1339,6 +1362,35 @@ async function tryResolvePieceCallableAt(
   };
 }
 
+/** The forced-stream probe: cast `name` on `cell` to a stream and ask the
+ * runtime whether it answers as a handler. This is the third resolution path
+ * of `cf piece call` (tryResolvePieceHandler) — a handler whose stored schema
+ * lost the stream marker still answers this cast — shared with the listing's
+ * fallback probe and the read-path guard so all three classify identically.
+ * Only meaningful at the piece cell, where every attribute is a
+ * schema-carrying link or a genuine handler: for inline values and
+ * schema-less links the cast schema itself survives resolution and
+ * `Cell.isStream`'s schema branch answers "stream" from it, so probing
+ * arbitrary cells would report plain data as handlers. Returns the proven
+ * stream cell, or null. */
+function probeForcedStreamCell(cell: any, name: string): any | null {
+  if (
+    typeof cell !== "object" || cell === null ||
+    typeof cell.asSchema !== "function"
+  ) {
+    return null;
+  }
+  const streamRoot = cell.asSchema({
+    type: "object",
+    properties: {
+      [name]: { asCell: ["stream"] },
+    },
+    required: [name],
+  });
+  const streamCell = streamRoot.key(name);
+  return isHandlerCell(streamCell) ? streamCell : null;
+}
+
 async function tryResolvePieceHandler(
   piece: any,
   manager: any,
@@ -1350,15 +1402,8 @@ async function tryResolvePieceHandler(
     return null;
   }
 
-  const streamRoot = pieceCell.asSchema({
-    type: "object",
-    properties: {
-      [callableName]: { asCell: ["stream"] },
-    },
-    required: [callableName],
-  });
-  const streamCell = streamRoot.key(callableName);
-  if (!isHandlerCell(streamCell)) {
+  const streamCell = probeForcedStreamCell(pieceCell, callableName);
+  if (!streamCell) {
     return null;
   }
 
@@ -1623,12 +1668,7 @@ export async function listPieceCallables(
     }
     for (const name of rejected) {
       if (listings.has(name)) continue;
-      const streamRoot = pieceCell.asSchema({
-        type: "object",
-        properties: { [name]: { asCell: ["stream"] } },
-        required: [name],
-      });
-      if (!isHandlerCell(streamRoot.key(name))) continue;
+      if (!probeForcedStreamCell(pieceCell, name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       const spec = callableCommandSpec(callableCell, "handler");
       listings.set(name, {
@@ -2172,6 +2212,60 @@ export function formatViewTree(view: unknown): string {
   return format(view, "", true);
 }
 
+/** A read path's last segment classified as a verb: the name, and whether
+ * `cf piece call <name>` actually resolves it (root-level names only). */
+interface ReadPathVerb {
+  verb: string;
+  callable: boolean;
+}
+
+/**
+ * Classify a `cf piece get` path whose last segment CERTAINLY lands on a
+ * verb. The guard refuses only on the two definite stored signals: the
+ * link-derived schema answers as a stream (`isHandlerCell` on the
+ * `asSchemaFromLinks` cell — that schema comes from stored links, never from
+ * a caller-supplied cast), or the stored value reads as the
+ * `{$stream: true}` sentinel. It NEVER refuses on the forced-stream probe:
+ * the probe is deliberately permissive for the dispatcher and the listing —
+ * over-inclusion there is an extra listing row or a call the caller asked
+ * for — but the cast's stream schema survives link resolution for inline
+ * values and schema-less links (`resolveLink` keeps the caller's schema and
+ * `Cell.isStream`'s schema branch answers from it), so a read guard built on
+ * it would refuse plain data outputs. Reads fail open: a classification
+ * failure, an uncertain shape, or a tool binding (readable data, exactly as
+ * the llm-dialog read tool treats it) all read normally.
+ *
+ * `callable` is true only for root-level names — the dispatcher's resolution
+ * paths all start at a root — so the refusal message can redirect honestly.
+ */
+async function classifyReadPathVerb(
+  piece: any,
+  prop: "input" | "result",
+  path: readonly (string | number)[],
+): Promise<ReadPathVerb | null> {
+  const name = path.at(-1);
+  // Verbs are named properties; a path-less read is the parent-object read,
+  // which stays readable even when the object carries verbs.
+  if (typeof name !== "string") return null;
+  try {
+    const rootCell = await piece[prop].getCell();
+    const parentCell = path.length > 1
+      ? rootCell.key(...path.slice(0, -1))
+      : rootCell;
+    const child = parentCell.key(name);
+    const derived = child.asSchemaFromLinks?.() ?? child;
+    if (
+      isStreamValue(getCallableValue(parentCell.get?.(), name)) ||
+      isHandlerCell(derived)
+    ) {
+      return { verb: name, callable: path.length === 1 };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getCellValue(
   config: PieceConfig,
   path: (string | number)[],
@@ -2228,11 +2322,32 @@ export async function getCellValue(
         }
         throw error;
       }
+      // Read-path guard (verb contract WS-F): the transform path returns
+      // early, so it needs the same verb refusal the plain read applies
+      // below — a verb read through a transform is the same mistake.
+      const transformPathVerb = await classifyReadPathVerb(piece, prop, path);
+      if (transformPathVerb) {
+        throw new PieceVerbReadError(
+          transformPathVerb.verb,
+          resolvedConfig.piece,
+          transformPathVerb.callable,
+        );
+      }
+      const sourceWasAbsent = typeof targetCell.getRaw === "function" &&
+        targetCell.getRaw() === undefined;
       if (
         !options.input && transformed === undefined &&
         await resultProjectionFailedAtPath(piece, path)
       ) {
         throw new PieceResultProjectionError(path, shouldStep);
+      }
+      if (transformed === undefined && !sourceWasAbsent) {
+        throw new PieceGetTransformError(
+          "Cannot read transformed value: the filter/schema expression did " +
+            "not materialize a JSON-renderable value. This is not JSON " +
+            "null. Retry with --step for a computed result, or inspect the " +
+            "selected source data and schema.",
+        );
       }
       return transformed;
     }
@@ -2259,6 +2374,19 @@ export async function getCellValue(
       await resultProjectionFailedAtPath(piece, path)
     ) {
       throw new PieceResultProjectionError(path, shouldStep);
+    }
+
+    // Read-path guard (verb contract WS-F): a path that lands ON a verb would
+    // return the stream's serialization — never what a caller wants — so it
+    // refuses and redirects. Classified after the read so the piece's links
+    // and schema are materialized locally.
+    const verb = await classifyReadPathVerb(piece, prop, path);
+    if (verb) {
+      throw new PieceVerbReadError(
+        verb.verb,
+        resolvedConfig.piece,
+        verb.callable,
+      );
     }
 
     return value;
