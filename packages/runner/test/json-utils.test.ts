@@ -8,10 +8,14 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import {
   createJsonSchema,
-  moduleToJSON,
+  moduleToEncodableForm,
   toJSONWithAliasBindings,
 } from "../src/builder/json-utils.ts";
-import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";
+import {
+  type JSONSchema,
+  type JSONSchemaObj,
+  type Module,
+} from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
@@ -789,7 +793,7 @@ describe("json-utils", () => {
   });
 });
 
-describe("moduleToJSON", () => {
+describe("moduleToEncodableForm", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -814,7 +818,7 @@ describe("moduleToJSON", () => {
         src: "main.tsx:1:1",
       },
     );
-    const serialized = moduleToJSON({
+    const serialized = moduleToEncodableForm({
       type: "javascript",
       implementation,
     } as any);
@@ -827,6 +831,35 @@ describe("moduleToJSON", () => {
     });
   });
 
+  it("writes exactly the module's own members, and none of its machinery", () => {
+    // The serialized form is what a content-derived id gets minted from, so
+    // an extra member is a changed id for every value carrying a module. The
+    // members a module carries for the builder's benefit -- its serializer,
+    // `with`, `bind` -- are machinery, and the serializer is responsible for
+    // leaving every one of them behind. Asserted as the WHOLE key set: a
+    // subset match cannot see a member that should not be there.
+    const module: Record<string, unknown> = {
+      type: "javascript",
+      implementation: Object.assign(() => 1, { preview: "() => 1" }),
+      wrapper: "handler",
+      argumentSchema: { type: "object" } as JSONSchema,
+      with: () => {},
+      bind: () => {},
+      toEncodableForm: () => moduleToEncodableForm(module as unknown as Module),
+    };
+
+    const serialized =
+      (module.toEncodableForm as () => Record<string, unknown>)();
+
+    expect(Object.keys(serialized).sort()).toEqual([
+      "argumentSchema",
+      "implementation",
+      "preview",
+      "type",
+      "wrapper",
+    ]);
+  });
+
   it("serializes non-javascript function-backed modules without leaking implementations", () => {
     const implementation = Object.assign(
       () => "ok",
@@ -835,7 +868,7 @@ describe("moduleToJSON", () => {
         src: "main.tsx:2:1",
       },
     );
-    const serialized = moduleToJSON({
+    const serialized = moduleToEncodableForm({
       type: "raw",
       implementation,
     } as any);
@@ -916,7 +949,7 @@ describe("moduleToJSON", () => {
 
     // The implementation became verified during the STANDALONE Engine's
     // evaluation, so it carries process-global content-addressed provenance
-    // (Engine.recordModuleProvenance) and `moduleToJSON` writes a `$implRef`.
+    // (Engine.recordModuleProvenance) and `moduleToEncodableForm` writes a `$implRef`.
     // But this pattern was registered WITHOUT going through
     // `compilePattern`/`registerEvaluatedModules` on THIS runtime, so its
     // engine's implementation index never saw the artifact and cannot resolve
@@ -939,9 +972,9 @@ describe("moduleToJSON", () => {
     ).toBeUndefined();
 
     const frame = pushFrame({ runtime });
-    let serialized: ReturnType<typeof moduleToJSON>;
+    let serialized: ReturnType<typeof moduleToEncodableForm>;
     try {
-      serialized = moduleToJSON(targetModule);
+      serialized = moduleToEncodableForm(targetModule);
     } finally {
       popFrame(frame);
     }

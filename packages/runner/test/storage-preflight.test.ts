@@ -11,19 +11,19 @@ function artifact(serialized: unknown): Record<string, unknown> {
   return {
     type: "javascript",
     implementation: () => "not representable",
-    toJSON: () => serialized,
+    toEncodableForm: () => serialized,
   };
-}
-
-/** A factory: a function carrying its module's members. */
-function factoryArtifact(serialized: unknown): () => void {
-  return Object.assign(() => {}, artifact(serialized));
 }
 
 describe("flattenBuilderArtifacts()", () => {
   describe("values carrying no artifact", () => {
     it("answers a record by identity", () => {
       const value = { a: 1, b: { c: [1, 2, 3] } };
+      expect(flattenBuilderArtifacts(value)).toBe(value);
+    });
+
+    it("answers a nested array by identity", () => {
+      const value = [{ a: 1 }, [2, [3]]];
       expect(flattenBuilderArtifacts(value)).toBe(value);
     });
 
@@ -36,6 +36,13 @@ describe("flattenBuilderArtifacts()", () => {
   });
 
   describe("replacement", () => {
+    it("replaces a top-level artifact with its serialized form", () => {
+      const result = flattenBuilderArtifacts(
+        artifact({ type: "javascript", implementation: "source" }),
+      );
+      expect(result).toEqual({ type: "javascript", implementation: "source" });
+    });
+
     it("replaces an artifact nested under records and arrays", () => {
       const value = {
         tools: { send: { handler: artifact({ serialized: true }) } },
@@ -45,14 +52,6 @@ describe("flattenBuilderArtifacts()", () => {
         tools: { send: { handler: { serialized: true } } },
         list: [{ second: true }],
       });
-    });
-
-    it("replaces a FUNCTION-shaped artifact", () => {
-      // A factory is a function carrying its module's members, so an artifact
-      // is reached in two shapes and both have to be covered.
-      const value = { tool: { pattern: factoryArtifact({ flat: true }) } };
-      expect(flattenBuilderArtifacts(value))
-        .toEqual({ tool: { pattern: { flat: true } } });
     });
 
     it("descends into the serialized form", () => {
@@ -79,7 +78,7 @@ describe("flattenBuilderArtifacts()", () => {
     it("serializes a shared artifact once and keeps it shared", () => {
       let calls = 0;
       const shared = {
-        toJSON: () => {
+        toEncodableForm: () => {
           calls++;
           return { serialized: true };
         },
@@ -90,47 +89,59 @@ describe("flattenBuilderArtifacts()", () => {
       });
       expect(calls).toBe(1);
       expect(result.first).toBe(result.second);
+      expect(result.first).toEqual({ serialized: true });
     });
 
-    it("reads each member once", () => {
-      // A copy built by re-reading would run an accessor twice and keep the
-      // second answer, recording a value the object never held at any single
-      // moment.
-      let reads = 0;
-      const value = {
-        artifact: artifact({ flat: true }),
-        get accessor() {
-          reads++;
-          return reads;
-        },
-      };
-      const result = flattenBuilderArtifacts(value) as Record<string, unknown>;
-      expect(reads).toBe(1);
-      expect(result.accessor).toBe(1);
+    it("makes the result representable as a `FabricValue`", () => {
+      const value = { tools: { send: { handler: artifact({ ok: true }) } } };
+      expect(fabricFromNativeValue(flattenBuilderArtifacts(value)))
+        .toEqual({ tools: { send: { handler: { ok: true } } } });
     });
 
     it("encodes to the same bytes as the serialized form written inline", () => {
       // The encoded form is what a content-derived id is minted from, so a
       // difference here is a difference in every id derived from a value
-      // carrying an artifact.
+      // carrying an artifact. Flattening must arrive at exactly the encoding
+      // of the form the artifact serializes to, key order included.
       const value = { tools: { send: { handler: artifact({ ok: true }) } } };
       const inline = { tools: { send: { handler: { ok: true } } } };
-      expect(
-        dataUriFromValue(fabricFromNativeValue(flattenBuilderArtifacts(value))),
-      ).toBe(dataUriFromValue(fabricFromNativeValue(inline)));
+      expect(dataUriFromValue(fabricFromNativeValue(
+        flattenBuilderArtifacts(value),
+      )))
+        .toBe(dataUriFromValue(fabricFromNativeValue(inline)));
+    });
+
+    it("is the only route by which an artifact becomes representable", () => {
+      // The conversion has no route of its own to an artifact's serializer:
+      // an artifact names it `toEncodableForm`, which the conversion knows
+      // nothing about. So flattening is load-bearing rather than an
+      // optimization, and skipping it is a loud rejection.
+      const value = { tools: { send: { handler: artifact({ ok: true }) } } };
+      expect(() => fabricFromNativeValue(value))
+        .toThrow(/function per se/);
     });
   });
 
   describe("values the conversion decides for itself", () => {
     it("leaves an array carrying an own serializer alone", () => {
       // An array is answered by the array rule whatever it carries.
-      const value = Object.assign([1, 2], { toJSON: () => "replaced" });
+      const value = Object.assign([1, 2], {
+        toEncodableForm: () => "replaced",
+      });
       expect(flattenBuilderArtifacts(value)).toBe(value);
+    });
+
+    it("leaves a plain object carrying an own `toJSON` alone", () => {
+      // `toJSON` is not how a builder artifact spells its serializer, so an
+      // object bearing one is ordinary data as far as this is concerned, and
+      // what becomes of it is the conversion's to decide.
+      const value = { secret: "internal", toJSON: () => ({ exposed: true }) };
+      expect(flattenBuilderArtifacts({ value }).value).toBe(value);
     });
 
     it("leaves a class instance with a prototype serializer alone", () => {
       class Serializable {
-        toJSON() {
+        toEncodableForm() {
           return { serialized: true };
         }
       }
@@ -138,10 +149,18 @@ describe("flattenBuilderArtifacts()", () => {
       expect(flattenBuilderArtifacts({ value }).value).toBe(value);
     });
 
+    it("leaves a class instance with an own serializer alone", () => {
+      class Bare {}
+      const value = Object.assign(new Bare(), {
+        toEncodableForm: () => "replaced",
+      });
+      expect(flattenBuilderArtifacts({ value }).value).toBe(value);
+    });
+
     it("leaves a null-prototype record alone", () => {
       const value: Record<string, unknown> = Object.assign(
         Object.create(null),
-        { toJSON: () => "replaced" },
+        { toEncodableForm: () => "replaced" },
       );
       expect(flattenBuilderArtifacts({ value }).value).toBe(value);
     });

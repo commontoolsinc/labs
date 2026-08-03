@@ -31,6 +31,7 @@ import {
   type Schema,
   type SchemaWithoutCell,
   SELF,
+  type toEncodableForm,
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
@@ -43,7 +44,7 @@ import {
 } from "./node-utils.ts";
 import {
   type CellAliasResolver,
-  moduleToJSON,
+  moduleToEncodableForm,
   patternToJSON,
   toJSONWithAliasBindings,
 } from "./json-utils.ts";
@@ -572,7 +573,7 @@ function factoryFromPattern<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
-  const pattern: Pattern & toJSON = {
+  const pattern: Pattern & toEncodableForm & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
     resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
@@ -580,6 +581,8 @@ function factoryFromPattern<T, R>(
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
     // pattern afterwards (see factory.ts:exportsCallback)
+    toEncodableForm: () => patternToJSON(patternFactory),
+    // What `JSON.stringify(SomePattern)` answers, which pattern source uses.
     toJSON: () => patternToJSON(patternFactory),
   };
 
@@ -589,13 +592,13 @@ function factoryFromPattern<T, R>(
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
-        const module: Module & toJSON = {
+        const module: Module & toEncodableForm = {
           type: "pattern",
           implementation: factory,
           ...(factory.defaultScope !== undefined
             ? { defaultScope: factory.defaultScope }
             : {}),
-          toJSON: () => moduleToJSON(module),
+          toEncodableForm: () => moduleToEncodableForm(module),
         };
 
         const outputs = reactive<R>();
@@ -622,8 +625,9 @@ function factoryFromPattern<T, R>(
       {
         ...pattern,
         ...(defaultScope !== undefined ? { defaultScope } : {}),
+        toEncodableForm: () => patternToJSON(factory),
         toJSON: () => patternToJSON(factory),
-      } as Pattern & toJSON,
+      } as Pattern & toEncodableForm & toJSON,
     ) as PatternFactory<T, R>;
 
     // `asScope` / `inSpace` mint fresh factory objects; record them as

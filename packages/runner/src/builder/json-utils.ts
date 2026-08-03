@@ -15,7 +15,6 @@ import {
   type Module,
   type Pattern,
   type Reactive,
-  type toJSON,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
 import {
@@ -31,7 +30,11 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
-import { replaceArtifacts } from "../encodable-form.ts";
+import {
+  encodableFormOf,
+  hasEncodableForm,
+  replaceArtifacts,
+} from "../encodable-form.ts";
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -140,8 +143,7 @@ export function toJSONWithAliasBindings(
     // serializer (its toJSON under the internal-serialization context): this
     // function builds the in-memory node representation, so embedded
     // sub-pattern graphs must stay bare — no boundary `$patternRef`.
-    const valueToProcess = (isPattern(value) &&
-        typeof (value as unknown as toJSON).toJSON === "function")
+    const valueToProcess = (isPattern(value) && hasEncodableForm(value))
       ? serializePatternGraph(value as unknown as Pattern) as Record<
         string,
         any
@@ -343,21 +345,24 @@ function itemsSchemaFromArray(
     : internSchema({ anyOf: uniqueSchemas });
 }
 
-export function moduleToJSON(module: Module) {
+export function moduleToEncodableForm(module: Module) {
   const frame = getTopFrame();
-  // Destructure-and-drop the runtime-only methods that handler modules
-  // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
-  // They are not part of the serialized contract; left in, they would surface
-  // as a "not representable as a `FabricValue`: function per se" rejection, so
-  // they are destructured out here.
+  // Destructure-and-drop the runtime-only members a module carries for the
+  // builder's own use: its serializer, and the handler ergonomics
+  // (`mod.with(...)`/`mod.bind(...)`). None is part of the serialized
+  // contract; left in, each would surface as a "not representable as a
+  // `FabricValue`: function per se" rejection, so they are destructured out
+  // here. `json-utils.test.ts` asserts the whole resulting key set, an extra
+  // member being a changed content-derived id for every value that carries a
+  // module.
   const {
     implementation: _implementation,
-    toJSON: _toJSON,
+    toEncodableForm: _toEncodableForm,
     with: _with,
     bind: _bind,
     ...rest
   } = module as Module & {
-    toJSON: () => any;
+    toEncodableForm: () => unknown;
     with?: unknown;
     bind?: unknown;
   };
@@ -489,9 +494,8 @@ export function serializePatternGraph(
   const previous = internalGraphSerialization;
   internalGraphSerialization = true;
   try {
-    const withToJSON = pattern as unknown as Partial<toJSON>;
-    return (typeof withToJSON.toJSON === "function"
-      ? withToJSON.toJSON()
+    return (hasEncodableForm(pattern)
+      ? encodableFormOf(pattern)
       : patternToJSON(pattern)) as Record<string, unknown>;
   } finally {
     internalGraphSerialization = previous;
@@ -538,7 +542,13 @@ export function patternToJSON(pattern: Pattern) {
   // async readers fall back to the storage-backed `loadPatternByIdentity` —
   // compiled artifacts persist in-space as an expected part of compilation.
   // A pattern with NO entry ref (manually constructed / dynamic) still
-  // serializes its full graph: nothing could ever resolve its ref.
+  // serializes its full graph: nothing could ever resolve its ref. That graph
+  // holds LIVE modules -- `toJSONWithAliasBindings` builds a node by copying
+  // its module member by member -- so the artifacts in it are replaced here,
+  // by the same walk the storage boundary uses. Enumerating the positions a
+  // module can occupy was tried and was wrong twice: a module reached through
+  // a node's `inputs` (an op, which nests inside itself) is not somewhere a
+  // hand-written traversal thinks to look.
   const entryRef = getArtifactEntryRef(pattern);
   return entryRef
     ? {

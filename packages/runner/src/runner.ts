@@ -68,6 +68,8 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { hasEncodableForm } from "./encodable-form.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type AddCancel,
   type Cancel,
@@ -1216,6 +1218,10 @@ export class Runner {
       undefined,
       tx,
     );
+    // A sub-pattern's argument can carry a builder artifact -- a pattern
+    // handed to another pattern as an input. This is a storage boundary like
+    // any other, so the artifact is replaced on the way in, once, for every
+    // write below: they must agree on what was stored.
     const storable = flattenBuilderArtifacts(argument);
     argumentCell.set(storable);
     recordSetupProjectionPolicyInputs(
@@ -1491,6 +1497,11 @@ export class Runner {
       // write boundary's `cloneIfNecessary` identity-pass instead of
       // deep-cloning-to-freeze. The result root marks the whole result
       // document as generated: setup rewrites the complete projection.
+      //
+      // A pattern's result can carry a builder artifact (a pattern tool, say).
+      // This converts directly rather than through `getImmutableCell`, which
+      // is where the replacement otherwise happens, so it does its own; the
+      // comparison above stays against the value as projected.
       writableResultCell.setRawUntyped(
         fabricFromNativeValue(flattenBuilderArtifacts(result)),
         false,
@@ -5116,14 +5127,42 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    const resultPatternAsString = JSON.stringify(resultPattern);
+    // Keyed on the pattern's ENCODABLE FORM, hashed, and ABSENT when the
+    // pattern has no such form -- a hand-built one does not.
+    //
+    // The distinction is the whole point. `JSON.stringify` has three ways of
+    // saying nothing (`undefined` for an unserializable value, `null` for such
+    // an array element, `{}` for an object of them), and the first is also
+    // what a cache miss looks like. Comparing them made a pattern that had
+    // never been seen read as unchanged, so it was never instantiated -- two
+    // absences agreeing, with nothing to observe at the comparison. An absent
+    // key now means "cannot say", which re-instantiates rather than skips.
+    //
+    // Note the key follows resolution state: the encodable form omits a
+    // module's stringified body when the reading runtime's harness can resolve
+    // its `$implRef`, so an answer that changes re-keys the pattern.
+    // Through the preflight, not the pattern's own form alone: a sub-graph
+    // reached through a node's `inputs` (an op) is not covered by the graph
+    // serializer, and a live function reaching the hash is an error where
+    // `JSON.stringify` merely dropped it. Fixing the route rather than the
+    // one path keeps this consumer honest as new routes appear.
+    const resultPatternKey = hasEncodableForm(resultPattern)
+      ? hashStringOf(flattenBuilderArtifacts(resultPattern))
+      : undefined;
     const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
-    const patternUnchanged =
-      previousResultPatternAsString === resultPatternAsString;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    const patternUnchanged = resultPatternKey !== undefined &&
+      previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternAsString);
+      // Only a key that says something is worth remembering; "cannot say"
+      // must not be recorded, or the next comparison inherits the ambiguity
+      // this whole shape exists to remove.
+      if (resultPatternKey !== undefined) {
+        this.resultPatternCache.set(cacheKey, resultPatternKey);
+      } else {
+        this.resultPatternCache.delete(cacheKey);
+      }
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -6038,6 +6077,13 @@ export class Runner {
       resultCell,
     );
 
+    // The input bindings are about to cross into the data model, and a
+    // pattern author can bind a builder artifact (a handler, a pattern) as an
+    // ordinary input value at any depth. Replace each with its serialized form
+    // on the way, so what crosses is representable. Flattening here rather
+    // than alongside the `op` substitution above keeps it clear of
+    // `findAllWriteRedirectCells`, which walks the same bindings for a
+    // different purpose and should see them as bound.
     const inputsCell = this.runtime.getImmutableCell(
       resultCell.space,
       mappedInputBindings,

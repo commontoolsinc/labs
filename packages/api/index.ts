@@ -1685,8 +1685,27 @@ export interface Module extends FabricExecPlainObject {
   defaultScope?: CellScope;
 }
 
+/**
+ * The member `JSON.stringify()` consults. A builder FACTORY keeps it, because
+ * a factory is what pattern source holds, and stringifying one is an idiom
+ * that source uses -- there the name says exactly what it means. What it
+ * answers is the same form `toEncodableForm` gives.
+ *
+ * A module does not carry it: a module is internal, nothing stringifies one,
+ * and for it the name would claim a relationship to JSON that does not exist.
+ */
 export type toJSON = {
   toJSON(): unknown;
+};
+
+/**
+ * The member by which a builder artifact produces the form in which it gets
+ * encoded. Distinct from `toJSON` in saying nothing about JSON: what it
+ * answers is a value the data model can represent, which reaches storage
+ * without being stringified on the way.
+ */
+export type toEncodableForm = {
+  toEncodableForm(): unknown;
 };
 
 /**
@@ -1708,6 +1727,7 @@ export type NodeFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & (Module | Handler | Pattern)
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): NodeFactory<T, R>;
   };
@@ -1716,6 +1736,7 @@ export type PatternFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Pattern
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): PatternFactory<T, R>;
     inSpace(space?: string | AnyCell<unknown>): PatternFactory<T, R>;
@@ -1725,6 +1746,7 @@ export type ModuleFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Module
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
@@ -1732,7 +1754,8 @@ export type ModuleFactory<T, R> =
 export type HandlerFactory<E, T, R = void> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
   & Handler<E, T, R>
-  & toJSON;
+  & toJSON
+  & toEncodableForm;
 
 // JSON types
 

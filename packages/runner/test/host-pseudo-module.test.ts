@@ -5,8 +5,8 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Module } from "../src/builder/types.ts";
-import type { toJSON } from "../src/builder/types.ts";
-import { moduleToJSON } from "../src/builder/json-utils.ts";
+import type { toEncodableForm } from "../src/builder/types.ts";
+import { moduleToEncodableForm } from "../src/builder/json-utils.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 
@@ -44,10 +44,10 @@ describe("host-trusted values ride a pseudo-module", () => {
   });
 
   const hostModule = (fn: (...args: unknown[]) => unknown): Module => {
-    const module: Module & toJSON = {
+    const module: Module & toEncodableForm = {
       type: "javascript",
       implementation: fn,
-      toJSON: () => moduleToJSON(module),
+      toEncodableForm: () => moduleToEncodableForm(module),
     };
     return module;
   };
@@ -59,7 +59,7 @@ describe("host-trusted values ride a pseudo-module", () => {
     const module = hostModule((value) => (value as number) + base);
     runtime.unsafeTrustModule(module, { reason: "host pseudo-module test" });
 
-    const json = (module as Module & toJSON).toJSON() as {
+    const json = (module as Module & toEncodableForm).toEncodableForm() as {
       $implRef?: { identity: string; symbol: string };
       implementation?: unknown;
       implementationRef?: string;
@@ -87,10 +87,10 @@ describe("host-trusted values ride a pseudo-module", () => {
     runtime.unsafeTrustModule(a, { reason: "host pseudo-module test" });
     runtime.unsafeTrustModule(b, { reason: "host pseudo-module test" });
 
-    const ja = (a as Module & toJSON).toJSON() as {
+    const ja = (a as Module & toEncodableForm).toEncodableForm() as {
       $implRef: { identity: string; symbol: string };
     };
-    const jb = (b as Module & toJSON).toJSON() as {
+    const jb = (b as Module & toEncodableForm).toEncodableForm() as {
       $implRef: { identity: string; symbol: string };
     };
     expect(ja.$implRef).not.toEqual(jb.$implRef);
@@ -99,12 +99,12 @@ describe("host-trusted values ride a pseudo-module", () => {
   it("re-trusting the same value keeps its ref stable", () => {
     const module = hostModule((value) => value);
     runtime.unsafeTrustModule(module, { reason: "host pseudo-module test" });
-    const first = (module as Module & toJSON).toJSON() as {
+    const first = (module as Module & toEncodableForm).toEncodableForm() as {
       $implRef: { identity: string; symbol: string };
     };
     expect(first.$implRef).toBeDefined();
     runtime.unsafeTrustModule(module, { reason: "host pseudo-module test" });
-    const second = (module as Module & toJSON).toJSON() as {
+    const second = (module as Module & toEncodableForm).toEncodableForm() as {
       $implRef: { identity: string; symbol: string };
     };
     expect(first.$implRef).toEqual(second.$implRef);
@@ -134,7 +134,8 @@ describe("host-trusted values ride a pseudo-module", () => {
       const frame = pushFrame({ runtime } as never);
       let json: { $implRef?: unknown; implementation?: unknown };
       try {
-        json = (module as Module & toJSON).toJSON() as typeof json;
+        json = (module as Module & toEncodableForm)
+          .toEncodableForm() as typeof json;
       } finally {
         popFrame(frame);
       }

@@ -122,7 +122,7 @@ function replace(
     if (!hasOwnEncodableForm(value)) return value;
     seen.set(value, IN_PROGRESS);
     return copied(
-      replace(value.toJSON(), seen, onCopy),
+      replace(value.toEncodableForm(), seen, onCopy),
       value,
       seen,
       onCopy,
@@ -152,7 +152,7 @@ function replace(
     // serializer it delegates to: the method a copy carries is closed over the
     // artifact the copy was made from, and that original is what the
     // serialized form describes.
-    flattened = replace(value.toJSON(), seen, onCopy);
+    flattened = replace(value.toEncodableForm(), seen, onCopy);
   } else {
     flattened = replaceInEntries(
       value as Record<string, unknown>,
@@ -252,7 +252,8 @@ function copyPreservingHoles(value: readonly unknown[]): unknown[] {
  */
 function hasOwnEncodableForm(
   value: object | ((...args: unknown[]) => unknown),
-): value is { toJSON(): unknown } {
-  return Object.hasOwn(value, "toJSON") &&
-    typeof (value as { toJSON: unknown }).toJSON === "function";
+): value is { toEncodableForm(): unknown } {
+  return Object.hasOwn(value, "toEncodableForm") &&
+    typeof (value as { toEncodableForm: unknown }).toEncodableForm ===
+      "function";
 }

@@ -118,9 +118,10 @@ describe("content-addressed action identity", () => {
       .implementation;
     expect(reimpl).toBe(impl);
 
-    const json =
-      (refactory as unknown as { toJSON: () => Record<string, unknown> })
-        .toJSON();
+    const json = (refactory as unknown as {
+      toEncodableForm: () => Record<string, unknown>;
+    })
+      .toEncodableForm();
     expect(json.$implRef).toBeDefined();
     expect("implementation" in json).toBe(false);
   });
@@ -128,12 +129,14 @@ describe("content-addressed action identity", () => {
   it("serializes javascript modules with $implRef only (no legacy fields)", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);
-    const json = (module as Module & { toJSON?: () => unknown }).toJSON
-      ? (module as Module & { toJSON: () => unknown }).toJSON() as Record<
-        string,
-        unknown
-      >
-      : JSON.parse(JSON.stringify(module));
+    const json =
+      (module as Module & { toEncodableForm?: () => unknown }).toEncodableForm
+        ? (module as Module & { toEncodableForm: () => unknown })
+          .toEncodableForm() as Record<
+            string,
+            unknown
+          >
+        : JSON.parse(JSON.stringify(module));
 
     const ref = json.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
@@ -152,8 +155,8 @@ describe("content-addressed action identity", () => {
   it("a $implRef-only module survives artifact-index eviction (engine implementation index)", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);
-    const json = (module as Module & { toJSON: () => unknown })
-      .toJSON() as Record<string, unknown>;
+    const json = (module as Module & { toEncodableForm: () => unknown })
+      .toEncodableForm() as Record<string, unknown>;
     const ref = json.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
     expect("implementation" in json).toBe(false);
@@ -383,10 +386,10 @@ export default pattern<{ value: number }>(({ value }) => ({
       (n.module as Module).type === "javascript"
     );
     expect(node).toBeDefined();
-    const live = node!.module as Module & { toJSON?: () => unknown };
+    const live = node!.module as Module & { toEncodableForm?: () => unknown };
     const json =
-      (live.toJSON
-        ? live.toJSON()
+      (live.toEncodableForm
+        ? live.toEncodableForm()
         : JSON.parse(JSON.stringify(live))) as Record<string, unknown>;
     const ref = json.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();

@@ -17,6 +17,7 @@ import type {
   SchemaWithoutCell,
   Stream,
   StripCell,
+  toEncodableForm,
   toJSON,
 } from "./types.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -26,7 +27,7 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
-import { moduleToJSON } from "./json-utils.ts";
+import { moduleToEncodableForm } from "./json-utils.ts";
 import {
   brandTrustedBuilderArtifact,
   getArtifactEntryRef,
@@ -116,6 +117,11 @@ const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
 const SYNTHETIC_MAPPED_LINE = 1;
 const SYNTHETIC_MAPPED_COLUMN = 23;
 
+/** See the `toJSON` type: the member a FACTORY keeps for `JSON.stringify`. */
+function jsonMemberFor(module: Module & toEncodableForm): toJSON {
+  return { toJSON: () => module.toEncodableForm() };
+}
+
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
@@ -130,9 +136,9 @@ export function createNodeFactory<T = any, R = any>(
     moduleSpec.implementation = implementation;
   }
 
-  const module: Module & toJSON = {
+  const module: Module & toEncodableForm = {
     ...moduleSpec,
-    toJSON: () => moduleToJSON(module),
+    toEncodableForm: () => moduleToEncodableForm(module),
   };
   // A module with ifc confidentiality on its argument schema should have at least
   // that value on its result schema
@@ -140,15 +146,22 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  const factory = Object.assign((inputs: FactoryInput<T>): Reactive<R> => {
-    const outputs = reactive<R>(undefined, module.resultSchema);
-    const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
+  const factory = Object.assign(
+    (inputs: FactoryInput<T>): Reactive<R> => {
+      const outputs = reactive<R>(undefined, module.resultSchema);
+      const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
-    connectInputAndOutputs(node);
-    (outputs as OpaqueCell<R>).connect(node);
+      connectInputAndOutputs(node);
+      (outputs as OpaqueCell<R>).connect(node);
 
-    return outputs;
-  }, module) as ModuleFactory<T, R>;
+      return outputs;
+    },
+    module,
+    // A factory adds `toJSON`, which a module does not carry: a factory is
+    // what pattern source holds, so `JSON.stringify(someFactory)` has to keep
+    // answering. Same form, by the name that means it here.
+    jsonMemberFor(module),
+  ) as ModuleFactory<T, R>;
   factory.asScope = (scope: CellScope) =>
     createNodeFactory({ ...module, defaultScope: scope });
   // Provenance brand: every node factory (lift / handler / byRef / the list-op
@@ -428,7 +441,7 @@ function handlerInternal<E, T>(
     stateSchema as JSONSchema | undefined,
   );
 
-  const module: Handler<E, T> & toJSON & {
+  const module: Handler<E, T> & toEncodableForm & {
     bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
@@ -438,7 +451,7 @@ function handlerInternal<E, T>(
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
     bind: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
-    toJSON: () => moduleToJSON(module),
+    toEncodableForm: () => moduleToEncodableForm(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(writableProxy && { writableProxy: true }),
   };
@@ -467,6 +480,7 @@ function handlerInternal<E, T>(
       return eventStream;
     },
     module,
+    jsonMemberFor(module),
   );
 
   // Provenance brand, like every factory from `createNodeFactory` (whose

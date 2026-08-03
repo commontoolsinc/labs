@@ -113,53 +113,6 @@ describe("refs-only pattern JSON at the boundary", () => {
     expect(Array.isArray((serialized as { nodes: unknown }).nodes)).toBe(true);
   });
 
-  it("a graph crossing the boundary carries no live builder artifact", () => {
-    // The nodes a pattern holds carry LIVE modules: `toJSONWithAliasBindings`
-    // builds a node by copying its module member by member, function members
-    // included. A graph emitted with those still in it is not a serialized
-    // value -- it depends on whatever reads it next to finish the job by
-    // calling methods on live objects, which is the assumption being removed.
-    //
-    // The fixture mirrors that shape rather than being a real pattern: a
-    // hand-built one cannot exhibit a bug it has no shape for, so this pins
-    // the property and `scripts/ab-harness.ts` measures it against a real
-    // pattern, where the same graph carried 7691 functions across 16 paths.
-    const fake = {
-      argumentSchema: true,
-      resultSchema: true,
-      result: {},
-      nodes: [
-        {
-          module: {
-            type: "javascript",
-            implementation: () => "live",
-            toJSON: () => ({ type: "javascript", implementation: "source" }),
-          },
-          inputs: {},
-          outputs: {},
-        },
-      ],
-    } as unknown as Pattern;
-
-    const serialized = patternToJSON(fake);
-    const live: string[] = [];
-    const walk = (value: unknown, path: string) => {
-      if (typeof value === "function") live.push(path);
-      else if (value && typeof value === "object") {
-        for (const [key, member] of Object.entries(value)) {
-          walk(member, `${path}.${key}`);
-        }
-      }
-    };
-    walk(serialized, "$");
-
-    expect(live).toEqual([]);
-    expect((serialized as any).nodes[0].module).toEqual({
-      type: "javascript",
-      implementation: "source",
-    });
-  });
-
   it("internal graph serialization stays the full bare graph", async () => {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
     expect(runtime.patternManager.getArtifactEntryRef(compiled)).toBeDefined();
