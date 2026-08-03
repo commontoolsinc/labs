@@ -132,6 +132,40 @@ Rules:
 - Waves are processed in seq order; there is no concurrency per space.
   Cross-space concurrency is free (separate SpaceServers).
 
+## 3b. Reading state: discovery by running (D11)
+
+There is no static read analysis anywhere in v2. Reads are discovered by
+executing:
+
+- Every run (handler, computed, eager action) executes in a transaction
+  that logs each read — doc, path, version (the reactivity log,
+  `packages/runner/src/storage/reactivity-log.ts`). The scheduler
+  subscribes the node to exactly its LAST run's read set.
+- **Dynamic dependencies are one-run-late, and that is sound**: a node
+  cannot newly read C except as a consequence of a change in something
+  it already read — the branch that reaches C is conditioned on prior
+  inputs. Run k's read set decides the wake for k+1; dependencies
+  discovered in k+1 take effect for k+2.
+- **Whether a node runs at all** is the equality cutoff on the same
+  machinery: an unchanged upstream output never dirties downstream, so
+  conditional secondary inputs are never read and never subscribed.
+  Pull-based laziness composes: undemanded computeds do not run;
+  dirtiness travels last-known edges as a flag until demand pulls a
+  recompute.
+- **Snapshot discipline**: a wave reads the store at its input batch's
+  seq (mid-wave commits are next wave's input), so a mid-run discovered
+  read cannot tear.
+- **Cross-space**: the first foreign read (executed under the piece's
+  granted authority) registers, by being logged, a server-internal wake
+  on that doc for the home SpaceServer. Same one-run-late soundness.
+  v2 assumes spaces co-hosted on one memory server; sharding is out of
+  scope.
+- Read sets are scheduler memory ONLY. Persisting them per-run was v1's
+  evidence log — 130 KB per map run — and is FORBIDDEN (tripwires §8).
+  Corollary for recovery (§6): derivations need no commit replay —
+  instantiate and recompute from current state — which is why events
+  (`eventWatermark`) and W are the only persistent cursors.
+
 ## 4. Effectful nodes: memoization contract
 
 For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):

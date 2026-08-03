@@ -37,6 +37,13 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   one idempotent GET".
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
   is reversible. The overlay records the nonce it acted on.
+- **Unreplicated inputs**: a speculative read of a doc/path the client
+  has not replicated is PENDING for that branch — speculation NEVER
+  blocks on a fetch and never triggers a network read. The branch
+  renders its ordinary loading state and reconciles when the server's
+  derived value arrives. (The server discovers the same read by running
+  with the store local — serving-loop.md §3b; the asymmetry is the
+  point.)
 
 ## 3. Rendering
 
