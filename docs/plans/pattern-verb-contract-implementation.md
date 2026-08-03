@@ -4,6 +4,15 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-31**, C3 withdrawn in review (Berni): no result-schema
+emission for now — values flow schema-free through receipts, discovery falls
+back to prose descriptions, and the durable shape waits for the Fabric-types
+stream evolution rather than baking a `result` keyword into append-only
+baselines that its successor would have to migrate away from. The WS-C
+schema-generator bullet records what was built, what it proved, and the
+permanence gap the deferral accepts; the C3 issue row is marked deferred and
+the WS-C exit criterion is revised accordingly.
+
 **Amended 2026-07-30**, follow-up scope from the pre-dispatch gate review
 (#5147): WS-D gains D5 (refuse an absent payload the verb provably cannot run
 without) and D6 (the default-relaxation helper moves next to the runner's
@@ -281,14 +290,42 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   stream to reach another. Both options need a result parameter threaded
   through `Handler`/`HandlerFactory` regardless, since the factory returns
   the stream, so that work is not a differentiator.
-- **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
-  updates under `docs/specs/ts-transformer/`. (The runtime side already
+- ~~**ts-transformers:** lowering for value-returning `action` bodies; CTS
+  spec updates under `docs/specs/ts-transformer/`. (The runtime side already
   consumes returns — `handleJavaScriptHandlerResult` — so this is authoring
-  surface, not execution semantics.)
-- **schema-generator:** emit a result schema for stream/handler properties so
-  it reaches the piece's **durable** schema — the dependency verb discovery
-  named; mapping spec update in
-  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).
+  surface, not execution semantics.)~~ — **done (C2)**:
+  `VerbReturnValidationTransformer` (pipeline stage 6) errors
+  (`verb-result:undeclared-return`) when a void-declared verb's block body
+  explicitly returns a **definitely plain-shaped** expression —
+  object/array/string/template literals and arithmetic over them — pointing
+  the author at declaring the result on whichever surface they used. The
+  boundary is narrower than first drafted, for a measured reason: value
+  returns under void declarations are already sanctioned runtime idioms —
+  `return navigateTo(piece)`, returning a freshly created piece (notebook's
+  create-and-return actions), returning rendered UI — and the authored
+  surface renders `Reactive<T>` transparently (`navigateTo(...)` types as
+  plain `boolean`), so neither types nor provenance can separate those from
+  forgotten declarations; syntax is the honest signal, and each exemption is
+  recorded in the current-behavior spec (§6.10) and the pattern-language
+  spec (§5.8). Lowering itself needed nothing: the return was already
+  preserved verbatim (pinned by C1's fixture) and the runtime already
+  consumes it.
+- **schema-generator: result-schema emission is DEFERRED** (review, Berni
+  2026-07-31). C3 was built and proven — a `result` dialect keyword sibling
+  to `asCell`, compat-checker recursion with result-name permanence, fleet
+  upgrade verified — and then withdrawn before merge, deliberately: the
+  value path never needed it (results flow schema-free through receipts,
+  proven end to end before the keyword existed), and shipping a keyword into
+  durable schemas and append-only baselines would have hard-committed a
+  shape the coming Fabric-types stream evolution (roughly
+  `type: "handler", event: ..., result?: ...`) is expected to replace —
+  the compat rules we built would themselves have refused its later removal.
+  What the deferral costs, recorded as a known gap: **verb result shapes
+  have no update-gate protection** — "every published result name is
+  permanent" is unenforceable for results until a declared schema exists —
+  and agents cannot learn a result's shape before calling; the interim for
+  both is prose in the verb's `description`. Revisit as part of the
+  Fabric-types stream design, not before.
   Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
@@ -358,9 +395,12 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
   interprets. Settle this at the top of the C1 PR.~~ — settled in #5123; the
   decision and its measured costs are the **C1 fork — settled** bullet above.
-- **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
-  result schema appears in the durable schema; under the flag, both plain and
-  reactive returns are readable in the receipt cell. The plain half of that
+- **Exit (revised with the C3 deferral):** a CTS pattern declares a verb
+  returning `AddTopicResult`; under the flag, both plain and reactive
+  returns are readable in the receipt cell. The durable-schema half of the
+  original exit ("the result schema appears in the durable schema") moves
+  out of this workstream with C3 — the type-level declaration and the value
+  path stand alone until the Fabric-types stream design. The plain half of that
   readback is pinned at the runner already — `declared-result-e2e.test.ts`
   compiles a declared-result pattern through the real pipeline and reads the
   receipt back through `tx.handlingReceiptLink`, both flag states — landed
@@ -749,7 +789,7 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | B1 | cli: sink-based settlement, result cell address | S | — |
 | C1 | api: action return types, `Stream<E, R>` (rejection carrier deferred to `FabricError`) | M | — |
 | C2 | ts-transformers: value-returning action lowering + CTS spec | M | C1 |
-| C3 | schema-generator: result schemas for streams + mapping spec | M | C1 |
+| C3 | schema-generator: result schemas for streams + mapping spec — **deferred to the Fabric-types stream design** (review, 2026-07-31) | M | C1 |
 | C4 | runner: plain-return projection behind flag + registry entry | S | — |
 | C5 | schema-generator/runner: closed-world verb input schemas | S | C1 |
 | D1 | runner: eventId through send; structured receipt link on dispatch | M | — |
