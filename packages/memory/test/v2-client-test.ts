@@ -126,23 +126,52 @@ const abortAfterResponse = (
   };
 };
 
-const abortAfterListenerRemovals = (
+const trackAbortListeners = (
   controller: AbortController,
-  count: number,
-  reason: unknown,
-): AbortSignal => {
+  onRemoval?: (count: number) => void,
+): { signal: AbortSignal; abortListenerCount: () => number } => {
+  let active = 0;
   let removals = 0;
-  return new Proxy(controller.signal, {
+  return {
+    signal: new Proxy(controller.signal, {
+      get(target, property) {
+        if (property === "addEventListener") {
+          return (
+            ...args: Parameters<AbortSignal["addEventListener"]>
+          ): void => {
+            target.addEventListener(...args);
+            if (args[0] === "abort") active++;
+          };
+        }
+        if (property === "removeEventListener") {
+          return (
+            ...args: Parameters<AbortSignal["removeEventListener"]>
+          ): void => {
+            target.removeEventListener(...args);
+            if (args[0] === "abort") {
+              active--;
+              removals++;
+              onRemoval?.(removals);
+            }
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }),
+    abortListenerCount: () => active,
+  };
+};
+
+const abortBetweenInitialAndPostStartChecks = (
+  reason: Error,
+): AbortSignal => {
+  const signal = new AbortController().signal;
+  let abortedReads = 0;
+  return new Proxy(signal, {
     get(target, property) {
-      if (property === "removeEventListener") {
-        return (
-          ...args: Parameters<AbortSignal["removeEventListener"]>
-        ): void => {
-          target.removeEventListener(...args);
-          removals++;
-          if (removals === count) controller.abort(reason);
-        };
-      }
+      if (property === "aborted") return ++abortedReads > 1;
+      if (property === "reason") return reason;
       const value = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
@@ -213,6 +242,7 @@ Deno.test("memory v2 client rejects an already cancelled mount", async () => {
 Deno.test("memory v2 client propagates a synchronous mount auth failure", async () => {
   const client = await connect({ transport: handshakeTransport(HELLO_OK) });
   const controller = new AbortController();
+  const tracked = trackAbortListeners(controller);
   try {
     await assertRejects(
       () =>
@@ -222,30 +252,33 @@ Deno.test("memory v2 client propagates a synchronous mount auth failure", async 
           () => {
             throw new Error("mount auth failed");
           },
-          controller.signal,
+          tracked.signal,
         ),
       Error,
       "mount auth failed",
     );
+    assertEquals(tracked.abortListenerCount(), 0);
   } finally {
     await client.close();
   }
 });
 
-Deno.test("memory v2 client observes cancellation during mount auth", async () => {
+Deno.test("memory v2 client observes cancellation after mount auth starts", async () => {
   const client = await connect({ transport: handshakeTransport(HELLO_OK) });
-  const controller = new AbortController();
   const reason = new Error("cancel during mount auth");
+  const authFailure = new Error("mount auth completed after cancellation");
+  const signal = abortBetweenInitialAndPostStartChecks(reason);
   try {
     await assertRejects(
       () =>
         client.mount(
           "did:key:z6Mk-memory-v2-cancel-during-mount-auth",
           {},
-          () => {
-            controller.abort(reason);
-          },
-          controller.signal,
+          () =>
+            Promise.resolve().then(() => {
+              throw authFailure;
+            }),
+          signal,
         ),
       Error,
       reason.message,
@@ -270,10 +303,11 @@ Deno.test("memory v2 client observes cancellation after session open", async () 
   for (const [index, testCase] of cases.entries()) {
     const client = await connect({ transport: handshakeTransport(HELLO_OK) });
     const controller = new AbortController();
-    const signal = abortAfterListenerRemovals(
+    const tracked = trackAbortListeners(
       controller,
-      2,
-      testCase.reason,
+      (removals) => {
+        if (removals === 2) controller.abort(testCase.reason);
+      },
     );
     try {
       await assertRejects(
@@ -282,11 +316,12 @@ Deno.test("memory v2 client observes cancellation after session open", async () 
             `did:key:z6Mk-memory-v2-cancel-after-session-open-${index}`,
             {},
             undefined,
-            signal,
+            tracked.signal,
           ),
         Error,
         testCase.message,
       );
+      assertEquals(tracked.abortListenerCount(), 0);
     } finally {
       await client.close();
     }
