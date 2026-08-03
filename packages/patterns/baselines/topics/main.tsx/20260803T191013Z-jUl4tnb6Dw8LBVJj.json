@@ -595,11 +595,7 @@
       "TopicIndexRow": {
         "properties": {
           "commentCount": {
-            "default": 0,
-            "type": [
-              "number",
-              "undefined"
-            ]
+            "type": "number"
           },
           "createdAt": {
             "type": "number"
@@ -619,11 +615,7 @@
             }
           },
           "lastActivityAt": {
-            "default": 0,
-            "type": [
-              "number",
-              "undefined"
-            ]
+            "type": "number"
           },
           "referencedBy": {
             "description": "Sibling topics whose prose mentions this topic's fid.",

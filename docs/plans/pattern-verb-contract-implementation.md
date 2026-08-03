@@ -134,8 +134,9 @@ Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
   `index` rows reuse the crossref join, but every reference-valued field is
   DECLARED through a title-only `TopicIndexRef` — schemas filter visibility,
   so the row schema rather than reader discipline is what bounds a survey
-  read. The summary scalars ride in the row itself; the mixed-version scalars
-  mirror `TopicReference`'s absent-path shaping. The compat gate records the
+  read. The summary scalars ride in the row itself as plain numbers — the
+  computed coalesces a mixed-version sibling's absent path to 0, so only
+  `createdBy` (which has no honest zero) keeps the absent-path shaping. The compat gate records the
   new contract as updatable from every recorded baseline (a result addition
   is widening).
 - ~~Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create,

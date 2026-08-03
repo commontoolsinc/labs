@@ -119,15 +119,17 @@ export interface TopicIndexRef {
 
 /** One row of the board's compact discovery index: the child reference plus
  * scalar summaries and the prose reference edges as sibling references.
- * The mixed-version scalars mirror TopicReference's absent-path shaping — a
- * cold or older sibling projects them as the declared defaults. */
+ * The count/activity scalars are plain numbers — the computed coalesces a
+ * cold or older sibling's absent path to 0, so the row itself never carries
+ * the mixed-version undefined. `createdBy` keeps TopicReference's shaping:
+ * authorship has no honest zero, so absence stays declared. */
 export interface TopicIndexRow {
   topic: TopicIndexRef;
   title: string;
   createdAt: number;
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
-  commentCount: number | Default<0> | undefined;
-  lastActivityAt: number | Default<0> | undefined;
+  commentCount: number;
+  lastActivityAt: number;
   /** Sibling topics whose fids this topic's prose mentions. */
   refsOut: TopicIndexRef[];
   /** Sibling topics whose prose mentions this topic's fid. */
