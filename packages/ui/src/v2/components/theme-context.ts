@@ -25,74 +25,6 @@ export type ColorIntent = "neutral" | "primary" | "accent" | "danger";
 export type StatusIntent = "info" | "success" | "warning" | "error";
 
 /**
- * Coordinated sizing scale from Figma design system.
- * Each size bundles height, radius, icon sizes, spacing, padding, and typography.
- * These are structural constants, not theme-dependent.
- */
-export const SIZING_SCALE = {
-  xs: {
-    height: 16,
-    radius: 4,
-    iconLg: 12,
-    iconMd: 8,
-    iconSm: 6,
-    spacing: 2,
-    paddingH: 4,
-    paddingV: 2,
-    fontSize: 9,
-    lineHeight: 12,
-  },
-  sm: {
-    height: 24,
-    radius: 5,
-    iconLg: 16,
-    iconMd: 12,
-    iconSm: 10,
-    spacing: 4,
-    paddingH: 6,
-    paddingV: 4,
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  md: {
-    height: 32,
-    radius: 8,
-    iconLg: 20,
-    iconMd: 16,
-    iconSm: 12,
-    spacing: 8,
-    paddingH: 8,
-    paddingV: 8,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  lg: {
-    height: 40,
-    radius: 9,
-    iconLg: 24,
-    iconMd: 20,
-    iconSm: 16,
-    spacing: 12,
-    paddingH: 12,
-    paddingV: 8,
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  xl: {
-    height: 48,
-    radius: 10,
-    iconLg: 28,
-    iconMd: 24,
-    iconSm: 20,
-    spacing: 16,
-    paddingH: 16,
-    paddingV: 12,
-    fontSize: 18,
-    lineHeight: 24,
-  },
-} as const;
-
-/**
  * Comprehensive theme configuration for CF components
  */
 export interface CFTheme {
@@ -267,7 +199,7 @@ export function getSemanticSpacing(
 /**
  * Derive interaction state variants from a base color.
  */
-export function deriveColorFamily(base: string): {
+function deriveColorFamily(base: string): {
   default: string;
   pressed: string;
   soft: string;
@@ -421,89 +353,6 @@ export const defaultTheme: CFTheme = {
 };
 
 /**
- * Helper function to get a color value that can be either semantic or specific
- * @param value - Either a semantic color key or a specific color value/token
- * @param theme - Current theme for resolving semantic tokens
- * @returns Resolved color string
- */
-export function getThemeColor(
-  value: keyof CFTheme["colors"] | ColorToken | string,
-  theme: CFTheme,
-): string {
-  const colorScheme = resolveColorScheme(theme.colorScheme);
-
-  // If it's a semantic color key, resolve from theme
-  if (typeof value === "string" && value in theme.colors) {
-    const semanticToken = theme.colors[value as keyof CFTheme["colors"]];
-    return resolveColor(semanticToken, colorScheme);
-  }
-
-  // If it's a color token object, resolve it
-  if (
-    typeof value === "object" && value !== null &&
-    ("light" in value || "dark" in value)
-  ) {
-    return resolveColor(value as ColorToken, colorScheme);
-  }
-
-  // Otherwise, treat as specific color value
-  return value as string;
-}
-
-/**
- * Helper function to get spacing that can be either semantic or specific
- * @param value - Either semantic spacing descriptor or specific value
- * @param theme - Current theme for resolving semantic spacing
- * @returns CSS spacing value
- */
-export function getThemeSpacing(
-  value:
-    | `${keyof typeof BASE_SPACING}-${keyof typeof DENSITY_SCALES[
-      CFTheme["density"]
-    ]}`
-    | string,
-  theme: CFTheme,
-): string {
-  // If it's a semantic spacing descriptor (e.g., "lg-normal", "sm-tight")
-  if (typeof value === "string" && value.includes("-")) {
-    const [sizeStr, contextStr] = value.split("-") as [
-      keyof typeof BASE_SPACING,
-      keyof typeof DENSITY_SCALES[CFTheme["density"]],
-    ];
-    if (
-      sizeStr in BASE_SPACING && contextStr in DENSITY_SCALES[theme.density]
-    ) {
-      return getSemanticSpacing(theme.density, sizeStr, contextStr);
-    }
-  }
-
-  // Otherwise, treat as specific value
-  return value;
-}
-
-/**
- * Create a theme override with granular control
- * @param baseTheme - Base theme to extend
- * @param overrides - Specific overrides (can use semantic values)
- * @returns New theme with applied overrides
- */
-export function createThemeVariant(
-  baseTheme: CFTheme,
-  overrides: Partial<CFTheme> & {
-    colors?: Partial<CFTheme["colors"]> & Record<string, ColorToken | string>;
-  },
-): CFTheme {
-  return {
-    ...baseTheme,
-    ...overrides,
-    colors: {
-      ...baseTheme.colors,
-      ...overrides.colors,
-    },
-  };
-}
-
-/**
  * Merge a partial theme with the default theme, supporting pattern-style partial objects
  * @param partialTheme - Partial theme object that may contain pattern-style properties
  * @param baseTheme - Base theme to merge with (defaults to defaultTheme)
@@ -604,17 +453,12 @@ export function getAnimationDuration(speed: CFTheme["animationSpeed"]): string {
  * Apply theme properties to an element's style
  * @param element - Element to apply theme properties to
  * @param theme - Theme configuration
- * @param options - Additional options for customization
+ * @param additionalSpacing - Extra `--cf-theme-spacing-*` properties to emit
  */
 export function applyThemeToElement(
   element: HTMLElement,
   theme: CFTheme,
-  options: {
-    includeSpacing?: boolean;
-    includeColors?: boolean;
-    includeTypography?: boolean;
-    additionalSpacing?: Record<string, string>;
-  } = {},
+  additionalSpacing: Record<string, string> = {},
 ) {
   /*
    * Canonical theme contract:
@@ -622,235 +466,219 @@ export function applyThemeToElement(
    * - Typography is emitted as `--cf-theme-font-*` plus border radius and animation duration.
    * - Spacing is emitted as `--cf-theme-spacing-*`.
    *
-   * Compatibility aliases are also emitted for older v2 components that still read
-   * legacy `--cf-theme-*` names. New code should prefer the canonical namespaces above.
+   * Colors are additionally emitted under their legacy `--cf-theme-*` names,
+   * which `docs/common/patterns/style.md` lists for pattern authors. New code
+   * should prefer the canonical namespaces above.
    */
-  const {
-    includeSpacing = true,
-    includeColors = true,
-    includeTypography = true,
-    additionalSpacing = {},
-  } = options;
-
   const colorScheme = resolveColorScheme(theme.colorScheme);
 
   // Typography and base properties
-  if (includeTypography) {
-    element.style.setProperty("--cf-theme-font-family", theme.fontFamily);
-    element.style.setProperty("font-family", theme.fontFamily);
+  element.style.setProperty("--cf-theme-font-family", theme.fontFamily);
+  element.style.setProperty("font-family", theme.fontFamily);
+  element.style.setProperty(
+    "--cf-theme-mono-font-family",
+    theme.monoFontFamily,
+  );
+  element.style.setProperty("--cf-theme-font-mono", theme.monoFontFamily);
+  const effectiveBorderRadius = theme.borderRadius !== defaultTheme.borderRadius
+    ? theme.borderRadius
+    : `${theme.roundness * 0.5}rem`;
+  element.style.setProperty(
+    "--cf-theme-border-radius",
+    effectiveBorderRadius,
+  );
+  element.style.setProperty(
+    "--cf-theme-border-radius-full",
+    "var(--cf-border-radius-full, 9999px)",
+  );
+  const effectiveFontSize = theme.fontSize !== defaultTheme.fontSize
+    ? theme.fontSize
+    : `${theme.scale}rem`;
+  element.style.setProperty("--cf-theme-font-size", effectiveFontSize);
+  const effectiveDuration = theme.animationSpeed !== "normal"
+    ? getAnimationDuration(theme.animationSpeed)
+    : `${Math.round(200 * theme.motion)}ms`;
+  element.style.setProperty(
+    "--cf-theme-animation-duration",
+    effectiveDuration,
+  );
+
+  // Colors - resolve all ColorTokens
+  const colorMap = {
+    "primary": theme.colors.primary,
+    "primary-foreground": theme.colors.primaryForeground,
+    "secondary": theme.colors.secondary,
+    "secondary-foreground": theme.colors.secondaryForeground,
+    "background": theme.colors.background,
+    "surface": theme.colors.surface,
+    "surface-hover": theme.colors.surfaceHover,
+    "text": theme.colors.text,
+    "text-muted": theme.colors.textMuted,
+    "border": theme.colors.border,
+    "border-muted": theme.colors.borderMuted,
+    "success": theme.colors.success,
+    "success-foreground": theme.colors.successForeground,
+    "error": theme.colors.error,
+    "error-foreground": theme.colors.errorForeground,
+    "warning": theme.colors.warning,
+    "warning-foreground": theme.colors.warningForeground,
+    "accent": theme.colors.accent,
+    "accent-foreground": theme.colors.accentForeground,
+    "brand": theme.colors.brand,
+    "brand-foreground": theme.colors.brandForeground,
+    "text-tertiary": theme.colors.textTertiary,
+    "text-disabled": theme.colors.textDisabled,
+    "surface-disabled": theme.colors.surfaceDisabled,
+    "surface-pressed": theme.colors.surfacePressed,
+    "surface-tertiary": theme.colors.surfaceTertiary,
+    "surface-inverse": theme.colors.surfaceInverse,
+    "text-on-color-secondary": theme.colors.textOnColorSecondary,
+    "text-on-inverse": theme.colors.textOnInverse,
+    "text-pressed": theme.colors.textPressed,
+  };
+
+  Object.entries(colorMap).forEach(([key, token]) => {
     element.style.setProperty(
-      "--cf-theme-mono-font-family",
-      theme.monoFontFamily,
+      `--cf-theme-color-${key}`,
+      resolveColor(token, colorScheme),
     );
-    element.style.setProperty("--cf-theme-font-mono", theme.monoFontFamily);
-    const effectiveBorderRadius =
-      theme.borderRadius !== defaultTheme.borderRadius
-        ? theme.borderRadius
-        : `${theme.roundness * 0.5}rem`;
+  });
+
+  const legacyColorAliases = {
+    "background": resolveColor(theme.colors.background, colorScheme),
+    "border": resolveColor(theme.colors.border, colorScheme),
+    "border-muted": resolveColor(theme.colors.borderMuted, colorScheme),
+    "error": resolveColor(theme.colors.error, colorScheme),
+    "primary": resolveColor(theme.colors.primary, colorScheme),
+    "success": resolveColor(theme.colors.success, colorScheme),
+    "surface": resolveColor(theme.colors.surface, colorScheme),
+    "surface-hover": resolveColor(theme.colors.surfaceHover, colorScheme),
+    "text": resolveColor(theme.colors.text, colorScheme),
+    "text-muted": resolveColor(theme.colors.textMuted, colorScheme),
+  };
+
+  Object.entries(legacyColorAliases).forEach(([key, value]) => {
+    element.style.setProperty(`--cf-theme-${key}`, value);
+  });
+
+  element.style.setProperty(
+    "--cf-theme-color-error-surface",
+    `color-mix(in srgb, ${resolveColor(theme.colors.error, colorScheme)} 12%, ${
+      resolveColor(theme.colors.surface, colorScheme)
+    })`,
+  );
+  element.style.setProperty(
+    "--cf-theme-color-error-light",
+    `color-mix(in srgb, ${resolveColor(theme.colors.error, colorScheme)} 18%, ${
+      resolveColor(theme.colors.surface, colorScheme)
+    })`,
+  );
+  element.style.setProperty(
+    "--cf-theme-color-primary-light",
+    `color-mix(in srgb, ${
+      resolveColor(theme.colors.primary, colorScheme)
+    } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+  );
+  element.style.setProperty(
+    "--cf-theme-color-success-light",
+    `color-mix(in srgb, ${
+      resolveColor(theme.colors.success, colorScheme)
+    } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+  );
+  element.style.setProperty(
+    "--cf-theme-color-muted",
+    resolveColor(theme.colors.surfaceTertiary, colorScheme),
+  );
+  element.style.setProperty(
+    "--cf-theme-color-text-secondary",
+    resolveColor(theme.colors.textMuted, colorScheme),
+  );
+
+  // Derived color families for ColorIntent
+  const intentMap: Array<{ name: string; base: ColorToken }> = [
+    { name: "primary", base: theme.colors.primary },
+    { name: "accent", base: theme.colors.accent },
+    { name: "danger", base: theme.colors.error },
+  ];
+  for (const { name, base: token } of intentMap) {
+    const base = resolveColor(token, colorScheme);
+    const family = deriveColorFamily(base);
     element.style.setProperty(
-      "--cf-theme-border-radius",
-      effectiveBorderRadius,
+      `--cf-theme-color-${name}-pressed`,
+      family.pressed,
     );
+    element.style.setProperty(`--cf-theme-color-${name}-soft`, family.soft);
     element.style.setProperty(
-      "--cf-theme-border-radius-full",
-      "var(--cf-border-radius-full, 9999px)",
-    );
-    const effectiveFontSize = theme.fontSize !== defaultTheme.fontSize
-      ? theme.fontSize
-      : `${theme.scale}rem`;
-    element.style.setProperty("--cf-theme-font-size", effectiveFontSize);
-    const effectiveDuration = theme.animationSpeed !== "normal"
-      ? getAnimationDuration(theme.animationSpeed)
-      : `${Math.round(200 * theme.motion)}ms`;
-    element.style.setProperty(
-      "--cf-theme-animation-duration",
-      effectiveDuration,
+      `--cf-theme-color-${name}-subtle`,
+      family.subtle,
     );
   }
 
-  // Colors - resolve all ColorTokens
-  if (includeColors) {
-    const colorMap = {
-      "primary": theme.colors.primary,
-      "primary-foreground": theme.colors.primaryForeground,
-      "secondary": theme.colors.secondary,
-      "secondary-foreground": theme.colors.secondaryForeground,
-      "background": theme.colors.background,
-      "surface": theme.colors.surface,
-      "surface-hover": theme.colors.surfaceHover,
-      "text": theme.colors.text,
-      "text-muted": theme.colors.textMuted,
-      "border": theme.colors.border,
-      "border-muted": theme.colors.borderMuted,
-      "success": theme.colors.success,
-      "success-foreground": theme.colors.successForeground,
-      "error": theme.colors.error,
-      "error-foreground": theme.colors.errorForeground,
-      "warning": theme.colors.warning,
-      "warning-foreground": theme.colors.warningForeground,
-      "accent": theme.colors.accent,
-      "accent-foreground": theme.colors.accentForeground,
-      "brand": theme.colors.brand,
-      "brand-foreground": theme.colors.brandForeground,
-      "text-tertiary": theme.colors.textTertiary,
-      "text-disabled": theme.colors.textDisabled,
-      "surface-disabled": theme.colors.surfaceDisabled,
-      "surface-pressed": theme.colors.surfacePressed,
-      "surface-tertiary": theme.colors.surfaceTertiary,
-      "surface-inverse": theme.colors.surfaceInverse,
-      "text-on-color-secondary": theme.colors.textOnColorSecondary,
-      "text-on-inverse": theme.colors.textOnInverse,
-      "text-pressed": theme.colors.textPressed,
-    };
-
-    Object.entries(colorMap).forEach(([key, token]) => {
-      element.style.setProperty(
-        `--cf-theme-color-${key}`,
-        resolveColor(token, colorScheme),
-      );
-    });
-
-    const legacyColorAliases = {
-      "background": resolveColor(theme.colors.background, colorScheme),
-      "border": resolveColor(theme.colors.border, colorScheme),
-      "border-muted": resolveColor(theme.colors.borderMuted, colorScheme),
-      "error": resolveColor(theme.colors.error, colorScheme),
-      "primary": resolveColor(theme.colors.primary, colorScheme),
-      "success": resolveColor(theme.colors.success, colorScheme),
-      "surface": resolveColor(theme.colors.surface, colorScheme),
-      "surface-hover": resolveColor(theme.colors.surfaceHover, colorScheme),
-      "text": resolveColor(theme.colors.text, colorScheme),
-      "text-muted": resolveColor(theme.colors.textMuted, colorScheme),
-    };
-
-    Object.entries(legacyColorAliases).forEach(([key, value]) => {
-      element.style.setProperty(`--cf-theme-${key}`, value);
-    });
-
+  // Derived color families for StatusIntent
+  const statusEntries: Array<
+    { name: string; base: ColorToken; fg: ColorToken }
+  > = [
+    {
+      name: "info",
+      base: theme.colors.primary,
+      fg: theme.colors.primaryForeground,
+    },
+    {
+      name: "success",
+      base: theme.colors.success,
+      fg: theme.colors.successForeground,
+    },
+    {
+      name: "warning",
+      base: theme.colors.warning,
+      fg: theme.colors.warningForeground,
+    },
+    {
+      name: "error",
+      base: theme.colors.error,
+      fg: theme.colors.errorForeground,
+    },
+  ];
+  for (const { name, base: baseToken, fg: fgToken } of statusEntries) {
+    const base = resolveColor(baseToken, colorScheme);
+    const family = deriveColorFamily(base);
+    element.style.setProperty(`--cf-theme-color-status-${name}`, base);
     element.style.setProperty(
-      "--cf-theme-color-error-surface",
-      `color-mix(in srgb, ${
-        resolveColor(theme.colors.error, colorScheme)
-      } 12%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+      `--cf-theme-color-status-${name}-pressed`,
+      family.pressed,
     );
     element.style.setProperty(
-      "--cf-theme-color-error-light",
-      `color-mix(in srgb, ${
-        resolveColor(theme.colors.error, colorScheme)
-      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+      `--cf-theme-color-status-${name}-soft`,
+      family.soft,
     );
     element.style.setProperty(
-      "--cf-theme-color-primary-light",
-      `color-mix(in srgb, ${
-        resolveColor(theme.colors.primary, colorScheme)
-      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+      `--cf-theme-color-status-${name}-subtle`,
+      family.subtle,
     );
     element.style.setProperty(
-      "--cf-theme-color-success-light",
-      `color-mix(in srgb, ${
-        resolveColor(theme.colors.success, colorScheme)
-      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+      `--cf-theme-color-status-${name}-foreground`,
+      resolveColor(fgToken, colorScheme),
     );
-    element.style.setProperty(
-      "--cf-theme-color-muted",
-      resolveColor(theme.colors.surfaceTertiary, colorScheme),
-    );
-    element.style.setProperty(
-      "--cf-theme-color-text-secondary",
-      resolveColor(theme.colors.textMuted, colorScheme),
-    );
-
-    // Derived color families for ColorIntent
-    const intentMap: Array<{ name: string; base: ColorToken }> = [
-      { name: "primary", base: theme.colors.primary },
-      { name: "accent", base: theme.colors.accent },
-      { name: "danger", base: theme.colors.error },
-    ];
-    for (const { name, base: token } of intentMap) {
-      const base = resolveColor(token, colorScheme);
-      const family = deriveColorFamily(base);
-      element.style.setProperty(
-        `--cf-theme-color-${name}-pressed`,
-        family.pressed,
-      );
-      element.style.setProperty(`--cf-theme-color-${name}-soft`, family.soft);
-      element.style.setProperty(
-        `--cf-theme-color-${name}-subtle`,
-        family.subtle,
-      );
-    }
-
-    // Derived color families for StatusIntent
-    const statusEntries: Array<
-      { name: string; base: ColorToken; fg: ColorToken }
-    > = [
-      {
-        name: "info",
-        base: theme.colors.primary,
-        fg: theme.colors.primaryForeground,
-      },
-      {
-        name: "success",
-        base: theme.colors.success,
-        fg: theme.colors.successForeground,
-      },
-      {
-        name: "warning",
-        base: theme.colors.warning,
-        fg: theme.colors.warningForeground,
-      },
-      {
-        name: "error",
-        base: theme.colors.error,
-        fg: theme.colors.errorForeground,
-      },
-    ];
-    for (const { name, base: baseToken, fg: fgToken } of statusEntries) {
-      const base = resolveColor(baseToken, colorScheme);
-      const family = deriveColorFamily(base);
-      element.style.setProperty(`--cf-theme-color-status-${name}`, base);
-      element.style.setProperty(
-        `--cf-theme-color-status-${name}-pressed`,
-        family.pressed,
-      );
-      element.style.setProperty(
-        `--cf-theme-color-status-${name}-soft`,
-        family.soft,
-      );
-      element.style.setProperty(
-        `--cf-theme-color-status-${name}-subtle`,
-        family.subtle,
-      );
-      element.style.setProperty(
-        `--cf-theme-color-status-${name}-foreground`,
-        resolveColor(fgToken, colorScheme),
-      );
-    }
   }
 
   // Semantic spacing
-  if (includeSpacing) {
-    const spacingMap = {
-      "tight": getSemanticSpacing(theme.density, "xs", "tight"),
-      "normal": getSemanticSpacing(theme.density, "sm", "normal"),
-      "loose": getSemanticSpacing(theme.density, "md", "loose"),
-      "padding-message": getSemanticSpacing(theme.density, "lg", "normal"),
-      "padding-code": getSemanticSpacing(theme.density, "sm", "tight"),
-      "padding-block": getSemanticSpacing(theme.density, "md", "normal"),
-      ...additionalSpacing,
-    };
+  const spacingMap = {
+    "tight": getSemanticSpacing(theme.density, "xs", "tight"),
+    "normal": getSemanticSpacing(theme.density, "sm", "normal"),
+    "loose": getSemanticSpacing(theme.density, "md", "loose"),
+    "padding-message": getSemanticSpacing(theme.density, "lg", "normal"),
+    "padding-code": getSemanticSpacing(theme.density, "sm", "tight"),
+    "padding-block": getSemanticSpacing(theme.density, "md", "normal"),
+    ...additionalSpacing,
+  };
 
-    Object.entries(spacingMap).forEach(([key, value]) => {
-      element.style.setProperty(`--cf-theme-spacing-${key}`, value);
-      if (key.startsWith("padding-") || key === "message-bottom") {
-        element.style.setProperty(`--cf-theme-${key}`, value);
-      }
-    });
+  Object.entries(spacingMap).forEach(([key, value]) => {
+    element.style.setProperty(`--cf-theme-spacing-${key}`, value);
+  });
 
-    element.style.setProperty("--cf-theme-spacing", spacingMap.normal);
-    element.style.setProperty("--cf-theme-spacing-compact", spacingMap.tight);
-    element.style.setProperty("--cf-theme-padding", spacingMap.normal);
-  }
+  element.style.setProperty("--cf-theme-spacing", spacingMap.normal);
+  element.style.setProperty("--cf-theme-spacing-compact", spacingMap.tight);
+  element.style.setProperty("--cf-theme-padding", spacingMap.normal);
 }
 
 /**

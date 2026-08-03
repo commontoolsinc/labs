@@ -47,6 +47,7 @@ import {
   touchedPointerPaths,
 } from "../../../memory/v2/patch.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   isObject,
@@ -185,36 +186,28 @@ const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
 
 // Strategy 1 — client-side conflict admission control (EXPERIMENT, default off).
 // Once a commit conflicts, the client knows its read set is behind on the
-// touched ids until the server catches it up. Two modes gate what we do with a
-// new commit whose reads land on a still-catching-up id:
+// touched ids until the server catches it up. "preempt" (coarse) gates what we
+// do with a new commit whose reads land on a still-catching-up id: assume it
+// will conflict and pre-empt it locally (revert + re-run after catch-up)
+// without sending. Measured NET-NEGATIVE on the lunch-poll workload: the stale
+// floor taints every id a losing tx touched (incl. write targets), so it
+// pre-empts commits that would have SUCCEEDED, turning them into extra
+// revert+re-run cycles. 5x5 server conflicts rose ~1380 -> ~1600 (plus
+// pre-empts), wall time flat (conflicts are cheap).
 //
-//   "preempt" (coarse): assume it will conflict and pre-empt it locally (revert
-//     + re-run after catch-up) without sending. Measured NET-NEGATIVE on the
-//     lunch-poll workload: the stale floor taints every id a losing tx touched
-//     (incl. write targets), so it pre-empts commits that would have SUCCEEDED,
-//     turning them into extra revert+re-run cycles. 5x5 server conflicts rose
-//     ~1380 -> ~1600 (plus pre-empts), wall time flat (conflicts are cheap).
-//
-//   "hold" (precise): hold the commit until the catch-up is applied, then run
-//     the server's precondition check LOCALLY against the now-current confirmed
-//     seqs. Locally revert only the commits that are genuinely stale; SEND the
-//     rest. Eliminates the coarse mode's false pre-empts and stops sending
-//     knowingly-doomed commits to the server.
-//
-//     Measured NEUTRAL (safe but no win) on lunch-poll: heldRevert ~= 0,
-//     heldSent ~= 70, conflicts ~= baseline. The reason is fundamental — the
-//     staleness here is SERVER-side, not locally knowable: when the action
-//     runs it reads the latest LOCAL confirmed value, which looks current
-//     (read.seq == local confirmed seq), so the local check cannot tell the
-//     commit is behind the server. Only the server (or a not-yet-received sync)
-//     knows. So the precise check correctly SENDS the held commits (no false
-//     pre-empts, unlike coarse) but cannot prevent the server conflict. This
-//     mode only pays off where a client routinely holds commits built against
-//     data its own later syncs have already superseded.
+// A "hold" (precise) mode also existed here: hold the commit until catch-up,
+// then run the server's precondition check LOCALLY, sending only the reads
+// that still hold. It was removed (#5110 review, CT-1925) — holding one
+// commit's send while a later, independent one proceeded violated the
+// increasing-localSeq send order required by 04-protocol.md §3.9 (reproduced
+// same-session admission order [1, 3, 2] against the real engine), and it
+// never showed a measured win (NEUTRAL on lunch-poll: the staleness is only
+// knowable on the server, not locally). Do not resurrect a wait-then-send
+// admission gate without re-solving the ordering violation.
 //
 // Default off. Do NOT enable without re-measuring on the target workload.
 // Catalogued in docs/development/EXPERIMENTAL_OPTIONS.md (conflictAdmissionMode).
-type ConflictAdmissionMode = "off" | "preempt" | "hold";
+type ConflictAdmissionMode = "off" | "preempt";
 let conflictAdmissionModeOverride: ConflictAdmissionMode | undefined;
 export function setConflictAdmissionMode(
   mode: ConflictAdmissionMode | undefined,
@@ -233,7 +226,6 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
   }
   try {
     const value = Deno.env.get("CF_CONFLICT_ADMISSION");
-    if (value === "hold") return "hold";
     if (value === "preempt" || value === "1" || value === "true") {
       return "preempt";
     }
@@ -242,7 +234,31 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
     return "off";
   }
 }
-const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
+/**
+ * Identity of one data-URI pull: the URI, the schema it was read against, the
+ * path into it, and where it lives.
+ *
+ * The result is a hash rather than those parts joined together. A data URI
+ * carries its whole value in its id, so the id is the one part that varies
+ * without bound — a rendered UI tree reaches tens of kilobytes — and a cache
+ * keyed on it directly would cost that much per entry.
+ */
+export function dataURISyncKey(identity: {
+  id: string;
+  schema: JSONSchema | undefined;
+  path: readonly string[];
+  space: MemorySpace;
+  scope: CellScope | undefined;
+}): string {
+  return hashStringOf([
+    identity.id,
+    identity.schema ? hashStringOf(identity.schema) : "",
+    [...identity.path],
+    identity.space,
+    normalizeCellScope(identity.scope),
+  ]);
+}
+
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
 
@@ -850,6 +866,13 @@ export class StorageManager implements IStorageManager {
   // absent targets (dangling links, deleted docs) from churning the
   // cross-space convergence loop on every read.
   #docPullKicks = new Set<string>();
+  // Data URIs whose linked targets this manager has already pulled, keyed by a
+  // hash of the URI, schema, path, space, and scope. Per manager rather than
+  // per process: a hit skips the pull, and a manager that inherited another
+  // manager's hit would leave its own replica without those documents.
+  #dataURISyncs = new BoundedKeyMap<string, Promise<void>>(
+    DATA_URI_SYNC_CACHE_MAX,
+  );
   // In-flight commits, registered synchronously by the transaction layer at
   // commit() entry (see IStorageManager.trackPendingCommit). This is the
   // write-durability barrier: distinct from #crossSpacePromises, which also
@@ -1108,6 +1131,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
     this.#providers.clear();
+    this.#dataURISyncs.clear();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1119,6 +1143,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
     );
     this.#providers.clear();
+    this.#dataURISyncs.clear();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1461,47 +1486,40 @@ export class StorageManager implements IStorageManager {
       .finally(() => this.resolveCrossSpace(resolve));
   }
 
-  private syncDataURICell<T>(
+  private async syncDataURICell<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
   ): Promise<Cell<T>> {
-    const pathStr = JSON.stringify(cell.path);
-    const schemaStr = schema ? hashStringOf(schema) : "";
-    const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}|${
-      normalizeCellScope(scope)
-    }`;
-    const existing = dataURISyncCache.get(cacheKey);
-    if (existing) {
-      return existing as Promise<Cell<T>>;
-    }
-    const promise = this.syncDataURICellUncached(
-      cell,
-      space,
+    const cacheKey = dataURISyncKey({
       id,
       schema,
+      path: cell.path.map(String),
+      space,
       scope,
-    );
-    if (dataURISyncCache.size >= DATA_URI_SYNC_CACHE_MAX) {
-      dataURISyncCache.clear();
+    });
+    let work = this.#dataURISyncs.get(cacheKey);
+    if (work === undefined) {
+      work = this.syncDataURILinkTargets(cell, space, id, schema, scope);
+      this.#dataURISyncs.set(cacheKey, work);
     }
-    dataURISyncCache.set(cacheKey, promise);
-    return promise;
+    await work;
+    return cell;
   }
 
-  private async syncDataURICellUncached<T>(
+  private async syncDataURILinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
-  ): Promise<Cell<T>> {
+  ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
       if (!isRecord(value) && !Array.isArray(value)) {
-        return cell;
+        return;
       }
       value = (value as Record<string, unknown>)[segment];
     }
@@ -1524,7 +1542,6 @@ export class StorageManager implements IStorageManager {
     if (promises.length > 0) {
       await Promise.all(promises);
     }
-    return cell;
   }
 
   private collectLinkedCellSyncs(
@@ -3171,65 +3188,18 @@ class SpaceReplica implements ISpaceReplica {
       if (admissionMode !== "off") {
         const threshold = this.preemptThreshold(commit);
         if (threshold !== undefined) {
-          if (admissionMode === "hold") {
-            const rejection = this.makePreemptRejection(commit, threshold);
-            // Precise mode: hold until the catch-up is applied, then run the
-            // server's stale-read check locally. Revert only the genuinely stale
-            // commits; fall through to send the ones whose reads still hold.
-            try {
-              await this.waitForCaughtUpLocalSeq(threshold);
-            } catch {
-              // Session/replica closing or reset: do not open/send a new session
-              // while shutdown is in progress. Finalize the held rejection so the
-              // optimistic write is dropped and close can drain promptly.
-              return await this.finalizeRejection(
-                localSeq,
-                operations,
-                source,
-                rejection,
-              );
-            }
-            if (inFlight?.localRejectionValue !== undefined) {
-              // A pending dependency was dropped while we held for catch-up;
-              // the commit is provably doomed — finalize without sending.
-              return await this.finalizeRejection(
-                localSeq,
-                operations,
-                source,
-                inFlight.localRejectionValue,
-              );
-            }
-            if (!this.#closed && this.commitReadsStaleLocally(commit)) {
-              logger.debug("commit-held-revert", () => [
-                `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
-                { localSeq, operations: operations.length },
-              ]);
-              return await this.finalizeRejection(
-                localSeq,
-                operations,
-                source,
-                rejection,
-              );
-            }
-            logger.debug("commit-held-sent", () => [
-              `held commit sent after catch-up (reads still valid)`,
-              { localSeq, operations: operations.length },
-            ]);
-            // fall through to send
-          } else {
-            // Coarse mode: assume conflict and pre-empt without sending.
-            const rejection = this.makePreemptRejection(commit, threshold);
-            logger.debug("commit-preempted", () => [
-              `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
-              { localSeq, operations: operations.length },
-            ]);
-            return await this.finalizeRejection(
-              localSeq,
-              operations,
-              source,
-              rejection,
-            );
-          }
+          // Coarse mode: assume conflict and pre-empt without sending.
+          const rejection = this.makePreemptRejection(commit, threshold);
+          logger.debug("commit-preempted", () => [
+            `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
+            { localSeq, operations: operations.length },
+          ]);
+          return await this.finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+          );
         }
       }
       // The push marker window covers observation flush + (re)dial + send +
@@ -3787,23 +3757,6 @@ class SpaceReplica implements ISpaceReplica {
       consider(read.id, read.scope);
     }
     return threshold;
-  }
-
-  // The server's stale-read precondition check, run LOCALLY against the current
-  // confirmed seqs (use after catch-up has been applied). Returns true only when
-  // a confirmed read is PROVABLY behind our local confirmed base — i.e. the
-  // commit is genuinely going to conflict. Anything we cannot prove stale
-  // (unknown id, no local record, or only pending reads) returns false so the
-  // commit is still sent and the server stays the source of truth.
-  private commitReadsStaleLocally(commit: ClientCommit): boolean {
-    for (const read of commit.reads.confirmed) {
-      const record = this.#docs.get(docKey(read.id as URI, read.scope));
-      const confirmedSeq = record?.confirmed.seq ?? 0;
-      if (read.seq < confirmedSeq) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private makePreemptRejection(

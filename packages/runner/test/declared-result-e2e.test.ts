@@ -7,6 +7,13 @@
 // result authoring surface. This is the readback half of WS-C's exit
 // criterion, pinned at the runner in addition to the end-to-end fixture
 // (pattern-verb-contract-implementation.md, D4).
+//
+// The incidental-cell-return case pins the receipt write's conversion: `set()`
+// returns its cell for chaining, so an expression-body
+// `action(() => cell.set(...))` returns a live Cell. The receipt write goes
+// through the cell's standard write flow, so that return is recorded as a LINK
+// to the mutated cell — receipts reflect what was returned (a raw write fails
+// the whole handling on the live object instead).
 import {
   afterEach,
   beforeEach,
@@ -24,6 +31,8 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 
 // One verb declared with `action<Event, Result>` whose body returns a value
 // derived from the event (provably from that dispatch), and one value-less
@@ -47,6 +56,7 @@ const DECLARED_RESULT_PROGRAM: RuntimeProgram = {
       "interface Verbs {",
       "  addTopic: Stream<AddTopic, AddTopicResult>;",
       "  touch: Stream<AddTopic>;",
+      "  bump: Stream<AddTopic>;",
       "  count: number;",
       "}",
       "",
@@ -62,7 +72,12 @@ const DECLARED_RESULT_PROGRAM: RuntimeProgram = {
       "    count.set(count.get() + 1);",
       "  });",
       "",
-      "  return { addTopic, touch, count };",
+      "  // Expression body: implicitly returns `count.set(...)`'s chained",
+      "  // cell — the incidental cell return the standard receipt write",
+      "  // conversion records as a link to the mutated cell.",
+      "  const bump = action((_event: AddTopic) => count.set(count.get() + 1));",
+      "",
+      "  return { addTopic, touch, bump, count };",
       "});",
     ].join("\n"),
   }],
@@ -121,6 +136,7 @@ describe("compiled CTS action<E, R> results in receipts", () => {
     const rootCell = runtime.getCell<{
       addTopic: unknown;
       touch: unknown;
+      bump: unknown;
       count: number;
     }>(
       space,
@@ -207,6 +223,50 @@ describe("compiled CTS action<E, R> results in receipts", () => {
 
     // The two receipts are distinct documents.
     expect(outcomes[0].receiptLink!.id).not.toBe(outcomes[1].receiptLink!.id);
+  });
+
+  it("projects an incidental cell return (chained set) as a link to the mutated cell", async () => {
+    const root = await instantiate("incidental cell return root");
+    const outcomes: Outcome[] = [];
+
+    dispatch(
+      root.key("bump") as Cell<unknown>,
+      { title: "incidental" },
+      "evt:declared-result:3:bump",
+      outcomes,
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => outcomes.length === 1,
+      "incidental-cell-return event did not settle",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    // The handling commits — the chained cell return must not fail the
+    // action ("Cannot clone: CellImpl", the raw-write bug) — and the body
+    // ran.
+    expect(outcomes[0].status).toBe("done");
+    expect(await root.key("count").pull()).toBe(1);
+
+    // The receipt went through the standard cell-write conversion, so it
+    // carries a LINK to the returned cell. Assert by identity, not shape:
+    // resolve both the stored link and the pattern's own `count` cell
+    // through the same link machinery and compare addresses.
+    const receipt = runtime.getCellFromLink<unknown>(
+      outcomes[0].receiptLink!,
+    );
+    await receipt.pull();
+    const written = parseLink(receipt.getRaw(), receipt);
+    expect(written).toBeDefined();
+    const writtenResolved = resolveLink(runtime, runtime.readTx(), written!);
+    const target = resolveLink(
+      runtime,
+      runtime.readTx(),
+      (root.key("count") as Cell<number>).getAsNormalizedFullLink(),
+    );
+    expect(writtenResolved.space).toBe(target.space);
+    expect(writtenResolved.id).toBe(target.id);
+    expect(writtenResolved.path).toEqual(target.path);
   });
 
   it("discards the declared result while plainResultReceipts is off (default)", async () => {

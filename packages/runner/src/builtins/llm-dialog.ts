@@ -53,6 +53,7 @@ import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import {
   isCell,
   isStream,
+  markRuntimeInjectedEventKeys,
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { resolveLinkScope } from "../scope.ts";
@@ -2751,14 +2752,38 @@ async function handleInvoke(
     if (pattern) {
       runtime.run(tx, pattern, invocationArgs, result);
     } else if (handler) {
-      handler.withTx(tx).send({
-        ...input,
-        result, // doesn't HAVE to be used, but can be
-      }, (completedTx: IExtendedStorageTransaction) => {
-        const summary = formatTransactionSummary(completedTx, space);
-        const value = result.withTx(completedTx);
-        resolve({ value, summary });
-      });
+      // Inject the result cell only when the caller's input does not carry a
+      // `result` of its own. Overwriting would silently DISCARD caller data
+      // before the closed-world gate could see it — the accepted-and-ignored
+      // failure mode C5 kills — so a caller-supplied `result` flows through
+      // UNMARKED instead: against a closed schema that does not declare it,
+      // the gate refuses the call; against an open or declaring schema it is
+      // the caller's ordinary field. The advertised schema hides `result`
+      // (stripInjectedResult), so a well-behaved caller never sends one and
+      // always gets the injected cell.
+      const injectResult = !(isRecord(input) && Object.hasOwn(input, "result"));
+      handler.withTx(tx).send(
+        injectResult
+          ? {
+            ...input,
+            result, // doesn't HAVE to be used, but can be
+          }
+          : input,
+        (completedTx: IExtendedStorageTransaction) => {
+          const summary = formatTransactionSummary(completedTx, space);
+          const value = result.withTx(completedTx);
+          resolve({ value, summary });
+        },
+        // Provenance for the closed-world gate: `result` is OUR injection,
+        // named through the mint-gated internal options bag (see
+        // markRuntimeInjectedEventKeys) — never inferable from the payload's
+        // shape, so nothing a caller sends can claim the exemption.
+        injectResult
+          ? {
+            runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
+          }
+          : undefined,
+      );
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
