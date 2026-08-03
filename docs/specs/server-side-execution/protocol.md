@@ -111,3 +111,6 @@ serving loop. `stream-data` stays disabled (README §3.5).
   serialized read links per record — is structurally impossible if this
   list is respected. A metadata field that scales with graph size is
   FORBIDDEN.
+- Writes inside a `derived` commit keep PER-ACTION provenance for CFC
+  label purposes (serving-loop.md §3c): the commit is a transport batch,
+  never a label boundary.

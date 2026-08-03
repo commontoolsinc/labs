@@ -160,11 +160,50 @@ executing:
   on that doc for the home SpaceServer. Same one-run-late soundness.
   v2 assumes spaces co-hosted on one memory server; sharding is out of
   scope.
-- Read sets are scheduler memory ONLY. Persisting them per-run was v1's
-  evidence log — 130 KB per map run — and is FORBIDDEN (tripwires §8).
-  Corollary for recovery (§6): derivations need no commit replay —
-  instantiate and recompute from current state — which is why events
-  (`eventWatermark`) and W are the only persistent cursors.
+- Read sets are authoritative IN MEMORY. Two persisted forms are
+  distinguished, and confusing them is how v1 died:
+  1. **The basis index (KEPT — pre-arc #3646 scope)**: compact rows
+     `(action, entity, seq)` — "output current iff these inputs
+     unchanged since these seqs" — written INSIDE the wave's derived
+     transaction (never own commits; amplification untouched). In-wave
+     reads share the wave's own commit seq. Purpose: warm start — space
+     activation skips still-current nodes instead of recomputing the
+     world. It is a DISPOSABLE CACHE: dropping it costs recompute, not
+     correctness, and admission never reads it. Anchors: the
+     `scheduler_read_index` / `scheduler_action_state` tables already on
+     main's engine-v3 schema.
+  2. **The evidence log (FORBIDDEN — tripwires §8)**: per-run link
+     payloads, certificates, replay records — 130 KB per map run in v1.
+     The test between the two: payloads or per-run history ⇒ evidence;
+     ids + seqs, overwritten in place per action ⇒ basis index.
+  W and `eventWatermark` remain the only CORRECTNESS-bearing cursors;
+  derivations still need no commit replay (recompute covers loss of the
+  index). Client reload needs none of this: every derived value is
+  committed, so client reload is read-and-render.
+
+## 3c. CFC: the enforcement boundary is the action run
+
+Batching commits MUST NOT coarsen CFC granularity. If flow control
+evaluated at the wave commit, the wave's read-union would taint every
+write in it — one action reading a secret would overtaint an unrelated
+action's public write. Therefore, normatively:
+
+- CFC evaluates at the END OF EACH ACTION RUN, against that action's own
+  logged read set (§3b) — the same Runtime code path as a client today,
+  including the existing rejected-write drop
+  (`reportDroppedCfcRejectedWrite`, `scheduler/events.ts`).
+- The wave transaction carries only writes that individually passed
+  their action's check; each write keeps per-action provenance for label
+  purposes (the `cfcFlowLabels` ladder applies unchanged). The commit is
+  transport; enforcement already happened per action, in memory.
+- Handler runs are actions: a server-side handler run gets per-run CFC
+  exactly as its client run did. D-v2-1 moves WHERE handlers run, never
+  the enforcement unit.
+
+FORBIDDEN: wave-level label unions; deferring any CFC check to commit
+or admission time; a server bypass ("the server is trusted") — the
+server is trusted with AUTHORITY, not with skipping flow control over
+user data.
 
 ## 4. Effectful nodes: memoization contract
 
@@ -240,4 +279,6 @@ the survival test was skipped — reject the diff:
 `completeSchedulerScopeSummary`, `scopeSummary`, `evidence`,
 `observationReplay`, `shadowRun`, `admissionCertificate`.
 
-The one intentional exception: `execution_lease` (§2), which predates v2.
+The intentional exceptions: `execution_lease` (§2) and the
+`scheduler_read_index` / `scheduler_action_state` basis tables (§3b),
+all of which predate v2.
