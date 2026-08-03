@@ -48,9 +48,18 @@ set or copy them into agent mutations.
 
 ## Reading Topics
 
-The board's durable `topics` input is the reliable discovery corpus. Project it
-immediately: an unprojected row follows the linked Topic and can include its
-body, comments, handlers, and reference graph.
+The current pattern exports `index` — a compact discovery result whose rows
+carry scalar summaries plus title-only sibling references, so one read surveys
+the whole board without expanding any topic:
+
+```bash
+deno task cf piece get --url "$TOPICS_BOARD_URL" index --step
+```
+
+A deployed board can run an older pattern without `index` — the read above
+erroring on an unknown path is the tell. Survey such a board through the durable
+`topics` input instead, projected immediately: an unprojected row follows the
+linked Topic and can include its body, comments, handlers, and reference graph.
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \

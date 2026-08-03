@@ -19,6 +19,7 @@ import { rendererVDOMSchema } from "./schemas.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
   type CellScope,
+  type FabricExecValue,
   type Frame,
   isModule,
   isPattern,
@@ -716,8 +717,8 @@ type DeferredStartResult<R> = {
 };
 
 type BoundNodeIO = {
-  inputs: FabricValue;
-  outputs: FabricValue;
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
 };
@@ -4048,8 +4049,8 @@ export class Runner {
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -4139,8 +4140,8 @@ export class Runner {
   }
 
   private bindNodeIO(
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
   ): BoundNodeIO {
@@ -4679,7 +4680,7 @@ export class Runner {
    * @returns
    */
   private resolveJavaScriptStreamLink(
-    inputs: FabricValue,
+    inputs: FabricExecValue,
     base: NormalizedFullLink,
     tx: IExtendedStorageTransaction,
   ): {
@@ -4691,7 +4692,10 @@ export class Runner {
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
     // binding, which must not be followed at this level.
-    let value: FabricValue = inputs.$event;
+    // Narrowing, not papering over: `$event` is a sigil link, which IS a
+    // `FabricValue`. Only the exec-typed container widens it here, and the
+    // sigil-only invariant above is what licenses the assertion.
+    let value = inputs.$event as FabricValue;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
@@ -5130,9 +5134,13 @@ export class Runner {
     resultHasReactives: boolean,
     frame: Frame,
     resultCell: Cell<any>,
-    outputs: FabricValue,
+    outputs: FabricExecValue,
     addCancel: AddCancel,
-    _resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
+    _resultFor: {
+      inputs: FabricExecValue;
+      outputs: FabricExecValue;
+      fn: string;
+    },
     previousResultCellRef: JavaScriptActionResultCells,
     narrowestReadScope?: CellScope,
   ): any {
@@ -5855,8 +5863,8 @@ export class Runner {
   private instantiateJavaScriptNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6025,7 +6033,7 @@ export class Runner {
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
-    inputBindings: FabricValue,
+    inputBindings: FabricExecValue,
   ): void {
     if (
       moduleRefName !== "map" && moduleRefName !== "filter" &&
@@ -6057,8 +6065,8 @@ export class Runner {
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6351,8 +6359,8 @@ export class Runner {
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
     _module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     _addCancel: AddCancel,
     pattern: Pattern,
@@ -6386,8 +6394,8 @@ export class Runner {
   private instantiatePatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,

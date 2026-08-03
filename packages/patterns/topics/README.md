@@ -96,10 +96,20 @@ cf piece call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
 
+**A full-board survey is one bounded read of `index`.** Each row is the child
+reference plus scalar summaries (`title`, `createdAt`, `createdBy`,
+`commentCount`, `lastActivityAt`) and the prose reference edges as sibling
+references — every reference declared through a title-only schema, so the read
+cannot expand a topic's body, thread, or verbs no matter how it is projected:
+
+```bash
+cf piece get --piece <board> index --step
+```
+
 The board input links to complete Topic objects, including bodies, threads,
-handlers, and cross-reference data. Headless discovery should therefore combine
-an exact/range `--filter` with a concise `--schema` instead of materializing the
-whole corpus:
+handlers, and cross-reference data. Targeted headless discovery beyond the index
+should therefore combine an exact/range `--filter` with a concise `--schema`
+instead of materializing the whole corpus:
 
 ```bash
 cf piece get --piece <board> topics --input \

@@ -110,30 +110,53 @@ Named so their absence reads as intent, not oversight:
 
 Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
 
-- `AddTopicEvent` gains optional `body` — argument widening, compat-checker
+- ~~`AddTopicEvent` gains optional `body` — argument widening, compat-checker
   clean — and `addTopic` creates the child with it, making `setBody` an
-  editing verb rather than part of every create.
-- Silent early-returns on mutating verbs become throws: empty title, blank
+  editing verb rather than part of every create.~~ — **done (#4991)**: the
+  create is atomic (no reader observes the title-only halfway state) and the
+  body is preserved verbatim, matching `setBody`.
+- ~~Silent early-returns on mutating verbs become throws: empty title, blank
   `agentName`, empty comment body, invalid link URL. UI composer wrappers
   (`submitTopic`, `submitComment`, `saveBody`, …) keep their silent guards —
-  an empty draft is a non-event in a composer, a defect headlessly.
-- A compact discovery `index` result on the board — one reference-plus-summary
+  an empty draft is a non-event in a composer, a defect headlessly.~~ —
+  **done (#4991)**: `rejectMutation` throws on every headless mutating verb;
+  `topics-rejections.test.tsx` pins each rejection asserting no write
+  happened, and the composer wrappers' silent guards are exercised in
+  `topics.test.tsx`.
+- ~~A compact discovery `index` result on the board — one reference-plus-summary
   row per topic: the child reference plus scalar summaries (`title`,
   `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`) and reference
   edges as sibling references — never expanded pieces, and no pattern-authored
   fid fields (identity rendering is the CLI's job — decision 6, F2).
   `crossrefs` stays as the UI's reference graph; it is not compact — each row
   expands to full pieces, and a live full-board read through it exceeded 300k
-  tokens — and stops being the documented survey surface.
-- Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create,
+  tokens — and stops being the documented survey surface.~~ — **done**:
+  `index` rows reuse the crossref join, but every reference-valued field is
+  DECLARED through a title-only `TopicIndexRef` — schemas filter visibility,
+  so the row schema rather than reader discipline is what bounds a survey
+  read. The summary scalars ride in the row itself as plain numbers — the
+  computed coalesces a mixed-version sibling's absent path to 0, so only
+  `createdBy` (which has no honest zero) keeps the absent-path shaping. The compat gate records the
+  new contract as updatable from every recorded baseline (a result addition
+  is widening).
+- ~~Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create,
   each thrown rejection (asserting no write happened), and the index
-  (asserting no expanded piece/action/runtime values serialize).
-- Docs riding the change: `packages/patterns/topics/README.md`,
+  (asserting no expanded piece/action/runtime values serialize).~~ —
+  **done**: the rejection pins landed with #4991 in their own
+  `topics-rejections.test.tsx` (those runs expect runtime errors);
+  `topics.test.tsx` covers body-at-create and now the index — rows, edges,
+  and a serialization pin asserting no expanded content, no verb streams,
+  and title-only reference projections (`Object.keys` is exactly `title`).
+- ~~Docs riding the change: `packages/patterns/topics/README.md`,
   `skills/topics/SKILL.md` (`addTopic` example gains `body`;
-  `deno task check-skill-facts` gates the citations).
-- **Exit:** filing-with-body is five CLI calls; a blank `agentName` fails with
-  a nonzero exit; a full-board survey is one bounded read of `index`; live
-  board updated via `setsrc` (gated — see Risks).
+  `deno task check-skill-facts` gates the citations).~~ — **done** across
+  #4991 (body) and the index change (README names `index` as the bounded
+  survey read; the skill documents it with a deployed-board lag caveat until
+  the setsrc lands).
+- **Exit:** filing-with-body is five CLI calls ✓; a blank `agentName` fails
+  with a nonzero exit ✓ (#4991); a full-board survey is one bounded read of
+  `index` ✓ in the pattern (deploy pending); live board updated via `setsrc`
+  — OPEN, gated on the clone rehearsal (see Risks).
 
 ### WS-B — CLI settlement hygiene
 
