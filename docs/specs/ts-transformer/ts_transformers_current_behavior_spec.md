@@ -800,7 +800,7 @@ canonical lift-applied form:
 - **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
   single result type param, while `lift<T, R>` takes input `T` first, so
   forwarding `[R]` would place `R` in `lift`'s input slot. Type args are
-  recomputed downstream (LiftAppliedStrategy / SchemaInjection) from the
+  recomputed downstream (the lift-applied closure transform / SchemaInjection) from the
   callback's parameter and return types.
 - does not additionally validate callback shape in this pass
 - preserves type information through `typeRegistry` (the original call's type is

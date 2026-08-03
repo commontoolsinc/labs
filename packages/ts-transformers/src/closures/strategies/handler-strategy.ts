@@ -1,41 +1,28 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
-import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { isEventHandlerJsxAttribute } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
 
-export class HandlerStrategy implements ClosureTransformationStrategy {
-  canTransform(
-    node: ts.Node,
-    context: TransformationContext,
-  ): boolean {
-    if (ts.isJsxAttribute(node)) {
-      return isEventHandlerJsxAttribute(node.name, context.checker);
-    }
-    return false;
-  }
-
-  // Caller must pass a JSX attribute node.
-  transform(
-    node: ts.Node,
-    context: TransformationContext,
-    visitor: ts.Visitor,
-  ): ts.Node | undefined {
-    if (ts.isJsxAttribute(node)) {
-      return transformHandlerJsxAttribute(node, context, visitor);
-    }
-    throw new Error("HandlerStrategy.transform requires a JSX attribute node");
-  }
-}
-
+/**
+ * Rewrite a JSX event handler attribute so its callback's captures become
+ * explicit handler params. Returns undefined for any other node.
+ */
 export function transformHandlerJsxAttribute(
-  attribute: ts.JsxAttribute,
+  node: ts.Node,
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.JsxAttribute | undefined {
+  if (
+    !ts.isJsxAttribute(node) ||
+    !isEventHandlerJsxAttribute(node.name, context.checker)
+  ) {
+    return undefined;
+  }
+
+  const attribute = node;
   const initializer = attribute.initializer;
   if (!initializer || !ts.isJsxExpression(initializer)) {
     return undefined;
