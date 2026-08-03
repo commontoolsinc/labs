@@ -36,9 +36,12 @@ import Topic, {
 // Re-export the shared types for consumers and tests.
 export type {
   AddCommentEvent,
+  AddCommentResult,
   AddLinkEvent,
+  AddLinkResult,
   AgentAuthoredEvent,
   SetBodyEvent,
+  SetBodyResult,
   TopicAuthor,
   TopicComment,
   TopicInput,
@@ -70,6 +73,16 @@ export interface AddTopicEvent {
    * callers of the previous deployed schema remain valid; new callers must
    * provide a non-blank name. */
   agentName?: string;
+}
+
+export interface AddTopicResult {
+  /** The topic this call created — the piece itself, not a manufactured
+   * identifier. It reaches the caller as a link to the child, which the CLI
+   * renders as an address (`cf piece call --show-links`); the pattern does
+   * not mint fid fields of its own. A caller therefore addresses the new
+   * topic straight from the create, instead of filing it and then searching
+   * the board's crossrefs for the topic it just made. */
+  topic: TopicPiece;
 }
 
 /** One topic's place in the prose reference graph. Derived at read time from
@@ -112,7 +125,7 @@ export interface TopicsOutput {
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
-  addTopic: Stream<AddTopicEvent>;
+  addTopic: Stream<AddTopicEvent, AddTopicResult>;
   /** @deprecated Compatibility view for callers of the previous board. */
   myName: string;
   /** @deprecated Compatibility mutation for callers of the previous board. */
@@ -175,7 +188,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     profileName.trim().length > 0 && profileWish.result !== undefined
   );
 
-  const addTopic = action(({ title, body, agentName }: AddTopicEvent) => {
+  const addTopic = action<AddTopicEvent, AddTopicResult>((
+    { title, body, agentName },
+  ) => {
     const trimmed = (title ?? "").trim();
     const author = topicAuthorFromAgent(agentName ?? "");
     if (agentName !== undefined && !author) {
@@ -204,6 +219,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);
     newTitle.set("");
+    return { topic: piece };
   });
 
   const setMyName = action(({ name }: { name: string }) => {
