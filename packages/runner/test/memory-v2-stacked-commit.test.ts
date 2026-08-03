@@ -2567,6 +2567,77 @@ Deno.test("memory v2 stacked commits: surviving mergeable append does not resurr
   }
 });
 
+Deno.test("memory v2 stacked commits: operation-based replay against an incompatible live-base ancestor is skipped, not thrown", async () => {
+  const harness = await createHarness();
+  const c1Verdict = Promise.withResolvers<void>();
+  const c2Verdict = Promise.withResolvers<void>();
+  try {
+    // A's durable `choice` is a present scalar (null), not an absent key --
+    // unlike the create-missing case above, descending into it is a genuine
+    // structural mismatch, not a missing container.
+    await seedAccepted(harness, DOCS.A, { choice: null });
+    await seedAccepted(harness, DOCS.B, valueFor("b0"));
+
+    // C1 optimistically turns `choice` into an object. A foreign B write
+    // makes its own confirmed read of B stale, so the server rejects the
+    // whole transaction -- same "no remote A novelty needed" mechanism as
+    // the resurrection-prevention test above.
+    const c1 = beginBatch(
+      harness,
+      [
+        { op: "set", id: DOCS.A, value: { choice: { items: ["seeded"] } } },
+        { op: "set", id: DOCS.B, value: valueFor("c1-b") },
+      ],
+      sourceFromReads([{ id: DOCS.B }]),
+    );
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "accept",
+      remoteInterleave: {
+        label: "foreign B write rejects C1",
+        operations: [{ op: "set", id: DOCS.B, value: valueFor("b-winner") }],
+      },
+      responseGate: c1Verdict.promise,
+    });
+
+    // C2 is an unconditional mergeable append underneath C1's optimistic
+    // container. Its own read is suppressed (mergeable ops carry no
+    // pending-read dependency), so it is independent of C1 and its replay
+    // must survive C1's rejection without throwing, even though the append's
+    // ancestor reverts to a non-container.
+    const c2LocalSeq = c1.localSeq + 1;
+    harness.model.setOutcome(c2LocalSeq, {
+      kind: "rejectConflict",
+      responseGate: c2Verdict.promise,
+    });
+    const c2 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "append", path: "/value/choice/items", values: ["mine"] }],
+      { choice: { items: ["seeded", "mine"] } },
+    );
+
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(c2LocalSeq),
+      "mergeable append to reach the wire",
+    );
+
+    // Reject C1. C2 remains pending and is replayed over A's confirmed
+    // `{ choice: null }` -- the append's ancestor is a scalar, not a
+    // container. Replay must skip the incompatible op rather than throw out
+    // of the replica.
+    c1Verdict.resolve();
+    await assertConflict(c1.promise, "stale confirmed read");
+    assertEquals(visibleValue(harness.provider, DOCS.A), { choice: null });
+
+    c2Verdict.resolve();
+    await assertConflict(c2);
+  } finally {
+    c1Verdict.resolve();
+    c2Verdict.resolve();
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: operation replay composes with an independent projected patch", async () => {
   const harness = await createHarness();
   try {
