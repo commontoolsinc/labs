@@ -384,6 +384,21 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   honors, and the open event side is pinned as a decision in
   `packages/schema-generator/test/stream-result.test.ts`.
 
+  **Review outcome (Berni, 2026-08-03, on the PR):** the boundary the
+  exemption depends on is CONFIRMED — the mint lives in runner internals no
+  pattern compartment can reach, and an enforcement gate may depend on
+  that. The injection itself, though, is a pre-receipts hack: now that
+  receipts exist, `llm-dialog`'s `{ ...input, result }` slot should be
+  REMOVED entirely and the tool result delivered through the handling's
+  receipt. Design for that world. **Follow-up task:** retire the
+  injection — deliver the tool result via receipt, then drop the marker
+  machinery (`markRuntimeInjectedEventKeys`, the dispatch exemption, this
+  carve-out) with its only production mint site, along with the
+  `stripInjectedResult` / `cloneWithoutBoundToolKeys` schema-hiding it
+  forced. Sequencing: leans on receipt delivery of plain-JSON results, so
+  it slots naturally after the `plainResultReceipts` flip decision
+  (#5245); piece-carrying results already flow on the production default.
+
   **A value-less verb wants `{ type: "object", properties: {} }`, not the
   generic `void` sentinel**, which lowers to `{ asCell: ["opaque"] }` — a
   *wrapper* claim ("the result is an opaque cell") rather than a statement
@@ -972,11 +987,16 @@ change that alters them.
   wave through: closing an event genuinely refuses callers that previously
   sent extra fields (they were accepted-and-stripped, per the C5
   characterization), so the gate is doing its job under its current rules.
-  The unblock is a design decision, not a workaround: either a
-  verb-event-role rule in the checker, taking the position that
-  accepted-and-STRIPPED was never contract — defensible precisely because
-  the runtime never delivered an undeclared field to any handler — or a
-  deliberate baseline migration. Whichever is chosen must also weigh the
+  The unblock was a design decision, not a workaround, and it is DECIDED
+  (Berni, 2026-08-03, on #5246): a verb-event-role rule in the checker —
+  the (a) fork — taking the position that accepted-and-STRIPPED was never
+  contract, defensible precisely because the runtime never delivered an
+  undeclared field to any handler. Implementation note from the same
+  review: the closed shapes already in argument-side baselines likely
+  derive from `never`-typed events that were never meant to assert "only
+  empty events are valid" — clean that up in the generator eventually;
+  until then the exemptions carry the cost. The chosen rule must still
+  weigh the
   FORWARD skew case the stripped-was-never-contract argument does not cover:
   adding an optional event field is legal argument widening, but during any
   deploy window a newer client sends that field to a still-running older
@@ -986,9 +1006,10 @@ change that alters them.
   write storms, the legacy-field mirroring `topics` still carries), so the
   decision needs a story for widened payloads against not-yet-updated
   pieces — deploy ordering, a skew-tolerant reject-only-on-collision rule,
-  or an explicit versioning step — before emission lands. Until decided,
-  generated event schemas stay open and closed-world enforcement is
-  per-schema opt-in at dispatch (C5's runner gate).
+  or an explicit versioning step — before emission lands. Until the rule
+  and its skew story land, generated event schemas stay open and
+  closed-world enforcement is per-schema opt-in at dispatch (C5's runner
+  gate).
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.
