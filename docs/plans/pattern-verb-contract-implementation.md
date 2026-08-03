@@ -4,6 +4,15 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-31**, C3 withdrawn in review (Berni): no result-schema
+emission for now — values flow schema-free through receipts, discovery falls
+back to prose descriptions, and the durable shape waits for the Fabric-types
+stream evolution rather than baking a `result` keyword into append-only
+baselines that its successor would have to migrate away from. The WS-C
+schema-generator bullet records what was built, what it proved, and the
+permanence gap the deferral accepts; the C3 issue row is marked deferred and
+the WS-C exit criterion is revised accordingly.
+
 **Amended 2026-07-30**, follow-up scope from the pre-dispatch gate review
 (#5147): WS-D gains D5 (refuse an absent payload the verb provably cannot run
 without) and D6 (the default-relaxation helper moves next to the runner's
@@ -281,14 +290,42 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   stream to reach another. Both options need a result parameter threaded
   through `Handler`/`HandlerFactory` regardless, since the factory returns
   the stream, so that work is not a differentiator.
-- **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
-  updates under `docs/specs/ts-transformer/`. (The runtime side already
+- ~~**ts-transformers:** lowering for value-returning `action` bodies; CTS
+  spec updates under `docs/specs/ts-transformer/`. (The runtime side already
   consumes returns — `handleJavaScriptHandlerResult` — so this is authoring
-  surface, not execution semantics.)
-- **schema-generator:** emit a result schema for stream/handler properties so
-  it reaches the piece's **durable** schema — the dependency verb discovery
-  named; mapping spec update in
-  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).
+  surface, not execution semantics.)~~ — **done (C2)**:
+  `VerbReturnValidationTransformer` (pipeline stage 6) errors
+  (`verb-result:undeclared-return`) when a void-declared verb's block body
+  explicitly returns a **definitely plain-shaped** expression —
+  object/array/string/template literals and arithmetic over them — pointing
+  the author at declaring the result on whichever surface they used. The
+  boundary is narrower than first drafted, for a measured reason: value
+  returns under void declarations are already sanctioned runtime idioms —
+  `return navigateTo(piece)`, returning a freshly created piece (notebook's
+  create-and-return actions), returning rendered UI — and the authored
+  surface renders `Reactive<T>` transparently (`navigateTo(...)` types as
+  plain `boolean`), so neither types nor provenance can separate those from
+  forgotten declarations; syntax is the honest signal, and each exemption is
+  recorded in the current-behavior spec (§6.10) and the pattern-language
+  spec (§5.8). Lowering itself needed nothing: the return was already
+  preserved verbatim (pinned by C1's fixture) and the runtime already
+  consumes it.
+- **schema-generator: result-schema emission is DEFERRED** (review, Berni
+  2026-07-31). C3 was built and proven — a `result` dialect keyword sibling
+  to `asCell`, compat-checker recursion with result-name permanence, fleet
+  upgrade verified — and then withdrawn before merge, deliberately: the
+  value path never needed it (results flow schema-free through receipts,
+  proven end to end before the keyword existed), and shipping a keyword into
+  durable schemas and append-only baselines would have hard-committed a
+  shape the coming Fabric-types stream evolution (roughly
+  `type: "handler", event: ..., result?: ...`) is expected to replace —
+  the compat rules we built would themselves have refused its later removal.
+  What the deferral costs, recorded as a known gap: **verb result shapes
+  have no update-gate protection** — "every published result name is
+  permanent" is unenforceable for results until a declared schema exists —
+  and agents cannot learn a result's shape before calling; the interim for
+  both is prose in the verb's `description`. Revisit as part of the
+  Fabric-types stream design, not before.
   Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
@@ -358,9 +395,12 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
   interprets. Settle this at the top of the C1 PR.~~ — settled in #5123; the
   decision and its measured costs are the **C1 fork — settled** bullet above.
-- **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
-  result schema appears in the durable schema; under the flag, both plain and
-  reactive returns are readable in the receipt cell. The plain half of that
+- **Exit (revised with the C3 deferral):** a CTS pattern declares a verb
+  returning `AddTopicResult`; under the flag, both plain and reactive
+  returns are readable in the receipt cell. The durable-schema half of the
+  original exit ("the result schema appears in the durable schema") moves
+  out of this workstream with C3 — the type-level declaration and the value
+  path stand alone until the Fabric-types stream design. The plain half of that
   readback is pinned at the runner already — `declared-result-e2e.test.ts`
   compiles a declared-result pattern through the real pipeline and reads the
   receipt back through `tx.handlingReceiptLink`, both flag states — landed
@@ -436,11 +476,14 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   misses the event schema does not make the argument invalid: `$event` reads
   back as `undefined`, the body runs with no event, and its receipt spends the
   id while the call reports settled. Two shapes stay legal, because the runtime
-  accepts them: a call with no payload at all (`$event` is genuinely optional —
-  value-less verbs are a supported shape), and a payload omitting a property
-  that carries a `default`, which the runtime injects on read. (D5 narrows the
-  first: once it lands, an absent payload against an object-schema verb is
-  normalized to `{}` and judged like any other — see its bullet below.)
+  accepts them: a call with no payload against a verb whose schema — after
+  resolving a top-level local `$ref` — is not an object schema (`$event` is
+  genuinely optional — value-less verbs are a supported shape), and a payload
+  omitting a property that carries a `default`, which the runtime injects on
+  read. An absent payload against an object-schema verb is normalized to `{}`
+  and judged like any supplied payload (D5 — see its bullet below): refused
+  when top-level `required` survives relaxation, dispatched as `{}` — so the
+  runtime materializes defaults — when it does not.
 - **cli, phase reporting:** every output — success, failure, timeout — carries
   the furthest observed `phase`
   (`initial_sync | dispatched | committed | readback`) beside the invocation
@@ -479,7 +522,7 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   a *result* back off the receipt, because a void verb leaves none to read.
   That assertion joins when WS-C gives verbs return values — or sooner
   against `plainResultReceipts`.
-- **cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
+- ~~**cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
   deferred.** The pre-dispatch validator passes `input === undefined`
   unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
   so a call that sends *nothing* against a verb whose event schema requires
@@ -535,8 +578,34 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   a provably-unsatisfiable absence is refused pre-dispatch like any other
   unfit payload. Migration note for the PR: calls that previously "settled"
   with no payload against a required-fields verb now fail locally and are
-  retryable under the same invocation id.
-- **runner/cfc, relocate the relaxation helper (D6).**
+  retryable under the same invocation id.~~ — **done (D5)**: the shared gate
+  (`assertVerbInputSatisfiesSchema`, both entry points) normalizes an absent
+  payload to `{}` where the schema — after `localRefTarget` resolves a
+  top-level local `$ref` — is an object schema: directly object-shaped, or
+  an `allOf` conjunction with an object-schema branch (a conjunction with an
+  object branch IS an object schema, no branch choice involved — added on
+  review, 2026-07-31; disjunctive `anyOf`/`oneOf` roots remain out of scope
+  per this bullet's combinator boundary, since normalizing there would pick
+  among alternatives on the caller's behalf). It dispatches exactly what
+  it judged, so an all-defaulted verb now receives a defaults-populated
+  object instead of `undefined`; the refusal reuses
+  `VerbInputValidationError` with a "no payload was supplied … send a
+  payload" detail distinct from fix-your-payload. Characterized first at
+  both entry points (the absent payload observed dispatching `undefined` on
+  unmodified code), then flipped. Measured while wiring the integration
+  mirror: a deployed stream cell's schema carries the handler's *own* event
+  schema, so it is `$ref`-rooted only when that schema is authored or
+  generated with `$defs`; flag-derivable inline-object schemas never reach
+  dispatch with an absent payload — the arg parser's requires-input check
+  (bare call) or its `{}` flag-parse (explicit `invoke`) already covers
+  them — and the gate closes the `$ref`-rooted shape, reached via explicit
+  `invoke`. `run_piece_call_retry` scenario 6 pins the property end to end
+  against a new `$ref`-rooted `recordNote` fixture verb: absent refused
+  locally, zero messages, corrected call under the SAME id records exactly
+  one (pre-D5, measured live: the absent call recorded "(no event)" and the
+  corrected same-id retry deduplicated against it, the correction never
+  applied).
+- ~~**runner/cfc, relocate the relaxation helper (D6).**
   `relaxDefaultedRequired` and `localRefTarget` re-implement the runtime's
   default-satisfaction rule inside `packages/cli/lib/callable.ts`, and C5
   (closed-world inputs enforced at dispatch) needs the identical relaxation
@@ -553,7 +622,22 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   `validateSchemaValue` applies but the relaxer doesn't — each a potential
   refused-but-valid call if a generated schema leans on a required property
   there); naming the boundary is the point. Pure move plus doc comment, no
-  behavior change, its own commit beside D5 so the diff reviews as such.
+  behavior change, its own commit beside D5 so the diff reviews as such.~~ —
+  **done (D6)**: both helpers moved verbatim into the validator's own module
+  (`packages/runner/src/cfc/schema-sanitization.ts`, beside
+  `validateSchemaValue`), exported from the defining module and imported
+  directly by the CLI through a new `./cfc/schema-sanitization` package
+  export — no re-export shim, nothing added to `cfc/mod.ts`. The relaxation
+  tests moved with the code
+  (`packages/runner/test/cfc-defaulted-required-relaxation.test.ts`, pinned
+  against the same relax-then-validate composition the gate applies); the
+  CLI keeps the gate tests plus one defaulted-required pin proving the gate
+  applies the relaxation. The doc comment now names the boundary: only
+  `required` is rewritten, so `additionalProperties`, `patternProperties`,
+  `minProperties` and the other constraints, `const`/`enum`, `not` /
+  `if`/`then`/`else`, and `oneOf` exclusivity are judged against the
+  original schema text — each a potential refused-but-valid call when a
+  schema leans on a defaulted property through them.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
@@ -642,12 +726,23 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   and Invocation is required to be authored open-world precisely so protocol
   fields can be added later. Cost is bounded by emitting links only for paths
   that have them, and only when asked.
-- **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
-  the stream's serialization rather than redirecting. The llm-dialog `read`
-  tool already rejects this case with the right message — "Path resolves to a
-  handler; use invoke() instead" — and the CLI read path
-  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
-  and it saves an agent a wasted turn.
+- ~~**Read-path guard:** `cf piece get` on a path that resolves to a verb
+  returns the stream's serialization rather than redirecting. The llm-dialog
+  `read` tool already rejects this case with the right message — "Path
+  resolves to a handler; use invoke() instead" — and the CLI read path
+  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check.
+  Cheap, and it saves an agent a wasted turn.~~ — **done**: `getCellValue`
+  refuses only on the two definite stored signals — the link-derived schema
+  answers as a stream, or the value reads as the `{$stream: true}` sentinel —
+  reported as a `piece get` data error (one line on stderr, exit 1). A root
+  verb redirects at `cf piece call`; a nested verb is not root-callable, so
+  it points at reading the parent object or `cf piece verbs` instead. The
+  guard never consults the forced-stream probe: the probe stays with the
+  dispatcher and the listing, where over-inclusion is an extra row or a call
+  the caller asked for, but the cast's stream schema survives link resolution
+  for inline values, so a read guard built on it would refuse plain data
+  outputs. Reads fail open; tool bindings read as data (the llm-dialog read
+  tool reads them too); parent objects and plain data paths read as before.
 - `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
@@ -749,7 +844,7 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | B1 | cli: sink-based settlement, result cell address | S | — |
 | C1 | api: action return types, `Stream<E, R>` (rejection carrier deferred to `FabricError`) | M | — |
 | C2 | ts-transformers: value-returning action lowering + CTS spec | M | C1 |
-| C3 | schema-generator: result schemas for streams + mapping spec | M | C1 |
+| C3 | schema-generator: result schemas for streams + mapping spec — **deferred to the Fabric-types stream design** (review, 2026-07-31) | M | C1 |
 | C4 | runner: plain-return projection behind flag + registry entry | S | — |
 | C5 | schema-generator/runner: closed-world verb input schemas | S | C1 |
 | D1 | runner: eventId through send; structured receipt link on dispatch | M | — |

@@ -26,6 +26,7 @@ import {
   JSONValue,
   type Module,
   NAME,
+  type Node,
   type NodeFactory,
   type Pattern,
   UI,
@@ -518,6 +519,27 @@ export function firstResolvedOutputRedirect(
     }
   }
   return undefined;
+}
+
+/**
+ * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
+ * both of `collectResumeOwnedCells`'s skip exits so a console trace names the
+ * same things either way: the result cell being resumed and enough about the
+ * node to find it in the pattern that was resumed.
+ */
+function describeSkippedSubPatternNode(
+  resultCellLink: NormalizedFullLink,
+  nodeIndex: number,
+  node: Node,
+  childPattern: Pattern,
+): Record<string, unknown> {
+  return {
+    resultCell: resultCellLink.id,
+    space: resultCellLink.space,
+    nodeIndex,
+    ...(node.description !== undefined && { node: node.description }),
+    childPattern: describePatternOrModule(childPattern),
+  };
 }
 
 const recordSetupProjectionPolicyInputs = (
@@ -1223,12 +1245,17 @@ export class Runner {
     // write below: they must agree on what was stored.
     const storable = flattenBuilderArtifacts(argument);
     argumentCell.set(storable);
+    // The policy recorder sees the RAW argument, as its sibling in
+    // `updateResultProjection` does. Handing it the flattened one would walk
+    // a serialized pattern graph it previously stopped at -- a function halts
+    // its descent, a record does not -- and record structural-provenance
+    // claims from positions it has never seen.
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
       argumentCell,
       argumentSchema,
-      storable,
+      argument,
     );
     diffAndUpdate(
       this.runtime,
@@ -1480,11 +1507,22 @@ export class Runner {
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
-    // TODO(danfuzz): This compares a runtime result value with `deepEqual`,
-    // which mishandles `FabricValue` (same-class `FabricPrimitive`s, with state
-    // in private `#fields` and zero own-props, compare equal regardless of
-    // value). Use a Fabric-aware equality for value comparison.
-    if (!deepEqual(result, previousResult)) {
+    // Convert-and-freeze (default): a deep-frozen value lets the storage write
+    // boundary's `cloneIfNecessary` identity-pass instead of
+    // deep-cloning-to-freeze.
+    //
+    // The conversion MUST precede the no-op gate. A raw result is not
+    // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
+    // here — and `valueEqual` hashes its operands, so comparing a raw result
+    // throws `hashOf: unsupported object type` instead of deciding anything.
+    // Converting first also makes the gate compare what a write would actually
+    // store, since the stored side is already a `FabricValue`.
+    // A result can carry a builder artifact -- a pattern tool, say -- and an
+    // artifact is not a `FabricValue`, so it is replaced before the
+    // conversion. That keeps the gate below comparing what a write would
+    // actually store, which is the whole point of converting first.
+    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
+    if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
         this.runtime,
@@ -1492,20 +1530,9 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
-      // Convert-and-freeze (default): a deep-frozen value lets the storage
-      // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze. The result root marks the whole result
-      // document as generated: setup rewrites the complete projection.
-      //
-      // A pattern's result can carry a builder artifact (a pattern tool, say).
-      // This converts directly rather than through `getImmutableCell`, which
-      // is where the replacement otherwise happens, so it does its own; the
-      // comparison above stays against the value as projected.
-      writableResultCell.setRawUntyped(
-        fabricFromNativeValue(flattenBuilderArtifacts(result)),
-        false,
-        "output",
-      );
+      // The result root marks the whole result document as generated: setup
+      // rewrites the complete projection.
+      writableResultCell.setRawUntyped(fabricResult, false, "output");
     }
   }
 
@@ -3758,7 +3785,7 @@ export class Runner {
     // (CT-1897).
     const argumentLink = getMetaLink(resultCell, "argument");
 
-    for (const node of pattern.nodes) {
+    for (const [nodeIndex, node] of pattern.nodes.entries()) {
       const module = node.module;
       if (module.type !== "pattern" || !isPattern(module.implementation)) {
         continue;
@@ -3797,10 +3824,39 @@ export class Runner {
         logger.warn("resume-owned-cells", () => [
           "skipping a sub-pattern node whose outputs did not bind or resolve",
           error,
+          describeSkippedSubPatternNode(link, nodeIndex, node, childPattern),
         ]);
         continue;
       }
-      if (spotLink === undefined) continue;
+      if (spotLink === undefined) {
+        // The same two skips as the catch above — this node's owned-cell
+        // pre-sync AND the recursion that would reach the child's own
+        // `derivedInternalCells` manifest — reached without an error: the
+        // outputs bound, but held no write redirect the scan could resolve
+        // (e.g. they consist only of deferred partialCause aliases, which
+        // denote a deeper level's derived internal cells rather than this
+        // node's reserved result spot).
+        //
+        // DEBUG, not warn: this is the BY-DESIGN outcome for such outputs, not
+        // a failure. #5143 deliberately moved that case off the throwing path,
+        // and ordinary healthy runs of the home pattern take this exit several
+        // times per resume — warning here would be noise, not signal. It still
+        // hides a skipped subtree, so it carries the same key and the same
+        // identity payload as its sibling, and turning this logger up to debug
+        // brings it back for someone tracing a stranded piece:
+        // `commonfabric.logger["runner"].level = "debug"` on the main thread,
+        // `commonfabric.rt.setLoggerLevel("debug", "runner")` for the worker
+        // the runner actually lives in. (`CF_LOG_LEVEL` will NOT do it: it is a
+        // floor, and this logger's own configured level — `warn` — is the more
+        // restrictive of the two.) A console filter on `resume-owned-cells`
+        // then catches both exits. `resume-owned-cells-skip-log.test.ts` pins
+        // the level in both directions.
+        logger.debug("resume-owned-cells", () => [
+          "skipping a sub-pattern node whose outputs resolved to no write redirect",
+          describeSkippedSubPatternNode(link, nodeIndex, node, childPattern),
+        ]);
+        continue;
+      }
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -6379,6 +6435,16 @@ export class Runner {
         sourceSchemas: { argument: pattern.argumentSchema },
       },
     );
+    // VALUE BIND (kind: the descriptor's). Binding WITH the manifest resolves a
+    // partialCause output to the descriptor's derived internal cell, so
+    // `getDerivedInternalCellLink` mints its id under the descriptor's kind:
+    // `computed:fid1:<hash>` for a descriptor classified `kind: "computed"`,
+    // and the same `of:fid1:<hash>` the identity bind below mints for a kindless
+    // one (the classifier declines the node, or `experimental.computedCellIds`
+    // is off). This is the binding the child link is SENT to
+    // (`sendValueToBinding` below), so this is where the child's value actually
+    // lives — at a DIFFERENT entity from the identity bind's only when the
+    // descriptor carries a kind. See the identity bind for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
@@ -6419,6 +6485,27 @@ export class Runner {
       // `bindPatterns: false` — output bindings never carry sub-patterns to
       // instantiate, so skip that work; we only need the pseudo-cell aliases
       // resolved to their concrete links.
+      //
+      // IDENTITY BIND (kind: always `of:`). CT-1943: this omits
+      // `derivedInternalCells` where the value bind above passes it, and the
+      // manifest descriptor is what carries the entity kind. Same cause, same
+      // hash preimage — but no descriptor means no kind, so this mint always
+      // lands on the unkinded `of:fid1:<hash>`
+      // (docs/specs/computed-cell-identity.md: the preimage is kind-free, the
+      // URI scheme IS the kind). Whether that is a SECOND entity depends on the
+      // descriptor the value bind saw:
+      //   - descriptor with `kind: "computed"` — the value bind minted
+      //     `computed:fid1:<hash>`, so the two binds address two distinct
+      //     entities that differ only by scheme, and the child link lives on
+      //     the `computed:` one;
+      //   - kindless descriptor (the classifier declined the node, or
+      //     `experimental.computedCellIds` is off) — both binds land on this
+      //     same `of:` entity, and the child link is written here.
+      // The split is fine here, and in `collectResumeOwnedCells`, because both
+      // use the link purely as the `resultFor` CAUSE — a stable coordinate,
+      // never read for a value. But anything that wants to READ the child link
+      // must use the id the VALUE bind minted: where the descriptor was
+      // computed, reading the `of:` one returns undefined for a healthy piece.
       const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
         this.runtime.cfc,
         outputBindings,
