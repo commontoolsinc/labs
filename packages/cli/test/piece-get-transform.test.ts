@@ -801,6 +801,19 @@ describe("cf piece get transforms", () => {
     );
   });
 
+  it("rejects filter paths when the item schema is false", async () => {
+    await expect(
+      derivePieceGetValue(
+        runtime,
+        space,
+        filterGuardSource(false, {}),
+        { filter: parsePieceGetFilter(".secret != null") },
+      ),
+    ).rejects.toThrow(
+      '--filter path ".secret" is not declared by this slot\'s schema',
+    );
+  });
+
   it("rejects excluded filter paths across schema compositions", async () => {
     const cases: Array<{
       schema: JSONSchema;
