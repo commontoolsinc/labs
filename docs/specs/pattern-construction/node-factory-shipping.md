@@ -389,7 +389,7 @@ deep-frozenness; the side-table state is not canonical until sealing succeeds.
 
 `FactoryStateV1.ref` always names the complete builder factory artifact, as
 returned by `getArtifactEntryRef(factory)` through its root token. It is never
-copied from `moduleToJSON(...).$implRef`: that legacy ref names an
+copied from `moduleToEncodableForm(...).$implRef`: that legacy ref names an
 implementation-resolution record and may not recover the factory descriptor or
 methods.
 

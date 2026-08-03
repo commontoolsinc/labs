@@ -1007,8 +1007,9 @@ export class Runner {
   private locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
-  // Map whose key is the result cell's full key, and whose values are the
-  // patterns as strings
+  // Map whose key is the result cell's full key, and whose values are a hash
+  // of the pattern's encodable form -- what `writeJavaScriptActionResult`
+  // compares to decide whether a returned sub-pattern has changed.
   private resultPatternCache = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string

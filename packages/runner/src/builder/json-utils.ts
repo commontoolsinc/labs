@@ -483,10 +483,10 @@ let internalGraphSerialization = false;
  * `toJSONWithAliasBindings` (builder-time node serialization, which the
  * `$opFallback` graphs descend from) and debug tooling.
  *
- * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:
- * factory `toJSON` closures deliberately serialize the ROOT factory (which
- * carries `.program`, set after construction — see builder/pattern.ts), so
- * the indirection is load-bearing.
+ * Asks the pattern for its own encodable form rather than calling
+ * `patternToJSON` directly: a factory's closure deliberately serializes the
+ * ROOT factory (which carries `.program`, set after construction — see
+ * builder/pattern.ts), so the indirection is load-bearing.
  */
 export function serializePatternGraph(
   pattern: Pattern,
