@@ -4,6 +4,8 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   CF_RUNTIME_ERROR_LOG,
   normalizeAbsentVerbPayload,
+  runtimeErrorLog,
+  schemaIsObjectShaped,
   verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
@@ -2079,5 +2081,52 @@ describe("reportVerbInputErrorOrRethrow", () => {
 
     expect(printed).toEqual([]);
     expect(exited).toEqual([]);
+  });
+});
+
+describe("runtimeErrorLog", () => {
+  // Pinned directly rather than left to incidental coverage: which execution
+  // paths hand this a non-object runtime varies by run and sharding, and the
+  // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
+  it("returns [] for non-object runtimes and runtimes without a log", () => {
+    expect(runtimeErrorLog(undefined)).toEqual([]);
+    expect(runtimeErrorLog("not a runtime")).toEqual([]);
+    expect(runtimeErrorLog({})).toEqual([]);
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: "not an array" }))
+      .toEqual([]);
+  });
+
+  it("returns the recorded log when present", () => {
+    const records = [{ message: "boom" }];
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: records }))
+      .toEqual(records);
+  });
+});
+
+describe("schemaIsObjectShaped", () => {
+  // Pinned directly: the gate's caller pre-filters non-object roots, so the
+  // defensive boolean-target guard is unreachable through it, and the
+  // combinator boundary this function encodes (allOf conjunctions count,
+  // disjunctions never) deserves its own record.
+  it("rejects boolean schemas and accepts object shapes", () => {
+    expect(schemaIsObjectShaped(true, true)).toBe(false);
+    expect(schemaIsObjectShaped(false, false)).toBe(false);
+    expect(schemaIsObjectShaped({ type: "object" }, {})).toBe(true);
+    expect(schemaIsObjectShaped({ properties: { a: {} } }, {})).toBe(true);
+  });
+
+  it("counts allOf conjunctions with an object branch, never disjunctions", () => {
+    expect(schemaIsObjectShaped(
+      { allOf: [{ type: "string" }, { type: "object" }] },
+      {},
+    )).toBe(true);
+    expect(schemaIsObjectShaped(
+      { anyOf: [{ type: "object" }] },
+      {},
+    )).toBe(false);
+    expect(schemaIsObjectShaped(
+      { oneOf: [{ type: "object" }] },
+      {},
+    )).toBe(false);
   });
 });

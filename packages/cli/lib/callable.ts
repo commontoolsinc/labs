@@ -285,7 +285,7 @@ export function normalizeAbsentVerbPayload(
  * boundary the D5 rule records (refuse or normalize only on proof) — the
  * plan's D5 bullet names disjunctive roots out of scope.
  */
-function schemaIsObjectShaped(
+export function schemaIsObjectShaped(
   target: JSONSchema,
   root: JSONSchema,
 ): boolean {
