@@ -2238,28 +2238,6 @@ interface ReadPathVerb {
  * `callable` is true only for root-level names — the dispatcher's resolution
  * paths all start at a root — so the refusal message can redirect honestly.
  */
-/**
- * The read-path guard's refusal, preferred over a result-projection failure.
- *
- * A verb is not a materializable result, so a read that lands on one fails the
- * projection check as a matter of course — and that error tells the caller to
- * retry with `--step`, which sends them to re-run a read that cannot succeed
- * at any number of steps. Classify before surrendering to the projection
- * error so the refusal naming `cf piece call` wins. Returns null when the path
- * is not certainly a verb, leaving the projection error exactly as it was.
- */
-async function verbReadRefusalOrNull(
-  piece: any,
-  prop: "input" | "result",
-  path: readonly (string | number)[],
-  pieceId: string,
-): Promise<PieceVerbReadError | null> {
-  const verb = await classifyReadPathVerb(piece, prop, path);
-  return verb
-    ? new PieceVerbReadError(verb.verb, pieceId, verb.callable)
-    : null;
-}
-
 async function classifyReadPathVerb(
   piece: any,
   prop: "input" | "result",
@@ -2286,6 +2264,28 @@ async function classifyReadPathVerb(
   } catch {
     return null;
   }
+}
+
+/**
+ * The read-path guard's refusal, preferred over a result-projection failure.
+ *
+ * A verb is not a materializable result, so a read that lands on one fails the
+ * projection check as a matter of course — and that error tells the caller to
+ * retry with `--step`, which sends them to re-run a read that cannot succeed
+ * at any number of steps. Classify before surrendering to the projection
+ * error so the refusal naming `cf piece call` wins. Returns null when the path
+ * is not certainly a verb, leaving the projection error exactly as it was.
+ */
+async function verbReadRefusalOrNull(
+  piece: any,
+  prop: "input" | "result",
+  path: readonly (string | number)[],
+  pieceId: string,
+): Promise<PieceVerbReadError | null> {
+  const verb = await classifyReadPathVerb(piece, prop, path);
+  return verb
+    ? new PieceVerbReadError(verb.verb, pieceId, verb.callable)
+    : null;
 }
 
 export async function getCellValue(
