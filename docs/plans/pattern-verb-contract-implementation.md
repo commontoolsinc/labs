@@ -752,7 +752,36 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   for inline values, so a read guard built on it would refuse plain data
   outputs. Reads fail open; tool bindings read as data (the llm-dialog read
   tool reads them too); parent objects and plain data paths read as before.
-- `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
+- ~~`--await` / `--no-wait` and the caller-controlled wait bound — with
+  WS-D.~~ — **done (F3)**, with these semantics: the default is unchanged —
+  wait for this handling's transaction-local commit acknowledgement plus
+  receipt readback (what D2 built) — and `--await` is that default's explicit
+  spelling, so a script can state its intent; combined with `--no-wait` it is
+  refused as a contradiction. `--no-wait` awaits the transaction-local
+  commit acknowledgement and skips ONLY the receipt readback (sync + read);
+  stdout carries the Invocation JSON with the furthest observed phase as its
+  `status` (`{"invocation": "<id>", "status": "committed"}`), and a commit
+  failure exits nonzero exactly as the default path would. The
+  acknowledgement is not skippable: `cf piece call` executes the handler in
+  the CLI's own runtime, so a process that exits before the commit is
+  acknowledged abandons the invocation un-executed — nothing durable
+  happened — rather than leaving it settling elsewhere. What makes skipping
+  the readback sound is the caller-supplied id (D1/D3): the acknowledged
+  commit is durable on the server, and a later same-id call deduplicates
+  against the create-only receipt and returns the original outcome, so the
+  readback's confirmation can be fetched at any time. Handler sends only: a
+  tool's result is delivered by this process, and the receipt-less
+  set-fallback dispatch leaves nothing to read back — both refuse the flag.
+  `--wait <seconds>` is a caller-chosen patience bound on the default wait,
+  not a correctness timeout: one clearable deadline racing the outermost
+  await (no polling, no bound anywhere inside the settlement path), and on
+  expiry the exit is nonzero with D2's failure shape — invocation id plus
+  furthest phase on stderr — while stdout carries the Invocation JSON with
+  that phase as `status`. An early fire is recoverable rather than
+  lossless: before the `committed` phase the invocation may not have
+  executed or committed at all, and the recovery is re-invoking with the
+  SAME id — it deduplicates when the commit landed and re-executes when it
+  never did.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
   makes them unnecessary.
