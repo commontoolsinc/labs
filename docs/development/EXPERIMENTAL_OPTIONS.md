@@ -30,7 +30,7 @@ was last checked against the code.
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
-| [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | off | Mike Salisbury (verb contract WS-C) | flip default after the invocation-protocol integration proof, then fold into receipt semantics and delete flag | implemented, off by default |
+| [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | on | Mike Salisbury (verb contract WS-C) | fold into receipt semantics and delete flag after a bake period | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
@@ -61,9 +61,9 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default". `commitPreconditions` and
-`computedCellIds` default on; the other flags in this category default off
-unless their section says otherwise.
+`undefined`, which means "take the built-in default". `commitPreconditions`,
+`plainResultReceipts`, and `computedCellIds` default on; the other flags in
+this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -71,8 +71,9 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `systemPatternAutoUpdate`, `computedCellIds`);
+Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`eagerSourceAnnotation`, `plainResultReceipts`, `systemPatternAutoUpdate`,
+`computedCellIds`);
 `commitPreconditions` is deliberately mapped to `null` there, which records
 "not env-reachable" as a decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
@@ -141,8 +142,11 @@ propagate](#how-flags-propagate).
 ### `plainResultReceipts`
 
 - **Toggle via.** `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env var, or
-  `RuntimeOptions.experimental.plainResultReceipts`. Env-reachable so the CLI
-  invocation-protocol work can enable it per process during integration.
+  `RuntimeOptions.experimental.plainResultReceipts`. The env mapping accepts
+  exactly `"true"` and `"false"` (the category's canonical parsing: any other
+  value — `1`, `yes`, `TRUE` — is ignored with a warning, leaving the built-in
+  default in place), so the opt-out while the flag exists is an explicit
+  `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`.
 - **Added by.** Mike Salisbury, verb-contract WS-C
   (`docs/plans/pattern-verb-contract-implementation.md`).
 - **Purpose.** A handler's return value containing reactives/cells projects
@@ -159,13 +163,25 @@ propagate](#how-flags-propagate).
   chaining) records a link to the mutated cell in its receipt. Receipts
   reflect what was returned. Requires `commitPreconditions` (the receipt
   write itself) to be active, which it is by default.
-- **Current default and planned end state.** Off by default. Flips on once the
-  verb-contract WS-D integration proof (caller-supplied event id → collide →
-  read back the original result, cross-process) is green; after a bake period
-  the behavior folds into base receipt semantics and the flag is deleted.
-- **Path to removal.** Delete the flag and make the projection unconditional in
-  `handleJavaScriptHandlerResult`'s receipt-only branch; update the receipt
-  content note in `docs/specs/scheduler-v2/README.md` §7.6.
+- **Current default and planned end state.** On by default. The gate the plan's
+  governing decision 2 set — the integration suite proving readback end to
+  end — was satisfied by the three-topic fixture (#5244): caller-supplied
+  event id, a dropped-response retry and a same-id replay with a different
+  payload, both reading the ORIGINAL declared result back off the receipt,
+  cross-process against an isolated toolshed. An explicit `false` (env or
+  programmatic) remains a rollback override while the flag exists. After a
+  bake period the behavior folds into base receipt semantics and the flag is
+  deleted.
+- **Status on 2026-08-03.** Implemented, on by default (default flipped after
+  #5244's proof; the receipt write's standard-flow conversion landed
+  separately in #5262). Both flag states are pinned in
+  `packages/runner/test/scheduler-event-receipts.test.ts` and
+  `packages/runner/test/declared-result-e2e.test.ts`; the flag-off cases pass
+  `plainResultReceipts: false` explicitly.
+- **Path to removal.** Let the default-on behavior soak; then delete the flag
+  and make the projection unconditional in `handleJavaScriptHandlerResult`'s
+  receipt-only branch, remove the env mapping and the explicit-off tests, and
+  update the receipt content note in `docs/specs/scheduler-v2/README.md` §7.6.
 
 ### `commitPreconditions`
 
@@ -983,7 +999,8 @@ design docs).
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
 `Runtime` constructor merges the provided flags with the built-in defaults
-(`commitPreconditions` true, the other Category 1 flags false),
+(`commitPreconditions`, `plainResultReceipts`, and `computedCellIds` true, the
+other Category 1 flags false),
 propagates each one to its ambient control point, and then reads the effective
 state back so that `runtime.experimental.*` reflects what is actually in effect.
 
