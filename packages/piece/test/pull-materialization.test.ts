@@ -13,8 +13,10 @@ import {
   KeepAsCell,
   NAME,
   Pattern,
+  resolveCellPath,
   Runtime,
   type RuntimeProgram,
+  selectPieceReadCell,
 } from "@commonfabric/runner";
 import {
   entityRefToString,
@@ -7261,6 +7263,92 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
         label: "hello",
         inner: { plain: "visible" },
       });
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("keeps a declared slot narrower than a mixed-generation target", async () => {
+    const tx = writerRuntime.edit();
+    const target = writerRuntime.getCell(
+      writerManager.getSpace(),
+      "generation-skew-target-" + crypto.randomUUID(),
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          secret: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      tx,
+    );
+    target.set({ title: "Visible", secret: "target-generation-only" });
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerManager.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              type: "object",
+              properties: { title: { type: "string" } },
+              additionalProperties: false,
+              asCell: ["cell"],
+            },
+          },
+          required: ["handle"],
+          additionalProperties: false,
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: target },
+      undefined,
+      { start: true },
+    );
+    await writerManager.synced();
+
+    const readerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerManager = new PieceManager(readerSession, readerRuntime);
+    try {
+      await readerManager.synced();
+      const readerPieces = new PiecesController(readerManager);
+      const readerPiece = await readerPieces.get(
+        entityRefToString(piece.entityId),
+        false,
+      );
+
+      const inputCell = await readerPiece.input.getCell();
+      expect(
+        readerRuntime.cfc.schemaAtPath(inputCell.schema!, [
+          "handle",
+          "secret",
+        ]),
+      ).toBe(false);
+      expect(selectPieceReadCell(inputCell, ["handle", "secret"]).schema)
+        .toBe(false);
+      expect(() => resolveCellPath(inputCell, ["handle", "secret"]))
+        .toThrow('property "secret" not found');
+
+      expect(await readerPiece.input.get(["handle"])).toEqual({
+        title: "Visible",
+      });
+      expect(await readerPiece.input.get(["handle", "title"]))
+        .toBe("Visible");
+      await expect(readerPiece.input.get(["handle", "secret"]))
+        .rejects.toThrow('property "secret" not found');
     } finally {
       await readerRuntime.dispose();
       await readerStorage.close();

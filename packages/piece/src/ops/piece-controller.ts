@@ -30,9 +30,11 @@ import {
   preparePieceSourceTransitionBaseline,
   resolveCellPath,
   resolveLink,
+  resolvePieceReadCell,
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
+  selectPieceReadCell,
 } from "@commonfabric/runner";
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
@@ -2260,18 +2262,20 @@ class PiecePropIo implements PieceCellIo {
     // started by pull() sends its path plus narrowed schema to Memory v2, so
     // this avoids traversing unrelated linked fields (an input can contain a
     // broad authoring graph even when the caller asks for one small durable
-    // field). No per-segment asCell handling is needed on the way down: key()
-    // walks the schema (so an asCell ancestor's `properties` keep narrowing the
-    // query) and link resolution follows the stored link at that segment during
-    // the read. A TERMINAL asCell is simply unwrapped: since #5231 the
-    // projection applies the asCell scope cap itself, so a capped handle stays
-    // capped without routing through resolveAsCell().
-    const selectedCell = targetCell.key(...path);
-    await selectedCell.pull();
+    // field). `selectPieceReadCell()` walks the declared schema and pins its leaf
+    // decision before link resolution, so a mixed-generation target cannot
+    // widen the selected path. A terminal asCell is then resolved through the
+    // same boundary helper used by transformed CLI reads.
+    const selectedCell = selectPieceReadCell(targetCell, path);
+    if (selectedCell.schema === false) {
+      return await this.#getFromRoot(targetCell, path);
+    }
+    const selectedReadCell = resolvePieceReadCell(selectedCell);
+    await selectedReadCell.pull();
     // Relax `required` for scoped links that this session cannot materialize,
     // at the selected subtree rather than the root — same boundary as
     // #getFromRoot, see schemaWithScopedLinkRequiredsRelaxed.
-    const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
+    const selected = cellWithScopedLinkRequiredsRelaxed(selectedReadCell).get();
     if (isCell(selected)) {
       // An asCell projection materializes even an absent or explicitly
       // undefined slot as a Cell, so inspect the stored slot before reading
@@ -2280,7 +2284,9 @@ class PiecePropIo implements PieceCellIo {
       if (selectedCell.getRaw() === undefined) {
         return await this.#getFromRoot(targetCell, path);
       }
-      const handle = cellWithScopedLinkRequiredsRelaxed(selected);
+      const handle = cellWithScopedLinkRequiredsRelaxed(
+        resolvePieceReadCell(selected),
+      );
       await handle.pull();
       return handle.get();
     }

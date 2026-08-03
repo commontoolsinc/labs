@@ -598,6 +598,161 @@ describe("cf piece get transforms", () => {
     ).toEqual({ title: "Visible" });
   });
 
+  it("keeps a declared linked-slot schema narrower than its target", async () => {
+    const tx = runtime.edit();
+    const target = runtime.getCell(
+      space,
+      "linked-transform-generation-skew-target",
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          secret: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      tx,
+    );
+    target.set({ title: "Visible", secret: "not declared by the slot" });
+    const container = runtime.getCell(
+      space,
+      "linked-transform-generation-skew-container",
+      {
+        type: "object",
+        properties: {
+          topic: {
+            type: "object",
+            properties: {
+              title: {
+                type: "string",
+                ifc: { confidentiality: ["declared-slot-title"] },
+              },
+            },
+            additionalProperties: false,
+            asCell: ["cell"],
+          },
+        },
+        additionalProperties: false,
+      },
+      tx,
+    );
+    container.set({ topic: target as never });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const selected = container.key("topic");
+    expect(await derivePieceGetValue(runtime, space, selected, {})).toEqual({
+      title: "Visible",
+    });
+    let projectedCell: Cell<unknown> | undefined;
+    expect(
+      await derivePieceGetValue(runtime, space, selected, {
+        projection: await parsePieceGetProjection("title,secret"),
+      }, {
+        onOutputCell: (cell) => projectedCell = cell,
+      }),
+    ).toEqual({ title: "Visible" });
+
+    const probeTx = runtime.edit();
+    const projectedTitle = projectedCell!.key("title").withTx(probeTx).get();
+    const probe = runtime.getCell(
+      space,
+      "generation-skew-slot-label-probe",
+      undefined,
+      probeTx,
+    );
+    probe.set({ projectedTitle });
+    probeTx.prepareCfc();
+    expect((await probeTx.commit()).ok).toBeDefined();
+    expect(derivedConfidentiality(probe.getAsNormalizedFullLink().id))
+      .toContain("declared-slot-title");
+
+    const listTarget = runtime.getCell(
+      space,
+      "linked-transform-generation-skew-list-target",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            secret: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+      },
+    );
+    const listContainer = runtime.getCell(
+      space,
+      "linked-transform-generation-skew-list-container",
+      {
+        type: "object",
+        properties: {
+          topics: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { title: { type: "string" } },
+              additionalProperties: false,
+            },
+            asCell: ["cell"],
+          },
+        },
+        additionalProperties: false,
+      },
+    );
+    const listTx = runtime.edit();
+    listTarget.withTx(listTx).set([{
+      title: "Visible",
+      secret: "not declared by the list slot",
+    }]);
+    listContainer.withTx(listTx).set({ topics: listTarget as never });
+    expect((await listTx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(
+        runtime,
+        space,
+        listContainer.key("topics"),
+        { filter: parsePieceGetFilter(".secret != null") },
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps a declared link scope cap during transforms", async () => {
+    const tx = runtime.edit();
+    const target = runtime.getCell(
+      space,
+      "linked-transform-capped-target",
+      { type: "object", properties: { field: { type: "string" } } },
+      tx,
+      "session",
+    );
+    target.set({ field: "session-only" });
+    const container = runtime.getCell(
+      space,
+      "linked-transform-capped-container",
+      {
+        type: "object",
+        properties: {
+          handle: {
+            type: "object",
+            properties: { field: { type: "string" } },
+            asCell: [{ kind: "cell", scope: "space" }],
+          },
+        },
+      },
+      tx,
+    );
+    container.set({ handle: target as never });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, container.key("handle"), {
+        projection: await parsePieceGetProjection("field"),
+      }),
+    ).toBeUndefined();
+  });
+
   it("materializes a projection instead of aliasing its broader source", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(

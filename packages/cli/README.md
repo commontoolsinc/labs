@@ -173,6 +173,14 @@ JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or
 override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
+The declared Piece slot schema also remains authoritative across stored links.
+The read boundary follows a link first so its scope cap and CFC dereference
+metadata apply, then reasserts the slot's declared payload schema. A link minted
+by another pattern generation therefore cannot expose a property excluded by a
+closed slot, even when the target's baked schema includes it. Ordinary and
+transformed reads share `selectPieceReadCell` and `resolvePieceReadCell` for
+this rule.
+
 ## Built Binary
 
 `deno task build-binaries cf` compiles the CLI to `dist/cf` — fully

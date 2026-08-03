@@ -266,6 +266,8 @@ export {
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,
+  resolvePieceReadCell,
+  selectPieceReadCell,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";

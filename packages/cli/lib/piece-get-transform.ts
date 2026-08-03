@@ -6,6 +6,7 @@ import {
   type JSONSchema,
   KeepAsCell,
   type MemorySpace,
+  resolvePieceReadCell,
   type Runtime,
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
@@ -1043,9 +1044,14 @@ export function selectSourceSchema(
   const properties: Record<string, JSONSchema> = {};
   for (const [key, childMask] of Object.entries(mask.properties)) {
     const child = cfc.schemaAtPath(source, [key]);
+    // `false` is an authoritative exclusion from a closed declared source
+    // schema, not the same thing as having no source schema. Omitting it keeps
+    // a caller projection or predicate from widening a mixed-generation link
+    // target that happens to publish the requested field.
+    if (child === false) continue;
     properties[key] = selectSourceSchema(
       cfc,
-      child === false ? undefined : child,
+      child,
       childMask,
       purpose,
     );
@@ -1174,20 +1180,14 @@ export async function derivePieceGetValue(
   transform: PieceGetTransform,
   deps: DerivePieceGetDependencies = {},
 ): Promise<unknown> {
-  const declaredSourceSchema = sourceCell.schema;
-  const sourceSchema = isRecord(declaredSourceSchema) &&
-      declaredSourceSchema.asCell !== undefined
-    ? dereferencedElementSchema(declaredSourceSchema)
-    : declaredSourceSchema;
-  const sourceValueCell = sourceSchema === declaredSourceSchema
-    ? sourceCell
-    : sourceCell.asSchema(sourceSchema);
+  const sourceValueCell = resolvePieceReadCell(sourceCell);
+  const sourceSchema = sourceValueCell.schema;
+  const sourceValue = await sourceValueCell.pull();
   if (transform.filter === undefined && transform.projection === undefined) {
-    return await sourceValueCell.pull();
+    return sourceValue;
   }
 
   const cfc = new ContextualFlowControl();
-  const sourceValue = await sourceValueCell.pull();
   if (transform.filter !== undefined && !Array.isArray(sourceValue)) {
     throw new PieceGetTransformError(
       "--filter can only be applied to an array",

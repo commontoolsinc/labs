@@ -670,16 +670,73 @@ describe("cli piece parsing", () => {
     )).rejects.toBe(transformError);
   });
 
+  it("rejects transformed paths excluded by the declared slot schema", async () => {
+    const targetCell = {
+      schema: false,
+      asSchema: () => targetCell,
+    };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: false,
+      },
+      runtime: { cfc: { schemaAtPath: () => false } },
+      key: () => targetCell,
+    };
+    let ordinaryRead = false;
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: {
+            getCell: () => Promise.resolve(rootCell),
+            get: (path: Array<string | number>) => {
+              ordinaryRead = true;
+              expect(path).toEqual(["secret"]);
+              return Promise.reject(
+                new Error(
+                  'Cannot access path "secret" - property "secret" not found',
+                ),
+              );
+            },
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["secret"],
+      { transform: { filter: parsePieceGetFilter(".secret != null") } },
+      {
+        loadManager: () =>
+          Promise.resolve({
+            runtime: {},
+            getSpace: () => "did:key:test-space",
+          } as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+        derivePieceGetValue: () => {
+          throw new Error("excluded paths must not reach the transform");
+        },
+      },
+    )).rejects.toThrow('property "secret" not found');
+    expect(ordinaryRead).toBe(true);
+  });
+
   it("reports projection failures encountered during transformed reads", async () => {
     const targetCell = {
       schema: { type: "number" },
       getRaw: () => ({ "/": "missing-session-count" }),
+      asSchema: () => targetCell,
     };
     const rootCell = {
       schema: {
         type: "object",
         properties: { count: { type: "number" } },
         required: ["count"],
+      },
+      runtime: {
+        cfc: { schemaAtPath: () => targetCell.schema },
       },
       key: () => targetCell,
     };

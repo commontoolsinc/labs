@@ -15,8 +15,10 @@ const signer = await Identity.fromPassphrase("test piece helpers");
 const space = signer.did();
 
 interface FakeCell {
+  readonly schema?: undefined;
   get(): unknown;
   key(segment: string | number): FakeCell;
+  resolveAsCell(): FakeCell;
 }
 
 function makeCell(
@@ -29,6 +31,9 @@ function makeCell(
     },
     key(segment: string | number) {
       return children[String(segment)] ?? makeCell(undefined);
+    },
+    resolveAsCell() {
+      return this;
     },
   };
 }

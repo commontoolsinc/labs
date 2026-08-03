@@ -7,6 +7,7 @@ import {
 import { isRecord } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
 import {
@@ -46,6 +47,7 @@ export function resolveCellPath<T>(
   let parentValue: unknown = undefined;
 
   for (const segment of path) {
+    currentCell = resolvePieceReadCell(currentCell);
     parentValue = currentCell.get() as unknown;
     // An asCell-schema slot surfaces its value as a live Cell (the
     // Writable<...> result shape); read through it like the leaf below
@@ -62,10 +64,13 @@ export function resolveCellPath<T>(
         }" - encountered non-object at "${segment}"`,
       );
     }
-    currentCell = currentCell.key(segment as keyof unknown) as Cell<unknown>;
+    currentCell = selectPieceReadCell(currentCell, [segment]);
   }
 
-  const resolvedValue = currentCell.get();
+  const schemaExcluded = currentCell.schema === false;
+  const resolvedValue = schemaExcluded
+    ? undefined
+    : resolvePieceReadCell(currentCell).get();
   const segment = path[path.length - 1];
   const keyMissing = parentValue != null && typeof parentValue === "object"
     ? !(segment in (parentValue as object))
@@ -87,6 +92,63 @@ export function resolveCellPath<T>(
   }
 
   return isCell(resolvedValue) ? resolvedValue.get() : resolvedValue;
+}
+
+/**
+ * Select a Piece path while retaining the root's declared schema decision at
+ * the leaf, including an explicit `false` for a field excluded by a closed
+ * schema. `Cell.key()` performs the authoritative segment-by-segment walk (and
+ * records scope caps); the final `asSchema()` retains that decision for the
+ * Piece boundary, which rejects `false` before reading and otherwise prevents a
+ * linked target from replacing a narrower leaf schema.
+ */
+export function selectPieceReadCell<T>(
+  root: Cell<T>,
+  path: CellPath,
+): Cell<unknown> {
+  const selected = root.key(...path) as Cell<unknown>;
+  const rootSchema = root.schema;
+  if (rootSchema === undefined || path.length === 0) return selected;
+  const declaredSchema = root.runtime.cfc.schemaAtPath(
+    rootSchema,
+    path.map(String),
+  );
+  return selected.asSchema(declaredSchema);
+}
+
+/**
+ * Resolve a Piece read address without letting a linked target replace its
+ * declared schema. One outer Cell wrapper is consumed when present.
+ *
+ * `resolveAsCell()` must follow the stored link first so scope caps and CFC
+ * dereference metadata are applied. A link minted by another pattern generation
+ * may carry a broader schema, however, so the schema declared on the materialized
+ * handle is reasserted after resolution. Both ordinary and transformed Piece
+ * reads use this boundary helper and therefore share one schema authority rule.
+ */
+export function resolvePieceReadCell<T>(cell: Cell<T>): Cell<T> {
+  const declaredSchema = cell.schema;
+  let readSchema = declaredSchema;
+  if (isRecord(declaredSchema)) {
+    const declaredWrappers = ContextualFlowControl.getAsCellValues(
+      declaredSchema,
+    );
+    if (declaredWrappers.length > 0) {
+      const { asCell: _asCell, ...declaredPayload } = declaredSchema;
+      const payloadSchema: JSONSchema = {
+        ...declaredPayload,
+        ...(declaredWrappers.length > 1 && {
+          asCell: declaredWrappers.slice(1),
+        }),
+      };
+      readSchema = Object.keys(payloadSchema).length === 0
+        ? true
+        : payloadSchema;
+    }
+  }
+
+  const resolved = cell.resolveAsCell();
+  return readSchema === undefined ? resolved : resolved.asSchema<T>(readSchema);
 }
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {

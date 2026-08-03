@@ -18,6 +18,7 @@ import {
   Runtime,
   runtimePresets,
   RuntimeProgram,
+  selectPieceReadCell,
   UI,
   VNode,
 } from "@commonfabric/runner";
@@ -2200,7 +2201,7 @@ export async function getCellValue(
       await piece.getCell().pull();
       const rootCell =
         await (options.input ? piece.input.getCell() : piece.result.getCell());
-      const targetCell = rootCell.key(...path);
+      const targetCell = selectPieceReadCell(rootCell, path);
       await targetCell.pull();
       await manager.synced();
       await manager.runtime.idle();
@@ -2210,7 +2211,13 @@ export async function getCellValue(
     const prop = options.input ? "input" : "result";
     if (options.transform !== undefined) {
       const rootCell = await piece[prop].getCell();
-      const targetCell = rootCell.key(...path);
+      const targetCell = selectPieceReadCell(rootCell, path);
+      if (targetCell.schema === false) {
+        // Use the ordinary Piece reader for its established missing-path
+        // diagnostic. The shared selector makes flagged and unflagged reads
+        // agree before any computed expression can inspect the target.
+        return await piece[prop].get(path);
+      }
       let transformed: unknown;
       try {
         transformed = await (deps.derivePieceGetValue ?? derivePieceGetValue)(
