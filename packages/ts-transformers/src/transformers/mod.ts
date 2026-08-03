@@ -8,6 +8,7 @@ export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.t
 export { HelperOwnedExpressionSiteLoweringTransformer } from "./helper-owned-expression-site-lowering.ts";
 export { JsxExpressionSiteRouterTransformer } from "./jsx-expression-site-router.ts";
 export { MergeablePushValidationTransformer } from "./mergeable-push-validation.ts";
+export { VerbReturnValidationTransformer } from "./verb-return-validation.ts";
 export { ModuleScopeCfDataTransformer } from "./module-scope-cf-data.ts";
 export { ModuleScopeFunctionHardeningTransformer } from "./module-scope-function-hardening.ts";
 export { ModuleScopeShadowingTransformer } from "./module-scope-shadowing.ts";

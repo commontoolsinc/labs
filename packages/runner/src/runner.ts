@@ -1495,11 +1495,18 @@ export class Runner {
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
-    // TODO(danfuzz): This compares a runtime result value with `deepEqual`,
-    // which mishandles `FabricValue` (same-class `FabricPrimitive`s, with state
-    // in private `#fields` and zero own-props, compare equal regardless of
-    // value). Use a Fabric-aware equality for value comparison.
-    if (!deepEqual(result, previousResult)) {
+    // Convert-and-freeze (default): a deep-frozen value lets the storage write
+    // boundary's `cloneIfNecessary` identity-pass instead of
+    // deep-cloning-to-freeze.
+    //
+    // The conversion MUST precede the no-op gate. A raw result is not
+    // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
+    // here — and `valueEqual` hashes its operands, so comparing a raw result
+    // throws `hashOf: unsupported object type` instead of deciding anything.
+    // Converting first also makes the gate compare what a write would actually
+    // store, since the stored side is already a `FabricValue`.
+    const fabricResult = fabricFromNativeValue(result);
+    if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
         this.runtime,
@@ -1507,15 +1514,9 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
-      // Convert-and-freeze (default): a deep-frozen value lets the storage
-      // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze. The result root marks the whole result
-      // document as generated: setup rewrites the complete projection.
-      writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result),
-        false,
-        "output",
-      );
+      // The result root marks the whole result document as generated: setup
+      // rewrites the complete projection.
+      writableResultCell.setRawUntyped(fabricResult, false, "output");
     }
   }
 
@@ -4857,16 +4858,26 @@ export class Runner {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
         // launched, but the result cell is still created — its create is the
         // exactly-once witness for this event id. Under plainResultReceipts
-        // the witness also carries the handler's (already-normalized) plain
-        // JSON return, so a caller — or a same-id retry colliding on the
-        // receipt — reads the verb's result back by receipt address (verb
-        // contract Part 2). `{}` remains the value-less shape either way.
+        // the witness also carries the handler's (already-normalized) return,
+        // so a caller — or a same-id retry colliding on the receipt — reads
+        // the verb's result back by receipt address (verb contract Part 2).
+        // `{}` remains the value-less shape either way.
+        //
+        // The value goes through the receipt cell's STANDARD write flow
+        // (`set` → diffAndUpdate), the same conversion any cell write gets:
+        // plain JSON persists as-is and a live Cell handle converts to a
+        // link. That matters because incidental cell returns are a sanctioned
+        // idiom — `set()` returns its cell for chaining, so an
+        // expression-body `action(() => cell.set(...))` returns the mutated
+        // cell — and a raw write here fails the whole handling on such a
+        // value with an uncloneable-live-object storage error instead of
+        // recording what was returned.
         const receiptValue =
           this.runtime.experimental.plainResultReceipts === true &&
             result !== undefined
             ? result
             : {};
-        receiptCell.withTx(tx).setRaw(receiptValue);
+        receiptCell.withTx(tx).set(receiptValue);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;

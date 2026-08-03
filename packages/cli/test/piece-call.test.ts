@@ -15,6 +15,7 @@ import {
 import {
   executePieceCallable,
   PieceResultProjectionError,
+  PieceVerbReadError,
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { ValidationError } from "@cliffy/command";
@@ -41,6 +42,68 @@ import { LinkValidationError } from "../lib/piece.ts";
 import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
 
 describe("executePieceCallable", () => {
+  it("reports not-found when the piece cell has no schema-cast surface", async () => {
+    // The forced-stream probe's type guard: a piece cell without asSchema
+    // cannot take the cast, so the third resolution path answers null and
+    // the resolver reports not-found instead of crashing on the probe.
+    const emptyChild: Record<string, unknown> = {
+      schema: undefined,
+      get: () => undefined,
+      getRaw: () => undefined,
+    };
+    emptyChild.key = () => emptyChild;
+    emptyChild.asSchemaFromLinks = () => emptyChild;
+    const emptyRoot = {
+      schema: undefined,
+      get: () => ({}),
+      getRaw: () => ({}),
+      key: () => emptyChild,
+      asSchemaFromLinks: () => emptyChild,
+    };
+    const piece = {
+      result: { getCell: () => Promise.resolve(emptyRoot) },
+      input: { getCell: () => Promise.resolve(emptyRoot) },
+      getCell: () => ({}),
+    };
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "missing",
+        [],
+        {
+          loadManager: () =>
+            Promise.resolve({ getSpace: () => "home" } as never),
+          loadPiece: () => Promise.resolve(piece as never),
+        },
+      ),
+    ).rejects.toThrow('Callable "missing" not found');
+
+    // A piece exposing no cell at all skips the probe the same way.
+    const { getCell: _getCell, ...pieceWithoutCell } = piece;
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "missing",
+        [],
+        {
+          loadManager: () =>
+            Promise.resolve({ getSpace: () => "home" } as never),
+          loadPiece: () => Promise.resolve(pieceWithoutCell as never),
+        },
+      ),
+    ).rejects.toThrow('Callable "missing" not found');
+  });
+
   it("preserves plain-text mode while resolving a callable", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -2795,6 +2858,58 @@ describe("piece get data errors", () => {
     });
     expect(report?.message).toBe("--filter can only be applied to an array");
     expect(report?.hint).toBeUndefined();
+  });
+
+  it("refuses a path that lands on a verb with the call redirect and exit 1", () => {
+    const verbError = new PieceVerbReadError(
+      "addTopic",
+      "fid1:piece-123",
+      true,
+    );
+    expect(isPieceGetDataError(verbError)).toBe(true);
+    const report = pieceGetDataErrorReport(verbError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    // The message IS the redirect — mirroring the llm-dialog read tool's
+    // "Path resolves to a handler; use invoke() instead." — so no extra hint
+    // rides along (the --input tip would be a wrong remedy for a verb).
+    expect(report?.message).toBe(
+      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+    );
+    expect(report?.hint).toBeUndefined();
+
+    // A nested verb is not root-callable, so its report must not suggest a
+    // command that would fail — it redirects at the parent read and the
+    // verbs listing instead, still hint-free.
+    const nestedReport = pieceGetDataErrorReport(
+      new PieceVerbReadError("removeItem", "fid1:piece-123", false),
+      { input: false, piece: "fid1:piece-123" },
+    );
+    expect(nestedReport?.message).toMatch(/not directly callable/);
+    expect(nestedReport?.message).toMatch(
+      /cf piece verbs --piece fid1:piece-123/,
+    );
+    expect(nestedReport?.message).not.toContain("cf piece call");
+    expect(nestedReport?.hint).toBeUndefined();
+
+    // Threaded through the shared data-error exit: stderr message, exit 1.
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError(report!, {
+        printError: (m) => printed.push(m),
+        printHint: () => {},
+        exit: (code: number): never => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        },
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual([
+      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+    ]);
+    expect(exited).toEqual([1]);
   });
 });
 

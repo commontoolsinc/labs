@@ -567,6 +567,35 @@ still reject. That carve-out is an unratified delta recorded in
 carve-out or the implementation reverts; per §1, do not treat the accident of
 acceptance as language policy in the meantime.
 
+## 5.8 Verb Results Are Declared, Never Inferred
+
+A verb (an `action(...)` or `handler(...)` body) that produces a value for
+its caller declares it by naming the result type argument —
+`action<Event, Result>(...)` / `handler<Event, State, Result>(...)` — so the
+schema layer can see it (verb contract WS-C). Inference is deliberately
+unavailable: the void overloads absorb every callback, because a concise
+body's completion value is whatever its last call returns (`Cell.set` returns
+the cell) and an incidental return must never declare a result nobody wrote.
+
+Consequently, under a void-declared verb, a block body's explicit
+`return <expr>` of a **definitely plain-shaped** expression — object/array
+literal, string/number/boolean/null literal, template string, or
+arithmetic/concatenation over those — is a compile-time error
+(`verb-result:undeclared-return`): plain data returned without a declaration
+is a value the verb's contract never announces — no caller can rely on it.
+The fix the diagnostic names is declaring the result, or a bare `return;`
+for an early exit.
+
+Everything else stays legal, deliberately: concise bodies (the absorption
+rule above), bare `return;` / `return undefined;` (control flow), and
+returns of calls, identifiers, property reads, or JSX — the
+launch/navigation/render idioms (`return navigateTo(piece)`, returning a
+freshly created piece, returning rendered UI) that the runtime consumes
+without a declaration. The authored surface renders `Reactive<T>`
+transparently, so these cannot be told apart from plain values by type;
+the boundary is syntactic and is pinned in
+`test/verb-return-validation.test.ts`.
+
 ## 6. Non-Normative Hardening Follow-Ups
 
 These are implementation/documentation follow-ups, not unresolved v1 language
