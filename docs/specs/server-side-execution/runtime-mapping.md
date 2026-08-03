@@ -468,9 +468,15 @@ The v2 statement now lives in protocol.md §1/§7 and README §3.8:
 the SpaceServer's envelope identity is its own service identity —
 the lease holder; derived commits are a different trust class,
 produced and admitted inside one trust environment — and per-run
-identity is per-action-context WITHIN the commit (acting principal
-per action, explicit `scope_key` per scoped write), never a
+identity is per-action-context WITHIN the commit (acting identity
+per action RUN, explicit `scope_key` per scoped write), never a
 SpaceServer-ambient user: the mapping's recommendation, now ruled.
+The owner's 2026-08-03 modeling ruling generalizes this into the
+transaction identity model (protocol.md §1): envelope identity for
+single-session authored transactions, per-action-run annotations
+inside the server-driven wave commit — closing ledger LD3 (the
+shared `scope_key` vocabulary, key-vocabulary.md §3) and LD5 (the
+lease-holder read row, protocol.md §2).
 scopes.md §7 M3 resolves the same way — `resolveScopeKey`'s session
 binding (`packages/memory/v2/server.ts:1577-1580`) narrows to
 authored commits only; derived admission stays the lease check.

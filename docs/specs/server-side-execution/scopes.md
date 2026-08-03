@@ -283,7 +283,9 @@ Phases 1–5 meet them wherever scoped state appears.
   evaluate per-instance just to DISCOVER per-instance scope — N
   runs under N identities, with N time-varying (§2).
   The READ side is the half R-Q6b did not cover, and it is now
-  RULED (S1, ledger LD5): reads may name an explicit
+  RULED (S1; ledger LD5 ratified by the owner 2026-08-03 as the
+  read half of the transaction identity model, protocol.md §1):
+  reads may name an explicit
   `entity_scope_key`, admissible ONLY for the space's live lease
   holder (protocol.md §2's read row) — the same trust argument and
   the same one equality check as derived writes. Without it a
@@ -353,7 +355,9 @@ DEMANDED ones only, bounded by serving-loop.md §3's budget rule),
 `scheduler_context_floor` (§7 — deletes whole with the observation
 machinery), and the M3 write path (§7 M3 — R-Q6b: explicit
 `scope_key` per scoped write WITHIN the derived commit; admission
-stays the lease check). Closed 2026-08-02 by S1 (ledger LD5): the
+stays the lease check). Closed 2026-08-02 by S1, ratified by the
+owner 2026-08-03 (ledger LD5; the transaction identity model,
+protocol.md §1): the
 READ side — reads may name an explicit `entity_scope_key`, lease
 holder only (§7 M1, protocol.md §2) — and run identity for
 non-handler runs (§5). Still open:

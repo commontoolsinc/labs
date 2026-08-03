@@ -57,6 +57,34 @@ and the next wave recomputes the derivation over it. v2 adds no
 security guarantees beyond today's unless trivial (owner,
 2026-08-02); tightening is future work.
 
+**The transaction identity model (RULED, owner 2026-08-03 — the
+modeling that closes ledger LD3 and LD5).** Today every transaction
+comes from ONE client, so identity rides the ENVELOPE: the session
+carries the user principal and session id — established once, at
+session open, never sent per commit — and scoped writes inside the
+transaction name only the scope KIND (`scope: "user"`). It is the
+memory server that maps kind → concrete `scope_key` at admission,
+derived from the session that had the commit (`resolveScopeKey`,
+`packages/memory/v2/engine.ts:98-126`). That model is UNCHANGED for
+every `authored` commit: clients never name keys, per commit or
+otherwise; their keys keep deriving from the authenticated session.
+
+The wave breaks that model's premise. The server executes for ALL
+clients at once — acting as many users and sessions in one pass —
+and combines every derived step into ONE transaction
+(serving-loop.md §3). No single user principal or session id exists
+for that transaction's envelope to carry, so it carries none: the
+envelope principal is the SpaceServer's service identity, exactly
+the lease holder §2 checks. The identity the envelope can no longer
+express moves INSIDE the transaction, as ANNOTATIONS on the changes
+themselves — at the grouping the commit already tracks per action
+run, the same granularity as scheduling basis rows and CFC
+provenance (serving-loop.md §3b–§3c). `derived` is therefore the
+ONE sanctioned commit variant that carries explicit user/session
+keys inside; §2's read row is the same variant's read half (ledger
+LD5), and the shared key vocabulary the annotations force is ledger
+LD3 (key-vocabulary.md §3).
+
 Identity at the derived envelope (R-Q6b, RULED, owner 2026-08-02):
 `derived` is a DIFFERENT TRUST CLASS from `authored`. An authored
 commit crosses a trust boundary — a session did work the server
@@ -75,13 +103,19 @@ prevent:
   clearance identity read it (builtins.md §2, scopes.md §6). It
   attributes nothing to anybody: an address is not a claim about
   who acted.
-- **ATTRIBUTION — the acting principal, one per action RUN.** The
-  unit is the RUN, `action × instance`, NEVER the action: under
+- **ATTRIBUTION — the acting identity, one per action RUN.** The
+  user principal plus, where the run has one, the session — the
+  same pair the envelope carries for an authored commit (and the
+  pair the stamped `firedAt` supplies for handler runs), relocated
+  to the granularity where it is true. The unit is the RUN,
+  `action × instance`, NEVER the action: under
   fan-out one action runs N times as N principals inside ONE wave
   commit (scopes.md §2), so per-ACTION attribution would merge N
   principals' provenance inside the load-bearing enforcement
   (serving-loop.md §3c). CFC labels evaluate per instance run for
-  the same reason.
+  the same reason. A run with no acting identity — a space-scope
+  derivation before any narrowing — carries none, like the
+  SpaceServer's own writes above.
 
 Attributed, not signed, today. The considered alternative — N
 commits per wave, one per session, each attributed at its
@@ -139,7 +173,12 @@ only on a MISSING principal, never on a wrong one, so the failure
 mode is a SILENT read of an empty instance, not an error. The row
 above closes it by extending Q6b's own trust argument symmetrically:
 the lease holder is the party the server already trusts to derive
-every instance, so it may NAME an instance to read.
+every instance, so it may NAME an instance to read. RATIFIED
+(owner, 2026-08-03; was ledger LD5): this row is the read half of
+§1's transaction identity model — the server-driven variant names
+keys on both sides of the wire, while the client-facing protocol is
+untouched: a non-holder naming a `scope_key` is rejected exactly as
+today, and client reads keep resolving from the session.
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a
@@ -354,9 +393,15 @@ disabled (README §3.5).
   only — §2); plus, WITHIN a derived commit's body, the ADDRESSING
   and ATTRIBUTION pair §1 defines — never envelope identity (R-Q6b):
   the explicit `scope_key` on every scoped write (addressing) and
-  the acting principal on every action RUN's writes (attribution,
+  the acting identity on every action RUN's writes (attribution,
   `action × instance`). Anything further needs a spec edit here
   first.
+- **`scope_key` is thereby PROTOCOL vocabulary**, no longer
+  engine-internal vocabulary: it appears inside derived commit
+  bodies and on lease-holder reads, so its format is defined ONCE
+  in the wire-shape module (`packages/memory/v2.ts`, beside
+  `CellScope` and `SessionId`) and imported by engine and runner
+  alike — the LD3 ruling, key-vocabulary.md §3.
 - **`eventId` and `firedAt` are ENVELOPE fields for admission** (T8),
   not payload: admission reads them (`eventId` for the uniqueness
   CAS above the dedupe horizon, `firedAt` because the server STAMPS
@@ -364,10 +409,12 @@ disabled (README §3.5).
   same classification; if the two ever disagree, this section and
   events.md §1 are the pair to reconcile, and neither is a payload
   claim.
-- **A read may name an `entity_scope_key`** (S1, §2's read row).
-  That is the only read-side addition to the wire: one optional
-  field on the read, admissible only for the space's live lease
-  holder. Reads that name nothing are unchanged.
+- **A read may name an `entity_scope_key`** (S1, §2's read row;
+  ledger LD5 ratified 2026-08-03 — the read half of §1's
+  transaction identity model). That is the only read-side addition
+  to the wire: one optional field on the read, admissible only for
+  the space's live lease holder. Reads that name nothing are
+  unchanged.
 - Basis-index rows (serving-loop.md §3b) ride INSIDE the derived
   commit's store TRANSACTION as engine table rows — sanctioned
   carriage, NOT metadata and NOT part of the commit representation:
@@ -384,7 +431,7 @@ disabled (README §3.5).
   CFC label purposes (serving-loop.md §3c), carried in the write
   PAYLOAD, never as commit metadata: the commit is a transport batch,
   never a label boundary. R-Q6b's attribution (§1) rides at the same
-  granularity — acting principal per action RUN (`action ×
+  granularity — acting identity per action RUN (`action ×
   instance`), with the `scope_key` per scoped write doing the
   separate ADDRESSING job — attributed, not signed, today; when
   per-user delegated keys exist (anticipated, not built),

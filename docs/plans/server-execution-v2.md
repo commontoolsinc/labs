@@ -65,18 +65,24 @@ Tasks:
       round 3, 2026-08-02: the M3 ruling's READ half is now closed
       too — reads may name an explicit `entity_scope_key`,
       admissible only for the space's live lease holder (scopes.md
-      §7 M1, protocol.md §2; ledger LD5, a protocol read-surface
-      change the owner should see), and run identity for
+      §7 M1, protocol.md §2), and run identity for
       non-handler runs is per DEMANDED INSTANCE (scopes.md §5). The
       batch-4 fan-out closure was CORRECTED: the discovering wave
       writes the redirect AND its own run's instance, and W waits on
       demanded siblings (scopes.md §2). The residual open that
       remains is session-data GC — the basis-index DDL is authored
       in serving-loop.md §3b — and that GC must cover non-session
-      keys too. Ledger LD3 — who owns the runner-side
-      `resolveScopeKey` twin, and whether the runner may import
-      engine scope-key vocabulary — is UNRESOLVED and blocks
-      Phase 1 stage E.
+      keys too. **Owner modeling ruling 2026-08-03 — the transaction
+      identity model (protocol.md §1) — closed the two remaining
+      ledger items:** LD5 (the read row is RATIFIED as the read half
+      of the server-driven commit variant — a protocol change, and
+      the intended one) and LD3 (the `scope_key` format is PROTOCOL
+      vocabulary, defined once in the wire-shape module
+      `packages/memory/v2.ts` beside `CellScope`, imported by engine
+      and runner alike; the runner constructs keys from demand-/
+      `firedAt`-supplied identity and never resolves them from
+      ambient state — key-vocabulary.md §3). Phase 1 stage E is
+      unblocked.
 - [ ] Name the single flag — NAMED 2026-08-02:
       `EXPERIMENTAL_SERVER_EXECUTION` (RuntimeOptions key
       `serverExecution`), deliberately distinct from v1's
@@ -208,9 +214,12 @@ Stages, one PR each except C, which is a three-PR train (below):
       This is the single biggest scope cost of the arc (scopes.md §7
       M2) and it is landed DARK, ahead of anything that depends on
       it — which is why it is its own stage rather than a task
-      inside F. LD3 (who owns the runner-side `resolveScopeKey` twin,
-      and whether importing engine vocabulary into the runner is
-      legal layering) MUST be ruled before this stage builds.
+      inside F. LD3 is RULED (owner 2026-08-03, key-vocabulary.md
+      §3): the `scope_key` format moves to the wire-shape module
+      (`packages/memory/v2.ts`) as ONE shared definition imported by
+      engine and runner alike; the nine sites construct keys from
+      demand-/`firedAt`-supplied identity, never from ambient state.
+      The stage's first PR is that definition move.
 - [ ] **F — host + SpaceServer + watermark + gates**: executor host,
       per-space activation/park with demand-driven value pull — no
       per-piece start/stop (serving-loop.md §1, §3); pure structural

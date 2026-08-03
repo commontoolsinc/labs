@@ -317,7 +317,9 @@ CREATE TABLE scheduler_basis (
   action_scope_key TEXT,    -- the INSTANCE that ran (scopes.md §7
                             --   M2 re-keying; scope_key vocabulary
                             --   is today's `resolveScopeKey` —
-                            --   packages/memory/v2/engine.ts:98)
+                            --   packages/memory/v2/engine.ts:98 —
+                            --   moving to the wire-shape module
+                            --   per LD3, key-vocabulary.md §3)
   entity_space     TEXT,    -- the input doc's space: foreign reads
                             --   are logged reads too (cross-space
                             --   bullet above)

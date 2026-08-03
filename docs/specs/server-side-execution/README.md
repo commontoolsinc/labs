@@ -364,9 +364,9 @@ session-scoped client act. The wiring:
   the work — one trust environment at the envelope), so the
   SpaceServer commits under its own service identity and attribution
   rides WITHIN the commit — explicit scope_key per scoped write,
-  acting principal per action — never a SpaceServer-ambient user
-  identity for served work (protocol.md §1, §7; runtime-mapping.md
-  N57). CFC labels stay the load-bearing enforcement; commit-level
+  acting identity per action RUN — never a SpaceServer-ambient user
+  identity for served work (protocol.md §1's transaction identity
+  model, §7; runtime-mapping.md N57). CFC labels stay the load-bearing enforcement; commit-level
   identity is not. Anticipated: per-user server-generated keys with
   user-delegated authority graduate attribution to acting-key
   signatures, envelope model unchanged.
