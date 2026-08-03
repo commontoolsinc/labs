@@ -1,10 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   FabricInstance,
   FabricPrimitive,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -153,29 +153,26 @@ export function withAliasBindings(
   // `{}`. It refuses instead of doing that quietly.
   if (value instanceof FabricInstance) throw refuseFabricInstance(value);
 
-  // What remains that is an object, and not a pattern, is either a native
-  // carrying a canonical fabric form (a `Uint8Array`, a `Date`) or something
-  // not representable at all. Hand it to the sanctioned conversion, which
-  // mints the fabric form or rejects.
+  // What remains that is an object, is not a pattern, and is not a plain
+  // object is either a native carrying a canonical fabric form (a
+  // `Uint8Array`, a `Date`) or something not representable at all. Hand it to
+  // the sanctioned conversion, which mints the fabric form or rejects.
   //
-  // Without this, the `for...in` copy rebuilds such a value by property name,
-  // which does not merely lose it -- it LAUNDERS it. A `Uint8Array` becomes
-  // `{"0":7,"1":9}` and a `Date` becomes `{}`, and both of those are inert
-  // plain objects, so they satisfy `isFabricValue()` and are stored as legal
-  // values meaning something else entirely. Nothing downstream can notice,
-  // because by then the evidence is gone.
+  // The INERT plain-object test is what keeps this function's output vetted,
+  // and it is not interchangeable with a plain-object test. An inert plain
+  // object is a container already known good, so it skips the conversion and
+  // is walked in place -- no clone allocated only to be dropped when the
+  // `for...in` below rebuilds it. Every other record goes to the conversion
+  // and is converted or REJECTED there.
   //
-  // An inert plain object is excluded, and NOT merely to save the copy. The
-  // conversion clones one in order to freeze it, and identity is load-bearing
-  // here: a module's `$implRef` and a pattern's metadata (program, derivation
-  // link) are held in WeakMaps keyed by the object itself, and a clone carries
-  // neither. (Circular-reference detection used to depend on this too, and no
-  // longer does -- the `seen` bookkeeping below marks both identities.)
-  let preConversion: object | undefined;
-  if (
-    isRecord(value) && !isPattern(value) && !isInertPlainObject(value)
-  ) {
-    preConversion = value as object;
+  // A plain object that is not inert must be among the rejected. Excluding it
+  // here instead would launder it exactly as a native would be laundered: the
+  // `for...in` rebuild silently drops a symbol key and a non-enumerable
+  // property, EVALUATES an accessor into a data property, and reparents a
+  // null-prototype object -- each producing a plain object that satisfies
+  // `isFabricValue()` while meaning something else. Nothing downstream can
+  // catch it, because what it produces is genuinely valid.
+  if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
     value = shallowFabricFromNativeValue(value);
     // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
     // an `Error` a `FabricError`.
@@ -194,13 +191,9 @@ export function withAliasBindings(
     // received and the value as converted -- and a cycle pointing at either is
     // caught. Keying only the converted object would let a cycle back to the
     // original recurse undetected until the stack dies.
-    const depth = Math.max(
-      seen.get(value as object) ?? 0,
-      preConversion === undefined ? 0 : seen.get(preConversion) ?? 0,
-    );
+    const depth = seen.get(value as object) ?? 0;
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
-    if (preConversion !== undefined) seen.set(preConversion, depth + 1);
 
     // If this is a pattern, serialize it through the INTERNAL graph
     // serializer (its toJSON under the internal-serialization context): this
@@ -230,7 +223,6 @@ export function withAliasBindings(
 
     // Restore depth so shared references can be re-serialized
     seen.set(value as object, depth);
-    if (preConversion !== undefined) seen.set(preConversion, depth);
 
     // Register the copy's derivation link so trust and the content-addressed
     // entry ref carry to the serialized copy (side table; symbol keys would be

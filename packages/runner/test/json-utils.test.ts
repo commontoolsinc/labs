@@ -852,6 +852,36 @@ describe("json-utils", () => {
       expect(out.self).toEqual({});
     });
 
+    it("rejects a plain object that is not inert, rather than laundering it", () => {
+      // These are the cases that separate `isInertPlainObject()` from a plain
+      // `isPlainObject()` at the routing test above. Were they excluded from
+      // the conversion, the `for...in` rebuild would silently drop the symbol
+      // key, EVALUATE the accessor into a data property, and reparent the
+      // null-prototype object -- each producing a plain object that satisfies
+      // `isFabricValue()` while meaning something else, with nothing
+      // downstream able to notice. They must be refused here.
+      const sym = Symbol("s");
+      expect(() => withAliasBindings({ a: 1, [sym]: "x" } as any)).toThrow(
+        "Not representable",
+      );
+      expect(() =>
+        withAliasBindings({
+          a: 1,
+          get live() {
+            return 42;
+          },
+        } as any)
+      ).toThrow("Not representable");
+      expect(() =>
+        withAliasBindings(
+          Object.assign(Object.create(null), { a: 1 }) as any,
+        )
+      ).toThrow("Not representable");
+
+      // ...while an ordinary inert plain object still walks through untouched.
+      expect(withAliasBindings({ a: 1 } as any)).toEqual({ a: 1 });
+    });
+
     it("leaves ordinary containers alone", () => {
       // The conversion above must not reach an inert plain object or an array;
       // those are already fabric values and are walked, not converted.
