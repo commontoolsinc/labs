@@ -1,5 +1,6 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { encodeJsonPointer } from "@commonfabric/runner";
+import { isInstance } from "@commonfabric/utils/types";
 import {
   localRefTarget,
   relaxDefaultedRequired,
@@ -591,11 +592,17 @@ type BackingLink = {
  * same encoding the llm-dialog link strings use), so a property name
  * containing `/` or `~` stays unambiguous.
  *
- * The walk covers the VALUE that was read back — finite, already-loaded
- * JSON — not the graph, so it terminates without cycle tracking, and a
- * receipt cell that cannot resolve links (no `resolveAsCell` /
- * `getAsNormalizedFullLink`) degrades to the receipt-root entry alone
- * rather than guessing.
+ * The walk covers the JSON of the value that was read back, and it ENFORCES
+ * that rather than assuming it: descent stops at any non-plain object, so a
+ * live runtime object reached through the result contributes its own link and
+ * nothing below it. That bound is what makes the walk terminate. A result
+ * carrying a piece that owns verbs is the case that proves the point — the
+ * stream on that piece is a live object whose `runtime`/`scheduler` graph
+ * refers back to itself, and walking into it exhausted the stack.
+ *
+ * A receipt cell that cannot resolve links (no `resolveAsCell` /
+ * `getAsNormalizedFullLink`) degrades to the receipt-root entry alone rather
+ * than guessing.
  */
 export function collectInvocationResultLinks(
   receiptLink: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
@@ -640,6 +647,12 @@ export function collectInvocationResultLinks(
       const resolved = child.resolveAsCell?.() ?? child;
       const childLink = resolved.getAsNormalizedFullLink?.();
       const segments = [...pathSegments, key];
+      // A non-plain object is not part of the result's JSON: it is a live
+      // runtime object the readback surfaced (a stream on a returned piece,
+      // most commonly). Annotate it if it has a document of its own, but do
+      // not descend — its properties are the runtime's, not the result's, and
+      // they refer back to themselves.
+      const descend = !isInstance(childValue);
       if (
         childLink?.id !== undefined && childLink.space !== undefined &&
         !sameBackingDocument(childLink as BackingLink, base)
@@ -647,8 +660,10 @@ export function collectInvocationResultLinks(
         links[encodeJsonPointer(["", ...segments])] = toInvocationResultLink(
           childLink as BackingLink,
         );
-        walk(resolved, childValue, segments, childLink as BackingLink);
-      } else {
+        if (descend) {
+          walk(resolved, childValue, segments, childLink as BackingLink);
+        }
+      } else if (descend) {
         // Same backing document — no entry — but descendants are still read
         // from the RESOLVED cell: a same-doc link can redirect to another
         // path, and the children live under its target.
