@@ -1,5 +1,9 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricPrimitive,
+  shallowFabricFromNativeValue,
+} from "@commonfabric/data-model/fabric-value";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -118,10 +122,26 @@ export function toJSONWithAliasBindings(
     );
   }
 
+  // An object here that is neither a pattern nor an inert plain object is
+  // either a native carrying a canonical fabric form (a `Uint8Array`, a
+  // `Date`) or something not representable at all. Hand it to the sanctioned
+  // conversion, which mints the fabric form or rejects.
+  //
+  // Without this, the `for...in` copy below rebuilds such a value by property
+  // name, which does not merely lose it -- it LAUNDERS it. A `Uint8Array`
+  // becomes `{"0":7,"1":9}` and a `Date` becomes `{}`, and both of those are
+  // inert plain objects, so they satisfy `isFabricValue()` and are stored as
+  // legal values meaning something else entirely. Nothing downstream can
+  // notice, because by then the evidence is gone.
+  if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
+    value = shallowFabricFromNativeValue(value) as typeof value;
+  }
+
   // A `FabricPrimitive` is an atomic value whose state lives in private fields
   // (zero enumerable own-props). The `for...in` copy branch below would flatten
-  // it to `{}`, so return it unchanged here — after the cell / alias / array
-  // handling above, which must still win for those forms.
+  // it to `{}`, so return it unchanged here — whether the author built one or
+  // the conversion above just minted it — after the cell / alias / array
+  // handling, which must still win for those forms.
   if (value instanceof FabricPrimitive) {
     return value as unknown as JSONValue;
   }
