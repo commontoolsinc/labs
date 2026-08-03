@@ -31,6 +31,7 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
@@ -287,15 +288,60 @@ export function exitWithDataError(
  * action body only ever runs under Cliffy, so anything written there is
  * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
  * threaded so a test can observe the report without a real process exit.
+ *
+ * `observer` is the call's phase observer: this exit bypasses the action's
+ * catch (it terminates the process from inside the promise chain), so the
+ * verbose in-flight span must be closed HERE — otherwise a pre-dispatch
+ * payload rejection under --verbose would leave the initial_sync span
+ * dangling with no failure timing. A rethrown error is closed by the
+ * action's own failure exit instead.
  */
 export function reportVerbInputErrorOrRethrow(
   error: unknown,
   piece: string | undefined,
   deps?: Parameters<typeof exitWithDataError>[1],
+  observer?: { finish: (end?: "settled" | "failed") => void },
 ): never {
   const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
-  if (report) exitWithDataError(report, deps);
+  if (report) {
+    observer?.finish("failed");
+    exitWithDataError(report, deps);
+  }
   throw error;
+}
+
+/**
+ * The failure exit for `cf piece call`: closes the verbose in-flight span as
+ * `failed` (idempotent — a span already closed elsewhere stays closed),
+ * rethrows Cliffy validation errors so usage failures still render the usage
+ * screen — with their span closed first — and reports everything else as the
+ * failure message plus the invocation id beside the furthest observed phase,
+ * the retry key, before exiting 1. A named export rather than catch-block
+ * prose because the action body only runs under Cliffy and is unreachable
+ * from a unit test; the seams let a test observe the exact exit contract.
+ */
+export function exitPieceCallFailure(
+  observer: { finish: (end?: "settled" | "failed") => void },
+  error: unknown,
+  invocationId: string,
+  phase: InvocationPhase,
+  deps?: {
+    printError?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never {
+  observer.finish("failed");
+  if (error instanceof ValidationError) {
+    throw error;
+  }
+  const printError = deps?.printError ?? console.error;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(error instanceof Error ? error.message : String(error));
+  // Where the invocation stopped decides retry semantics: anything at or
+  // past "dispatched" retries SAFELY ONLY with this same id (same-id
+  // retries deduplicate; a fresh id would re-execute).
+  printError(`invocation: ${invocationId} phase: ${phase}`);
+  return exit(1);
 }
 
 export function pieceCallRawArgs(
@@ -468,6 +514,77 @@ export function pieceCallPhaseObserver(
       close(end);
     },
   };
+}
+
+/**
+ * The success tail of `cf piece call`, extracted from the command action so
+ * it is unit-coverable — command action bodies never execute under the unit
+ * suite, the same convention that keeps `cf test` out of its action body
+ * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
+ * finishes: no invocation ran, so there is no span to close.
+ */
+export function renderPieceCallOutcome(
+  observer: { finish: (end?: "settled" | "failed" | "detached") => void },
+  result: ExecutedPieceCallable,
+  callableName: string,
+  piece: string,
+  deps: {
+    render?: (text: string) => void;
+    hint?: (text: string, prefix?: boolean) => void;
+    printError?: (text: string) => void;
+  } = {},
+  opts: { detached?: boolean; invocationId?: string } = {},
+): void {
+  const renderOut = deps.render ?? render;
+  const hintOut = deps.hint ?? hint;
+  const printError = deps.printError ?? console.error;
+  if (result.helpText) {
+    renderOut(result.helpText);
+    return;
+  }
+  observer.finish(opts.detached ? "detached" : undefined);
+  if (result.outputText) {
+    renderOut(result.outputText);
+    if (result.resultRef) {
+      // stderr, so stdout stays exactly the tool's JSON result. Routed
+      // through hint() DELIBERATELY: under --quiet the ref is suppressed —
+      // it is advisory until the invocation protocol carries it in the
+      // stdout Invocation JSON (verb contract WS-D), and --quiet callers
+      // asked for the bare result.
+      const ref = result.resultRef;
+      hintOut(
+        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        false,
+      );
+    }
+    return;
+  }
+  const nextSteps = cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${piece} ...`);
+  if (result.invocation) {
+    // The machine surface for a handler invocation: stdout carries the
+    // Invocation JSON — settled, or stopped at "committed" under --no-wait —
+    // prose stays on stderr via hint().
+    renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    hintOut(
+      opts.detached
+        ? cliText(`NEXT STEPS:
+  → Read the outcome: cf piece call --piece ${piece} --invocation ${
+          opts.invocationId ?? "<id>"
+        } ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+        : nextSteps,
+    );
+    return;
+  }
+  const confirmation = `Called handler "${callableName}" on piece ${piece}`;
+  if (result.parsed.usedJsonInput) {
+    printError(confirmation);
+  } else {
+    renderOut(confirmation);
+  }
+  hintOut(nextSteps);
 }
 
 /**
@@ -1479,59 +1596,26 @@ after --. Handlers interpret piped input when no input argument is present.`,
             ),
           },
         ).catch((error) =>
-          reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
+          reportVerbInputErrorOrRethrow(
+            error,
+            pieceConfig.piece,
+            undefined,
+            observer,
+          )
         ),
         waitControl.boundSeconds,
       );
-      if (result.helpText) {
-        render(result.helpText);
-        return;
-      }
-      observer.finish(waitControl.mode === "commit" ? "detached" : "settled");
-      if (result.outputText) {
-        render(result.outputText);
-        if (result.resultRef) {
-          // stderr, so stdout stays exactly the tool's JSON result. Routed
-          // through hint() DELIBERATELY: under --quiet the ref is suppressed —
-          // it is advisory until the invocation protocol carries it in the
-          // stdout Invocation JSON (verb contract WS-D), and --quiet callers
-          // asked for the bare result.
-          const ref = result.resultRef;
-          hint(
-            `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
-            false,
-          );
-        }
-        return;
-      }
-      if (result.invocation) {
-        // The machine surface for a handler invocation: stdout carries the
-        // Invocation JSON — settled, or stopped at "committed" under
-        // --no-wait — prose stays on stderr via hint().
-        render(JSON.stringify(invocationJson(result.invocation), null, 2));
-        if (waitControl.mode === "commit") {
-          hint(cliText(`NEXT STEPS:
-  → Read the outcome: cf piece call --piece ${pieceConfig.piece} --invocation ${invocationId} ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
-  → Verify state:     cf piece get --piece ${pieceConfig.piece} <path> ...`));
-        } else {
-          hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
-        }
-        return;
-      }
-      const confirmation =
-        `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
-      if (result.parsed.usedJsonInput) {
-        console.error(confirmation);
-      } else {
-        render(confirmation);
-      }
-      hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+      renderPieceCallOutcome(
+        observer,
+        result,
+        callableName,
+        pieceConfig.piece,
+        {},
+        { detached: waitControl.mode === "commit", invocationId },
+      );
     } catch (error) {
       if (error instanceof ValidationError) {
+        observer.finish("failed");
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);
