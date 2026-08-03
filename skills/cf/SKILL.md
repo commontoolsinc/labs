@@ -235,11 +235,13 @@ comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
 fields apply per item for arrays, while JSON Schema describes the whole output.
 In an array-item projection, a typed scalar leaf that does not match stored data
 is omitted rather than reported as an error; prefer `true` leaves unless type
-filtering is intentional. Concise dotted paths do not traverse nested array
-items; use inline/file JSON Schema with `items` for that shape. A concise
-projection over nullable array items can currently collapse the whole result to
-JSON `null`; filter null/unavailable items before projecting or preserve the
-item union in an explicit schema, and never treat that `null` as an empty list.
+filtering is intentional. Concise dotted paths follow declared source schemas
+through nested arrays: `comments.body` selects `body` from every comment and
+drops its siblings. Source-declared nullable items and properties remain null;
+an unavailable or rejected transformed value exits nonzero with an explicit "not
+JSON null" error. If the source schema does not identify a nested container,
+concise projection still applies its field mask across encountered arrays to
+prevent sibling disclosure; use an explicit schema for a fixed output contract.
 The two flags compose as filter-then-project. Both run through runtime
 filter/map/lift nodes, which construct projected values from
 source-schema-selected reads, so CFC behavior is the same as a computed pattern

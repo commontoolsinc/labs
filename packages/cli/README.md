@@ -149,13 +149,17 @@ Projection schemas support structural `properties`, `items`, and scalar leaf
 schemas. In an array-item projection, a scalar leaf whose declared type does not
 match the stored value is omitted by the runtime rather than reported as an
 error; prefer `true` leaves unless that type filtering is intentional. Schema
-combinators and references are rejected. Concise dotted paths traverse object
-properties, not nested array items: use an inline/file JSON Schema with `items`
-for a shape such as selected fields from every `comments` entry. A concise
-projection over nullable array items can currently return JSON `null` for the
-whole array when any item is null. Filter null/unavailable items before
-projecting, or use an explicit array schema whose `items` preserves the source
-nullability; do not interpret that JSON `null` as an empty result.
+combinators and references are rejected in caller-supplied projection schemas.
+Concise dotted paths follow the declared source schema through nested arrays, so
+`comments.body` selects `body` from every comment without retaining comment
+siblings. The projection preserves source-declared nullable items and
+properties, including `type` arrays and `anyOf` unions. When the source schema
+does not identify a nested container, the concise form applies the same field
+mask across arrays encountered in the value so siblings still cannot leak; use
+an explicit JSON Schema when the output schema itself must be fixed. If a
+transformed value is unavailable or rejected, the command exits nonzero and
+states that the failure is not JSON `null`; a printed `null` is therefore a
+valid projected null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 The runtime's list filter/map builtins therefore handle CFC exactly as authored

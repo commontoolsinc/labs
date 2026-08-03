@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
-import { type Cell, Runtime } from "@commonfabric/runner";
+import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   derivePieceGetValue,
@@ -10,6 +10,7 @@ import {
   parsePieceGetFilter,
   parsePieceGetProjection,
   PieceGetTransformError,
+  schemaMayBeArray,
 } from "../lib/piece-get-transform.ts";
 
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
@@ -230,6 +231,20 @@ describe("cf piece get transforms", () => {
     } finally {
       await Deno.remove(path);
     }
+  });
+
+  it("detects arrays through refs and cyclic schema compositions", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.anyOf = [cyclic, { type: "array" }];
+
+    expect(schemaMayBeArray(false)).toBe(false);
+    expect(schemaMayBeArray(cyclic as JSONSchema)).toBe(true);
+    expect(() =>
+      schemaMayBeArray({
+        $ref: "#/$defs/Missing",
+        $defs: {},
+      })
+    ).toThrow("Could not resolve source schema reference for --schema");
   });
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
@@ -765,6 +780,331 @@ describe("cf piece get transforms", () => {
         projection: await parsePieceGetProjection(JSON.stringify(projection)),
       }),
     ).toEqual({ comments: [{ body: "Hello" }] });
+  });
+
+  it("preserves nullable array items through concise projections", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "nullable-concise-projection-source",
+      {
+        type: "array",
+        items: {
+          type: ["object", "null"],
+          properties: {
+            name: { type: "string" },
+            secret: { type: "string" },
+          },
+        },
+      },
+      tx,
+    );
+    source.set([{ name: "a", secret: "hidden" }, null]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(await derivePieceGetValue(runtime, space, source, {})).toEqual([
+      { name: "a", secret: "hidden" },
+      null,
+    ]);
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        filter: parsePieceGetFilter('.name == "a"'),
+      }),
+    ).toEqual([{ name: "a", secret: "hidden" }]);
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("name"),
+      }),
+    ).toEqual([{ name: "a" }, null]);
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection(JSON.stringify({
+          type: "array",
+          items: {
+            type: ["object", "null"],
+            properties: { name: true },
+            additionalProperties: false,
+          },
+        })),
+      }),
+    ).toEqual([{ name: "a" }, null]);
+  });
+
+  it("projects concise paths through nested and repeated arrays", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "nested-concise-array-projection-source",
+      {
+        type: "object",
+        properties: {
+          comments: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                body: { type: "string" },
+                privateNote: { type: "string" },
+                replies: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      body: { type: "string" },
+                      privateNote: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      tx,
+    );
+    source.set({
+      comments: [{
+        body: "Top level",
+        privateNote: "hidden",
+        replies: [{ body: "Nested", privateNote: "also hidden" }],
+      }],
+    });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection(
+          "comments.body,comments.replies.body",
+        ),
+      }),
+    ).toEqual({
+      comments: [{
+        body: "Top level",
+        replies: [{ body: "Nested" }],
+      }],
+    });
+  });
+
+  it("preserves nullable property unions independently of their parent", async () => {
+    for (const additionalProperties of [false, true]) {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        `nullable-property-${additionalProperties}`,
+        {
+          type: "object",
+          properties: {
+            profiles: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  profile: {
+                    type: ["object", "null"],
+                    properties: {
+                      name: { type: "string" },
+                      secret: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          additionalProperties,
+        },
+        tx,
+      );
+      source.set({
+        profiles: [
+          { profile: { name: "Ada", secret: "hidden" } },
+          { profile: null },
+        ],
+      });
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await derivePieceGetValue(runtime, space, source, {
+          projection: await parsePieceGetProjection("profiles.profile.name"),
+        }),
+      ).toEqual({
+        profiles: [{ profile: { name: "Ada" } }, { profile: null }],
+      });
+    }
+  });
+
+  it("preserves anyOf nullability in concise array projections", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "any-of-nullable-concise-source",
+      {
+        type: "array",
+        items: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                secret: { type: "string" },
+              },
+            },
+            { type: "null" },
+          ],
+        },
+      },
+      tx,
+    );
+    source.set([{ name: "Ada", secret: "hidden" }, null]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("name"),
+      }),
+    ).toEqual([{ name: "Ada" }, null]);
+  });
+
+  it("projects concise fields through allOf source schemas", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "all-of-concise-source",
+      {
+        type: "array",
+        items: {
+          allOf: [
+            {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+            {
+              type: "object",
+              properties: { secret: { type: "string" } },
+            },
+          ],
+        },
+      },
+      tx,
+    );
+    source.set([{ name: "Ada", secret: "hidden" }]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("name"),
+      }),
+    ).toEqual([{ name: "Ada" }]);
+  });
+
+  it("projects concise paths through a linked nested array", async () => {
+    const tx = runtime.edit();
+    const comments = runtime.getCell(
+      space,
+      "linked-nested-comments",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            body: { type: "string" },
+            privateNote: { type: "string" },
+          },
+        },
+      },
+      tx,
+    );
+    comments.set([{ body: "Visible", privateNote: "hidden" }]);
+    const source = runtime.getCell(
+      space,
+      "linked-nested-array-source",
+      {
+        type: "object",
+        properties: {
+          comments: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                body: { type: "string" },
+                privateNote: { type: "string" },
+              },
+            },
+            asCell: ["cell"],
+          },
+        },
+      },
+      tx,
+    );
+    source.set({ comments: comments as never });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("comments.body"),
+      }),
+    ).toEqual({ comments: [{ body: "Visible" }] });
+  });
+
+  it("projects concise array paths through source schema references", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "referenced-nested-array-source",
+      {
+        type: "object",
+        properties: {
+          comments: {
+            $ref: "#/$defs/Comments",
+            $defs: {
+              Comments: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    body: { type: "string" },
+                    privateNote: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      tx,
+    );
+    source.set({
+      comments: [{ body: "Visible", privateNote: "hidden" }],
+    });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("comments.body"),
+      }),
+    ).toEqual({ comments: [{ body: "Visible" }] });
+  });
+
+  it("does not leak siblings when a nested array schema is ambiguous", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "ambiguous-nested-array-source",
+      {
+        type: "object",
+        properties: { comments: true },
+      },
+      tx,
+    );
+    source.set({
+      comments: [{ body: "Visible", privateNote: "hidden" }],
+    });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection("comments.body"),
+      }),
+    ).toEqual({ comments: [{ body: "Visible" }] });
   });
 
   it("handles schema-less filters and identity projection schemas", async () => {

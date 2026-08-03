@@ -705,7 +705,7 @@ function dereferencedElementSchema(
 
 function filteredOutputSchema(
   sourceSchema: JSONSchema | undefined,
-  sourceItemSchema: JSONSchema | undefined,
+  outputItemSchema: JSONSchema | undefined,
 ): JSONSchema {
   if (!isRecord(sourceSchema)) {
     return { type: "array", items: true };
@@ -715,7 +715,7 @@ function filteredOutputSchema(
   return {
     ...metadata,
     type: "array",
-    items: dereferencedElementSchema(sourceItemSchema),
+    items: dereferencedElementSchema(outputItemSchema),
   };
 }
 
@@ -771,12 +771,105 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   return true;
 }
 
-function projectValue(value: unknown, schema: JSONSchema): unknown {
+function schemaFromProjectionMask(mask: ProjectionMask): JSONSchema {
+  if (mask === true) return true;
+  if (mask.type === "array") {
+    return {
+      type: "array",
+      items: schemaFromProjectionMask(mask.items),
+    };
+  }
+  return {
+    type: "object",
+    properties: Object.fromEntries(
+      Object.entries(mask.properties).map(([key, child]) => [
+        key,
+        schemaFromProjectionMask(child),
+      ]),
+    ),
+    additionalProperties: false,
+  };
+}
+
+/** @internal Exported for focused schema-shape tests. */
+export function schemaMayBeArray(
+  schema: JSONSchema | undefined,
+  seen = new Set<object>(),
+): boolean {
+  if (!isRecord(schema)) return false;
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  if (schema.$ref !== undefined) {
+    try {
+      return schemaMayBeArray(
+        ContextualFlowControl.resolveSchemaRefsOrThrow(schema, schema),
+        seen,
+      );
+    } catch (error) {
+      throw new PieceGetTransformError(
+        `Could not resolve source schema reference for --schema: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+  }
+  if (schemaTypes(schema).includes("array")) return true;
+  return [
+    ...schema.anyOf ?? [],
+    ...schema.oneOf ?? [],
+    ...schema.allOf ?? [],
+  ].some((option) => schemaMayBeArray(option, seen));
+}
+
+function alignConciseProjectionMask(
+  cfc: ContextualFlowControl,
+  source: JSONSchema | undefined,
+  mask: ProjectionMask,
+): ProjectionMask {
+  if (mask === true || source === undefined || source === true) return mask;
+
+  if (schemaMayBeArray(source)) {
+    const sourceItem = schemaAtArrayItem(cfc, source);
+    const itemMask = mask.type === "array" ? mask.items : mask;
+    return {
+      type: "array",
+      items: alignConciseProjectionMask(cfc, sourceItem, itemMask),
+    };
+  }
+
+  const objectMask = mask as ObjectProjectionMask;
+  return {
+    ...objectMask,
+    properties: Object.fromEntries(
+      Object.entries(objectMask.properties).map(([key, childMask]) => {
+        const child = cfc.schemaAtPath(source, [key]);
+        return [
+          key,
+          alignConciseProjectionMask(
+            cfc,
+            child === false ? undefined : child,
+            childMask,
+          ),
+        ];
+      }),
+    ),
+  };
+}
+
+function projectValue(
+  value: unknown,
+  schema: JSONSchema,
+  implicitArrayTraversal = false,
+): unknown {
   if (typeof schema === "boolean") return schema ? value : undefined;
   if (value === null) return value;
   if (Array.isArray(value)) {
-    const itemSchema = schema.items ?? true;
-    return value.map((item) => projectValue(item, itemSchema));
+    const itemSchema = schema.items ??
+      (implicitArrayTraversal ? schema : true);
+    return value.map((item) =>
+      projectValue(item, itemSchema, implicitArrayTraversal)
+    );
   }
   if (!isRecord(value)) return value;
 
@@ -786,12 +879,22 @@ function projectValue(value: unknown, schema: JSONSchema): unknown {
     for (const [key, child] of Object.entries(value)) {
       const childSchema = properties[key] ?? schema.additionalProperties ??
         true;
-      projected[key] = projectValue(child, childSchema);
+      projected[key] = projectValue(
+        child,
+        childSchema,
+        implicitArrayTraversal,
+      );
     }
     return projected;
   }
   for (const [key, childSchema] of Object.entries(properties)) {
-    if (key in value) projected[key] = projectValue(value[key], childSchema);
+    if (key in value) {
+      projected[key] = projectValue(
+        value[key],
+        childSchema,
+        implicitArrayTraversal,
+      );
+    }
   }
   return projected;
 }
@@ -853,15 +956,35 @@ function selectSourceSchema(
   source: JSONSchema | undefined,
   mask: ProjectionMask,
 ): JSONSchema {
-  if (source === undefined || source === true) return mask;
+  // An absent/wildcard source schema cannot prove that a structural mask has
+  // the same container shape as the current value. Keep that read permissive;
+  // the materializing projector still applies the mask and drops siblings.
+  if (source === undefined || source === true) return true;
   if (source === false || mask === true || !isRecord(mask)) {
     return source;
   }
-  if (
-    source.$ref !== undefined || source.anyOf !== undefined ||
-    source.oneOf !== undefined || source.allOf !== undefined
-  ) {
+  if (source.$ref !== undefined) {
     return source;
+  }
+  if (source.anyOf !== undefined || source.oneOf !== undefined) {
+    const {
+      anyOf: _anyOf,
+      oneOf: _oneOf,
+      ...metadata
+    } = source;
+    const options = [...source.anyOf ?? [], ...source.oneOf ?? []].map(
+      (option) => selectSourceSchema(cfc, option, mask),
+    );
+    return { ...metadata, anyOf: options };
+  }
+  if (source.allOf !== undefined) {
+    const { allOf: _allOf, ...metadata } = source;
+    return {
+      ...metadata,
+      allOf: source.allOf.map((option) =>
+        selectSourceSchema(cfc, option, mask)
+      ),
+    };
   }
 
   if (mask.type === "array") {
@@ -870,7 +993,6 @@ function selectSourceSchema(
     const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
     return {
       ...metadata,
-      type: "array",
       items: selectSourceSchema(cfc, sourceItem, mask.items),
     };
   }
@@ -900,7 +1022,6 @@ function selectSourceSchema(
   const selectedRequired = required?.filter((key) => key in properties);
   return {
     ...metadata,
-    type: "object",
     properties,
     ...(selectedRequired?.length ? { required: selectedRequired } : {}),
     additionalProperties: false,
@@ -909,26 +1030,61 @@ function selectSourceSchema(
 
 interface ResolvedProjection {
   outputSchema: JSONSchema;
+  projectionSchema: JSONSchema;
+  mask: ProjectionMask;
   projectsArrayItems: boolean;
-  itemSchema?: JSONSchema;
+  itemOutputSchema?: JSONSchema;
+  itemProjectionSchema?: JSONSchema;
+  itemMask?: ProjectionMask;
+  implicitArrayTraversal: boolean;
 }
 
 function resolveProjection(
+  cfc: ContextualFlowControl,
   projection: PieceGetProjection | undefined,
+  sourceSchema: JSONSchema | undefined,
   sourceIsArray: boolean,
 ): ResolvedProjection | undefined {
   if (projection === undefined) return undefined;
   if (projection.kind === "concise") {
     const projectsArrayItems = sourceIsArray;
+    const source = projectsArrayItems
+      ? schemaAtArrayItem(cfc, sourceSchema)
+      : sourceSchema;
+    const mask = alignConciseProjectionMask(
+      cfc,
+      source,
+      projectionMask(projection.schema),
+    );
+    const projectionSchema = schemaFromProjectionMask(mask);
+    const outputSchema = sanitizeSchemaForLinks(
+      selectSourceSchema(
+        cfc,
+        dereferencedElementSchema(source),
+        mask,
+      ),
+      KeepAsCell.OnlyStream,
+    ) ?? projectionSchema;
     return projectsArrayItems
       ? {
-        outputSchema: { type: "array", items: projection.schema },
+        outputSchema: filteredOutputSchema(sourceSchema, outputSchema),
+        projectionSchema: {
+          type: "array",
+          items: projectionSchema,
+        },
+        mask: { type: "array", items: mask },
         projectsArrayItems: true,
-        itemSchema: projection.schema,
+        itemOutputSchema: outputSchema,
+        itemProjectionSchema: projectionSchema,
+        itemMask: mask,
+        implicitArrayTraversal: true,
       }
       : {
-        outputSchema: projection.schema,
+        outputSchema,
+        projectionSchema,
+        mask,
         projectsArrayItems: false,
+        implicitArrayTraversal: true,
       };
   }
   const projectsArrayItems = schemaIsArray(projection.schema);
@@ -943,13 +1099,21 @@ function resolveProjection(
         : "An array-rooted JSON --schema can only be applied to an array value.",
     );
   }
+  const mask = projectionMask(projection.schema);
+  const itemSchema = projectsArrayItems
+    ? (projection.schema as Exclude<JSONSchema, boolean>).items ?? true
+    : undefined;
   return {
     outputSchema: projection.schema,
+    projectionSchema: projection.schema,
+    mask,
     projectsArrayItems,
+    implicitArrayTraversal: false,
     ...(projectsArrayItems
       ? {
-        itemSchema: (projection.schema as Exclude<JSONSchema, boolean>).items ??
-          true,
+        itemOutputSchema: itemSchema,
+        itemProjectionSchema: itemSchema,
+        itemMask: projectionMask(itemSchema!),
       }
       : {}),
   };
@@ -998,19 +1162,17 @@ export async function derivePieceGetValue(
     );
   }
   const projection = resolveProjection(
+    cfc,
     transform.projection,
+    sourceSchema,
     Array.isArray(sourceValue),
   );
   const sourceItemSchema = schemaAtArrayItem(cfc, sourceSchema);
   const predicateItemMask = transform.filter === undefined
     ? undefined
     : maskFromPaths(transform.filter.paths);
-  const projectionMaskSchema = projection === undefined
-    ? undefined
-    : projectionMask(projection.outputSchema);
-  const projectionItemMask = projection?.projectsArrayItems
-    ? projectionMask(projection.itemSchema!)
-    : undefined;
+  const projectionMaskSchema = projection?.mask;
+  const projectionItemMask = projection?.itemMask;
 
   let sourceMask: ProjectionMask = true;
   if (transform.filter !== undefined && projection === undefined) {
@@ -1078,7 +1240,8 @@ export async function derivePieceGetValue(
 
   let itemProjectionPattern: ReturnType<typeof pattern> | undefined;
   if (projection?.projectsArrayItems) {
-    const itemSchema = projection.itemSchema!;
+    const itemOutputSchema = projection.itemOutputSchema!;
+    const itemProjectionSchema = projection.itemProjectionSchema!;
     const elementSchema = selectSourceSchema(
       cfc,
       sourceItemSchema,
@@ -1096,14 +1259,19 @@ export async function derivePieceGetValue(
       additionalProperties: false,
     };
     const projectionModule = lift(
-      ({ element }: { element: unknown }) => projectValue(element, itemSchema),
+      ({ element }: { element: unknown }) =>
+        projectValue(
+          element,
+          itemProjectionSchema,
+          projection.implicitArrayTraversal,
+        ),
       argumentSchema,
-      itemSchema,
+      itemOutputSchema,
     );
     itemProjectionPattern = pattern(
       ({ element }: any) => projectionModule({ element }),
       argumentSchema,
-      itemSchema,
+      itemOutputSchema,
     );
   }
 
@@ -1122,7 +1290,11 @@ export async function derivePieceGetValue(
       !projection.projectsArrayItems
     ? lift(
       ({ value }: { value: unknown }) =>
-        projectValue(value, projection.outputSchema),
+        projectValue(
+          value,
+          projection.projectionSchema,
+          projection.implicitArrayTraversal,
+        ),
       directProjectionArgumentSchema,
       projection.outputSchema,
     )
