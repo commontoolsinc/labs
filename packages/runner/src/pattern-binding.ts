@@ -437,8 +437,8 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * purpose. Under that flag a link is a `FabricLink`, hence a
    * `FabricInstance`, so ordinary links reach here — which is how the work
    * still owed before the flag can be turned on gets found, at the sites that
-   * owe it. It is a discovery instrument, not a hazard to route around: do not
-   * add a class-by-class exemption to quiet it.
+   * owe it. Firing is the instrument working, and each site it names is
+   * answered by teaching this walk to descend that value.
    *
    * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
    * point the throw becomes a rebind. The two sibling walks in this file carry
