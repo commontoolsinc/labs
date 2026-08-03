@@ -64,7 +64,12 @@ what this looks like when it bites.
   argument, or schema-derived flags after `--`. Empty stdin fails loudly.
 - A `piece get` path that doesn't resolve is a data error: one-line message on
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
-  (missing source/target piece or path) reports the same way.
+  (missing source/target piece or path) reports the same way. So does a
+  `piece get` path that lands on a handler verb: reading a stream refuses — read
+  data, call verbs. A root verb's refusal points at `cf piece call`; a nested
+  verb is not directly callable, so it points at reading the parent object or
+  `cf piece verbs`. The verb's parent object still reads, and tool bindings read
+  as data.
 
 ## Environment Setup
 

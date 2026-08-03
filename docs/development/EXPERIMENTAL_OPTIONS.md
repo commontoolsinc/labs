@@ -794,6 +794,43 @@ the per-epic implementation notes).
 
 ---
 
+## Flag-gated tripwires
+
+Some code paths refuse a value they cannot yet handle, by throwing and naming
+what is missing, rather than accepting it and doing something plausible but
+wrong. The `FabricInstance` checks in the runner's binding walks are the
+recurring example: such a value is a container reached by its codec contents
+rather than by property name, and a walk that cannot yet descend one would
+otherwise hand it back whole, leaving a binding nested inside it silently
+unresolved.
+
+These throws are **discovery instruments**. Each one that fires names a site
+that owes work before the relevant flag can graduate, which is more useful than
+a quiet wrong answer that surfaces later as corrupted data.
+
+**The invariant that makes this safe rather than merely lucky:** anything
+introduced that would reach one of these throws is itself gated on an experiment
+flag. A default configuration therefore never arrives at one, and any arrival is
+something a flag was deliberately turned on to reach.
+
+Two obligations follow, and they are the reason this is recorded here rather
+than at any one of the sites:
+
+- **Adding a feature.** If your change would let a value reach one of these
+  throws in a default configuration, gate the change on an experiment flag. That
+  is what keeps the default path clear and the tripwire honest.
+- **Meeting one.** A throw firing under a flag is the instrument working, not a
+  defect in it. The answer is to implement the missing handling at the site it
+  names — that work *is* the flag's graduation work — rather than to exempt the
+  value so the walk stays quiet.
+
+Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
+`FabricLink` and therefore a `FabricInstance`, so ordinary links reach these
+checks and throw. That is expected, and the set of sites it lights up is a
+useful part of the remaining work for that flag.
+
+---
+
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,

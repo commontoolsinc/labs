@@ -134,9 +134,14 @@ deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
   --filter '.topic.title == "<exact title>"' --schema fid,topic.title
 ```
 
-Find the new topic's canonical fid in `crossrefs` before applying further
-changes. All handler arguments are JSON; encode multiline Markdown rather than
-passing an unescaped string.
+`addTopic` returns the topic it created, so a board running this source hands
+back the new topic on the call itself. The board's deployed pattern can be older
+than this source, and an older `addTopic` returns nothing; `crossrefs` above
+remains the path that works either way, and `cf piece verbs` reports the
+deployed pattern's source identity when you need to know which you are talking
+to. Find the new topic's canonical fid before applying further changes. All
+handler arguments are JSON; encode multiline Markdown rather than passing an
+unescaped string.
 
 ```bash
 deno task cf piece call --url "$TOPIC_URL" setBody \
@@ -147,6 +152,13 @@ deno task cf piece call --url "$TOPIC_URL" addLink \
   '{"kind":"pr","url":"<PR URL>","label":"<PR label>","agentName":"<agent name>"}'
 deno task cf piece get --url "$TOPIC_URL" commentCount --step
 ```
+
+Each of these three returns the record it wrote — the appended comment or link,
+or the persisted body plus its attribution — which spares the verification read
+above. That result rides `plainResultReceipts`
+(`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` until the flag's default flips); the
+write happens either way, so treat an absent result as "not enabled here", never
+as "the mutation did not land".
 
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,

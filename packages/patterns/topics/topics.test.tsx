@@ -20,11 +20,14 @@ import Topics, {
   type TopicReference,
 } from "./main.tsx";
 import Topic, {
+  type AddCommentResult,
+  type AddLinkResult,
   crossrefJoin,
   extractFidPayloads,
   fidPayload,
   isSafeLinkUrl,
   saveProfileBody,
+  type SetBodyResult,
   snippet,
   submitProfileComment,
   submitProfileLink,
@@ -71,15 +74,31 @@ const propValue = (value: any): unknown =>
   value && typeof value.get === "function" ? value.get() : value;
 
 // A faithful pre-authorship Topic projection: the legacy schema has no
-// `createdBy` path at all. Pushing one into a current Topic's retained
-// mentionable list exercises the mixed-version boundary that production
-// migration must preserve.
+// `createdBy` path at all, and its verbs declare no results. Pushing one into
+// a current Topic's retained mentionable list exercises the mixed-version
+// boundary that production migration must preserve.
+//
+// Its verbs carry the current declared arity because `Stream<E, R>`
+// deliberately does not satisfy `Stream<E>` and the sibling projection is one
+// contract for the whole list — verb arity is not the legacy dimension under
+// test here, the absent `createdBy` path is. A genuinely older deployed
+// sibling, whose verbs return nothing, stays valid against this same list at
+// runtime: a declared result adds nothing to the generated schema (C3
+// withdrawn — results flow schema-free through receipts), so the stored
+// schema a legacy piece is validated against is unchanged.
 const LegacyUnsignedTopic = pattern(() => {
-  const addComment = action((_event: { body: string }) => {});
-  const addLink = action(
-    (_event: { kind: TopicLinkKind; url: string; label: string }) => {},
-  );
-  const setBody = action((_event: { body: string }) => {});
+  const addComment = action<{ body: string }, AddCommentResult>((event) => ({
+    comment: { authorName: "", body: event.body, sentAt: 0 },
+  }));
+  const addLink = action<
+    { kind: TopicLinkKind; url: string; label: string },
+    AddLinkResult
+  >((event) => ({
+    link: { kind: event.kind, url: event.url, label: event.label },
+  }));
+  const setBody = action<{ body: string }, SetBodyResult>((event) => ({
+    body: event.body,
+  }));
   return {
     [NAME]: undefined,
     title: "Legacy unsigned sibling",
