@@ -40,6 +40,39 @@ validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
 
+## 2b. Cross-space writes
+
+The storage layer already enforces the load-bearing rule (anchor:
+`packages/runner/src/storage/interface.ts` `writer(space)` — a
+transaction FAILS if a writer for a different space was already opened
+on it): **one transaction writes one space.** Reads cross freely
+(serving-loop.md §3b; cross-space label metadata flows with them). v2
+keeps that invariant and adds the class discipline:
+
+| crossing | mechanism |
+| --- | --- |
+| read a foreign doc | free — logged read + server-internal wake (§3b) |
+| derive FROM foreign state | home derivation reading foreign inputs; result commits HOME |
+| mutate a foreign space | **an event append to a foreign stream — the ONLY cross-space mutation** |
+| `derived` commit into a foreign space | FORBIDDEN — SpaceServer(B) is B's only deriver; A never derives into B |
+| client authored writes to several spaces | unchanged from today: separate per-space commits, per-space ACL + CAS |
+
+The event append crosses as an ordinary `authored` commit under the
+piece's append capability, carried by the OUTBOX (serving-loop.md §5):
+at-least-once, deduped by `eventId` at the target's admission, FIFO per
+(source wave → target stream). The target's SpaceServer processes it
+like any event. This matches the codebase's own convention — patterns
+already mutate cross-space through exported streams — and it is now the
+rule, not a style: a server action tx that opens a foreign-space writer
+is a runtime error naming this section.
+
+**Atomicity, stated plainly:** nothing spanning two spaces is atomic —
+not today, not in v2. A wave is per-space; cross-space influence is
+asynchronous (reads/wakes inward, events outward). What v2 adds is that
+the non-atomic boundary is EXPLICIT and carries defined failure
+semantics: the outbox retries the append, the eventId dedupes it, and
+the target's `eventWatermark` makes processing exactly-once.
+
 ## 3. Subscription and push
 
 - Clients subscribe to docs/queries as today

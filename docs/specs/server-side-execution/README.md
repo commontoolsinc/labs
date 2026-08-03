@@ -172,7 +172,9 @@ One committing runtime per space, hosted by the executor pool.
   home runtime the same way a home commit does. Per-reader clearance
   (sqlite row admissibility, CFC labels) is enforced where the read is
   served. v1's cross-space claims and cohort fences delete; what remains
-  is subscription plus an authority check.
+  is subscription plus an authority check. Writes LEAVE a space only as
+  events (protocol.md §2b) — derived commits never target foreign
+  spaces.
 - Recovery: on restart, re-derive from current cell state (with
   memoized-effect reuse per §2). No observation replay.
 
@@ -262,7 +264,7 @@ sound: same inputs → the committed result *is* the value.
 `resume-recover` / `resume-republish` are v1-era compensation machinery —
 apply the survival test before carrying them over.
 
-### 3.6 Events are the client's computational commit (D-v2-1, proposed)
+### 3.6 Events are the client's computational commit (D-v2-1, RULED 2026-08-02)
 
 The end state was always: the client sends the *event* down; the server
 processes the handler. v2 builds that **now** rather than after another
@@ -277,7 +279,7 @@ arbitrary cells, CFC-at-client-commit, and conflict handling between
 client handler writes and server derivations — all machinery that
 dissolves the day handlers move. The survival test fails it.
 
-So in v2:
+Ruled YES by the owner 2026-08-02: events-down from day one. So in v2:
 
 - A handler firing on the client commits **only the event** (payload +
   target stream). Admission is an append-capability check.

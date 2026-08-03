@@ -22,8 +22,9 @@ the gate on anything that feels needed.
 
 Tasks:
 
-- [ ] Owner confirms or amends **D-v2-1** (events are the client's only
-      computational commit) on PR #5269.
+- [x] Owner confirms or amends **D-v2-1** (events are the client's only
+      computational commit) on PR #5269 — **RULED YES 2026-08-02:
+      events-down from day one.**
 - [ ] Owner rules Q1 (offline event queueing) and Q6 (effect authority for
       multi-user triggers) far enough to unblock Phases 3 and 1
       respectively; the rest of §6 can trail.

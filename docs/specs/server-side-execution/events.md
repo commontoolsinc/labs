@@ -55,7 +55,9 @@ handler fires
 
 - Server-originated events (`stream.send()` from a served computation, or
   piece-to-piece) enter at "enqueue" with `firedAt.session = server` and
-  are otherwise identical. One path, two producers.
+  are otherwise identical. One path, two producers. When the target
+  stream lives in ANOTHER space, the append travels via the outbox as an
+  authored commit — the only cross-space mutation (protocol.md §2b).
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
   beyond the space's commit sequence — same as today.
