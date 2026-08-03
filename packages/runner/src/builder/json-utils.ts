@@ -4,6 +4,7 @@ import {
   FabricPrimitive,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -155,8 +156,7 @@ export function withAliasBindings(
   // What remains that is an object, and not a pattern, is either a native
   // carrying a canonical fabric form (a `Uint8Array`, a `Date`) or something
   // not representable at all. Hand it to the sanctioned conversion, which
-  // mints the fabric form or rejects. An inert plain object comes back from it
-  // unchanged (modulo the clone-to-freeze), so it needs no test here.
+  // mints the fabric form or rejects.
   //
   // Without this, the `for...in` copy rebuilds such a value by property name,
   // which does not merely lose it -- it LAUNDERS it. A `Uint8Array` becomes
@@ -165,9 +165,17 @@ export function withAliasBindings(
   // values meaning something else entirely. Nothing downstream can notice,
   // because by then the evidence is gone.
   //
-  // A pattern is excluded because its metadata (program, derivation link) is
-  // held in WeakMaps keyed by object identity, which a clone would not carry.
-  if (isRecord(value) && !isPattern(value)) {
+  // An inert plain object is excluded, and NOT merely to save the copy. The
+  // conversion clones one in order to freeze it, and identity is load-bearing
+  // here: a module's `$implRef` and a pattern's metadata (program, derivation
+  // link) are held in WeakMaps keyed by the object itself, and a clone carries
+  // neither. (Circular-reference detection used to depend on this too, and no
+  // longer does -- the `seen` bookkeeping below marks both identities.)
+  let preConversion: object | undefined;
+  if (
+    isRecord(value) && !isPattern(value) && !isInertPlainObject(value)
+  ) {
+    preConversion = value as object;
     value = shallowFabricFromNativeValue(value);
     // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
     // an `Error` a `FabricError`.
@@ -180,9 +188,19 @@ export function withAliasBindings(
     // Guard against circular object references (e.g. schema objects with
     // shared identity between $defs and sibling properties).
     if (!seen) seen = new WeakMap();
-    const depth = seen.get(value as object) ?? 0;
+    // Circularity is keyed on object identity, and identity can CHANGE on the
+    // way here: the conversion above hands back a different object when it
+    // clones in order to freeze. So both identities are marked -- the value as
+    // received and the value as converted -- and a cycle pointing at either is
+    // caught. Keying only the converted object would let a cycle back to the
+    // original recurse undetected until the stack dies.
+    const depth = Math.max(
+      seen.get(value as object) ?? 0,
+      preConversion === undefined ? 0 : seen.get(preConversion) ?? 0,
+    );
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
+    if (preConversion !== undefined) seen.set(preConversion, depth + 1);
 
     // If this is a pattern, serialize it through the INTERNAL graph
     // serializer (its toJSON under the internal-serialization context): this
@@ -198,20 +216,21 @@ export function withAliasBindings(
 
     const result: any = {};
     for (const key in valueToProcess as any) {
-      const jsonValue = withAliasBindings(
+      const boundValue = withAliasBindings(
         valueToProcess[key],
         resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
       );
-      if (jsonValue !== undefined) {
-        result[key] = jsonValue;
+      if (boundValue !== undefined) {
+        result[key] = boundValue;
       }
     }
 
     // Restore depth so shared references can be re-serialized
     seen.set(value as object, depth);
+    if (preConversion !== undefined) seen.set(preConversion, depth);
 
     // Register the copy's derivation link so trust and the content-addressed
     // entry ref carry to the serialized copy (side table; symbol keys would be
