@@ -214,14 +214,29 @@ same-named types emit `$ref`s to it.
 
 `NATIVE_TYPE_SCHEMAS` (`src/formatters/native-type-formatter.ts`), as of
 this writing: `VNode` →
-`{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date` →
-`{ type: "string", format: "date-time" }`; `URL` → `{ type: "string", format:
+`{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date`, `RegExp`,
+and `Uint8Array` → `{ type: "object" }`; `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
-`ArrayBufferView`, the eleven typed arrays (`Uint8Array` … `BigUint64Array`),
-and `JSONSchemaObj`/`JSONSchema` → `true`.
+`ArrayBufferView`, the remaining ten typed arrays
+(`Uint8ClampedArray` … `BigUint64Array`), and `JSONSchemaObj`/`JSONSchema` →
+`true`.
+
+The three mapped to `{ type: "object" }` are the ones with a canonical fabric
+form: a `Date` is stored as a `FabricEpochNsec`, a `RegExp` as a
+`FabricRegExp`, and a `Uint8Array` as a `FabricBytes`. There is no schema
+vocabulary for `Fabric*` types yet, and `"object"` is what they are called in
+the meantime — a value stored as one reads back intact through it, where
+`{ type: "string" }` projects the read to `undefined`. `URL` is the exception
+that stays a string, because it converts to a plain string rather than to a
+fabric object.
+
+The remaining typed arrays and the buffer types map to `true` (accept
+anything), which overclaims: none of them is representable as a `FabricValue`,
+so a value of one of those types is rejected at the storage boundary rather
+than stored. `true` is the status quo for them, not an endorsement.
 
 Guard: the lib-declared subset (`LIB_DECLARED_NATIVE_TYPES` — `Date`
-through `BigUint64Array`) is claimed only when declared in a default-lib or
+through `BigUint64Array`, and `RegExp`) is claimed only when declared in a default-lib or
 `@types/node` file (`hasLibraryDeclaration`), so a user-defined
 `interface Date {…}` is not swallowed. `VNode`/`JSONSchemaObj`/`JSONSchema`
 have **no** such guard (untested collision). Native resolution also pierces

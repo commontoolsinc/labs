@@ -8,18 +8,15 @@
               "type": "null"
             },
             {
-              "format": "date-time",
-              "type": "string"
+              "type": "object"
             }
           ]
         },
         "createdAt": {
-          "format": "date-time",
-          "type": "string"
+          "type": "object"
         },
         "publishedAt": {
-          "format": "date-time",
-          "type": "string"
+          "type": "object"
         },
         "title": {
           "type": "string"
@@ -38,8 +35,7 @@
         },
         "timestamp": {
           "default": "2023-01-01T00:00:00.000Z",
-          "format": "date-time",
-          "type": "string"
+          "type": "object"
         }
       },
       "required": [
@@ -51,8 +47,7 @@
     "UserProfile": {
       "properties": {
         "createdAt": {
-          "format": "date-time",
-          "type": "string"
+          "type": "object"
         },
         "lastLogin": {
           "anyOf": [
@@ -60,8 +55,7 @@
               "type": "null"
             },
             {
-              "format": "date-time",
-              "type": "string"
+              "type": "object"
             }
           ]
         },
@@ -74,8 +68,7 @@
               "type": "string"
             },
             "updatedAt": {
-              "format": "date-time",
-              "type": "string"
+              "type": "object"
             }
           },
           "required": [

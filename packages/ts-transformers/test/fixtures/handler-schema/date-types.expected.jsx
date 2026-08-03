@@ -21,8 +21,7 @@ const timedHandler = handler({
     type: "object",
     properties: {
         timestamp: {
-            type: "string",
-            format: "date-time"
+            type: "object"
         }
     },
     required: ["timestamp"]
@@ -30,8 +29,7 @@ const timedHandler = handler({
     type: "object",
     properties: {
         lastUpdate: {
-            type: "string",
-            format: "date-time",
+            type: "object",
             asCell: ["writeonly"]
         }
     },
