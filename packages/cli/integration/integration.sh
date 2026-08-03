@@ -990,6 +990,22 @@ run_three_topic_fixture() {
   echo "Successfully ran the three-topic end-to-end fixture for ${API_URL}/${SPACE}/${TOPIC_PIECE_ID}."
 }
 
+# The verb-result walkthrough. Delegates to the standalone script rather than
+# restating its assertions here: that script is what
+# docs/common/verbs-over-the-cli.md tells a reader to run, so the documented
+# artifact is the tested one and the two cannot drift. It deploys its own
+# fixture and takes its own space.
+#
+# It is also the regression test for the `--show-links` link walk: its
+# address-and-call step annotates a returned piece that owns a verb, which is
+# the shape that used to exhaust the stack.
+run_verbs_walkthrough() {
+  echo "Running the verb-result walkthrough..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/verbs-over-the-cli.sh" ||
+    error "The verb-result walkthrough failed."
+  echo "Successfully ran the verb-result walkthrough for ${API_URL}."
+}
+
 run_wish() {
   setup_space
 
@@ -1041,6 +1057,7 @@ case "$SECTION" in
     run_piece_call
     run_piece_call_retry
     run_three_topic_fixture
+    run_verbs_walkthrough
     ;;
   piece-call-retry)
     run_piece_call_retry
@@ -1050,6 +1067,9 @@ case "$SECTION" in
     ;;
   wish)
     run_wish
+    ;;
+  verbs)
+    run_verbs_walkthrough
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"

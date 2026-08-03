@@ -1236,7 +1236,12 @@ describe("scheduler event receipts", () => {
     expect(emptyReceipt.get()).toEqual({});
   });
 
-  it("discards a plain JSON return while plainResultReceipts is off (default)", async () => {
+  it("discards a plain JSON return while plainResultReceipts is explicitly off", async () => {
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { experimental: { plainResultReceipts: false } },
+    ));
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;

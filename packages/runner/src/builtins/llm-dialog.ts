@@ -57,6 +57,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { resolveLinkScope } from "../scope.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { getEntityId } from "../create-ref.ts";
@@ -619,7 +620,7 @@ function serializeForLLMObservation(
   // Turn cells into a link, unless they are data: URIs and traverse instead
   if (isCell(value)) {
     const link = value.resolveAsCell().getAsNormalizedFullLink();
-    if (link.id.startsWith("data:")) {
+    if (hasDataUriScheme(link.id)) {
       return serializeForLLMObservation({
         value: value.get(),
         schema,
@@ -686,7 +687,7 @@ function serializeForLLMObservation(
       if (isRecord(child.value) && isCellResultForDereferencing(v)) {
         const link = getCellOrThrow(v).resolveAsCell()
           .getAsNormalizedFullLink();
-        if (!link.id.startsWith("data:")) {
+        if (!hasDataUriScheme(link.id)) {
           child = {
             ...child,
             value: {

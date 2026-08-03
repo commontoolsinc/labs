@@ -4,7 +4,7 @@ import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import {
-  isDataUri,
+  isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -558,7 +558,7 @@ const eventEnvelopePayloads = (
   }
   try {
     const eventLink = parseLink(event);
-    if (eventLink?.id && isDataUri(eventLink.id)) {
+    if (eventLink?.id && isFabricDataUri(eventLink.id)) {
       const decoded = valueFromDataUri(eventLink.id);
       addPayload(decoded, eventLink.space);
     }
