@@ -1,7 +1,8 @@
 // A CTS-authored `action<Event, Result>` verb, compiled through the real
 // pipeline (`patternManager.compilePattern` → js-compiler → CTS transformers →
 // SES evaluation), delivers its returned value into the event receipt under
-// the `plainResultReceipts` experimental flag — the composition of this
+// the `plainResultReceipts` experimental flag (default-on since the flip) —
+// the composition of this
 // package's plain-return projection (scheduler-event-receipts.test.ts, which
 // exercises only the raw trusted-builder `handler`) with the api's declared-
 // result authoring surface. This is the readback half of WS-C's exit
@@ -118,9 +119,11 @@ describe("compiled CTS action<E, R> results in receipts", () => {
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
+    // No experimental options: this suite pins the BUILT-IN default
+    // (plainResultReceipts on). The explicitly-off case below re-creates its
+    // runtime with `plainResultReceipts: false` to pin the rollback override.
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { experimental: { plainResultReceipts: true } },
     ));
   });
 
@@ -269,10 +272,11 @@ describe("compiled CTS action<E, R> results in receipts", () => {
     expect(writtenResolved.path).toEqual(target.path);
   });
 
-  it("discards the declared result while plainResultReceipts is off (default)", async () => {
+  it("discards the declared result while plainResultReceipts is explicitly off", async () => {
     await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
+      { experimental: { plainResultReceipts: false } },
     ));
     const root = await instantiate("declared result e2e flag-off root");
     const outcomes: Outcome[] = [];

@@ -12,6 +12,36 @@ existing thrown-handler path), while the schema-generator EMISSION of
 refusal for argument-side verbs — see the WS-C bullet for what shipped and
 Risks for the migration step landing the emission now requires.
 
+**Amended 2026-07-31 (second pass, flip staging)**: governing decision 2's
+gate is satisfied — the three-topic fixture (D4, #5244, merged) proves
+declared-result readback end to end, including the original result surviving
+a dropped-response retry and a same-id replay — and the `plainResultReceipts`
+default flip lands in #5245, approved by Berni (2026-08-03, on the measured
+fleet exposure: 40 expression-body setter verbs across 11 non-test pattern
+files begin publishing a link to the state cell they mutate) and by Mike. Env `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` stays the
+opt-out while the flag exists. Staging the flip surfaced a latent C4 bug,
+reachable via the env flag before any flip: the receipt-only branch wrote the
+handler's return as RAW JSON (`setRaw`), so a return carrying a live `Cell` —
+most commonly the incidental chained return of an expression-body
+`action(() => cell.set(...))`, since `set()` returns its cell — failed the
+handling on an uncloneable storage write. Per review (Berni), the fix is not
+to discard such returns but to route the receipt value through the same
+standard cell-write conversion `receipt.set(value)` applies: plain JSON
+persists as before, cell handles convert to links, and a one-line setter
+verb's receipt (and `cf piece call` result) therefore carries a link to the
+mutated cell where it used to be empty — receipts reflect what was returned.
+That fix landed separately as #5262, ahead of and independent of this flip.
+Create-only witness semantics are unchanged. One tension is recorded as
+decided, not overlooked (Berni, set explicitly and twice): receipts are
+runtime-honest, while C2's absorption rule governs DECLARATION — a concise
+completion value still declares nothing at the type layer, and with C3
+withdrawn no result schema exists to contradict — so receipts may carry
+values, including links from incidental cell returns, that no contract
+declares. Consumers must treat undeclared receipt content as advisory. The
+declared-versus-incidental distinction becomes enforceable when the
+Fabric-types stream evolution brings declared-result metadata — precisely
+the deferred-C3 gap.
+
 **Amended 2026-07-31**, C3 withdrawn in review (Berni): no result-schema
 emission for now — values flow schema-free through receipts, discovery falls
 back to prose descriptions, and the durable shape waits for the Fabric-types
@@ -66,7 +96,11 @@ Made 2026-07-24, shaping everything below:
    as its own workstream from day one, in parallel with the small wins.
 2. **Plain-return projection ships behind a flag, default-off**, per the
    `EXPERIMENTAL_OPTIONS.md` process; the default flips after the integration
-   suite proves readback end to end.
+   suite proves readback end to end. *That proof landed as the three-topic
+   fixture (D4, #5244); the flip is staged in #5245 (draft, held for the
+   explicit go from Mike and Berni), with an explicit `false` — env
+   `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` or programmatic — as the
+   rollback override while the flag exists.*
 3. **Continuous dogfood.** The live Estuary topics board gets `setsrc` as each
    phase lands. The compat checker gates schema breaks; every phase ends with a
    live-board acceptance pass.
