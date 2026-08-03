@@ -496,7 +496,8 @@ export class XDebuggerView extends LitElement {
     }
 
     @keyframes pulse {
-      0%, 100% {
+      0%,
+      100% {
         opacity: 1;
       }
       50% {
@@ -532,78 +533,6 @@ export class XDebuggerView extends LitElement {
     .tab-button.active {
       color: #e2e8f0; /* slate-200 */
       border-bottom-color: #3b82f6; /* blue-500 */
-    }
-
-    .watch-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.125rem;
-    }
-
-    .watch-item {
-      display: grid;
-      grid-template-columns: 1fr auto auto auto;
-      gap: 0.75rem;
-      padding: 0.375rem 0.5rem;
-      background-color: #1e293b; /* slate-800 */
-      border-radius: 0.375rem;
-      border: 1px solid #334155; /* slate-700 */
-      align-items: center;
-      font-size: 0.6875rem;
-    }
-
-    .watch-item:hover {
-      background-color: #334155; /* slate-700 */
-    }
-
-    .watch-label {
-      color: #cbd5e1; /* slate-300 */
-      font-family: monospace;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .watch-value {
-      color: #94a3b8; /* slate-400 */
-      font-family: monospace;
-      max-width: 20rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .watch-updates {
-      color: #64748b; /* slate-500 */
-      font-family: monospace;
-      text-align: right;
-      min-width: 4rem;
-    }
-
-    .unwatch-button {
-      background-color: #334155; /* slate-700 */
-      color: #94a3b8; /* slate-400 */
-      border: none;
-      padding: 0.125rem 0.375rem;
-      border-radius: 0.25rem;
-      font-size: 0.625rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: monospace;
-    }
-
-    .unwatch-button:hover {
-      background-color: #dc2626; /* red-600 */
-      color: white;
-    }
-
-    .watch-empty {
-      color: #64748b; /* slate-500 */
-      font-style: italic;
-      text-align: center;
-      padding: 2rem;
-      font-size: 0.75rem;
-      line-height: 1.5;
     }
 
     /* Loggers pane styles */
@@ -840,7 +769,6 @@ export class XDebuggerView extends LitElement {
   @state()
   private accessor _activeTab:
     | "events"
-    | "watch"
     | "scheduler"
     | "loggers"
     | "diagnosis" = "events";
@@ -1339,19 +1267,6 @@ export class XDebuggerView extends LitElement {
     return details;
   }
 
-  private formatValue(value: unknown): string {
-    if (value === null) return "null";
-    if (value === undefined) return "undefined";
-    if (typeof value === "string") return `"${value}"`;
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-
-    // For objects/arrays, truncate JSON representation
-    const json = this.safeJsonStringify(value, 60);
-    return json;
-  }
-
   /**
    * Safely stringify a value with size limits to prevent context blowout.
    * Truncates large strings, arrays, and objects.
@@ -1439,17 +1354,6 @@ export class XDebuggerView extends LitElement {
     }
 
     return String(value);
-  }
-
-  private getCellLabel(
-    watch: { label?: string; cellLink: { id: string } },
-  ): string {
-    if (watch.label) return watch.label;
-
-    // Generate short ID from full ID
-    const id = watch.cellLink.id;
-    const shortId = id.split(":").pop()?.slice(-6) ?? "???";
-    return `#${shortId}`;
   }
 
   // ============================================================
@@ -1746,7 +1650,6 @@ export class XDebuggerView extends LitElement {
 
     if (keys.length === 0) {
       return html`
-
       `;
     }
 
@@ -1756,7 +1659,6 @@ export class XDebuggerView extends LitElement {
           const stats = timingData[key];
           if (!stats.cdf || stats.cdf.length === 0) {
             return html`
-
             `;
           }
 
@@ -1884,7 +1786,6 @@ export class XDebuggerView extends LitElement {
 
     if (cdf.length === 0) {
       return html`
-
       `;
     }
 
@@ -2560,13 +2461,6 @@ export class XDebuggerView extends LitElement {
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "watch" ? "active" : ""}"
-          @click="${() => this._activeTab = "watch"}"
-        >
-          Watch List
-        </button>
-        <button
-          type="button"
           class="tab-button ${this._activeTab === "scheduler" ? "active" : ""}"
           @click="${() => {
             this._activeTab = "scheduler";
@@ -2764,43 +2658,6 @@ export class XDebuggerView extends LitElement {
     `;
   }
 
-  private renderWatchList() {
-    const watchedCells = this.debuggerController?.getWatchedCells() ?? [];
-
-    if (watchedCells.length === 0) {
-      return html`
-        <div class="watch-empty">
-          No cells being watched.<br />
-          Hold Alt and hover over a cf-cell-context to access watch controls.
-        </div>
-      `;
-    }
-
-    return html`
-      <div class="watch-list">
-        ${watchedCells.map((watch) =>
-          html`
-            <div class="watch-item">
-              <div class="watch-label">${this.getCellLabel(watch)}</div>
-              <div class="watch-value">${this.formatValue(
-                watch.lastValue,
-              )}</div>
-              <div class="watch-updates">${watch.updateCount} updates</div>
-              <button
-                type="button"
-                class="unwatch-button"
-                @click="${() => this.debuggerController?.unwatchCell(watch.id)}"
-                title="Stop watching this cell"
-              >
-                ×
-              </button>
-            </div>
-          `
-        )}
-      </div>
-    `;
-  }
-
   private renderEvents() {
     const events = this.getFilteredEvents();
 
@@ -2966,8 +2823,7 @@ export class XDebuggerView extends LitElement {
                   ${this.renderDiagnosis()}
                 </div>
               `
-              : this._activeTab === "events"
-              ? html`
+              : html`
                 <div class="toolbar-container">
                   <div class="topics-filter">
                     ${Object.entries(TOPIC_HIERARCHY).map(([key, topic]) => {
@@ -3129,13 +2985,6 @@ export class XDebuggerView extends LitElement {
                   ? "resizing"
                   : ""}">
                   ${this.renderEvents()}
-                </div>
-              `
-              : html`
-                <div class="content-area ${this.resizeController.isResizing
-                  ? "resizing"
-                  : ""}">
-                  ${this.renderWatchList()}
                 </div>
               `}
           </div>

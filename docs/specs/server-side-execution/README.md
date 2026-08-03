@@ -94,9 +94,10 @@ workers can be transient. §9 records the remaining gaps.
 ### 2.1 Execution: N clients × same graph
 
 Each browser tab boots one runtime per (identity, apiUrl) in a web worker
-(`packages/shell/src/lib/runtime-lifecycle.ts:8`,
-`packages/lib-shell/src/runtime.ts:527`). The space root pattern is the
-canonical demand root (`packages/lib-shell/src/runtime.ts:240`); navigated
+(`shouldRecreateRuntime`, `packages/shell/src/lib/runtime-lifecycle.ts`;
+`packages/lib-shell/src/runtime.ts`). The space root pattern is the
+canonical demand root (the `#spaceRootPatterns` map in the same lib-shell
+runtime); navigated
 pieces start on demand (`getPattern(space, id, { start: true })`). Every
 client runs the *entire* reactive graph of every started piece: computations,
 materializers, render effects, and async builtins.
@@ -112,13 +113,17 @@ Consequences, all previously measured:
   Conflicts are cheap now (seenSeq-gated refresh, commit `5abe477c7`), but
   they still ratchet under multi-browser load and burn retries; the
   cross-tab mutex machinery inside async builtins
-  (`packages/runner/src/builtins/fetch-utils.ts:90`) exists only to paper
+  (`MUTEX_STALE_AFTER` and the input-hash helpers in
+  `packages/runner/src/builtins/fetch-utils.ts`) exists only to paper
   over exactly this.
 - **Async fragility.** fetch/LLM calls run in whichever tab claimed the cell
   mutex; a closed tab aborts the request
-  (`packages/runner/src/builtins/fetch.ts:312`) and someone else may re-claim
-  after a 5s–5min timeout. Streaming LLM partials live in an in-memory
-  `partial` cell and are lost on disconnect.
+  (the `abortController?.abort("Pattern stopped")` teardown in
+  `packages/runner/src/builtins/fetch.ts`) and someone else may re-claim
+  after a 5s–5min staleness bound
+  ([why that bound stays](../../development/fetch-request-deadlines.md)).
+  Streaming LLM partials live in an in-memory `partial` cell and are lost on
+  disconnect.
 - **Cold start.** A fresh client cannot paint pattern UI until it compiles
   and executes patterns locally (browser cold-compile floor ≈ 525ms for the
   entry-file emit alone, plus dependency collection and first settle).
@@ -128,11 +133,10 @@ Consequences, all previously measured:
 The wire is a WebSocket session (`session.open` with a signed challenge;
 per-space ACL `OWNER/WRITE/READ`). Clients register *graph queries* via
 `session.watch.set`. On every commit the server marks the space dirty and,
-after `SUBSCRIPTION_REFRESH_DELAY_MS = 5` (`packages/memory/v2/server.ts:92`),
+after `SUBSCRIPTION_REFRESH_DELAY_MS = 5` (`packages/memory/v2/server.ts`),
 walks all connections × sessions whose watch is affected and **re-runs each
 session's graph query** against live state
-(`refreshTrackedGraph`, call site `packages/memory/v2/server.ts:2224`,
-imported at :67). There is no
+(`refreshTrackedGraph`, `packages/memory/v2/server.ts`). There is no
 query-result caching; cost is O(dirty commits × affected sessions ×
 graph-traversal). This is the cost the redesign wants to remove — and it is
 also *duplicated* state: the query describes the client's dependency
@@ -143,7 +147,7 @@ server-side executor would know natively.
 
 - The client write path is already optimistic: handler transactions apply
   locally before the server confirms; conflicts retry with a budget
-  (`packages/runner/src/scheduler/events.ts:715`). "Speculate locally,
+  (`packages/runner/src/scheduler/events.ts`). "Speculate locally,
   confirm remotely" is the existing model — it just applies to *all* writes
   instead of only source writes.
 - The commit protocol already carries read provenance
@@ -151,7 +155,8 @@ server-side executor would know natively.
   `pending = (id, path, localSeq)`), and replays are idempotent by
   `(sessionId, localSeq)` (`docs/specs/memory-v2/03-commit-model.md` §3.6).
 - `background-piece-service` already runs a runtime per space in a **Deno
-  Worker thread** (`packages/background-piece-service/src/worker-controller.ts:78`),
+  Worker thread** (the `new Worker(...)` in
+  `packages/background-piece-service/src/worker-controller.ts`),
   discovered reactively from a registry cell, under a single service
   identity. It is a lifecycle/isolation precedent for the executor pool (§6),
   not its registry or discovery substrate: bps-owned spaces are excluded from
@@ -163,8 +168,9 @@ server-side executor would know natively.
   builtin's server-executed query + result writeback.
 - The store is fast and co-locatable: reads are synchronous FFI (~2µs;
   JSON decode dominates for large docs), and an in-process transport exists
-  (`loopback`, `packages/memory/v2/client.ts:1299`;
-  `StorageManager.emulate()`, `packages/runner/src/storage/v2-emulate.ts:36`).
+  (`loopback`, `packages/memory/v2/client.ts`;
+  `StorageManager.emulate()` → `EmulatedStorageManager`,
+  `packages/runner/src/storage/v2-emulate.ts`).
 
 ---
 
@@ -195,13 +201,15 @@ the full durable stack, not just shapes. Per-action observations
 (`SchedulerActionObservation` — `pieceId`, `actionId`, `actionKind`,
 `implementationFingerprint`, `observedAtSeq`, `reads`, `currentKnownWrites`,
 `declaredWrites`, gate options, status —
-`packages/runner/src/scheduler/persistent-observation.ts:22`) are attached
-to the live commit tx (`run.ts:516`) and persisted **inside the
-single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
-→ `upsertSchedulerObservationTransaction` `:3285`) across five tables
+`packages/runner/src/scheduler/persistent-observation.ts`) are attached
+to the live commit tx (`attachSchedulerActionObservation`,
+`packages/runner/src/scheduler/run.ts`) and persisted **inside the
+single `applyCommit` SQLite transaction**
+(`upsertSchedulerObservationTransaction`, `packages/memory/v2/engine.ts`)
+across five tables
 (`scheduler_observation`, `scheduler_action_snapshot` LWW,
 `scheduler_read_index`, `scheduler_write_index`, `scheduler_action_state` —
-DDL `engine.ts:206`+). Cold start reads them back
+their DDL in the same file). Cold start reads them back
 (`listSchedulerActionSnapshots` through the provider seam) and rehydrates
 without re-running unchanged actions. On #4288, the runner loads the
 snapshots and the facade in `packages/runner/src/scheduler/facade.ts` applies
@@ -211,8 +219,9 @@ rehydration. Restart-skip is proven by `reload-rehydration.test.ts` and
 
 Still missing (G4): durable dirty markers
 consumed as a **wake query** — the tree marks readers dirty *inline* during
-commit (`findSchedulerReadersForWrite` `engine.ts:1849`,
-`markSchedulerReadersDirtyForWrites` `:1912`) but exposes no named
+commit (`findSchedulerReadersForWrite` /
+`markSchedulerReadersDirtyForWrites`, `packages/memory/v2/engine.ts`) but
+exposes no named
 `staleReadersFor(space, changedIds, seq)` batched query for a *parked*
 space, and no wake-on-commit consumer of it (implementation-plan W1.5). The reverse
 *index* itself (`scheduler_read_index`) exists and is populated; what is
@@ -266,8 +275,9 @@ also prove space-only observations continue to coalesce.
 
 ### 3.3 Producer lookup: durable writer index, not creation provenance
 
-Result cells carry `patternIdentity = {identity, symbol}`
-(`packages/runner/src/runner.ts:1014`); serialized modules/handlers carry
+Result cells carry `patternIdentity = {identity, symbol}` (stamped by
+`Runner.applySetupState`, `packages/runner/src/runner.ts`); serialized
+modules/handlers carry
 `$implRef` / `$patternRef` sentinels; verified provenance is a WeakMap keyed
 by the function object; `pattern:<identity>` source docs form a
 Merkle-verified closure with `loadPatternByIdentity` +
@@ -761,7 +771,8 @@ user-DID, session, nonce/expiry, signature}` — the request-proof format of
 [Toolshed Access Control](../toolshed-access-control.md) applied to events,
 replacing the
 non-serializable WeakSet trusted-event mark
-(`packages/runner/src/cfc/ui-contract.ts:95`). The server verifies the
+(the `rendererTrustedEvents` WeakSet,
+`packages/runner/src/cfc/ui-contract.ts`). The server verifies the
 envelope, marks renderer-trust server-side, and runs the handler in the
 space executor with the event queue as the single per-space serialization
 point. Clients speculate handler effects + derived locally and reconcile on
@@ -844,7 +855,7 @@ the execution model.
 One **executor pool** service is co-resident with the memory engine (initially
 inside toolshed; separable later). Per active branch/space there is at most one
 authoritative Deno Worker generation running one Runtime — the bps shape
-(`packages/background-piece-service/src/worker-controller.ts:78`). Realm
+(`packages/background-piece-service/src/worker-controller.ts`). Realm
 isolation is required, and a worker remains a natural unit of resource
 accounting and crash isolation. Most importantly, one scheduler instance
 unions `ExecutionDemand` from every connected client; there is never one
@@ -882,13 +893,13 @@ engine assumption and keeps WAL discipline in one place.
 ### 6.2 Storage transport: in-process, no subscriptions
 
 An initial prototype may connect through the `loopback` transport
-(`packages/memory/v2/client.ts:1299`) to the same `Server`, but authority
+(`packages/memory/v2/client.ts`) to the same `Server`, but authority
 cannot transfer through a raw `Engine` shortcut.
 
 The production design is an **executor-grade provider** implementing
-`IStorageProviderWithReplica` (`packages/runner/src/storage/interface.ts:264`)
-that (a) reads through the engine's read pool directly
-(`packages/memory/v2/server.ts:711`) with MessageChannel batching, (b)
+`IStorageProviderWithReplica` (`packages/runner/src/storage/interface.ts`)
+that (a) reads through the engine's read pool directly (the request
+dispatch in `packages/memory/v2/server.ts`) with MessageChannel batching, (b)
 commits through the server's canonical validated apply path, and (c) receives
 invalidations from the engine commit stream as a per-space callback — not via
 `session.watch` graph queries. It preserves authenticated `onBehalfOf`, ACL
@@ -918,7 +929,7 @@ A space is *active* when any of:
    `ExecutionDemand {branch, space, pieces}` message
    replacing `session.watch.set` (G7) — because a standing
    per-doc pulled-set export from clients doesn't exist yet
-   (`.pull()` is one-shot, `packages/runner/src/cell.ts:1032`). The
+   (`Cell.pull()` is one-shot, `packages/runner/src/cell.ts`). The
    message is a granularity hint over the doc-centric model, not the
    model.
 2. **Standing registrations (lower priority):** pieces whose value is their effects rather
@@ -1067,7 +1078,8 @@ view** rebuilt on demand:
 
 1. **Primary tier — SQLite, transaction-coupled.** The context-qualified
    observation rows (reads / writes / `observedAtSeq` / gate options per action,
-   `packages/runner/src/scheduler/persistent-observation.ts:22`), the
+   `SchedulerActionObservation` in
+   `packages/runner/src/scheduler/persistent-observation.ts`), the
    read/write indexes, and `scheduler_action_state` including dirty
    markers — written in the same transaction as the commits they
    describe. Consumers: rehydration on spin-up, wake-on-commit (the

@@ -13,12 +13,16 @@ import {
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
+  getPieceSourceRevisions,
   type MemorySpace,
   NAME,
   parseFabricRef,
+  resolveSystemPatternSource,
   type Runtime,
+  type RuntimeProgram,
 } from "@commonfabric/runner";
 import { nameSchema } from "@commonfabric/runner/schemas";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 
 /**
  * How an origin URL resolves.
@@ -62,6 +66,26 @@ export interface PieceSourceState {
   entry?: string;
   /** The authored source files of the current pattern, when readable. */
   files: { name: string; contents: string }[];
+  /** Ordered, append-only source and origin states accepted by the piece. */
+  history: PieceSourceRevisionState[];
+  currentRevisionId?: string;
+}
+
+export interface PieceSourceRevisionState {
+  revisionId: string;
+  timestamp: number;
+  pattern: { identity: string; symbol: string };
+  origin?: PieceOrigin;
+  operation:
+    | "baseline"
+    | "create"
+    | "edit"
+    | "origin-update"
+    | "detach"
+    | "revert"
+    | "follow"
+    | "repoint";
+  selectedRevisionId?: string;
 }
 
 export class PieceOriginError extends Error {
@@ -79,13 +103,135 @@ function pinnedPatternIdentity(ref: FabricRef): string | undefined {
     : undefined;
 }
 
+export interface ResolvedPieceOriginSource {
+  program: RuntimeProgram;
+  pattern: { identity?: string; symbol: string };
+}
+
+type StableFabricRef = FabricRef & {
+  ref: Extract<FabricRef["ref"], { kind: "uri" }>;
+};
+
+/**
+ * Resolve an origin now, returning the authored program and selected export a
+ * repoint transition should apply.
+ */
+export async function resolvePieceOriginSource(
+  runtime: Runtime,
+  destinationSpace: MemorySpace,
+  recorded: string,
+  historicalSymbol: string,
+): Promise<ResolvedPieceOriginSource> {
+  const origin = classifyOrigin(runtime, destinationSpace, recorded);
+  if (origin.kind === "web") {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(
+        origin.url,
+        (input, init) =>
+          runtime.fetch(input, {
+            ...init,
+            cache: "no-cache",
+          }),
+      ),
+    );
+    return {
+      program: { ...program, mainExport: historicalSymbol },
+      pattern: { symbol: historicalSymbol },
+    };
+  }
+
+  const ref = parseFabricRef(origin.url)!;
+  if (ref.subpath !== undefined) {
+    throw new PieceOriginError("piece source subpaths are not supported");
+  }
+  if (ref.ref.kind === "slug") {
+    throw new PieceOriginError(
+      "piece origins require a stable fabric entity or pattern reference",
+    );
+  }
+  const stableRef = ref as StableFabricRef;
+  if (ref.space !== undefined && !ref.space.startsWith("did:")) {
+    throw new PieceOriginError(
+      "piece origins require an explicit space DID",
+    );
+  }
+  const sourceSpace = ref.space === undefined
+    ? destinationSpace
+    : ref.space as MemorySpace;
+  if (sourceSpace !== destinationSpace) {
+    throw new PieceOriginError(
+      "following a source from another space requires checked source replication",
+    );
+  }
+  if (ref.host !== undefined) {
+    const routedUrl = new URL(
+      runtime.mappedHostFor(sourceSpace) ??
+        runtime.hostForSpace(sourceSpace),
+    );
+    const explicitHost = new URL(`${routedUrl.protocol}//${ref.host}`).host;
+    if (routedUrl.host !== explicitHost) {
+      const scheme = fabricHostScheme(ref.host);
+      if (!runtime.registerSpaceHost(sourceSpace, `${scheme}//${ref.host}`)) {
+        throw new PieceOriginError(
+          `the host ${ref.host} is not available for ${sourceSpace}`,
+        );
+      }
+    }
+  }
+
+  const pinned = pinnedPatternIdentity(stableRef);
+  const pattern = pinned === undefined
+    ? await mutableFabricOriginPattern(runtime, sourceSpace, stableRef)
+    : { identity: pinned, symbol: historicalSymbol };
+  if (pattern === undefined) {
+    throw new PieceOriginError(
+      `${origin.url} does not currently resolve to a piece pattern`,
+    );
+  }
+
+  const program = await runtime.patternManager
+    .getPatternSourceProgramByIdentity(
+      pattern.identity,
+      destinationSpace,
+    );
+  if (program === undefined) {
+    throw new PieceOriginError(
+      `source for ${pattern.identity} is not available`,
+    );
+  }
+  return {
+    program: { ...program, mainExport: pattern.symbol },
+    pattern,
+  };
+}
+
+async function mutableFabricOriginPattern(
+  runtime: Runtime,
+  sourceSpace: MemorySpace,
+  ref: StableFabricRef,
+): Promise<{ identity: string; symbol: string } | undefined> {
+  const target: Cell<unknown> = runtime.getCellFromEntityId(
+    sourceSpace,
+    `${ref.ref.scheme}:fid1:${ref.ref.hash}`,
+  );
+  await target.sync();
+  return getPatternIdentityRef(target);
+}
+
+function fabricHostScheme(host: string): "http:" | "https:" {
+  const hostname = new URL(`https://${host}`).hostname;
+  const loopback = hostname === "localhost" || hostname === "[::1]" ||
+    /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  return loopback ? "http:" : "https:";
+}
+
 /**
  * Classify a recorded source string as an origin.
  *
- * A toolshed-relative path — the legacy shape system roots are stamped with —
- * resolves against the host accepted for `space`, so the origin that leaves
- * this function is always absolute. An unusable string throws rather than
- * becoming a silently inert origin.
+ * A `system:` ref, and the toolshed-relative path that is the legacy shape
+ * system roots were stamped with, both resolve against the host accepted for
+ * `space`, so the origin that leaves this function is always absolute. An
+ * unusable string throws rather than becoming a silently inert origin.
  */
 export function classifyOrigin(
   runtime: Runtime,
@@ -118,6 +264,17 @@ export function classifyOrigin(
         ? "fabric-piece"
         : "fabric-pattern",
     };
+  }
+
+  // A `system:` ref names a pattern this deployment's toolshed serves; it
+  // classifies as the web origin it resolves to, keeping the ref itself as the
+  // recorded form so the panel shows what the piece actually stores.
+  const systemRoute = resolveSystemPatternSource(source);
+  if (systemRoute !== undefined) {
+    return webOrigin(
+      new URL(systemRoute, runtime.hostForSpace(space)),
+      source,
+    );
   }
 
   if (source.startsWith("/")) {
@@ -170,17 +327,17 @@ export function readPieceOrigin(
   }
 }
 
-/** Read every source fact a piece carries, with its authored source files. */
-export async function readPieceSourceState(
+/** Read source metadata already present in the local replica. */
+export function readPieceSourceMetadata(
   runtime: Runtime,
   piece: Cell<unknown>,
-): Promise<PieceSourceState> {
-  await piece.sync();
+): PieceSourceState {
   const pattern = getPatternIdentityRef(piece);
   const state: PieceSourceState = {
     space: piece.space,
     pieceId: piece.getAsNormalizedFullLink().id,
     files: [],
+    history: [],
   };
   const name = piece.asSchema(nameSchema).get()?.[NAME];
   if (typeof name === "string") state.name = name;
@@ -193,7 +350,51 @@ export async function readPieceSourceState(
   if (origin !== undefined) state.origin = origin;
   const repository = getPatternRepository(piece);
   if (repository !== undefined) state.repository = repository;
+  const revisions = getPieceSourceRevisions(piece);
+  state.history = revisions.map((revision) => {
+    const historyOrigin = revision.origin === undefined
+      ? undefined
+      : tryClassifyOrigin(runtime, piece.space, revision.origin);
+    if (
+      historyOrigin !== undefined &&
+      revision.recordedOrigin !== undefined
+    ) {
+      historyOrigin.recorded = revision.recordedOrigin;
+    }
+    return {
+      revisionId: revision.revisionId,
+      timestamp: revision.timestamp,
+      pattern: revision.pattern,
+      ...(historyOrigin === undefined ? {} : { origin: historyOrigin }),
+      operation: revision.operation,
+      ...(revision.selectedRevisionId === undefined
+        ? {}
+        : { selectedRevisionId: revision.selectedRevisionId }),
+    };
+  });
+  const currentRevisionId = revisions.at(-1)?.revisionId;
+  if (currentRevisionId !== undefined) {
+    state.currentRevisionId = currentRevisionId;
+  }
+  const currentRevision = revisions.at(-1);
+  if (
+    state.origin !== undefined &&
+    currentRevision?.origin === state.origin.url &&
+    currentRevision.recordedOrigin !== undefined
+  ) {
+    state.origin.recorded = currentRevision.recordedOrigin;
+  }
+  return state;
+}
 
+/** Read every source fact a piece carries, with its authored source files. */
+export async function readPieceSourceState(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+): Promise<PieceSourceState> {
+  await piece.sync();
+  const state = readPieceSourceMetadata(runtime, piece);
+  const pattern = state.pattern;
   if (pattern !== undefined) {
     const program = await runtime.patternManager
       .getPatternSourceProgramByIdentity(pattern.identity, piece.space);
@@ -203,6 +404,18 @@ export async function readPieceSourceState(
     }
   }
   return state;
+}
+
+function tryClassifyOrigin(
+  runtime: Runtime,
+  space: MemorySpace,
+  recorded: string,
+): PieceOrigin | undefined {
+  try {
+    return classifyOrigin(runtime, space, recorded);
+  } catch {
+    return undefined;
+  }
 }
 
 function isPatternRef(

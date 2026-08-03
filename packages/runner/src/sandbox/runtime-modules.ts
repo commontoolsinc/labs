@@ -47,8 +47,9 @@ export function getRuntimeModuleExports() {
     "commontools": commontools,
     // commontools/schema only exports types, no runtime values needed
     "commontools/schema": {},
-    // __esModule lets this load in the AMD loader
-    // when finding the "default"
+    // __esModule marks this namespace as ESM-shaped, so an importer compiled
+    // with esModuleInterop (`__importDefault`) reads `default` rather than
+    // wrapping the whole namespace.
     "turndown": { default: turndown, __esModule: true },
     "@commontools/html": commontools,
     "@commontools/builder": commontools,

@@ -11,6 +11,7 @@ export * from "./artifacts.ts";
 export * from "./cli.ts";
 export * from "./gateway/openai-client.ts";
 export * from "./model/client.ts";
+export * from "./model/usage.ts";
 export * from "./model/openai-compatible-gateway.ts";
 export * from "./model/openai-codex-responses.ts";
 export * from "./auth/types.ts";

@@ -185,7 +185,7 @@ export function schemaWithProperties(
   // freezing the `schema`/`overrides` inputs in place -- so the subsequent
   // `toDeepFrozenSchema(result, true)` only has to seal the (owned) top.
   const result = shallowMutableClone(
-    { ...schema, ...overrides } as FabricValue,
+    { ...schema, ...overrides },
   ) as JSONSchemaObj;
   return isInternedSchema(schema)
     ? internSchema(result)

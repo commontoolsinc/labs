@@ -571,6 +571,7 @@ function applyValue(
 function cellRefsEqual(a: CellRef, b: CellRef): boolean {
   if (a.id !== b.id) return false;
   if (a.space !== b.space) return false;
+  if ((a.scope ?? "space") !== (b.scope ?? "space")) return false;
   if (a.path.length !== b.path.length) return false;
   for (let i = 0; i < a.path.length; i++) {
     if (a.path[i] !== b.path[i]) return false;

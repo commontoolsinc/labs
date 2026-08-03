@@ -270,7 +270,10 @@ class ScriptedServerModel {
       // commit, and staleness is scanned once, based at the HIGHEST element
       // (the doc's top-of-stack below the reader). Scanning lower layers
       // would false-conflict with the session's own later stacked writes —
-      // the exact hazard the max-basis rule exists to avoid.
+      // the exact hazard the max-basis rule exists to avoid. (This double
+      // keeps the LEGACY basis; the CT-1910 true-basis path — `basisSeq`
+      // with own-session exclusion — is exercised against the real engine
+      // in packages/memory/test/v2-pending-read-basis-overadvance.test.ts.)
       const layers = Array.isArray(read.localSeq)
         ? read.localSeq
         : [read.localSeq];
@@ -874,7 +877,7 @@ const applyOperation = (
     );
   }
   const next = applyPatch(
-    { value: clone(current) ?? {} } as FabricValue,
+    { value: clone(current) ?? {} },
     operation.patches,
   ) as { value?: RootValue };
   return next.value;
@@ -1968,6 +1971,89 @@ Deno.test("memory v2 stacked commits: reading through the session's own two-deep
       sent.commit.reads.pending.map((read) => read.localSeq),
       [[c1.localSeq, c2.localSeq]],
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending reads carry the doc's true confirmed basis (CT-1910)", async () => {
+  const harness = await createHarness();
+  try {
+    // Confirm a baseline for A so the doc's confirmed basis is non-zero,
+    // then stack an optimistic layer and read through it.
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    await assertResultOk(c1.promise);
+
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    const c3 = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("c3"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+    await assertResultOk(c2.promise);
+    await assertResultOk(c3.promise);
+
+    // The wire read names its dependency layer AND the confirmed basis the
+    // view sat on — the seq c1's acceptance advanced the doc to. Before
+    // CT-1910 that basis was discarded whenever layers existed, leaving the
+    // server's staleness scan anchored at the dependency's resolution.
+    const sent = harness.model.applied.get(c3.localSeq);
+    assertExists(sent);
+    const confirmedBasis = harness.model.applied.get(c1.localSeq)!.applied.seq;
+    assertEquals(
+      sent.commit.reads.pending.map((read) => ({
+        localSeq: read.localSeq,
+        basisSeq: read.basisSeq,
+      })),
+      [{ localSeq: c2.localSeq, basisSeq: confirmedBasis }],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-read compaction", async () => {
+  const harness = await createHarness();
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    await assertResultOk(c1.promise);
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+
+    // Two read activities over the same stacked doc and path: one at the
+    // doc's confirmed basis, one pinned lower via meta.seq. Compaction must
+    // keep BOTH wire reads — merging them would let the surviving read's
+    // higher basis claim the pinned read's interval (0, confirmedBasis],
+    // hiding a foreign write there from the server's staleness scan.
+    const confirmedBasis = harness.model.applied.get(c1.localSeq)!.applied.seq;
+    const reads = harness.replica.buildReads(
+      sourceFromReads([
+        { id: DOCS.A },
+        { id: DOCS.A, seq: 0 },
+      ]),
+      3,
+    );
+    assertEquals(reads.confirmed, []);
+    assertEquals(
+      reads.pending
+        // `basisSeq` is optional on the wire type; the client always emits
+        // it, so absence would itself be a failure — surface it as -1.
+        .map((read) => ({
+          localSeq: read.localSeq,
+          basisSeq: read.basisSeq ?? -1,
+        }))
+        .toSorted((left, right) => left.basisSeq - right.basisSeq),
+      [
+        { localSeq: c2.localSeq, basisSeq: 0 },
+        { localSeq: c2.localSeq, basisSeq: confirmedBasis },
+      ],
+    );
+    await assertResultOk(c2.promise);
   } finally {
     await harness.close();
   }

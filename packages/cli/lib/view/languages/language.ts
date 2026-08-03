@@ -2,10 +2,11 @@
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language for a file. A language is a stateless strategy object: one
- * instance describes each supported syntax, and plain text handles unknown
- * named files. The pager selects the right one for a file ONCE (via {@link
- * languageForFile}) and then dispatches every operation through that object's
- * methods — there is no per-operation branch on the file extension.
+ * instance describes each supported syntax, and plain text handles input that
+ * has no recognized filename or shebang. The pager selects the right one for a
+ * source ONCE (via {@link languageForSource}) and then dispatches every
+ * operation through that object's methods — there is no per-operation branch
+ * on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -47,6 +48,8 @@ export interface DefTarget {
   readonly fileOffset?: number;
   /** 0-based line of the definition (document line in-document, file otherwise). */
   readonly line: number;
+  /** 0-based display column of the definition. */
+  readonly col?: number;
   /** A trimmed one-line preview of the definition site. */
   readonly preview: string;
 }
@@ -102,18 +105,34 @@ export interface HunkStructureContext {
   readonly definitions: Map<string, Definition[]>;
 }
 
+/** An exact executable basename or regular expression for a shebang. */
+export type InterpreterPattern = string | RegExp;
+
 /**
- * A source language the pager can render and navigate. Selection asks each
- * language {@link matches} once per file; all later work is method dispatch.
+ * Declarative names that select a language. Extensions include their leading
+ * dot and compare without case. Exact filenames and regular-expression
+ * patterns match a path's basename. Aliases name explicit language overrides.
+ * Interpreters match executable basenames extracted from shebangs.
+ */
+export interface LanguageMetadata {
+  readonly extensions: readonly string[];
+  readonly filenames: readonly string[];
+  readonly filenamePatterns: readonly RegExp[];
+  readonly aliases: readonly string[];
+  readonly interpreters: readonly InterpreterPattern[];
+}
+
+/**
+ * A source language the pager can render and navigate. Selection reads each
+ * language's metadata once per source; all later work is method dispatch.
  */
 export interface Language {
   /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
    * `"yaml"`, `"python"`, or `"plain-text"`. */
   readonly id: string;
 
-  /** Does this language claim `fileName`? Consulted in order by {@link
-   * languageForFile}. */
-  matches(fileName: string | undefined): boolean;
+  /** Filename, explicit-name, and shebang selectors for this language. */
+  readonly metadata: LanguageMetadata;
 
   /** Parse `text` into the full document model: coloured lines, a structure
    * tree, and a name → definition index. `fileName` is advisory. */
@@ -212,9 +231,7 @@ export function renderedLinesFor(
 
 /**
  * Every language the pager knows, most specific first, built on first use.
- * Plain text comes last because it claims every named file left after the
- * syntax-specific languages. An input with no filename is handled by the
- * fallback below.
+ * Plain text comes last and remains the fallback after metadata selection.
  *
  * The list is lazy so this module's top level never reads the concrete language
  * singletons: they and this module form an import cycle (a language's semantic
@@ -225,23 +242,406 @@ export function renderedLinesFor(
 let languages: readonly Language[] | undefined;
 function allLanguages(): readonly Language[] {
   return languages ??= [
+    typeScriptLanguage,
     markdownLanguage,
     jsonLanguage,
     yamlLanguage,
     pythonLanguage,
-    typeScriptLanguage,
     plainTextLanguage,
   ];
 }
 
-/** The language for `fileName` — the first that claims it. Plain text claims
- * otherwise unknown named files. TypeScript remains the fallback for an
- * unnamed pipe of transformed compiler output. */
-export function languageForFile(fileName: string | undefined): Language {
-  for (const language of allLanguages()) {
-    if (language.matches(fileName)) return language;
+/** Whether metadata claims a filename. */
+export function metadataMatchesFilename(
+  metadata: LanguageMetadata,
+  fileName: string | undefined,
+): boolean {
+  if (fileName === undefined) return false;
+  const filename = basename(fileName);
+  const lower = filename.toLowerCase();
+  if (
+    metadata.extensions.some((extension) =>
+      lower.endsWith(extension.toLowerCase())
+    )
+  ) {
+    return true;
   }
+  if (metadata.filenames.includes(filename)) return true;
+  return metadata.filenamePatterns.some((pattern) =>
+    regularExpressionMatches(pattern, filename)
+  );
+}
+
+/** The language selected by filename metadata, with plain text as fallback. */
+export function languageForFile(fileName: string | undefined): Language {
+  return languageMatchingFilename(fileName) ?? plainTextLanguage;
+}
+
+function languageMatchingFilename(
+  fileName: string | undefined,
+): Language | undefined {
+  for (const language of allLanguages()) {
+    if (metadataMatchesFilename(language.metadata, fileName)) return language;
+  }
+  return undefined;
+}
+
+/**
+ * Select a language for complete source. A recognized filename takes
+ * precedence. A filename with no metadata match can defer to a shebang.
+ */
+export function languageForSource(
+  fileName: string | undefined,
+  text: string,
+): Language {
+  const byFilename = languageMatchingFilename(fileName);
+  if (byFilename !== undefined) return byFilename;
+  return languageForShebang(text) ?? plainTextLanguage;
+}
+
+let languagesByName: ReadonlyMap<string, Language> | undefined;
+function namedLanguages(): ReadonlyMap<string, Language> {
+  return languagesByName ??= indexLanguagesByName(allLanguages());
+}
+
+/** Build the explicit-name index and reject ambiguous identifiers or aliases. */
+export function indexLanguagesByName(
+  languages: readonly Language[],
+): ReadonlyMap<string, Language> {
+  const named = new Map<string, Language>();
+  for (const language of languages) {
+    for (const name of [language.id, ...language.metadata.aliases]) {
+      const existing = named.get(name);
+      if (existing !== undefined) {
+        throw new Error(
+          `Language name "${name}" belongs to both ${existing.id} and ${language.id}`,
+        );
+      }
+      named.set(name, language);
+    }
+  }
+  return named;
+}
+
+/** Look up a language by its stable identifier or alias. */
+export function languageForName(name: string): Language | undefined {
+  return namedLanguages().get(name);
+}
+
+/** Stable identifiers accepted by an explicit language override. */
+export function languageIds(): string[] {
+  return allLanguages().map((language) => language.id);
+}
+
+/** Stable identifiers and aliases accepted by an explicit language override. */
+export function languageNames(): string[] {
+  return [...namedLanguages().keys()];
+}
+
+/** The TypeScript default for filename-free `cf check --show-transformed`
+ * output. The caller checks the compiler's module header before selecting it. */
+export function languageForTransformedOutput(): Language {
   return typeScriptLanguage;
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function languageForShebang(text: string): Language | undefined {
+  const interpreter = shebangInterpreter(text);
+  if (interpreter === undefined) return undefined;
+  return allLanguages().find((language) =>
+    language.metadata.interpreters.some((pattern) =>
+      typeof pattern === "string"
+        ? pattern === interpreter
+        : regularExpressionMatches(pattern, interpreter)
+    )
+  );
+}
+
+function regularExpressionMatches(pattern: RegExp, value: string): boolean {
+  pattern.lastIndex = 0;
+  const matches = pattern.test(value);
+  pattern.lastIndex = 0;
+  return matches;
+}
+
+/**
+ * Extract the executable basename from a direct shebang or an `env` shebang.
+ * `env -S` supplies the command after the split-string flag.
+ */
+function shebangInterpreter(text: string): string | undefined {
+  const end = text.indexOf("\n");
+  const firstLine = (end < 0 ? text : text.slice(0, end)).replace(/\r$/, "");
+  if (!firstLine.startsWith("#!")) return undefined;
+  const command = firstLine.slice(2).trimStart();
+  if (command.length === 0) return undefined;
+  const separator = command.search(/\s/);
+  const executable = separator < 0 ? command : command.slice(0, separator);
+  const direct = basename(executable);
+  if (direct !== "env") return direct;
+  return envCommandFromShebang(
+    separator < 0 ? "" : command.slice(separator),
+  );
+}
+
+function envCommandFromShebang(input: string): string | undefined {
+  const matches = [...input.matchAll(/\S+/g)];
+  let options = true;
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
+    const word = match[0];
+    if (options) {
+      const rest = input.slice(match.index! + word.length);
+      if (word === "--") {
+        options = false;
+        continue;
+      }
+      if (word === "-S" || word === "--split-string") {
+        return splitEnvCommand(rest);
+      }
+      if (word.startsWith("--split-string=")) {
+        return splitEnvCommand(word.slice("--split-string=".length) + rest);
+      }
+      const combinedSplitOffset = envCombinedSplitOffset(word);
+      if (combinedSplitOffset !== undefined) {
+        return splitEnvCommand(word.slice(combinedSplitOffset) + rest);
+      }
+      if (envOptionTakesFollowingWord(word)) {
+        index++;
+        continue;
+      }
+      if (word.startsWith("-")) continue;
+    }
+    if (/^[^=]+=/.test(word)) {
+      options = false;
+      continue;
+    }
+    return basename(word);
+  }
+  return undefined;
+}
+
+function envCombinedSplitOffset(word: string): number | undefined {
+  if (!word.startsWith("-")) return undefined;
+  let index = 1;
+  while (word[index] === "i" || word[index] === "v" || word[index] === "0") {
+    index++;
+  }
+  return word[index] === "S" ? index + 1 : undefined;
+}
+
+function envOptionTakesFollowingWord(word: string): boolean {
+  if (
+    word === "--unset" || word === "--chdir" || word === "--path" ||
+    word === "--argv0"
+  ) {
+    return true;
+  }
+  const grouped = word.match(/^-[iv0]*[uCPa](.*)$/);
+  return grouped !== null && grouped[1].length === 0;
+}
+
+function splitEnvCommand(input: string): string | undefined {
+  const words = splitShebangWords(input);
+  return words === undefined ? undefined : envCommand(words);
+}
+
+interface EnvWord {
+  readonly text: string;
+  readonly stable: boolean;
+}
+
+interface EnvWordFrame {
+  readonly words: readonly EnvWord[];
+  index: number;
+}
+
+function nextEnvWord(frames: EnvWordFrame[]): EnvWord | undefined {
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    if (frame.index < frame.words.length) {
+      return frame.words[frame.index++];
+    }
+    frames.pop();
+  }
+  return undefined;
+}
+
+function envWord(text: string, stable: boolean): EnvWord {
+  return {
+    text,
+    stable: stable && text.length > 0,
+  };
+}
+
+function envWordSuffix(word: EnvWord, start: number): EnvWord {
+  const text = word.text.slice(start);
+  return {
+    text,
+    stable: word.stable && text.length > 0 && !text.startsWith("#"),
+  };
+}
+
+function splitEnvWord(word: EnvWord): EnvWord[] | undefined {
+  return word.stable ? [word] : splitShebangWords(word.text);
+}
+
+function envCommand(initialWords: readonly EnvWord[]): string | undefined {
+  const frames: EnvWordFrame[] = [{ words: initialWords, index: 0 }];
+  let options = true;
+  for (;;) {
+    const word = nextEnvWord(frames);
+    if (word === undefined) return undefined;
+    const text = word.text;
+    if (options) {
+      if (text === "--") {
+        options = false;
+        continue;
+      }
+      let splitString: EnvWord | undefined;
+      if (text === "-S" || text === "--split-string") {
+        splitString = nextEnvWord(frames);
+        if (splitString === undefined) return undefined;
+      } else if (text.startsWith("--split-string=")) {
+        splitString = envWordSuffix(word, "--split-string=".length);
+      } else {
+        const combinedSplitOffset = envCombinedSplitOffset(text);
+        if (combinedSplitOffset !== undefined) {
+          splitString = combinedSplitOffset < text.length
+            ? envWordSuffix(word, combinedSplitOffset)
+            : nextEnvWord(frames);
+          if (splitString === undefined) return undefined;
+        }
+      }
+      if (splitString !== undefined) {
+        const splitWords = splitEnvWord(splitString);
+        if (splitWords === undefined) return undefined;
+        frames.push({ words: splitWords, index: 0 });
+        continue;
+      }
+      if (envOptionTakesFollowingWord(text)) {
+        if (nextEnvWord(frames) === undefined) return undefined;
+        continue;
+      }
+      if (text.startsWith("-")) continue;
+    }
+    if (/^[^=]+=/.test(text)) {
+      options = false;
+      continue;
+    }
+    return basename(text);
+  }
+}
+
+const ENV_SPLIT_ESCAPES: Readonly<Record<string, string | undefined>> = {
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+  " ": " ",
+  "\t": "\t",
+  "#": "#",
+  "$": "$",
+  '"': '"',
+  "'": "'",
+  "\\": "\\",
+};
+
+function splitShebangWords(input: string): EnvWord[] | undefined {
+  const words: EnvWord[] = [];
+  let word = "";
+  let stable = true;
+  let started = false;
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index];
+    if (escaped) {
+      escaped = false;
+      if (quote === "'" && char !== "'" && char !== "\\") {
+        word += `\\${char}`;
+        stable = false;
+        started = true;
+        continue;
+      }
+      if (char === "c") {
+        if (quote === '"') return undefined;
+        break;
+      }
+      if (char === "_") {
+        if (quote === '"') {
+          word += " ";
+          stable = false;
+          started = true;
+        } else if (started) {
+          words.push(envWord(word, stable));
+          word = "";
+          stable = true;
+          started = false;
+        }
+        continue;
+      }
+      const replacement = ENV_SPLIT_ESCAPES[char];
+      if (replacement === undefined) return undefined;
+      stable &&= envTextIsStable(replacement, word.length === 0);
+      word += replacement;
+      started = true;
+      continue;
+    }
+    if (char === "$" && quote !== "'") {
+      const variable = input.slice(index).match(
+        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}/,
+      )?.[0];
+      if (variable === undefined) return undefined;
+      word += variable;
+      started = true;
+      index += variable.length - 1;
+      continue;
+    }
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined;
+        started = true;
+      } else if (char === "\\") {
+        escaped = true;
+      } else {
+        stable &&= envTextIsStable(char, word.length === 0);
+        word += char;
+        started = true;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      started = true;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (char === " " || char === "\t") {
+      if (started) {
+        words.push(envWord(word, stable));
+        word = "";
+        stable = true;
+        started = false;
+      }
+    } else if (char === "#" && !started) {
+      break;
+    } else {
+      stable &&= envTextIsStable(char, word.length === 0);
+      word += char;
+      started = true;
+    }
+  }
+  if (escaped || quote !== undefined) return undefined;
+  if (started) words.push(envWord(word, stable));
+  return words;
+}
+
+function envTextIsStable(text: string, atStart: boolean): boolean {
+  return !/[ \t\\'"$]/.test(text) && !(atStart && text.startsWith("#"));
 }
 
 /** The distinct languages a set of files resolves to, in first-seen order. */

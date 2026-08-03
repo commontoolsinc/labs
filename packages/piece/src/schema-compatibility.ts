@@ -118,9 +118,37 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  * contracts of the currently running pattern.
  *
  * Arguments are contravariant and results are covariant. Open argument objects
- * may still gain optional/defaulted named fields as the piece-evolution policy;
- * the runner validates the piece's merged durable arguments against the new
- * schema transactionally before committing such an update.
+ * may still gain optional/defaulted named fields as the piece-evolution policy.
+ * What keeps that allowance sound is a second check at update time rather than
+ * anything provable here: pattern setup re-stages the piece's stored argument
+ * against the incoming schema and validates it inside the setup transaction, so
+ * an update whose durable argument the new schema cannot read is refused
+ * instead of landing over unreadable state. Two sites do the checking, and the
+ * line between them is whether the caller will (re)instantiate the graph, not
+ * whether the piece happens to be running: `Runner.applySetupState` re-points
+ * and validates the argument for a cold root and for the watcher's hot-swap,
+ * both of which then instantiate; `Runner.validateStoredArgument` checks a
+ * piece that is being REUSED — its nodes stay as they are — and moves nothing
+ * (`packages/runner/test/pattern-update-argument-validation.test.ts`).
+ *
+ * That check defers two cases, and the waiver is only as strong as they allow:
+ *
+ * - A slot whose stored value is a link that cannot be dereferenced in the
+ *   transaction validates as opaque, because "the target has not synced" is
+ *   indistinguishable from "the value is invalid" at that moment (CT-1917). A
+ *   plain value of the wrong type is refused.
+ * - A root carrying no `patternSetupIdentity` marker gets one unvalidated
+ *   setup, because absence cannot be told from a pending update. The marker is
+ *   recent, so this currently exempts most stored roots rather than a rare
+ *   tail, and it is aged roots — the ones likeliest to hold a value a new
+ *   schema cannot read — that the exemption covers.
+ *
+ * So this waiver is not a proof; it is a decision to accept those two cases.
+ * Neither is covered elsewhere either — in particular Tier 2's vintage replay
+ * cannot reach the markerless one, since its captures run setup through the
+ * current runner and are therefore always marked. Both are pinned as decisions
+ * in `packages/runner/test/pattern-update-argument-validation.test.ts` rather
+ * than left to be rediscovered.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
@@ -504,17 +532,10 @@ function objectSubsetIssue(
         return `${path}.${property}: result field is no longer required`;
       }
     }
-    for (const property of sourceRequired) {
-      if (
-        !Object.hasOwn(targetProperties, property) &&
-        (!allowEvolutionDefaults || !schemaProvidesValidDefault(
-          sourceProperties[property],
-          context.sourceRoot,
-        ))
-      ) {
-        return `${path}.${property}: newly required result field has no default`;
-      }
-    }
+    // The candidate pattern produces its result. A newly required field does
+    // not need a migration default: the new graph materializes that output when
+    // it runs. Existing required-result guarantees above still cannot weaken,
+    // and existing field types remain checked covariantly below.
 
     const previousAdditional = target.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {

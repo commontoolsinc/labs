@@ -231,7 +231,7 @@ toolshed-only `TOOLSHED_GIT_SHA` override remains highest priority.
 The compilation cache for compiled patterns is the content-addressed cell
 cache (always on under an enforcing CFC mode; see
 `packages/runner/src/compilation-cache/cell-cache.ts`). The former
-`COMPILATION_CACHE_*` env vars configured the removed AMD bundle cache and no
+`COMPILATION_CACHE_*` env vars configured an earlier whole-bundle cache and no
 longer exist.
 
 ---
@@ -295,6 +295,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
 | `CF_CLI_INTEGRATION_USE_LOCAL` | _(unset)_ | Used by integration tests to dispatch through local source rather than a built binary. |
+| `CF_LABS_ROOT` | _(unset)_ | Read by `bin/cf` only. Selects which labs checkout answers, overriding the nearest one walking up from the cwd. Must be a checkout (a directory with `packages/cli/launcher.ts`) or `bin/cf` exits 2. Chooses the CLI, not the working directory. |
 
 ### Global args
 

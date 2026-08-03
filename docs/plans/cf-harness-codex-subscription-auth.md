@@ -1,14 +1,12 @@
 # cf-harness Codex Subscription Authentication — Implementation Plan
 
 Status: Implemented in `cf-harness` and covered by automated tests. Remaining
-shipping gates are live-account smoke tests, security review, root validation
-under the repository-supported Deno version, and Loom host/UI policy wiring.
+shipping gates are live-account smoke tests, security review, and Loom host/UI
+policy wiring.
 
-Validation snapshot (2026-07-23): all 500 `cf-harness` tests pass; direct type
-checking, package lint/format, docs checks, unused-dependency checks, and diff
-whitespace checks pass. The aggregate root `deno task check` stops at its
-version guard because this workspace has Deno 2.9.3 while the repository
-requires Deno >=2.8.0 and <2.9.0.
+Validation snapshot (2026-07-29): the repository pins Deno 2.9.4. The aggregate
+root `deno task check` and `deno task test` pass, including the `cf-harness`
+checks and tests.
 
 This plan adds an opt-in way for a `cf-harness` user to use their ChatGPT/Codex
 subscription instead of an OpenAI Platform API key, first through the local CLI

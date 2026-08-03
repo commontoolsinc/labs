@@ -571,7 +571,7 @@ const eventEnvelopePayloads = (
 
 // Helper for the (dormant — see `contractCandidatesFromEventContext`) `$ctx`
 // path. Binding lowers handler context props one level at a time but preserves
-// the surrounding object/array structure (see `unwrapOneLevelAndBindtoDoc`), so a
+// the surrounding object/array structure (see `unwrapOneLevelAndBindToDoc`), so a
 // contract-bearing link can sit nested inside a `$ctx` entry (e.g.
 // `myHandler({ config: { savedTitle: state.x } })`) rather than at its top
 // level. Walk plain objects/arrays to collect every reachable bound link. A

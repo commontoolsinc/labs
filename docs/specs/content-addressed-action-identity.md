@@ -101,7 +101,7 @@ address in a second, non-canonical encoding). See
 the only pattern pointer; cold recovery recompiles from the `pattern:<identity>`
 source docs.
 
-The design assumes the shipped state after the AMD-loader removal: the ESM
+The design assumes the shipped loader state: the ESM
 module-record loader is the only loader, every module has a content-addressed
 identity (`cf:module/<hash>`), and every module-scope builder artifact
 (pattern / lift / handler) is addressable as `{ identity, symbol }` — authored
@@ -217,7 +217,7 @@ or stops needing identity-carry, the symbols die with it.)
 | C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `toJSONWithAliasBindings` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
 | C2 | `moduleToJSON` pattern-type implementation (`json-utils.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
 | C3 | `traverseValue` (`traverse-utils.ts:54`): copies during build traversal (`collectCellsAndNodes`, `node-utils` connect) | Preserves the backref so a traversal copy still resolves `getArtifactEntryRef` | **Copy stays; backref replaced** by side-table registration at the same line. |
-| C4 | `unwrapOneLevelAndBindtoDoc` (`pattern-binding.ts:333–340`): instantiation-time rebinding copies | Propagates backref + the `verifiedLoadId` side-table entry to the bound copy | **Copy stays; backref replaced** by side-table registration; the `verifiedLoadId` propagation is deleted outright (CFC identity no longer flows through loadIds — § CFC). |
+| C4 | `unwrapOneLevelAndBindToDoc` (`pattern-binding.ts:333–340`): instantiation-time rebinding copies | Propagates backref + the `verifiedLoadId` side-table entry to the bound copy | **Copy stays; backref replaced** by side-table registration; the `verifiedLoadId` propagation is deleted outright (CFC identity no longer flows through loadIds — § CFC). |
 | C5 | `unsafe_noteParentOnPatterns` (`pattern-binding.ts:346–358`): writes `unsafe_parentPattern` | Nothing reads it | **Delete now.** Independent of the rest of this design. |
 
 Net: the copies themselves are mostly load-bearing (the serialized graph is the
@@ -410,7 +410,7 @@ runtime.unsafe_registerHostArtifact(value: object, options: {
   `registerTestArtifact(value, name)`), replacing every test that today relies
   on builder-time `implementationRef` registration outside a compiled program.
   Tests that want **verified** (CFC-passing) artifacts compile a small
-  in-memory program — already the dominant idiom post-AMD.
+  in-memory program — already the dominant idiom.
 
 ### 6. `patternId` scoping: deleted
 

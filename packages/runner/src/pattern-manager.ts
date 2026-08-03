@@ -11,6 +11,7 @@ import {
   resolveOriginal,
   setArtifactEntryRef,
   setPatternProgram,
+  setPatternSourcePath,
 } from "./builder/pattern-metadata.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
@@ -376,6 +377,16 @@ export class PatternManager {
     const ref = { identity, symbol: "default" };
     this.associatePatternIdentity(root, ref);
     return ref;
+  }
+
+  /**
+   * Whether `identity` is a session-synthetic keyless pointer (minted by
+   * {@link ensureKeylessPatternIdentity}) rather than a durable
+   * content-addressed artifact identity. A fresh runtime can never load a
+   * keyless pointer, so such refs must never be written into durable state.
+   */
+  static isKeylessPatternIdentity(identity: string): boolean {
+    return identity.startsWith("keyless:");
   }
 
   /**
@@ -1452,9 +1463,17 @@ export class PatternManager {
         // Index each exported builder artifact for addressing by its export name.
         // (Reload relies on this so a sub-pattern's result cell loads BY IDENTITY
         // instead of cold-recompiling — CT-1623.)
+        const sourcePath = result.sourcePathByIdentity?.get(identity);
         for (const exportName of Object.keys(exports)) {
           if (exportName === "__esModule") continue;
           this.indexArtifact(identity, exportName, exports[exportName]);
+          // Stamp where it came from. The by-identity reload path attaches no
+          // program on purpose, so this is the only record a nested pattern
+          // keeps of its own file — and without it nothing downstream can say
+          // which source a live sub-pattern corresponds to.
+          if (sourcePath !== undefined) {
+            setPatternSourcePath(exports[exportName], sourcePath);
+          }
         }
       }
       while (this.modulesByIdentity.size > this.maxEvaluatedModuleCacheSize) {
@@ -1469,8 +1488,10 @@ export class PatternManager {
     const sink = result.registrationsByIdentity;
     if (sink) {
       for (const [identity, entries] of sink) {
+        const sourcePath = result.sourcePathByIdentity?.get(identity);
         for (const [symbol, value] of entries) {
           this.indexArtifact(identity, symbol, value);
+          if (sourcePath !== undefined) setPatternSourcePath(value, sourcePath);
         }
       }
     }
@@ -1967,9 +1988,10 @@ export class PatternManager {
 
   /**
    * The content-addressed `{ identity, symbol }` reference for a builder artifact
-   * (pattern / lift / handler), if known (learned on the ESM path). Lets callers
-   * persist a result cell's reference so the artifact reloads straight from the
-   * compiled cache. Returns undefined for legacy/AMD artifacts.
+   * (pattern / lift / handler), if known (learned when the module loads). Lets
+   * callers persist a result cell's reference so the artifact reloads straight
+   * from the compiled cache. Returns undefined for an artifact with no recorded
+   * module provenance (host-trusted or dynamically created).
    */
   getArtifactEntryRef(
     value: object,

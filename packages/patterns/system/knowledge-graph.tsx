@@ -149,7 +149,7 @@ export const searchGraphPattern = pattern<
   return { edges: filteredEdges, compoundNodes: filteredNodes };
 });
 
-/** Pattern tool: lists all pieces with their summaries. */
+/** Pattern tool: lists the supplied pieces with their summaries. */
 const listPiecesPattern = pattern<
   {
     entries: Array<

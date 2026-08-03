@@ -1,13 +1,14 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
+import { type Cell, createCell, frameAnchorIds } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import {
   type IExtendedStorageTransaction,
@@ -142,10 +143,10 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * `unshift`, etc.) route through the same write-boundary normalization
  * as `Cell.set()` / `Cell.push()`.
  *
- * **Frozenness contract:** Values handed to the write-side array mutators flow
- * through `recursivelyAddIDIfNeeded()` and so plain unfrozen Object/Array
- * inputs get shallowly frozen at each visited level; already-deep- frozen valid
- * `FabricValue` inputs are accepted identity-preservingly.
+ * **Frozenness contract:** Values handed to the write-side array mutators are
+ * normalized (and frozen) level by level inside the write's diff; the caller's
+ * input objects are never mutated, and already-deep-frozen valid `FabricValue`
+ * inputs are accepted identity-preservingly.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
@@ -424,29 +425,36 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            // Turn any newly added elements into cells by adding [ID] symbols.
-            // This ensures objects get stored as separate entity documents
-            // rather than inline data, which is critical for persistence.
+            // The anchor id source turns any newly added objects into entity
+            // documents of their own rather than inline data, which is
+            // critical for persistence.
             const frame = getTopFrame();
 
-            const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
-
             // And if there was a change at all, update the cell.
-            diffAndUpdate(runtime, tx, link, processedCopy, {
-              parent: { id: link.id, space: link.space },
-              method: prop,
-              call: new Error().stack,
-              context: frame?.cause ?? "unknown",
-            });
+            diffAndUpdate(
+              runtime,
+              tx,
+              link,
+              copy,
+              {
+                parent: { id: link.id, space: link.space },
+                method: prop,
+                call: new Error().stack,
+                context: frame?.cause ?? "unknown",
+              },
+              undefined,
+              frameAnchorIds(frame),
+            );
 
             // A tail append records its intent so the commit emits a
             // tail-relative, mergeable operation rather than a position diffed
             // against a possibly-stale base. Any other in-place mutator (splice,
-            // unshift, sort, reverse, fill, ...) reshapes the array: if a
-            // mergeable push was recorded on it earlier in the transaction, the
-            // recorded tail no longer identifies the appended elements, so
-            // abandon the intent and let the whole-array diff carry the reshaped
-            // result.
+            // unshift, sort, reverse, fill, ...) reshapes the array: for any
+            // mergeable op recorded earlier in the transaction on this array —
+            // or on an array nested inside it, which this reshape rewrites just
+            // as surely — the recorded tail no longer identifies the appended
+            // elements, so abandon those intents and let the whole-array diff
+            // carry the reshaped result.
             if (prop === "push") {
               tx.recordMergeableOp?.(link, {
                 op: "append",
@@ -534,12 +542,20 @@ export function createQueryResultProxy<T>(
         );
       }
 
+      const writeLink = { ...link, path: [...link.path, String(prop)] };
       diffAndUpdate(
         runtime,
         tx,
-        { ...link, path: [...link.path, String(prop)] },
+        writeLink,
         value,
       );
+
+      // Assigning over a property is a whole-value write, the same reshape
+      // `Cell.set` performs — and it reaches this trap instead of that method.
+      // Any mergeable op recorded at or beneath the assigned property refers to
+      // a value this write just replaced, so abandon it and let the whole-value
+      // diff carry the result.
+      tx.poisonMergeableOp?.(writeLink);
 
       return true;
     },
@@ -551,7 +567,20 @@ export function createQueryResultProxy<T>(
         : Reflect.ownKeys(value);
       if (Array.isArray(proxyTarget)) {
         if (!keys.includes("length")) {
-          keys.push("length");
+          // Insert `length` where a real array carries it -- after the index
+          // keys, ahead of any other name -- rather than appending it. Own-key
+          // order is load-bearing: a consumer can tell an index-only array from
+          // one carrying named properties by asking whether `length` comes
+          // last (`isArrayWithOnlyIndexProperties()` does exactly that), and
+          // appending would make a named property look like an index-only one.
+          const firstNonIndex = keys.findIndex((key) =>
+            !((typeof key === "string") && isArrayIndexPropertyName(key))
+          );
+          keys.splice(
+            (firstNonIndex === -1) ? keys.length : firstNonIndex,
+            0,
+            "length",
+          );
         }
         // Enumerating an array's keys (`Object.keys`/`values`/`entries`, a spread,
         // `for...in`) observes which index keys are present. For a dense array

@@ -128,6 +128,15 @@ export interface EvaluateResult {
    */
   exportsByIdentity?: Map<string, Exports>;
   /**
+   * Module content identity → the authored file it came from.
+   *
+   * A pattern reloaded by identity gets no program attached (that path is
+   * source-free by design), so nothing downstream can say WHICH file a nested
+   * pattern came from. The evaluate loop knows both, so it records the pairing
+   * and `PatternManager` stamps it onto each indexed artifact.
+   */
+  sourcePathByIdentity?: Map<string, string>;
+  /**
    * Hoist registrations collected during this evaluation (`__cfReg`): module
    * content identity → (symbol → live builder artifact). The PatternManager turns
    * each trusted entry into a content-addressed `{ identity, symbol }` reference

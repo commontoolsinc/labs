@@ -3,13 +3,13 @@ import { expect } from "@std/expect";
 
 import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.ts";
 
-// Verifier-level parity oracle (Phase D2.2). These are crafted compiled-
-// CommonJS module bodies that mimic CF-transformed output (the same way the AMD
-// verifier is tested with crafted AMD fixtures). They assert that the ESM body
-// verifier reproduces the AMD verifier's accept/reject *semantics* for the
-// format-agnostic SES module-item rules. The end-to-end differential (same
-// authored source through both the AMD and ESM compile paths) lands in D3 once
-// the adapter runs the CF transformer pipeline.
+// Accept/reject corpus for the module-body verifier. These are crafted
+// compiled-CommonJS module bodies that mimic CF-transformed output, pinning the
+// verdict `verifyCompiledModuleBody` gives each shape of the format-agnostic SES
+// module-item rules. Crafted bodies, not compiler output: they cover shapes the
+// transformer does not currently emit, so a future emit change cannot silently
+// widen what the verifier admits. End-to-end coverage over genuinely compiled
+// programs lives in esm-module-body-verifier.test.ts and esm-pattern-run.test.ts.
 
 const IMPORT = `const cf_1 = require("commonfabric");`;
 
@@ -48,9 +48,8 @@ const ACCEPT: Case[] = [
   },
   {
     // CT-1661: `export { x } from "./m"` emits the module reference as `var`
-    // (hoisted ahead of the getter), not `const`. AMD accepts re-exports
-    // (imports are factory params); the ESM import-preamble must accept the
-    // `var` form too, or the same source diverges between the two verifiers.
+    // (hoisted ahead of the getter), not `const`. The import-preamble fast-path
+    // must accept the `var` form, or a legitimate barrel re-export is rejected.
     name: "named reexport getter from a var require preamble",
     body:
       `var inner_1 = require("./inner.ts");\nObject.defineProperty(exports, "x", { enumerable: true, get: function () { return inner_1.x; } });`,

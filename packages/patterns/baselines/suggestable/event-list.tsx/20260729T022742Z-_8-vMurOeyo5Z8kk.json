@@ -1,0 +1,55 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "suggestable/event-list.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Event": {
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "date",
+          "time",
+          "notes"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "events": {
+        "items": {
+          "$ref": "#/$defs/Event"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "events",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

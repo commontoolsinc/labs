@@ -915,6 +915,9 @@ export class HarnessInteractiveChatService {
         kind: "turn_completed",
         turnId,
         finalText: result.finalAssistantText,
+        ...((result.totalUsage ?? result.usage) !== undefined
+          ? { usage: result.totalUsage ?? result.usage }
+          : {}),
       });
     } catch (error) {
       if (record.canceledTurnIds.has(turnId)) {
@@ -948,6 +951,7 @@ export class HarnessInteractiveChatService {
       ...(session.artifactRoot !== undefined
         ? { artifactRoot: session.artifactRoot }
         : {}),
+      cacheAffinityKey: `interactive:${session.sessionId}`,
       allowedToolIds: policy.allowedToolIds,
       allowedSubagentProfiles: policy.allowedSubagentProfiles,
       ...(browserAccess !== undefined ? { browserAccess } : {}),

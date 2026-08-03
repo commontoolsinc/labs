@@ -28,7 +28,10 @@ function firstDiff(a: readonly Line[], b: readonly Line[]): number {
     for (let j = 0; j < sa.length; j++) {
       if (
         sa[j].col !== sb[j].col || sa[j].text !== sb[j].text ||
-        sa[j].cls !== sb[j].cls || sa[j].bracketDepth !== sb[j].bracketDepth
+        sa[j].cls !== sb[j].cls ||
+        sa[j].bracketDepth !== sb[j].bracketDepth ||
+        sa[j].exactDefinitionName !== sb[j].exactDefinitionName ||
+        sa[j].exactDefinitionDisplayName !== sb[j].exactDefinitionDisplayName
       ) {
         return i;
       }

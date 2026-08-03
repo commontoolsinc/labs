@@ -42,12 +42,12 @@ describe("BaseFabricCodec", () => {
     describe("tagForValue()", () => {
       it("returns the codec's `recognizedTypeTag`", () => {
         const codec = new TestCodec("Foo@1", undefined);
-        expect(codec.tagForValue("anything" as FabricValue)).toBe("Foo@1");
+        expect(codec.tagForValue("anything")).toBe("Foo@1");
       });
 
       it("throws when the codec has no recognized tag (must be overridden)", () => {
         const codec = new TestCodec(undefined, undefined);
-        expect(() => codec.tagForValue("anything" as FabricValue)).toThrow(
+        expect(() => codec.tagForValue("anything")).toThrow(
           "no recognized tag",
         );
       });

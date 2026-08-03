@@ -19,6 +19,11 @@ export const commonToolsUp: Tile = {
       const t0 = Date.now();
       const res = await fetch(url, { signal: AbortSignal.timeout(8000), redirect: "manual" });
       const ms = Date.now() - t0;
+      try {
+        await res.body?.cancel();
+      } catch {
+        // A received status establishes reachability when body cleanup fails.
+      }
       fails = 0; // reachable — reset the outage counter
 
       const status: Status = res.status >= 500 ? "bad" : res.status >= 400 || ms > 2500 ? "warn" : "good";

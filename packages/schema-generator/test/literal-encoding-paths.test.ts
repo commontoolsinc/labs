@@ -56,6 +56,97 @@ describe("literal encoding across analysis paths", () => {
     });
   });
 
+  it("preserves nullable booleans across both analysis paths", async () => {
+    const code = `type MaybeBoolean = boolean | null;`;
+    const generator = new SchemaGenerator();
+    const { type, checker, typeNode } = await getTypeFromCode(
+      code,
+      "MaybeBoolean",
+    );
+    const expected = {
+      anyOf: [{ type: "boolean" }, { type: "null" }],
+    };
+
+    expect(generator.generateSchema(type, checker, typeNode)).toEqual(expected);
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(typeNode!, checker),
+    ).toEqual(expected);
+  });
+
+  it("preserves null beside explicit boolean literals on both paths", async () => {
+    const code = `type MaybeBoolean = true | false | null;`;
+    const generator = new SchemaGenerator();
+    const { type, checker, typeNode } = await getTypeFromCode(
+      code,
+      "MaybeBoolean",
+    );
+
+    expect(generator.generateSchema(type, checker, typeNode)).toEqual({
+      anyOf: [{ type: "boolean" }, { type: "null" }],
+    });
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(typeNode!, checker),
+    ).toEqual({
+      anyOf: [
+        { type: "boolean", const: true },
+        { type: "boolean", const: false },
+        { type: "null" },
+      ],
+    });
+  });
+
+  it("keeps nullable single boolean literals narrow on both paths", async () => {
+    for (const literal of ["true", "false"] as const) {
+      const code = `type MaybeBoolean = ${literal} | null;`;
+      const generator = new SchemaGenerator();
+      const { type, checker, typeNode } = await getTypeFromCode(
+        code,
+        "MaybeBoolean",
+      );
+      const value = literal === "true";
+
+      expect(generator.generateSchema(type, checker, typeNode)).toEqual({
+        anyOf: [
+          { type: "boolean", enum: [value] },
+          { type: "null" },
+        ],
+      });
+      expect(
+        generator.generateSchemaFromSyntheticTypeNode(typeNode!, checker),
+      ).toEqual({
+        anyOf: [
+          { type: "boolean", const: value },
+          { type: "null" },
+        ],
+      });
+    }
+  });
+
+  it("preserves undefined in nullable booleans on both paths", async () => {
+    const code = `type MaybeBoolean = boolean | null | undefined;`;
+    const generator = new SchemaGenerator();
+    const { type, checker, typeNode } = await getTypeFromCode(
+      code,
+      "MaybeBoolean",
+    );
+
+    expect(generator.generateSchema(type, checker, typeNode)).toEqual({
+      anyOf: [
+        { type: ["null", "undefined"] },
+        { type: "boolean" },
+      ],
+    });
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(typeNode!, checker),
+    ).toEqual({
+      anyOf: [
+        { type: "boolean" },
+        { type: "null" },
+        { type: "undefined" },
+      ],
+    });
+  });
+
   it("bound object nodes converge (property literals re-resolve onto the type path)", async () => {
     const code = `type Shape = { kind: "point"; x: number };`;
     const generator = new SchemaGenerator();

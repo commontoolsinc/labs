@@ -1,0 +1,764 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "HistoryEntry": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "loggedBy": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/User",
+                "asCell": [
+                  "cell"
+                ]
+              }
+            ]
+          },
+          "loggedByName": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "votes": {
+            "items": {
+              "$ref": "#/$defs/VoteSnapshot"
+            },
+            "type": "array"
+          },
+          "wentAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "loggedByName",
+          "loggedBy",
+          "wentAt",
+          "votes"
+        ],
+        "type": "object"
+      },
+      "LunchProfile": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Option": {
+        "properties": {
+          "addedByName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "description": "Persisted generated-art data URL (`\"\"` until the host's client generates\nand syncs it). Every viewer renders this stored value; generation only\nruns on the host's client for options where it is still empty.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "addedByName"
+        ],
+        "type": "object"
+      },
+      "ParticipantProfileDirectory": {
+        "properties": {
+          "participants": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ParticipantProfileLink"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "participants"
+        ],
+        "type": "object"
+      },
+      "ParticipantProfileDirectoryValue": {
+        "$ref": "#/$defs/ParticipantProfileDirectory",
+        "default": {
+          "participants": []
+        }
+      },
+      "ParticipantProfileLink": {
+        "properties": {
+          "name": {
+            "description": "Immutable Lunch Poll name used by the current name-keyed vote schema.",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/$defs/LunchProfile",
+            "asCell": [
+              "cell"
+            ],
+            "description": "Live canonical profile cell; compare it by identity with `equals()`."
+          }
+        },
+        "required": [
+          "name",
+          "profile"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "avatar": {
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile.",
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "type": "object"
+      },
+      "Vote": {
+        "properties": {
+          "castAt": {
+            "description": "When the vote was cast (ms epoch), stamped by `castVote`. Optional for\nvotes stored before this field existed — those count as not-today, so the\ncurrent-day filter hides them.",
+            "type": "number"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          },
+          "voterName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "voterName",
+          "optionId",
+          "voteType"
+        ],
+        "type": "object"
+      },
+      "VoteColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red"
+        ]
+      },
+      "VoteSnapshot": {
+        "properties": {
+          "color": {
+            "$ref": "#/$defs/VoteColor"
+          },
+          "optionTitle": {
+            "type": "string"
+          },
+          "voter": {
+            "type": "string"
+          },
+          "voterLink": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/User",
+                "asCell": [
+                  "cell"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "voter",
+          "voterLink",
+          "optionTitle",
+          "color"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "adminName": {
+        "default": "",
+        "scope": "space",
+        "type": "string"
+      },
+      "myName": {
+        "default": "",
+        "scope": "user",
+        "type": "string"
+      },
+      "options": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Option"
+        },
+        "scope": "space",
+        "type": "array"
+      },
+      "participantProfiles": {
+        "$ref": "#/$defs/ParticipantProfileDirectoryValue",
+        "description": "Canonical live profile links for profile-backed users; guests are absent.",
+        "scope": "space"
+      },
+      "question": {
+        "default": "Where should we eat?",
+        "scope": "space",
+        "type": "string"
+      },
+      "users": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/User"
+        },
+        "scope": "space",
+        "type": "array"
+      },
+      "visits": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HistoryEntry"
+        },
+        "scope": "space",
+        "type": "array"
+      },
+      "votes": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Vote"
+        },
+        "scope": "space",
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "lunch-poll/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AddOptionEvent": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CastVoteEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          }
+        },
+        "required": [
+          "optionId",
+          "voteType"
+        ],
+        "type": "object"
+      },
+      "ClaimHostEvent": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "ClearHistoryEvent": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "ClearVoteEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId"
+        ],
+        "type": "object"
+      },
+      "HistoryEntry": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "loggedBy": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/User"
+              }
+            ]
+          },
+          "loggedByName": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "votes": {
+            "items": {
+              "$ref": "#/$defs/VoteSnapshot"
+            },
+            "type": "array"
+          },
+          "wentAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "loggedByName",
+          "loggedBy",
+          "wentAt",
+          "votes"
+        ],
+        "type": "object"
+      },
+      "JoinEvent": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LogVisitEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "wentAt": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "LunchProfile": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Option": {
+        "properties": {
+          "addedByName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "description": "Persisted generated-art data URL (`\"\"` until the host's client generates\nand syncs it). Every viewer renders this stored value; generation only\nruns on the host's client for options where it is still empty.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "addedByName"
+        ],
+        "type": "object"
+      },
+      "ParticipantProfileLink": {
+        "properties": {
+          "name": {
+            "description": "Immutable Lunch Poll name used by the current name-keyed vote schema.",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/$defs/LunchProfile",
+            "description": "Live canonical profile cell; compare it by identity with `equals()`."
+          }
+        },
+        "required": [
+          "name",
+          "profile"
+        ],
+        "type": "object"
+      },
+      "PlaceStat": {
+        "properties": {
+          "greens": {
+            "type": "number"
+          },
+          "reds": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "visits": {
+            "type": "number"
+          },
+          "yellows": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "title",
+          "visits",
+          "greens",
+          "yellows",
+          "reds"
+        ],
+        "type": "object"
+      },
+      "RemoveHistoryEntryEvent": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "RemoveOptionEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId"
+        ],
+        "type": "object"
+      },
+      "ResetVotesEvent": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "SetOptionImageEvent": {
+        "properties": {
+          "imageUrl": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId",
+          "imageUrl"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "avatar": {
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile.",
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "type": "object"
+      },
+      "Vote": {
+        "properties": {
+          "castAt": {
+            "description": "When the vote was cast (ms epoch), stamped by `castVote`. Optional for\nvotes stored before this field existed — those count as not-today, so the\ncurrent-day filter hides them.",
+            "type": "number"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          },
+          "voterName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "voterName",
+          "optionId",
+          "voteType"
+        ],
+        "type": "object"
+      },
+      "VoteColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red"
+        ]
+      },
+      "VoteSnapshot": {
+        "properties": {
+          "color": {
+            "$ref": "#/$defs/VoteColor"
+          },
+          "optionTitle": {
+            "type": "string"
+          },
+          "voter": {
+            "type": "string"
+          },
+          "voterLink": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/User"
+              }
+            ]
+          }
+        },
+        "required": [
+          "voter",
+          "voterLink",
+          "optionTitle",
+          "color"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addOption": {
+        "$ref": "#/$defs/AddOptionEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "adminName": {
+        "type": "string"
+      },
+      "castVote": {
+        "$ref": "#/$defs/CastVoteEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "claimHost": {
+        "$ref": "#/$defs/ClaimHostEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "clearHistory": {
+        "$ref": "#/$defs/ClearHistoryEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "clearMyVote": {
+        "$ref": "#/$defs/ClearVoteEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "historyCount": {
+        "type": "number"
+      },
+      "isAdmin": {
+        "type": "boolean"
+      },
+      "isJoined": {
+        "type": "boolean"
+      },
+      "joinAs": {
+        "$ref": "#/$defs/JoinEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "logVisit": {
+        "$ref": "#/$defs/LogVisitEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "mostRecentTitle": {
+        "type": "string"
+      },
+      "myName": {
+        "type": "string"
+      },
+      "optionCount": {
+        "type": "number"
+      },
+      "options": {
+        "items": {
+          "$ref": "#/$defs/Option"
+        },
+        "type": "array"
+      },
+      "participantProfiles": {
+        "items": {
+          "$ref": "#/$defs/ParticipantProfileLink"
+        },
+        "type": "array"
+      },
+      "placeStats": {
+        "items": {
+          "$ref": "#/$defs/PlaceStat"
+        },
+        "type": "array"
+      },
+      "question": {
+        "type": "string"
+      },
+      "recentVisits": {
+        "items": {
+          "$ref": "#/$defs/HistoryEntry"
+        },
+        "type": "array"
+      },
+      "removeHistoryEntry": {
+        "$ref": "#/$defs/RemoveHistoryEntryEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "removeOption": {
+        "$ref": "#/$defs/RemoveOptionEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "resetVotes": {
+        "$ref": "#/$defs/ResetVotesEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "setOptionImage": {
+        "$ref": "#/$defs/SetOptionImageEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "todayDate": {
+        "type": "string"
+      },
+      "todayVoteCount": {
+        "type": "number"
+      },
+      "todaysVotes": {
+        "items": {
+          "$ref": "#/$defs/Vote"
+        },
+        "type": "array"
+      },
+      "userCount": {
+        "type": "number"
+      },
+      "users": {
+        "items": {
+          "$ref": "#/$defs/User"
+        },
+        "type": "array"
+      },
+      "voteCount": {
+        "type": "number"
+      },
+      "voteHistoryCount": {
+        "type": "number"
+      },
+      "votes": {
+        "items": {
+          "$ref": "#/$defs/Vote"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "question",
+      "options",
+      "votes",
+      "users",
+      "participantProfiles",
+      "adminName",
+      "myName",
+      "userCount",
+      "optionCount",
+      "voteCount",
+      "todayDate",
+      "todaysVotes",
+      "todayVoteCount",
+      "historyCount",
+      "recentVisits",
+      "mostRecentTitle",
+      "voteHistoryCount",
+      "placeStats",
+      "isJoined",
+      "isAdmin",
+      "joinAs",
+      "claimHost",
+      "addOption",
+      "removeOption",
+      "castVote",
+      "clearMyVote",
+      "resetVotes",
+      "setOptionImage",
+      "logVisit",
+      "removeHistoryEntry",
+      "clearHistory",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

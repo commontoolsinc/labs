@@ -1,8 +1,8 @@
-// Micro-benchmark for `unwrapOneLevelAndBindtoDoc`.
+// Micro-benchmark for `unwrapOneLevelAndBindToDoc`.
 //
 // CONTEXT / CONCLUSION: reload profiling showed `bindNodeIO` is ~90% of per-node
 // instantiation cost during the `raw:map` notes-list reconcile (~3ms/node, up to
-// ~52ms for one node). `bindNodeIO` = unwrapOneLevelAndBindtoDoc(in/out) +
+// ~52ms for one node). `bindNodeIO` = unwrapOneLevelAndBindToDoc(in/out) +
 // findAllWriteRedirectCells(in/out). This bench was written to study the unwrap
 // part — and it PROVED unwrap is NOT the bottleneck:
 //   * unwrap is ~1.9µs/alias (5.2µs with $ref/$defs schemas) and linear — a real
@@ -16,18 +16,18 @@
 // isn't covered by this pure micro-bench (TODO: add an emulate-runtime bench for
 // findAllWriteRedirectCells to study/optimize the actual hotspot).
 //
-// unwrapOneLevelAndBindtoDoc itself is PURE (CFC schema traversal + deep
+// unwrapOneLevelAndBindToDoc itself is PURE (CFC schema traversal + deep
 // clone/rebind of the binding tree; no storage/tx), studied in isolation below.
 //
 // Run as a bench:        deno bench -A packages/runner/test/pattern-binding.bench.ts
 // Run directly (study):  deno run  -A packages/runner/test/pattern-binding.bench.ts
 //                        deno run  -A packages/runner/test/pattern-binding.bench.ts 2000   # custom size
 
-import { unwrapOneLevelAndBindtoDoc } from "../src/pattern-binding.ts";
+import { unwrapOneLevelAndBindToDoc } from "../src/pattern-binding.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { AnyCell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { FabricExecValue, JSONSchema } from "../src/builder/types.ts";
 
 const cfc = new ContextualFlowControl();
 
@@ -148,7 +148,7 @@ function aliasPath(i: number, depth: number): string[] {
   return p.slice(0, Math.max(1, depth + 1));
 }
 
-function makeAlias(i: number, opts: BuildOpts): unknown {
+function makeAlias(i: number, opts: BuildOpts): FabricExecValue {
   return {
     $alias: {
       cell: "argument",
@@ -162,9 +162,9 @@ function makeAlias(i: number, opts: BuildOpts): unknown {
 
 // Build a VNode-tree binding (what a node's `[UI]` inputBindings look like):
 // a tree of {type:"vnode", name, props, children:[...]} with alias leaves.
-function makeUiBinding(opts: BuildOpts): unknown {
+function makeUiBinding(opts: BuildOpts): FabricExecValue {
   let leaf = 0;
-  const child = (): unknown => {
+  const child = (): FabricExecValue => {
     if (leaf >= opts.aliases) {
       return { type: "vnode", name: "span", props: {}, children: ["·"] };
     }
@@ -177,9 +177,9 @@ function makeUiBinding(opts: BuildOpts): unknown {
     };
   };
   // ~branching factor 4 until all aliases are placed
-  const children: unknown[] = [];
+  const children: FabricExecValue[] = [];
   while (leaf < opts.aliases) {
-    const group: unknown[] = [];
+    const group: FabricExecValue[] = [];
     for (let k = 0; k < 4 && leaf < opts.aliases; k++) group.push(child());
     children.push({
       type: "vnode",
@@ -193,8 +193,8 @@ function makeUiBinding(opts: BuildOpts): unknown {
 
 type Links = typeof withSchema;
 
-function op(binding: unknown, links: Links = withSchema): void {
-  unwrapOneLevelAndBindtoDoc(
+function op(binding: FabricExecValue, links: Links = withSchema): void {
+  unwrapOneLevelAndBindToDoc(
     cfc,
     binding,
     links.arg,
@@ -206,7 +206,7 @@ function op(binding: unknown, links: Links = withSchema): void {
 for (const aliases of [10, 30, 100, 300]) {
   const binding = makeUiBinding({ aliases, pathDepth: 2 });
   Deno.bench(
-    `unwrapOneLevelAndBindtoDoc aliases=${aliases}`,
+    `unwrapOneLevelAndBindToDoc aliases=${aliases}`,
     () => op(binding),
   );
 }
@@ -214,7 +214,7 @@ for (const aliases of [10, 30, 100, 300]) {
 // ---- direct-run study harness ---------------------------------------------
 function time(
   label: string,
-  binding: unknown,
+  binding: FabricExecValue,
   iters: number,
   links: Links = withSchema,
 ): void {

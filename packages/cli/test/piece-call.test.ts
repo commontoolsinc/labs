@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
-import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import {
+  CF_RUNTIME_ERROR_LOG,
+  verbInputSchemaError,
+  VerbInputValidationError,
+} from "../lib/callable.ts";
 import {
   executePieceCallable,
   PieceResultProjectionError,
@@ -15,9 +19,12 @@ import {
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
+  reportVerbInputErrorOrRethrow,
   resolveInvocationId,
+  verbInputErrorReport,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
+import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
 
 describe("executePieceCallable", () => {
   it("preserves plain-text mode while resolving a callable", async () => {
@@ -135,6 +142,47 @@ describe("executePieceCallable", () => {
         value: { message: "milk" },
       },
     ]);
+  });
+
+  it("rejects a piped payload that fails the verb's schema before dispatch", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve('{"mesage":"milk"}'),
+          invocationId: "inv-typo-retry",
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "recordMessage"/);
+
+    // Nothing reached the stream, so the invocation id was never spent — the
+    // corrected retry can still use it. Without this gate the typo'd payload
+    // reads back as an absent `$event`, the verb runs with no event, and its
+    // receipt burns the id while the call reports settled.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
   });
 
   it("runs tools from schema-derived flags and returns JSON output", async () => {
@@ -381,7 +429,7 @@ describe("executePieceCallable", () => {
     ]);
   });
 
-  it("passes --json-file payloads through for object handlers without CLI shape enforcement", async () => {
+  it("refuses a --json-file payload that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "editContent",
@@ -399,29 +447,28 @@ describe("executePieceCallable", () => {
       },
     });
 
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "editContent",
-      ["--json-file", "/tmp/input.json"],
-      {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        readTextFile: () => Promise.resolve('["not-an-object"]'),
-      },
-    );
+    // The arg parser still passes JSON through verbatim — it neither reshapes
+    // nor rejects. The refusal happens at dispatch, where the payload is
+    // measured against the verb's own schema.
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "editContent",
+        ["--json-file", "/tmp/input.json"],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          readTextFile: () => Promise.resolve('["not-an-object"]'),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "editContent"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["editContent"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("infers piped stdin for primitive handlers when no args are provided", async () => {
@@ -504,7 +551,7 @@ describe("executePieceCallable", () => {
     ]);
   });
 
-  it("passes implicit piped JSON through for object handlers without CLI shape enforcement", async () => {
+  it("refuses implicit piped JSON that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "editContent",
@@ -522,33 +569,29 @@ describe("executePieceCallable", () => {
       },
     });
 
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "editContent",
-      [],
-      {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        isStdinTerminal: () => false,
-        readTextInput: () => Promise.resolve('["not-an-object"]'),
-      },
-    );
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "editContent",
+        [],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve('["not-an-object"]'),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "editContent"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["editContent"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  it("passes inline --json through for object handlers without CLI shape enforcement", async () => {
+  it("refuses inline --json that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "editContent",
@@ -566,28 +609,24 @@ describe("executePieceCallable", () => {
       },
     });
 
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "editContent",
-      ["--json", '["not-an-object"]'],
-      {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-      },
-    );
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "editContent",
+        ["--json", '["not-an-object"]'],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "editContent"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["editContent"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("renders piece-call help with the piece-call command prefix", async () => {
@@ -1572,6 +1611,19 @@ describe("piece get data errors", () => {
     expect(report?.message).toMatch(/--step/);
     expect(report?.hint).toBeUndefined();
   });
+
+  it("reports transform failures without an unrelated --input hint", () => {
+    const transformError = new PieceGetTransformError(
+      "--filter can only be applied to an array",
+    );
+    expect(isPieceGetDataError(transformError)).toBe(true);
+    const report = pieceGetDataErrorReport(transformError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    expect(report?.message).toBe("--filter can only be applied to an array");
+    expect(report?.hint).toBeUndefined();
+  });
 });
 
 describe("piece link data errors", () => {
@@ -1596,6 +1648,30 @@ describe("piece link data errors", () => {
       pieceLinkDataErrorReport(new Error("network unreachable"), {
         sourcePieceId: "fid1:source-1",
         targetPieceId: "fid1:target-1",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("piece call input errors", () => {
+  it("reports the rejection with a pointer at the verb listing", () => {
+    const report = verbInputErrorReport(
+      new VerbInputValidationError(
+        "recordMessage",
+        "missing required property message",
+      ),
+      { piece: "fid1:piece-123" },
+    );
+    expect(report?.message).toMatch(/Invalid input for "recordMessage"/);
+    expect(report?.message).toMatch(/missing required property message/);
+    expect(report?.hint).toMatch(/piece verbs/);
+    expect(report?.hint).toMatch(/fid1:piece-123/);
+  });
+
+  it("returns null for a non-input error (caller rethrows)", () => {
+    expect(
+      verbInputErrorReport(new Error("network unreachable"), {
+        piece: "fid1:piece-123",
       }),
     ).toBeNull();
   });
@@ -1633,5 +1709,282 @@ describe("exitWithDataError", () => {
     ).toThrow("exit-sentinel");
     expect(printed).toEqual(["error:boom"]);
     expect(exited).toEqual([1]);
+  });
+});
+
+describe("verbInputSchemaError", () => {
+  const objectSchema: JSONSchema = {
+    type: "object",
+    properties: { message: { type: "string" } },
+    required: ["message"],
+  };
+
+  it("accepts a payload that matches", () => {
+    expect(verbInputSchemaError({ message: "milk" }, objectSchema))
+      .toBeUndefined();
+  });
+
+  it("rejects a missing required property", () => {
+    expect(verbInputSchemaError({ mesage: "milk" }, objectSchema))
+      .toMatch(/message/);
+  });
+
+  it("rejects a payload of the wrong type", () => {
+    expect(verbInputSchemaError(["not-an-object"], objectSchema))
+      .toMatch(/object/);
+  });
+
+  it("leaves an absent payload alone so value-less verbs still send", () => {
+    expect(verbInputSchemaError(undefined, objectSchema)).toBeUndefined();
+  });
+
+  it("accepts anything when the verb declares no schema", () => {
+    expect(verbInputSchemaError({ anything: 1 }, undefined)).toBeUndefined();
+    expect(verbInputSchemaError({ anything: 1 }, true)).toBeUndefined();
+  });
+
+  // The runtime injects a property's default when the payload omits it, so
+  // requiring it here would refuse a call the verb would have accepted.
+  it("treats a defaulted property as satisfied when omitted", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: { mode: { type: "string", default: "fast" } },
+      required: ["mode"],
+    })).toBeUndefined();
+  });
+
+  it("treats a defaulted property as satisfied when nested", () => {
+    expect(verbInputSchemaError({ opts: {} }, {
+      type: "object",
+      properties: {
+        opts: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      },
+      required: ["opts"],
+    })).toBeUndefined();
+  });
+
+  it("treats a defaulted property as satisfied behind a $ref", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Mode" } },
+      required: ["mode"],
+      $defs: { Mode: { type: "string", default: "fast" } },
+    })).toBeUndefined();
+  });
+
+  it("follows a $ref chain to find the default", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Mode" } },
+      required: ["mode"],
+      $defs: {
+        Mode: { $ref: "#/$defs/RealMode" },
+        RealMode: { type: "string", default: "fast" },
+      },
+    })).toBeUndefined();
+  });
+
+  it("relaxes a defaulted property inside array items", () => {
+    expect(verbInputSchemaError([{}], {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { mode: { type: "string", default: "fast" } },
+        required: ["mode"],
+      },
+    })).toBeUndefined();
+  });
+
+  it("relaxes a defaulted property inside a combinator branch", () => {
+    expect(verbInputSchemaError({}, {
+      anyOf: [
+        {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      ],
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // A reference that names nothing local cannot be followed to a default.
+  // Relaxation leaves it exactly as written rather than guessing.
+  it("leaves a non-local $ref untouched", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "https://example.com/Mode" } },
+    } as JSONSchema)).toMatch(/cannot resolve schema reference/);
+  });
+
+  // Hoisting emits `$defs`; a `definitions` ref is one the runtime cannot
+  // resolve either. Relaxing on a default behind one would admit a payload the
+  // verb then receives as an absent event, spending the invocation id.
+  it("does not relax on a default behind a #/definitions ref", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/definitions/Mode" } },
+      required: ["mode"],
+      definitions: { Mode: { type: "string", default: "fast" } },
+    } as unknown as JSONSchema)).toMatch(/mode/);
+  });
+
+  it("leaves a $ref naming a missing definition untouched", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Absent" } },
+      $defs: { Present: { type: "string" } },
+    } as JSONSchema)).toMatch(/cannot resolve schema reference/);
+  });
+
+  it("ignores a malformed $defs pool instead of indexing it", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Mode" } },
+      $defs: null,
+    } as unknown as JSONSchema)).toMatch(/cannot resolve schema reference/);
+  });
+
+  it("handles a $ref whose target is a boolean schema", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Anything" } },
+      $defs: { Anything: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  it("passes a boolean property schema through unchanged", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // A ref cycle names no schema to check against. Relaxation walks it without
+  // looping and hands it on unchanged; the validator is what reports it.
+  it("terminates on a $ref cycle instead of looping", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/A" } },
+      $defs: {
+        A: { $ref: "#/$defs/B" },
+        B: { $ref: "#/$defs/A" },
+      },
+    })).toMatch(/cannot resolve schema reference/);
+  });
+
+  it("still rejects a non-defaulted sibling of a defaulted property", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: {
+        mode: { type: "string", default: "fast" },
+        target: { type: "string" },
+      },
+      required: ["mode", "target"],
+    })).toMatch(/target/);
+  });
+
+  it("accepts asCell fields given either a plain value or a link", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        target: {
+          type: "object",
+          properties: { n: { type: "number" } },
+          asCell: ["cell"],
+        },
+      },
+      required: ["target"],
+    };
+    expect(verbInputSchemaError({ target: { n: 1 } }, schema)).toBeUndefined();
+    expect(
+      verbInputSchemaError(
+        { target: { "/": { id: "of:abc", path: [], space: "did:x:y" } } },
+        schema,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("terminates on a self-referential schema", () => {
+    const cyclic: Record<string, unknown> = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    };
+    (cyclic.properties as Record<string, unknown>).child = cyclic;
+    expect(verbInputSchemaError({ name: "a" }, cyclic as JSONSchema))
+      .toBeUndefined();
+  });
+});
+
+describe("reportVerbInputErrorOrRethrow", () => {
+  const sink = () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    return {
+      printed,
+      exited,
+      deps: {
+        printError: (m: string) => printed.push(`error:${m}`),
+        printHint: (m: string) => printed.push(`hint:${m}`),
+        exit: ((code: number) => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        }) as (code: number) => never,
+      },
+    };
+  };
+
+  it("reports a rejected payload and exits 1", () => {
+    const { printed, exited, deps } = sink();
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError(
+          "recordMessage",
+          "missing required property message",
+        ),
+        "fid1:piece-123",
+        deps,
+      )
+    ).toThrow("exit-sentinel");
+
+    expect(printed[0]).toMatch(/Invalid input for "recordMessage"/);
+    expect(printed[1]).toMatch(/piece verbs/);
+    expect(printed[1]).toMatch(/fid1:piece-123/);
+    expect(exited).toEqual([1]);
+  });
+
+  it("names the piece as <piece> when the config carries none", () => {
+    const { printed, deps } = sink();
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError("recordMessage", "bad"),
+        undefined,
+        deps,
+      )
+    ).toThrow("exit-sentinel");
+
+    expect(printed[1]).toMatch(/<piece>/);
+  });
+
+  // Anything that is not an input rejection has to keep travelling: a network
+  // failure reported as a payload problem would send an agent to fix a payload
+  // that was fine.
+  it("re-throws an unrelated failure untouched", () => {
+    const { printed, exited, deps } = sink();
+    const original = new Error("network unreachable");
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(original, "fid1:piece-123", deps)
+    )
+      .toThrow("network unreachable");
+
+    expect(printed).toEqual([]);
+    expect(exited).toEqual([]);
   });
 });

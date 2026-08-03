@@ -274,6 +274,27 @@ The write-storm history and the mis-pointed-client hazard drive four rails.
    on live spaces independent of cloning — it is the query that would have
    caught the July storm in minutes.
 
+## Corrected by the first real rehearsal (2026-07-29)
+
+This document claimed that excluding compiler-generated cells would leave the
+content fingerprint **unchanged** across a clean pattern update. That is wrong,
+and the first real rehearsal proved it: a schema migration rewrites every
+piece's *result* value, and results are part of the fingerprint, so
+`fingerprint.match` is false after any successful migration.
+
+Excluding generated cells was necessary but not sufficient. The single hash
+therefore cannot distinguish "the update worked" from "content was destroyed",
+which was the one job it was designed for.
+
+What does distinguish them is the **shape** of the change. On the Topics
+rehearsal: 149 changed (74 pieces, 73 owned cells, 2 modules), 3,189 added,
+and **0 removed** — while every authored title, body, comment and link stayed
+byte-identical (73 topics / 59 comments / 56 links, matching #4997). `removed`
+is the alarm; changes confined to pieces and their derived cells are the
+migration working. `cf space verify` now reports that breakdown, and authored
+content still has to be checked separately — no fingerprint over the whole
+store can answer "did the content survive?" on its own.
+
 ## Fidelity caveats the practice must state
 
 A clone is not the production system, and two gaps are worth naming so a
@@ -304,6 +325,25 @@ rehearsal isn't over-trusted:
 - `cf space clone --reset` — restore the working copy from pristine.
 - `cf space clone --verify` — fingerprint check against the manifest.
 - `cf inspect churn <space> [--bucket 1m] [--since …] [--top N]`.
+
+**Layout correction (2026-07-28).** The first implementation wrote the working
+copy to `<dir>/engine-v3/<did>.sqlite` and told the operator to point
+`MEMORY_DIR` at `<dir>`. A server pointed there actually reads
+`<dir>/engine-v3/engine-v3/<did>.sqlite`: toolshed's
+`resolveMemoryEngineStoreRootUrl` appends `engine-v3`, and memory's
+`resolveSpaceStoreUrl` appends it again. Every clone produced was therefore
+unservable — the server found nothing and silently created a fresh empty space
+— and every test passed, because they all checked the layout against the
+tool's own hardcoded constant rather than against the resolvers. Only booting a
+real toolshed and reading the board back exposed it.
+
+The fix is not to hardcode the doubled path, which would be a third statement
+of the layout. `resolveMemoryEngineStoreRootUrl` moved into
+`memory/v2/storage-path.ts` beside `resolveSpaceStoreUrl`, and both the clone
+and its tests now COMPOSE the two. If the redundant append is ever removed,
+clones follow with no further change. The doubling itself is a latent bug worth
+its own change: every existing store depends on it, so removing it is a
+migration, not a drive-by.
 
 **Build (increment 2, optional).** Toolshed clone banner. **Shipped** —
 `packages/toolshed/lib/clone-banner.ts` reads the `.cf-clone` marker at

@@ -1,0 +1,45 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "message": {
+        "default": "Private until reader evidence is present",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "cfc-exchange-rules/direct-release.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "message": {
+        "ifc": {
+          "confidentiality": [
+            {
+              "moduleIdentity": "UsUHkONMerVZwnUOIBrbzrUlhEfaV0SByvpFqW28WLg",
+              "policyDigest": "jr6me2Bb11h2h9txejm-Vjp-5-YPtlpKsLaGcjSR4Sk",
+              "policyRefKind": "module",
+              "subject": {
+                "__ctOwningSpace": true
+              },
+              "symbol": "directReleaseRules",
+              "type": "https://commonfabric.org/cfc/atom/Policy"
+            }
+          ]
+        },
+        "type": "string"
+      }
+    },
+    "required": [
+      "message",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

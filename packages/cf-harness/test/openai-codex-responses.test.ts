@@ -125,6 +125,70 @@ Deno.test("Codex Responses client sends the pinned owner-authenticated request",
   assertEquals(body.prompt_cache_key, "run-123");
 });
 
+Deno.test("Codex Responses supports stable affinity and reasoning controls", async () => {
+  let body: Record<string, unknown> | undefined;
+  let headers: Headers | undefined;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      headers = new Headers(init?.headers);
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: "done" }],
+          }],
+        },
+      }));
+    },
+  });
+
+  await client.complete({
+    model: "gpt-5.6-sol",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "ephemeral-run",
+    cacheAffinityKey: "stable-session",
+    reasoningEffort: "low",
+  });
+
+  assertEquals(headers?.get("session-id"), "stable-session");
+  assertEquals(body?.prompt_cache_key, "stable-session");
+  assertEquals(body?.reasoning, { effort: "low" });
+  assertEquals(body?.prompt_cache_options, undefined);
+});
+
+Deno.test("Codex Responses rejects API prompt cache mode controls", async () => {
+  let resolvedCredential = false;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: {
+      resolve: () => {
+        resolvedCredential = true;
+        return Promise.resolve(credential);
+      },
+    },
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.6-sol",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-123",
+        promptCacheMode: "explicit",
+      }),
+    Error,
+    "prompt cache mode controls are not supported by openai-codex",
+  );
+  assertEquals(resolvedCredential, false);
+});
+
 Deno.test("Codex Responses client bounds stable run affinity identifiers", async () => {
   const longRunId = `${"parent-run-".repeat(8)}subagent.123`;
   const requests: Array<{ headers: Headers; body: Record<string, unknown> }> =
@@ -670,6 +734,7 @@ Deno.test("Codex Responses client parses CRLF SSE split across byte boundaries",
     inputTokens: 3,
     outputTokens: 2,
     totalTokens: 5,
+    estimateWithheldReason: "provider-pricing-unavailable",
   });
 });
 

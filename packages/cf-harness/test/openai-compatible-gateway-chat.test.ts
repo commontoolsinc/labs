@@ -146,6 +146,50 @@ Deno.test("chat responses with array content are flattened to text", async () =>
   assertEquals(result.assistant.content, "Part one. Part two.");
 });
 
+Deno.test("chat responses preserve cache and reasoning usage", async () => {
+  const client = clientWith([], () => ({
+    body: {
+      ...assistantText("Done."),
+      usage: {
+        prompt_tokens: 1_500,
+        prompt_tokens_details: {
+          cached_tokens: 1_024,
+          cache_write_tokens: 0,
+        },
+        completion_tokens: 100,
+        completion_tokens_details: { reasoning_tokens: 40 },
+        total_tokens: 1_600,
+      },
+    },
+  }));
+
+  const result = await client.complete(turn());
+
+  assertEquals(result.usage, {
+    inputTokens: 1_500,
+    cachedInputTokens: 1_024,
+    cacheWriteTokens: 0,
+    outputTokens: 100,
+    reasoningTokens: 40,
+    totalTokens: 1_600,
+    estimateWithheldReason: "unknown-model",
+  });
+});
+
+Deno.test("chat-routed models reject reasoning effort before provider traffic", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, () => ({
+    body: assistantText("unused"),
+  }));
+
+  await assertRejects(
+    () => client.complete(turn({ reasoningEffort: "low" })),
+    Error,
+    "reasoning effort low requires a model routed through the Responses API",
+  );
+  assertEquals(captured.length, 0);
+});
+
 Deno.test("chat responses surface native model tool results", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, () => ({
@@ -202,6 +246,15 @@ Deno.test("listModels maps the gateway registry", async () => {
   assertEquals(models.map((m) => m.id), ["gpt-5.6-sol", "claude-opus-5"]);
   assertEquals(models[0].inputModalities, ["text", "image"]);
   assertEquals(models[1].inputModalities, ["text"]);
+  assertEquals(models[0].supportedReasoningEfforts, [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]);
+  assertEquals(models[1].supportedReasoningEfforts, []);
 });
 
 Deno.test("listModels surfaces a failed registry fetch", async () => {

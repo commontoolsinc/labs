@@ -7,16 +7,21 @@ import {
   type Cell,
   getPatternIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
   type RuntimeProgram,
   setPatternRepository,
   setPatternSource,
+  systemPatternSource,
 } from "../src/index.ts";
 
 const signer = await Identity.fromPassphrase("lazy system pattern updates");
 const PARENT_PATH = "/api/patterns/system/lazy-update-parent.tsx";
+// The `system:` ref that route path spells — what a checked piece is stamped
+// with, whichever legacy spelling it started from.
+const PARENT_SOURCE = systemPatternSource("system/lazy-update-parent.tsx");
 const SOURCE_PATH = "/api/patterns/system/lazy-update-test.tsx";
 const SYMBOL = "TrackedPattern";
 
@@ -35,6 +40,14 @@ function source(marker: string): string {
   ].join("\n");
 }
 
+function sourceWithRequiredInput(marker: string): string {
+  return [
+    "import { computed, pattern } from 'commonfabric';",
+    `export const ${SYMBOL} = pattern<{ required: string }, { marker: string }>(() => ({ marker: computed(() => "${marker}") }));`,
+    "",
+  ].join("\n");
+}
+
 function parentProgram(contents: string): RuntimeProgram {
   return {
     main: PARENT_PATH,
@@ -43,6 +56,22 @@ function parentProgram(contents: string): RuntimeProgram {
       name: PARENT_PATH,
       contents: parentSource,
     }, { name: SOURCE_PATH, contents }],
+  };
+}
+
+// A program named the way `cf piece new` names one deployed from a file tree:
+// every module by its path under the compile root, so the entry says nothing
+// about what the host serves.
+const FILE_TREE_PATH = "/main.tsx";
+
+function fileTreeProgram(contents: string): RuntimeProgram {
+  return {
+    main: FILE_TREE_PATH,
+    mainExport: SYMBOL,
+    files: [
+      { name: FILE_TREE_PATH, contents: parentSource },
+      { name: "/lazy-update-test.tsx", contents },
+    ],
   };
 }
 
@@ -191,7 +220,7 @@ describe("lazy system-pattern auto-update", () => {
     identityGate.resolve();
     await runtime.patternUpdater.idle();
     expect(identityFetches).toBe(1);
-    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
   });
 
   it("does not schedule a generic check for an explicitly handled root", async () => {
@@ -517,7 +546,7 @@ describe("lazy system-pattern auto-update", () => {
       identity: v2Identity,
       symbol: SYMBOL,
     });
-    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     expect(requested).toContainEqual({
       href: `http://toolshed.test${PARENT_PATH}?identity=`,
       cache: "no-cache",
@@ -558,8 +587,176 @@ describe("lazy system-pattern auto-update", () => {
     await runtime.patternUpdater.idle();
 
     expect(getPatternIdentityRef(piece)).toEqual(originalRef);
-    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     expect(sourceFetches).toBe(0);
+  });
+
+  it("does not fetch an entry filename that names no route", async () => {
+    let fetches = 0;
+    createRuntime(() => {
+      fetches++;
+      return Promise.resolve(new Response("unexpected"));
+    });
+    const space = signer.did();
+    const pattern = await runtime.patternManager.compilePattern(
+      fileTreeProgram(source("v1")),
+      { space },
+    );
+    const piece = runtime.getCell<{ marker?: string }>(
+      space,
+      `file-tree-${crypto.randomUUID()}`,
+    );
+    await runtime.setup(undefined, pattern, {}, piece);
+    const recovered = await runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        getPatternIdentityRef(piece)!.identity,
+        space,
+      );
+    // The precondition this guards: a program deployed from a file tree names
+    // its entry for the compile root, not for any route. Resolving that name
+    // against the host reached the shell's SPA fallback, which answers 200 with
+    // HTML for an unrouted path, and the HTML was then compiled as TSX.
+    expect(recovered?.main).toBe(FILE_TREE_PATH);
+
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(fetches).toBe(0);
+    expect(getPatternSource(piece)).toBeUndefined();
+  });
+
+  it("re-stamps a legacy absolute origin as a system ref", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname !== PARENT_PATH) {
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }
+      return Promise.resolve(
+        url.searchParams.has("identity")
+          ? new Response(v1Identity)
+          : new Response(parentSource),
+      );
+    });
+    // The spelling a piece carries once a source transition recorded its route
+    // path against the space's host.
+    const legacyOrigin = new URL(PARENT_PATH, runtime.apiUrl).href;
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, legacyOrigin);
+    });
+    expect(stamped.error).toBeUndefined();
+    const originalRef = getPatternIdentityRef(piece);
+
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+    // Re-spelling the origin is an origin change to the history, which is the
+    // accepted cost of migrating in place: the pair below is what a reader of
+    // the source panel sees once, per piece, and never again. Pinned here so
+    // it stays a decision rather than a side effect.
+    expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+      .toEqual(["baseline", "origin-update"]);
+    // Both revisions name the same file, so the migration moves no source.
+    const origins = getPieceSourceRevisions(piece).map((entry) => entry.origin);
+    expect(origins).toEqual([legacyOrigin, PARENT_SOURCE]);
+  });
+
+  it("repairs an active legacy origin whose retained source probe failed", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    let sourceFetches = 0;
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname === PARENT_PATH && url.searchParams.has("identity")) {
+        return Promise.resolve(new Response(v1Identity));
+      }
+      const contents = url.pathname === PARENT_PATH
+        ? parentSource
+        : url.pathname === SOURCE_PATH
+        ? source("v1")
+        : undefined;
+      if (contents !== undefined) sourceFetches++;
+      return Promise.resolve(
+        new Response(contents ?? "not found", {
+          status: contents === undefined ? 404 : 200,
+        }),
+      );
+    });
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, PARENT_PATH);
+    });
+    expect(stamped.error).toBeUndefined();
+    const getSource = runtime.patternManager
+      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+    let failedProbe = false;
+    runtime.patternManager.getPatternSourceProgramByIdentity = ((...args) => {
+      if (!failedProbe) {
+        failedProbe = true;
+        return Promise.resolve(undefined);
+      }
+      return getSource(...args);
+    }) as typeof runtime.patternManager.getPatternSourceProgramByIdentity;
+
+    try {
+      await runtime.start(piece);
+      await runtime.patternUpdater.idle();
+    } finally {
+      runtime.patternManager.getPatternSourceProgramByIdentity = getSource;
+    }
+
+    expect(sourceFetches).toBeGreaterThan(0);
+    expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+      .toEqual(["baseline", "origin-update"]);
+    expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+  });
+
+  it("rejects an unattended update that changes the piece contract", async () => {
+    const incompatible = sourceWithRequiredInput("v2");
+    const v2Identity = await identityFor(incompatible);
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname === PARENT_PATH && url.searchParams.has("identity")) {
+        return Promise.resolve(new Response(v2Identity));
+      }
+      const contents = url.pathname === PARENT_PATH
+        ? parentSource
+        : url.pathname === SOURCE_PATH
+        ? incompatible
+        : undefined;
+      return Promise.resolve(
+        new Response(contents ?? "not found", {
+          status: contents === undefined ? 404 : 200,
+        }),
+      );
+    });
+    const original = getPatternIdentityRef(piece);
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, PARENT_PATH);
+    });
+    expect(stamped.error).toBeUndefined();
+
+    await runtime.start(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(getPatternIdentityRef(piece)).toEqual(original);
+    expect(getPieceSourceRevisions(piece)).toEqual([]);
+    expect((await piece.pull())?.marker).toBe("v1");
   });
 
   it("leaves an ordinary pattern alone when its source has no identity route", async () => {

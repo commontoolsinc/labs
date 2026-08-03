@@ -87,10 +87,14 @@ The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
 otherwise. Gray tiles do not turn the favicon gray. The page uses one URL-backed
 PNG favicon. Scalable source artwork is used only to generate and verify those
-raster assets; it is not part of the runtime dependency graph. The red favicon
-starts sad and becomes a crying face after the dashboard stays red for one
-continuous hour. The server retains the elapsed time across reloads. Returning
-below red resets it once every collector due in the same pass has finished.
+raster assets; it is not part of the runtime dependency graph. The green face is
+a rounded square, the orange warning face is a triangle, and the red faces are
+octagons. The eyes and mouth of the warning face sit ten percent of the canvas
+height below the level the other faces use, which places them in the wide part
+of the triangle instead of near its apex. The red favicon starts sad and
+becomes a crying face after the dashboard stays red for one continuous hour. The
+server retains the elapsed time across reloads. Returning below red resets it
+once every collector due in the same pass has finished.
 
 After changing `favicon-artwork.ts`, regenerate the embedded PNGs and their
 content-based cache version from the dashboard package directory:
@@ -176,10 +180,10 @@ surveillance tool.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
-| production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard that cannot reach the tailnet needs `PROD_URL` pointed at something it can | `PROD_URL` (optional) |
+| production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard without direct tailnet access can route this check through `PROD_PROXY` or point `PROD_URL` at another truthful health source | `PROD_URL`, `PROD_PROXY` (optional) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
-| cloud spend | BigQuery billing export, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
+| cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
 | benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
@@ -192,6 +196,11 @@ The **labs ci** and **loom ci** headlines use the most recent completed
 workflow attempt. While GitHub reruns a workflow, the prior attempt's conclusion
 remains visible and the tile marks the activity as **build rerunning**. A new
 workflow run still appears as **next build running**.
+
+The **labs ci duration** and **loom ci duration** tiles use successful main push
+runs. Each duration starts when GitHub creates the workflow run for the landed
+commit and ends when that run finishes, so it includes runner queueing and
+reruns.
 
 ## Credentials
 
@@ -307,13 +316,36 @@ dataset.
 6. For local development instead, grant those two roles to a service account,
    download a key for it, and set `GCP_SA_KEY` to the file's contents.
 
-The tile sums the raw `cost` column, i.e. total GCP spend across all services,
-gross of credits. It shows the estimated full-month spend as its headline and
-the actual month-to-date value in the header. The estimate uses every settled
-day in the current month. During the first half of the month, it fills that rate
-window from the prior month's tail until it covers 14 days or reaches the first
-available billing day. The chart shows up to 45 complete UTC days and
-highlights the part used for the estimate.
+The tile covers every project tied to the exported billing account. Its figures
+are money that account actually pays: the export's `cost` column plus the credits
+the same rows carry, which are negative amounts. Every kind of credit counts —
+promotional credits, committed- and sustained-use discounts, and the free tier —
+because none of them is money the account pays. The credit is not a figure the
+tile reports on its own; it is simply absent from the spend, in the same way that
+the usage GitHub's plan includes is absent from the ci-spend figures.
+
+It shows the estimated full-month spend as its headline and the actual
+month-to-date value in the header. The estimate uses every settled day in the
+current month. During the first half of the month, it fills that rate window from
+the prior month's tail until it covers 14 days or reaches the first available
+billing day. The chart shows up to 45 finished UTC days and highlights the part
+used for the estimate.
+
+A day is finished when the export has stopped adding to it, which the tile reads
+from the export's own progress: a day counts as finished once a later day's usage
+has been written since that day was last written to. This matters because the
+export lands a day's usage in batches and goes on adding to a day well into the
+following one, so a day it has not finished holds only part of that day's cost.
+Such a day belongs in the month-to-date total, where it is a running figure, and
+not in the rate behind the projection or at the end of the chart, where it would
+read as spend falling away. When the export has finished no day for more than
+four days the tile goes gray and says how far behind it is, rather than
+projecting a month from stale history.
+
+A promotional credit is finite, so the spend the tile reports rises when a grant
+runs out even though nothing about the usage changed. How much of a grant is left
+is not in the billing export: Google publishes it only in the console's billing
+credits page.
 
 ### `OPENAI_ADMIN_KEY`
 
@@ -384,6 +416,7 @@ it.
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
 | `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
+| `PROD_PROXY` | production | optional proxy used only for the production health check. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy so the tailnet hostname resolves through it. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
@@ -429,16 +462,16 @@ Notes:
   and Blacksmith. Each source is projected from its own recent daily rate. The
   rate uses at least two weeks and reaches into last month early in a month.
   GitHub contributes net Actions spend after discounts and included usage.
-  Blacksmith's current invoice amount supplies its month-to-date total. Daily
-  runner cost and sticky-disk storage cost supply its history and projection.
-  The storage range total is assigned to days in proportion to the reported
-  daily cache footprint. `CI_MONTHLY_BUDGET` overrides provider budgets. A
-  single provider otherwise uses its own configured budget. With both providers,
-  their budgets are added only when both exist. Blacksmith's budget is its
-  monthly spending-alert threshold. A failed configured source turns the tile
-  gray and shows `$???` for that source. The values from responding sources
-  remain as a lower bound. A GitHub classic-plan setup still falls back to
-  minutes when Blacksmith is not configured.
+  Blacksmith's current invoice amount supplies its all-in month-to-date total
+  and current-month projection input. Daily runner cost supplies its history
+  and chart; storage usage is not requested or charted separately.
+  `CI_MONTHLY_BUDGET` overrides provider budgets. A single provider otherwise
+  uses its own configured budget. With both providers, their budgets are added
+  only when both exist. Blacksmith's budget is its monthly spending-alert
+  threshold. A failed configured source turns the tile gray and shows `$???`
+  for that source. The values from responding sources remain as a lower bound.
+  A GitHub classic-plan setup still falls back to minutes when Blacksmith is not
+  configured.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
   over the runner, cache, and deep-equal benchmarks. It uploads the report as a
@@ -497,7 +530,7 @@ Notes:
     Cache entries written before CPU identity was stored are fetched again.
     Each completed artifact check is persisted before it is counted as
     finished. Only new runs and attempts are fetched after the first fill or a
-    server restart. The shortest-view buckets are about 16 minutes wide. The
+    server restart. The shortest-view buckets are about 8 minutes wide. The
     first cache fill can therefore download more artifacts.
   - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
     line per CPU for **every** benchmark. The lines share a calendar-time axis.
@@ -509,8 +542,12 @@ Notes:
     max) and whether to group by source **file** or sort by latest **duration**
     or **trend**. A "hide green" checkbox drops the steady ones. A slider from 1
     through 45 days changes the visible calendar range. The displayed samples
-    are spread across at most 90 time buckets, so a shorter window uses more of
-    the collected samples per day. Keyboard arrows adjust the window without
+    are spread across at most 200 time buckets, so a shorter window uses more of
+    the collected samples per day. Each graph chooses its vertical scale after
+    ignoring the two lowest and two highest displayed values; those points stay
+    in the line but no longer determine the scale, so they may clip instead of
+    flattening the rest of the history. A graph with fewer than 20 values uses
+    its complete range. Keyboard arrows adjust the window without
     moving focus. Enter applies the range immediately. Another selector carries
     the range into its own navigation, and leaving the controls applies it
     directly. Each row shows one latest value and trend from the CPU with the
@@ -535,19 +572,24 @@ Notes:
     base name used by `scripts/ci-gantt.ts` are shown together. Each group starts
     with a slowest-shard line, followed by the individual shard lines. The
     slider covers 1 through 45 days. It keeps every successful main build when
-    there are at most 90, then uses about 90 time buckets and keeps the newest
-    build in each bucket for larger sets. A coverage label compares the sampled
-    builds shown with every successful main build in the selected range. The
-    view can group by job or sort every line by latest duration or robust trend.
+    there are at most 200. Larger sets keep exactly 200 builds spread evenly
+    through the chronological run sequence. A coverage label compares the
+    sampled builds shown with every successful main build in the selected
+    range. The view can group by job or sort every line by latest duration or
+    robust trend. Its graphs use the same vertical-scale trimming as runtime
+    benchmark history.
     It renders cached history immediately. The progress panel remains visible
     as Idle between collections, then shows live collection progress with
     cached, queued, requested, responded, outstanding, and failed run counts.
+    On both history pages, a failed collection remains in the Idle panel until
+    a later collection for that history view succeeds.
     Open runtime benchmark and CI history pages check for newer server data once
     a minute. An open Gantt regenerates every 30 minutes and whenever its tab
     becomes visible. CI refreshes share a 30-minute GitHub freshness window, so
-    multiple pages do not repeat the same API reads. Moving the window slider
-    starts or joins the matching collection without cancelling wider-window
-    work already in progress.
+    multiple pages do not repeat the same API reads. Runtime and CI history
+    checks wait through the same window after GitHub rejects a collection.
+    Moving the window slider starts or joins the matching collection without
+    cancelling wider-window work already in progress.
   - Every GitHub API request made by the three performance views reserves rate
     capacity before it starts. Each guarded request batch reads GitHub's current
     rate-limit status before reserving. Collection stops before projected
@@ -567,6 +609,8 @@ Notes:
     CI history and the detailed `/bench?view=gantt` view use the same entries.
     The three performance views share one selector and preserve the applicable
     repository, range, sort, and runtime statistic while moving between them.
+    They also share the styles for their page header, selector, controls,
+    progress panel, time axis, and history rows.
     The next collection loads those timings before reading GitHub, so it only
     fetches jobs for new sampled runs, uncached Gantt runs, and new attempts.
     Cached history remains visible when no GitHub token is configured or a
@@ -627,6 +671,8 @@ Env knobs for the dev loop:
 - `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
   organization for GitHub users.
 - `PROD_URL` — point the production tile at a local server (`http://localhost:8000/`) instead of prod. It checks `/_health` on that origin.
+- `PROD_PROXY` — route only the production health check through a proxy, for
+  example `socks5h://127.0.0.1:1055` with a local Tailscale userspace proxy.
 - The other credential envs (see **Credentials** above — `SIGNOZ_*`, `GCP_*`,
   `OPENAI_ADMIN_KEY`/`ANTHROPIC_ADMIN_KEY`/`OPENROUTER_KEY`, `DISCORD_*`) — set
   one to develop that gated tile against its real backend.
@@ -678,19 +724,25 @@ its embedded tsnet).
 **One-time setup (human steps):**
 
 1. Tailscale admin console: add `tag:dashboard` to `tagOwners`, grant who may
-   reach it, and mint an **ephemeral** `tag:dashboard` auth key. The tailnet
-   also needs MagicDNS and HTTPS certificates enabled — `tailscale serve` fetches
-   a cert for `dashboard.<tailnet>.ts.net` and can't without them.
-2. `tofu apply` in `infra/tofu/gke` creates all the dev-dashboard Secret Manager
-   containers (authkey, github token, and the optional discord/signoz ones). Then
-   store the two required values:
+   reach it, and configure a federated identity restricted to `auth_keys` and
+   `tag:dashboard`. The infra overlay supplies that identity's public client ID
+   with `ephemeral=false&preauthorized=true` and its audience; no Tailscale auth
+   key or OAuth secret is stored in Kubernetes or Secret Manager. The tailnet
+   also needs MagicDNS and HTTPS certificates enabled — `tailscale serve`
+   fetches a cert for `dashboard.<tailnet>.ts.net` and can't without them.
+2. `tofu apply` in `infra/tofu/gke` creates the dev-dashboard Secret Manager
+   containers and Workload Identity/BigQuery grants. Store the required GitHub
+   token (and each provider credential you want to enable):
    ```bash
-   printf %s "tskey-auth-…" | gcloud secrets versions add k8s-stage-dashboard-authkey --data-file=-
    printf %s "github_pat_…" | gcloud secrets versions add k8s-stage-dashboard-github-token --data-file=-
    ```
    The GitHub token is fine-grained and read-only. It has Actions read for the
-   dashboard repositories. GitHub users also needs org Members read. CI spend
-   also needs org Administration read.
+   dashboard repositories. The GitHub users tile also needs org Members read;
+   CI spend also needs org Administration read.
+3. The infra manifests create separate 1 Gi `standard-rwo` PVCs for the Discord
+   history file and Tailscale node state. The dashboard remains a one-replica
+   `Recreate` Deployment; pod replacement reuses the same non-ephemeral
+   Tailscale node ID and `dashboard.<tailnet>.ts.net` name.
 
 **Build, push, deploy**
 
@@ -744,20 +796,21 @@ Tailscale console as `tag:dashboard`; open
 `https://dashboard.<tailnet>.ts.net/`. (The sidecar image is already pinned by
 `@sha256` digest in `03-deployment.yaml`, matching golink.)
 
-**Gated tiles** stay gray until wired: add the Secret Manager *value* (the
-container already exists from `tofu apply`), uncomment the ExternalSecret in
-`dashboard-secrets.yaml` and the env block in `03-deployment.yaml`, then re-run
-`make apply-dev-dashboard-stage`. So you can deploy green and light tiles up one
-at a time.
+**Provider-gated tiles** stay gray until their credential or public configuration
+is wired: add the Secret Manager *value* (the container already exists from
+`tofu apply`), enable the matching ExternalSecret/env when needed, then re-run
+`make apply-dev-dashboard-stage`. Stage's Cloud Billing table is already wired;
+during Google's initial export backfill it reports `no billing data yet` rather
+than a false zero.
 
 Every backend is reached over HTTP, so the image carries no cloud CLI. The
 GitHub tiles use `GH_TOKEN`. The Blacksmith share of CI spend uses
 `BLACKSMITH_API_TOKEN`. The cloud-spend tile queries BigQuery as the pod's
 own service account through Workload Identity. The infra repo's
 `tofu/gke/dashboard.tf` provisions that account, the Workload Identity binding,
-and its BigQuery Job User and Data Viewer grants. Lighting the cloud-spend tile
-up is then just setting `GCP_BILLING_TABLE` and
-`dashboard_billing_dataset` for the export dataset.
+and its BigQuery Job User and Data Viewer grants, so no key is stored in the
+cluster. The stage deployment sets `GCP_BILLING_TABLE` to the standard export
+table, and `dashboard_billing_dataset` scopes its dataset reader grant.
 
 ## Design notes
 

@@ -182,9 +182,12 @@ propagate](#how-flags-propagate).
 - **Current default and planned end state.** On by default as part of
   scheduler-v2 speculation lineage and receipt enforcement. An explicit
   programmatic `false` remains a rollback override; under that override,
-  single-use grants fail closed rather than silently becoming multi-use. The
-  planned end state is to remove the rollback flag and make the behavior
-  unconditional.
+  single-use grants fail closed rather than silently becoming multi-use, and
+  no handling publishes a receipt address on its transaction
+  (`tx.handlingReceiptLink` stays absent) — nothing creates or create-only
+  marks that cell while the flag is off, so an address would name a witness
+  that does not exist. The planned end state is to remove the rollback flag
+  and make the behavior unconditional.
 - **Status on 2026-07-10.** Implemented for lineage commits and event-result
   receipts, single-use grant consumption, and the memory protocol; on by
   default, with explicit programmatic opt-out retained temporarily.
@@ -656,7 +659,12 @@ the per-epic implementation notes).
 >   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
->   wire shape, and the successor design is tracked as CT-1910.
+>   wire shape. (The CT-1910 basis repair — `basisSeq` on pending reads,
+>   scanned with own-session exclusion — landed WITHOUT a capability of its
+>   own: servers ignore unknown read fields, so clients attach it
+>   unconditionally and older servers keep the legacy max-dependency basis.
+>   CT-1910's remaining scope, server-inferred dependencies, stays a
+>   follow-on protocol step.)
 > - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
 >   It advertises that the memory server can list live space-scoped entity
 >   identifiers without returning stored values. Older servers omit it, which
@@ -979,11 +987,11 @@ scheduler-v2 spec documents still mention it as part of their migration history.
 
 ### `esmModuleLoader` / `CF_ESM_MODULE_LOADER` (removed)
 
-The flag that selected the ESM module-record loader over the older AMD bundle
-path during the content-addressed module-loading rollout. (An early draft of the
-plan called it `EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then
-the flag, the AMD bundle pipeline, and the AMD compilation cache were all
-removed; the ESM loader is now the only loader. See
+The flag that selected the ESM module-record loader during the
+content-addressed module-loading rollout. (An early draft of the plan called it
+`EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then the flag and
+the whole-bundle loader and cache it switched away from were all removed; the
+ESM module-record loader is now the only loader. See
 [`docs/history/specs/module-loading-implementation-plan.md`](../history/specs/module-loading-implementation-plan.md),
 whose status header records the removal.
 

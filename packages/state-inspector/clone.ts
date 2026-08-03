@@ -24,16 +24,39 @@
 // serves the clone as a live space under the SAME DID.
 
 import * as Path from "@std/path";
+// The only read-WRITE database handle in this package, and it opens nothing:
+// `assertNotInUse` takes a lock to ask whether a server is still holding the
+// working copy. `db.ts` stays read-only by contract, so the probe lives here
+// with the rest of the code that legitimately writes to a clone.
+import { Database } from "@db/sqlite";
+import {
+  resolveMemoryEngineStoreRootUrl,
+  resolveSpaceStoreUrl,
+} from "@commonfabric/memory/v2/storage-path";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { createHasher } from "@commonfabric/content-hash";
 import { openSpace } from "./db.ts";
-import { contentFingerprint, type FingerprintReport } from "./fingerprint.ts";
+import {
+  contentFingerprint,
+  diffFingerprints,
+  type FingerprintReport,
+  type ScopedEntity,
+} from "./fingerprint.ts";
 
 /** Filenames the layout depends on. */
 const MANIFEST = "clone.json";
+/**
+ * Per-entity baseline hashes, written beside the manifest at clone time.
+ *
+ * `createClone` already fingerprints the pristine snapshot; keeping its
+ * per-entity rows means `verify` diffs against a file instead of re-opening and
+ * re-fingerprinting a multi-gigabyte baseline on every call — measured at 43s
+ * vs 13s on the 1.0 GB Estuary store, on the operation a rehearsal runs most.
+ * Kept out of `clone.json` so that file stays small enough to read by eye.
+ */
+const BASELINE = "baseline-entities.json";
 const MARKER = ".cf-clone";
 const PRISTINE_DIR = "pristine";
-/** The memory server's own per-space directory name — must match the engine. */
-const WORKING_DIR = "engine-v3";
 
 export interface CloneManifest {
   /** Schema version of this file, so a future reader can refuse politely. */
@@ -46,6 +69,17 @@ export interface CloneManifest {
   createdAt: string;
   /** SHA-256 of the pristine snapshot file. */
   snapshotHash: string;
+  /**
+   * SHA-256 of the per-entity baseline sidecar.
+   *
+   * The sidecar feeds `diff` and therefore `okAfterMigration` — the verdict a
+   * rehearsal script gates on — so it gets the same integrity treatment as the
+   * snapshot. Without this, a corrupted-but-parseable sidecar (two hashes
+   * swapped inside valid JSON) would produce a confident, wrong diff while
+   * `baselineIntact` still reported true. Absent on clones taken before the
+   * sidecar existed, which fall back to recomputing.
+   */
+  baselineHash?: string;
   snapshotBytes: number;
   /** Durable counts at clone time — the cheap half of "did content survive?". */
   counts: {
@@ -54,8 +88,23 @@ export interface CloneManifest {
     entities: number;
     maxSeq: number;
   };
-  /** Content fingerprint at clone time, generated cells excluded. */
-  fingerprint: { hash: string; entities: number; excludedGenerated: number };
+  /**
+   * Content fingerprint at clone time, generated cells excluded.
+   *
+   * `unhashable` and `ambiguous` record what the baseline fingerprint could NOT
+   * speak for. Both are absent from the roll-up by construction, so a verdict
+   * computed from the hash alone rests on however much evidence happened to
+   * exist — and without recording the number here, nobody could tell whether
+   * that was all of it. Optional: clones taken before these were recorded
+   * report them as unknown rather than as zero.
+   */
+  fingerprint: {
+    hash: string;
+    entities: number;
+    excludedGenerated: number;
+    unhashable?: number;
+    ambiguous?: number;
+  };
 }
 
 export interface CreateCloneOptions {
@@ -77,18 +126,38 @@ export interface CreateCloneOptions {
 export interface ClonePaths {
   dir: string;
   manifestPath: string;
+  /** Per-entity baseline hashes (see {@link BASELINE}). */
+  baselinePath: string;
   pristinePath: string;
   workingPath: string;
 }
 
-/** Where each artifact lives for a clone of `space` in `dir`. */
+/**
+ * Where each artifact lives for a clone of `space` in `dir`.
+ *
+ * The working copy's path is DERIVED, never spelled out: `dir` is used exactly
+ * as a server's `MEMORY_DIR`, and the store lands wherever composing
+ * `resolveMemoryEngineStoreRootUrl` with `resolveSpaceStoreUrl` puts it — which
+ * today means a doubled `engine-v3/engine-v3/`. Restating that here is how the
+ * first version of this file wrote a clone to a path no server ever reads: the
+ * copy/verify/reset loop was self-consistent and served nothing.
+ */
 export function clonePaths(dir: string, space: string): ClonePaths {
-  const file = `${space}.sqlite`;
+  const workingPath = Path.fromFileUrl(
+    resolveSpaceStoreUrl(
+      resolveMemoryEngineStoreRootUrl(
+        Path.toFileUrl(dir.endsWith("/") ? dir : `${dir}/`),
+        { singleFileMode: false },
+      ),
+      space as MemorySpace,
+    ),
+  );
   return {
     dir,
     manifestPath: `${dir}/${MANIFEST}`,
-    pristinePath: `${dir}/${PRISTINE_DIR}/${file}`,
-    workingPath: `${dir}/${WORKING_DIR}/${file}`,
+    baselinePath: `${dir}/${BASELINE}`,
+    pristinePath: `${dir}/${PRISTINE_DIR}/${space}.sqlite`,
+    workingPath,
   };
 }
 
@@ -119,7 +188,7 @@ export async function createClone(
 
   const paths = clonePaths(dir, options.space);
   await Deno.mkdir(`${dir}/${PRISTINE_DIR}`, { recursive: true });
-  await Deno.mkdir(`${dir}/${WORKING_DIR}`, { recursive: true });
+  await Deno.mkdir(Path.dirname(paths.workingPath), { recursive: true });
 
   // Plain copies. `VACUUM INTO` server-side already produced a consistent,
   // companion-free file; re-vacuuming here would need the live source, which by
@@ -152,9 +221,21 @@ export async function createClone(
       hash: fingerprint.hash,
       entities: fingerprint.entities,
       excludedGenerated: fingerprint.excludedGenerated,
+      unhashable: fingerprint.unhashable.length,
+      ambiguous: fingerprint.ambiguous.length,
     },
   };
 
+  await Deno.writeTextFile(
+    paths.manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  await Deno.writeTextFile(
+    paths.baselinePath,
+    JSON.stringify(fingerprint.perEntity),
+  );
+  // Recorded after the write so the manifest describes what is actually on disk.
+  manifest.baselineHash = await hashFile(paths.baselinePath);
   await Deno.writeTextFile(
     paths.manifestPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
@@ -174,10 +255,29 @@ export async function createClone(
  * Deletes the `-wal`/`-shm` companions the engine creates on open. Leaving them
  * behind would let a checkpoint replay part of the discarded attempt over the
  * fresh copy — a reset that silently isn't one.
+ *
+ * REFUSES while a server still has the working copy open, because unlinking a
+ * file does not disturb a process that already holds it: the server keeps
+ * reading and writing the unlinked inode while every new reader — including the
+ * `verify` this function's caller runs next — sees the restored one. Pass two of
+ * a rehearsal would then run against pass one's state while `cf space verify`
+ * reported the clone pristine, which is the failure mode the whole two-pass
+ * procedure exists to rule out.
+ *
+ * That check is a TRIPWIRE, not mutual exclusion. It catches the case that
+ * actually happens — an operator who forgot to stop a toolshed that is already
+ * serving the clone — and cannot prevent one that opens the store in the
+ * instant between the probe and the unlink. No external check can: a process
+ * that opens a SQLite file takes no lock in doing so, so there is no state to
+ * hold against it, and holding our own lock across the unlink would be worse
+ * (the probe connection would then rewrite `-wal`/`-shm` beside the freshly
+ * restored copy on close). Stopping the server is what makes a reset correct;
+ * this makes forgetting to loud rather than silent.
  */
 export async function resetClone(dir: string): Promise<CloneManifest> {
   const manifest = await readManifest(dir);
   const paths = clonePaths(await canonicalPath(dir), manifest.space);
+  await assertNotInUse(paths.workingPath);
   // The companions are absent on a clone no engine has opened yet — the normal
   // case at the start of a rehearsal — so their absence is not an error, while
   // any OTHER failure must surface rather than leave a half-reset clone.
@@ -189,9 +289,80 @@ export async function resetClone(dir: string): Promise<CloneManifest> {
   return manifest;
 }
 
+/**
+ * Refuse if any process still holds the working copy open, as of now.
+ *
+ * "As of now" is the honest scope — see the tripwire note on {@link resetClone}
+ * for why nothing stronger is available from outside the server.
+ *
+ * The probe is the hazard itself rather than a proxy for it: take SQLite's
+ * exclusive lock, which in WAL mode cannot be granted while another connection
+ * has the shared-memory index mapped. A PID or lease file would have to be
+ * written by the server, kept in step with it, and disbelieved when stale; this
+ * asks the operating system the actual question and needs no bookkeeping. It
+ * also gives the right answer in the case a marker would get wrong: a toolshed
+ * that is running but has never opened THIS space's engine holds nothing, and
+ * resetting under it is safe because it will open the restored file when it
+ * first reads.
+ *
+ * Locking is the only signal the binding exposes — its errors carry a message
+ * and nothing else — so the two outcomes are separated by message. Anything
+ * that is not a lock conflict means the working copy could not be opened as a
+ * database at all, and that is precisely when a reset is the remedy rather than
+ * the risk, so it proceeds.
+ */
+async function assertNotInUse(workingPath: string): Promise<void> {
+  // Nothing to hold open, and `Database` would otherwise create an empty file
+  // just to probe it. The copy below restores it either way.
+  if (!(await pathExists(workingPath))) return;
+  let db: Database;
+  try {
+    db = new Database(workingPath, { create: false });
+  } catch {
+    return; // unopenable — reset is the fix, not the hazard
+  }
+  try {
+    db.exec("PRAGMA locking_mode=EXCLUSIVE");
+    db.exec("BEGIN IMMEDIATE");
+    db.exec("ROLLBACK");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/database (is|table is) locked/i.test(message)) return;
+    throw new Error(
+      `refusing to reset ${workingPath}: another process still has it open ` +
+        `(${message}). Unlinking it would not reach that process — it would ` +
+        `keep serving the discarded attempt while verify reported the clone ` +
+        `pristine. Stop the server first (scripts/stop-local-dev.sh ` +
+        `--port-offset 10), reset, then start it again.`,
+    );
+  } finally {
+    db.close();
+  }
+}
+
 export interface VerifyResult {
-  /** True when the baseline is intact AND the working copy still matches it. */
+  /**
+   * Strict: the baseline is intact AND nothing moved at all.
+   *
+   * Correct for "is this clone still pristine?", and correct for catching an
+   * accidental clobber. NOT usable as the verdict after a migration: a schema
+   * update rewrites every piece's result value, so this is false after every
+   * successful one.
+   *
+   * Which of those two situations applies is something only the caller knows,
+   * so the tool does not guess — see `okAfterMigration`.
+   */
   ok: boolean;
+  /**
+   * Relaxed: the baseline is intact and nothing was REMOVED.
+   *
+   * The verdict to gate on when a migration was expected. Content *changing* is
+   * then information (results are rewritten by design); content *disappearing*
+   * is the alarm. It cannot distinguish a clobber from a migration — nothing
+   * hash-shaped can — which is why the runbook insists authored content be
+   * checked separately.
+   */
+  okAfterMigration: boolean;
   /** The pristine snapshot still hashes to what the manifest recorded. */
   baselineIntact: boolean;
   /** Working-copy counts, against the manifest's. */
@@ -206,6 +377,52 @@ export interface VerifyResult {
     match: boolean;
     excludedGenerated: number;
   };
+  /**
+   * WHAT moved, against the pristine baseline — the part an operator can act on.
+   *
+   * A schema migration necessarily rewrites every piece's result value, so
+   * `fingerprint.match` is false after ANY successful migration and cannot by
+   * itself distinguish "the update worked" from "content was destroyed". The
+   * shape of the change is what separates them: entities `removed` is the alarm,
+   * while `changed` confined to pieces and their derived cells is the migration
+   * doing its job. Measured on the July 2026 Topics rehearsal: 74 pieces and 73
+   * owned cells changed, 3,189 added, **0 removed**, with every authored title,
+   * body, comment and link byte-identical.
+   */
+  diff: {
+    removed: number;
+    changed: number;
+    added: number;
+    /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
+    changedByKind: Record<string, number>;
+    removedByKind: Record<string, number>;
+  };
+  /**
+   * How much of the store the fingerprint could not speak for, on each side.
+   *
+   * Neither verdict above is computed from these, and that is deliberate rather
+   * than an omission — but a verdict that silently rests on partial evidence is
+   * indistinguishable from one that rests on all of it, so the number is
+   * reported wherever the verdict is.
+   *
+   * The two behave differently, and only one is already covered:
+   *
+   *   * `unhashable` — an entity that BECOMES unhashable drops out of the
+   *     working fingerprint entirely, so the diff already counts it as
+   *     `removed` and both verdicts already fail. The gap the count closes is
+   *     the entity unhashable on BOTH sides: invisible to the diff, so a change
+   *     to it is silent, and the only way to know is that the number is nonzero.
+   *   * `ambiguous` — an id one manifest calls generated and another calls
+   *     named is counted as generated and excluded, which can hide a real
+   *     change to authored content. Nothing gates on it, so the count is the
+   *     whole signal.
+   *
+   * `manifest` is null on clones taken before these were recorded.
+   */
+  uncertainty: {
+    unhashable: { manifest: number | null; working: number };
+    ambiguous: { manifest: number | null; working: number };
+  };
 }
 
 /**
@@ -213,8 +430,19 @@ export interface VerifyResult {
  * the working copy still holds the same durable content.
  *
  * A migration rehearsal EXPECTS counts to grow — that is what a migration does.
- * The fingerprint is the signal that matters: generated cells are excluded, so
- * a clean pattern update should leave it unchanged even as commits climb.
+ *
+ * It also expects the content fingerprint to MOVE. Excluding generated cells is
+ * not enough to hold it still: a schema update rewrites every piece's result
+ * value, and results are part of the fingerprint. The first real rehearsal
+ * proved this — 74 pieces and 73 owned cells changed while every authored
+ * title, body, comment and link stayed byte-identical.
+ *
+ * So the hash cannot be the verdict after a migration. `diff` is: entities
+ * `removed` is the alarm, and changes confined to pieces and their derived
+ * cells are the update working. `ok` stays strict for checking an untouched
+ * clone; `okAfterMigration` is the one to gate a rehearsal on. Neither can see
+ * a clobber of authored content, which is why the runbook checks that
+ * separately.
  */
 export async function verifyClone(dir: string): Promise<VerifyResult> {
   const manifest = await readManifest(dir);
@@ -233,9 +461,80 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
     space.close();
   }
 
+  // Diff against the baseline recorded at clone time, so the report can say
+  // WHAT moved rather than merely that something did. Reading the sidecar
+  // avoids re-fingerprinting the pristine snapshot on every verify; a clone
+  // taken before the sidecar existed falls back to computing it.
+  let before: FingerprintReport;
+  try {
+    if (manifest.baselineHash !== undefined) {
+      const actual = await hashFile(paths.baselinePath);
+      if (actual !== manifest.baselineHash) {
+        throw new Error(
+          `${paths.baselinePath} does not match the hash recorded in ` +
+            `${MANIFEST}; the baseline is damaged and its diff would be wrong. ` +
+            `Re-clone rather than trusting this verdict.`,
+        );
+      }
+    }
+    const rows = JSON.parse(
+      await Deno.readTextFile(paths.baselinePath),
+    ) as FingerprintReport["perEntity"];
+    before = {
+      hash: manifest.fingerprint.hash,
+      entities: rows.length,
+      excludedGenerated: manifest.fingerprint.excludedGenerated,
+      ambiguous: [],
+      unhashable: [],
+      perEntity: rows,
+    };
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    const baseline = openSpace(paths.pristinePath);
+    try {
+      before = contentFingerprint(baseline);
+    } finally {
+      baseline.close();
+    }
+  }
+
+  const d = diffFingerprints(before, fingerprint);
+  // Keyed by id AND scope throughout: one id can hold a shared space value plus
+  // per-user/per-session overrides that are genuinely different entities, and a
+  // by-id lookup would let the last scope win and misclassify the tally —
+  // exactly the precision ("74 pieces vs 73 cells") the diff exists to provide.
+  // `diffFingerprints` reports the address it compared by, so there is nothing
+  // left to guess at here.
+  const kindIndex = (rows: FingerprintReport["perEntity"]) => {
+    const byAddress = new Map(rows.map((e) => [`${e.id} ${e.scope}`, e.kind]));
+    return (at: ScopedEntity) =>
+      byAddress.get(`${at.id} ${at.scope}`) ?? "unknown";
+  };
+  const kindOf = kindIndex(fingerprint.perEntity);
+  const kindWas = kindIndex(before.perEntity);
+  const tally = (
+    entities: ScopedEntity[],
+    lookup: (at: ScopedEntity) => string,
+  ) => {
+    const out: Record<string, number> = {};
+    for (const at of entities) {
+      const k = lookup(at);
+      out[k] = (out[k] ?? 0) + 1;
+    }
+    return out;
+  };
+  const delta = {
+    removed: d.removed.length,
+    changed: d.changed.length,
+    added: d.added.length,
+    changedByKind: tally(d.changed, kindOf),
+    removedByKind: tally(d.removed, kindWas),
+  };
+
   const match = fingerprint.hash === manifest.fingerprint.hash;
   return {
     ok: baselineIntact && match,
+    okAfterMigration: baselineIntact && delta.removed === 0,
     baselineIntact,
     counts: { manifest: manifest.counts, working: counts },
     fingerprint: {
@@ -243,6 +542,17 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
       working: fingerprint.hash,
       match,
       excludedGenerated: fingerprint.excludedGenerated,
+    },
+    diff: delta,
+    uncertainty: {
+      unhashable: {
+        manifest: manifest.fingerprint.unhashable ?? null,
+        working: fingerprint.unhashable.length,
+      },
+      ambiguous: {
+        manifest: manifest.fingerprint.ambiguous ?? null,
+        working: fingerprint.ambiguous.length,
+      },
     },
   };
 }
@@ -351,9 +661,11 @@ function assertSafeTarget(
       `refusing to clone into the snapshot's own directory (${sourceDir}).`,
     );
   }
+  // Blank entries are dropped by the caller before canonicalization (a blank
+  // would resolve to the working directory and forbid everything under it), so
+  // there is no empty-string case to re-check here.
   for (const raw of forbiddenDirs) {
     const forbidden = raw.replace(/\/+$/, "");
-    if (forbidden === "") continue;
     if (isWithin(dir, forbidden) || isWithin(forbidden, dir)) {
       throw new Error(
         `refusing to write a clone into ${dir}: it overlaps the live store ` +

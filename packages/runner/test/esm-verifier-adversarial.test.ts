@@ -93,14 +93,14 @@ const ATTACKS: Attack[] = [
       `const a = 1, __importStar = (m) => globalThis;\nconst ns = __importStar(require("commonfabric"));`,
   },
 
-  // --- __cf_data / schema opaque-argument boundary (shared design with AMD) ---
+  // --- __cf_data / schema opaque-argument boundary ---
   {
     name: "legit __cf_data-wrapped plain object (negative control)",
     body: `${IMPORT}\nexports.config = cf.__cf_data({ a: 1, b: 2 });`,
     accept: true,
   },
   {
-    // KNOWN BOUNDARY (shared with the AMD verifier): __cf_data/schema arguments
+    // KNOWN BOUNDARY: __cf_data/schema arguments
     // are treated as opaque verified data — `verifyTrustedDataCall` checks only
     // the argument *count*, never recurses into the argument expression. So a
     // side-effecting computed value inside the wrapped literal is accepted by

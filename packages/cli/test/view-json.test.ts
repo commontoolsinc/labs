@@ -10,7 +10,6 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   createJsonHighlighter,
-  isJsonPath,
   jsonDocument,
   jsonHighlightLines,
 } from "../lib/view/languages/json/json.ts";
@@ -34,22 +33,14 @@ function classesOf(lines: readonly Line[], token: string): Set<TokenClass> {
   return out;
 }
 
-Deno.test("json: isJsonPath recognises json extensions", () => {
-  assert(isJsonPath("deno.json"));
-  assert(isJsonPath("/a/b/tsconfig.jsonc"));
-  assert(isJsonPath("UPPER.JSON"));
-  assert(!isJsonPath("main.ts"));
-  assert(!isJsonPath("README.md"));
-  assert(!isJsonPath(undefined));
-});
-
-Deno.test("json: the registry selects JSON for .json and .jsonc", () => {
+Deno.test("json: language metadata selects JSON filenames", () => {
   assertEquals(languageForFile("deno.json").id, "json");
-  assertEquals(languageForFile("cfg.jsonc").id, "json");
-  // Other registered selections remain unchanged.
+  assertEquals(languageForFile("/a/b/tsconfig.jsonc").id, "json");
+  assertEquals(languageForFile("UPPER.JSON").id, "json");
+  assertEquals(languageForFile("config.json.example").id, "json");
   assertEquals(languageForFile("main.ts").id, "typescript");
-  assertEquals(languageForFile("notes.md").id, "markdown");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile("README.md").id, "markdown");
+  assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
 Deno.test("json: keys, values, and literals get distinct classes", () => {

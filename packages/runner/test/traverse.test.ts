@@ -695,7 +695,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -758,7 +758,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -822,7 +822,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -1368,7 +1368,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // receives that self-contained schema and must resolve the $ref before
     // deciding whether undefined is a valid substitute.
     const docValue = ["hello", true];
-    const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+    const { store, docUri, type } = makeArrayDoc(docValue);
 
     const schema = {
       type: "array",
@@ -1386,7 +1386,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
           type,
           path: ["value"],
         },
-        value: docValue as FabricValue[],
+        value: docValue,
       });
 
     // After fix: $ref is resolved to { type: "string" }, which does not allow
@@ -4197,5 +4197,161 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
 
   it("rejects a finite number against a {type: 'string'} branch", () => {
     expect(canBranchMatch({ type: "string" }, 42)).toBe(false);
+  });
+});
+
+describe("MapSet size and totalValues", () => {
+  // Both getters exist only to fill in the slow-traverse report, so nothing
+  // else in the runtime reads them. Covering them here keeps them off the
+  // machine-speed-dependent path that report used to sit on.
+  it("counts keys and values in the reference-equality mode", () => {
+    const mapSet = new MapSet<string, string>();
+    expect(mapSet.size).toBe(0);
+    expect(mapSet.totalValues).toBe(0);
+
+    mapSet.add("a", "one");
+    mapSet.add("a", "two");
+    mapSet.add("b", "three");
+    // "two" is already present under "a" by reference, so it does not add.
+    mapSet.add("a", "two");
+
+    expect(mapSet.size).toBe(2);
+    expect(mapSet.totalValues).toBe(3);
+  });
+
+  it("counts keys and values in the hash-dedup mode", () => {
+    const mapSet = new MapSet<string, { n: number }>((value) => `${value.n}`);
+    expect(mapSet.size).toBe(0);
+    expect(mapSet.totalValues).toBe(0);
+
+    mapSet.add("a", { n: 1 });
+    mapSet.add("a", { n: 2 });
+    mapSet.add("b", { n: 3 });
+    // A distinct object that hashes the same is a duplicate here, unlike in
+    // the reference-equality mode above.
+    mapSet.add("a", { n: 2 });
+
+    expect(mapSet.size).toBe(2);
+    expect(mapSet.totalValues).toBe(3);
+  });
+});
+
+describe("SchemaObjectTraverser slow-traverse reporting", () => {
+  const type = "application/json" as const;
+
+  // A store that advances the traversal's clock the first time it is read.
+  // `traverse()` is synchronous, so a test cannot step the clock from outside
+  // while a traversal is in flight; loading a linked doc is the hook that runs
+  // during one. If the traversal never reads the store, `advanceMs` never
+  // lands and the assertions fail rather than passing vacuously — which is
+  // what `readStore` is asserted on.
+  class ClockAdvancingStore extends Map<string, Revision<State>> {
+    advanced = false;
+    constructor(private readonly onFirstRead: () => void) {
+      super();
+    }
+    override get(key: string): Revision<State> | undefined {
+      if (!this.advanced) {
+        this.advanced = true;
+        this.onFirstRead();
+      }
+      return super.get(key);
+    }
+  }
+
+  // Runs one real traversal with `elapsed` pinned to `advanceMs`, and returns
+  // whatever the logger wrote. `performance.now` is what `logger.timeStart` /
+  // `timeEnd` read, so overriding it is what decides the elapsed time the gate
+  // sees — no sleeping, and no dependence on how fast this machine is. The
+  // package's fake clock has already replaced `performance.now` with its own
+  // stub, so the property is saved and put back rather than assumed native.
+  function traverseWithElapsed(
+    advanceMs: number,
+  ): { warnings: string[]; readStore: boolean } {
+    const targetUri = "of:slow-traverse-target" as URI;
+    const docUri = "of:slow-traverse-doc" as URI;
+    // The container links into the target, so resolving it makes the traversal
+    // load the target out of the store — the moment the clock advances.
+    const docValue = {
+      employeeName: {
+        "/": {
+          [LINK_V1_TAG]: { id: targetUri, path: ["employees", "0", "name"] },
+        },
+      },
+    };
+
+    let now = 1000;
+    const store = new ClockAdvancingStore(() => {
+      now += advanceMs;
+    });
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { employees: [{ name: "Bob" }] } },
+      cause: hashOf({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docUri as Entity }),
+      since: 2,
+    });
+
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
+    const doc: IMemorySpaceValueAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    const warnings: string[] = [];
+    const savedWarn = console.warn;
+    const savedNow = performance.now;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    Reflect.set(performance, "now", () => now);
+    try {
+      traverser.traverse(doc);
+    } finally {
+      Reflect.set(performance, "now", savedNow);
+      console.warn = savedWarn;
+    }
+    return { warnings, readStore: store.advanced };
+  }
+
+  it("reports a traversal that crosses the threshold", () => {
+    const { warnings, readStore } = traverseWithElapsed(150);
+
+    expect(readStore).toBe(true);
+    expect(warnings.length).toBe(1);
+    const report = warnings[0];
+    expect(report).toContain("slow-traverse");
+    expect(report).toContain("150ms");
+    expect(report).toContain("doc=of:slow-traverse-doc/application/json");
+    // The container and the doc it links into were both tracked, so the report
+    // is reading live traversal state rather than a zeroed-out traverser.
+    expect(report).toContain("trackerKeys=2");
+    expect(report).toContain("trackerVals=2");
+    expect(report).toContain("traverseSchema=1");
+    expect(report).toContain("maxDepth=1");
+    // docVisits is populated only under CF_TRAVERSE_DIAGNOSTICS=1.
+    expect(report).toContain("topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)");
+  });
+
+  it("stays quiet for a traversal well under the threshold", () => {
+    const { warnings, readStore } = traverseWithElapsed(5);
+
+    expect(readStore).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
+  it("stays quiet at the threshold exactly, and reports one ms past it", () => {
+    // The gate is `elapsed > SLOW_TRAVERSE_MS`, so 100 is silent and 101 is
+    // not. Pinning both sides keeps a later edit from turning it into `>=`
+    // without a test noticing.
+    expect(traverseWithElapsed(100).warnings).toEqual([]);
+    expect(traverseWithElapsed(101).warnings.length).toBe(1);
   });
 });

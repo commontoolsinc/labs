@@ -47,6 +47,7 @@ import type { HarnessModelClient } from "../src/model/client.ts";
 import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import { assertPromptCacheModeSupported } from "../src/model/responses-protocol.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -351,9 +352,19 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
     complete(request) {
       turns += 1;
       assertEquals(request.model, "test-model");
+      assertEquals(request.cacheAffinityKey, "stable-cache");
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
       return Promise.resolve(
         turns === 1
           ? {
+            usage: {
+              inputTokens: 100,
+              cachedInputTokens: 0,
+              cacheWriteTokens: 80,
+              outputTokens: 20,
+              totalTokens: 120,
+            },
             assistant: {
               role: "assistant",
               content: "",
@@ -368,6 +379,13 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
             },
           }
           : {
+            usage: {
+              inputTokens: 200,
+              cachedInputTokens: 100,
+              cacheWriteTokens: 0,
+              outputTokens: 30,
+              totalTokens: 230,
+            },
             assistant: { role: "assistant", content: "done" },
           },
       );
@@ -375,6 +393,9 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
   };
   const loop = new CfHarnessPromptLoop({
     modelClient,
+    cacheAffinityKey: "stable-cache",
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
     engine: new CfHarnessEngine({
       sandboxRuntime: sandbox,
       runId: "run-model-client",
@@ -387,6 +408,16 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
 
   assertEquals(result.finalAssistantText, "done");
   assertEquals(turns, 2);
+  assertEquals(result.usage, {
+    inputTokens: 300,
+    cachedInputTokens: 100,
+    cacheWriteTokens: 80,
+    outputTokens: 50,
+    totalTokens: 350,
+    estimateWithheldReason: "incomplete-estimates",
+  });
+  assertEquals(result.totalUsage, result.usage);
+  assertEquals(result.modelUsage?.map((entry) => entry.modelTurn), [1, 2]);
   assertEquals(
     sandbox.shellRequests.filter((request) =>
       !request.command.includes(CAPABILITY_PROBE_SENTINEL)
@@ -433,7 +464,19 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       `data: ${
         JSON.stringify({
           type: "response.completed",
-          response: { status: "completed", output },
+          response: {
+            status: "completed",
+            output,
+            usage: {
+              input_tokens: 10,
+              input_tokens_details: {
+                cached_tokens: 5,
+                cache_write_tokens: 0,
+              },
+              output_tokens: 2,
+              total_tokens: 12,
+            },
+          },
         })
       }\n\n`,
       { status: 200 },
@@ -509,6 +552,8 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(result.finalAssistantText, "Parent done.");
   assertEquals(refreshes, 1);
   assertEquals(modelTurns, 3);
+  assertEquals(result.usage?.totalTokens, 24);
+  assertEquals(result.totalUsage?.totalTokens, 36);
   assertEquals(
     result.runState.subagentRuns?.[0]?.manifest.modelProvider,
     "openai-codex",
@@ -588,6 +633,79 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   );
 });
 
+Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model overrides", async () => {
+  let parentTurns = 0;
+  let childTurns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete: (request) => {
+      assertPromptCacheModeSupported(request.model, request.promptCacheMode);
+      if (request.model !== "gpt-5.6-terra") {
+        childTurns += 1;
+        return Promise.resolve({
+          assistant: { role: "assistant", content: "unexpected child success" },
+        });
+      }
+      parentTurns += 1;
+      return Promise.resolve({
+        assistant: parentTurns === 1
+          ? {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-web-search-cache-mode",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Search current documentation.",
+                  profile: "web_search",
+                }),
+              },
+            }],
+          }
+          : {
+            role: "assistant" as const,
+            content: "Parent handled the unsupported child configuration.",
+          },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    promptCacheMode: "explicit",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["web_search"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-child-cache-mode",
+      model: "gpt-5.6-terra",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: { status: string; summary: string };
+  };
+
+  assertEquals(
+    result.finalAssistantText,
+    "Parent handled the unsupported child configuration.",
+  );
+  assertEquals(parentTurns, 2);
+  assertEquals(childTurns, 0);
+  assertEquals(output.subagent.status, "failed");
+  assertStringIncludes(
+    output.subagent.summary,
+    "prompt cache mode explicit requires a GPT-5.6 model",
+  );
+});
+
 class FailingArtifactStore implements HarnessArtifactStore {
   readonly artifactRoot = "/tmp/cf-harness-artifacts";
   readonly runRoot = "/tmp/cf-harness-artifacts/run-error";
@@ -659,7 +777,9 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(`${this.runRoot}/policy-trace.json`);
   }
 
-  persistRunReport(): Promise<string> {
+  persistRunReport(
+    _report: Parameters<HarnessArtifactStore["persistRunReport"]>[0],
+  ): Promise<string> {
     return Promise.resolve(`${this.runRoot}/run-report.json`);
   }
 
@@ -673,6 +793,97 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     return Promise.resolve(path);
   }
 }
+
+class FailingDelegateOutputArtifactStore extends RecordingArtifactStore {
+  readonly runReports: Array<
+    Parameters<HarnessArtifactStore["persistRunReport"]>[0]
+  > = [];
+
+  override persistRunReport(
+    report: Parameters<HarnessArtifactStore["persistRunReport"]>[0],
+  ): Promise<string> {
+    this.runReports.push(report);
+    return Promise.resolve(`${this.runRoot}/run-report.json`);
+  }
+
+  override persistToolOutput(): Promise<string> {
+    return Promise.reject(new Error("delegate output persist boom"));
+  }
+}
+
+Deno.test("CfHarnessPromptLoop retains child usage when delegate output persistence fails", async () => {
+  const artifactRoot = await Deno.makeTempDir({
+    dir: "/tmp",
+    prefix: "cf-harness-delegate-usage-failure-",
+  });
+  try {
+    const artifactStore = new FailingDelegateOutputArtifactStore(
+      artifactRoot,
+      "run-delegate-usage-failure",
+    );
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) =>
+        Promise.resolve(
+          request.runId === "run-delegate-usage-failure"
+            ? {
+              usage: {
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+              },
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-delegate-usage-failure",
+                  type: "function" as const,
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Return a short summary.",
+                    }),
+                  },
+                }],
+              },
+            }
+            : {
+              usage: {
+                inputTokens: 20,
+                outputTokens: 3,
+                totalTokens: 23,
+              },
+              assistant: {
+                role: "assistant" as const,
+                content: "Child summary.",
+              },
+            },
+        ),
+    };
+    const loop = new CfHarnessPromptLoop({
+      modelClient,
+      engine: new CfHarnessEngine({
+        artifactStore,
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-delegate-usage-failure",
+        model: "test-model",
+        cfcEnforcementMode: "disabled",
+      }),
+    });
+
+    await assertRejects(
+      () => loop.runPrompt({ prompt: "Delegate this." }),
+      Error,
+      "delegate output persist boom",
+    );
+
+    const failureReport = artifactStore.runReports.at(-1);
+    assertEquals(failureReport?.usage?.totalTokens, 12);
+    assertEquals(failureReport?.totalUsage?.totalTokens, 35);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
 
 const observedCfcResult = (
   stdout: string,

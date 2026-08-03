@@ -18,6 +18,7 @@ import {
   Module,
   parseLink,
   Pattern,
+  type PieceSourceTransition,
   Runtime,
   type Schema,
   type SpaceCellContents,
@@ -43,6 +44,9 @@ import {
   getResultCellWithSourceSchema,
   isLegacyPieceRegistryRoot,
 } from "../../runner/src/piece-helpers.ts";
+import { prepareSourceClosureVerification } from "../../runner/src/compilation-cache/cell-cache.ts";
+import type { PatternUpdateOutcome } from "../../runner/src/pattern-updater.ts";
+import { deriveSystemPatternSource } from "./system-pattern-url.ts";
 ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
@@ -81,6 +85,12 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 // visible in the load summaries (browser worker included, where the
 // CF_CLI_TRACE_TIMINGS console path cannot run) as `piece/phase/<label>`.
 const pieceTimingLogger = getLogger("piece", { enabled: false });
+// Same channel the controller's heal path warns on, so a root healed through
+// the manager choke point shows up alongside the boot-path heal logs.
+const pieceHealLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
 
 async function timePiecePhase<T>(
   label: string,
@@ -238,21 +248,84 @@ export class PieceManager {
     ) {
       return undefined;
     }
-    return await timePiecePhase(
-      `getDefaultPattern.get(runIt=${runIt})`,
-      () =>
-        this.get(
-          defaultPattern,
-          runIt,
-          nameSchema,
-        ),
-    );
+    try {
+      return await timePiecePhase(
+        `getDefaultPattern.get(runIt=${runIt})`,
+        () =>
+          this.get(
+            defaultPattern,
+            runIt,
+            nameSchema,
+          ),
+      );
+    } catch (error) {
+      // An obsolete root whose stored pattern this runtime can no longer load
+      // used to heal on ONE entry point only — the boot path
+      // (PiecesController.ensureDefaultPattern reconciles before start).
+      // Every other consumer resolves the root HERE — piece registry
+      // listings, `cf piece ls`, FUSE, the shell's list cells — and
+      // inherited no heal at all: the load failure propagated and every
+      // listing died with the root (2026-07-29 vendor gate,
+      // the cf-cell-context type retirement). Run the same awaited updater
+      // check from this choke point and retry the start ONCE when it
+      // updated; any other outcome rethrows the original failure untouched.
+      if (!runIt || !this.runtime.experimental?.systemPatternAutoUpdate) {
+        throw error;
+      }
+      let outcome: PatternUpdateOutcome;
+      try {
+        const root = await this.get(defaultPattern, false, nameSchema);
+        outcome = await this.runtime.patternUpdater.checkDefaultPattern(
+          root,
+          deriveSystemPatternSource(this.space, this.runtime),
+        );
+      } catch {
+        throw error;
+      }
+      if (outcome !== "updated" && outcome !== "repaired-provenance") {
+        throw error;
+      }
+      pieceHealLogger.warn("default-root-healed-on-load-failure", () => [
+        "getDefaultPattern: start failed, updater rolled the root forward;",
+        `retrying start once (${this.space})`,
+      ]);
+      // The metadata swap committed through a transaction view; settle, then
+      // resolve the root AGAIN so the retry observes the committed
+      // patternIdentity rather than the pre-transaction snapshot held by
+      // `defaultPattern` (same trap the boot path documents in
+      // startEnsuredDefaultPattern). The whole settle/re-resolve/retry
+      // sequence surfaces the ORIGINAL start failure if anything in it goes
+      // wrong — a secondary failure here is a diagnostic detail, not the
+      // caller's error.
+      try {
+        await this.runtime.idle();
+        const refreshedSlot = await timePiecePhase(
+          "getDefaultPattern.spaceCell.resync(after-heal)",
+          () => this.spaceCell.key("defaultPattern").sync(),
+        );
+        const healedPattern = refreshedSlot.get();
+        if (!healedPattern) throw error;
+        await healedPattern.sync();
+        return await timePiecePhase(
+          "getDefaultPattern.get(retry-after-heal)",
+          () => this.get(healedPattern, runIt, nameSchema),
+        );
+      } catch (retryError) {
+        pieceHealLogger.warn("default-root-heal-retry-failed", () => [
+          "getDefaultPattern: post-heal retry failed; surfacing the",
+          `original start failure (${this.space})`,
+          retryError,
+        ]);
+        throw error;
+      }
+    }
   }
 
   /**
-   * Get the cell containing the list of all pieces in this space.
-   * Reads the default pattern's pieceRegistry export. An eligible legacy
-   * system root is read through its retired registry export.
+   * Get the cell containing the registered pieces in this space.
+   * This is the discovery root, not a list of every stored piece root. Reads
+   * the default pattern's pieceRegistry export. An eligible legacy system root
+   * is read through its retired registry export.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern(true);
@@ -419,13 +492,13 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that the given piece reads data from via sigil links.
-   * This identifies dependencies that the piece has on other pieces.
+   * Find registered pieces that the given piece reads from via sigil links.
+   * Unregistered targets are not returned.
    * @param piece The piece to check
-   * @returns Array of pieces that are read from
+   * @returns Array of registered pieces that are read from
    */
   async getReadingFrom(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
-    // Get all pieces that might be referenced
+    // Get registered pieces that might be referenced
     const piecesCell = await this.getPieceRegistry();
     const registeredPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
@@ -576,13 +649,13 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that read data from the given piece via sigil links.
-   * This identifies which pieces depend on this piece.
+   * Find registered pieces that read from the given piece via sigil links.
+   * Unregistered readers are not returned.
    * @param piece The piece to check
-   * @returns Array of pieces that read from this piece
+   * @returns Array of registered pieces that read from this piece
    */
   async getReadByPieces(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
-    // Get all pieces to check
+    // Get registered pieces to check
     const piecesCell = await this.getPieceRegistry();
     const registeredPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
@@ -821,14 +894,14 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    options?: { start?: boolean; repository?: string },
+    options?: { start?: boolean; repository?: string; origin?: string },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
     const piece = await this.setupPersistent<T>(
       pattern,
       inputs,
       cause,
-      { repository: options?.repository },
+      { repository: options?.repository, origin: options?.origin },
     );
     if (start) {
       await this.startPiece(piece);
@@ -847,11 +920,15 @@ export class PieceManager {
     options?: {
       start?: boolean;
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateCurrentArgument?: (
+        argumentCell: Cell<unknown>,
+      ) => void;
       validateArgumentLinks?: (
         argumentCell: Cell<unknown>,
         argumentSchema: JSONSchema,
       ) => void;
       repository?: string;
+      sourceTransition?: PieceSourceTransition;
     },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
@@ -865,6 +942,8 @@ export class PieceManager {
       currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
         expectedPatternIdentity: options?.expectedPatternIdentity,
         patternRepository: options?.repository,
+        pieceSourceTransition: options?.sourceTransition,
+        validateCurrentArgument: options?.validateCurrentArgument,
         validateArgumentLinks: options?.validateArgumentLinks,
       });
     } else {
@@ -891,7 +970,7 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    options?: { repository?: string },
+    options?: { repository?: string; origin?: string },
   ): Promise<Cell<T>> {
     await timePiecePhase(
       "setupPersistent.runtime.idle",
@@ -908,11 +987,19 @@ export class PieceManager {
     const knownEntryRef = this.runtime.patternManager.getArtifactEntryRef(
       pattern,
     );
+    if (knownEntryRef !== undefined) {
+      await timePiecePhase(
+        "setupPersistent.prepareSourceClosureVerification",
+        () => prepareSourceClosureVerification(),
+      );
+    }
     await timePiecePhase(
       "setupPersistent.runtime.setup",
       () =>
         this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
           patternRepository: options?.repository,
+          initializePieceSourceHistory: true,
+          initialPieceSourceOrigin: options?.origin,
         }),
     );
     await timePiecePhase(
@@ -1126,16 +1213,16 @@ async function getCellByIdOrPiece(
         options?.targetScope,
       );
 
-      // Check if this cell is actually a piece by looking at the pieces list
+      // Check whether this cell is registered as a piece.
       const piecesCell = await manager.getPieceRegistry();
       const pieces = piecesCell.get();
-      const isActuallyPiece = pieces.some((piece: Cell<unknown>) => {
+      const isRegisteredPiece = pieces.some((piece: Cell<unknown>) => {
         const id = pieceId(piece);
-        // If we can't get the piece ID, it's not a valid piece
+        // An entry without a piece ID cannot establish registration.
         if (!id) return false;
         return id === cellId;
       });
-      return { cell, isPiece: isActuallyPiece };
+      return { cell, isPiece: isRegisteredPiece };
     } catch (_) {
       throw new Error(`${label} "${cellId}" not found as piece or cell`);
     }

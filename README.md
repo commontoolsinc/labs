@@ -39,6 +39,9 @@ can run their own spaces or use hosted versions.
 3. Run `mise trust && mise install` in the repo to install the pinned Deno
    version
 4. Install the Git hooks: `deno task install-hooks` (optional)
+   - mise puts this checkout's `bin/` on PATH, so `cf` works as a plain command.
+     Without mise: `deno task install-cf`. Shell completion needs it — see
+     [Installing `cf` on PATH](./packages/cli/README.md#installing-cf-on-path).
 5. Start local dev servers: `./scripts/start-local-dev.sh`
 6. Access the application at <http://localhost:8000>
 

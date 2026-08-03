@@ -3,6 +3,7 @@ import {
   type CachedCiHistoryRefresh,
   type CachedCiRun,
   CI_JOB_CACHE_DAYS,
+  CI_JOB_HISTORY_SAMPLING_VERSION,
   CiJobHistoryStore,
 } from "./ci-job-cache.ts";
 
@@ -54,6 +55,115 @@ function cachedRun(
   };
 }
 
+Deno.test("CI job cache refreshes legacy and outdated samples without dropping their runs", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  const file = `${directory}/history.json`;
+  const run = cachedRun(90);
+  try {
+    await Deno.writeTextFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        runs: [run],
+        refreshes: [
+          {
+            repo: REPO,
+            workflow: WORKFLOW,
+            days: 7,
+            refreshedAt: NOW,
+            successfulRunTimes: [NOW],
+            sampledRuns: [{ runId: run.runId, runAttempt: run.runAttempt }],
+            failedRunCount: 0,
+            failedRunTimes: [],
+            stale: false,
+          },
+          {
+            repo: REPO,
+            workflow: WORKFLOW,
+            days: 8,
+            refreshedAt: NOW,
+            samplingVersion: CI_JOB_HISTORY_SAMPLING_VERSION - 1,
+            successfulRunTimes: [NOW],
+            sampledRuns: [{ runId: run.runId, runAttempt: run.runAttempt }],
+            failedRunCount: 0,
+            failedRunTimes: [],
+            stale: false,
+          },
+        ],
+      }),
+    );
+
+    const store = new CiJobHistoryStore(file);
+    await store.load();
+
+    assertEquals(store.refresh(REPO, WORKFLOW, 7)?.samplingVersion, undefined);
+    assertEquals(store.freshRefresh(REPO, WORKFLOW, 7), undefined);
+    assertEquals(store.refreshedRuns(REPO, WORKFLOW, 7), [run]);
+    assertEquals(
+      store.refresh(REPO, WORKFLOW, 8)?.samplingVersion,
+      CI_JOB_HISTORY_SAMPLING_VERSION - 1,
+    );
+    assertEquals(store.freshRefresh(REPO, WORKFLOW, 8), undefined);
+    assertEquals(store.refreshedRuns(REPO, WORKFLOW, 8), [run]);
+
+    store.markRefreshed(
+      REPO,
+      WORKFLOW,
+      7,
+      NOW,
+      [NOW],
+      [{ runId: run.runId, runAttempt: run.runAttempt }],
+      0,
+      [],
+      false,
+    );
+    assertEquals(
+      store.freshRefresh(REPO, WORKFLOW, 7)?.samplingVersion,
+      CI_JOB_HISTORY_SAMPLING_VERSION,
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("CI job cache rejects a sampling version that is not a version", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  const file = `${directory}/history.json`;
+  try {
+    const store = new CiJobHistoryStore(file);
+    const mark = (samplingVersion: number | null) =>
+      store.markRefreshed(
+        REPO,
+        WORKFLOW,
+        7,
+        NOW,
+        [NOW],
+        [],
+        0,
+        [],
+        false,
+        samplingVersion,
+      );
+
+    for (const invalid of [0, -1, 1.5, Number.NaN, Infinity]) {
+      assertThrows(
+        () => mark(invalid),
+        Error,
+        "CI job history refresh has an invalid sampling version.",
+      );
+    }
+    assertEquals(store.refresh(REPO, WORKFLOW, 7), undefined);
+
+    // A null version records a sample of unknown provenance: it is stored
+    // without a version, and it is never fresh.
+    mark(null);
+    assertEquals(store.refresh(REPO, WORKFLOW, 7)?.samplingVersion, undefined);
+    assertEquals(store.freshRefresh(REPO, WORKFLOW, 7), undefined);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("CI job cache rejects malformed persisted structures before merging", async () => {
   const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
   const valid = cachedRun(1);
@@ -61,6 +171,8 @@ Deno.test("CI job cache rejects malformed persisted structures before merging", 
   invalidStep.gantt.jobs[0].steps = [null] as never;
   const invalidJob = structuredClone(valid);
   invalidJob.gantt.jobs = [null] as never;
+  const invalidAttempt = structuredClone(valid);
+  invalidAttempt.gantt.jobs[0].attempt = 0;
   const invalidGantt = { ...valid, gantt: null };
   const invalidSha = { ...valid, headSha: "not-a-commit" };
   const cases: { value: unknown; message: string }[] = [
@@ -83,6 +195,10 @@ Deno.test("CI job cache rejects malformed persisted structures before merging", 
     },
     {
       value: { version: 1, runs: [invalidStep] },
+      message: "Invalid CI job history cache entry",
+    },
+    {
+      value: { version: 1, runs: [invalidAttempt] },
       message: "Invalid CI job history cache entry",
     },
     {

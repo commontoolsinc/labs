@@ -27,7 +27,7 @@ describe("PatternManager program persistence", () => {
 
   afterEach(async () => {
     await tx.commit();
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -167,8 +167,8 @@ describe("PatternManager.loadPatternByIdentity single-flight", () => {
       expect(second).toBe(first);
       expect(third).toBe(first);
     } finally {
-      await runtimeB?.dispose();
-      await runtimeA.dispose();
+      await runtimeB?.dispose({ closeStorage: false });
+      await runtimeA.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -187,7 +187,7 @@ describe("PatternManager.loadPatternByIdentity error handling", () => {
   });
 
   afterEach(async () => {
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -243,7 +243,7 @@ describe("PatternManager.compileOrGetPattern", () => {
 
   afterEach(async () => {
     await tx.commit();
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 

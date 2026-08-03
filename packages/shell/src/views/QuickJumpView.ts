@@ -276,7 +276,6 @@ export class XQuickJumpView extends BaseView {
   override render() {
     if (!this.visible) {
       return html`
-
       `;
     }
     const results = this.filtered();
@@ -309,7 +308,9 @@ export class XQuickJumpView extends BaseView {
             `
           )} ${results.length === 0
             ? html`
-              <li class="item"><div class="name">No matches</div></li>
+              <li class="item">
+                <div class="name">No matches</div>
+              </li>
             `
             : ""}
         </ul>

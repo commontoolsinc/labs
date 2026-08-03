@@ -4,10 +4,14 @@
  * semantic service only when launching the pager, so these call the returned
  * closure directly to exercise both the diff and source semantics paths.
  */
-import { assert, assertEquals } from "@std/assert";
-import { buildView } from "../lib/view/mod.ts";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
+import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
+import { buildView, ViewError } from "../lib/view/mod.ts";
 
 const SRC = "export const x = 1;\nconst y = x + 1;\n";
+const TRANSFORMED = `// transformed: /app.ts
+${SRC}`;
 const DIFF = `diff --git a/a.ts b/a.ts
 --- a/a.ts
 +++ b/a.ts
@@ -25,10 +29,186 @@ Deno.test("buildView: a named source file is editable and its semantics closure 
   assertEquals(r.editSource.editable, true, "a named file is editable");
 });
 
-Deno.test("buildView: a pipe with no file is a read-only source", () => {
+Deno.test("buildView: an ordinary pipe with no file is read-only plain text", () => {
   const r = buildView(SRC);
-  r.semantics();
+
+  assertEquals(r.doc.structure, []);
+  assertEquals(
+    r.doc.lines.flatMap((line) => line.spans.map((span) => span.cls)),
+    ["plain", "plain"],
+  );
+  assertEquals(r.semantics(), undefined);
   assertEquals(r.editSource.editable, false);
+});
+
+Deno.test("buildView: source syntax is not guessed from content", () => {
+  const examples = [
+    ["JSON", '{"value": true}\n'],
+    ["Markdown", "# Heading\n"],
+    ["YAML", "value: true\n"],
+    ["Python", "def greet():\n    pass\n"],
+  ] as const;
+
+  for (const [name, source] of examples) {
+    const classes = buildView(source).doc.lines.flatMap((line) =>
+      line.spans.map((span) => span.cls)
+    );
+    assert(
+      classes.length > 0 && classes.every((className) => className === "plain"),
+      `${name}-shaped unnamed source remains plain text`,
+    );
+  }
+});
+
+Deno.test("buildView: transformed compiler output keeps the TypeScript default", () => {
+  const r = buildView(TRANSFORMED);
+
+  assert(
+    r.doc.structure.some((node) => node.kind === "section"),
+    "the transformed module has TypeScript structure",
+  );
+  assert(
+    r.doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.cls === "storageKeyword"
+    ),
+    "the transformed module has TypeScript highlighting",
+  );
+  const semantics = r.semantics();
+  assert(semantics, "transformed output has TypeScript semantics");
+  assertEquals(
+    r.editSource.parse(TRANSFORMED),
+    r.doc,
+    "read-only reparsing keeps the selected language",
+  );
+});
+
+Deno.test("buildView: a virtual filename selects piped source without making it editable", () => {
+  const source = 'def greet(name):\n    return f"Hello, {name}"\n';
+  const r = buildView(source, undefined, undefined, {
+    fileName: "scripts/greet.py",
+  });
+
+  assert(
+    r.doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.cls === "storageKeyword"
+    ),
+    "the virtual Python filename selects Python highlighting",
+  );
+  assertEquals(r.editSource.editable, false);
+  assertEquals(r.editSource.path, undefined);
+  assertEquals(r.editSource.parse(source), r.doc);
+});
+
+Deno.test("buildView: a shebang selects an extensionless source and its editor", () => {
+  const source = "#!/usr/bin/env python3\ndef greet():\n    return 'hello'\n";
+  const piped = buildView(source);
+  const file = buildView(source, "greet");
+
+  for (const view of [piped, file]) {
+    assert(
+      view.doc.lines.flatMap((line) => line.spans).some((span) =>
+        span.cls === "storageKeyword" && span.text === "def"
+      ),
+      "the Python shebang selects Python highlighting",
+    );
+    assertEquals(view.editSource.parse(source), view.doc);
+  }
+  assertEquals(piped.editSource.editable, false);
+  assertEquals(file.editSource.editable, true);
+});
+
+Deno.test("buildView: an explicit language takes priority over a virtual filename", () => {
+  const source = "# **Piped heading**\n";
+  const r = buildView(source, undefined, undefined, {
+    language: markdownLanguage,
+    fileName: "notes.txt",
+  });
+
+  assert(
+    r.doc.structure.some((node) =>
+      node.kind === "section" && node.name === "**Piped heading**"
+    ),
+    "the explicit Markdown language overrides the plain-text filename",
+  );
+  assertEquals(
+    r.editSource.render?.(r.doc).lines[0].text,
+    "Piped heading",
+  );
+});
+
+Deno.test("buildView: explicit source selection suppresses automatic detection", () => {
+  const transformed = buildView(TRANSFORMED, undefined, undefined, {
+    language: plainTextLanguage,
+  });
+  assertEquals(transformed.doc.structure, []);
+
+  const filenameDiff = buildView(DIFF, undefined, undefined, {
+    fileName: "piped.py",
+  });
+  assertEquals(filenameDiff.editSource.isDiff, undefined);
+  assert(
+    !filenameDiff.doc.flatStructure.some((node) => node.kind === "hunk"),
+    "the virtual source filename overrides diff content detection",
+  );
+
+  const languageDiff = buildView(DIFF, undefined, undefined, {
+    language: plainTextLanguage,
+  });
+  assertEquals(languageDiff.editSource.isDiff, undefined);
+  assert(
+    !languageDiff.doc.flatStructure.some((node) => node.kind === "hunk"),
+    "the explicit language overrides diff content detection",
+  );
+});
+
+Deno.test("buildView: source selection rejects incompatible direct calls", () => {
+  assertThrows(
+    () =>
+      buildView(SRC, "actual.ts", undefined, {
+        language: plainTextLanguage,
+      }),
+    ViewError,
+    "cannot be used with a file argument",
+  );
+  assertThrows(
+    () =>
+      buildView(SRC, undefined, true, {
+        fileName: "virtual.ts",
+      }),
+    ViewError,
+    "--diff cannot be combined",
+  );
+});
+
+Deno.test("buildView: transformed declarations without bodies retain function structure", () => {
+  const r = buildView(
+    "// transformed: /types.ts\nexport declare function run(): void;\n",
+  );
+  const declaration = r.doc.flatStructure.find((node) => node.name === "run");
+
+  assert(declaration, "the declaration remains in the TypeScript structure");
+  assertEquals(declaration.kind, "function");
+  assertEquals(declaration.children, []);
+  assertEquals(declaration.meta, {
+    kind: "closure",
+    params: [],
+    returns: undefined,
+    signature: "() → void",
+  });
+});
+
+Deno.test("buildView: only an exact first-line transformed header selects TypeScript", () => {
+  for (
+    const text of [
+      "ordinary text",
+      `\n${TRANSFORMED}`,
+      "// transformed:\nexport const x = 1;\n",
+      "// transformed:   \nexport const x = 1;\n",
+      "// Transformed: /app.ts\nexport const x = 1;\n",
+    ]
+  ) {
+    assertEquals(buildView(text).doc.structure, [], JSON.stringify(text));
+  }
 });
 
 Deno.test("buildView: blank input remains a read-only source", () => {
@@ -210,14 +390,39 @@ Deno.test("buildView: forceDiff=false views a real diff as source (--no-diff)", 
   );
 });
 
-Deno.test("buildView: text that only embeds a diff stays source (mostlyDiff is false)", () => {
-  // Looks like a diff at the top, but the bulk is ordinary source, so the
-  // diff-share heuristic rejects it and it renders as TypeScript.
-  const embedded = "diff --git a/x b/x\n" +
-    Array.from({ length: 40 }, (_, i) => `const v${i} = ${i};`).join("\n") +
-    "\n";
-  const r = buildView(embedded);
+Deno.test("buildView: a source file that embeds a complete diff stays source", () => {
+  const embedded = `const patch = \`
+diff --git a/x.ts b/x.ts
+--- a/x.ts
++++ b/x.ts
+@@ -1 +1 @@
+-old
++new
+\`;
+`;
+  const r = buildView(embedded, "fixture.ts");
   r.semantics();
-  // The first line is not treated as a diff header (no +/- tints across it).
-  assert(r.doc.lines.length > 10);
+  assertEquals(r.editSource.isDiff, undefined);
+  assert(
+    r.doc.flatStructure.some((node) =>
+      node.kind === "variable" && node.name === "patch"
+    ),
+    "the TypeScript source keeps its structure",
+  );
+});
+
+Deno.test("buildView: a git header followed by ordinary source stays source", () => {
+  const source = "diff --git a/x.ts b/x.ts\n" +
+    "const value = 1;\n" +
+    "export { value };\n";
+  const view = buildView(source);
+
+  assertEquals(view.editSource.isDiff, undefined);
+  assertEquals(view.doc.structure, []);
+  assert(
+    view.doc.lines.flatMap((line) => line.spans).every((span) =>
+      span.cls === "plain"
+    ),
+    "the unnamed input remains plain source",
+  );
 });

@@ -9,6 +9,7 @@ import {
   displayWidth,
   glyphFor,
   sourceColumnOf,
+  visitDisplayCellSources,
 } from "../lib/view/display.ts";
 import type { Line } from "../lib/view/model.ts";
 
@@ -138,12 +139,28 @@ Deno.test("hidden: a run of control codes collapses to one ellipsis at its start
     1,
     "the ellipsis stands at the run's first column",
   );
+  assertEquals(cells[1].sourceEnd, 4, "the ellipsis covers the complete run");
   assertEquals(cells[2].col, 4, "text after keeps its source column");
 });
 
 Deno.test("hidden: a lone ESC that opens no sequence joins the ellipsis run", () => {
   // ESC not followed by `[` is just another non-printable → part of the run.
   assertEquals(glyphs("a\x1bb", "hidden"), "a…b");
+});
+
+Deno.test("hidden: a cell visitor can stop on a collapsed control run", () => {
+  const ranges: [number, number][] = [];
+  const completed = visitDisplayCellSources(
+    "\x01\x02x",
+    "hidden",
+    (start, end) => {
+      ranges.push([start, end]);
+      return false;
+    },
+  );
+
+  assertEquals(completed, false);
+  assertEquals(ranges, [[0, 2]]);
 });
 
 // --- source → display column mapping (horizontal scrolling) ------------------

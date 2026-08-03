@@ -87,7 +87,7 @@ returns the subtree as JSON. Top-level callable children under `input/` and
 ### Reading
 
 ```bash
-# List all pieces in a space
+# List registered pieces in a space
 ls home/pieces/
 
 # Read the full result cell as JSON (pipe to jq for pretty printing)
@@ -121,6 +121,12 @@ cat home/pieces/todo-app/result.json | jq '.addItem, .search'
 # => {"/handler":"addItem"}
 # => {"/tool":"search"}
 ```
+
+The named directories under `pieces/` come from the space's piece registry. They
+do not include unregistered or orphan pieces. The `entities/` directory can
+enumerate live entity IDs when the server supports identifier listing, but it
+does not identify which entities are piece roots. See
+[Finding Pieces](../../docs/common/concepts/piece-discovery.md).
 
 The prefix-free `patternRef.identity` + `patternRef.symbol` are the
 authoritative reference to the artifact currently running the piece

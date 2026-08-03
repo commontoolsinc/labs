@@ -11,9 +11,17 @@ import {
   Writable,
 } from "commonfabric";
 
+// This manager's PROJECTION of a stored favorite: only the fields it renders.
+// Naming a field it does not read costs compatibility for nothing — the row is
+// re-staged and validated against this type on every pattern swap, so a field
+// declared here must hold for every vintage in durable storage. Discovery tags
+// are the cautionary case: rows written before #4197 carry `tag` (singular),
+// rows written after carry `tags` (plural), and this manager reads neither
+// (`cf-tags` renders `item.userTags`). Declaring `tag: string` required made
+// every post-#4197 row fail validation; requiring `tags` would fail every
+// pre-#4197 row the same way. Omitting both is what accepts all of them.
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
-  tag: string;
   userTags: Writable<string[]>;
   spaceName?: string;
   // Stable key the favorite entity is addressed by (the piece's identity),
@@ -62,28 +70,26 @@ export default pattern<Record<string, never>>((_) => {
     [UI]: (
       <cf-vstack gap="3">
         {favorites!.map((item) => (
-          <cf-cell-context $cell={item.cell}>
-            <cf-vstack gap="2">
-              <cf-hstack gap="2" align="center">
-                <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
-                <cf-button
-                  variant="destructive"
-                  size="sm"
-                  onClick={onRemoveFavorite({
-                    favorites: favorites!,
-                    id: item.id,
-                    item: item.cell,
-                  })}
-                >
-                  Remove
-                </cf-button>
-              </cf-hstack>
-              <cf-tags
-                tags={item.userTags}
-                oncf-change={onUpdateUserTags({ userTags: item.userTags })}
-              />
-            </cf-vstack>
-          </cf-cell-context>
+          <cf-vstack gap="2">
+            <cf-hstack gap="2" align="center">
+              <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
+              <cf-button
+                variant="destructive"
+                size="sm"
+                onClick={onRemoveFavorite({
+                  favorites: favorites!,
+                  id: item.id,
+                  item: item.cell,
+                })}
+              >
+                Remove
+              </cf-button>
+            </cf-hstack>
+            <cf-tags
+              tags={item.userTags}
+              oncf-change={onUpdateUserTags({ userTags: item.userTags })}
+            />
+          </cf-vstack>
         ))}
         {favorites!.length === 0 && <p>No favorites yet.</p>}
       </cf-vstack>

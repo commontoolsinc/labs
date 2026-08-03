@@ -1,0 +1,32 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "selected": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "selected"
+    ],
+    "type": "object"
+  },
+  "pattern": "catalog/ui/story-renderer.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "controls": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

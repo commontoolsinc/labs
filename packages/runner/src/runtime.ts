@@ -69,6 +69,7 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { addressKey } from "./link-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
@@ -106,7 +107,7 @@ import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
-import { Runner } from "./runner.ts";
+import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
@@ -293,6 +294,27 @@ export type RuntimeFetch = (
   init?: RequestInit & { client?: Deno.HttpClient },
 ) => Promise<Response>;
 
+/**
+ * One pattern materialization: the content-addressed pointer, where it landed,
+ * and the entry file it came from.
+ *
+ * `main` is the program's entry filename (repo-root-relative, e.g.
+ * `/packages/patterns/system/home.tsx`). It is what lets a later run map a
+ * RECORDED identity back to a source file and compile today's version of it —
+ * without it the record says a pattern was here but not which pattern.
+ */
+export interface PatternInstantiation {
+  identity: string;
+  symbol: string;
+  main?: string;
+  /** The result cell the pattern was materialized onto. */
+  cell: NormalizedFullLink;
+}
+
+export type PatternInstantiationObserver = (
+  instantiation: PatternInstantiation,
+) => void;
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -315,6 +337,23 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /**
+   * Called once for every pattern this runtime materializes onto a result
+   * cell, with the content-addressed pointer and where it landed.
+   *
+   * Exists for the pattern-update state-continuity capture
+   * (`tasks/pattern-vintage-run.ts`), which needs the list of update targets a
+   * run produced. The store durably labels every root with its
+   * `patternIdentity`, but there is no way to ENUMERATE those labels: the `_`
+   * wildcard selector is unimplemented, and `sqliteQuery` reaches a
+   * cell-derived db rather than the space store. Observing instantiation is
+   * how the list is obtained at all — not a second copy of something already
+   * readable.
+   *
+   * Capture-time only. Leave unset in production; a throwing callback is the
+   * caller's bug and is not caught here.
+   */
+  onPatternInstantiated?: PatternInstantiationObserver;
   /**
    * Flow-label propagation dial (S16 default transition). Defaults to `off`.
    * Propagation requires enforcement mode ≥ `observe` to run at the commit
@@ -548,6 +587,9 @@ export interface SpaceCellContents {
 
 type RuntimeSetupOptions = {
   patternRepository?: string;
+  pieceSourceTransition?: PieceSourceTransition;
+  initializePieceSourceHistory?: boolean;
+  initialPieceSourceOrigin?: string;
   reapplyStoredSetup?: boolean;
   prepareForResume?: boolean;
 };
@@ -588,6 +630,8 @@ export class Runtime {
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+  /** See `RuntimeOptions.onPatternInstantiated`. */
+  readonly onPatternInstantiated?: PatternInstantiationObserver;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
@@ -1024,6 +1068,7 @@ export class Runtime {
     this.patternUpdater = new PatternUpdater(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
+    this.onPatternInstantiated = options.onPatternInstantiated;
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
@@ -1108,7 +1153,14 @@ export class Runtime {
   // perform AFTER their handler returns, from a post-commit outbox flush: a
   // network / LLM / navigation call or a sqlite RPC, plus any result writeback.
   // `idle()` deliberately does NOT wait for these; `settled()` does.
-  #pendingAsyncWork = new Set<Promise<unknown>>();
+  //
+  // Each entry carries the pattern run it belongs to, as the address key of the
+  // run's result cell — the `parentCell` every raw builtin is handed. Entries
+  // with no owner belong to no single run: the scheduler's commit promises,
+  // which are the barrier that a fire-and-forget builtin's outbox flush has
+  // registered its own work. `settledFor` waits for those as well as the run's
+  // own, because that handoff is how the run's work first becomes visible.
+  #pendingAsyncWork = new Map<Promise<unknown>, string | undefined>();
 
   /**
    * Register an in-flight async builtin operation so `settled()` waits for it
@@ -1118,10 +1170,18 @@ export class Runtime {
    * network/LLM promise. Normalized to always resolve (failures are settled, not
    * thrown) and auto-removed once it settles, so a rejecting promise is safe and
    * never leaks.
+   *
+   * `owner` is the pattern run the work belongs to — the `parentCell` a raw
+   * builtin is given, which is the result cell of the run that instantiated it.
+   * Passing it is what lets `settledFor` wait for one run rather than the whole
+   * runtime. Omit it only for work that belongs to no single run.
    */
-  trackAsyncWork(promise: Promise<unknown>): void {
+  trackAsyncWork(promise: Promise<unknown>, owner?: Cell<any>): void {
     const tracked = promise.then(() => {}, () => {});
-    this.#pendingAsyncWork.add(tracked);
+    const ownerKey = owner === undefined
+      ? undefined
+      : addressKey(owner.getAsNormalizedFullLink());
+    this.#pendingAsyncWork.set(tracked, ownerKey);
     tracked.finally(() => this.#pendingAsyncWork.delete(tracked));
   }
 
@@ -1144,7 +1204,53 @@ export class Runtime {
       await this.scheduler.idleWithPendingCommits();
       await this.storageManager.synced();
       if (this.#pendingAsyncWork.size === 0) return;
-      await Promise.allSettled([...this.#pendingAsyncWork]);
+      await Promise.allSettled([...this.#pendingAsyncWork.keys()]);
+    }
+  }
+
+  /**
+   * Wait until one pattern run has quiesced: the scheduler is idle including
+   * in-flight commits, storage is synced, and no tracked async work belongs
+   * either to `owner` or to nobody. Re-checked until all of those hold at once,
+   * because each can restart the others.
+   *
+   * This is `settled()` narrowed to a single run. The narrowing matters where
+   * `settled()` cannot be used at all: a caller that is itself running inside
+   * tracked work — an LLM tool call, which runs inside its turn's promise —
+   * would wait on the promise it is inside.
+   *
+   * The answer it gives is "this run is doing nothing further", which is what
+   * distinguishes a run that finished having written nothing from one still
+   * working. It is not "the run wrote a result": the caller reads the result
+   * cell afterwards and finds whatever landed, including nothing.
+   *
+   * `idleWithPendingCommits()` rather than plain `idle()`, because a run's
+   * result writeback travels through a commit and a plain idle can resolve
+   * while that commit is still going to the server.
+   *
+   * Unlike `settled()` this carries no round cap. A cap would put a ceiling on
+   * how much work a run may do before the barrier reports it finished anyway,
+   * and a barrier that returns while the run is still working answers the
+   * caller's question wrongly and silently. Each round awaits real promises, so
+   * a run that keeps working keeps the barrier open rather than spinning.
+   *
+   * `signal` stops the loop for a caller that no longer needs the answer —
+   * typically because it raced this against something that resolved first, and
+   * without it an unbounded loop would outlive the caller.
+   */
+  async settledFor(
+    owner: Cell<any>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const ownerKey = addressKey(owner.getAsNormalizedFullLink());
+    while (!signal?.aborted) {
+      await this.scheduler.idleWithPendingCommits();
+      await this.storageManager.synced();
+      const relevant = [...this.#pendingAsyncWork]
+        .filter(([, key]) => key === undefined || key === ownerKey)
+        .map(([promise]) => promise);
+      if (relevant.length === 0) return;
+      await Promise.allSettled(relevant);
     }
   }
 
@@ -1203,8 +1309,63 @@ export class Runtime {
    * Any unawaited tx.commit() calls will be canceled when
    * storageManager.close() tears down storage sessions. Callers
    * should await all pending commits before calling dispose().
+   *
+   * `closeStorage: false` leaves the storage manager OPEN for a caller that
+   * OWNS it and is still using it — a second runtime sharing the same store, or
+   * one that reads the store after this runtime is done writing to it. Every
+   * other step still runs, which is the point: quiescing the WRITER is what
+   * makes a subsequent read of the store a statement about a state this runtime
+   * actually reached. `idle()` and `synced()` cannot substitute, because they
+   * say nothing about the background work that only teardown stops —
+   * `patternUpdater`'s source checks and the runner's pointer-commit
+   * roll-forwards both live outside the scheduler and can still commit. That
+   * path also drains in-flight async builtin work first; see below.
+   *
+   * It is about OWNERSHIP, not survivability. `close()` destroys the manager's
+   * providers and rotates its session id rather than latching it shut, so what
+   * a later write does is a matter of circumstance rather than contract — all
+   * measured: over a caller-held server, a write to a doc the replica never saw
+   * lands, a retrying writer (`editWithRetry`) recovers, and a bare `commit()`
+   * to a doc the replica already knew fails its stale-read precondition and
+   * LOSES the write; over `StorageManager.emulate`, which owns its server,
+   * closing strands everything. A callee cannot see which of those its caller
+   * is in, so it hands the decision back rather than betting on the recovery.
+   *
+   * Passing `false` makes closing the CALLER's job — nothing else will. Note
+   * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
+   *
+   * Either way this resets the PROCESS-GLOBAL experimental config to defaults
+   * (`resetModernCellRepConfig` and friends). Under a non-default flag that is
+   * visible to a second runtime still running against the same store, which is
+   * exactly the caller this option serves — so set the flags per process, not
+   * per runtime, if two of them must agree.
    */
-  async dispose(): Promise<void> {
+  async dispose(
+    { closeStorage = true }: { closeStorage?: boolean } = {},
+  ): Promise<void> {
+    // A kept store keeps RECORDING, so this path drains what could still write
+    // into it. In-flight async builtin work is that shape: a fetch / llm call or
+    // a sqlite RPC runs from a post-commit outbox flush and writes its result
+    // back when it lands, and `trackAsyncWork` exists because neither `idle()`
+    // nor `synced()` waits for it. `settled()` is the barrier that does. The
+    // closing path skips it because a caller who let the store close has no
+    // reader left to mislead, and waiting on the network in every teardown is a
+    // real cost; here the caller is about to read what this runtime wrote.
+    //
+    // BEFORE the cancellation below, not after: `stopAll()` and
+    // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
+    // leaving the store holding part of a result — which is worse than either
+    // extreme for a reader trying to learn what state this runtime reached.
+    //
+    // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
+    // loop and returns — silently, with work still outstanding — which is
+    // exactly the hole this drain exists to close, one layer down. Measured: 60
+    // generations of chained tracked work, and a capped drain returned at
+    // generation 50 while the chain kept running and writing. `settledFor`'s
+    // JSDoc gives the reason a cap is wrong for this question and why removing
+    // it cannot spin: every round awaits real promises, so a runtime that keeps
+    // working keeps the barrier open rather than busy-looping.
+    if (!closeStorage) await this.settled(Infinity);
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {
@@ -1218,6 +1379,12 @@ export class Runtime {
     // and settle them before the storage sessions they may write through close.
     await this.patternUpdater.dispose();
 
+    // Same contract for the runner's unloadable-pointer roll-forward commits
+    // (CT-1923): settle before their storage sessions close. Commits only —
+    // never the watcher pattern LOADS, which can be held/wedged arbitrarily
+    // long and are lifecycle-epoch-guarded instead.
+    await this.runner.settlePointerCommits();
+
     // Scheduler background work can still be using storage, for example the
     // lifecycle-guarded boot-time persistent-state listing. Let that finish
     // before tearing down storage sessions.
@@ -1227,7 +1394,7 @@ export class Runtime {
     this.moduleRegistry.clear();
 
     // Cancel all storage operations
-    await this.storageManager.close();
+    if (closeStorage) await this.storageManager.close();
 
     // Wait for any pending operations
     await this.scheduler.idle();
@@ -1973,11 +2140,15 @@ export class Runtime {
     inputs?: any,
     options?: {
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateCurrentArgument?: (
+        argumentCell: Cell<unknown>,
+      ) => void;
       validateArgumentLinks?: (
         argumentCell: Cell<unknown>,
         argumentSchema: JSONSchema,
       ) => void;
       patternRepository?: string;
+      pieceSourceTransition?: PieceSourceTransition;
     },
   ) {
     return this.runner.runSynced(resultCell, pattern, inputs, options);

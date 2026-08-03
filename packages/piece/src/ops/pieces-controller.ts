@@ -1,14 +1,19 @@
 import {
+  applyPieceSourceTransition,
   type Cell,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
+  getPieceSourceSnapshot,
+  isStoredArgumentSchemaRefusal,
   type JSONSchema,
-  type MemorySpace,
   type ModuleByteCache,
+  normalizePatternSource,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -32,31 +37,27 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
-// System space-root patterns, served as raw TSX by the toolshed patterns route.
-export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
-export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
+// System space-root pattern refs, their derivation, and the source→URL
+// resolution live in ../system-pattern-url.ts (shared with PieceManager's
+// default-root heal-on-load-failure retry); re-exported here for existing
+// importers.
+import {
+  DEFAULT_APP_PATTERN_SOURCE,
+  deriveSystemPatternSource,
+  HOME_PATTERN_SOURCE,
+  patternSourceUrl,
+} from "../system-pattern-url.ts";
+export {
+  DEFAULT_APP_PATTERN_SOURCE,
+  deriveSystemPatternSource,
+  HOME_PATTERN_SOURCE,
+};
 
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
 // the current source immediately before creation. Keep the runner's watcher,
 // but do not schedule its duplicate fire-and-forget source check.
 const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
-
-/**
- * The official system space-root pattern URL for a space type — the home DID
- * gets home.tsx, every other space gets the default app. This derivation only
- * selects the identity to check; it never proves that a sourceless root tracks
- * that URL. Exact equality with the official content identity supplies
- * that proof below.
- */
-export function deriveSystemPatternUrl(
-  space: MemorySpace,
-  runtime: Runtime,
-): string {
-  return space === runtime.userIdentityDID
-    ? HOME_PATTERN_URL
-    : DEFAULT_APP_PATTERN_URL;
-}
 
 // Same logger as manager.ts's timePiecePhase: timing stats record even while
 // the logger is disabled, so controller phases show up in the load summaries
@@ -73,10 +74,13 @@ export type UpdateOutcome = PatternUpdateOutcome;
 /**
  * A cold-start setup repair failed specifically because the CFC SCHEMA
  * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
- * the reused doc onto a now-required field that carries no default (the estuary
- * `favorites` case). This is the ONLY repair-failure class the runnability
- * backstop ({@link PiecesController.healDefaultRootByRollForward}) acts on;
- * every other failure stays fail-closed.
+ * preserved input or unclassified document data onto a now-required field that
+ * carries no default. Generated result fields are not in this class: pattern
+ * setup materializes them. This is ONE of the two repair-failure classes the
+ * runnability backstop ({@link PiecesController.healDefaultRootByRollForward})
+ * acts on — the other is a refused stored argument
+ * ({@link isStoredArgumentSchemaRefusal}); every other failure stays
+ * fail-closed.
  *
  * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
  * runner emits it for prepared-digest races, unprepared transactions, and
@@ -129,6 +133,7 @@ async function timePiecesPhase<T>(
 export interface CreatePieceOptions {
   input?: object;
   repository?: string;
+  origin?: string;
   start?: boolean;
 }
 
@@ -157,7 +162,7 @@ export class PiecesController<T = unknown> {
       pattern,
       options.input,
       cause,
-      { repository: options.repository, start },
+      { repository: options.repository, origin: options.origin, start },
     );
     if (!start) {
       await this.#manager.runtime.idle();
@@ -190,6 +195,7 @@ export class PiecesController<T = unknown> {
     return new PieceController(this.#manager, cell);
   }
 
+  /** Return the piece registry, not every stored piece root. */
   async getRegisteredPieces() {
     this.disposeCheck();
     const piecesCell = await this.#manager.getPieceRegistry();
@@ -283,7 +289,14 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Read the default app URL from the home space's configuration.
+   * Read the configured default app source from the home space.
+   *
+   * The value is authored as a URL and canonicalized to the ref that names the
+   * same file, so a root is born with the provenance it will keep. Stamping the
+   * authored spelling instead would leave every new root waiting on a migration
+   * to become followable — and on a deployment with the update flag off, waiting
+   * forever. A locator naming no pattern route is returned as authored.
+   *
    * Returns empty string if not configured or if home space is not accessible.
    */
   private async getDefaultAppUrlFromHome(): Promise<string> {
@@ -300,7 +313,9 @@ export class PiecesController<T = unknown> {
           homeSpaceCell.key("defaultPattern")
             .asSchema(homeSchema).key("defaultAppUrl").get(),
       );
-      return typeof url === "string" ? url.trim() : "";
+      return typeof url === "string"
+        ? normalizePatternSource(url.trim(), this.#manager.runtime.apiUrl)
+        : "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
       return "";
@@ -343,13 +358,13 @@ export class PiecesController<T = unknown> {
     const isHomeSpace =
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-    let patternConfig: { name: string; urlPath: string; cause: string };
+    let patternConfig: { name: string; source: string; cause: string };
     let pattern;
 
     if (options?.customProgram) {
       patternConfig = {
         name: isHomeSpace ? "Home" : "DefaultPieceList",
-        urlPath: "custom",
+        source: "custom",
         cause: isHomeSpace
           ? `home-pattern-${Date.now()}`
           : `space-root-${Date.now()}`,
@@ -362,20 +377,20 @@ export class PiecesController<T = unknown> {
       if (isHomeSpace) {
         patternConfig = {
           name: "Home",
-          urlPath: HOME_PATTERN_URL,
+          source: HOME_PATTERN_SOURCE,
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
         const customUrl = await this.getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
-          urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
+          source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
           cause: `space-root-${Date.now()}`,
         };
       }
 
-      const patternUrl = new URL(
-        patternConfig.urlPath,
+      const patternUrl = patternSourceUrl(
+        patternConfig.source,
         this.#manager.runtime.apiUrl,
       );
 
@@ -422,7 +437,7 @@ export class PiecesController<T = unknown> {
       // setPatternRepository below, so a custom root without a repository
       // intentionally stays unstamped.
       if (options?.customProgram === undefined) {
-        setPatternSource(pieceCell, tx, patternConfig.urlPath);
+        setPatternSource(pieceCell, tx, patternConfig.source);
       }
 
       if (options?.repository !== undefined) {
@@ -483,12 +498,12 @@ export class PiecesController<T = unknown> {
     const isHomeSpace =
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-    let patternConfig: { name: string; urlPath: string; cause: string };
+    let patternConfig: { name: string; source: string; cause: string };
 
     if (isHomeSpace) {
       patternConfig = {
         name: "Home",
-        urlPath: HOME_PATTERN_URL,
+        source: HOME_PATTERN_SOURCE,
         cause: "home-pattern",
       };
     } else {
@@ -498,13 +513,13 @@ export class PiecesController<T = unknown> {
       );
       patternConfig = {
         name: "DefaultPieceList",
-        urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
+        source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
         cause: "space-root",
       };
     }
 
-    const patternUrl = new URL(
-      patternConfig.urlPath,
+    const patternUrl = patternSourceUrl(
+      patternConfig.source,
       this.#manager.runtime.apiUrl,
     );
 
@@ -570,7 +585,7 @@ export class PiecesController<T = unknown> {
 
           // Stamp the provenance the piece tracks for updates (the source it
           // was born from) — the same transaction, one extra meta write.
-          setPatternSource(pieceCell, tx, patternConfig.urlPath);
+          setPatternSource(pieceCell, tx, patternConfig.source);
 
           // Link as default pattern within same transaction
           defaultPatternCell.set(pieceCell.withTx(tx));
@@ -633,11 +648,19 @@ export class PiecesController<T = unknown> {
       // covers docs ALREADY left in that state by an earlier session: their
       // identity compares current, so no further swap will ever fire.
       //
-      // run() (setup + start) is the sanctioned repair: with an unchanged
-      // pattern pointer the setup phase is idempotent — it only materializes
-      // missing internal cells and writes no argument (none supplied). Fail
-      // closed: if the repair cannot proceed or fails, surface the ORIGINAL
-      // start error; nothing is torn down or overwritten.
+      // run() (setup + start) is the sanctioned repair. With an unchanged
+      // pattern pointer the setup phase is near-idempotent: it materializes
+      // missing internal cells and supplies no argument. It is not a complete
+      // no-op on the doc this repair exists for, and deliberately so — a root
+      // whose identity moved without setup also carries a stale
+      // `patternSetupIdentity`, so setup re-points the stored argument at the
+      // pattern's argument schema and validates it (`storedSetupMarker` in
+      // the runner), which is the staging the skipped update never did. That
+      // makes a stored argument the pinned pattern cannot read a REPAIR
+      // failure, classified and escalated below rather than left to surface as
+      // an unreadable value at every later read. Fail closed: if the repair
+      // cannot proceed or fails for its own reasons, surface the ORIGINAL start
+      // error; nothing is torn down or overwritten.
       const runtime = this.#manager.runtime;
       const ref = getPatternIdentityRef(rootToStart);
       if (ref === undefined) throw startError;
@@ -685,30 +708,59 @@ export class PiecesController<T = unknown> {
             }),
         );
       } catch (repairError) {
-        // Escalate to the RUNNABILITY backstop on EXACTLY one signal: the
-        // pinned pattern LOADS but its setup-commit was REJECTED BY THE CFC
-        // MIGRATION — the estuary case, where an old root's required field
-        // predates its `Default<>` or a handler stream predates its exemption.
-        // "Loadable" is not "runnable"; re-running the same identity can only
-        // fail identically, so roll the root forward to the space's CURRENT
-        // official pattern (which migrates the reused doc cleanly). This fires
-        // only on a failed migration, so a root that already runs — current
-        // official, or a custom root that migrates cleanly — never reaches it,
-        // and custom-root protection is preserved for free.
+        // Escalate to the RUNNABILITY backstop on TWO signals, and only those.
+        // The first: the pinned pattern LOADS but its setup-commit was REJECTED
+        // BY THE CFC MIGRATION — the estuary case, where an old root's required
+        // field predates its `Default<>` or a handler stream predates its
+        // exemption. "Loadable" is not "runnable"; re-running the same identity
+        // can only fail identically, so roll the root forward to the space's
+        // CURRENT official pattern (which migrates the reused doc cleanly).
+        // Neither signal fires for a root that already runs — current official,
+        // or a custom root that migrates cleanly — so custom-root protection is
+        // preserved for free.
+        //
+        // A refused STORED ARGUMENT is the same class of evidence and escalates
+        // the same way. Setup re-points the argument at the pinned pattern's
+        // schema when the doc was staged by another version, and a refusal says
+        // that pattern cannot read its own root — re-running it refuses
+        // identically, so without this the root would be pinned to a version
+        // whose setup can never complete and the space would stop opening.
+        //
+        // Both classifiers read the error, not the document it came from, so a
+        // refusal raised while instantiating a NESTED piece under this root
+        // reads the same as one raised for the root itself. That is a property
+        // of classifying by message rather than by origin, and it is shared
+        // with the CFC trigger; narrowing it means carrying the failing
+        // document through the setup boundary.
         //
         // Any OTHER repair failure (transient storage/commit error, backend
         // unavailable, …) is NOT evidence the pinned pattern is wrong. It stays
         // FAIL-CLOSED: surface the ORIGINAL start error, change nothing, let
         // the next boot retry. This gate is what keeps a transient blip from
         // swapping a healthy root's identity out from under it.
-        if (!isCfcMigrationRejection(repairError)) {
+        const migrationRejected = isCfcMigrationRejection(repairError);
+        if (!migrationRejected && !isStoredArgumentSchemaRefusal(repairError)) {
+          // Log before discarding it. The thrown error is the ORIGINAL start
+          // failure, so a repair that failed for its own reason would otherwise
+          // leave the operator reading a stack about the symptom that triggered
+          // the repair rather than the reason the repair did not work.
+          pieceUpdateLogger.warn(
+            "cold-start-setup-repair-error",
+            () => [
+              "startEnsuredDefaultPattern: setup repair failed for an " +
+              "unrelated reason; surfacing the original start error",
+              `${ref.identity}#${ref.symbol}`,
+              repairError,
+            ],
+          );
           throw startError;
         }
         pieceUpdateLogger.warn(
           "cold-start-setup-repair-failed",
           () => [
-            "startEnsuredDefaultPattern: setup repair rejected by CFC " +
-            "migration; rolling forward",
+            `startEnsuredDefaultPattern: setup repair rejected by ${
+              migrationRejected ? "CFC migration" : "argument validation"
+            }; rolling forward`,
             `${ref.identity}#${ref.symbol}`,
             repairError,
           ],
@@ -734,11 +786,14 @@ export class PiecesController<T = unknown> {
 
   /**
    * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
-   * repair. Reached only when the pinned pattern's OWN setup repair was
-   * REJECTED BY THE CFC MIGRATION (gated by {@link isCfcMigrationRejection}) —
-   * a root that loads but cannot run (the estuary `favorites`/handler-stream
-   * case). Rolls the root forward to the space's CURRENT official pattern and
-   * materializes THAT over the reused doc.
+   * repair. Reached only when the pinned pattern's OWN setup repair failed in a
+   * way that re-running it cannot fix — a root that loads but cannot run.
+   * Exactly two signals qualify: the CFC migration rejected the commit (gated
+   * by {@link isCfcMigrationRejection} — the estuary `favorites`/handler-stream
+   * case), or setup refused the root's stored argument (gated by
+   * {@link isStoredArgumentSchemaRefusal} — the pinned version's schema cannot
+   * read its own document). Rolls the root forward to the space's CURRENT
+   * official pattern and materializes THAT over the reused doc.
    *
    * Outcome is one of exactly two, each legible — no operator left
    * reverse-engineering scattered `$stream`/`needs a default` messages:
@@ -770,13 +825,19 @@ export class PiecesController<T = unknown> {
     const space = this.#manager.getSpace();
     // Reuse the canonical official-URL derivation (home.tsx for the home DID,
     // default-app.tsx otherwise) — never hard-code home here.
-    const officialUrlPath = deriveSystemPatternUrl(space, runtime);
+    const officialUrlPath = deriveSystemPatternSource(space, runtime);
     const msg = (error: unknown) =>
       error instanceof Error ? error.message : String(error);
+    // Name the check that actually refused. Two signals escalate to this heal —
+    // a CFC migration rejection and a refused stored argument — and reporting
+    // the second as a migration failure sends the reader to the wrong guard.
+    const pinnedFailure = isStoredArgumentSchemaRefusal(migrationError)
+      ? "could not read its stored argument"
+      : "failed CFC migration";
     const clearError = (reason: string, cause: unknown) =>
       new Error(
         `default-root heal failed for ${space}: pinned pattern ` +
-          `${pinnedRef.identity}#${pinnedRef.symbol} failed CFC migration ` +
+          `${pinnedRef.identity}#${pinnedRef.symbol} ${pinnedFailure} ` +
           `(${msg(migrationError)}) and roll-forward to official ` +
           `${officialUrlPath} ${reason}`,
         { cause },
@@ -795,7 +856,10 @@ export class PiecesController<T = unknown> {
     // could roll forward onto the WRONG host's system pattern. `hostForSpace`
     // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
     // uses for its own roll-forward.
-    const officialUrl = new URL(officialUrlPath, runtime.hostForSpace(space));
+    const officialUrl = patternSourceUrl(
+      officialUrlPath,
+      runtime.hostForSpace(space),
+    );
     let officialPattern;
     let officialRef;
     try {
@@ -834,8 +898,8 @@ export class PiecesController<T = unknown> {
     ) {
       throw clearError(
         `is already the pinned entry ${officialRef.identity}#` +
-          `${officialRef.symbol}, so the migration cannot be repaired by ` +
-          `rolling forward`,
+          `${officialRef.symbol}, so this cannot be repaired by rolling ` +
+          `forward`,
         migrationError,
       );
     }
@@ -852,6 +916,24 @@ export class PiecesController<T = unknown> {
     // clobbered by our stale `officialRef`. Returning `false` aborts the write
     // without committing — precedent: pattern-updater's `stillMatches`/
     // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
+    if (sourceSnapshot === undefined) {
+      throw clearError("has no source state to update", migrationError);
+    }
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      rootToStart,
+      sourceSnapshot,
+      { allowUnavailable: true },
+    );
+    const sourceTransition: PieceSourceTransition = {
+      revisionId: crypto.randomUUID(),
+      baseline,
+      timestamp: Date.now(),
+      operation: "origin-update",
+      origin: officialUrlPath,
+      expected: sourceSnapshot,
+    };
     const swapResult = await runtime.editWithRetry((tx) => {
       const rootTx = rootToStart.withTx(tx);
       const currentRef = getPatternIdentityRef(rootTx);
@@ -861,13 +943,19 @@ export class PiecesController<T = unknown> {
       ) {
         return false;
       }
+      applyPieceSourceTransition(
+        runtime,
+        rootToStart,
+        tx,
+        officialRef,
+        sourceTransition,
+      );
       rootTx.setMetaRaw("displacedPattern", {
         identity: pinnedRef.identity,
         symbol: pinnedRef.symbol,
-        displacedAt: Date.now(),
+        displacedAt: sourceTransition.timestamp,
       });
       rootTx.setMetaRaw("patternIdentity", officialRef);
-      setPatternSource(rootToStart, tx, officialUrlPath);
       return true;
     });
     if (swapResult.error) {
@@ -920,8 +1008,16 @@ export class PiecesController<T = unknown> {
           }),
       );
     } catch (materializeError) {
+      // The official pattern cannot take this doc either — the end of the line.
+      // Name which check refused rather than always saying "CFC migration": an
+      // argument refusal reaches here too, and reporting that as a migration
+      // failure sends the reader to the wrong guard.
       throw clearError(
-        `also failed CFC migration (${msg(materializeError)})`,
+        `also failed ${
+          isCfcMigrationRejection(materializeError)
+            ? "CFC migration"
+            : "to materialize"
+        } (${msg(materializeError)})`,
         materializeError,
       );
     }
@@ -960,7 +1056,7 @@ export class PiecesController<T = unknown> {
       if (!root) return "current";
       return await runtime.patternUpdater.checkDefaultPattern(
         root,
-        deriveSystemPatternUrl(space, runtime),
+        deriveSystemPatternSource(space, runtime),
       );
     } catch (error) {
       pieceUpdateLogger.warn("root-resolution-failed", () => [

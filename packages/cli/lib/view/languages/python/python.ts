@@ -13,11 +13,6 @@ import { cpLen } from "../../ansi.ts";
 import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import type { Highlighter } from "../language.ts";
 
-/** Whether `fileName` names a Python source or stub file. */
-export function isPythonPath(fileName: string | undefined): boolean {
-  return fileName !== undefined && /\.(py|pyi|pyw)$/i.test(fileName);
-}
-
 interface Token {
   readonly start: number;
   readonly end: number;

@@ -20,19 +20,16 @@ deno task cf check --help     # Type checking
 
 ## Invocation Paths
 
-Three equivalent ways to run the CLI, in order of preference for agents:
+Three ways to run the CLI, in order of preference. All run from source, so they
+always match the working tree:
 
-1. **Built binary (recommended for scripted/agent use):**
-
-   ```bash
-   deno task build-binaries --cli-only   # produces dist/cf
-   export PATH="$PWD/dist:$PATH"         # or copy dist/cf onto PATH
-   cf piece ls ...                       # works from any cwd, no Deno noise
-   ```
-
-   The binary is fully cwd-independent and prints nothing but CLI output.
-   **Rebuild it after every `git pull`** — a stale binary rejects newer flags
-   and can hit wire-protocol skew against an updated server.
+1. **`cf` (via `bin/cf`)** — a plain `cf` backed by source. Already on PATH
+   under mise; otherwise `deno task install-cf`. Works from any cwd, and shell
+   completion requires a `cf` on PATH. It runs whichever checkout you are
+   standing in (nearest one walking up, or a host's `vendor/labs`), not the one
+   it was installed from — set `CF_LABS_ROOT` to override when your cwd cannot
+   say what you mean, and run `cf which` to see which CLI would run and why. See
+   "Which checkout runs" in `packages/cli/README.md`.
 
 2. **`deno task cf ...`** — works from any directory inside the repo (the
    launcher resolves the repo root itself and runs the CLI from your invoking
@@ -42,6 +39,14 @@ Three equivalent ways to run the CLI, in order of preference for agents:
 3. **`deno run -q -A packages/cli/mod.ts ...`** — repo-root-relative; only works
    with the repo root as cwd. The `-q` suppresses Deno's own warnings (e.g. the
    npm "Ignored build scripts" banner).
+
+**Do not put `dist/cf` on your PATH.** `deno task build-binaries cf` still
+produces it, and CI uses it (a CI run never edits the source it was built from),
+but there is no invalidation story for a working tree you are actively editing:
+nothing compares the binary against its sources, so it silently serves stale
+behavior after a `git pull` or a local edit. See "Why not `dist/cf`" in
+`packages/cli/README.md`, and the "FUSE mount wrapper mismatch" entry below for
+what this looks like when it bites.
 
 ## Output Conventions (scripts & agents)
 
@@ -120,20 +125,23 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 ## Quick Command Reference
 
-| Operation         | Command                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| Type check        | `deno task cf check pattern.tsx --no-run`                                                            |
-| Deploy new        | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
-| Update existing   | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
-| Inspect state     | `deno task cf piece inspect --piece ID ...`                                                          |
-| Get field         | `deno task cf piece get --piece ID fieldPath ...`                                                    |
-| Step + get        | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
-| Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
-| Call handler      | `deno task cf piece call --piece ID handlerName ...`                                                 |
-| List verbs        | `deno task cf piece verbs --piece ID --json ...`                                                     |
-| Trigger recompute | `deno task cf piece step --piece ID ...`                                                             |
-| List pieces       | `deno task cf piece ls -i key -a url -s space`                                                       |
-| Visualize         | `deno task cf piece map ...`                                                                         |
+| Operation          | Command                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| Type check         | `deno task cf check pattern.tsx --no-run`                                                            |
+| Deploy new         | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
+| Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
+| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
+| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
+| Project fields     | `deno task cf piece get --piece ID items --schema id,title ...`                                      |
+| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
+| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
+| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
+| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                     |
+| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                             |
+| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                       |
+| Visualize          | `deno task cf piece map ...`                                                                         |
+| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)              |
 
 ## Check Command Flags
 
@@ -218,6 +226,20 @@ echo '{"name": "John"}' | deno task cf piece set ... user
 
 `piece get` and `wish` always print JSON. Both accept a redundant `--json` so
 callers can request the format explicitly.
+
+`piece get --filter` accepts a jq-inspired predicate over array items: paths,
+JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
+`null` are falsey; stored `undefined` is treated like a missing value and is
+also falsey. Non-array inputs are rejected. `--schema` projects output from a
+comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
+fields apply per item for arrays, while JSON Schema describes the whole output.
+In an array-item projection, a typed scalar leaf that does not match stored data
+is omitted rather than reported as an error; prefer `true` leaves unless type
+filtering is intentional. The two flags compose as filter-then-project. Both run
+through runtime filter/map/lift nodes, so CFC behavior is the same as a computed
+pattern expression. Source schema metadata is authoritative; projection schemas
+cannot supply `ifc`, `asCell`, `scope`, or `default`. See
+`packages/cli/README.md` for the exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

@@ -109,6 +109,19 @@ One line per archived document; each document's header carries the fuller
 - [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
   — why the CLI tool-result poll was replaced event-driven and why the
   piece-start and sync bounds could not be removed at the CLI layer, July 2026.
+- [2026-07-27-session-paging-out-of-memory.md](packages/patterns/agent-sessions-debug/2026-07-27-session-paging-out-of-memory.md)
+  — paging the agent-sessions debug table exhausts the browser runtime's heap,
+  July 2026.
+- [2026-07-28-list-window-child-retention.md](packages/runner/2026-07-28-list-window-child-retention.md)
+  — why a moving list window retained every child run it started, and what the
+  fix covered, July 2026.
+- [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
+  — a completed transaction kept the activity of everything it read, and the
+  unbounded document cache that still exhausts a browser tab, July 2026.
+- [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
+  — why the open-argument update class went unvalidated on the repair path, and
+  the correction of an earlier measurement that named the wrong mechanism,
+  July 2026.
 
 ### Executed plans and work orders
 
@@ -117,6 +130,11 @@ One line per archived document; each document's header carries the fuller
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [pattern-update-state-continuity.md](plans/pattern-update-state-continuity.md)
+  — the Tier 2 state-continuity gate: capture and replay machinery,
+  test-populated vintages, and value comparison, executed 2026-07/08. Records
+  the measurements that decided the design, including the ones that reversed
+  it (raw beats gzipped storage; a cross-DID restore reads fine).
 - [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
   operand reporting for pattern-test assertions, with the compile-time
   constraints that shaped it, executed 2026-07.
@@ -124,6 +142,10 @@ One line per archived document; each document's header carries the fuller
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),
   executed 2026-07.
+- [retiring-llm-tool-call-deadlines.md](development/proposals/retiring-llm-tool-call-deadlines.md)
+  — replacing the LLM tool-call deadline with a run-scoped quiescence barrier,
+  and narrowing the dialog message-drop heuristic the deadline's argument did
+  not reach, executed 2026-07.
 - [STANDARD_DECORATORS_MIGRATION_PLAN.md](development/STANDARD_DECORATORS_MIGRATION_PLAN.md)
   — the cutover to standard decorators.
 - [content-addressed-action-identity-implementation-plan.md](specs/content-addressed-action-identity-implementation-plan.md)
@@ -178,6 +200,9 @@ One line per archived document; each document's header carries the fuller
   — trusted-agent tool-input integrity scoping.
 - [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
   compilation cache.
+- [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
+  — the removed AMD bundle pipeline and the bundle-grained identity defect that
+  motivated content-addressed module loading.
 - [module-loading-verifier-and-engine-design.md](specs/module-loading-verifier-and-engine-design.md)
   — verifier port and engine integration.
 - [capability-wrappers.md](specs/pattern-construction/capability-wrappers.md)

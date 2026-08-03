@@ -1,0 +1,27 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "system/space-overview.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "summary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "summary",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -1,5 +1,6 @@
 import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
+import { VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
   type EntryConfig,
@@ -43,6 +44,12 @@ import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+import {
+  parsePieceGetFilter,
+  parsePieceGetProjection,
+  type PieceGetTransform,
+  PieceGetTransformError,
+} from "../lib/piece-get-transform.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -67,6 +74,21 @@ export function normalizeApiUrl(apiUrl: string): string {
   normalized.hash = "";
   const href = normalized.toString();
   return basePath ? href : href.slice(0, -1);
+}
+
+export async function parsePieceGetTransformOptions(options: {
+  filter?: string;
+  schema?: string;
+}): Promise<PieceGetTransform | undefined> {
+  const filter = options.filter === undefined
+    ? undefined
+    : parsePieceGetFilter(options.filter);
+  const projection = options.schema === undefined
+    ? undefined
+    : await parsePieceGetProjection(options.schema);
+  return filter === undefined && projection === undefined
+    ? undefined
+    : { filter, projection };
 }
 
 function summarizeForDisplay(value: unknown): unknown {
@@ -156,13 +178,14 @@ export function localPatternEntry(
 
 /**
  * A `piece get` failure caused by a data condition rather than bad arguments:
- * a path that doesn't resolve, or a result schema that can't project the
- * stored data (PieceResultProjectionError). Reported as a plain error on
- * stderr with exit 1, never as a Cliffy ValidationError (which would dump the
- * usage screen and read as an arg-parse failure).
+ * a path that doesn't resolve, a result schema that can't project stored data,
+ * or a filter/projection that doesn't fit the selected value. Reported as a
+ * plain error on stderr with exit 1, never as a Cliffy ValidationError (which
+ * would dump the usage screen and read as an arg-parse failure).
  */
 export function isPieceGetDataError(error: unknown): error is Error {
   return error instanceof PieceResultProjectionError ||
+    error instanceof PieceGetTransformError ||
     (error instanceof Error &&
       error.message.startsWith("Cannot access path"));
 }
@@ -171,16 +194,20 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * Build the stderr report for a `piece get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
- * already carries its own `--step` guidance, and an input-mode read has
- * nothing more to suggest — only a result-mode unresolved path gets the
- * `--input` tip.
+ * already carries its own `--step` guidance, transform errors stand alone,
+ * and an input-mode read has nothing more to suggest — only a result-mode
+ * unresolved path gets the `--input` tip.
  */
 export function pieceGetDataErrorReport(
   error: unknown,
   opts: { input?: boolean; piece?: string },
 ): { message: string; hint?: string } | null {
   if (!isPieceGetDataError(error)) return null;
-  if (error instanceof PieceResultProjectionError || opts.input) {
+  if (
+    error instanceof PieceResultProjectionError ||
+    error instanceof PieceGetTransformError ||
+    opts.input
+  ) {
     return { message: error.message };
   }
   return {
@@ -212,6 +239,26 @@ export function pieceLinkDataErrorReport(
 }
 
 /**
+ * Build the stderr report for a `piece call` payload rejection. Returns null
+ * when the error is not a VerbInputValidationError (the caller should
+ * rethrow). The flags parsed fine and the piece resolved — the values simply
+ * do not fit the verb — so it reports like the other data errors rather than
+ * as a usage failure, and points at the listing that shows the shape it wanted.
+ */
+export function verbInputErrorReport(
+  error: unknown,
+  opts: { piece: string },
+): { message: string; hint: string } | null {
+  if (!(error instanceof VerbInputValidationError)) return null;
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: Run 'cf piece verbs --piece ${opts.piece} --json' to see each verb's expected input.`,
+    ),
+  };
+}
+
+/**
  * Print a data-error report — message plus optional hint — to stderr and exit
  * 1. The single exit path for the `piece get` / `piece link` data errors
  * above. The `deps` seam lets unit tests observe the wiring without a real
@@ -231,6 +278,24 @@ export function exitWithDataError(
   printError(report.message);
   if (report.hint) printHint(report.hint);
   return exit(1);
+}
+
+/**
+ * Turn a failed `piece call` into its stderr report, or re-throw.
+ *
+ * A named function rather than an inline `.catch` in the command action: the
+ * action body only ever runs under Cliffy, so anything written there is
+ * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
+ * threaded so a test can observe the report without a real process exit.
+ */
+export function reportVerbInputErrorOrRethrow(
+  error: unknown,
+  piece: string | undefined,
+  deps?: Parameters<typeof exitWithDataError>[1],
+): never {
+  const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
+  if (report) exitWithDataError(report, deps);
+  throw error;
 }
 
 export function pieceCallRawArgs(
@@ -475,20 +540,20 @@ export const piece = new Command()
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   .globalOption("-s,--space <space:string>", "The space name or DID")
   /* piece ls */
-  .command("ls", "List pieces in space.")
+  .command("ls", "List pieces registered in the space.")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_COMP}`),
-    `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
   )
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
-    `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
   /* piece search */
-  .command("search", "Search readable input and result data in every piece.")
+  .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
   .example(
     cliText(`cf piece search ${EX_ID} ${EX_COMP} "meeting notes"`),
@@ -1034,6 +1099,18 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} --step`),
     `Start, recompute, and get the result in one CLI session.`,
   )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --filter '.status == "open"'`,
+    ),
+    "Return only matching items from an array.",
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --schema id,title`,
+    ),
+    "Project each returned item to selected fields.",
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
@@ -1044,6 +1121,14 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with comma-separated fields, inline JSON Schema, or @file",
+  )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
@@ -1053,9 +1138,11 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
+      const transform = await parsePieceGetTransformOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
         step: options.step,
+        ...(transform === undefined ? {} : { transform }),
       });
       render(value, { json: true });
     } catch (error) {
@@ -1111,11 +1198,11 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     );
   })
   /* piece map */
-  .command("map", "Display a visual map of all pieces and their connections")
+  .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP}`),
-    `Display a map of all pieces and connections in "${RAW_EX_COMP.space}".`,
+    `Display registered pieces and connections in "${RAW_EX_COMP.space}".`,
   )
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP} --format dot`),
@@ -1207,6 +1294,8 @@ after --. Handlers interpret piped input when no input argument is present.`,
             (next) => phase = next,
           ),
         },
+      ).catch((error) =>
+        reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
       );
       if (result.helpText) {
         render(result.helpText);

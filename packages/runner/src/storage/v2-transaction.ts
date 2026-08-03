@@ -88,8 +88,10 @@ import {
   buildMergeableIntent,
   foldMergeableIntent,
   isNoopMergeableDelta,
+  type MergeableBuildContext,
   type MergeableOpDelta,
   type MergeableOpIntent,
+  mergeableOpPayloadContains,
   type OpSuppression,
 } from "./mergeable-ops.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
@@ -123,9 +125,11 @@ type WritableDocumentEntry = {
   // set. See ./mergeable-ops.ts.
   mergeableOps?: Map<string, MergeableOpIntent>;
   // Paths where a mergeable intent cannot faithfully carry the transaction's
-  // local change — a second mergeable op of a different kind was recorded, or a
-  // foreign write (a reshape such as sort/splice) rewrote the array after an op
-  // was recorded. Such a path abandons the mergeable fast path and commits the
+  // local change — a second mergeable op of a different kind was recorded, a
+  // foreign write (a reshape such as sort/splice, or a whole-value set at or
+  // above the path) rewrote the array after an op was recorded, or the
+  // commit-time builder abandoned the intent because it no longer described the
+  // local value. Such a path abandons the mergeable fast path and commits the
   // whole-array diff, which reflects the correct combined local value. Once
   // poisoned a path stays poisoned for the rest of the transaction, so a later
   // op does not resurrect a partial intent. Keyed like mergeableOps.
@@ -262,7 +266,7 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   // deep-clones-and-freezes -- isolating the result from later source
   // mutation. On the hot read path, repeated reads of the same stored
   // (deep-frozen) value collapse to a single cache lookup.
-  return cloneIfNecessary(value as FabricValue) as T;
+  return cloneIfNecessary(value) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -609,7 +613,7 @@ const buildArrayPatchCandidates = (
         path: encodePointer(path),
         index: before.length,
         remove: 0,
-        add: after.slice(before.length) as FabricValue[],
+        add: after.slice(before.length),
       },
       path,
       coversDescendants: false,
@@ -907,6 +911,31 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc: DocumentEntry;
   };
 
+  /**
+   * Complete the transaction, keeping its result and releasing the state that
+   * only an open transaction needs: the materialized branches, the read and
+   * write activity, and the cached reactivity log. Those are consumed while
+   * the transaction is open — the scheduler takes the reactivity log when the
+   * action that opened the transaction finishes, and the commit path takes the
+   * write details before the result is known. Whatever holds a completed
+   * transaction afterwards, such as a cell bound to it or a cleanup closure
+   * that captured it, would otherwise also hold every address that
+   * transaction read.
+   *
+   * Only a commit that ran ends here. A transaction that never reached storage
+   * — aborted, or rejected by validation — keeps its activity, because the
+   * scheduler retries the action that opened it and re-establishes that
+   * action's dependencies from those reads.
+   */
+  #finish(result: Result<Unit, StorageTransactionFailed>): void {
+    this.#state = { status: "done", result };
+    this.#branches.clear();
+    this.#readActivities.length = 0;
+    this.#writeAttemptLog.length = 0;
+    this.#reactivityLogCache = undefined;
+    this.#lastDocument = undefined;
+  }
+
   constructor(private readonly storage: IStorageManager) {}
 
   setReadOnly(reason = "runtime.readTx()"): void {
@@ -1073,23 +1102,39 @@ export class V2StorageTransaction implements IStorageTransaction {
   // Abandon the mergeable fast path for `address`: a foreign write (a reshape
   // that is not itself a mergeable op) has rewritten the array after an op was
   // recorded, so the recorded tail no longer identifies the appended elements.
-  // Drop any intent and mark the path poisoned so the commit emits the
-  // whole-array diff (the correct local value) instead. A path with no recorded
-  // intent is left untouched — a reshape before any op is fine, and a later op on
-  // that path is still mergeable.
+  // Drop any covered intent and mark its path poisoned so the commit emits the
+  // whole-array diff (the correct local value) instead.
+  //
+  // The reshape reaches every intent AT or BENEATH the written path: a write to
+  // an enclosing object (`doc.set({rows})`) rewrites the array inside it just as
+  // surely as a write to the array itself, and the intent's recorded tail then
+  // spans elements the reshape supplied rather than ones an op appended. Intents
+  // ABOVE the write are untouched, which is what keeps an element edit
+  // (`cell.key(i).set(...)`, a write beneath the array) composing with a push,
+  // and leaves a write to a sibling field alone.
+  //
+  // A path carrying no intent yet is left alone — but that is not a statement
+  // that a reshape before an op is harmless. It is caught later instead, by each
+  // builder's own check at commit that its intent still describes the local
+  // value (see ./mergeable-ops.ts). The same goes for an element edit, which is
+  // beneath the array and so passes through here untouched: harmless to a tail
+  // op, fatal to a remove-by-value, and the builders are what tell them apart.
   poisonMergeableOp(address: IMemorySpaceAddress): void {
     // Only ever called right after a write on this transaction, so the tx is
     // editable — no editable() re-check. The write also made the address's
     // document writable, but a caller could resolve to a different (read-only)
     // slot, so a non-writable target is a real no-op.
     const doc = this.writableMergeableTarget(address);
-    if (!doc) return;
-    const pathKey = encodePointer(address.path);
-    if (!doc.mergeableOps?.has(pathKey)) {
+    if (!doc?.mergeableOps?.size) {
       return;
     }
-    doc.mergeableOps.delete(pathKey);
-    (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    const covered = [...doc.mergeableOps.entries()]
+      .filter(([, intent]) => isPrefixPath(address.path, intent.path))
+      .map(([pathKey]) => pathKey);
+    for (const pathKey of covered) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    }
   }
 
   // The caller wrote through this same transaction, so the entry is writable.
@@ -1586,7 +1631,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const isolatedValue = value === undefined
       ? undefined
-      : cloneIfNecessary(value) as FabricValue;
+      : cloneIfNecessary(value);
 
     // Compute the activity path and previous-value snapshots BEFORE the
     // write -- `applyMutablePathWrite()` mutates `current.value` in place
@@ -1608,7 +1653,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const previousActivityValue = cloneIfNecessary(
       readValueAtPath(current.value, activityPath, {
         allowArrayLength: true,
-      }) as FabricValue,
+      }),
     ) as FabricValue | undefined;
     // Pre-write slot presence (distinct from value: a slot holding
     // `undefined` is present) for the write details — also read BEFORE the
@@ -1719,7 +1764,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : cloneIfNecessary(value) as FabricValue;
+        : cloneIfNecessary(value);
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1744,7 +1789,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }) as FabricValue,
+        }),
       ) as FabricValue | undefined;
       // Pre-write slot presence for the write details (see
       // `writeWithinBranch`; empty path = root definedness, since
@@ -1928,6 +1973,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       return { error: ready.error };
     }
+    // Aborted before reaching storage, so the activity stays: the scheduler
+    // rebuilds this action's dependencies from it and retries.
     this.#state = {
       status: "done",
       result: { error: TransactionAborted(reason) },
@@ -1963,7 +2010,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       schedulerObservationCommitSpace(this.#schedulerObservation);
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
@@ -1980,7 +2027,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       !hasCommitPreconditions && !hasSqliteOps
     ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
@@ -1989,6 +2036,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.validate(),
     );
     if (validation.error) {
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
       this.#state = {
         status: "done",
         result: { error: validation.error },
@@ -2008,13 +2057,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     } catch (error) {
       const result: Result<Unit, StorageTransactionRejected> = {
         error: toStoreError(error),
       };
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
   }
@@ -2046,13 +2095,18 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     if (commits.length === 0) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
     const validation = this.validate();
     if (validation.error) {
-      this.#state = { status: "done", result: { error: validation.error } };
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
+      this.#state = {
+        status: "done",
+        result: { error: validation.error },
+      };
       return { error: validation.error };
     }
 
@@ -2060,7 +2114,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     } catch (error) {
       // Mirror the single-space path: a rejected commit must still transition
@@ -2069,7 +2123,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const result: Result<Unit, StorageTransactionRejected> = {
         error: toStoreError(error),
       };
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
   }
@@ -2583,6 +2637,24 @@ export class V2StorageTransaction implements IStorageTransaction {
   // each covers so the diff candidates the op replaces can be suppressed. The
   // per-op payload/suppression rules live in ./mergeable-ops.ts; here we only
   // supply each intent the working/initial array state its builder needs.
+  //
+  // A builder can also abandon its intent — the recorded op no longer describes
+  // the transaction's local value (see `buildTailOp` / `buildRemoveByValue`).
+  // Abandoning must poison the path here rather than just skip the op, because a
+  // surviving intent still narrows the op's reads out of the commit's conflict
+  // set (v2.ts) and would hand the replacing whole-value diff a read set it has
+  // not earned. This runs inside getNativeCommit, which precedes that narrowing,
+  // so both sides see the same intents.
+  //
+  // One intent is also abandoned for what its SIBLINGS carry, which is why the
+  // contexts are computed for all of them before any is built: a tail op's
+  // payload is live values read out of the working document, so an intent whose
+  // target sits inside that payload has already had its change applied by the
+  // covering op, and sending it too would apply it twice (see
+  // `mergeableOpPayloadContains`). Coverage is judged on what each intent
+  // RECORDED, not on which ops survived — an intent contained by an op that is
+  // itself abandoned must fall back with it, so that the whole-value diff is the
+  // only thing carrying that region.
   private buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
@@ -2591,32 +2663,59 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!doc.mergeableOps || doc.current.value === undefined) {
       return { ops, suppress };
     }
-    for (const intent of doc.mergeableOps.values()) {
-      const working = readValueAtPath(doc.current.value, intent.path, {
-        allowArrayLength: true,
-      });
-      const initial = doc.initial.value === undefined ? undefined : (
-        readValueAtPath(doc.initial.value, intent.path, {
-          allowArrayLength: true,
-        })
-      );
-      // Presence, not definedness: an already-present slot (even holding
-      // `undefined`) does not add a key to its parent, so the op does not
-      // materialize a path and must not stamp `createsKey`.
-      const hadInitialValue = doc.initial.value !== undefined &&
-        hasValueAtPath(doc.initial.value, intent.path, {
-          allowArrayLength: true,
-        });
-      const built = buildMergeableIntent(intent, {
-        workingArray: Array.isArray(working)
-          ? working as FabricValue[]
-          : undefined,
-        hadInitialArray: Array.isArray(initial),
-        hadInitialValue,
-      });
+    const pending = [...doc.mergeableOps.values()].map((intent) => ({
+      intent,
+      ctx: this.mergeableBuildContext(doc, intent),
+    }));
+
+    const abandoned: string[] = [];
+    for (const { intent, ctx } of pending) {
+      const built = pending.some(({ intent: other, ctx: otherCtx }) =>
+          mergeableOpPayloadContains(other, otherCtx, intent.path)
+        )
+        ? { abandon: true, ops: [], suppress: [] }
+        : buildMergeableIntent(intent, ctx);
+      if (built.abandon) {
+        abandoned.push(encodePointer(intent.path));
+        continue;
+      }
       ops.push(...built.ops);
       suppress.push(...built.suppress);
     }
+    for (const pathKey of abandoned) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    }
     return { ops, suppress };
+  }
+
+  // The working / initial state at one intent's path, which its builder turns
+  // into wire ops.
+  private mergeableBuildContext(
+    doc: WritableDocumentEntry,
+    intent: MergeableOpIntent,
+  ): MergeableBuildContext {
+    const working = readValueAtPath(doc.current.value, intent.path, {
+      allowArrayLength: true,
+    });
+    const initial = doc.initial.value === undefined ? undefined : (
+      readValueAtPath(doc.initial.value, intent.path, {
+        allowArrayLength: true,
+      })
+    );
+    return {
+      workingArray: Array.isArray(working) ? working : undefined,
+      hadInitialArray: Array.isArray(initial),
+      // Presence, not definedness: an already-present slot (even holding
+      // `undefined`) does not add a key to its parent, so the op does not
+      // materialize a path and must not stamp `createsKey`.
+      hadInitialValue: doc.initial.value !== undefined &&
+        hasValueAtPath(doc.initial.value, intent.path, {
+          allowArrayLength: true,
+        }),
+      initialArray: Array.isArray(initial)
+        ? initial as readonly FabricValue[]
+        : undefined,
+    };
   }
 }

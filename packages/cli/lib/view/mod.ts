@@ -2,25 +2,33 @@
  * Entry point for `cf view`. Reads the input (a file argument or piped stdin),
  * parses it once — as a unified diff when it reads as one, otherwise with the
  * language selected from its filename — then either launches the interactive
- * TTY) or prints the selected source/rendered representation and exits,
- * mirroring how `less`/`bat` behave when their output is redirected. An
- * unnamed pipe remains transformed TypeScript.
+ * pager (when stdout is a TTY) or prints the selected source or rendered
+ * representation and exits, mirroring how `less`/`bat` behave when their
+ * output is redirected.
+ * Filename-free compiler output keeps the transformed TypeScript default.
+ * Other source uses filename and shebang metadata unless an explicit language
+ * selects another language.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
 import type { Document } from "./model.ts";
 import { ViewError } from "./errors.ts";
-import { type DiffModel, looksLikeDiff, parseDiff } from "./diff.ts";
+import { detectDiff, type DiffModel, parseDiff } from "./diff.ts";
 import {
   buildDiffDocument,
   realWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
-import type { Semantics } from "./languages/language.ts";
 import {
   diffSemanticsFor,
   distinctLanguages,
+  type Language,
   languageForFile,
+  languageForName,
+  languageForSource,
+  languageForTransformedOutput,
+  languageNames,
+  type Semantics,
 } from "./languages/language.ts";
 import {
   type EditableSource,
@@ -41,11 +49,16 @@ export interface ViewOptions {
   /** Start in the rendered representation when one is available. */
   rendered?: boolean;
   file?: string;
+  /** Select piped source with this stable language identifier. */
+  language?: string;
+  /** Select piped source as though it had this filename. */
+  filename?: string;
   /** Force (true) or suppress (false) diff mode; undefined auto-detects. */
   diff?: boolean;
 }
 
 export async function viewMain(options: ViewOptions): Promise<void> {
+  const selection = pipedSelection(options);
   const text = await readInput(options.file);
   if (text.trim().length === 0) {
     throw new ViewError(
@@ -62,6 +75,7 @@ export async function viewMain(options: ViewOptions): Promise<void> {
     text,
     options.file,
     options.diff,
+    selection,
   );
   const stdoutTty = Deno.stdout.isTerminal();
   const interactive = !options.plain && stdoutTty;
@@ -89,37 +103,92 @@ export async function viewMain(options: ViewOptions): Promise<void> {
   printDocument(shown, color, options.lineNumbers);
 }
 
+function pipedSelection(options: ViewOptions): SourceSelection {
+  validateSourceSelection(
+    options.file,
+    options.diff,
+    options.language !== undefined || options.filename !== undefined,
+  );
+  if (options.language === undefined) {
+    return { fileName: options.filename };
+  }
+  const language = languageForName(options.language);
+  if (!language) {
+    throw new ViewError(
+      `cf view: unknown language "${options.language}". Available languages: ${
+        languageNames().join(", ")
+      }`,
+    );
+  }
+  return { language, fileName: options.filename };
+}
+
+/** Explicit syntax selection for source received through a pipe. */
+export interface SourceSelection {
+  readonly language?: Language;
+  readonly fileName?: string;
+}
+
+function validateSourceSelection(
+  file: string | undefined,
+  forceDiff: boolean | undefined,
+  sourceSelected: boolean,
+): void {
+  if (!sourceSelected) return;
+  if (file !== undefined) {
+    throw new ViewError(
+      "cf view: --language and --filename cannot be used with a file argument",
+    );
+  }
+  if (forceDiff === true) {
+    throw new ViewError(
+      "cf view: --diff cannot be combined with --language or --filename",
+    );
+  }
+}
+
 /**
  * Parse the input into a Document and pick the matching semantic service:
  * diff input gets a program over the current workspace files it names; a
  * transformed blob gets the section-based program. Semantics are constructed
  * lazily — only the interactive path needs them.
  *
- * `forceDiff` pins the mode (`--diff` / `--no-diff`); when auto-detecting, a
- * diff is accepted only if a reasonable share of its lines actually parse as
- * diff content — so a source file that merely EMBEDS a diff (in a string, a
- * test fixture) still views as source. Exported for tests.
+ * `forceDiff` pins the mode (`--diff` / `--no-diff`). Automatic detection
+ * accepts raw unified diffs only when the first non-empty line starts a
+ * structurally parseable diff container. Standard Git commit output has its own
+ * complete-header check. Exported for tests.
+ *
+ * `selection` chooses syntax for piped source. Its virtual filename is
+ * advisory and does not make the source editable.
  */
 export function buildView(
   text: string,
   file?: string,
   forceDiff?: boolean,
+  selection: SourceSelection = {},
 ): {
   doc: Document;
   semantics: () => Semantics | undefined;
   editSource: EditableSource;
 } {
-  const commitOutput = looksLikeCommitOutput(text);
-  const tryDiff = forceDiff ?? (looksLikeDiff(text) || commitOutput);
-  const parsedDiff = tryDiff ? parseDiff(text) : null;
+  const sourceSelected = selection.language !== undefined ||
+    selection.fileName !== undefined;
+  validateSourceSelection(file, forceDiff, sourceSelected);
+  const detectContent = forceDiff !== false && !sourceSelected;
+  const commitOutput = detectContent && looksLikeCommitOutput(text);
+  const parsedDiff = forceDiff === true || commitOutput
+    ? parseDiff(text)
+    : detectContent
+    ? detectDiff(text)
+    : null;
   const model: DiffModel | null = parsedDiff ??
-    (tryDiff && commitOutput
+    (forceDiff === true || commitOutput
       ? {
         files: [],
         lines: text.split("\n").map(() => ({ kind: "other" as const })),
       }
       : null);
-  if (model && (forceDiff || commitOutput || mostlyDiff(model, text))) {
+  if (model) {
     const ws = realWorkspace(safeCwd());
     // One workspace cache shared by the initial build and every deferred
     // re-parse, so the named files are read and parsed once per session.
@@ -149,17 +218,37 @@ export function buildView(
       ),
     };
   }
-  const language = languageForFile(file);
-  const doc = language.parseDocument(text, file ?? "transformed.tsx");
+  const fileName = selection.fileName ?? file;
+  const transformedOutput = fileName === undefined &&
+    looksLikeTransformedOutput(text);
+  const language = selection.language ??
+    (transformedOutput
+      ? languageForTransformedOutput()
+      : languageForSource(fileName, text));
+  const doc = language.parseDocument(text, fileName);
   return {
     doc,
     semantics: () =>
-      language.createSemantics?.(text, { cwd: safeCwd(), fileName: file }),
+      language.createSemantics?.(text, { cwd: safeCwd(), fileName }),
     // A real file is editable; a pipe (transformed output, etc.) is not.
-    editSource: file ? fileSource(file) : readonlySource(
+    editSource: file ? fileSource(file, language) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",
+      language,
+      fileName,
     ),
   };
+}
+
+/** `cf check --show-transformed` starts each output module with this header. */
+function looksLikeTransformedOutput(text: string): boolean {
+  const lineEnd = text.indexOf("\n");
+  const firstLine = (lineEnd < 0 ? text : text.slice(0, lineEnd)).replace(
+    /\r$/,
+    "",
+  );
+  const prefix = "// transformed: ";
+  return firstLine.startsWith(prefix) &&
+    firstLine.slice(prefix.length).trim().length > 0;
 }
 
 /** A standard `git show` or `git log` header. Unlike a diff heuristic, this also
@@ -193,20 +282,6 @@ function looksLikeCommitOutput(text: string): boolean {
     /^Author:\s+.*<[^<>]*>$/.test(line) ||
     /^author .*<[^<>]*> -?\d+ [+-]\d{4}$/.test(line)
   );
-}
-
-/** At least a quarter of the non-empty lines parse as diff content. Headers in
- * `git log -p` output are a minority; an embedded diff in a source file is. */
-function mostlyDiff(model: DiffModel, text: string): boolean {
-  const lines = text.split("\n");
-  let nonEmpty = 0;
-  let diffLines = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().length === 0) continue;
-    nonEmpty++;
-    if (model.lines[i]?.kind !== "other") diffLines++;
-  }
-  return nonEmpty > 0 && diffLines / nonEmpty >= 0.25;
 }
 
 function safeCwd(): string {

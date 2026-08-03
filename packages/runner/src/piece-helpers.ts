@@ -9,6 +9,10 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
+import {
+  normalizePatternSource,
+  systemPatternSource,
+} from "./pattern-source-scheme.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -102,8 +106,9 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
  * ENTIRE object (`traverseObjectWithSchema`'s required check) — so a path-less
  * piece read returns `undefined` while every child-path read works. Per the
  * #4746 contract, partial visibility must be expressed in the schema rather
- * than special-cased in the traverser; this helper is the piece read boundary
- * doing exactly that, driven by the stored links' own declared scopes.
+ * than special-cased in the traverser; piece reads apply this helper at both
+ * the root and a selected subtree boundary, driven by the stored links' own
+ * declared scopes.
  *
  * Also relaxed: a property whose chain resolution is SCOPE-BLOCKED (a schema
  * scope cap forbade following a narrower link, CT-1642) — the member is just
@@ -240,10 +245,11 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 }
 
 /**
- * Return `cell` re-schema'd for a terminal whole-object read: `required`
- * entries that point at narrower-scoped stored links are relaxed via
- * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged
- * when it carries no schema, the raw value is unreadable, or nothing needed
+ * Return `cell` re-schema'd for a terminal object read, whether it is the piece
+ * root or a selected subtree: `required` entries that point at
+ * narrower-scoped stored links are relaxed via
+ * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged when
+ * it carries no schema, the raw value is unreadable, or nothing needed
  * relaxing.
  */
 export function cellWithScopedLinkRequiredsRelaxed<T>(
@@ -283,7 +289,9 @@ export function getResultCellWithSourceSchema<T = unknown>(
   return cell;
 }
 
-const DEFAULT_APP_PATTERN_SOURCE = "/api/patterns/system/default-app.tsx";
+const DEFAULT_APP_PATTERN_SOURCE = systemPatternSource(
+  "system/default-app.tsx",
+);
 
 /**
  * Identifies a persisted default-app-shaped root that still exposes its piece
@@ -300,7 +308,14 @@ export function isLegacyPieceRegistryRoot(
     typeof patternIdentity.identity !== "string" ||
     typeof patternIdentity.symbol !== "string" ||
     (patternSource !== undefined &&
-      patternSource !== DEFAULT_APP_PATTERN_SOURCE)
+      (typeof patternSource !== "string" ||
+        // Compare in canonical form: a root that tracks the official default
+        // app is the same root whether it was stamped with the `system:` ref
+        // or with either pre-scheme spelling of that route.
+        normalizePatternSource(
+            patternSource,
+            root.runtime.hostForSpace(root.space),
+          ) !== DEFAULT_APP_PATTERN_SOURCE))
   ) {
     return false;
   }

@@ -56,7 +56,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { resolveLinkScope } from "../scope.ts";
-import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
+import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { getEntityId } from "../create-ref.ts";
 import {
@@ -120,10 +120,12 @@ const logger = getLogger("llm-dialog", {
 });
 
 const client = new LLMClient();
+// How long to keep believing another replica is still working on a dialog. This
+// is a heartbeat staleness bound, not a bound on a request: `lastActivity` is
+// refreshed by `safelyPerformUpdate` on every durable write of a turn, guarded
+// by a requestId match, so only the replica running the turn refreshes it.
+// Nothing distinguishes a crashed replica from a slow one without a bound.
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
-// Pattern-backed tools can themselves run LLM/tool loops (for example generic
-// sub-agents), so the dialog needs a budget longer than a single model call.
-const TOOL_CALL_TIMEOUT = 1000 * 120; // 120 seconds
 const MAX_SERIALIZE_DEPTH = 100;
 
 /**
@@ -2215,10 +2217,29 @@ async function executeToolCalls(
   pinnedCells?: Cell<PinnedCell[]>,
   observedConfidentiality?: readonly CfcConfClause[],
   observationMaxConfidentiality?: readonly CfcConfClause[],
+  // The turn's abort signal. A tool that runs a pattern waits for that pattern,
+  // and cancelling the turn has to reach that wait: without it the tool runs on
+  // after the user has cancelled, and only its writeback is discarded.
+  abortSignal?: AbortSignal,
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
+      // A model turn can call several tools at once, and they run one after
+      // another here. Checking the signal per tool rather than only inside the
+      // wait is what keeps a cancel from starting the ones not reached yet:
+      // `handleInvoke` runs the pattern or sends to the handler before it
+      // reaches its own wait, so a tool entered after the cancel would fire its
+      // side effects and only then notice.
+      if (abortSignal?.aborted) {
+        results.push({
+          id: part.toolCallId,
+          toolName: part.toolName,
+          error: "Tool call cancelled",
+        });
+        continue;
+      }
+
       if (
         !toolAllowsObservedConfidentiality(
           toolCatalog,
@@ -2283,6 +2304,7 @@ async function executeToolCalls(
         toolCatalog,
         pinnedCells,
         observationMaxConfidentiality,
+        abortSignal,
       );
       results.push({
         id: part.toolCallId,
@@ -2331,6 +2353,7 @@ function createToolResultMessages(
 }
 
 export const llmDialogTestHelpers = {
+  REQUEST_TIMEOUT,
   getCellSchema,
   parseLLMFriendlyLink,
   traverseAndSerialize,
@@ -2652,6 +2675,7 @@ async function handleInvoke(
   space: MemorySpace,
   resolved: ResolvedToolCall,
   observationMaxConfidentiality?: readonly CfcConfClause[],
+  abortSignal?: AbortSignal,
 ): Promise<{
   result: { type: string; value: any };
   observedConfidentiality: readonly CfcConfClause[];
@@ -2747,20 +2771,44 @@ async function handleInvoke(
     r !== undefined && resolve(r);
   });
 
-  let timeout;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Tool call timed out"));
-    }, TOOL_CALL_TIMEOUT);
-  }).then(() => {
-    throw new Error("Tool call timed out");
-  });
+  // Ends three ways, each of them an event: the result lands, the run quiesces,
+  // or the turn is cancelled.
+  //
+  // The middle one is what makes the wait above determinate. "The result cell
+  // became defined" conflates two questions — has the run finished, and did it
+  // produce anything — so a run that finishes having written nothing looks the
+  // same as one still working. `settledFor` answers the first question directly
+  // for the run this tool call started, so a tool that produced nothing ends
+  // here with the cell still undefined rather than waiting for a value that is
+  // never coming.
+  const aborted = abortSignal
+    ? new Promise<void>((resolveAborted) => {
+      if (abortSignal.aborted) return resolveAborted();
+      abortSignal.addEventListener("abort", () => resolveAborted(), {
+        once: true,
+      });
+    })
+    : undefined;
 
+  // The barrier keeps re-checking until the run goes quiet, so a race the result
+  // wins would otherwise leave it looping with nobody waiting.
+  const quiescence = new AbortController();
   try {
-    await Promise.race([promise, timeoutPromise]);
+    await Promise.race(
+      [promise, runtime.settledFor(result, quiescence.signal), aborted]
+        .filter(Boolean),
+    );
   } finally {
-    clearTimeout(timeout);
+    quiescence.abort();
     cancel();
+  }
+
+  // Cancelling stops this wait; without stopping the run the pattern behind it
+  // keeps computing and keeps its own model calls in flight, so the tool would
+  // go on working after the user has cancelled the turn.
+  if (abortSignal?.aborted) {
+    if (pattern) runtime.runner.stop(result);
+    throw new Error("Tool call cancelled");
   }
 
   // Get the actual entity ID from the result cell
@@ -2854,6 +2902,7 @@ async function invokeToolCall(
   _catalog?: ToolCatalog,
   pinnedCells?: Cell<PinnedCell[]>,
   observationMaxConfidentiality?: readonly CfcConfClause[],
+  abortSignal?: AbortSignal,
 ) {
   // Handle pinned cell tools
   if (resolved.type === "pin") {
@@ -2909,6 +2958,7 @@ async function invokeToolCall(
     space,
     resolved,
     observationMaxConfidentiality,
+    abortSignal,
   );
 }
 
@@ -2952,11 +3002,25 @@ export function llmDialog(
   let cellScope: CellScope | undefined;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  // The request id of the turn this replica is running, if any. Set when that
+  // turn's promise is registered with `trackAsyncWork` and cleared when the
+  // promise settles, so it spans the whole conversation the turn drives,
+  // including its tool calls. A turn running here needs no failure detection:
+  // this replica knows it is alive.
+  let localTurnRequestId: string | undefined = undefined;
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
     abortController?.abort("Pattern stopped");
+
+    // The cells below are assigned during the first run of this node, and a
+    // pattern can be stopped before that happens -- notably when startup
+    // fails, since the failure path cancels what it already registered. There
+    // is nothing of ours to wind down in that case, and reaching for the cells
+    // would throw from inside cleanup, replacing whatever error caused the
+    // stop.
+    if (!cellsInitialized) return;
 
     const tx = runtime.edit();
 
@@ -3049,31 +3113,83 @@ export function llmDialog(
         // Cast is necessary as .key doesn't yet correctly handle Stream<>
         result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>,
         (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
-          if (
-            pending.withTx(tx).get() && (
+          if (pending.withTx(tx).get()) {
+            // A message added while a turn is running is dropped. The add
+            // message UI should either be disabled or change the send button
+            // to be a stop button.
+            const activeRequestId = internal.withTx(tx).key("requestId").get();
+            if (
+              localTurnRequestId !== undefined &&
+              localTurnRequestId === activeRequestId
+            ) {
+              // The running turn is this replica's own, so its liveness is not
+              // in question and the heartbeat is not consulted. A turn can run
+              // longer than the heartbeat's staleness bound without a durable
+              // write, and the heartbeat then reads stale for a turn that is
+              // plainly alive. The writes bracket a round of tool calls rather
+              // than falling between them, and nothing bounds a tool call, so a
+              // single one that runs long enough is already such a gap.
+              //
+              // Nothing bounds a turn on this branch. A local turn that never
+              // settles keeps dropping messages until `cancelGeneration` sets
+              // `pending` false, which is the stop button `cf-prompt-input`
+              // shows in place of send for as long as `pending` holds.
+              return;
+            }
+            // The turn belongs to another replica. `lastActivity` is that
+            // replica's heartbeat, refreshed by `safelyPerformUpdate` on every
+            // durable write of the turn, and a stale one is the only sign
+            // available that the tab which started the turn went away.
+            //
+            // This `Date.now()` is a latent hazard under the runner's fake
+            // clock, whose auto-advance can carry logical time past the
+            // five-minute mark in a test that never meant to model elapsed
+            // time. The branch it then takes accepts a message into a dialog
+            // whose turn is still running.
+            if (
               internal.withTx(tx).key("lastActivity").get() >
                 Date.now() - REQUEST_TIMEOUT
-            )
-          ) {
-            // For now, let's drop messages added while request is pending for
-            // less than five minutes. Add message UI should either be disabled
-            // or change the send button to be a stop button.
-            return;
+            ) {
+              return;
+            }
           }
 
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
-          inputs.key("messages").withTx(tx).push(
-            {
-              ...event,
-              // Add ID manually, as for built-ins this isn't automated
-              // TODO(seefeld): Once we have event ids, it should be that.
-              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
-              // Cast because we can't yet express ArrayBuffer in JSON Schema
-            } as Schema<
-              typeof LLMMessageSchema
-            >,
+          // Each message becomes its own document, which the LlmDerived
+          // stamping downstream relies on. Pushing a plain message would also
+          // produce one, since `Cell.push` anchors objects in arrays; the
+          // document is made explicitly to control its identity -- a
+          // deliberate cause rather than a frame-relative counter.
+          // TODO(seefeld): Once we have event ids, the cause should be that.
+          //
+          // Space AND scope come from the RESOLVED messages link -- the array
+          // document itself, not the input slot that points at it, which can
+          // sit at a different scope. `push()` resolves the same way before it
+          // writes; a document minted at the slot's scope instead lands in a
+          // partition the array's readers never look in.
+          //
+          // The document is left schema-less: the schema it would carry ends
+          // up inlined in every link written to it, and the array's own items
+          // schema already describes what a reader finds there.
+          const messagesForPush = inputs.key("messages");
+          const messagesBase = resolveLink(
+            runtime,
+            tx,
+            messagesForPush.getAsNormalizedFullLink(),
           );
+          const messageCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+            messagesBase.space,
+            { llmDialog: { message: cause, id: crypto.randomUUID() } },
+            undefined,
+            tx,
+            messagesBase.scope,
+          );
+          messageCell.withTx(tx).set(
+            // Cast because we can't yet express ArrayBuffer in JSON Schema
+            { ...event } as Schema<typeof LLMMessageSchema>,
+          );
+          messagesForPush.withTx(tx).push(messageCell);
 
           // Set up new request (abort existing ones just in case) by allocating
           // a new request Id and setting up a new abort controller.
@@ -3112,22 +3228,37 @@ export function llmDialog(
               }
 
               abortController = new AbortController();
+              // Set alongside starting the turn and cleared when the turn's
+              // promise settles, so the flag's lifetime is exactly the turn's.
+              localTurnRequestId = nextRequestId;
               // Track the dialog turn (LLM call + writeback) as async builtin
-              // work so `runtime.settled()` wait for the result;
+              // work owned by this run, so `runtime.settled()` and
+              // `runtime.settledFor(parentCell)` both wait for the result;
               // `idle()` does not, so the handler never blocks on the LLM call.
-              runtime.trackAsyncWork(startRequest(
-                runtime,
-                parentCell.space,
-                cause,
-                inputs,
-                pending,
-                internal,
-                pinnedCells,
-                result,
-                nextRequestId,
-                abortController.signal,
-                capturedRequest,
-              ));
+              runtime.trackAsyncWork(
+                startRequest(
+                  runtime,
+                  parentCell.space,
+                  cause,
+                  inputs,
+                  pending,
+                  internal,
+                  pinnedCells,
+                  result,
+                  nextRequestId,
+                  abortController.signal,
+                  capturedRequest,
+                ).finally(() => {
+                  // A superseded turn keeps running until its abort reaches
+                  // every await inside it, so it can settle after a newer turn
+                  // has claimed the flag. Only the turn that still holds the
+                  // flag clears it.
+                  if (localTurnRequestId === nextRequestId) {
+                    localTurnRequestId = undefined;
+                  }
+                }),
+                parentCell,
+              );
             },
           );
         },
@@ -3323,7 +3454,32 @@ async function startRequest(
     const startIndex = (messagesCell.withTx(tx).get() as
       | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
-    messagesCell.withTx(tx).push(...messages);
+    // Each message becomes its own document, which the stamping below reads
+    // back. Pushing plain messages would also produce them, since `Cell.push`
+    // anchors objects in arrays; they are made explicitly to control their
+    // identity -- a deliberate cause rather than a frame-relative counter.
+    // TODO(seefeld): Once we have event ids, the cause should be that.
+    //
+    // Space, scope and schema follow the user-message push: resolved link,
+    // schema-less document.
+    const base = resolveLink(
+      runtime,
+      tx,
+      messagesCell.getAsNormalizedFullLink(),
+    );
+    messagesCell.withTx(tx).push(
+      ...messages.map((message) => {
+        const messageCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+          base.space,
+          { llmDialog: { message: cause, id: crypto.randomUUID() } },
+          undefined,
+          tx,
+          base.scope,
+        );
+        messageCell.withTx(tx).set(message);
+        return messageCell;
+      }),
+    );
     if (runtime.cfcEnforcementMode === "disabled") {
       return;
     }
@@ -3336,15 +3492,14 @@ async function startRequest(
       builtinId: "llmDialog",
     });
     // Record the stamping schema for each pushed message's own entity doc
-    // (every model push carries an [ID] sigil, so each message splits into
-    // its own doc). The messages link carries its own schema, which wins over
+    // (every message is appended as a link to a document of its own, so each
+    // one is separately addressable). The messages link carries its own schema, which wins over
     // an `asSchema` handle inside `push()` (`resolvedLink.schema ?? ...`), so
     // the stamp cannot ride the array handle — instead this mirrors the
     // split-entity idiom in data-updating.ts (`recordRelevantSchemaWrite-
     // PolicyInput` on the child doc), which also marks the transaction
     // CFC-relevant so `prepareTxForCommit` runs the persist pass that mints
     // the labelMap entry.
-    const base = messagesCell.getAsNormalizedFullLink();
     for (let index = 0; index < messages.length; index++) {
       const raw = messagesCell.withTx(tx).key(startIndex + index).getRaw();
       const link = parseLink(raw);
@@ -3540,7 +3695,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
     : doWork();
 
-  resultPromise
+  // Returned, not fired and forgotten: the caller hands this promise to
+  // `runtime.trackAsyncWork`, so it is what makes `runtime.settled()` span the
+  // model call, the tool calls it makes, and the writeback of their results.
+  return resultPromise
     .then(async (llmResult) => {
       // Validate that the response has valid content
       if (!hasValidContent(llmResult.content)) {
@@ -3552,11 +3710,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           "LLM returned invalid/empty content, adding error message",
         );
         const errorMessage = {
-          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content:
             "I encountered an error generating a response. Please try again.",
-        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+        } satisfies BuiltInLLMMessage;
 
         await safelyPerformUpdate(
           runtime,
@@ -3564,9 +3721,24 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           internal,
           requestId,
           (tx) => {
-            messagesCell.withTx(tx).push(
+            // As above: made explicitly for identity control, in the resolved
+            // messages document's space and scope, schema-less.
+            const errorBase = resolveLink(
+              runtime,
+              tx,
+              messagesCell.getAsNormalizedFullLink(),
+            );
+            const errorCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+              errorBase.space,
+              { llmDialog: { message: cause, id: crypto.randomUUID() } },
+              undefined,
+              tx,
+              errorBase.scope,
+            );
+            errorCell.withTx(tx).set(
               errorMessage as Schema<typeof LLMMessageSchema>,
             );
+            messagesCell.withTx(tx).push(errorCell);
             pending.withTx(tx).set(false);
           },
         );
@@ -3585,11 +3757,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             llmContent,
             toolCallParts,
           );
-
-          // Add ID to assistant message and publish immediately
-          (assistantMessage as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-            llmDialog: { message: cause, id: crypto.randomUUID() },
-          };
 
           await safelyPerformUpdate(
             runtime,
@@ -3621,6 +3788,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pinnedCells,
             requestObservedConfidentiality,
             observationMaxConfidentiality,
+            abortSignal,
           );
 
           // If presentResult was called, cellify the raw input so we can
@@ -3654,10 +3822,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             );
             // Add error message instead of invalid partial results
             const errorMessage = {
-              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
               role: "assistant",
               content: "Some tool calls failed to execute. Please try again.",
-            } satisfies BuiltInLLMMessage & { [ID]: unknown };
+            } satisfies BuiltInLLMMessage;
 
             await safelyPerformUpdate(
               runtime,
@@ -3676,12 +3843,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
           // Create and publish tool result messages
           const toolResultMessages = createToolResultMessages(toolResults);
-
-          toolResultMessages.forEach((message) => {
-            (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-              llmDialog: { message: cause, id: crypto.randomUUID() },
-            };
-          });
 
           const success = await safelyPerformUpdate(
             runtime,
@@ -3743,7 +3904,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           if (success) {
             logger.info("llm", "Continuing conversation after tool calls...");
 
-            startRequest(
+            // Awaited so the turn that follows the tool calls stays inside this
+            // turn's promise, and so the conversation settles as one unit
+            // rather than one hop at a time.
+            await startRequest(
               runtime,
               space,
               cause,
@@ -3768,10 +3932,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
       } else {
         // No tool calls, just add the assistant message
         const assistantMessage = {
-          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content: llmResult.content,
-        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+        } satisfies BuiltInLLMMessage;
 
         // Ignore errors here, it probably means something else took over.
         await safelyPerformUpdate(
@@ -3803,11 +3966,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
         ? error.message
         : String(error);
       const errorMessage = {
-        [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
         role: "assistant",
         content:
           `I encountered an error generating a response: ${errorMessageText}`,
-      } satisfies BuiltInLLMMessage & { [ID]: unknown };
+      } satisfies BuiltInLLMMessage;
 
       safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
         messagesCell.withTx(tx).push(

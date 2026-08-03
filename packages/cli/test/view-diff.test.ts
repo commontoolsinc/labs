@@ -7,6 +7,7 @@ import {
   realWorkspace,
 } from "../lib/view/diffdoc.ts";
 import { createDiffSemantics } from "../lib/view/languages/typescript/semantics.ts";
+import type { Semantics } from "../lib/view/languages/language.ts";
 import { buildPeekCard } from "../lib/view/card.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
 import { renderFrame, type ViewState } from "../lib/view/render.ts";
@@ -144,12 +145,51 @@ Deno.test("diff: detection accepts git and plain unified diffs, rejects code", (
 +c
 `;
   assert(looksLikeDiff(plain), "plain diff -u detected");
+  assert(looksLikeDiff(`\n \t\n${plain}`), "leading blank lines are ignored");
   assert(!looksLikeDiff(SAMPLE), "transformed blob is not a diff");
   assert(!looksLikeDiff("const x = 1;\nconst y = 2;\n"), "code is not a diff");
   assert(
     !looksLikeDiff("--- header ---\nsome prose\nmore prose\n"),
     "a lone --- line is not a diff",
   );
+  assert(
+    !looksLikeDiff("diff --git a/x.ts b/x.ts\n"),
+    "a lone git header is not a diff",
+  );
+  assert(
+    !looksLikeDiff(
+      "diff --git a/x.ts b/x.ts\n" +
+        "const value = 1;\n" +
+        "export { value };\n",
+    ),
+    "a git header followed by source is not a diff",
+  );
+  const malformedGit = "diff --git malformed\n" +
+    "index 0000000..1111111 100644\n";
+  assert(
+    !looksLikeDiff(malformedGit),
+    "a malformed git header does not make a container",
+  );
+  assert(
+    !looksLikeDiff(`${malformedGit}${DIFF}`),
+    "a later valid diff does not rescue a malformed first container",
+  );
+  const embedded = `const patch = \`
+diff --git a/x.ts b/x.ts
+--- a/x.ts
++++ b/x.ts
+@@ -1 +1 @@
+-old
++new
+\`;
+`;
+  assert(!looksLikeDiff(embedded), "a diff inside source is not a container");
+  const rename = `diff --git a/old.ts b/new.ts
+similarity index 100%
+rename from old.ts
+rename to new.ts
+`;
+  assert(looksLikeDiff(rename), "a metadata-only git diff is detected");
 });
 
 // --- parsing -------------------------------------------------------------------
@@ -706,7 +746,7 @@ Deno.test("diff render: added lines carry the add tint under the syntax colour",
       height: 4,
       color: true,
       showLineNumbers: false,
-      wrapLines: false,
+      wrapMode: "off",
       displayMode: "pictures",
       selected: null,
       matches: null,
@@ -1110,14 +1150,14 @@ Deno.test("mod: buildView routes diffs to diff mode, sources to source mode", ()
   // Source code routes to source mode.
   const srcView = buildView("const x = 1;\nconst y = 2;\n");
   assert(!srcView.doc.flatStructure.some((n) => n.kind === "hunk"));
-  // A source file that merely EMBEDS a short diff stays in source mode (the
-  // diff-content share is far below the threshold)…
+  // A source file that embeds a short diff stays in source mode.
   const embedded =
     "const patch = `\n--- a/x.ts\n+++ b/x.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n`;\n" +
     Array.from({ length: 40 }, (_, i) => `const filler${i} = ${i};`).join("\n");
-  assert(looksLikeDiff(embedded), "the heuristic alone would misroute");
+  assert(!looksLikeDiff(embedded), "the embedded patch is not a raw diff");
   assert(!buildView(embedded).doc.flatStructure.some((n) => n.kind === "hunk"));
-  // …unless forced; and --no-diff suppresses a real diff.
+  // Forced diff mode accepts the embedded patch. No-diff mode suppresses a
+  // raw diff.
   assert(
     buildView(embedded, undefined, true).doc.flatStructure.some((n) =>
       n.kind === "hunk"
@@ -1368,6 +1408,58 @@ Deno.test("card: uses over a diff exclude the removed side", () => {
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+Deno.test("card: removed calls do not consume the definition lookup budget", () => {
+  const removed = Array.from(
+    { length: 40 },
+    () => "-  oldWorker.run(),",
+  ).join("\n");
+  const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,42 +1,3 @@
+ [
+${removed}
++  liveWorker.stop(),
+ ];
+`;
+  const model = parseDiff(diff)!;
+  const current = "[\n  liveWorker.stop(),\n];\n";
+  const { doc } = buildDiffDocument(diff, model, {
+    resolve: (path) => `/repo/${path}`,
+    read: () => current,
+  });
+  const statement = doc.flatStructure.find((node) =>
+    node.kind === "statement" && node.label === "["
+  )!;
+  const lookedUp: number[] = [];
+  const sem: Semantics = {
+    typeAt: () => null,
+    prewarm: () => {},
+    fileLines: () => null,
+    definitionOf: (offset) => {
+      lookedUp.push(offset);
+      return diff.slice(offset).startsWith("stop")
+        ? [{
+          name: "stop",
+          filePath: "/repo/ext.ts",
+          fileOffset: 0,
+          line: 0,
+          col: 0,
+          preview: "stop(): void",
+        }]
+        : [];
+    },
+  };
+  const card = buildPeekCard(doc, statement, sem);
+  const text = card.info.map((line) => line.text).join("\n");
+  assertEquals(
+    lookedUp.map((offset) => diff.slice(offset).match(/^\w+/)?.[0]).sort(),
+    ["liveWorker", "stop"],
+  );
+  assert(text.includes("  stop  ext.ts:1"), `live call is listed: ${text}`);
+  assert(!text.includes("remaining uses"), `nothing live is deferred: ${text}`);
 });
 
 // --- object-literal properties are navigable in a diff hunk ------------------

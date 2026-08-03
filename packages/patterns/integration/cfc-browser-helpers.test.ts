@@ -7,6 +7,7 @@ import {
   clickCfButtonsConcurrently,
   clickNthCfButton,
   clickTrustedAction,
+  waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 
 /** One element's live click marks, in attribute order. */
@@ -117,6 +118,170 @@ describe("CFC browser helpers", () => {
       "the click effect was not applied by a post-click view settle",
     );
     assertEquals(result.settleCalls, 2);
+  });
+
+  it("settles the view after a late target appears, before clicking it", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clickedAtSettle = 0;
+      let bound = false;
+      const bind = () => {
+        const button = root.querySelector("#late-vote-button");
+        if (!button || bound) return;
+        bound = true;
+        button.addEventListener("click", () => {
+          clickedAtSettle = settleCalls;
+        }, { once: true });
+      };
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (!root.querySelector("#late-vote-button")) {
+            const button = document.createElement("button");
+            button.id = "late-vote-button";
+            button.textContent = "Veto";
+            root.append(button);
+            return Promise.resolve();
+          }
+          bind();
+          return Promise.resolve();
+        },
+      };
+
+      (globalThis as typeof globalThis & {
+        __lateClickResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateClickResult = () => ({ settleCalls, clickedAtSettle });
+    });
+
+    await clickCfButton(page, "#late-vote-button");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __lateClickResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateClickResult()
+    );
+    assert(
+      result.clickedAtSettle > 0,
+      "the click reached no handler: the view never settled with the target " +
+        "present before the click was dispatched",
+    );
+    // One settle renders the control, one binds it, and one follows the click.
+    assertEquals(result.settleCalls, 3);
+  });
+
+  it("settles the same rendered control that it clicks", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const createButton = () => {
+        const button = document.createElement("button");
+        button.id = "replaced-join-button";
+        button.textContent = "Join";
+        return button;
+      };
+      root.append(createButton());
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clicks = 0;
+      let boundButton: HTMLButtonElement | undefined;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __replacedClickResult: () => {
+          settleCalls: number;
+          clicks: number;
+        };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (settleCalls === 1) {
+            root.replaceChildren(createButton());
+          } else {
+            const button = root.querySelector<HTMLButtonElement>(
+              "#replaced-join-button",
+            );
+            if (button && button !== boundButton) {
+              boundButton = button;
+              button.addEventListener("click", () => clicks++);
+            }
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __replacedClickResult: () => {
+          settleCalls: number;
+          clicks: number;
+        };
+      }).__replacedClickResult = () => ({ settleCalls, clicks });
+    });
+
+    await clickCfButton(page, "#replaced-join-button");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __replacedClickResult: () => {
+          settleCalls: number;
+          clicks: number;
+        };
+      }).__replacedClickResult()
+    );
+    assertEquals(
+      result.clicks,
+      1,
+      "the click reached the replacement before its handler was bound",
+    );
+    assertEquals(result.settleCalls, 3);
+  });
+
+  it("drives the page while waiting for text", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const line = document.createElement("p");
+      line.id = "settled-text-line";
+      line.textContent = "no votes yet";
+      root.append(line);
+      document.body.append(host);
+
+      // A rendering the page produces for itself, not one pushed to it. Nothing
+      // outside a settle applies it, which is what makes a wait that only
+      // watches the DOM sit here until the stuck-condition net fires.
+      let settleCalls = 0;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (settleCalls >= 2) line.textContent = "3 votes";
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __settledTextCalls: () => number;
+      }).__settledTextCalls = () => settleCalls;
+    });
+
+    await waitForSettledText(page, "#settled-text-line", "3 votes");
+
+    const settleCalls = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __settledTextCalls: () => number;
+      }).__settledTextCalls()
+    );
+    assertEquals(settleCalls, 2);
   });
 
   it("marks grouped targets between settlement barriers", async () => {

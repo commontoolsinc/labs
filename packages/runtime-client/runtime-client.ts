@@ -35,7 +35,9 @@ import {
   NavigateRequestNotification,
   type PatternSourcesResponse,
   PendingWritesNotification,
+  type PieceSourceAction,
   type PieceSourceView,
+  type PieceUpdateSourceResponse,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
@@ -317,6 +319,27 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.source;
   }
 
+  /**
+   * Change a piece's source lifecycle state and return the resulting source
+   * view. An incompatible candidate is returned as a warning without mutation.
+   */
+  async updatePieceSource(
+    pieceId: string,
+    space: DID,
+    action: PieceSourceAction,
+    options: { confirmationToken?: string } = {},
+  ): Promise<PieceUpdateSourceResponse> {
+    return await this.#conn.request<RequestType.PieceUpdateSource>({
+      type: RequestType.PieceUpdateSource,
+      pieceId,
+      space,
+      action,
+      ...(options.confirmationToken === undefined
+        ? {}
+        : { confirmationToken: options.confirmationToken }),
+    });
+  }
+
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
     const response = await this.#conn.request<RequestType.PageGetSlug>({
       type: RequestType.PageGetSlug,
@@ -337,7 +360,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Get the pieces list cell.
-   * Subscribe to this cell to get reactive updates of all pieces in the space.
+   * Subscribe to this cell to get reactive updates of registered pieces in the
+   * space. This is not a storage-wide piece listing.
    */
   async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({

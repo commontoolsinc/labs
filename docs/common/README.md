@@ -43,6 +43,7 @@ on the Common Fabric runtime.
 - [concepts/action.md](concepts/action.md) — handling events with `action()`
 - [concepts/handler.md](concepts/handler.md) — reusable parameterized handlers with `handler()`
 - [concepts/identity.md](concepts/identity.md) — object identity, `equals()`, why `===` fails across cells
+- [concepts/piece-discovery.md](concepts/piece-discovery.md) — the piece registry, searchable collections, link walks, and the limits of orphan-piece discovery
 - [concepts/self-reference.md](concepts/self-reference.md) — self-referential types with `SELF`
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures
 - [concepts/types-and-schemas/default.md](concepts/types-and-schemas/default.md) — `Default<>` for input defaults
@@ -67,7 +68,6 @@ on the Common Fabric runtime.
 
 - [components/COMPONENTS.md](components/COMPONENTS.md) — index of all `cf-*` components, bindable props, usage narrative
 - [components/forms.md](components/forms.md) — stub; form authoring lives in COMPONENTS.md, internals in `packages/ui/docs/`
-- [components/CELL_CONTEXT.md](components/CELL_CONTEXT.md) — `cf-cell-context` debugging tool
 
 ### conventions/ — system integration
 

@@ -4,7 +4,7 @@ import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
-  unwrapOneLevelAndBindtoDoc,
+  unwrapOneLevelAndBindToDoc,
 } from "../src/pattern-binding.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
@@ -21,6 +21,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -339,7 +340,7 @@ describe("pattern-binding", () => {
         tx,
       );
       argumentCell.set({ b: { c: 2 } });
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
@@ -376,7 +377,7 @@ describe("pattern-binding", () => {
         undefined,
         tx,
       );
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         undefined,
@@ -399,7 +400,7 @@ describe("pattern-binding", () => {
         tx,
       );
       expect(() =>
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           binding,
           undefined,
@@ -441,7 +442,7 @@ describe("pattern-binding", () => {
         argumentSchema,
         tx,
       );
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
@@ -531,7 +532,7 @@ describe("pattern-binding", () => {
         ],
       };
 
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         { op: nestedPattern },
         argumentCell.getAsNormalizedFullLink(),
@@ -556,6 +557,134 @@ describe("pattern-binding", () => {
     });
   });
 
+  describe("unwrapOneLevelAndBindToDoc structure sharing", () => {
+    /** Binds `binding`, with one derived internal cell named `"a"` available. */
+    const bind = <T>(binding: T): T => {
+      const resultCell = runtime.getCell(
+        space,
+        `share ${crypto.randomUUID()}`,
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        `share arg ${crypto.randomUUID()}`,
+        undefined,
+        tx,
+      );
+      return unwrapOneLevelAndBindToDoc(
+        runtime.cfc,
+        binding as never,
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+        { derivedInternalCells: [{ partialCause: "a" }] },
+      ) as T;
+    };
+    const alias = () => ({ $alias: { partialCause: "a", path: [] } });
+
+    it("returns a binding with nothing to rebind by identity", () => {
+      const binding = { x: 1, deep: { y: ["a", "b"] } };
+      const result = bind(binding);
+      expect(result).toBe(binding);
+      expect(result.deep).toBe(binding.deep);
+      expect(result.deep.y).toBe(binding.deep.y);
+    });
+
+    it("copies only the path to a rebound alias, sharing its siblings", () => {
+      const untouched = { deep: [1, 2, 3] };
+      const binding = { changed: { inner: alias() }, untouched };
+      const result = bind(binding);
+
+      // The root and the branch containing the alias are copies...
+      expect(result).not.toBe(binding);
+      expect(result.changed).not.toBe(binding.changed);
+      // ...while a sibling subtree with nothing to rebind is the same object.
+      expect(result.untouched).toBe(untouched);
+      expect(result.untouched.deep).toBe(untouched.deep);
+    });
+
+    it("shares an array whose elements all convert to themselves", () => {
+      const inner = [1, 2];
+      const binding = { list: [inner, "x"] };
+      const result = bind(binding);
+      expect(result).toBe(binding);
+      expect(result.list[0]).toBe(inner);
+    });
+
+    it("preserves holes when a sibling element rebinds", () => {
+      // deno-lint-ignore no-sparse-arrays
+      const binding = [alias(), , "third"] as unknown[];
+      const result = bind(binding);
+
+      expect(result).not.toBe(binding);
+      expect(result.length).toBe(3);
+      expect(1 in result).toBe(false); // still a hole, not `undefined`
+      expect(result[2]).toBe("third");
+      expect(isAliasBinding(result[0])).toBe(false); // it did rebind
+    });
+
+    it("keeps the length of an array whose trailing elements are holes", () => {
+      const binding = [alias()] as unknown[];
+      binding.length = 4;
+      const result = bind(binding);
+
+      expect(result.length).toBe(4);
+      for (const i of [1, 2, 3]) expect(i in result).toBe(false);
+    });
+
+    it("keeps a FabricPrimitive whole instead of flattening it", () => {
+      // A `FabricPrimitive` keeps its state in private fields, so
+      // `Object.entries()` reports none of it. A name-driven rebuild of the
+      // enclosing record therefore used to replace it with a bare `{}`.
+      const stamp = new FabricEpochNsec(123n);
+      const shared = bind({ stamp, n: 1 });
+      expect(shared.stamp).toBeInstanceOf(FabricEpochNsec);
+      expect(shared.stamp).toBe(stamp);
+
+      // ...and it survives the COPY path too, where a sibling rebinds.
+      const copied = bind({ stamp, aliased: alias() });
+      expect(copied).not.toBe(undefined);
+      expect(copied.stamp).toBeInstanceOf(FabricEpochNsec);
+      expect(copied.stamp).toBe(stamp);
+
+      // Same at the root, and inside an array.
+      expect(bind(stamp)).toBe(stamp);
+      expect(bind([stamp, alias()])[0]).toBe(stamp);
+    });
+
+    it("hands an Array subclass's species the same length `map()` would", () => {
+      // Regression: an earlier lazy copy used `slice(0, i)`, which passes the
+      // PREFIX length to `ArraySpeciesCreate`, where `map()` passes the full
+      // length. Only a custom `Symbol.species` can observe the difference.
+      const lengths: number[] = [];
+      class Spy extends Array {
+        constructor(...args: unknown[]) {
+          lengths.push(args[0] as number);
+          super(...(args as []));
+        }
+      }
+      class Watched extends Array {
+        // `ArrayConstructor` is what the base class declares here, and `Spy`
+        // does not structurally satisfy it (no callable-without-`new` form).
+        // The cast is the point of the fixture: an exotic species is exactly
+        // what is under test.
+        static override get [Symbol.species](): ArrayConstructor {
+          return Spy as unknown as ArrayConstructor;
+        }
+      }
+      // A rebind at the LAST index, so a prefix-sized copy would differ most.
+      const binding = Watched.from(["a", "b", alias()]) as unknown[];
+
+      lengths.length = 0;
+      binding.map((x) => x);
+      const viaMap = [...lengths];
+
+      lengths.length = 0;
+      bind(binding);
+      expect(lengths).toEqual(viaMap);
+    });
+  });
+
   describe("findAllWriteRedirectCells", () => {
     it("should not find non-unwrapped alias binding", () => {
       const testCell = runtime.getCell<{ foo: number }>(
@@ -569,7 +698,7 @@ describe("pattern-binding", () => {
       const links = findAllWriteRedirectCells(binding, testCell);
       expect(links.length).toBe(0);
 
-      const unwrappedBinding = unwrapOneLevelAndBindtoDoc(
+      const unwrappedBinding = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
@@ -606,7 +735,7 @@ describe("pattern-binding", () => {
       // Unwrapping converts the immediate alias to a sigil link; the deferred
       // aliases survive as aliases (defer crossed, next level's wiring) and
       // stay invisible to the walker.
-      const unwrappedBinding = unwrapOneLevelAndBindtoDoc(
+      const unwrappedBinding = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
@@ -743,7 +872,7 @@ describe("pattern-binding", () => {
         { $alias: { cell: "result", path: ["arr", "2"] } },
       ];
       const links = findAllWriteRedirectCells(
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),
@@ -773,7 +902,7 @@ describe("pattern-binding", () => {
         c: 3,
       };
       const links = findAllWriteRedirectCells(
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),

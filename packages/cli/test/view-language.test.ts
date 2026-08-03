@@ -1,16 +1,24 @@
 /**
- * Language selection: `languageForFile` picks a language by extension, uses
- * plain text for unknown named files, and keeps TypeScript for unnamed pipes.
- * `distinctLanguages` dedupes the languages a diff touches, and
- * `diffSemanticsFor` composes the diff view's semantic layer from the languages
- * present, scoped to each one's files.
+ * Language selection: declarative metadata covers filenames, aliases, and
+ * shebangs, with plain text when none match. Transformed compiler output selects
+ * TypeScript through a separate path. `distinctLanguages` dedupes the languages
+ * a diff touches, and `diffSemanticsFor` composes the diff view's semantic layer
+ * from the languages present, scoped to each one's files.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   diffSemanticsFor,
   distinctLanguages,
+  indexLanguagesByName,
   languageForFile,
+  languageForName,
+  languageForSource,
+  languageForTransformedOutput,
+  languageIds,
+  type LanguageMetadata,
+  languageNames,
+  metadataMatchesFilename,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
@@ -27,9 +35,12 @@ import {
 import { parseDiff } from "../lib/view/diff.ts";
 import type { Line } from "../lib/view/model.ts";
 
-Deno.test("languageForFile: named files resolve and unnamed input defaults to TypeScript", () => {
+Deno.test("languageForFile: named files resolve and missing names use plain text", () => {
   for (const ts of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx"]) {
     assertEquals(languageForFile(ts).id, "typescript", ts);
+  }
+  for (const name of ["a.mtsx", "a.ctsx", "a.mjsx", "a.cjsx"]) {
+    assertEquals(languageForFile(name).id, "plain-text", name);
   }
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile("deno.jsonc").id, "json");
@@ -37,7 +48,26 @@ Deno.test("languageForFile: named files resolve and unnamed input defaults to Ty
   assertEquals(languageForFile("script.py").id, "python");
   assertEquals(languageForFile("notes.xyz").id, "plain-text");
   assertEquals(languageForFile("LICENSE").id, "plain-text");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
+  assertEquals(languageForTransformedOutput().id, "typescript");
+});
+
+Deno.test("language metadata matches extensions, exact names, and compound patterns", () => {
+  const metadata: LanguageMetadata = {
+    extensions: [".demo"],
+    filenames: ["BUILD"],
+    filenamePatterns: [/^Dockerfile\..+$/i],
+    aliases: ["example"],
+    interpreters: ["example-runner"],
+  };
+
+  assert(metadataMatchesFilename(metadata, "/repo/source.DEMO"));
+  assert(metadataMatchesFilename(metadata, "/repo/BUILD"));
+  assert(metadataMatchesFilename(metadata, "containers/Dockerfile.x86_64"));
+  assert(metadataMatchesFilename(metadata, "containers/DOCKERFILE.debug"));
+  assert(!metadataMatchesFilename(metadata, "/repo/build"));
+  assert(!metadataMatchesFilename(metadata, "/repo/demo"));
+  assert(!metadataMatchesFilename(metadata, undefined));
 });
 
 Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {
@@ -45,6 +75,287 @@ Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser",
   const doc = languageForFile("answer.js").parseDocument(source, "answer.js");
   assertEquals(doc.text, source);
   assert(doc.lines[0].spans.some((span) => span.cls === "storageKeyword"));
+});
+
+Deno.test("languageForName: identifiers and aliases resolve explicit overrides", () => {
+  assertEquals(languageForName("typescript"), typeScriptLanguage);
+  assertEquals(languageForName("js"), typeScriptLanguage);
+  assertEquals(languageForName("markdown"), markdownLanguage);
+  assertEquals(languageForName("md"), markdownLanguage);
+  assertEquals(languageForName("json"), jsonLanguage);
+  assertEquals(languageForName("jsonc"), jsonLanguage);
+  assertEquals(languageForName("yaml"), yamlLanguage);
+  assertEquals(languageForName("yml"), yamlLanguage);
+  assertEquals(languageForName("python"), pythonLanguage);
+  assertEquals(languageForName("py"), pythonLanguage);
+  assertEquals(languageForName("plain-text"), plainTextLanguage);
+  assertEquals(languageForName("plaintext"), plainTextLanguage);
+  assertEquals(languageForName("TypeScript"), undefined);
+  assertEquals(languageForName("ruby"), undefined);
+  assertEquals(languageIds(), [
+    "typescript",
+    "markdown",
+    "json",
+    "yaml",
+    "python",
+    "plain-text",
+  ]);
+  assertEquals(languageNames(), [
+    "typescript",
+    "ts",
+    "javascript",
+    "js",
+    "markdown",
+    "md",
+    "json",
+    "jsonc",
+    "yaml",
+    "yml",
+    "python",
+    "py",
+    "plain-text",
+    "text",
+    "plaintext",
+  ]);
+});
+
+Deno.test("language names reject ambiguous identifiers and aliases", () => {
+  const collidingLanguage = {
+    ...markdownLanguage,
+    id: "other-markdown",
+    metadata: {
+      ...markdownLanguage.metadata,
+      aliases: ["typescript"],
+    },
+  };
+  assertThrows(
+    () =>
+      indexLanguagesByName([
+        typeScriptLanguage,
+        collidingLanguage,
+      ]),
+    Error,
+    'Language name "typescript" belongs to both typescript and other-markdown',
+  );
+});
+
+Deno.test("languageForSource: filenames precede direct and env shebangs", () => {
+  assertEquals(
+    languageForSource(
+      "tool",
+      "#!/usr/bin/python3.12\nprint('selected from a direct shebang')\n",
+    ),
+    pythonLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      undefined,
+      "#!/usr/bin/env -S deno run --allow-read\nconsole.log('deno');\n",
+    ),
+    typeScriptLanguage,
+  );
+  for (
+    const shebang of [
+      '#!/usr/bin/python3 "unterminated',
+      "#!/usr/bin/python3 trailing\\",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  assertEquals(
+    languageForSource(
+      "tool",
+      "#!/usr/bin/env -u PYTHONPATH python3\nprint('env options');\n",
+    ),
+    pythonLanguage,
+  );
+  for (
+    const shebang of [
+      "#!/usr/bin/env -v CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env -- CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env --unset PYTHONPATH python3",
+      "#!/usr/bin/env -iu PYTHONPATH python3",
+      "#!/usr/bin/env -iP /usr/bin python3",
+      "#!/usr/bin/env -iC /tmp python3",
+      "#!/usr/bin/env -iuPYTHONPATH python3",
+      "#!/usr/bin/env -S CF_VIEW_REVIEW=1 python3 -u",
+      '#!/usr/bin/env -S CF_VIEW_REVIEW="quoted value" python3 -u',
+      "#!/usr/bin/env -S -u PYTHONPATH python3",
+      "#!/usr/bin/env -S -iu PYTHONPATH python3",
+      "#!/usr/bin/env -S -iP /usr/bin python3",
+      "#!/usr/bin/env -S -iC /tmp python3",
+      "#!/usr/bin/env -S -iuPYTHONPATH python3",
+      "#!/usr/bin/env -S -- python3",
+      "#!/usr/bin/env -S -- CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env -S -S python3",
+      '#!/usr/bin/env -S -S "" python3',
+      '#!/usr/bin/env -S -S "-u" PYTHONPATH python3',
+      '#!/usr/bin/env -S -S "--" CF_VIEW_REVIEW=1 python3',
+      '#!/usr/bin/env -S -S "python3 -u"',
+      '#!/usr/bin/env -S -S "CF_VIEW_REVIEW=1" python3',
+      '#!/usr/bin/env -S --split-string "python3 -u"',
+      "#!/usr/bin/env -S --split-string=python3",
+      '#!/usr/bin/env -S --split-string="python3 -u"',
+      '#!/usr/bin/env -S --split-string="CF_VIEW_REVIEW=1" python3',
+      "#!/usr/bin/env -S -vS python3",
+      "#!/usr/bin/env -S -vSpython3",
+      '#!/usr/bin/env -S -vS"python3 -u"',
+      "#!/usr/bin/env -S -S#ignored python3",
+      "#!/usr/bin/env -S --split-string=#ignored python3",
+      "#!/usr/bin/env -S CF=has\\\\backslash python3",
+      '#!/usr/bin/env -S "CF=has\\$dollar" python3',
+      "#!/usr/bin/env -S 'CF=has\\ttext' python3",
+      "#!/usr/bin/env -S CF=one\\ two python3",
+      "#!/usr/bin/env -S CF=one\\\ttwo python3",
+      '#!/usr/bin/env -S "CF=one\\ two" python3',
+      "#!/usr/bin/env -S CF=one\\_python3",
+      '#!/usr/bin/env -S "CF=one\\_two" python3',
+      "#!/usr/bin/env -S ${CF_VIEW_BIN}/python3",
+      '#!/usr/bin/env -S "${CF_VIEW_BIN}/python3"',
+      "#!/usr/bin/env -S '$CF_VIEW_BIN/python3'",
+      "#!/usr/bin/env -S python3\\c ignored",
+      "#!/usr/bin/env -S python3 # ignored",
+      "#!/usr/bin/env --split-string python3 -u",
+      "#!/usr/bin/env --split-string=CF_VIEW_REVIEW=1 python3 -u",
+      "#!/usr/bin/env -vS python3 -S",
+      "#!/usr/bin/env -vSpython3 -S",
+      "#!/usr/bin/env python3 --split-string=node",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\nprint('env split string');\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  const deeplyNestedSplit = "--split-string=".repeat(20_000);
+  for (const command of ["python3", "${CF_VIEW_BIN}/python3"]) {
+    assertEquals(
+      languageForSource(
+        "tool",
+        `#!/usr/bin/env -S ${deeplyNestedSplit}${command}\n`,
+      ),
+      pythonLanguage,
+    );
+  }
+  for (const interpreter of ["deno", "node", "nodejs", "bun"]) {
+    assertEquals(
+      languageForSource(
+        "tool",
+        `#!/usr/bin/env ${interpreter}\nconsole.log('selected');\n`,
+      ),
+      typeScriptLanguage,
+      interpreter,
+    );
+  }
+  assertEquals(
+    languageForSource(
+      "notes.md",
+      "#!/usr/bin/env python3\n# Markdown filename wins\n",
+    ),
+    markdownLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "notes.txt",
+      "#!/usr/bin/env python3\nprint('plain-text filename wins');\n",
+    ),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "LICENSE",
+      "#!/usr/bin/env python3\nprint('exact filename wins');\n",
+    ),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env bash\necho plain\n"),
+    plainTextLanguage,
+  );
+});
+
+Deno.test("languageForSource: malformed and option-only shebangs fall back safely", () => {
+  assertEquals(languageForSource("tool", "#!   \n"), plainTextLanguage);
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -- python3\n"),
+    pythonLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env --\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -S\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -S --\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -u PATH\n"),
+    plainTextLanguage,
+  );
+  for (
+    const shebang of [
+      '#!/usr/bin/env python3 "unterminated',
+      "#!/usr/bin/env python3 argument\\",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  for (
+    const shebang of [
+      '#!/usr/bin/env "python3"',
+      "#!/usr/bin/env py\\thon3",
+      "#!/usr/bin/env python3\\x",
+      '#!/usr/bin/env "python3\\x"',
+      "#!/usr/bin/env python3\\",
+      '#!/usr/bin/env "python3',
+      "#!/usr/bin/env 'python3",
+      '#!/usr/bin/env -S "python3',
+      "#!/usr/bin/env -S -u",
+      "#!/usr/bin/env -S -S",
+      "#!/usr/bin/env -S -vS",
+      "#!/usr/bin/env -S -S '\"python3'",
+      "#!/usr/bin/env -S py\\thon3",
+      '#!/usr/bin/env -S "py\\thon3"',
+      "#!/usr/bin/env -S python3\\x",
+      '#!/usr/bin/env -S "python3\\c"',
+      "#!/usr/bin/env -S # python3",
+      "#!/usr/bin/env -S -S#/usr/bin/python3",
+      "#!/usr/bin/env -S --split-string=#/usr/bin/python3",
+      "#!/usr/bin/env -S $CF_VIEW_BIN/python3",
+      "#!/usr/bin/env -S $*/python3",
+      "#!/usr/bin/env -S ${}/python3",
+      "#!/usr/bin/env -S ${1}/python3",
+      "#!/usr/bin/env -S ${A-B}/python3",
+      "#!/usr/bin/env -S ${CF_VIEW_BIN/python3",
+      '#!/usr/bin/env -S "$CF_VIEW_BIN/python3"',
+      "#!/usr/bin/env CF_VIEW_REVIEW=1 -S python3",
+      "#!/usr/bin/env -S CF_VIEW_REVIEW=1 -S python3",
+      '#!/usr/bin/env -S -S "CF_VIEW_REVIEW=1" -S python3',
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      plainTextLanguage,
+      shebang,
+    );
+  }
 });
 
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {

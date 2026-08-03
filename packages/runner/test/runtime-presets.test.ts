@@ -105,6 +105,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   commitBackpressure: { treat: "absent" },
   moduleByteCache: { treat: "absent" },
   patternCoverage: { treat: "absent" },
+  onPatternInstantiated: { treat: "absent" },
   fetch: { treat: "absent" },
 };
 
@@ -190,6 +191,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
     } as unknown as NonNullable<RuntimeOptions["telemetry"]>;
     const commitBackpressure = { retryWindowMs: 100 };
     const spaceHostMap = { "did:key:zSpace": "https://host.example" };
+    const onPatternInstantiated = () => {};
 
     it("productionServer", () => {
       const patternApiUrl = new URL("https://public.example/api");
@@ -235,6 +237,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         cfcEnforcementMode: "observe",
         patternCoverage,
+        onPatternInstantiated,
       })).toEqual({
         ...minimalOutputs.patternTest,
         fetch: fetchSentinel,
@@ -243,6 +246,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         cfcEnforcementMode: "observe",
         patternCoverage,
+        onPatternInstantiated,
       });
     });
 

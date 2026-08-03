@@ -18,6 +18,7 @@ import type {
   HarnessModelTurnRequest,
   HarnessModelTurnResult,
 } from "./client.ts";
+import { normalizeOpenAIUsage } from "./usage.ts";
 
 export const OPENAI_CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
@@ -291,6 +292,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
   async complete(
     request: HarnessModelTurnRequest,
   ): Promise<HarnessModelTurnResult> {
+    if (request.promptCacheMode !== undefined) {
+      throw new Error(
+        "prompt cache mode controls are not supported by openai-codex; omit promptCacheMode to use the subscription backend's implicit prompt cache",
+      );
+    }
     if (request.nativeModelToolIds.length > 0) {
       throw new Error(
         "openai-codex does not support provider-native tools in this release",
@@ -308,7 +314,9 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     const credential = await this.#resolver.resolve(request.signal);
     if (request.signal?.aborted) throw abortReason(request.signal);
     const responseTools = toResponsesTools(request.tools);
-    const affinityKey = providerRunAffinityKey(request.runId);
+    const affinityKey = providerRunAffinityKey(
+      request.cacheAffinityKey ?? request.runId,
+    );
     const requestId = crypto.randomUUID();
     const body = JSON.stringify({
       model: request.model,
@@ -320,6 +328,9 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       text: { verbosity: "low" },
       include: ["reasoning.encrypted_content"],
       prompt_cache_key: affinityKey,
+      ...(request.reasoningEffort !== undefined
+        ? { reasoning: { effort: request.reasoningEffort } }
+        : {}),
       tool_choice: "auto",
       parallel_tool_calls: true,
     });
@@ -471,10 +482,15 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     if (terminalOutputEmpty && streamedItems.length > 0) {
       terminal = { ...terminal, output: streamedItems };
     }
-    const usage = typeof terminal.usage === "object" &&
+    const rawUsage = typeof terminal.usage === "object" &&
         terminal.usage !== null && !Array.isArray(terminal.usage)
       ? terminal.usage as Record<string, unknown>
       : undefined;
+    const normalizedUsage = normalizeOpenAIUsage(rawUsage);
+    const usage = normalizedUsage === undefined ? undefined : {
+      ...normalizedUsage,
+      estimateWithheldReason: "provider-pricing-unavailable" as const,
+    };
     return {
       assistant: normalizeTerminalResponse(
         terminal,
@@ -482,21 +498,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         OPENAI_CODEX_PROVIDER_ID,
         OPENAI_CODEX_RESPONSES_LABEL,
       ),
-      ...(usage !== undefined
-        ? {
-          usage: {
-            ...(typeof usage.input_tokens === "number"
-              ? { inputTokens: usage.input_tokens }
-              : {}),
-            ...(typeof usage.output_tokens === "number"
-              ? { outputTokens: usage.output_tokens }
-              : {}),
-            ...(typeof usage.total_tokens === "number"
-              ? { totalTokens: usage.total_tokens }
-              : {}),
-          },
-        }
-        : {}),
+      ...(usage !== undefined ? { usage } : {}),
     };
   }
 }

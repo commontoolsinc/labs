@@ -1,14 +1,13 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { FabricPrimitive } from "@commonfabric/data-model/interface";
 import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/interface";
-import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
+  type FabricExecValue,
+  isPattern,
+  type JSONSchema,
+  type JSONValue,
+} from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -292,16 +291,16 @@ function sendValueToBindingInner<T>(
           cell.runtime,
           tx,
           scopedRef,
-          value as FabricValue,
+          value,
           { cell: cell.getAsNormalizedFullLink(), binding },
-          { meta: ignoreReadForScheduling },
+          { meta: ignoreReadForScheduling, schemaRole: "output" },
         );
       }
       tx.writeValueOrThrow(
         bindingLink,
         createSigilLinkFromParsedLink(scopedRef, {
           base: bindingLink,
-        }) as FabricValue,
+        }),
       );
       return;
     }
@@ -315,7 +314,7 @@ function sendValueToBindingInner<T>(
       ) {
         const newValue = createSigilLinkFromParsedLink(
           valueLink,
-        ) as FabricValue;
+        );
         // Skip the write when the redirect already holds this exact link. Raw
         // builtins (ifElse/when/unless/map/...) re-run and re-send their result
         // whenever their inputs change, but the output binding points at a
@@ -336,9 +335,9 @@ function sendValueToBindingInner<T>(
       cell.runtime,
       tx,
       ref,
-      value as FabricValue,
+      value,
       { cell: cell.getAsNormalizedFullLink(), binding },
-      { meta: ignoreReadForScheduling },
+      { meta: ignoreReadForScheduling, schemaRole: "output" },
     );
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
@@ -405,7 +404,7 @@ function sendValueToBindingInner<T>(
  *   links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoDoc<T, U>(
+export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
@@ -414,10 +413,42 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
 ): T {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
 
+  /**
+   * Rebinds one value, returning it unchanged when nothing under it rebound.
+   *
+   * A `FabricPrimitive` leaves first, ahead of the container branches. It is a
+   * genuine leaf: an opaque scalar whose state lives in private fields, so
+   * `Object.entries()` reports none of it and a rebuild from those entries
+   * would yield a bare `{}`. Returning it as-is preserves it, and skips an
+   * `Object.entries()` call that can only ever come back empty.
+   *
+   * TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a container
+   * holding other `FabricValue`s, so it does need descending into, but by its
+   * codec contents rather than by property name. It currently falls through to
+   * the record branch, where its zero enumerable own properties mean nothing
+   * rebinds and the original is handed back — preserved rather than decomposed,
+   * but never descended, so a bound alias nested inside one is missed. The two
+   * sibling walks in this file carry the same marker.
+   *
+   * The container branches then hand back the original when nothing under one
+   * rebound, without checking whether a rebuild would have reproduced it. For
+   * the shapes those branches actually see, it would: an array and a plain
+   * object reaching them are the *inert* ones of `isInertArray()` /
+   * `isInertPlainObject()`, and every shape a name-driven rebuild silently
+   * alters — a foreign prototype, a symbol key, a non-enumerable or
+   * accessor-backed property — is non-inert. That is a claim about the
+   * CONTAINERS, not about `FabricExecValue` as a whole: the special objects
+   * handled above are non-inert too, which is exactly why they leave first.
+   *
+   * Sharing is quieter than rebuilding for an accessor in one respect only. It
+   * is not frozen *into* a data property, as `Object.fromEntries()` would do;
+   * but `Object.entries()` still reads it on the way past, so a getter's side
+   * effect fires either way.
+   */
   function convert(
-    binding: unknown,
+    binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
-  ): unknown {
+  ): FabricExecValue {
     if (isAliasBinding(binding)) {
       const { defer: optDefer, ...aliasRest } = { ...binding.$alias };
       const defer = optDefer ?? 0;
@@ -500,35 +531,61 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         );
       }
     } else if (binding instanceof FabricPrimitive) {
-      // An opaque leaf; return it as-is ahead of the record rebuild below,
-      // which would otherwise reconstruct it from its (empty) own properties.
       return binding;
-    } else if (binding instanceof FabricInstance) {
-      // TODO(danfuzz): a `FabricInstance` binding is not yet handled -- it
-      // needs processing by its codec contents. Fail loudly until that exists.
-      throw new Error(
-        `Cannot yet handle \`${binding.constructor.name}\` (a ` +
-          "`FabricInstance`) as a pattern binding.",
-      );
     } else if (Array.isArray(binding)) {
-      return binding.map((value, index) =>
-        convert(
+      // Copy lazily: allocate only once a child actually converts to something
+      // else, so the shared path allocates nothing.
+      //
+      // Holes are skipped rather than visited, as `map()` skips them. That is a
+      // cost guard, not a correctness one: `convert()` returns a hole's
+      // `undefined` unchanged, so the `next === value` test below would skip it
+      // regardless. Testing membership first keeps a sparse array priced by its
+      // element count rather than by its extent — length 100k with two elements
+      // is otherwise 100k pointless `convert()` calls.
+      let converted: FabricExecValue[] | undefined;
+      for (let i = 0; i < binding.length; i++) {
+        if (!(i in binding)) continue;
+        const value = binding[i];
+        const next = convert(
           value,
-          cfc.getSchemaAtPath(targetSchema, [String(index)]),
-        )
-      );
+          cfc.getSchemaAtPath(targetSchema, [String(i)]),
+        );
+        if (next === value) continue;
+        // First change: copy the whole array, not just the prefix. `slice()`
+        // with no arguments hands the species constructor the same length
+        // `map()` did, so an `Array` subclass with a custom `Symbol.species`
+        // sees what it always saw; and the copy already carries every unchanged
+        // element and every hole, leaving only changed indices to write.
+        converted ??= binding.slice();
+        converted[i] = next;
+      }
+      // Nothing rebound, so the original is the answer.
+      return converted ?? binding;
     } else if (isRecord(binding)) {
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
-        Object.entries(binding).map(([key, value]) => [
-          key,
-          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
-        ]),
-      );
+      // Copy lazily, as the array branch does: allocate only once a value
+      // actually converts to something else, so the shared path — the common
+      // one, and the majority of nodes — allocates nothing at all. (Compare
+      // `overlayUnresolvedLinkPlaceholders()` in `runner.ts`, the same idiom.)
+      let converted: Record<string, FabricExecValue> | undefined;
+      for (const key of Object.keys(binding)) {
+        const value = binding[key];
+        const next = convert(value, cfc.getSchemaAtPath(targetSchema, [key]));
+        if (next === value) continue;
+        converted ??= { ...binding };
+        converted[key] = next;
+      }
+      if (converted === undefined) {
+        // Nothing under here rebound, so hand back the original.
+        // `noteDerivedCopy()` is skipped deliberately: it no-ops when copy and
+        // original are the same value, and `resolveOriginal()` already answers
+        // with the original.
+        return binding;
+      }
       // Carry the derivation link (trust + content-addressed entry ref) onto
       // the bound copy so a pattern value re-bound here still resolves its
       // `{ identity, symbol }` and stays trusted.
-      if (isPattern(binding)) noteDerivedCopy(result, binding);
-      return result;
+      if (isPattern(binding)) noteDerivedCopy(converted, binding);
+      return converted;
     } else return binding;
   }
   return convert(binding, options?.targetSchema) as T;
@@ -588,7 +645,7 @@ export function findAllWriteRedirectCells<T>(
   // `Cell<unknown>`) rather than the original typed base.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isAliasBinding(binding)) {
-      // Callers unwrap bindings (unwrapOneLevelAndBindtoDoc) before walking,
+      // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
       // so a surviving `$alias` belongs to a nested level — it just crossed
       // its `defer` boundary, or sits inside an embedded Pattern value —
       // and is not part of this level's read/write surface.

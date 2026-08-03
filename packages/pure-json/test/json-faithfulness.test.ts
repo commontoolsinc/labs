@@ -93,6 +93,35 @@ describe("findJsonUnfaithfulValues", () => {
     expect(found[0]!.reason).toContain("non-index");
   });
 
+  it("catches a NON-enumerable non-index property on an array", () => {
+    // `JSON.stringify` drops it just the same, so an enumerable-only walk
+    // would certify a value that JSON demonstrably mangles.
+    const withHidden: unknown[] = [1, 2];
+    Object.defineProperty(withHidden, "foo", { value: 3, enumerable: false });
+
+    const found = findJsonUnfaithfulValues({ default: withHidden });
+
+    expect(found).toHaveLength(1);
+    expect(found[0]!.pointer).toBe("/default/foo");
+    expect(found[0]!.reason).toContain("non-index");
+  });
+
+  it("does not report an array's own `length` as a dropped property", () => {
+    // `length` is a non-index own name on every array, so walking own property
+    // names rather than enumerable keys must not start flagging it.
+    expect(findJsonUnfaithfulValues({ default: [1, 2, 3] })).toHaveLength(0);
+  });
+
+  it("keeps reporting a non-enumerable index as faithful", () => {
+    // Such an index is a real element -- `JSON.stringify` emits it -- so it is
+    // not an offender even though it is invisible to an enumerable-only walk.
+    const arr: unknown[] = [1, 2, 3];
+    Object.defineProperty(arr, "0", { value: 9, enumerable: false });
+
+    expect(JSON.stringify(arr)).toBe("[9,2,3]");
+    expect(findJsonUnfaithfulValues({ default: arr })).toHaveLength(0);
+  });
+
   it("catches a toJSON hook, even non-enumerable", () => {
     // `toJSON` replaces the value before JSON sees its contents, so the walk
     // cannot certify what would be sent.

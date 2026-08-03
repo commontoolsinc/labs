@@ -1,0 +1,444 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "ItemStatus": {
+        "enum": [
+          "want",
+          "reading",
+          "finished",
+          "abandoned"
+        ]
+      },
+      "ItemType": {
+        "enum": [
+          "book",
+          "article",
+          "paper",
+          "video"
+        ]
+      },
+      "ReadingItemDetailOutput": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          "addedAt": {
+            "type": "number"
+          },
+          "author": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setNotes": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "notes"
+            ],
+            "type": "object"
+          },
+          "setRating": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "rating": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "rating"
+            ],
+            "type": "object"
+          },
+          "setStatus": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/$defs/ItemStatus"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/$defs/ItemStatus"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/ItemType"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "author",
+          "url",
+          "type",
+          "status",
+          "rating",
+          "notes",
+          "summary",
+          "addedAt",
+          "finishedAt",
+          "setStatus",
+          "setRating",
+          "setNotes",
+          "$NAME",
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ReadingItemDetailOutput"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "reading-list/reading-list.tsx",
+  "resultSchema": {
+    "$defs": {
+      "ItemStatus": {
+        "enum": [
+          "want",
+          "reading",
+          "finished",
+          "abandoned"
+        ]
+      },
+      "ItemType": {
+        "enum": [
+          "book",
+          "article",
+          "paper",
+          "video"
+        ]
+      },
+      "ReadingItemDetailOutput": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          "addedAt": {
+            "type": "number"
+          },
+          "author": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setNotes": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "notes"
+            ],
+            "type": "object"
+          },
+          "setRating": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "rating": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "rating"
+            ],
+            "type": "object"
+          },
+          "setStatus": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/$defs/ItemStatus"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/$defs/ItemStatus"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/ItemType"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "author",
+          "url",
+          "type",
+          "status",
+          "rating",
+          "notes",
+          "summary",
+          "addedAt",
+          "finishedAt",
+          "setStatus",
+          "setRating",
+          "setNotes",
+          "$NAME",
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/$defs/ItemType"
+          }
+        },
+        "required": [
+          "title",
+          "author",
+          "type"
+        ],
+        "type": "object"
+      },
+      "currentFilter": {
+        "enum": [
+          "want",
+          "reading",
+          "finished",
+          "abandoned",
+          "all"
+        ]
+      },
+      "filteredCount": {
+        "type": "number"
+      },
+      "filteredItems": {
+        "items": {
+          "$ref": "#/$defs/ReadingItemDetailOutput"
+        },
+        "type": "array"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/ReadingItemDetailOutput"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "items": {
+          "$ref": "#/$defs/ReadingItemDetailOutput"
+        },
+        "type": "array"
+      },
+      "removeItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/ReadingItemDetailOutput"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "type": "object"
+      },
+      "setFilter": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "want",
+              "reading",
+              "finished",
+              "abandoned",
+              "all"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "totalCount": {
+        "type": "number"
+      },
+      "updateItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/ReadingItemDetailOutput"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/$defs/ItemStatus"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "items",
+      "mentionable",
+      "totalCount",
+      "currentFilter",
+      "filteredItems",
+      "filteredCount",
+      "summary",
+      "addItem",
+      "removeItem",
+      "setFilter",
+      "updateItem",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

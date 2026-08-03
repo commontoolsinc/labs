@@ -102,8 +102,7 @@ export class CFSeparator extends BaseElement {
         part="separator"
         role="${this.decorative ? "none" : "separator"}"
         aria-orientation="${this.decorative ? null : this.orientation}"
-      >
-      </div>
+      ></div>
     `;
   }
 }
