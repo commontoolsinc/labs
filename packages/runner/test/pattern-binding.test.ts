@@ -342,7 +342,6 @@ describe("pattern-binding", () => {
       );
       argumentCell.set({ b: { c: 2 } });
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
@@ -379,7 +378,6 @@ describe("pattern-binding", () => {
         tx,
       );
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         undefined,
         resultCell,
@@ -402,7 +400,6 @@ describe("pattern-binding", () => {
       );
       expect(() =>
         unwrapOneLevelAndBindToDoc(
-          runtime.cfc,
           binding,
           undefined,
           resultCell,
@@ -444,7 +441,6 @@ describe("pattern-binding", () => {
         tx,
       );
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
@@ -534,7 +530,6 @@ describe("pattern-binding", () => {
       };
 
       const result = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         { op: nestedPattern },
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
@@ -574,7 +569,6 @@ describe("pattern-binding", () => {
         tx,
       );
       return unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding as never,
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
@@ -714,7 +708,6 @@ describe("pattern-binding", () => {
       expect(links.length).toBe(0);
 
       const unwrappedBinding = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
         testCell,
@@ -751,7 +744,6 @@ describe("pattern-binding", () => {
       // aliases survive as aliases (defer crossed, next level's wiring) and
       // stay invisible to the walker.
       const unwrappedBinding = unwrapOneLevelAndBindToDoc(
-        runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
         testCell,
@@ -888,7 +880,6 @@ describe("pattern-binding", () => {
       ];
       const links = findAllWriteRedirectCells(
         unwrapOneLevelAndBindToDoc(
-          runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),
           testCell,
@@ -918,7 +909,6 @@ describe("pattern-binding", () => {
       };
       const links = findAllWriteRedirectCells(
         unwrapOneLevelAndBindToDoc(
-          runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),
           testCell,

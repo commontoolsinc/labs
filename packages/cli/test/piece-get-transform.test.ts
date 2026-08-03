@@ -2,12 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
-import {
-  type Cell,
-  ContextualFlowControl,
-  type JSONSchema,
-  Runtime,
-} from "@commonfabric/runner";
+import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   derivePieceGetValue,
@@ -1234,10 +1229,9 @@ describe("cf piece get transforms", () => {
       properties: { body: true as const },
       additionalProperties: false as const,
     };
-    const cfc = new ContextualFlowControl();
-    expect(selectSourceSchema(cfc, source, mask)).toBe(source);
+    expect(selectSourceSchema(source, mask)).toBe(source);
     expect(
-      selectSourceSchema(cfc, source, mask, "projected-output"),
+      selectSourceSchema(source, mask, "projected-output"),
     ).toEqual({
       anyOf: source.anyOf,
       allOf: [

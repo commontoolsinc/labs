@@ -57,11 +57,13 @@ export function applyArgumentIfcToResult(
   resultSchema?: JSONSchema,
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
-    const cfc = new ContextualFlowControl();
     const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, argumentSchema);
     return (joined.size !== 0)
-      ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
+      ? ContextualFlowControl.schemaWithLub(
+        resultSchema ?? true,
+        ContextualFlowControl.lub(joined),
+      )
       : resultSchema;
   }
   return resultSchema;
@@ -73,7 +75,6 @@ export function applyInputIfcToOutput<T, R>(
   outputs: FactoryInput<R>,
 ) {
   const collectedClassifications = new Set<unknown>();
-  const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isCell(item)) {
       const { schema: inputSchema } = item.export();
@@ -83,7 +84,10 @@ export function applyInputIfcToOutput<T, R>(
     }
   });
   if (collectedClassifications.size !== 0) {
-    attachCfcToOutputs(outputs, cfc, cfc.lub(collectedClassifications));
+    attachCfcToOutputs(
+      outputs,
+      ContextualFlowControl.lub(collectedClassifications),
+    );
   }
 }
 
@@ -92,7 +96,6 @@ export function applyInputIfcToOutput<T, R>(
 // TODO(@ubik2) Investigate: can we have cycles here?
 function attachCfcToOutputs(
   outputs: unknown,
-  cfc: ContextualFlowControl,
   lubConfidentiality: readonly CfcConfClause[],
 ) {
   if (isCell(outputs)) {
@@ -104,7 +107,7 @@ function attachCfcToOutputs(
     const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
       ? { ...outputSchema.ifc }
       : {};
-    ifc.confidentiality = cfc.lub(joined);
+    ifc.confidentiality = ContextualFlowControl.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}
       : outputSchema === false
@@ -129,7 +132,7 @@ function attachCfcToOutputs(
     // slots, so CFC labels are not attached to the special object's actual
     // contents.
     for (const [_, value] of Object.entries(outputs)) {
-      attachCfcToOutputs(value, cfc, lubConfidentiality);
+      attachCfcToOutputs(value, lubConfidentiality);
     }
   }
 }

@@ -15,7 +15,6 @@ import type {
   Pattern,
   Schema,
 } from "./builder/types.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
@@ -632,7 +631,6 @@ export class Runtime {
   readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
   readonly pieceCreatedCallback?: PieceCreatedCallback;
-  readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
   /** See `RuntimeOptions.onPatternInstantiated`. */
   readonly onPatternInstantiated?: PatternInstantiationObserver;
@@ -1075,7 +1073,6 @@ export class Runtime {
     this.patternManager = new PatternManager(this);
     this.patternUpdater = new PatternUpdater(this);
     this.runner = new Runner(this);
-    this.cfc = new ContextualFlowControl();
     this.onPatternInstantiated = options.onPatternInstantiated;
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
