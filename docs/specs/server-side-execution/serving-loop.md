@@ -278,7 +278,8 @@ executing:
      Recovery DEPENDS on this index (own derived commits are echo-
      skipped live, so commit replay cannot re-mark the frontier); what
      keeps it on the right side of the no-payload lesson is its shape:
-     ids + seqs only, overwritten in place per action — never payloads,
+     ids + seqs only, overwritten in place per (action, instance) —
+     never payloads,
      never per-run history — and admission never reads it. It is NOT
      the evidence log (§8's exception says the same). Prior art being
      REDUCED, not a kept shape: main's `persistentSchedulerState`
@@ -291,7 +292,8 @@ executing:
   2. **The evidence log (FORBIDDEN — tripwires §8)**: per-run link
      payloads, certificates, replay records — 130 KB per map run in v1.
      The test between the two: payloads or per-run history ⇒ evidence;
-     ids + seqs, overwritten in place per action ⇒ basis index.
+     ids + seqs, overwritten in place per (action, instance) ⇒ basis
+     index.
   W, `eventWatermark`, and the basis index are the correctness-bearing
   persisted forms; commit REPLAY bears nothing — recovery never replays
   (§6). Client reload needs none of this: every derived value is
@@ -614,7 +616,15 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   result IS the node's value — no effect fires. This is what makes
   restart-recovery safe: recompute pure nodes, re-derive keys, reuse
   results.
-- **Miss rule**: enqueue the effect on the outbox with the key; on
+- **Miss rule**: enqueue the effect on the outbox with the key AND
+  the run's identity carriage — the result-cell address including
+  its instance `scope_key`, plus the run's acting identity where it
+  had one. The completion commit is derived-class, so it carries
+  protocol.md §1's annotations like any other — but it never passes
+  through §3d's sealing (the run is long over when the response
+  arrives), and the memo key cannot supply them (the instance is
+  hashed in, not recoverable), so the outbox entry is the only
+  carrier. On
   completion, commit result + key in one derived-class commit and
   inject the result-cell dirtiness IN-PROCESS, post-commit — the next
   wave consumes it directly. The subscription's copy of the completion
@@ -633,7 +643,10 @@ process-local; on crash, missing results are re-missed from keys).
 
 ## 5. The outbox
 
-- Process-local queue of (space, memo key, request, authority handle).
+- Process-local queue of (space, memo key, request, authority
+  handle, identity carriage — §4's miss rule: the result-cell
+  address with its `scope_key`, plus the acting identity where the
+  run had one).
 - At-least-once; idempotence comes from the memo hit rule (a duplicate
   completion writes an identical key and is a CAS no-op).
 - Authority: the capability handle bound at wiring time (README §3.8);

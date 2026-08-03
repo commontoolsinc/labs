@@ -77,10 +77,11 @@ not coin flip:
   private definitions.
 - **What stays engine-owned is IDENTITY DERIVATION, not the
   format.** For `authored` traffic the memory server still derives
-  the identity from the authenticated session at admission
-  (`resolveScopeKey`'s session binding,
-  `packages/memory/v2/server.ts:1577-1580`) and then constructs the
-  key via the shared definition. Clients never name keys — their
+  the identity from the authenticated session at admission —
+  `applyCommit` threads `session.principal` + `message.sessionId`
+  (`packages/memory/v2/server.ts:2128-2132`) into the engine's
+  write path, which constructs the key (`engine.ts:5374-5375`) —
+  via the shared definition. Clients never name keys — their
   identity rides the session, established at session open, never
   the commit (protocol.md §1) — so the derivation step is admission
   machinery and never exists client-side.
@@ -97,10 +98,13 @@ not coin flip:
   (`@commonfabric/memory/v2` — e.g.
   `packages/runner/src/storage/v2.ts:43`); what it must not import
   is ENGINE internals, and after the move the format is not one.
-  (Evidence the old state was already leaking:
+  (Evidence the boundary was already porous:
   `packages/state-inspector/scopes.ts` imports `resolveScopeKey`
-  straight from `engine.ts` today; it migrates to the shared module
-  with the rest.)
+  straight from `engine.ts` today — it migrates to the shared
+  module with the rest — and the runner itself already reaches into
+  `memory/v2` internals beyond the wire module,
+  `packages/runner/src/storage/v2.ts:44-49`; those other leaks are
+  out of this ruling's scope.)
 
 Plan Phase 1 stage E is UNBLOCKED by this ruling; the migration is
 one definition move ahead of the nine-site re-keying.

@@ -311,8 +311,10 @@ Phases 1–5 meet them wherever scoped state appears.
   dependency graph, and the basis index must re-key per instance —
   the single biggest scope cost of the arc.
 - **M3 — There is no all-principals write path.** `resolveScopeKey`
-  binds to the authenticated session
-  (`packages/memory/v2/server.ts:1577-1580`), and mirrors refuse to
+  is fed from the authenticated session at admission (`applyCommit`
+  threads principal + sessionId,
+  `packages/memory/v2/server.ts:2128-2132`, into
+  `engine.ts:5374-5375`), and mirrors refuse to
   re-derive scope context (`engine.ts:2580-2596`): a scoped write
   requires that instance's principal. → v2, RESOLVED (R-Q6b,
   2026-08-02): derived commits carry an explicit `scope_key` on

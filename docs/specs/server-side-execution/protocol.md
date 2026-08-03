@@ -120,8 +120,11 @@ quote above before "fixing" it:
   annotations. Only `authored` commits still carry identity at the
   envelope.
 - *"`resolveScopeKey` throws without a principal / would resolve
-  `user:<serviceDID>` here."* That function DERIVES identity from
-  the authenticated session — the client-commit model. Server-side
+  `user:<serviceDID>` here."* The function itself is a pure
+  constructor; it is its admission-side CALLERS that feed it
+  identity derived from the authenticated session (`applyCommit`,
+  `packages/memory/v2/server.ts:2128-2132` →
+  `engine.ts:5374-5375`) — the client-commit model. Server-side
   runs never derive identity from their own session: identity
   arrives WITH the work (the demand, or the stamped `firedAt`) and
   is carried into keys, not resolved from ambient state (scopes.md
@@ -189,7 +192,7 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries `actingPrincipal` + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → CAS |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
-| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1) | requester holds the live `execution_lease` for the space (the SAME one equality check) → the named instance is read. A non-holder naming a `scope_key` is REJECTED exactly as today; a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
+| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1) | requester holds the live `execution_lease` for the space (the SAME one equality check) → the named instance is read. A non-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
 
 That is the ENTIRE admission surface — the last row is the one
 READ-side check; every row above it is commit admission. No scope
@@ -211,6 +214,13 @@ forged actor is UNREPRESENTABLE rather than merely validated, and a
 disagreeing client value is rejected rather than silently overwritten.
 `clientSeq` stays client-minted — it orders one session's own appends
 and steers nothing.
+Delegated appends (the server-produced authored row above) stamp
+from the DELEGATION, never the delegating envelope:
+`firedAt.user` := the validated `actingPrincipal`,
+`firedAt.session` := `"server"` (events.md §2) — stamping from the
+outbox's own envelope would run the target handler as
+`user:<serviceDID>`, the silent-empty-instance trap this section
+exists to prevent.
 This PRESERVES a guarantee the store gives today rather than adding
 one: `resolveScopeKey` binds scope to the authenticated session
 (scopes.md §7 M3), so cross-principal scoped writes are impossible on
@@ -229,8 +239,9 @@ every instance, so it may NAME an instance to read. RATIFIED
 (owner, 2026-08-03; was ledger LD5): this row is the read half of
 §1's transaction identity model — the server-driven variant names
 keys on both sides of the wire, while the client-facing protocol is
-untouched: a non-holder naming a `scope_key` is rejected exactly as
-today, and client reads keep resolving from the session.
+untouched: a non-holder naming a `scope_key` is rejected (today the
+wire cannot even express one — the field is new), and client reads
+keep resolving from the session.
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a
@@ -445,7 +456,8 @@ disabled (README §3.5).
   only — §2); plus, WITHIN a derived commit's body, the ADDRESSING
   and ATTRIBUTION pair §1 defines — never envelope identity (R-Q6b):
   the explicit `scope_key` on every scoped write (addressing) and
-  the acting identity on every action RUN's writes (attribution,
+  the acting identity on every action RUN's writes, where the run
+  has one — §1 (attribution,
   `action × instance`). Anything further needs a spec edit here
   first.
 - **`scope_key` is thereby PROTOCOL vocabulary**, no longer

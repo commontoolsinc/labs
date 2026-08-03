@@ -477,8 +477,10 @@ single-session authored transactions, per-action-run annotations
 inside the server-driven wave commit — closing ledger LD3 (the
 shared `scope_key` vocabulary, key-vocabulary.md §3) and LD5 (the
 lease-holder read row, protocol.md §2).
-scopes.md §7 M3 resolves the same way — `resolveScopeKey`'s session
-binding (`packages/memory/v2/server.ts:1577-1580`) narrows to
+scopes.md §7 M3 resolves the same way — `resolveScopeKey`'s
+session-fed admission path (`applyCommit`,
+`packages/memory/v2/server.ts:2128-2132` → `engine.ts:5374-5375`)
+narrows to
 authored commits only; derived admission stays the lease check.
 Effects still run under the capability handle's grant (README
 §3.8); only quota attribution stays open (README §6).

@@ -218,8 +218,10 @@ Stages, one PR each except C, which is a three-PR train (below):
       §3): the `scope_key` format moves to the wire-shape module
       (`packages/memory/v2.ts`) as ONE shared definition imported by
       engine and runner alike; the nine sites construct keys from
-      demand-/`firedAt`-supplied identity, never from ambient state.
-      The stage's first PR is that definition move.
+      demand-/`firedAt`-supplied identity, never from ambient state
+      (OFF arm: the identity is the runtime's own authenticated
+      session — key-vocabulary.md §3). The stage LEADS with that
+      definition move.
 - [ ] **F — host + SpaceServer + watermark + gates**: executor host,
       per-space activation/park with demand-driven value pull — no
       per-piece start/stop (serving-loop.md §1, §3); pure structural
