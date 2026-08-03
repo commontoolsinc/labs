@@ -541,8 +541,15 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   (`initial_sync | dispatched | committed | readback`) beside the invocation
   id — **done (D2)** for the annotation (tracked through an `onPhase`
   callback, printed on failure exits); verbose output adds per-phase timings
-  (initial sync / dispatch / handler / commit / result sync / readback) —
-  still open. With a caller-supplied id a retry is safe in every phase, so
+  — **done**: `cf piece call --verbose` streams one wall-clock span per
+  observed phase transition to stderr (stdout stays exactly the settled
+  Invocation JSON), at the granularity the `onPhase` callback observes:
+  initial sync→dispatch, dispatch→commit acknowledgement (the handler run
+  and its commit are one span — nothing between them is observable from the
+  CLI without new runner instrumentation, and result sync is inside the
+  readback span for the same reason), receipt classification, and
+  readback→settlement; a failure exit closes the in-flight span with
+  `failed`. With a caller-supplied id a retry is safe in every phase, so
   phase is diagnosis; a derived `retrySafe` convenience flag may ride along.
 - ~~**Acknowledgement is transaction-local.** The call path awaits *this
   handling's* commit (D1's commit callback) plus receipt sync — never
@@ -569,11 +576,13 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   without racing a clock; a `--message` that differs on the retry proves the
   settled outcome stands rather than being overwritten. Each scenario spawns
   a fresh `cf` process, so the fresh-process case is the default rather than
-  a special one. One half of the third scenario is not covered yet: the
+  a special one. ~~One half of the third scenario is not covered yet: the
   collision is asserted through `deduplicated` and exit 0, but not by reading
-  a *result* back off the receipt, because a void verb leaves none to read.
-  That assertion joins when WS-C gives verbs return values — or sooner
-  against `plainResultReceipts`.
+  a *result* back off the receipt, because a void verb leaves none to
+  read.~~ — closed by D4's integration fixture (`run_three_topic_fixture`,
+  same file): a settled create replayed under its id, with a different
+  payload, must report `deduplicated` AND carry the ORIGINAL declared
+  result, read back off the receipt under `plainResultReceipts`.
 - ~~**cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
   deferred.** The pre-dispatch validator passes `input === undefined`
   unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
@@ -778,13 +787,72 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   and Invocation is required to be authored open-world precisely so protocol
   fields can be added later. Cost is bounded by emitting links only for paths
   that have them, and only when asked.
-- **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
-  the stream's serialization rather than redirecting. The llm-dialog `read`
-  tool already rejects this case with the right message — "Path resolves to a
-  handler; use invoke() instead" — and the CLI read path
-  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
-  and it saves an agent a wasted turn.
-- `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
+
+  **Done (F2) for callable results:** `cf piece call --show-links` emits the
+  decided shape — a `links` field on the Invocation JSON, `{ "/path":
+  <link> }` with RFC 6901 pointer keys — with entries only where a path's
+  backing document differs from its enclosing one, resolved through the
+  receipt cell's own link traversal (`key()` steps plus `resolveAsCell`)
+  after readback. The root `"/"` entry is the result value's own backing
+  document, resolved like any other path — the scalar-is-its-own-doc case
+  is the shape's whole point, so a result that is itself a reference maps
+  `"/"` to the referenced document and keeps the receipt address under the
+  reserved bare key `receipt` (pointer keys always begin with `/`, so no
+  result path can collide); in the common receipt-internal case `"/"` IS
+  the receipt address. Link values reuse the CLI's existing cell-address
+  shape (`resultRef`'s `{ space, id, scope }`), plus a `path` when the link
+  points below the backing document's root. `resultRef` itself stays as-is,
+  and `--show-links --no-wait` is refused — the links ride the readback
+  `--no-wait` skips. The data-read surface (`cf piece get` /
+  `--include-ids`) is not part of that change and picks up the same
+  dictionary shape when it lands.
+- ~~**Read-path guard:** `cf piece get` on a path that resolves to a verb
+  returns the stream's serialization rather than redirecting. The llm-dialog
+  `read` tool already rejects this case with the right message — "Path
+  resolves to a handler; use invoke() instead" — and the CLI read path
+  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check.
+  Cheap, and it saves an agent a wasted turn.~~ — **done**: `getCellValue`
+  refuses only on the two definite stored signals — the link-derived schema
+  answers as a stream, or the value reads as the `{$stream: true}` sentinel —
+  reported as a `piece get` data error (one line on stderr, exit 1). A root
+  verb redirects at `cf piece call`; a nested verb is not root-callable, so
+  it points at reading the parent object or `cf piece verbs` instead. The
+  guard never consults the forced-stream probe: the probe stays with the
+  dispatcher and the listing, where over-inclusion is an extra row or a call
+  the caller asked for, but the cast's stream schema survives link resolution
+  for inline values, so a read guard built on it would refuse plain data
+  outputs. Reads fail open; tool bindings read as data (the llm-dialog read
+  tool reads them too); parent objects and plain data paths read as before.
+- ~~`--await` / `--no-wait` and the caller-controlled wait bound — with
+  WS-D.~~ — **done (F3)**, with these semantics: the default is unchanged —
+  wait for this handling's transaction-local commit acknowledgement plus
+  receipt readback (what D2 built) — and `--await` is that default's explicit
+  spelling, so a script can state its intent; combined with `--no-wait` it is
+  refused as a contradiction. `--no-wait` awaits the transaction-local
+  commit acknowledgement and skips ONLY the receipt readback (sync + read);
+  stdout carries the Invocation JSON with the furthest observed phase as its
+  `status` (`{"invocation": "<id>", "status": "committed"}`), and a commit
+  failure exits nonzero exactly as the default path would. The
+  acknowledgement is not skippable: `cf piece call` executes the handler in
+  the CLI's own runtime, so a process that exits before the commit is
+  acknowledged abandons the invocation un-executed — nothing durable
+  happened — rather than leaving it settling elsewhere. What makes skipping
+  the readback sound is the caller-supplied id (D1/D3): the acknowledged
+  commit is durable on the server, and a later same-id call deduplicates
+  against the create-only receipt and returns the original outcome, so the
+  readback's confirmation can be fetched at any time. Handler sends only: a
+  tool's result is delivered by this process, and the receipt-less
+  set-fallback dispatch leaves nothing to read back — both refuse the flag.
+  `--wait <seconds>` is a caller-chosen patience bound on the default wait,
+  not a correctness timeout: one clearable deadline racing the outermost
+  await (no polling, no bound anywhere inside the settlement path), and on
+  expiry the exit is nonzero with D2's failure shape — invocation id plus
+  furthest phase on stderr — while stdout carries the Invocation JSON with
+  that phase as `status`. An early fire is recoverable rather than
+  lossless: before the `committed` phase the invocation may not have
+  executed or committed at all, and the recovery is re-invoking with the
+  SAME id — it deduplicates when the commit landed and re-executes when it
+  never did.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
   makes them unnecessary.
@@ -816,7 +884,7 @@ change that alters them.
   plumbing, collision, reclassification, and readback against an isolated
   toolshed.
 - **End-to-end fixture (D4, Phase 4):** the three-topic graph from the live
-  session, run as an integration test and as the live pass — create an
+  session, run ~~as an integration test~~ and as the live pass — create an
   umbrella with body (returns its child reference); create two children whose
   bodies reference it; revise the umbrella to reference both; deliberately
   drop one create response and retry with the same invocation id. Verify
@@ -825,6 +893,30 @@ change that alters them.
   to the acting agent. Record command
   count, payload sizes, per-phase timings, and cold/warm durations — the
   baseline the session-mode decision (Non-goals) reads.
+
+  **The integration half is done** — `run_three_topic_fixture` in
+  `packages/cli/integration/integration.sh` (the piece-call shard, its own
+  space, `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` on every call), driving a
+  declared-result fixture pattern
+  (`packages/cli/integration/pattern/topic-graph.tsx`) against an isolated
+  toolshed. References adapt to that setting: a create returns
+  `{ id, path }` and the test opens the canonical child by that path
+  directly, standing in for the live pass's fid rendering; the
+  dropped-response retry — and a same-id replay with a different payload —
+  must read the ORIGINAL result back off the receipt (the assertion D3 left
+  open). The drop is deterministic, not a recorded race branch: the call
+  runs with a test-only per-phase stderr announcement
+  (`CF_TEST_ANNOUNCE_INVOCATION_PHASES`, off by default) and is killed only
+  after a blocking pipe read sees `phase: committed`, so the
+  commit-then-lost-response window is a property of the mechanism and the
+  dedup-with-original-result path is asserted unconditionally, every run.
+  Results flow schema-free per the C3 deferral: the value path is
+  what the fixture proves, and no assertion reads a result schema from the
+  durable store. Command counts, payload sizes, and per-command wall-clock
+  print as `[d4-baseline]` lines (per-phase timings await #5233's
+  `--verbose`). **The live pass stays open**, gated on the write-storm
+  machinery (Risks): until that gate clears, no live-board run has happened
+  and D4 is not done.
 - **Live acceptance checklist**, per phase, against the Estuary board — a
   scenario per phase (six-call filing shrinking to five in Phase 1, a
   deliberate duplicate retry in Phase 2, a returned handle in Phase 4), and

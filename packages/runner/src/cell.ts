@@ -7,6 +7,7 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
+  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
@@ -3310,6 +3311,20 @@ export function convertCellsToLinks(
   // throwing away the copy just made above. One copy could serve both.
   if (!isRecord(value)) {
     // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
+    return value;
+  } else if (value instanceof FabricPrimitive) {
+    // An opaque scalar whose state lives in private fields, so it has zero
+    // enumerable own properties and the object branch below would rebuild it
+    // from its (empty) entries as a bare `{}`. It leaves whole instead.
+    //
+    // This catches both forms that arrive here: one the caller already built,
+    // and one `shallowFabricFromNativeValue()` just minted from a native (a
+    // `Uint8Array`, a `Date`) immediately above.
+    //
+    // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
+    // container reached by its codec contents rather than by property name, so
+    // it still falls to the object branch and is rebuilt from zero enumerable
+    // own properties. Same marker as the sibling walk in `builder/json-utils.ts`.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

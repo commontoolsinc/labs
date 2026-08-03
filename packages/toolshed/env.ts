@@ -134,7 +134,7 @@ export const EnvSchema = z.object({
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
   //    (directory mode - default, backwards compatible)
   //  - DB_PATH is an optional absolute path to a single SQLite database file
-  //    (single-file mode - for clusterduck clustering)
+  //    holding every space (single-file mode - takes precedence over MEMORY_DIR)
   //  - MEMORY_URL is used by toolshed to connect to memory endpoint
   // ===========================================================================
   MEMORY_DIR: z.string().default(

@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { dataURISyncKey } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -324,5 +325,146 @@ describe("data URI sync", () => {
     await dataCell.sync();
 
     expect(syncedIds).toContain(linkedId);
+  });
+
+  it("sync stops walking when the path leaves the data URI's containers", async () => {
+    const linkedCell = runtime.getCell(
+      space,
+      "unreachable-target",
+      undefined,
+      tx,
+    );
+    linkedCell.set("never pulled");
+    const linkedId = linkedCell.getAsNormalizedFullLink().id;
+
+    // The link sits beside the path, not under it. Walking ["count", "deeper"]
+    // steps onto a number, which holds no further segments, so the walk gives
+    // up before it ever reaches the link.
+    const dataURI = dataUriFromValueWithResolvedLinks({
+      count: 42,
+      ref: { "/": { [LINK_V1_TAG]: { id: linkedId, path: [] } } },
+    });
+    const dataCell = runtime.getCellFromEntityId(
+      space,
+      dataURI,
+      ["count", "deeper"],
+      undefined,
+      tx,
+    );
+
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const syncedIds: string[] = [];
+    // deno-lint-ignore no-explicit-any
+    provider.sync = (id: any, selector?: any, scope?: any) => {
+      syncedIds.push(id);
+      return originalSync(id, selector, scope);
+    };
+
+    expect(await dataCell.sync()).toBe(dataCell);
+    expect(syncedIds).toEqual([]);
+  });
+
+  it("sync on a data: URI cell resolves to the cell it was called on", async () => {
+    const dataURI = dataUriFromValueWithResolvedLinks({ simple: "value" });
+    const cell = runtime.getCellFromEntityId(
+      space,
+      dataURI,
+      [],
+      undefined,
+      tx,
+    );
+
+    expect(await cell.sync()).toBe(cell);
+    // The second call takes the memoized path. It must still hand back this
+    // caller's cell: another cell would carry another transaction, and holding
+    // one in the memo would keep that transaction and everything it read alive.
+    expect(await cell.sync()).toBe(cell);
+
+    const second = runtime.getCellFromEntityId(
+      space,
+      dataURI,
+      [],
+      undefined,
+      tx,
+    );
+    expect(await second.sync()).toBe(second);
+  });
+
+  it("does not carry a data: URI sync across storage managers", async () => {
+    const linkedCell = runtime.getCell(space, "cross-manager", undefined, tx);
+    linkedCell.set({ value: "target data" });
+    const linkedId = linkedCell.getAsNormalizedFullLink().id;
+    const dataURI = dataUriFromValueWithResolvedLinks({
+      ref: { "/": { [LINK_V1_TAG]: { id: linkedId, path: [] } } },
+    });
+
+    await runtime.getCellFromEntityId(space, dataURI, [], undefined, tx).sync();
+
+    // A second manager has its own providers and its own session. It must pull
+    // the link target itself rather than inherit the first manager's work.
+    const otherStorageManager = StorageManager.emulate({ as: signer });
+    const otherRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: otherStorageManager,
+    });
+    const otherTx = otherRuntime.edit();
+    try {
+      const provider = otherStorageManager.open(space);
+      const originalSync = provider.sync.bind(provider);
+      const syncedIds: string[] = [];
+      // deno-lint-ignore no-explicit-any
+      provider.sync = (id: any, selector?: any, scope?: any) => {
+        syncedIds.push(id);
+        return originalSync(id, selector, scope);
+      };
+
+      await otherRuntime
+        .getCellFromEntityId(space, dataURI, [], undefined, otherTx)
+        .sync();
+
+      expect(syncedIds).toContain(linkedId);
+    } finally {
+      await otherTx.commit();
+      await otherRuntime.dispose();
+      await otherStorageManager.close();
+    }
+  });
+});
+
+describe("data URI sync memo key", () => {
+  const identity = {
+    id: "data:application/json,{}",
+    schema: undefined,
+    path: [] as readonly string[],
+    space,
+    scope: undefined,
+  };
+
+  it("costs the same however large the data URI is", () => {
+    const small = dataURISyncKey(identity);
+    const huge = dataURISyncKey({
+      ...identity,
+      id: `data:application/json,${"x".repeat(200_000)}`,
+    });
+    expect(huge.length).toBe(small.length);
+    expect(huge).not.toBe(small);
+  });
+
+  it("separates entries that differ in any part of their identity", () => {
+    const base = dataURISyncKey(identity);
+    const keys = [
+      base,
+      dataURISyncKey({ ...identity, id: 'data:application/json,{"a":1}' }),
+      dataURISyncKey({ ...identity, schema: { type: "string" } }),
+      dataURISyncKey({ ...identity, path: ["value"] }),
+      dataURISyncKey({ ...identity, scope: "user" }),
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("gives one identity one key", () => {
+    expect(dataURISyncKey({ ...identity, path: ["a", "b"] }))
+      .toBe(dataURISyncKey({ ...identity, path: ["a", "b"] }));
   });
 });

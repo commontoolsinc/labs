@@ -1,4 +1,5 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { encodeJsonPointer } from "@commonfabric/runner";
 import {
   localRefTarget,
   relaxDefaultedRequired,
@@ -51,7 +52,14 @@ export interface CallableCellLike {
     scope?: CellScope;
     id?: string;
     space?: string;
+    path?: readonly (string | number)[];
   };
+  /** Resolve through stored links to the concrete backing cell (runner:
+   * Cell.resolveAsCell). `getAsNormalizedFullLink` alone reports the cell's
+   * own address — receipt id plus path — even where the stored value is a
+   * link into another document; resolving first is what tells the two
+   * apart. */
+  resolveAsCell?: () => CallableCellLike;
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
@@ -140,12 +148,45 @@ export interface CallableExecutionDeps {
   invocationId?: string;
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
+  /** `--no-wait`: await this handling's transaction-local commit
+   * acknowledgement, then return WITHOUT the receipt readback (sync + read).
+   * The commit acknowledgement cannot be skipped: the handler executes in
+   * THIS process's runtime, so exiting before the commit is acknowledged
+   * would abandon the invocation un-executed — nothing durable would have
+   * happened — not leave it settling elsewhere. What CAN be skipped is
+   * fetching the outcome back, because a caller-supplied id keeps that
+   * fetch available forever: a later same-id call deduplicates against the
+   * create-only receipt and returns the original outcome (verb contract
+   * D1/D3). Requires an `invocationId` — without one there is no receipt to
+   * come back for — and only the handler send path supports it (a tool's
+   * result is delivered by this process, not read back from a receipt). */
+  skipReadback?: boolean;
+  /** `--show-links`: annotate the Invocation JSON with a `links` dictionary
+   * mapping result paths to their backing cell addresses (verb contract
+   * WS-F, F2). Provenance rides BESIDE the value, never inline — an inline
+   * marker cannot annotate a scalar, and a scalar can be its own doc — and
+   * entries appear only for paths whose backing differs from their enclosing
+   * document, so plain JSON inside one doc adds nothing. Rides the receipt
+   * readback, which is why it cannot combine with `--no-wait`. */
+  showLinks?: boolean;
+}
+
+/** A backing-cell address in an Invocation's `links` dictionary: the same
+ * serialized shape as `CallableResultRef` (the CLI's existing cell-address
+ * form), plus the path inside the backing document when the link points
+ * below its root. */
+export interface InvocationResultLink extends CallableResultRef {
+  path?: (string | number)[];
 }
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
 export interface InvocationOutcome {
   id: string;
-  status: "settled";
+  /** `"settled"` once receipt readback completed. Otherwise the furthest
+   * phase the caller chose to observe: `--no-wait` returns at `"committed"`
+   * (commit acknowledged, readback skipped), and a caller-bounded wait
+   * reports the phase its bound expired in. */
+  status: "settled" | InvocationPhase;
   /** The verb's result read back from the handling's receipt, when the
    * receipt carried one (a reactive-bearing return, or a plain return under
    * the plainResultReceipts flag). Absent for value-less verbs. */
@@ -153,6 +194,13 @@ export interface InvocationOutcome {
   /** True when this call collided on the create-only receipt: the handling
    * did not commit again, and `result` is the ORIGINAL outcome. */
   deduplicated?: boolean;
+  /** Under `--show-links` only: result paths mapped to their backing cell
+   * addresses, provenance beside the value. The root `"/"` entry is the
+   * result value's own backing document — the receipt, unless the result is
+   * itself a reference, in which case the receipt address rides the
+   * reserved bare `"receipt"` key; other entries appear only where a path's
+   * backing document differs from its enclosing one. */
+  links?: Record<string, InvocationResultLink>;
 }
 
 /** Durable address of a tool's per-invocation result cell. The scope is part
@@ -478,6 +526,141 @@ export function callableCommandSpec(
   };
 }
 
+/** Normalize a receipt/backing link into the `links` dictionary's value
+ * shape. Absent scope on a normalized link means the space scope (the same
+ * rule `resultRef` applies); the path rides along only when the link points
+ * below the backing document's root. */
+function toInvocationResultLink(link: {
+  id: string;
+  space: string;
+  scope?: CellScope;
+  path?: readonly (string | number)[];
+}): InvocationResultLink {
+  return {
+    space: link.space,
+    id: link.id,
+    scope: link.scope ?? "space",
+    ...(link.path !== undefined && link.path.length > 0
+      ? { path: [...link.path] }
+      : {}),
+  };
+}
+
+/** Two normalized links address the same backing document iff id, space,
+ * and scope (absent = space) all agree; a differing path alone is just a
+ * position inside the same doc, which needs no link of its own. */
+function sameBackingDocument(
+  a: { id: string; space: string; scope?: CellScope },
+  b: { id: string; space: string; scope?: CellScope },
+): boolean {
+  return a.id === b.id && a.space === b.space &&
+    (a.scope ?? "space") === (b.scope ?? "space");
+}
+
+/** The shape a backing address takes on its way into the dictionary. */
+type BackingLink = {
+  id: string;
+  space: string;
+  scope?: CellScope;
+  path?: readonly (string | number)[];
+};
+
+/**
+ * Walk a settled result's backing links into the `{ "/path": <link> }`
+ * dictionary `--show-links` emits (verb contract WS-F, F2).
+ *
+ * The root `"/"` entry is the backing document of the result VALUE itself,
+ * resolved through `resolveAsCell` like every other path — the design's own
+ * motivating case is a result that is a reference (a scalar can be its own
+ * doc), and `"/"` must expose the document that actually backs it, not the
+ * cell it was read through. In the common case the root resolves to the
+ * receipt and `"/"` IS the receipt address; when it resolves elsewhere, the
+ * receipt address stays available under the reserved bare key `"receipt"` —
+ * pointer keys always begin with `/`, so no result path can collide with
+ * it.
+ *
+ * Below the root, every value path is resolved through the receipt cell
+ * (`key()` steps plus `resolveAsCell`), and a path earns an entry exactly
+ * when its backing document differs from its enclosing one — a path inside
+ * the same plain JSON needs no link. Below an emitted entry the comparison
+ * rebases onto that entry's document, so a chain of references annotates
+ * each hop once. Recursion always continues from the RESOLVED cell, even
+ * when no entry is emitted: a same-document link can still redirect to
+ * another path, and descendants must be read from the redirect's target.
+ * Keys are RFC 6901 JSON pointers (the runner's `encodeJsonPointer`, the
+ * same encoding the llm-dialog link strings use), so a property name
+ * containing `/` or `~` stays unambiguous.
+ *
+ * The walk covers the VALUE that was read back — finite, already-loaded
+ * JSON — not the graph, so it terminates without cycle tracking, and a
+ * receipt cell that cannot resolve links (no `resolveAsCell` /
+ * `getAsNormalizedFullLink`) degrades to the receipt-root entry alone
+ * rather than guessing.
+ */
+export function collectInvocationResultLinks(
+  receiptLink: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
+  receiptCell: CallableCellLike | undefined,
+  value: unknown,
+): Record<string, InvocationResultLink> {
+  if (receiptCell === undefined) {
+    return { "/": toInvocationResultLink(receiptLink) };
+  }
+
+  const resolvedRoot = receiptCell.resolveAsCell?.() ?? receiptCell;
+  const rootLink = resolvedRoot.getAsNormalizedFullLink?.();
+  const rootBacking: BackingLink =
+    rootLink?.id !== undefined && rootLink.space !== undefined
+      ? rootLink as BackingLink
+      : receiptLink;
+  const links: Record<string, InvocationResultLink> = {
+    "/": toInvocationResultLink(rootBacking),
+  };
+  if (!sameBackingDocument(rootBacking, receiptLink)) {
+    links["receipt"] = toInvocationResultLink(receiptLink);
+  }
+
+  const walk = (
+    cell: CallableCellLike,
+    val: unknown,
+    pathSegments: string[],
+    base: { id: string; space: string; scope?: CellScope },
+  ): void => {
+    if (typeof val !== "object" || val === null) return;
+    const keys = Array.isArray(val)
+      ? val.map((_, index) => String(index))
+      : Object.keys(val);
+    for (const key of keys) {
+      const childValue = (val as Record<string, unknown>)[key];
+      let child: CallableCellLike;
+      try {
+        child = cell.key(key);
+      } catch {
+        continue; // Not addressable as a cell — nothing to annotate.
+      }
+      const resolved = child.resolveAsCell?.() ?? child;
+      const childLink = resolved.getAsNormalizedFullLink?.();
+      const segments = [...pathSegments, key];
+      if (
+        childLink?.id !== undefined && childLink.space !== undefined &&
+        !sameBackingDocument(childLink as BackingLink, base)
+      ) {
+        links[encodeJsonPointer(["", ...segments])] = toInvocationResultLink(
+          childLink as BackingLink,
+        );
+        walk(resolved, childValue, segments, childLink as BackingLink);
+      } else {
+        // Same backing document — no entry — but descendants are still read
+        // from the RESOLVED cell: a same-doc link can redirect to another
+        // path, and the children live under its target.
+        walk(resolved, childValue, segments, base);
+      }
+    }
+  };
+
+  walk(resolvedRoot, value, [], rootBacking);
+  return links;
+}
+
 export async function executeResolvedCallable(
   resolved: CallableResolution,
   input: unknown,
@@ -498,6 +681,11 @@ export async function executeResolvedCallable(
       const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
       const errorCountBefore = runtimeErrors.length;
       const invocationId = deps.invocationId;
+      if (deps.skipReadback && invocationId === undefined) {
+        // Refused before dispatch: skipping the readback is only sound when
+        // a later same-id call can fetch the outcome, and that needs the id.
+        throw new Error("--no-wait requires an invocation id");
+      }
       deps.onPhase?.("dispatched");
       const tx = await new Promise<CallableTransactionLike>(
         (resolve, reject) => {
@@ -538,11 +726,27 @@ export async function executeResolvedCallable(
 
       if (invocationId === undefined) return {};
 
+      if (deps.skipReadback) {
+        // --no-wait's exit point: the commit is acknowledged, so the
+        // handling — and on a collision, the original one — is durable on
+        // the server and survives this process. Only the readback
+        // (sync + read of the outcome) is skipped; a later same-id call
+        // retrieves it by deduplicating against the create-only receipt.
+        return {
+          invocation: {
+            id: invocationId,
+            status: "committed",
+            ...(deduplicated ? { deduplicated: true } : {}),
+          },
+        };
+      }
+
       // Read the handling's outcome back off its receipt. On a receipt-exists
       // collision this is the ORIGINAL handling's receipt — same id, same
       // outcome, no re-execution — so a retry settles as a success.
       deps.onPhase?.("readback");
       let result: unknown;
+      let links: Record<string, InvocationResultLink> | undefined;
       const link = tx?.handlingReceiptLink;
       const getCellFromLink = resolved.manager.runtime.getCellFromLink;
       if (link && typeof getCellFromLink === "function") {
@@ -557,6 +761,11 @@ export async function executeResolvedCallable(
         ) {
           result = value;
         }
+        if (deps.showLinks) {
+          // After readback, off the same receipt the result came from: the
+          // links annotate exactly the value the caller is holding.
+          links = collectInvocationResultLinks(link, receipt, result);
+        }
       }
 
       return {
@@ -565,15 +774,36 @@ export async function executeResolvedCallable(
           status: "settled",
           ...(deduplicated ? { deduplicated: true } : {}),
           ...(result !== undefined ? { result } : {}),
+          ...(links !== undefined ? { links } : {}),
         },
       };
     }
 
+    if (deps.skipReadback) {
+      // This handler dispatches through a plain data write, outside the
+      // invocation receipt protocol — there is no per-handling commit
+      // acknowledgement to wait for and no receipt a later same-id call
+      // could read the outcome back from.
+      throw new Error(
+        `--no-wait is not available for "${resolved.cellKey}": ` +
+          "this callable dispatches without an invocation receipt",
+      );
+    }
     await resolved.piece[resolved.cellProp].set(input, [resolved.cellKey]);
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
 
     return {};
+  }
+
+  if (deps.skipReadback) {
+    // A tool's result is produced and delivered by this process, not read
+    // back from a receipt — there is nothing to skip that a later call
+    // could recover.
+    throw new Error(
+      `--no-wait is not available for tool "${resolved.cellKey}": ` +
+        "a tool runs to completion in this process",
+    );
   }
 
   const pattern = asCallablePattern(

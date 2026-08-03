@@ -1,3 +1,4 @@
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cancel } from "../cancel.ts";
 import { getTopFrame } from "../builder/pattern.ts";
@@ -35,6 +36,7 @@ import type {
 import {
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
+  MAX_ACTION_STATS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
 import {
@@ -440,7 +442,9 @@ export class Scheduler {
 
   // Compute time tracking for auto-debounce and diagnostics
   // Keyed by action ID (source location) to persist stats across action recreation
-  private actionStats = new Map<string, ActionStats>();
+  private actionStats = new BoundedKeyMap<string, ActionStats>(
+    MAX_ACTION_STATS,
+  );
   private actionTimingState: ActionTimingState = {
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),

@@ -14,6 +14,7 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -153,6 +154,13 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   level: "warn",
   logCountEvery: 0,
 });
+
+/**
+ * How many prepared/stopped result shortcuts one runner keeps. Sized well
+ * above any plausible number of simultaneously live pieces, so the bound is
+ * reached only by a pattern churning through results it will not revisit.
+ */
+const RESULT_SHORTCUT_LIMIT = 4096;
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -1134,14 +1142,20 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
-  private locallyPreparedResults = new Map<
+  // Both maps record that this runner prepared or stopped a result, so a later
+  // start of the same result can reuse the cells it already assembled instead
+  // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
+  // a missing entry costs a slower start, never a wrong one. They are bounded
+  // for that reason — a result key names one result document, and a pattern
+  // that keeps starting and stopping children adds keys it will never revisit.
+  private locallyPreparedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
-  private locallyStoppedResults = new Map<
+  >(RESULT_SHORTCUT_LIMIT);
+  private locallyStoppedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
+  >(RESULT_SHORTCUT_LIMIT);
   // Successful event-result starts that are still live in this runner. This is
   // intentionally local and bounded by live starts: it lets a sequential
   // redelivery avoid re-materializing an already-won result before the
@@ -5003,16 +5017,26 @@ export class Runner {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
         // launched, but the result cell is still created — its create is the
         // exactly-once witness for this event id. Under plainResultReceipts
-        // the witness also carries the handler's (already-normalized) plain
-        // JSON return, so a caller — or a same-id retry colliding on the
-        // receipt — reads the verb's result back by receipt address (verb
-        // contract Part 2). `{}` remains the value-less shape either way.
+        // the witness also carries the handler's (already-normalized) return,
+        // so a caller — or a same-id retry colliding on the receipt — reads
+        // the verb's result back by receipt address (verb contract Part 2).
+        // `{}` remains the value-less shape either way.
+        //
+        // The value goes through the receipt cell's STANDARD write flow
+        // (`set` → diffAndUpdate), the same conversion any cell write gets:
+        // plain JSON persists as-is and a live Cell handle converts to a
+        // link. That matters because incidental cell returns are a sanctioned
+        // idiom — `set()` returns its cell for chaining, so an
+        // expression-body `action(() => cell.set(...))` returns the mutated
+        // cell — and a raw write here fails the whole handling on such a
+        // value with an uncloneable-live-object storage error instead of
+        // recording what was returned.
         const receiptValue =
           this.runtime.experimental.plainResultReceipts === true &&
             result !== undefined
             ? result
             : {};
-        receiptCell.withTx(tx).setRaw(receiptValue);
+        receiptCell.withTx(tx).set(receiptValue);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;

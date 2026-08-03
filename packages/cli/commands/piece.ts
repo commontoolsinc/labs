@@ -32,6 +32,7 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
@@ -294,15 +295,60 @@ export function exitWithDataError(
  * action body only ever runs under Cliffy, so anything written there is
  * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
  * threaded so a test can observe the report without a real process exit.
+ *
+ * `observer` is the call's phase observer: this exit bypasses the action's
+ * catch (it terminates the process from inside the promise chain), so the
+ * verbose in-flight span must be closed HERE — otherwise a pre-dispatch
+ * payload rejection under --verbose would leave the initial_sync span
+ * dangling with no failure timing. A rethrown error is closed by the
+ * action's own failure exit instead.
  */
 export function reportVerbInputErrorOrRethrow(
   error: unknown,
   piece: string | undefined,
   deps?: Parameters<typeof exitWithDataError>[1],
+  observer?: { finish: (end?: "settled" | "failed") => void },
 ): never {
   const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
-  if (report) exitWithDataError(report, deps);
+  if (report) {
+    observer?.finish("failed");
+    exitWithDataError(report, deps);
+  }
   throw error;
+}
+
+/**
+ * The failure exit for `cf piece call`: closes the verbose in-flight span as
+ * `failed` (idempotent — a span already closed elsewhere stays closed),
+ * rethrows Cliffy validation errors so usage failures still render the usage
+ * screen — with their span closed first — and reports everything else as the
+ * failure message plus the invocation id beside the furthest observed phase,
+ * the retry key, before exiting 1. A named export rather than catch-block
+ * prose because the action body only runs under Cliffy and is unreachable
+ * from a unit test; the seams let a test observe the exact exit contract.
+ */
+export function exitPieceCallFailure(
+  observer: { finish: (end?: "settled" | "failed") => void },
+  error: unknown,
+  invocationId: string,
+  phase: InvocationPhase,
+  deps?: {
+    printError?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never {
+  observer.finish("failed");
+  if (error instanceof ValidationError) {
+    throw error;
+  }
+  const printError = deps?.printError ?? console.error;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(error instanceof Error ? error.message : String(error));
+  // Where the invocation stopped decides retry semantics: anything at or
+  // past "dispatched" retries SAFELY ONLY with this same id (same-id
+  // retries deduplicate; a fresh id would re-execute).
+  printError(`invocation: ${invocationId} phase: ${phase}`);
+  return exit(1);
 }
 
 export function pieceCallRawArgs(
@@ -412,11 +458,22 @@ export function resolveInvocationId(
  * still holds the exact id to retry with, and the retry deduplicates instead
  * of executing a second time. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
+ *
+ * `announcePhases` is a test-harness hook (reached via the
+ * `CF_TEST_ANNOUNCE_INVOCATION_PHASES` env var at the call site): every phase
+ * advance is additionally announced as `invocation: <id> phase: <phase>` —
+ * the shape failure exits already print. Integration scenarios that must act
+ * inside a specific window block on a phase line instead of racing a clock:
+ * the dropped-response fixture kills its call only after reading
+ * `phase: committed`, which the observer emits only once the handling's
+ * durable commit has been acknowledged. Off by default, so normal output is
+ * byte-identical with the hook absent.
  */
 export function invocationPhaseReporter(
   invocationId: string,
   onAdvance: (phase: InvocationPhase) => void,
   announce: (message: string) => void = console.error,
+  announcePhases = false,
 ): (phase: InvocationPhase) => void {
   let announced = false;
   return (next) => {
@@ -424,8 +481,131 @@ export function invocationPhaseReporter(
       announced = true;
       announce(`invocation: ${invocationId}`);
     }
+    if (announcePhases) {
+      announce(`invocation: ${invocationId} phase: ${next}`);
+    }
     onAdvance(next);
   };
+}
+
+/**
+ * Phase observer for `cf piece call`: always advances the furthest-phase
+ * tracker the failure report prints; under --verbose it also streams one
+ * wall-clock span per observed phase transition (verb contract WS-D, phase
+ * timings). Spans are bounded by the phases the `onPhase` callback already
+ * observes — initial sync up to dispatch, the dispatched handler run up to
+ * its transaction-local commit acknowledgement, the receipt classification,
+ * and the receipt readback up to settlement — because those boundaries are
+ * what the invocation actually reports; nothing new is instrumented inside
+ * the runner. Every line goes to stderr so stdout stays exactly the settled
+ * Invocation JSON an agent parses, and lines stream as transitions happen so
+ * a failure exit keeps every span observed before the failure — `finish`
+ * closes the in-flight span with the outcome that ended it: `settled`,
+ * `failed`, or `detached` for a `--no-wait` exit that stopped at the commit
+ * acknowledgement and skipped the readback.
+ */
+export function pieceCallPhaseObserver(
+  verbose: boolean,
+  onAdvance: (phase: InvocationPhase) => void,
+  emit: (line: string) => void = console.error,
+  now: () => number = () => performance.now(),
+): {
+  onPhase: (phase: InvocationPhase) => void;
+  finish: (end?: "settled" | "failed" | "detached") => void;
+} {
+  if (!verbose) {
+    return { onPhase: onAdvance, finish: () => {} };
+  }
+  let current: InvocationPhase = "initial_sync";
+  let spanStart = now();
+  let finished = false;
+  const close = (next: string) => {
+    emit(`timing: ${current} → ${next} ${(now() - spanStart).toFixed(1)}ms`);
+  };
+  return {
+    onPhase: (next) => {
+      close(next);
+      current = next;
+      spanStart = now();
+      onAdvance(next);
+    },
+    finish: (end = "settled") => {
+      if (finished) return;
+      finished = true;
+      close(end);
+    },
+  };
+}
+
+/**
+ * The success tail of `cf piece call`, extracted from the command action so
+ * it is unit-coverable — command action bodies never execute under the unit
+ * suite, the same convention that keeps `cf test` out of its action body
+ * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
+ * finishes: no invocation ran, so there is no span to close.
+ */
+export function renderPieceCallOutcome(
+  observer: { finish: (end?: "settled" | "failed" | "detached") => void },
+  result: ExecutedPieceCallable,
+  callableName: string,
+  piece: string,
+  deps: {
+    render?: (text: string) => void;
+    hint?: (text: string, prefix?: boolean) => void;
+    printError?: (text: string) => void;
+  } = {},
+  opts: { detached?: boolean; invocationId?: string } = {},
+): void {
+  const renderOut = deps.render ?? render;
+  const hintOut = deps.hint ?? hint;
+  const printError = deps.printError ?? console.error;
+  if (result.helpText) {
+    renderOut(result.helpText);
+    return;
+  }
+  observer.finish(opts.detached ? "detached" : undefined);
+  if (result.outputText) {
+    renderOut(result.outputText);
+    if (result.resultRef) {
+      // stderr, so stdout stays exactly the tool's JSON result. Routed
+      // through hint() DELIBERATELY: under --quiet the ref is suppressed —
+      // it is advisory until the invocation protocol carries it in the
+      // stdout Invocation JSON (verb contract WS-D), and --quiet callers
+      // asked for the bare result.
+      const ref = result.resultRef;
+      hintOut(
+        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        false,
+      );
+    }
+    return;
+  }
+  const nextSteps = cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${piece} ...`);
+  if (result.invocation) {
+    // The machine surface for a handler invocation: stdout carries the
+    // Invocation JSON — settled, or stopped at "committed" under --no-wait —
+    // prose stays on stderr via hint().
+    renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    hintOut(
+      opts.detached
+        ? cliText(`NEXT STEPS:
+  → Read the outcome: cf piece call --piece ${piece} --invocation ${
+          opts.invocationId ?? "<id>"
+        } ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+        : nextSteps,
+    );
+    return;
+  }
+  const confirmation = `Called handler "${callableName}" on piece ${piece}`;
+  if (result.parsed.usedJsonInput) {
+    printError(confirmation);
+  } else {
+    renderOut(confirmation);
+  }
+  hintOut(nextSteps);
 }
 
 /**
@@ -434,6 +614,8 @@ export function invocationPhaseReporter(
  * only when the call collided on an existing receipt, and `result` only when
  * the receipt carried one — a value-less verb omits it rather than reporting
  * `null`, which would be indistinguishable from a verb that returned null.
+ * `links` appears only under --show-links: provenance beside the value,
+ * never inline in it.
  */
 export function invocationJson(
   outcome: InvocationOutcome,
@@ -445,7 +627,117 @@ export function invocationJson(
     ...("result" in outcome && outcome.result !== undefined
       ? { result: outcome.result }
       : {}),
+    ...(outcome.links !== undefined ? { links: outcome.links } : {}),
   };
+}
+
+/** How long `cf piece call` waits for a handler invocation (verb contract
+ * WS-F, F3). `settle` is the default: await this handling's commit
+ * acknowledgement plus receipt readback, optionally bounded by the caller's
+ * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
+ * transaction-local commit acknowledgement — the durable point; the handler
+ * runs in THIS process, so the acknowledgement is not skippable — and skips
+ * only the receipt readback. */
+export interface PieceCallWaitControl {
+  mode: "settle" | "commit";
+  /** Caller-chosen patience bound in seconds (`--wait`). Never set for
+   * `commit` — the readback the bound would cover is already skipped. */
+  boundSeconds?: number;
+}
+
+/**
+ * Resolve the wait flags into one control. `--await` is the explicit spelling
+ * of the default (flag parity, so a script can state its intent), which makes
+ * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
+ * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
+ * names the patience. A non-positive bound is refused: it would spell
+ * "don't wait" while claiming to be a wait. `--show-links --no-wait` is
+ * refused too: the links ride the receipt readback a detached exit skips,
+ * so honoring both is impossible — refusing beats silently dropping the
+ * links.
+ */
+export function resolveWaitControl(
+  options: { await?: boolean; wait?: number | boolean; showLinks?: boolean },
+): PieceCallWaitControl {
+  if (options.wait === false) {
+    if (options.await) {
+      throw new ValidationError(
+        "--await and --no-wait contradict each other; pass one.",
+      );
+    }
+    if (options.showLinks) {
+      throw new ValidationError(
+        "--show-links needs the receipt readback that --no-wait skips; " +
+          "pass one.",
+      );
+    }
+    return { mode: "commit" };
+  }
+  if (typeof options.wait === "number") {
+    if (!Number.isFinite(options.wait) || options.wait <= 0) {
+      throw new ValidationError(
+        "--wait requires a positive number of seconds",
+      );
+    }
+    return { mode: "settle", boundSeconds: options.wait };
+  }
+  return { mode: "settle" };
+}
+
+/**
+ * The caller's patience bound expired before the invocation settled. The
+ * handler runs in THIS process's runtime, so an exit before the commit is
+ * acknowledged abandons un-executed work rather than leaving it settling
+ * elsewhere: before the `committed` phase, the invocation may not have
+ * executed or committed at all. The recovery is re-invoking with the SAME
+ * id — safe in every phase, because it deduplicates against the create-only
+ * receipt when the commit landed and re-executes when it never did. The
+ * exit reports the id and the furthest phase so the caller can.
+ */
+export class WaitBoundExpired extends Error {
+  constructor(readonly seconds: number) {
+    super(
+      `--wait bound of ${seconds}s expired: the invocation may not have ` +
+        "executed or committed — re-invoke with the same invocation id " +
+        "to finish it or read the outcome back",
+    );
+    this.name = "WaitBoundExpired";
+  }
+}
+
+/**
+ * Bound an in-flight settlement wait by the caller's chosen patience.
+ *
+ * This is a patience bound, not a correctness timeout (the distinction
+ * docs/development/waiting-in-tests.md draws): firing early is safe because
+ * a caller-supplied invocation id makes a same-id re-invoke safe in EVERY
+ * phase. Safe is not lossless — the handler runs locally, so a bound that
+ * fires before the commit is acknowledged abandons work that may never have
+ * executed or committed — but the re-invoke recovers either way: it
+ * deduplicates when the commit landed and re-executes when it never did.
+ * That is what permits a wall-clock bound here at all, and only because the
+ * caller asked for one; nothing waits by default.
+ *
+ * Mechanism: one deadline racing the outermost await — the settlement work
+ * underneath is event-driven and untouched, and there is no polling anywhere.
+ * The timer is cleared once the race resolves, so a call that settles inside
+ * the bound leaves no armed timer behind (`AbortSignal.timeout` would keep
+ * ticking; a clearable timer is the same one-shot deadline without the
+ * leftover).
+ */
+export function boundedSettlement<T>(
+  settlement: Promise<T>,
+  boundSeconds: number | undefined,
+): Promise<T> {
+  if (boundSeconds === undefined) return settlement;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new WaitBoundExpired(boundSeconds)),
+      boundSeconds * 1000,
+    );
+  });
+  return Promise.race([settlement, expiry]).finally(() => clearTimeout(timer));
 }
 
 export function writePieceRenderStatus(
@@ -1275,11 +1567,54 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "outcome — but the handler body does re-run, so effects outside the " +
       "transaction repeat. Minted automatically when omitted.",
   )
+  .option(
+    "--verbose",
+    "Print per-phase wall-clock timings to stderr (before the callable " +
+      "name). stdout still carries only the command output.",
+  )
+  .option(
+    "--await",
+    "Wait for settlement and receipt readback (before the callable name). " +
+      "This is the default; the flag exists so a script can say so " +
+      "explicitly. Contradicts --no-wait.",
+  )
+  .option(
+    "--wait <seconds:number>",
+    "Bound the settlement wait by a chosen patience, in seconds (before " +
+      "the callable name). On expiry the exit is nonzero with the " +
+      "invocation id and furthest phase on stderr; the invocation may not " +
+      "have executed or committed, and re-invoking with the same id is " +
+      "safe in every phase — it finishes the work or reads the outcome " +
+      "back.",
+  )
+  .option(
+    "--no-wait",
+    "Exit once this handling's commit is acknowledged (before the callable " +
+      "name), skipping only the receipt readback: stdout reports status " +
+      '"committed", and a later call with the same --invocation id reads ' +
+      "the outcome back. The handler still executes here and its commit " +
+      "is durable. Handler invocations only.",
+  )
+  .option(
+    "--show-links",
+    "Annotate the Invocation JSON with a links dictionary mapping result " +
+      "paths to their backing cell addresses (before the callable name). " +
+      'The root "/" entry is the result\'s own backing document — the ' +
+      "receipt, unless the result is itself a reference, in which case a " +
+      'separate "receipt" entry keeps the receipt address; other entries ' +
+      "appear only where a path is backed by a different document. Handler " +
+      "invocations only — a tool already reports its result cell on stderr.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
     const invocationId = resolveInvocationId(options.invocation);
+    const waitControl = resolveWaitControl(options);
     let phase: InvocationPhase = "initial_sync";
+    const observer = pieceCallPhaseObserver(
+      !!options.verbose,
+      (next) => phase = next,
+    );
     try {
       setQuietMode(!!options.quiet);
       const invocation = pieceCallInvocation(
@@ -1290,69 +1625,67 @@ after --. Handlers interpret piped input when no input argument is present.`,
         ...options,
         json: invocation.jsonOutput,
       });
-      const result = await executePieceCallable(
-        pieceConfig,
-        callableName,
-        invocation.rawArgs,
-        {
-          invocationId,
-          onPhase: invocationPhaseReporter(
+      const result = await boundedSettlement(
+        executePieceCallable(
+          pieceConfig,
+          callableName,
+          invocation.rawArgs,
+          {
             invocationId,
-            (next) => phase = next,
-          ),
-        },
-      ).catch((error) =>
-        reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
+            skipReadback: waitControl.mode === "commit",
+            showLinks: !!options.showLinks,
+            onPhase: invocationPhaseReporter(
+              invocationId,
+              observer.onPhase,
+              undefined,
+              Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
+            ),
+          },
+        ).catch((error) =>
+          reportVerbInputErrorOrRethrow(
+            error,
+            pieceConfig.piece,
+            undefined,
+            observer,
+          )
+        ),
+        waitControl.boundSeconds,
       );
-      if (result.helpText) {
-        render(result.helpText);
-        return;
-      }
-      if (result.outputText) {
-        render(result.outputText);
-        if (result.resultRef) {
-          // stderr, so stdout stays exactly the tool's JSON result. Routed
-          // through hint() DELIBERATELY: under --quiet the ref is suppressed —
-          // it is advisory until the invocation protocol carries it in the
-          // stdout Invocation JSON (verb contract WS-D), and --quiet callers
-          // asked for the bare result.
-          const ref = result.resultRef;
-          hint(
-            `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
-            false,
-          );
-        }
-        return;
-      }
-      if (result.invocation) {
-        // The machine surface for a handler invocation: stdout carries the
-        // settled Invocation JSON, prose stays on stderr via hint().
-        render(JSON.stringify(invocationJson(result.invocation), null, 2));
-        hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
-        return;
-      }
-      const confirmation =
-        `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
-      if (result.parsed.usedJsonInput) {
-        console.error(confirmation);
-      } else {
-        render(confirmation);
-      }
-      hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+      renderPieceCallOutcome(
+        observer,
+        result,
+        callableName,
+        pieceConfig.piece,
+        {},
+        { detached: waitControl.mode === "commit", invocationId },
+      );
     } catch (error) {
       if (error instanceof ValidationError) {
+        observer.finish("failed");
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
+      observer.finish("failed");
       // Where the invocation stopped decides retry semantics: anything at or
       // past "dispatched" retries SAFELY ONLY with this same id (same-id
       // retries deduplicate; a fresh id would re-execute).
       console.error(`invocation: ${invocationId} phase: ${phase}`);
+      if (error instanceof WaitBoundExpired) {
+        // The caller's patience expired. The handler runs in this process,
+        // so the invocation may not have executed or committed — the
+        // recovery is a same-id re-invoke, which the stderr message names.
+        // stdout still carries the Invocation JSON with the furthest
+        // observed phase — the same machine surface as a settled call, so a
+        // script parses one shape either way.
+        render(
+          JSON.stringify(
+            invocationJson({ id: invocationId, status: phase }),
+            null,
+            2,
+          ),
+        );
+      }
       Deno.exit(1);
     }
   })
