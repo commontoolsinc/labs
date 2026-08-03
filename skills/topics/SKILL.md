@@ -54,8 +54,13 @@ body, comments, handlers, and reference graph.
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+  --filter '.title != null' \
   --schema title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 ```
+
+The defensive title predicate removes null or currently unavailable rows before
+the concise projection. Without it, one such row can collapse the whole
+projected array to JSON `null`.
 
 `--filter` is useful for exact field and range searches. It runs before
 `--schema`, so a predicate can inspect a field that the result omits:
@@ -113,9 +118,9 @@ existing topic's input before changing it, especially its full body, comments,
 and links. Input reads are durable and do not need `--step`; use `--step` on
 result reads that must be current. If `topics --input` is non-empty but
 `crossrefs --step` is empty or fails, do not infer that the board is empty. The
-compact `topics --input` search remains valid evidence, but it does not expose a
-canonical Topic fid, so report the crossref materialization blocker rather than
-guessing an address.
+non-null rows from a compact `topics --input` search remain valid evidence, but
+the search does not expose a canonical Topic fid, so report the crossref
+materialization blocker rather than guessing an address.
 
 ## Creating and updating
 
@@ -184,6 +189,11 @@ verification succeeded.
 - If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
   do not call the board empty. Preserve the input evidence and report the
   result-materialization failure.
+- If a compact Topic-array read with `--schema` returns JSON `null`, do not call
+  it empty or claim there were no matches. A null or unavailable element can
+  currently void the whole concise projection. Filter those rows before the
+  projection, for example with `--filter '.title != null'` on the board, and
+  report that unavailable entries may have been omitted.
 - Do not substitute `piece ls` for the board's topic list. Pieces created inside
   handlers can be absent from that listing; `crossrefs --step` is the canonical
   fid index, with `topics --input` as the durable fallback.

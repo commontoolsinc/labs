@@ -236,13 +236,16 @@ fields apply per item for arrays, while JSON Schema describes the whole output.
 In an array-item projection, a typed scalar leaf that does not match stored data
 is omitted rather than reported as an error; prefer `true` leaves unless type
 filtering is intentional. Concise dotted paths do not traverse nested array
-items; use inline/file JSON Schema with `items` for that shape. The two flags
-compose as filter-then-project. Both run through runtime filter/map/lift nodes,
-which construct projected values from source-schema-selected reads, so CFC
-behavior is the same as a computed pattern expression. Source schema metadata is
-authoritative; projection schemas cannot supply `ifc`, `asCell`, `scope`, or
-`default`. See `packages/cli/README.md` for the exact syntax and supported
-schema subset.
+items; use inline/file JSON Schema with `items` for that shape. A concise
+projection over nullable array items can currently collapse the whole result to
+JSON `null`; filter null/unavailable items before projecting or preserve the
+item union in an explicit schema, and never treat that `null` as an empty list.
+The two flags compose as filter-then-project. Both run through runtime
+filter/map/lift nodes, which construct projected values from
+source-schema-selected reads, so CFC behavior is the same as a computed pattern
+expression. Source schema metadata is authoritative; projection schemas cannot
+supply `ifc`, `asCell`, `scope`, or `default`. See `packages/cli/README.md` for
+the exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

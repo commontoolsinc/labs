@@ -151,7 +151,11 @@ match the stored value is omitted by the runtime rather than reported as an
 error; prefer `true` leaves unless that type filtering is intentional. Schema
 combinators and references are rejected. Concise dotted paths traverse object
 properties, not nested array items: use an inline/file JSON Schema with `items`
-for a shape such as selected fields from every `comments` entry.
+for a shape such as selected fields from every `comments` entry. A concise
+projection over nullable array items can currently return JSON `null` for the
+whole array when any item is null. Filter null/unavailable items before
+projecting, or use an explicit array schema whose `items` preserves the source
+nullability; do not interpret that JSON `null` as an empty result.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 The runtime's list filter/map builtins therefore handle CFC exactly as authored
