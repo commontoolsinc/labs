@@ -19,11 +19,12 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
-To make source-run build metadata describe the checkout the same way compiled
-binaries do, pass the current revision into the start script:
+Source-run build metadata describes the checkout the same way compiled
+binaries do: `start-local-dev.sh` defaults `COMMIT_SHA` to the checkout's
+current HEAD, and an explicit value in the environment overrides that default:
 
 ```bash
-COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+COMMIT_SHA="<some-other-sha>" ./scripts/start-local-dev.sh --bg-updater
 ```
 
 The script's children inherit the value: toolshed uses it as the source-run
@@ -33,6 +34,12 @@ deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
 descriptive metadata, not a system-pattern update gate. The updater instead
 compiles the downloaded source/import closure and requires its entry identity
 to equal `?identity` before changing the persisted root.
+
+The cf CLI resolves its own commit the same way (baked build metadata for
+compiled binaries, the checkout's HEAD for source runs) and compares it
+against `/api/meta.gitSha` on every server-touching command, warning on
+stderr when the two differ. Set `CF_SKIP_VERSION_CHECK=1` to skip the check
+when running mismatched versions on purpose.
 
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use

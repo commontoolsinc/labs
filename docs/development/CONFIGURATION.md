@@ -224,7 +224,7 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 Set `COMMIT_SHA` to the Labs revision that describes a source checkout when you
 want source-run metadata to match compiled-binary metadata. A parent start
 script can export it once so toolshed and shell diagnostics describe the same
-checkout. It is descriptive metadata, not update authorization; only stamp a
+checkout; `scripts/start-local-dev.sh` defaults it to the checkout's HEAD. It is descriptive metadata, not update authorization; only stamp a
 revision that actually describes the launched sources. The explicit
 toolshed-only `TOOLSHED_GIT_SHA` override remains highest priority.
 
@@ -294,6 +294,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
+| `CF_SKIP_VERSION_CHECK` | _(unset)_ | Set to any non-empty value to skip the cf ↔ server version check. By default, server-touching commands compare this cf's commit (baked build metadata, or the checkout's HEAD for source runs) with `/api/meta.gitSha` and warn on stderr when they differ. |
 | `CF_CLI_INTEGRATION_USE_LOCAL` | _(unset)_ | Used by integration tests to dispatch through local source rather than a built binary. |
 | `CF_LABS_ROOT` | _(unset)_ | Read by `bin/cf` only. Selects which labs checkout answers, overriding the nearest one walking up from the cwd. Must be a checkout (a directory with `packages/cli/launcher.ts`) or `bin/cf` exits 2. Chooses the CLI, not the working directory. |
 

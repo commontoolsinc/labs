@@ -71,6 +71,7 @@ import {
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
+import { warnOnVersionMismatch } from "./version-check.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import {
   derivePieceGetValue,
@@ -385,12 +386,16 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   ] = runtimeErrors;
 
   return await withRuntimeCleanupOnFailure(runtime, async () => {
-    if (
-      !(await timeCliPhase(
-        "loadManager.healthCheck",
-        () => runtime.healthCheck(),
-      ))
-    ) {
+    // Runs concurrently with the health check's round-trip; awaited on both
+    // paths so no fetch/subprocess op outlives a thrown error, and the
+    // warning lands before any command output.
+    const versionCheck = warnOnVersionMismatch(config.apiUrl);
+    const healthy = await timeCliPhase(
+      "loadManager.healthCheck",
+      () => runtime.healthCheck(),
+    );
+    await versionCheck;
+    if (!healthy) {
       throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
     }
 

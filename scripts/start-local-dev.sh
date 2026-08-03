@@ -29,6 +29,14 @@ INSPECT_BRK=false
 INSPECT_PORT=${INSPECT_PORT:-}
 LOCAL_DEV_STARTUP_TIMEOUT=${LOCAL_DEV_STARTUP_TIMEOUT:-120}
 
+# Source-run build metadata: default COMMIT_SHA to this checkout's HEAD so
+# toolshed's /api/meta reports the commit it is running — cf compares its own
+# commit against it to detect version skew. An explicit COMMIT_SHA wins.
+if [[ -z "${COMMIT_SHA:-}" ]]; then
+    COMMIT_SHA="$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || true)"
+fi
+export COMMIT_SHA
+
 # Exit code emitted when a server cannot bind because its port is already in
 # use. Callers can retry on a different port.
 PORT_IN_USE_EXIT=3

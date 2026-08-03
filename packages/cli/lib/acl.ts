@@ -14,6 +14,7 @@ import {
   isACLUser,
 } from "@commonfabric/memory/acl";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { warnOnVersionMismatch } from "./version-check.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -52,7 +53,12 @@ export async function createRuntime(
     experimental: experimentalOptionsFromEnv(Deno.env.get),
   }));
 
-  if (!(await runtime.healthCheck())) {
+  // Runs concurrently with the health check's round-trip; awaited on both
+  // paths so no fetch/subprocess op outlives a thrown error.
+  const versionCheck = warnOnVersionMismatch(config.apiUrl);
+  const healthy = await runtime.healthCheck();
+  await versionCheck;
+  if (!healthy) {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
   }
 
