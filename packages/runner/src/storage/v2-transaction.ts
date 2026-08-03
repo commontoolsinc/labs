@@ -63,6 +63,7 @@ import {
   claim,
   load as loadInline,
   read as readAttestation,
+  StateInconsistency,
 } from "./transaction/attestation.ts";
 import {
   applyMutablePathWrite,
@@ -2045,7 +2046,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
-    const replica = this.storage.open(writeSpace).replica;
+    const replica = this.replicaForCommit(writeSpace);
     if (!replica.commitNative) {
       throw new Error("memory v2 replica does not support commitNative()");
     }
@@ -2158,7 +2159,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
-      const replica = this.storage.open(space).replica;
+      const replica = this.replicaForCommit(space);
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
       }
@@ -2335,6 +2336,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     return branch;
   }
 
+  private replicaForCommit(
+    space: MemorySpace,
+  ): ReturnType<IStorageManager["open"]>["replica"] {
+    return this.#branches.get(space)?.replica ??
+      this.storage.open(space).replica;
+  }
+
   private document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
@@ -2397,7 +2405,35 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
+  validateReplicaRoutes(): Result<Unit, IStorageTransactionInconsistent> {
+    for (const [space, branch] of this.#branches) {
+      const currentReplica = this.storage.open(space).replica;
+      if (currentReplica !== branch.replica) {
+        const firstDocument = branch.docs.values().next().value;
+        if (firstDocument !== undefined) {
+          const { address, value: expected } = firstDocument.initial;
+          const actual = toTransactionDocumentValue(
+            currentReplica.getDocument(address.id as URI, address.scope),
+          );
+          return {
+            error: StateInconsistency({
+              address,
+              expected,
+              actual,
+              space,
+            }),
+          };
+        }
+      }
+    }
+    return { ok: {} };
+  }
+
   private validate(): Result<Unit, IStorageTransactionInconsistent> {
+    const routes = this.validateReplicaRoutes();
+    if (routes.error) {
+      return routes;
+    }
     for (const branch of this.#branches.values()) {
       for (const doc of branch.docs.values()) {
         if (!doc.validated) {

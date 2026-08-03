@@ -33,21 +33,24 @@ export type SpacesList = Schema<typeof spacesListSchema>;
  * daemon (syncing its served sources) and link-receipt flows.
  *
  * Entries are HINTS: unverified in v0 (the space's own log is the
- * integrity boundary, not the host), and a hint must never silently
- * re-point a space the runtime already opened.
+ * integrity boundary, not the host). The first hint may replace an
+ * unseeded default-host provider, but it cannot replace a seed or an
+ * earlier accepted hint.
  *
  * SECURITY (v0, explicit): the table is ordinary home-space data, so
  * ANYTHING with home-space write access — including patterns running
- * there — can steer where a not-yet-opened space is fetched from.
+ * there — can steer where an unseeded space is fetched from, including
+ * a space already opened provisionally through the default host.
  * That is a deliberate v0 trade (matching "don't even verify in the
  * first month") and the forcing function for audience-binding the
  * session handshake before host hints ever come from less-trusted
  * data.
  *
- * Table semantics: an array with no uniqueness constraint — for an
- * unopened space, the LAST entry for a did wins; REMOVING an entry
- * does not unregister an already-learned hint until the runtime
- * restarts.
+ * Table semantics: an array with no uniqueness constraint. During initial
+ * hydration, the last valid HTTP or HTTPS entry for a DID is the candidate
+ * route. A seed or accepted hint remains fixed. A default-host fallback is
+ * provisional until the first hint is accepted. Removing an entry does not
+ * unregister an accepted route until the runtime restarts.
  */
 export const spaceHostEntrySchema = {
   type: "object",

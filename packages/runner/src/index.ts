@@ -1,4 +1,5 @@
 export { Runtime } from "./runtime.ts";
+export { normalizeSpaceHost } from "./space-host.ts";
 export type {
   ConsoleHandler,
   ConsoleHandlerOutput,

@@ -80,6 +80,7 @@ import type {
   IStorageProviderWithReplica,
   IStorageSubscription,
   IStorageTransaction,
+  IStorageTransactionInconsistent,
   NativeStorageCommit,
   PullError,
   PushError,
@@ -147,6 +148,8 @@ import {
   createStorageAddressResolver,
   RemoteSessionFactory,
   type SessionFactory,
+  storageAddressForHost,
+  toWebSocketAddress,
 } from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -606,15 +609,17 @@ export interface Options {
   /**
    * Base URL of the default memory host. The storage endpoint path
    * (`/api/storage/memory`) is joined internally — pass the host, not
-   * the full endpoint.
+   * the full endpoint. This storage-only route may use HTTP, HTTPS,
+   * WebSocket, or secure WebSocket.
    */
   memoryHost: URL;
   /**
    * Optional space DID → host base URL overrides. A space listed here
    * opens its storage connection against that host; absent map or
-   * absent entry resolves to `memoryHost`. The map is fixed for the
-   * manager's lifetime (the per-space provider cache assumes space →
-   * host never changes).
+   * absent entry initially resolves to `memoryHost`. The map is fixed for
+   * the manager's lifetime. A first late hint can replace a provisional
+   * `memoryHost` route for an unseeded space before that route issues a
+   * stateful operation.
    */
   spaceHostMap?: Record<string, string>;
   id?: string;
@@ -886,6 +891,8 @@ export class StorageManager implements IStorageManager {
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+  /** WebSocket storage endpoint used by an unseeded, unhinted space. */
+  #defaultStorageRoute?: string;
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
@@ -932,24 +939,37 @@ export class StorageManager implements IStorageManager {
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
     this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
+    try {
+      const resolveDefault = createStorageAddressResolver(options.memoryHost);
+      this.#defaultStorageRoute = toWebSocketAddress(
+        resolveDefault("did:key:route-comparison" as MemorySpace),
+      ).toString();
+    } catch {
+      // A custom session factory may use a non-network memoryHost placeholder.
+    }
   }
 
   /**
-   * Record a runtime-learned host hint for a space (e.g. from the
-   * home-space site table). Returns true when the hint is (now) in
-   * effect for the space's storage connection. Refusals, by design:
+   * Record a runtime-learned HTTP or HTTPS host hint for a space (e.g. from
+   * the home-space site table). Returns true when the hint is accepted or
+   * confirms a configured or previously accepted route. Refusals:
    *
    * - The seed map wins: a seeded space cannot be re-pointed.
-   * - An already-OPENED space keeps its connection — a hint must never
-   *   silently re-point live storage (re-pointing requires an explicit
-   *   close, which is lifecycle follow-up work).
+   * - The first accepted late hint remains in effect.
+   * - A provider opened through the default route is provisional until its
+   *   session accepts a stateful operation. Its first accepted hint replaces
+   *   that route and replays its reads.
+   * - A different-host hint cannot replace a route after a stateful operation
+   *   is issued.
    *
    * Idempotent when the hint matches what is already in effect.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
     let normalized: string;
     try {
-      normalized = new URL(host).toString();
+      const parsed = new URL(host);
+      storageAddressForHost(parsed);
+      normalized = parsed.toString();
     } catch (cause) {
       throw new Error(
         `Invalid host for space ${space}: "${host}"`,
@@ -961,12 +981,20 @@ export class StorageManager implements IStorageManager {
       return new URL(seeded).toString() === normalized;
     }
     const existing = this.#dynamicHosts.get(space);
-    if (this.#providers.has(space)) {
-      // Connection already established — only confirmable, not changeable.
-      return existing !== undefined &&
-        new URL(existing).toString() === normalized;
+    if (existing !== undefined) {
+      return existing === normalized;
     }
-    this.#dynamicHosts.set(space, host);
+    const provider = this.#providers.get(space);
+    const replacesDefaultRoute = provider !== undefined &&
+      this.#defaultStorageRoute !==
+        toWebSocketAddress(storageAddressForHost(normalized)).toString();
+    if (replacesDefaultRoute && !provider.canReplaceProvisionalReplica()) {
+      return false;
+    }
+    this.#dynamicHosts.set(space, normalized);
+    if (replacesDefaultRoute) {
+      this.trackUntilSettled(provider.replaceProvisionalReplica());
+    }
     return true;
   }
 
@@ -986,17 +1014,28 @@ export class StorageManager implements IStorageManager {
       // a derived space key for named spaces, the connection must authenticate
       // as the active user.
       const signer = this.as;
+      const routeState: ProviderRouteState = { generation: 0 };
       provider = new Provider({
         as: signer,
         space,
         settings: this.#settings,
         subscription: this.#subscription,
+        routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
-          ? () => this.#createInitializedSession(space, signer)
-          : () =>
+          ? (routeGeneration, routeSignal) =>
+            this.#createInitializedSession(
+              space,
+              signer,
+              routeState,
+              routeGeneration,
+              routeSignal,
+            )
+          : (_routeGeneration, routeSignal) =>
             this.#sessionFactory.create(space, signer, {
               sessionId: this.#sessionId,
-            }),
+            }, routeSignal),
+        syncReplayDependencies: (document) =>
+          this.syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
@@ -1021,106 +1060,177 @@ export class StorageManager implements IStorageManager {
   async #createInitializedSession(
     space: MemorySpace,
     signer: Signer,
-  ): Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }> {
-    const normal = await this.#sessionFactory.create(space, signer, {
-      sessionId: this.#sessionId,
-    });
-    if (this.#sessionFactory.supportsAclBootstrap !== true) return normal;
-    const isHomeSpace = signer.did() === space;
-    const spaceIdentity = isHomeSpace
-      ? signer
-      : this.#spaceIdentities.get(space);
-    if (spaceIdentity === undefined) return normal;
-
-    const openedServerSeq = normal.session.serverSeq;
-    const aclId = `of:${space}`;
-    const aclResult = await normal.session.queryGraph({
-      roots: [{ id: aclId, selector: { path: [], schema: false } }],
-    });
-    const aclSnapshot = aclResult.entities.find((entity) =>
-      entity.id === aclId && (entity.scope ?? "space") === "space"
-    );
-    const aclNeverCreated = aclSnapshot?.seq === 0 &&
-      aclSnapshot.document === null;
-    if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
-      return normal;
-    }
-
-    // Do not reuse the bootstrap session for replica work: both it and the
-    // replica allocate localSeq from 1, and named spaces must switch back from
-    // the space signer to the active user before any user-scoped operation.
-    // Preserve the normal session token before detaching it so the final user
-    // mount resumes the construction-wide manager session instead of trying to
-    // replace that still-live id without its token.
-    const resumeNormal: MemoryV2Client.MountOptions = {
-      sessionId: normal.session.sessionId,
-      seenSeq: normal.session.serverSeq,
-      ...(normal.session.sessionToken !== undefined
-        ? { sessionToken: normal.session.sessionToken }
-        : {}),
+    routeState: ProviderRouteState,
+    routeGeneration: number,
+    routeSignal: AbortSignal,
+  ): Promise<OpenedSpaceSession> {
+    const assertCurrentRoute = (): void => {
+      if (
+        routeSignal.aborted ||
+        routeState.generation !== routeGeneration
+      ) {
+        throw routeSignal.reason instanceof Error
+          ? routeSignal.reason
+          : new Error("memory replica route replaced");
+      }
     };
-    await normal.client.close();
-    let bootstrapSessionId = crypto.randomUUID();
-    while (bootstrapSessionId === this.#sessionId) {
-      bootstrapSessionId = crypto.randomUUID();
-    }
-    const bootstrap = await this.#sessionFactory.create(
-      space,
-      spaceIdentity,
-      { sessionId: bootstrapSessionId },
-    );
+    const activeClients = new Set<MemoryV2Client.Client>();
+    const closeActiveClients = (): void => {
+      for (const client of activeClients) {
+        void client.close().catch(() => {});
+      }
+    };
+    const track = (opened: OpenedSpaceSession): OpenedSpaceSession => {
+      activeClients.add(opened.client);
+      assertCurrentRoute();
+      return opened;
+    };
+    routeSignal.addEventListener("abort", closeActiveClients, { once: true });
+    let completed = false;
+
     try {
-      const current = await bootstrap.session.queryGraph({
+      assertCurrentRoute();
+      const normal = track(
+        await this.#sessionFactory.create(
+          space,
+          signer,
+          { sessionId: this.#sessionId },
+          routeSignal,
+        ),
+      );
+      if (this.#sessionFactory.supportsAclBootstrap !== true) {
+        completed = true;
+        return normal;
+      }
+      const isHomeSpace = signer.did() === space;
+      const spaceIdentity = isHomeSpace
+        ? signer
+        : this.#spaceIdentities.get(space);
+      if (spaceIdentity === undefined) {
+        completed = true;
+        return normal;
+      }
+
+      const openedServerSeq = normal.session.serverSeq;
+      const aclId = `of:${space}`;
+      const aclResult = await normal.session.queryGraph({
         roots: [{ id: aclId, selector: { path: [], schema: false } }],
       });
-      const snapshot = current.entities.find((entity) =>
+      assertCurrentRoute();
+      const aclSnapshot = aclResult.entities.find((entity) =>
         entity.id === aclId && (entity.scope ?? "space") === "space"
       );
-      // Recheck emptiness in the authority session. In `off` mode an unrelated
-      // writer can still populate the space between the first inspection and
-      // bootstrap; that turns it into the named legacy-public case and must
-      // not be claimed. Home remains the explicit exception.
-      const aclStillNeverCreated = snapshot?.seq === 0 &&
-        snapshot.document === null;
-      if (aclStillNeverCreated && (isHomeSpace || current.serverSeq === 0)) {
-        try {
-          const bootstrapAcl = isHomeSpace
-            ? { [signer.did()]: "OWNER" }
-            : { [signer.did()]: "OWNER", "*": "WRITE" };
-          await bootstrap.session.transact({
-            localSeq: 1,
-            reads: {
-              confirmed: [{
+      const aclNeverCreated = aclSnapshot?.seq === 0 &&
+        aclSnapshot.document === null;
+      if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
+        completed = true;
+        return normal;
+      }
+
+      // Do not reuse the bootstrap session for replica work: both it and the
+      // replica allocate localSeq from 1, and named spaces must switch back from
+      // the space signer to the active user before any user-scoped operation.
+      // Preserve the normal session token before detaching it so the final user
+      // mount resumes the construction-wide manager session instead of trying to
+      // replace that still-live id without its token.
+      const resumeNormal: MemoryV2Client.MountOptions = {
+        sessionId: normal.session.sessionId,
+        seenSeq: normal.session.serverSeq,
+        ...(normal.session.sessionToken !== undefined
+          ? { sessionToken: normal.session.sessionToken }
+          : {}),
+      };
+      activeClients.delete(normal.client);
+      await normal.client.close();
+      assertCurrentRoute();
+      let bootstrapSessionId = crypto.randomUUID();
+      while (bootstrapSessionId === this.#sessionId) {
+        bootstrapSessionId = crypto.randomUUID();
+      }
+      const bootstrap = track(
+        await this.#sessionFactory.create(
+          space,
+          spaceIdentity,
+          { sessionId: bootstrapSessionId },
+          routeSignal,
+        ),
+      );
+      try {
+        assertCurrentRoute();
+        const current = await bootstrap.session.queryGraph({
+          roots: [{ id: aclId, selector: { path: [], schema: false } }],
+        });
+        assertCurrentRoute();
+        const snapshot = current.entities.find((entity) =>
+          entity.id === aclId && (entity.scope ?? "space") === "space"
+        );
+        // Recheck emptiness in the authority session. In `off` mode an
+        // unrelated writer can still populate the space between the first
+        // inspection and bootstrap; that turns it into the named legacy-public
+        // case and must not be claimed. Home remains the explicit exception.
+        const aclStillNeverCreated = snapshot?.seq === 0 &&
+          snapshot.document === null;
+        if (
+          aclStillNeverCreated &&
+          (isHomeSpace || current.serverSeq === 0)
+        ) {
+          try {
+            const bootstrapAcl = isHomeSpace
+              ? { [signer.did()]: "OWNER" }
+              : { [signer.did()]: "OWNER", "*": "WRITE" };
+            await bootstrap.session.transact({
+              localSeq: 1,
+              reads: {
+                confirmed: [{
+                  id: aclId,
+                  path: toDocumentPath([]),
+                  seq: snapshot?.seq ?? 0,
+                }],
+                pending: [],
+              },
+              operations: [{
+                op: "set",
                 id: aclId,
-                path: toDocumentPath([]),
-                seq: snapshot?.seq ?? 0,
+                value: { value: bootstrapAcl },
               }],
-              pending: [],
-            },
-            operations: [{
-              op: "set",
-              id: aclId,
-              value: { value: bootstrapAcl },
-            }],
-          });
-        } catch (error) {
-          // A concurrent space-authorized initializer may win between the
-          // point read and commit. Reopening as the user below is the
-          // authoritative outcome: it succeeds only if the winning ACL grants
-          // access. Other failures are real bootstrap errors.
-          if (!(error instanceof Error) || error.name !== "ConflictError") {
-            throw error;
+            }, () => {
+              assertCurrentRoute();
+              routeState.writeIssuedGeneration = routeGeneration;
+            });
+          } catch (error) {
+            // A concurrent space-authorized initializer may win between the
+            // point read and commit. Reopening as the user below is the
+            // authoritative outcome: it succeeds only if the winning ACL grants
+            // access. Other failures are real bootstrap errors.
+            if (!(error instanceof Error) || error.name !== "ConflictError") {
+              throw error;
+            }
           }
         }
+      } finally {
+        activeClients.delete(bootstrap.client);
+        await bootstrap.client.close();
       }
-    } finally {
-      await bootstrap.client.close();
-    }
 
-    return await this.#sessionFactory.create(space, signer, resumeNormal);
+      assertCurrentRoute();
+      const resumed = track(
+        await this.#sessionFactory.create(
+          space,
+          signer,
+          resumeNormal,
+          routeSignal,
+        ),
+      );
+      completed = true;
+      return resumed;
+    } finally {
+      if (!completed) {
+        routeSignal.removeEventListener("abort", closeActiveClients);
+        await Promise.allSettled(
+          [...activeClients].map((client) => client.close()),
+        );
+      }
+    }
   }
 
   async close(): Promise<void> {
@@ -1427,7 +1537,7 @@ export class StorageManager implements IStorageManager {
   private async syncCfcSchemaDocument(
     space: MemorySpace,
     document: EntityDocument | undefined,
-  ): Promise<unknown> {
+  ): Promise<Error | undefined> {
     const cfc = isRecord(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
@@ -1623,17 +1733,42 @@ export class StorageManager implements IStorageManager {
   }
 }
 
+type ProviderRouteState = {
+  generation: number;
+  writeIssuedGeneration?: number;
+};
+
+type OpenedSpaceSession = {
+  client: MemoryV2Client.Client;
+  session: MemoryV2Client.SpaceSession;
+};
+
 type ProviderOptions = {
   as: Signer;
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
-  createSession: () => Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }>;
+  routeState: ProviderRouteState;
+  createSession: (
+    routeGeneration: number,
+    routeSignal: AbortSignal,
+  ) => Promise<OpenedSpaceSession>;
+  syncReplayDependencies: (
+    document: EntityDocument | undefined,
+  ) => Promise<Error | undefined>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+};
+
+type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
+  routeGeneration: number;
+  createSession: () => Promise<OpenedSpaceSession>;
+};
+
+type ProviderSyncRequest = {
+  uri: URI;
+  selector: SchemaPathSelector;
+  scope?: CellScope;
 };
 
 /**
@@ -1644,13 +1779,26 @@ type ProviderOptions = {
 type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProviderWithReplica {
-  readonly replica: SpaceReplica;
+  replica: SpaceReplica;
+  #syncRequests = new Map<string, ProviderSyncRequest>();
   #destroyed = false;
+  #routeAbort = new AbortController();
 
   constructor(
     readonly options: ProviderOptions,
   ) {
-    this.replica = new SpaceReplica(options);
+    this.replica = this.createReplica();
+  }
+
+  private createReplica(): SpaceReplica {
+    const routeGeneration = this.options.routeState.generation;
+    const routeSignal = this.#routeAbort.signal;
+    return new SpaceReplica({
+      ...this.options,
+      routeGeneration,
+      createSession: () =>
+        this.options.createSession(routeGeneration, routeSignal),
+    });
   }
 
   send(
@@ -1667,13 +1815,85 @@ class Provider implements IStorageProviderWithReplica {
     selector?: SchemaPathSelector,
     scope?: CellScope,
   ): Promise<Result<Unit, Error>> {
-    return this.replica.sync(uri, selector, scope) as Promise<
+    const [[address, normalizedSelector]] = normalizeSyncEntries([[
+      { id: uri, type: DOCUMENT_MIME, scope },
+      selector,
+    ]]);
+    this.#syncRequests.set(
+      watchIdForEntry(address, normalizedSelector),
+      { uri, selector: normalizedSelector, scope },
+    );
+    return this.replica.sync(uri, normalizedSelector, scope) as Promise<
       Result<Unit, Error>
     >;
   }
 
+  private async replaySync(
+    replica: SpaceReplica,
+    uri: URI,
+    selector: SchemaPathSelector,
+    scope?: CellScope,
+  ): Promise<Result<Unit, PullError>> {
+    const result = await replica.sync(uri, selector, scope);
+    if (result.error !== undefined || uri.startsWith("cid:")) {
+      return result;
+    }
+    const dependencyFailure = await this.options.syncReplayDependencies(
+      replica.getDocument(uri, scope),
+    );
+    return dependencyFailure === undefined
+      ? result
+      : { error: dependencyFailure as PullError };
+  }
+
+  private followReplacement<T>(
+    read: (replica: SpaceReplica) => Promise<T>,
+  ): Promise<T> {
+    const replica = this.replica;
+    return read(replica).then(
+      (result) =>
+        this.replica !== replica && !this.#destroyed
+          ? read(this.replica)
+          : result,
+      (error) => {
+        if (this.replica !== replica && !this.#destroyed) {
+          return read(this.replica);
+        }
+        throw error;
+      },
+    );
+  }
+
+  canReplaceProvisionalReplica(): boolean {
+    const { generation, writeIssuedGeneration } = this.options.routeState;
+    return writeIssuedGeneration !== generation;
+  }
+
+  async replaceProvisionalReplica(): Promise<void> {
+    if (this.#destroyed) {
+      return;
+    }
+    const previous = this.replica;
+    this.#routeAbort.abort(new Error("memory replica route replaced"));
+    this.options.routeState.generation++;
+    this.#routeAbort = new AbortController();
+    const replacement = this.createReplica();
+    this.replica = replacement;
+    previous.redirectOverlappingReadsTo((uri, selector, scope) =>
+      this.replaySync(replacement, uri, selector, scope)
+    );
+    previous.reset();
+    previous.closeNow();
+    const requests = [...this.#syncRequests.values()];
+    await Promise.all(
+      requests.map(({ uri, selector, scope }) =>
+        this.replaySync(replacement, uri, selector, scope)
+      ),
+    );
+  }
+
   synced(): Promise<void> {
-    return this.replica.synced();
+    return this.followReplacement((replica) => replica.synced());
   }
 
   authorizationError(): Error | undefined {
@@ -1681,27 +1901,31 @@ class Provider implements IStorageProviderWithReplica {
   }
 
   ensureSession(): Promise<void> {
-    return this.replica.ensureSession();
+    return this.followReplacement((replica) => replica.ensureSession());
   }
 
   listEntityIds(): Promise<string[] | undefined> {
-    return this.replica.listEntityIds();
+    return this.followReplacement((replica) => replica.listEntityIds());
   }
 
   listEntityIdPage(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
-    return this.replica.listEntityIdPage(options);
+    return this.followReplacement((replica) =>
+      replica.listEntityIdPage(options)
+    );
   }
 
   entityIdExists(id: string): Promise<boolean | undefined> {
-    return this.replica.entityIdExists(id);
+    return this.followReplacement((replica) => replica.entityIdExists(id));
   }
 
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
-    return this.replica.listSchedulerActionSnapshots(query);
+    return this.followReplacement((replica) =>
+      replica.listSchedulerActionSnapshots(query)
+    );
   }
 
   areSchedulerAddressesCurrentAtOrBelow(
@@ -1722,7 +1946,9 @@ class Provider implements IStorageProviderWithReplica {
     sql: string,
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult> {
-    return this.replica.sqliteQuery(db, sql, params);
+    return this.followReplacement((replica) =>
+      replica.sqliteQuery(db, sql, params)
+    );
   }
 
   sqliteServerCommitRowLabelEval(): boolean {
@@ -1752,12 +1978,16 @@ class Provider implements IStorageProviderWithReplica {
       return;
     }
     this.#destroyed = true;
+    this.#routeAbort.abort(new Error("memory replica closed"));
+    this.options.routeState.generation++;
     await this.replica.close();
   }
 
   async destroyNow(): Promise<void> {
     if (!this.#destroyed) {
       this.#destroyed = true;
+      this.#routeAbort.abort(new Error("memory replica closed"));
+      this.options.routeState.generation++;
     }
     await this.replica.closeNow();
   }
@@ -1800,7 +2030,16 @@ type NativeCommitOperation =
 type SchedulerObservationBatchEntry = {
   commit: SchedulerObservationCommit;
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
+  source?: IStorageTransaction;
+  batchGeneration: number;
 };
+
+class StorageTransactionRejectionError extends Error {
+  constructor(readonly rejection: StorageTransactionRejected) {
+    super(rejection.message);
+    this.name = rejection.name;
+  }
+}
 
 /**
  * A commit that has been issued (optimistic write applied, verdict not yet
@@ -1890,6 +2129,10 @@ class SpaceReplica implements ISpaceReplica {
   // teardown rejects every in-flight request.
   readonly #suppressedVerdicts = new Set<Promise<void>>();
   readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
+  readonly #unsettledSchedulerObservations = new Set<
+    SchedulerObservationBatchEntry
+  >();
+  #schedulerObservationBatchGeneration = 0;
   #schedulerObservationFlushScheduled = false;
   #schedulerObservationFlushPromise:
     | Promise<Result<Unit, StorageTransactionRejected>>
@@ -1912,6 +2155,7 @@ class SpaceReplica implements ISpaceReplica {
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
   #closed = false;
+  readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
   #caughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
@@ -1937,19 +2181,40 @@ class SpaceReplica implements ISpaceReplica {
   // denial. `authorizationError()` reports it as a throwable error; `synced()`
   // stays silent so a denied cross-space link remains a silent absent read.
   #lastAuthorizationError: IAuthorizationError | null = null;
+  readonly #routeState: ProviderRouteState;
+  readonly #routeGeneration: number;
+  #replacementRead:
+    | ((
+      uri: URI,
+      selector: SchemaPathSelector,
+      scope?: CellScope,
+    ) => Promise<Result<Unit, PullError>>)
+    | undefined;
 
   #settings: IRemoteStorageProviderSettings;
 
-  constructor(options: ProviderOptions) {
+  constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#settings = options.settings;
+    this.#routeState = options.routeState;
+    this.#routeGeneration = options.routeGeneration;
   }
 
   did(): MemorySpace {
     return this.#space;
+  }
+
+  redirectOverlappingReadsTo(
+    replacementRead: (
+      uri: URI,
+      selector: SchemaPathSelector,
+      scope?: CellScope,
+    ) => Promise<Result<Unit, PullError>>,
+  ): void {
+    this.#replacementRead = replacementRead;
   }
 
   get(entry: IMemoryAddress): State | undefined {
@@ -1961,10 +2226,23 @@ class SpaceReplica implements ISpaceReplica {
     selector?: SchemaPathSelector,
     scope?: CellScope,
   ): Promise<Result<Unit, PullError>> {
-    return await this.pull([[
+    const replacementAtStart = this.#replacementRead;
+    const result = await this.pull([[
       { id: uri, type: DOCUMENT_MIME as MIME, scope },
       selector,
     ]]);
+    const replacement = this.#replacementRead;
+    if (replacementAtStart === undefined && replacement !== undefined) {
+      return await replacement(
+        uri,
+        normalizeSyncEntries([[
+          { id: uri, type: DOCUMENT_MIME, scope },
+          selector,
+        ]])[0][1],
+        scope,
+      );
+    }
+    return result;
   }
 
   sinkDocument(
@@ -2066,7 +2344,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async ensureSession(): Promise<void> {
-    await this.sessionHandle();
+    await this.activeSessionHandle();
   }
 
   async sqliteQuery(
@@ -2074,12 +2352,12 @@ class SpaceReplica implements ISpaceReplica {
     sql: string,
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult> {
-    const { session } = await this.sessionHandle();
+    const { session } = await this.activeSessionHandle();
     return await session.sqliteQuery(db, sql, params);
   }
 
   async listEntityIds(): Promise<string[] | undefined> {
-    const { client, session } = await this.sessionHandle();
+    const { client, session } = await this.activeSessionHandle();
     if (client.serverFlags?.entityIdListing !== true) {
       return undefined;
     }
@@ -2106,7 +2384,7 @@ class SpaceReplica implements ISpaceReplica {
   async listEntityIdPage(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
-    const { client, session } = await this.sessionHandle();
+    const { client, session } = await this.activeSessionHandle();
     if (
       client.serverFlags?.entityIdListing !== true ||
       client.serverFlags.entityIdPagination !== true
@@ -2117,7 +2395,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async entityIdExists(id: string): Promise<boolean | undefined> {
-    const { client, session } = await this.sessionHandle();
+    const { client, session } = await this.activeSessionHandle();
     if (client.serverFlags?.entityIdLookup !== true) {
       return undefined;
     }
@@ -2140,8 +2418,12 @@ class SpaceReplica implements ISpaceReplica {
     id: string,
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult> {
-    const { session } = await this.sessionHandle();
-    return await session.registerSqliteDiskSource(id, path);
+    const { session } = await this.activeSessionHandle();
+    return await session.registerSqliteDiskSource(
+      id,
+      path,
+      () => this.markRouteWriteIssued(),
+    );
   }
 
   async listSchedulerActionSnapshots(
@@ -2150,7 +2432,7 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return { serverSeq: 0, snapshots: [] };
     }
-    const { client, session } = await this.sessionHandle();
+    const { client, session } = await this.activeSessionHandle();
     // Optional capability, negotiated at hello: a server that did not
     // advertise `persistentSchedulerState` keeps no scheduler rows (and an
     // older build may not know the message at all) — treat as "no snapshots"
@@ -2198,6 +2480,7 @@ class SpaceReplica implements ISpaceReplica {
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#closeSignal.resolve();
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     // Settle any queued (not-yet-sent) watch refresh first so its pull promise
@@ -2317,6 +2600,7 @@ class SpaceReplica implements ISpaceReplica {
 
   closeNow(): void {
     this.#closed = true;
+    this.#closeSignal.resolve();
     this.resetConflictAdmissionState();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
@@ -2577,7 +2861,7 @@ class SpaceReplica implements ISpaceReplica {
     type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
-      const { session } = await this.sessionHandle();
+      const { session } = await this.activeSessionHandle();
       // Per-session (no global): mirror the storage setting onto the session so
       // its watch-mutation family (set + add) uses the ordered-issue concurrent
       // path. Idempotent; cheap to re-assert each refresh. Optional-chained so
@@ -2739,7 +3023,7 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<void> {
     while (true) {
       const next = await iterator.next();
-      if (next.done) {
+      if (next.done || this.#closed) {
         return;
       }
       this.applySessionSync(next.value, "integrate");
@@ -2768,16 +3052,31 @@ class SpaceReplica implements ISpaceReplica {
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
     >();
-    this.#schedulerObservationBatch.push({
+    const entry: SchedulerObservationBatchEntry = {
       commit: {
         localSeq,
         reads: this.buildReads(source, localSeq),
         schedulerObservation,
       },
       pending,
+      source,
+      batchGeneration: this.#schedulerObservationBatchGeneration,
+    };
+    this.#schedulerObservationBatch.push(entry);
+    this.#unsettledSchedulerObservations.add(entry);
+    void pending.promise.then(() => {
+      this.#unsettledSchedulerObservations.delete(entry);
     });
     this.scheduleSchedulerObservationFlush();
     return pending.promise;
+  }
+
+  private schedulerObservationDependenciesBefore(
+    localSeq: number,
+  ): Promise<Result<Unit, StorageTransactionRejected>>[] {
+    return [...this.#unsettledSchedulerObservations]
+      .filter((entry) => entry.commit.localSeq < localSeq)
+      .map((entry) => entry.pending.promise);
   }
 
   private scheduleSchedulerObservationFlush(): void {
@@ -2795,25 +3094,24 @@ class SpaceReplica implements ISpaceReplica {
     Result<Unit, StorageTransactionRejected>
   > {
     let lastResult: Result<Unit, StorageTransactionRejected> = { ok: {} };
+    let firstError: Result<Unit, StorageTransactionRejected> | undefined;
     while (true) {
-      if (this.#schedulerObservationFlushPromise) {
-        lastResult = await this.#schedulerObservationFlushPromise;
-        if (
-          this.#schedulerObservationBatch.length === 0 ||
-          "error" in lastResult
-        ) {
-          return lastResult;
+      const activeFlush = this.#schedulerObservationFlushPromise;
+      if (activeFlush) {
+        lastResult = await activeFlush;
+        if ("error" in lastResult) {
+          firstError ??= lastResult;
         }
         continue;
       }
 
       if (this.#schedulerObservationBatch.length === 0) {
-        return lastResult;
+        return firstError ?? lastResult;
       }
 
       lastResult = await this.startSchedulerObservationBatchFlush();
       if ("error" in lastResult) {
-        return lastResult;
+        firstError ??= lastResult;
       }
     }
   }
@@ -2821,7 +3119,16 @@ class SpaceReplica implements ISpaceReplica {
   private startSchedulerObservationBatchFlush(): Promise<
     Result<Unit, StorageTransactionRejected>
   > {
-    const entries = this.#schedulerObservationBatch.splice(0);
+    const batchGeneration = this.#schedulerObservationBatch[0].batchGeneration;
+    const nextGeneration = this.#schedulerObservationBatch.findIndex((entry) =>
+      entry.batchGeneration !== batchGeneration
+    );
+    const entries = this.#schedulerObservationBatch.splice(
+      0,
+      nextGeneration === -1
+        ? this.#schedulerObservationBatch.length
+        : nextGeneration,
+    );
     const localSeq = this.#nextLocalSeq++;
     const commit: ClientCommit = {
       localSeq,
@@ -2844,7 +3151,7 @@ class SpaceReplica implements ISpaceReplica {
       // the whole session's writes starve). Fail closed instead: drop the
       // observations — the feature degrades to flag-off semantics (resumes
       // re-run fresh) while semantic traffic proceeds untouched.
-      const { client } = await this.sessionHandle();
+      const { client } = await this.activeSessionHandle();
       if (client.serverFlags?.persistentSchedulerState !== true) {
         return { ok: {} };
       }
@@ -2877,7 +3184,35 @@ class SpaceReplica implements ISpaceReplica {
         ...commit,
         schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
       };
-      return await this.pushCommit(localSeq, [], wireBatch, undefined);
+      const routeSources: IStorageTransaction[] = [];
+      const prepareIssue = (issueCommit: ClientCommit): boolean => {
+        const issueEntries: SchedulerObservationBatchEntry[] = [];
+        for (const entry of wireEntries) {
+          const validation = entry.source?.validateReplicaRoutes?.();
+          if (validation?.error !== undefined) {
+            entry.pending.resolve({ error: validation.error });
+            continue;
+          }
+          issueEntries.push(entry);
+          if (
+            entry.source !== undefined &&
+            !routeSources.includes(entry.source)
+          ) {
+            routeSources.push(entry.source);
+          }
+        }
+        issueCommit.schedulerObservationBatch = issueEntries.map((entry) =>
+          entry.commit
+        );
+        return issueEntries.length > 0;
+      };
+      return await this.pushCommit(
+        localSeq,
+        [],
+        wireBatch,
+        undefined,
+        { routeSources, prepareIssue },
+      );
     })()
       .then((result) => {
         for (const entry of entries) {
@@ -2925,6 +3260,8 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const localSeq = this.#nextLocalSeq++;
+    // Observations created after this direct commit form a later batch.
+    this.#schedulerObservationBatchGeneration++;
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
@@ -3015,6 +3352,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
+          { waitForSchedulerObservations: true },
         ),
     );
     this.#commitPromises.add(promise);
@@ -3141,7 +3479,18 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
+    options: {
+      routeSources?: readonly IStorageTransaction[];
+      prepareIssue?: (commit: ClientCommit) => boolean;
+      waitForSchedulerObservations?: boolean;
+    } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const routeSources = options.routeSources ??
+      (source === undefined ? [] : [source]);
+    const schedulerObservationDependencies =
+      options.waitForSchedulerObservations === true
+        ? this.schedulerObservationDependenciesBefore(localSeq)
+        : [];
     // Register BEFORE any await: commitOperations calls pushCommit
     // synchronously after applyPending, so registration is atomic with the
     // optimistic write — a dependency drop can never slip between the two.
@@ -3184,20 +3533,24 @@ class SpaceReplica implements ISpaceReplica {
         spaceDid: this.#space,
       });
       try {
-        if (
-          operations.length > 0 &&
-          (this.#schedulerObservationBatch.length > 0 ||
-            this.#schedulerObservationFlushPromise)
-        ) {
-          const flushResult = await this.flushSchedulerObservationBatch();
-          const rejection = flushResult.error;
+        if (schedulerObservationDependencies.length > 0) {
+          const flushResults = await Promise.all(
+            schedulerObservationDependencies,
+          );
+          const rejection = flushResults.find((result) =>
+            result.error !== undefined
+          )?.error;
           if (rejection !== undefined) {
-            const error = new Error(rejection.message);
-            error.name = rejection.name ?? "TransactionError";
-            throw error;
+            throw new StorageTransactionRejectionError(rejection);
           }
         }
-        const { client, session } = await this.sessionHandle();
+        const { client, session } = await this.activeSessionHandle();
+        if (
+          options.prepareIssue !== undefined &&
+          !options.prepareIssue(commit)
+        ) {
+          return { ok: {} };
+        }
         // Wire-compat: only a server advertising `pendingReadStacks` can
         // resolve array dependency sets — otherwise collapse each to its
         // top-of-stack element before sending.
@@ -3251,7 +3604,10 @@ class SpaceReplica implements ISpaceReplica {
         if (inFlight === undefined) {
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
-          const applied = await session.transact(wireCommit);
+          const applied = await session.transact(
+            wireCommit,
+            () => this.markRouteWriteIssued(routeSources),
+          );
           this.confirmPending(localSeq, operations, applied);
           telemetry?.submit({
             type: "storage.push.complete",
@@ -3263,7 +3619,10 @@ class SpaceReplica implements ISpaceReplica {
         // Race the server verdict against a locally-fabricated rejection (a
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
-        const verdict = session.transact(wireCommit);
+        const verdict = session.transact(
+          wireCommit,
+          () => this.markRouteWriteIssued(routeSources),
+        );
         const outcome = await Promise.race([
           verdict.then((applied) => ({ applied })),
           inFlight.localRejection.promise.then((rejection) => ({ rejection })),
@@ -3294,15 +3653,27 @@ class SpaceReplica implements ISpaceReplica {
         });
         return { ok: {} };
       } catch (error) {
-        const rejection = toRejectedError(error, commit, this.#space);
+        let cause = error;
+        if (this.#replacementRead !== undefined) {
+          const routeConflict = new Error("memory replica route replaced");
+          routeConflict.name = "ConflictError";
+          cause = routeConflict;
+        }
+        const schedulerDependencyRejection =
+          cause instanceof StorageTransactionRejectionError ? cause : undefined;
+        const rejection = schedulerDependencyRejection !== undefined
+          ? schedulerDependencyRejection.rejection
+          : toRejectedError(cause, commit, this.#space);
         telemetry?.submit({
           type: "storage.push.error",
           id: pushOpId,
           error: rejection.name ?? "TransactionError",
         });
-        this.attachProviderReadyToRetry(rejection, localSeq);
-        if (admissionMode !== "off" && rejection.name === "ConflictError") {
-          this.recordStaleFloor(commit, localSeq);
+        if (schedulerDependencyRejection === undefined) {
+          this.attachProviderReadyToRetry(rejection, localSeq);
+          if (admissionMode !== "off" && rejection.name === "ConflictError") {
+            this.recordStaleFloor(commit, localSeq);
+          }
         }
         // Counted (even while silent) so multi-writer churn can be read back via
         // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
@@ -3328,6 +3699,58 @@ class SpaceReplica implements ISpaceReplica {
     } finally {
       this.settleInFlightCommit(localSeq);
     }
+  }
+
+  private markRouteWriteIssued(
+    sources: readonly IStorageTransaction[] = [],
+  ): void {
+    for (const source of sources) {
+      const validation = source.validateReplicaRoutes?.();
+      if (validation?.error !== undefined) {
+        throw Object.assign(
+          new Error(validation.error.message),
+          validation.error,
+        );
+      }
+    }
+    if (
+      this.#closed ||
+      this.#routeState.generation !== this.#routeGeneration
+    ) {
+      throw new Error("memory replica route replaced");
+    }
+    this.#routeState.writeIssuedGeneration = this.#routeGeneration;
+  }
+
+  private assertActiveRoute(): void {
+    if (
+      this.#closed ||
+      this.#routeState.generation !== this.#routeGeneration
+    ) {
+      throw new Error("memory replica closed");
+    }
+  }
+
+  private activeSessionHandle(): Promise<OpenedSpaceSession> {
+    try {
+      this.assertActiveRoute();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const handle = this.sessionHandle();
+    if (this.#sessionClient !== undefined) {
+      return handle;
+    }
+    return Promise.race([
+      handle.then((value) => ({ value })),
+      this.#closeSignal.promise.then(() => ({ value: undefined })),
+    ]).then((opened) => {
+      if (opened.value === undefined) {
+        throw new Error("memory replica closed");
+      }
+      this.assertActiveRoute();
+      return opened.value;
+    });
   }
 
   // Shared rejection tail for both real conflicts and pre-empted commits: wait
@@ -4101,14 +4524,26 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }> {
+    if (this.#closed) {
+      return Promise.reject(new Error("memory replica closed"));
+    }
     if (this.#sessionHandle === undefined) {
       // Defer the factory call until after #sessionHandle is installed. Session
       // setup can synchronously re-enter provider work (notably home-space ACL
       // bootstrap); calling the factory inline leaves a window where that work
       // starts a second mount with the same explicit session id and revokes the
       // first mount before it can commit.
-      const handle = Promise.resolve().then(() => this.#createSession()).then(
-        (resolved) => {
+      const handle = Promise.resolve().then(() => {
+        this.assertActiveRoute();
+        return this.#createSession();
+      }).then(
+        async (resolved) => {
+          try {
+            this.assertActiveRoute();
+          } catch (error) {
+            await resolved.client.close();
+            throw error;
+          }
           this.#sessionClient = resolved.client;
           this.#sessionSession = resolved.session;
           return resolved;
@@ -4178,6 +4613,9 @@ const toRejectedError = (
   const name = error instanceof Error
     ? error.name
     : (error as { name?: unknown })?.name;
+  if (name === "StorageTransactionInconsistent") {
+    return error as IStorageTransactionInconsistent;
+  }
   // `error` may be a primitive or null — never throw while normalizing a
   // commit failure, that would mask the real rejection.
   const precondition = (error as { precondition?: unknown })?.precondition;
