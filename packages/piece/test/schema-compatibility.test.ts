@@ -2123,3 +2123,53 @@ describe("verb event closed-world transitions", () => {
     ).not.toThrow();
   });
 });
+
+describe("listing marks are annotation-class", () => {
+  // `tier: "wrapper"` and standard `deprecated: true` shape only what
+  // `cf piece verbs` shows by default (verb contract WS-F); neither
+  // constrains a value, so both must ADD and REMOVE freely across pattern
+  // updates. Classified before the generator emits them — the checker
+  // equality-compares unknown keywords, so an unclassified mark would be
+  // refused in both directions: the C3 append-only lesson.
+  const verbArgument = (marks: Record<string, unknown>): Pattern =>
+    pattern(
+      {
+        type: "object",
+        properties: {
+          submitTopic: {
+            type: "object",
+            properties: { body: { type: "string" } },
+            asCell: ["stream"],
+            ...marks,
+          },
+        },
+      },
+      { type: "object", properties: {} },
+    );
+
+  const unmarked = verbArgument({});
+  const marked = verbArgument({ tier: "wrapper", deprecated: true });
+
+  it("lets both marks arrive on a recorded verb", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(unmarked, marked)
+    ).not.toThrow();
+  });
+
+  it("lets both marks leave again", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(marked, unmarked)
+    ).not.toThrow();
+  });
+
+  it("still refuses a genuinely unknown keyword (control)", () => {
+    // The pin proves classification, not a checker that stopped looking:
+    // an unclassified key on the same node is refused exactly as before.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        unmarked,
+        verbArgument({ mysteryDial: 7 }),
+      )
+    ).toThrow(/mysteryDial|unknown/i);
+  });
+});
