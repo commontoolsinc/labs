@@ -1,7 +1,7 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { FabricSpecialObject } from "@commonfabric/data-model/interface";
+import { FabricPrimitive } from "@commonfabric/data-model/interface";
 import {
   type FabricExecValue,
   isPattern,
@@ -416,17 +416,19 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
    *
-   * A `FabricSpecialObject` leaves first, ahead of the container branches. It
-   * is an opaque leaf to a name-driven walk: its state lives in private fields,
-   * so `Object.entries()` reports none of it and a rebuild from those entries
+   * A `FabricPrimitive` leaves first, ahead of the container branches. It is a
+   * genuine leaf: an opaque scalar whose state lives in private fields, so
+   * `Object.entries()` reports none of it and a rebuild from those entries
    * would yield a bare `{}`. Returning it as-is preserves it, and skips an
    * `Object.entries()` call that can only ever come back empty.
    *
-   * TODO(danfuzz): Latent — a `FabricInstance` (unlike a `FabricPrimitive`) is
-   * a container, so an alias nested in its codec contents is not rebound by
-   * this walk. Leaving it whole is strictly better than decomposing it, but a
-   * bound alias inside one would be missed. The two sibling walks in this file
-   * carry the same marker.
+   * TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a container
+   * holding other `FabricValue`s, so it does need descending into, but by its
+   * codec contents rather than by property name. It currently falls through to
+   * the record branch, where its zero enumerable own properties mean nothing
+   * rebinds and the original is handed back — preserved rather than decomposed,
+   * but never descended, so a bound alias nested inside one is missed. The two
+   * sibling walks in this file carry the same marker.
    *
    * The container branches then hand back the original when nothing under one
    * rebound, without checking whether a rebuild would have reproduced it. For
@@ -528,7 +530,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           { includeSchema: true, overwrite: "redirect" },
         );
       }
-    } else if (binding instanceof FabricSpecialObject) {
+    } else if (binding instanceof FabricPrimitive) {
       return binding;
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
