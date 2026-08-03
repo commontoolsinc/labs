@@ -4,6 +4,8 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   CF_RUNTIME_ERROR_LOG,
   normalizeAbsentVerbPayload,
+  runtimeErrorLog,
+  schemaIsObjectShaped,
   verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
@@ -29,6 +31,7 @@ import {
   WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
+import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
 
 describe("executePieceCallable", () => {
   it("preserves plain-text mode while resolving a callable", async () => {
@@ -2176,6 +2179,19 @@ describe("piece get data errors", () => {
     expect(report?.message).toMatch(/--step/);
     expect(report?.hint).toBeUndefined();
   });
+
+  it("reports transform failures without an unrelated --input hint", () => {
+    const transformError = new PieceGetTransformError(
+      "--filter can only be applied to an array",
+    );
+    expect(isPieceGetDataError(transformError)).toBe(true);
+    const report = pieceGetDataErrorReport(transformError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    expect(report?.message).toBe("--filter can only be applied to an array");
+    expect(report?.hint).toBeUndefined();
+  });
 });
 
 describe("piece link data errors", () => {
@@ -2396,6 +2412,58 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
+  // A boolean definition is a resolvable target that still proves nothing
+  // about the event being an object — absence passes through, like any other
+  // non-object target.
+  it("leaves absence alone when the top-level $ref names a boolean def", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Anything",
+      asCell: ["stream"],
+      $defs: { Anything: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // An allOf conjunction with an object-schema branch IS an object schema —
+  // no branch choice is involved, so `{}` is exactly as meaningful as for a
+  // direct object root, and the gate then judges it the same way (refused
+  // when non-defaulted required survives relaxation, dispatched with defaults
+  // engaging when it does not).
+  it("normalizes absence to {} against an allOf of object schemas", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      allOf: [
+        {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      ],
+    } as unknown as JSONSchema)).toEqual({});
+  });
+
+  it("normalizes absence through an allOf branch behind a $ref", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      allOf: [{ $ref: "#/$defs/Base" }],
+      $defs: {
+        Base: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+        },
+      },
+    } as unknown as JSONSchema)).toEqual({});
+  });
+
+  // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
+  // boundary): normalizing `{}` against anyOf/oneOf would pick among
+  // alternatives on the caller's behalf.
+  it("leaves absence alone against anyOf/oneOf roots", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      anyOf: [{ type: "object", properties: {} }],
+    } as unknown as JSONSchema)).toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, {
+      oneOf: [{ type: "object", properties: {} }],
+    } as unknown as JSONSchema)).toBeUndefined();
+  });
+
   // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
   // type and no properties) is not an object schema; `{}` means nothing
   // there.
@@ -2472,5 +2540,52 @@ describe("reportVerbInputErrorOrRethrow", () => {
 
     expect(printed).toEqual([]);
     expect(exited).toEqual([]);
+  });
+});
+
+describe("runtimeErrorLog", () => {
+  // Pinned directly rather than left to incidental coverage: which execution
+  // paths hand this a non-object runtime varies by run and sharding, and the
+  // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
+  it("returns [] for non-object runtimes and runtimes without a log", () => {
+    expect(runtimeErrorLog(undefined)).toEqual([]);
+    expect(runtimeErrorLog("not a runtime")).toEqual([]);
+    expect(runtimeErrorLog({})).toEqual([]);
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: "not an array" }))
+      .toEqual([]);
+  });
+
+  it("returns the recorded log when present", () => {
+    const records = [{ message: "boom" }];
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: records }))
+      .toEqual(records);
+  });
+});
+
+describe("schemaIsObjectShaped", () => {
+  // Pinned directly: the gate's caller pre-filters non-object roots, so the
+  // defensive boolean-target guard is unreachable through it, and the
+  // combinator boundary this function encodes (allOf conjunctions count,
+  // disjunctions never) deserves its own record.
+  it("rejects boolean schemas and accepts object shapes", () => {
+    expect(schemaIsObjectShaped(true, true)).toBe(false);
+    expect(schemaIsObjectShaped(false, false)).toBe(false);
+    expect(schemaIsObjectShaped({ type: "object" }, {})).toBe(true);
+    expect(schemaIsObjectShaped({ properties: { a: {} } }, {})).toBe(true);
+  });
+
+  it("counts allOf conjunctions with an object branch, never disjunctions", () => {
+    expect(schemaIsObjectShaped(
+      { allOf: [{ type: "string" }, { type: "object" }] },
+      {},
+    )).toBe(true);
+    expect(schemaIsObjectShaped(
+      { anyOf: [{ type: "object" }] },
+      {},
+    )).toBe(false);
+    expect(schemaIsObjectShaped(
+      { oneOf: [{ type: "object" }] },
+      {},
+    )).toBe(false);
   });
 });

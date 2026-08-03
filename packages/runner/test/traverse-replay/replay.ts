@@ -171,7 +171,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // (decodeMemoryBoundary), so frozen corpus values are the faithful
       // replay shape — without this, frozen-identity fast paths in traverse
       // can never engage during replay even though they do in production.
-      value: deepFreeze(value) as FabricValue,
+      value: deepFreeze(value),
     };
     this.attestations.set(key, attestation);
     return attestation;

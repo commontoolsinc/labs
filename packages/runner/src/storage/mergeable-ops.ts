@@ -242,7 +242,7 @@ const buildTailOp = (
       return { ops: [], suppress: [], abandon: true };
     }
   }
-  const values = array.slice(start) as FabricValue[];
+  const values = array.slice(start);
   if (values.length === 0) {
     return { ops: [], suppress: [], abandon: true };
   }
@@ -267,7 +267,7 @@ const withRemovalsApplied = (
   base: readonly FabricValue[],
   values: readonly FabricValue[],
 ): FabricValue[] => {
-  const result = base.slice() as FabricValue[];
+  const result = base.slice();
   for (const value of values) {
     for (let index = result.length - 1; index >= 0; index -= 1) {
       if (valueEqual(result[index], value)) {

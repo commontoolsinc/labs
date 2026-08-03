@@ -82,8 +82,8 @@ const pushObjectsHandler = handler(
   },
   ({ value }, { array }) => {
     console.log("Pushing object:", { count: value.count });
-    // Note: [ID] should be added automatically by the runtime via
-    // recursivelyAddIDIfNeeded - we don't need to add it manually anymore
+    // Note: the runtime anchors pushed objects into documents of their own
+    // automatically - no manual identity needed
     array.push({ count: value.count });
   },
 );

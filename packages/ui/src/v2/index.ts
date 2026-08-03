@@ -128,6 +128,9 @@ export * from "./components/cf-cfc-authorship/index.ts";
 export * from "./components/cf-cfc-label/index.ts";
 export * from "./components/cf-question/index.ts";
 export * from "./components/cf-cell-link/index.ts";
+// Retired (#5132), kept as an inert passthrough because durable pattern source
+// still emits it. See core/retired-element.ts.
+export * from "./components/cf-cell-context/index.ts";
 export * from "./components/cf-space-link/index.ts";
 export * from "./components/cf-drag-source/index.ts";
 export * from "./components/cf-drop-zone/index.ts";

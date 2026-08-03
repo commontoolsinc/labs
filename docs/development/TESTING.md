@@ -169,6 +169,11 @@ run directory.
   call the LLM, including the test-environment guard and conversation fixtures.
 - [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser
   integration tests.
+- [../specs/pattern-update-testing.md](../specs/pattern-update-testing.md) —
+  the two CI gates standing between an incompatible pattern and every piece
+  running it: contract compatibility (`deno task pattern-compat`) and state
+  continuity (`deno task pattern-vintage`), what each proves, and what an
+  author does to add a pattern to the fixture set.
 - [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
   — writing and running pattern tests with `cf test`. The agent-oriented version
   is [../common/ai/pattern-testing-guide.md](../common/ai/pattern-testing-guide.md),

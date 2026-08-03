@@ -755,7 +755,7 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         { a: 1 },
-        { a: undefined } as FabricValue,
+        { a: undefined },
       );
       expect(result).toEqual([action1]);
     });
@@ -1727,8 +1727,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
       );
 
       // Action B and C should trigger because __#0 appeared,
@@ -1893,8 +1893,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
       );
 
       // Should trigger
@@ -1922,8 +1922,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -1940,8 +1940,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1958,8 +1958,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1984,8 +1984,8 @@ describe("determineTriggeredActions", () => {
       expect(() =>
         determineTriggeredActions(
           dependencies,
-          before as unknown as FabricValue,
-          after as unknown as FabricValue,
+          before,
+          after,
           ["value", "a"],
           { nonRecursive: true },
         )
@@ -2002,8 +2002,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a"],
         { nonRecursive: true },
       );
@@ -2023,16 +2023,16 @@ describe("determineTriggeredActions", () => {
 
       const recursiveResult = determineTriggeredActions(
         new Map([[recursiveAction, [["value", "a"]]]]),
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "existing"],
       );
       expect(recursiveResult).toEqual([recursiveAction]);
 
       const nonRecursiveResult = determineTriggeredActions(
         new Map([[nonRecursiveAction, [["value", "a"]]]]),
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -2049,8 +2049,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value"],
         { nonRecursive: true },
       );
@@ -2159,8 +2159,8 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as FabricValue,
-    after as FabricValue,
+    before,
+    after,
   );
 });
 
@@ -2268,7 +2268,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as FabricValue,
-    after as FabricValue,
+    before,
+    after,
   );
 });

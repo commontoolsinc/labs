@@ -7,16 +7,10 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { FabricValue } from "@commonfabric/api";
-import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import {
-  type Frame,
-  ID,
-  JSONSchema,
-  type Pattern,
-} from "../src/builder/types.ts";
+import { JSONSchema, type Pattern } from "../src/builder/types.ts";
 import {
   getMetaLink,
   isPrimitiveCellLink,
@@ -196,7 +190,7 @@ describe("Cell", () => {
     );
     parent.setRawUntyped({
       slot: target.getAsWriteRedirectLink(),
-    } as unknown as FabricValue);
+    });
 
     // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
     // into `FabricError`) through the redirect must land at the target,
@@ -288,88 +282,10 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (unfrozen input)", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    const interests = ["coding", "reading"];
-    const value = {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable: { nested: true },
-    };
-
-    const result = recursivelyAddIDIfNeeded(value, frame);
-
-    // The "preserve identity when nothing to do" optimization doesn't
-    // apply for unfrozen inputs; the function returns a structurally
-    // equivalent, deep-frozen tree (top-level included).
-    expect(result).not.toBe(value);
-    expect(result).toEqual(value);
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.interests)).toBe(true);
-    expect(Object.isFrozen(result.stable)).toBe(true);
-  });
-
-  it("preserves identity when input is already deep-frozen", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    // Deep-freeze before passing in. An already-frozen
-    // plain Object/Array is a valid `FabricValue` and shallow fabric
-    // conversion returns it as-is, so reference identity survives all
-    // the way out.
-    const interests = Object.freeze(["coding", "reading"]);
-    const stable = Object.freeze({ nested: true });
-    const value = Object.freeze({
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable,
-    });
-
-    const result = recursivelyAddIDIfNeeded(value, frame);
-
-    expect(result).toBe(value);
-    expect(result.interests).toBe(interests);
-    expect(result.stable).toBe(stable);
-  });
-
-  it("adds generated IDs to objects in arrays regardless of clone depth", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      reactives: new Set(),
-    };
-    const stable = { nested: true };
-    const value = {
-      stable,
-      list: [{ name: "Ada" }, "plain"],
-    };
-
-    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
-
-    // Shallow fabric conversion clones at each level, so no
-    // sub-branch is reference-preserved. The core invariants that
-    // remain: ID assignment for objects-in-arrays still fires, and
-    // primitive list elements still pass through unchanged. The
-    // returned tree is deep-frozen as a whole (top-level + sub-trees).
-    expect(result).not.toBe(value);
-    expect(result.stable).not.toBe(stable);
-    expect(result.stable).toEqual(stable);
-    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
-    expect(result.list[1]).toBe("plain");
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.list)).toBe(true);
-    expect(Object.isFrozen(result.list[0])).toBe(true);
-  });
-
-  it("should preserve holes and add IDs to objects in sparse arrays", () => {
+  it("should preserve holes and anchor objects in sparse arrays", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should preserve holes and add IDs to objects in sparse arrays",
+      "should preserve holes and anchor objects in sparse arrays",
       undefined,
       tx,
     );
@@ -393,20 +309,22 @@ describe("Cell", () => {
     expect(result.length).toBe(4);
   });
 
-  it("should call toJSON() on arrays with toJSON method during set", () => {
+  it("should reject arrays carrying a toJSON method during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should call toJSON() on arrays with toJSON method during set",
+      "should reject arrays carrying a toJSON method during set",
       undefined,
       tx,
     );
     const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
     arrWithToJSON.toJSON = () => "custom-array-value";
-    c.set({ arr: arrWithToJSON });
 
-    const result = c.get() as { arr: unknown } | undefined;
-    // toJSON() should have been called
-    expect(result?.arr).toBe("custom-array-value");
+    // An array is answered by the array rule whatever it carries, and `toJSON`
+    // is a named own property, which that rule rejects. Converting by it would
+    // mean storing an array by the very property that disqualifies it.
+    expect(() => c.set({ arr: arrWithToJSON })).toThrow(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
   });
 
   it("should create a proxy for the cell", () => {
@@ -833,7 +751,8 @@ describe("Cell circular references", () => {
       schema,
       tx,
     );
-    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+    // Anchoring turns the array element into a separate cell document.
+    const inner: any = { anchored: true };
     const outer: any = { list: [inner] };
     inner.parent = outer;
     c.set(outer);
@@ -941,7 +860,7 @@ describe("Cell utility functions", () => {
       // Write a sigil link via setRawUntyped — this would not type-check
       // with setRaw because a link object is not assignable to string.
       const link = target.getAsWriteRedirectLink();
-      cell.setRawUntyped(link as FabricValue);
+      cell.setRawUntyped(link);
 
       // The raw untyped read should return the link structure.
       const raw = cell.getRawUntyped();
@@ -1004,7 +923,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped([1, 2, 3] as FabricValue);
+      cell.setRawUntyped([1, 2, 3]);
       expect(cell.getRawUntyped()).toEqual([1, 2, 3]);
     });
 
@@ -1015,7 +934,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped({ a: { b: { c: 42 } } } as FabricValue);
+      cell.setRawUntyped({ a: { b: { c: 42 } } });
       const raw = cell.getRawUntyped() as { a: { b: { c: number } } };
       expect(raw.a.b.c).toBe(42);
     });
@@ -1028,7 +947,7 @@ describe("Cell utility functions", () => {
         tx,
       );
       cell.set(10);
-      cell.setRawUntyped(null as FabricValue);
+      cell.setRawUntyped(null);
       expect(cell.getRawUntyped()).toBe(null);
     });
 
@@ -1039,7 +958,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped([] as FabricValue);
+      cell.setRawUntyped([]);
       expect(cell.getRawUntyped()).toEqual([]);
     });
 
@@ -1048,7 +967,7 @@ describe("Cell utility functions", () => {
         space,
         "setRawUntyped no tx",
       );
-      expect(() => cell.setRawUntyped(42 as FabricValue)).toThrow(
+      expect(() => cell.setRawUntyped(42)).toThrow(
         "Transaction required",
       );
     });
@@ -1149,7 +1068,7 @@ describe("Cell raw methods: frozen-or-not", () => {
       undefined,
       tx,
     );
-    cell.setRawUntyped([10, 20, 30] as FabricValue);
+    cell.setRawUntyped([10, 20, 30]);
     const raw = cell.getRawUntyped();
     expect(raw).toEqual([10, 20, 30]);
     expect(Object.isFrozen(raw)).toBe(true);
@@ -1162,7 +1081,7 @@ describe("Cell raw methods: frozen-or-not", () => {
       undefined,
       tx,
     );
-    cell.setRawUntyped({ a: { b: [1, 2] } } as FabricValue);
+    cell.setRawUntyped({ a: { b: [1, 2] } });
     const raw = cell.getRawUntyped() as { a: { b: readonly number[] } };
     expect(raw.a.b).toEqual([1, 2]);
     expect(Object.isFrozen(raw)).toBe(true);
@@ -1178,7 +1097,7 @@ describe("Cell raw methods: frozen-or-not", () => {
       tx,
     );
     cell.set(5);
-    cell.setRawUntyped(null as FabricValue);
+    cell.setRawUntyped(null);
     expect(cell.getRawUntyped()).toBe(null);
   });
 
@@ -1595,7 +1514,7 @@ describe(
         tx,
       );
       expect(() => c.set({ value: Symbol("nope") })).toThrow(
-        "Cannot store unique (uninterned) symbol",
+        "Not representable as a `FabricValue`: unique (uninterned) symbol",
       );
     });
   },

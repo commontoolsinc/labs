@@ -504,7 +504,7 @@ describe("Pattern Runner - Lift", () => {
   it("stores a lifted array-of-objects result inline as a single doc (no per-element entity docs)", async () => {
     // Pin the write-path contract for DERIVED output: `Cell.set()` of an
     // array of plain objects decomposes each element into its own entity
-    // doc (editable-array semantics, see cell.ts recursivelyAddIDIfNeeded),
+    // doc (editable-array semantics; data-updating.ts array anchoring),
     // but a lift's RESULT is not editable and is written via the raw path
     // (runner.ts setRawUntyped) — so an N-element derived list must land as
     // ONE document with the elements stored INLINE, not as N element docs
@@ -557,7 +557,7 @@ describe("Pattern Runner - Lift", () => {
 
     // Follow the result indirection to the doc that actually holds the
     // array, then assert its RAW stored form: a plain inline array of
-    // records — not element links, and not element `[ID]` markers.
+    // records — not element links, and not anchored element documents.
     const indexCell = result.key("index");
     const link = resolveLink(
       runtime,

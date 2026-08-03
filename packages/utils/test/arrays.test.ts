@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
+  isInertArray,
 } from "@commonfabric/utils/arrays";
 
 describe("arrays", () => {
@@ -290,6 +291,180 @@ describe("arrays", () => {
           expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
         });
       }
+    });
+  });
+
+  describe("isInertArray()", () => {
+    describe("returns `true` for inert arrays", () => {
+      it("accepts a compact array", () => {
+        expect(isInertArray([1, 2, 3])).toBe(true);
+        expect(isInertArray([])).toBe(true);
+      });
+
+      it("accepts a sparse array", () => {
+        const arr: unknown[] = [];
+        arr[0] = 1;
+        arr[5] = 2;
+        expect(isInertArray(arr)).toBe(true);
+      });
+
+      it("accepts a frozen array", () => {
+        expect(isInertArray(Object.freeze([1, 2, 3]))).toBe(true);
+      });
+
+      it("accepts a non-enumerable data-backed index", () => {
+        // Unlike the plain-object check, index enumerability is not required:
+        // the check is about inertness (data-ness), and array contents are
+        // reached by index, not by enumeration-driven copying.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          value: 22,
+          enumerable: false,
+          writable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(true);
+      });
+    });
+
+    describe("subsumes the index-only check", () => {
+      // `isInertArray()` includes everything
+      // `isArrayWithOnlyIndexProperties()` checks; callers never need both.
+      it("rejects a named property", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects anything that isn't an array", () => {
+        expect(isInertArray({ 0: "a", length: 1 })).toBe(false);
+        expect(isInertArray(null)).toBe(false);
+        expect(isInertArray(undefined)).toBe(false);
+        expect(isInertArray("abc")).toBe(false);
+      });
+    });
+
+    describe("`Proxy` handling", () => {
+      it("accepts a pass-through proxy over an inert array", () => {
+        // `Array.isArray()` sees through to the target, and the prototype
+        // question forwards to it as well, so a proxied inert array is still
+        // recognized as one.
+        expect(isInertArray(new Proxy([1, 2, 3], {}))).toBe(true);
+      });
+
+      it("rejects a pass-through proxy over a getter-indexed array", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(new Proxy(arr, {}))).toBe(false);
+      });
+    });
+
+    describe("returns `false` for accessor-backed indices", () => {
+      it("rejects a getter-backed index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a setter-only index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, {
+          set: () => {},
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a getter-backed index even on a frozen array", () => {
+        // Freezing prevents reconfiguration but does not convert an accessor
+        // into data: its reads still execute code.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 0, {
+          get: () => "still live",
+          enumerable: true,
+          configurable: false,
+        });
+        Object.freeze(arr);
+        expect(isInertArray(arr)).toBe(false);
+      });
+
+      it("rejects a getter-backed final index", () => {
+        // The final index is the last key before `length`; this pins that the
+        // descriptor walk covers the whole index range, not just a prefix.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, {
+          get: () => 33,
+          enumerable: true,
+          configurable: true,
+        });
+        expect(isInertArray(arr)).toBe(false);
+      });
+    });
+
+    describe("returns `false` for indirect `Array` instances", () => {
+      it("rejects an `Array` subclass instance", () => {
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+
+        // Index-only and data-backed, so only the prototype separates it from
+        // an inert array.
+        expect(isArrayWithOnlyIndexProperties(sub)).toBe(true);
+        expect(isInertArray(sub)).toBe(false);
+      });
+
+      it("rejects a subclass instance whose prototype rewrites iteration", () => {
+        // The concrete hazard the prototype requirement addresses: iteration
+        // and index reads answer different content, and freezing the instance
+        // does not touch the prototype that does it.
+        class Smuggler extends Array {
+          override *[Symbol.iterator](): Generator<unknown> {
+            yield "smuggled";
+          }
+        }
+        const smuggler = new Smuggler();
+        smuggler.push("benign");
+        Object.freeze(smuggler);
+
+        expect([...smuggler]).toEqual(["smuggled"]);
+        expect(smuggler[0]).toBe("benign");
+        expect(isInertArray(smuggler)).toBe(false);
+      });
+
+      it("rejects an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(isInertArray(severed)).toBe(false);
+      });
+
+      it("rejects an array reparented onto another prototype", () => {
+        const reparented: unknown[] = [1, 2];
+        Object.setPrototypeOf(reparented, Object.prototype);
+        expect(isInertArray(reparented)).toBe(false);
+      });
+
+      it("rejects a proxy that answers a non-`Array` prototype", () => {
+        // `Array.isArray()` sees the array target, so the prototype answer is
+        // the only thing that can catch this one.
+        const lying = new Proxy([1, 2], { getPrototypeOf: () => null });
+        expect(Array.isArray(lying)).toBe(true);
+        expect(isInertArray(lying)).toBe(false);
+      });
     });
   });
 });

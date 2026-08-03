@@ -14,6 +14,7 @@ import {
   isString,
   isUnsafeObjectKey,
   Mutable,
+  unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 
 type ImmutableObj<T> = {
@@ -411,6 +412,86 @@ describe("types", () => {
             "isUnsafeObjectKey() is now open to prototype pollution.",
         );
         throw e;
+      }
+    });
+  });
+
+  describe("unsafeObjectKeyIn", () => {
+    it("returns the offending name for a reserved own key", () => {
+      const withProto = { other: 1 } as Record<string, unknown>;
+      Object.defineProperty(withProto, "__proto__", {
+        value: 1,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      expect(unsafeObjectKeyIn(withProto)).toBe("__proto__");
+      expect(unsafeObjectKeyIn({ ["constructor"]: 1 })).toBe("constructor");
+    });
+
+    it("returns `undefined` for ordinary objects", () => {
+      expect(unsafeObjectKeyIn({})).toBe(undefined);
+      expect(unsafeObjectKeyIn({ a: 1, prototype: 2, toString: 3 })).toBe(
+        undefined,
+      );
+    });
+
+    it("returns `undefined` for an inherited reserved name", () => {
+      // Every object inherits `constructor`, and most inherit `__proto__`.
+      // Only an OWN property is the value's own data, and only that can fail
+      // to survive a copy.
+      expect(unsafeObjectKeyIn(Object.create({ constructor: 1 }))).toBe(
+        undefined,
+      );
+    });
+
+    it("is needed because assignment loses the key where the accessor is standard", () => {
+      // The companion to the `__proto__`-is-inert test above, from the other
+      // side. Deno neutralises the accessor, so a copy loop there is safe and
+      // no test can see the hazard. A realm that keeps the accessor -- every
+      // browser, and this repo ships `data-model` to browsers -- loses the
+      // property and mutates the copy instead. That is what makes these names
+      // uncarryable HERE, and the day no realm behaves this way is the day the
+      // restriction can go.
+      const saved = Object.getOwnPropertyDescriptor(
+        Object.prototype,
+        "__proto__",
+      );
+      try {
+        Object.defineProperty(Object.prototype, "__proto__", {
+          configurable: true,
+          get(this: object) {
+            return Object.getPrototypeOf(this);
+          },
+          set(this: object, v: unknown) {
+            // Spec-faithful: the setter is a no-op unless the value is an
+            // object or `null`. A primitive-valued `__proto__` assignment
+            // silently does nothing at all -- the key is still lost, but the
+            // prototype is untouched.
+            if ((typeof v === "object") || (typeof v === "function")) {
+              Object.setPrototypeOf(this, v as object | null);
+            }
+          },
+        });
+
+        const copy: Record<string, unknown> = {};
+        copy["__proto__"] = { marker: true };
+
+        expect(Object.hasOwn(copy, "__proto__")).toBe(false);
+        expect(Object.getPrototypeOf(copy)).not.toBe(Object.prototype);
+
+        // A primitive value loses the key without touching the prototype:
+        // the same data loss, a quieter failure.
+        const primitive: Record<string, unknown> = {};
+        primitive["__proto__"] = "payload";
+        expect(Object.hasOwn(primitive, "__proto__")).toBe(false);
+        expect(Object.getPrototypeOf(primitive)).toBe(Object.prototype);
+      } finally {
+        if (saved === undefined) {
+          delete (Object.prototype as Record<string, unknown>)["__proto__"];
+        } else {
+          Object.defineProperty(Object.prototype, "__proto__", saved);
+        }
       }
     });
   });

@@ -6695,8 +6695,7 @@ const decodeStoredPatchList = (data: string | null): PatchOp[] => {
 const applyPatchDocument = (
   document: EntityDocument,
   patches: PatchOp[],
-): EntityDocument =>
-  applyPatch(document as FabricValue, patches) as EntityDocument;
+): EntityDocument => applyPatch(document, patches) as EntityDocument;
 
 const sameStoredOriginal = (
   stored: string,

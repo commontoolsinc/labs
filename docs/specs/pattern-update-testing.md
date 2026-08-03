@@ -1,0 +1,341 @@
+# Pattern update testing
+
+Two CI gates stand between an incompatible pattern and every piece running it.
+This document specifies what each one proves, what it deliberately does not,
+and what an author does to participate.
+
+## Why the gates exist
+
+The automatic pattern updater performs **no structural check at all**. `cf
+piece setsrc` refuses an incompatible replacement by calling
+`assertPatternSchemasBackwardCompatible`, but the automatic path compiles the
+new source, verifies the entry identity, and applies it. So CI is the only
+thing standing between an incompatible pattern and a running piece, and a bad
+update does not throw — it leaves a piece that can no longer materialize.
+
+The two gates guard different halves of the same risk:
+
+| | Gate | CI job | What it proves |
+| --- | --- | --- | --- |
+| Tier 1 | `deno task pattern-compat` | Pattern Update Compatibility | The **contract** a pattern declares can still be applied over every contract it has declared before |
+| Tier 2 | `deno task pattern-vintage` | Pattern Update State Continuity | A real **document** written by an older version is still readable, and its data survives |
+
+Tier 1 is a statement about schemas. Tier 2 proves the stronger thing schemas
+cannot say. Neither subsumes the other: a contract can stay compatible while
+the data goes unreachable, and a fixture can only cover patterns some test
+actually instantiates.
+
+## Tier 1 — contract compatibility
+
+Compiles **every** authored pattern under `packages/patterns/`, derives its
+argument and result schemas, and proves the current contract can be applied
+over every contract recorded for it under `packages/patterns/baselines/`.
+There is no opt-in: a pattern is covered by existing.
+
+Baselines are **append-only**, enforced mechanically by
+`tasks/check-baselines-append-only.ts` (CI job: Pattern Baselines
+Append-Only). An author-run `--update` that could remove a baseline could
+remove the very one that would have caught a break.
+
+### Findings and their remedies
+
+- **`contract <hash> is not recorded`** — the pattern's contract changed and
+  the new one has no baseline. Run `deno task pattern-compat --update` and
+  commit the recorded baseline. Routine.
+- **`cannot be applied over baseline <label>`** — the change would break
+  pieces running an older version. This **cannot be recorded away**:
+  `--update` records only when "not recorded" is the *sole* finding, so an
+  incompatible contract is never written to a baseline. The remedy is to
+  change the pattern, usually by giving a new required field a `Default<>`.
+
+  This is deliberate. An incompatible contract cannot merge, so it never
+  ships; recording it would force a later corrected contract to prove itself
+  against a version that only ever existed in a failed CI run, with no way to
+  remove it.
+- **`<role> schema is not valid on its own terms`** — the schema fails
+  definition validation independently of any baseline.
+- **`has N baseline(s) but yields no contract now`** — a file that used to be
+  a pattern no longer exports one. Every piece tracking that path is pinned to
+  its current pattern **forever**: the updater's identity probe fails and
+  nothing surfaces on the piece. Restore the pattern, or delete its baseline
+  directory to record the retirement deliberately.
+- **`newly fails to evaluate`** — a pattern that cannot evaluate gets no
+  contract, so no baseline, so no check, forever. Fix it, or add it to
+  `tasks/pattern-compat-unevaluable.ts` with a reason. That allowlist can only
+  shrink: a listed pattern that evaluates again must leave the list, or its
+  exemption outlives the breakage it was granted for.
+
+An already-recorded contract is not re-validated. It was proved when recorded
+and has not changed since, and both the definition validator and the subset
+proof blow up combinatorially on some real schemas — so the steady state, where
+no contract changed, costs nothing beyond the compile.
+
+Compatibility is directional by role. Existing invocations must still satisfy
+the candidate argument schema, so a newly required argument needs a default or
+must be optional. A newly required result does not need a schema default: the
+candidate pattern generates it during setup. This admits the forward migration;
+add a result default as well when an older concurrently running generation must
+still be able to write its previous result shape.
+
+## Tier 2 — state continuity
+
+Replays committed SQLite stores — real state, written through a pattern's own
+handlers by running its own tests — under today's pattern source.
+
+### What a green run asserts
+
+Per fixture:
+
+- the vintage **restored**: its manifest contains the identity the filename
+  records, checked before anything is applied;
+- today's source **resolves and compiles** for every recorded instantiation;
+- the fixture actually **holds** each recorded root, checked per target before
+  anything is applied to it;
+- the setup commit carrying the artifact onto that root is **not refused** and
+  completes;
+- the root then **reads as something** rather than nothing;
+- every value the vintage held is **still readable** afterwards.
+
+The restore and per-root controls are not ceremony. An empty or truncated
+store presents as a fresh space, today's source materializes onto a fresh space
+happily, and without those controls every remaining check passes while nothing
+has been replayed. A root can also be absent while the fixture is otherwise
+good — recorded in a space that did not travel, in a companion store that
+restored empty, or at a cell id nothing ever wrote.
+
+Across the run, `isClean` additionally requires a positive number of fixtures
+replayed, a positive number of candidates, and a positive number of upgrade
+targets. A run that examined nothing is a failure, not a pass. A `beforeunload`
+guard turns "the process ended without reaching a verdict" into exit 1 — a
+pattern that does not compile and a corrupt fixture both reject a promise
+nobody awaits while the promise the replay awaits never settles.
+
+### The class this catches that Tier 1 cannot
+
+Move where a field is stored — `.for("journal")` becomes `.for("journalMoved")`
+— and the declared contract does not change by a byte, while every document
+written under the old name goes unreachable. Nothing throws. Measured on the
+real `home.tsx`, that exits 1 naming the key and showing what was there.
+
+Emptiness is judged **per leaf at any depth**, so partial loss counts: two of
+three rows disappearing is a finding, not a warning. Judged only at the top, a
+`.for()` list would fail solely when it emptied entirely.
+
+### What it compares, and what it excludes
+
+The comparison reads the vintage under the root's **own stored schema**, so it
+sees the data as the version that wrote it did, and compares only keys that
+were present before. An update may legitimately add a generated result field,
+and the candidate setup materializes it during replay; arguments and ordinary
+durable document fields still need defaults when existing state must supply a
+newly required value.
+
+That schema is relaxed at its `unknown` positions first, on both sides: a
+schema-driven read resolves nothing there, so a key an index signature covers
+would otherwise arrive as `undefined` however much state it holds,
+indistinguishable from a key the document does not hold.
+
+It compares **state, not renderings**. `$UI` and its variants are recomputed by
+the setup and a stored rendering never matches a fresh one, so comparing them
+would red every pattern edit while saying nothing about data. Every other key
+is compared, `$NAME` included. Excluding those names is not sufficient on its
+own — a `map`-body hoist is a recorded instantiation whose whole result is a
+vnode under no `$UI` — so a rendering is also recognised by shape, wherever it
+sits.
+
+What a root holds at a cell or stream position is compared as the **document it
+points at**, so a field that moved to a different document is still a finding.
+
+### Findings are graded
+
+A replay recomputes as well as reads, so a derived value the vintage never
+pulled on can resolve to something better this time. A value that merely
+**changed** is reported with `console.warn` and does not fail; a non-empty
+value that went **empty** does fail.
+
+The limit this buys, pinned by name in `tasks/pattern-vintage-run.test.ts`: a
+moved `.for()` key whose new slot the pattern *seeds* reads back non-empty and
+only warns. The same move into a slot that stays empty fails. Weighting a key
+by whether it is backed by an `of:` document rather than a `computed:` one is
+the candidate for closing that gap.
+
+## Fixture layout
+
+```
+packages/piece/test/vintages/<test key>/<tier>/<iso>-<identity>.sqlite
+packages/piece/test/vintages/<test key>/<tier>/<iso>-<identity>.sqlite.spaces/<did>.sqlite
+```
+
+- **`<test key>`** is the path under `packages/patterns/` of the **test** that
+  produced the fixture. Keyed by test rather than by pattern because a test
+  need not be named after what it drives, and one fixture routinely covers
+  several patterns.
+- **`<identity>`** is provenance, not an address: it records which version
+  wrote the state. Nothing looks a fixture up by it — the replay enumerates the
+  directory and replays everything it finds. A gate that selected fixtures by
+  identity would silently cover nothing the moment naming drifted; enumeration
+  cannot.
+- **`<iso>`** is a capture timestamp, with `:` substituted so the name is legal
+  on Windows and still sorts chronologically. Retention sorts on this field.
+- The **`.sqlite.spaces/`** directory carries the run's other spaces. A capture
+  that instantiates a pattern via `Factory.inSpace(...)` writes a second store,
+  and a fixture holding only the first would record roots whose state it does
+  not have. It is part of the fixture, not a fixture itself, so
+  `parseVintagePath` declines everything inside one.
+
+The tree is deliberately **not** under `packages/patterns/`.
+`tasks/build-binaries.ts` passes that whole directory to `deno compile
+--include`, which is recursive over non-source files, so fixtures would ship
+inside the toolshed binary; and `PatternsServer` serves the same directory by
+path, so they would be fetchable from any deployment.
+
+Fixtures are stored **raw**, not compressed. A store is mostly slack and gzips
+15–48x, so pre-compressing looks free — but it defeats git's *delta*
+compression, which is the mechanism that makes accumulating vintages cheap. Two
+raw captures of `home.tsx` cost 232.86 KiB packed against 232.50 KiB for one; two
+gzipped ones cost between +21 KiB and the entire second file depending on the
+compression level.
+
+### The two tiers
+
+- **`pinned/`** — never pruned, and the only tier that credits coverage.
+- **`auto/`** — generations captured automatically, pruned to the newest
+  `AUTO_GENERATIONS_KEPT` (4) per test key.
+
+An auto generation credits no coverage by design: it is regenerable and pruned
+by count, so letting one satisfy the coverage requirement would let retention
+delete a pattern's only evidence while the gate still read green.
+
+Accumulating generations is what makes the gate get *stronger* over time rather
+than merely staying green. One pinned vintage proves today's source can read
+one old world; a run of generations proves it can read every world the pattern
+has passed through. That is affordable because git deltas adjacent generations
+to roughly 9 KiB, while each costs a few MB of working-tree disk in every
+clone — which is what the retention bound exists for. It bounds **checkouts**,
+not history.
+
+## Commands
+
+```
+deno task pattern-vintage                                  # replay every fixture (what CI runs)
+deno task pattern-vintage --update topics/topics.test.tsx  # capture a first pinned fixture
+deno task pattern-vintage --capture-changed                # capture a generation where due
+deno task pattern-vintage --pin topics/topics.test.tsx     # promote the newest generation
+```
+
+`--update` and `--pin` name a **test** path, never a pattern path: a fixture is
+produced by running a test and covers whatever that test instantiates.
+`system/home.tsx` names no test and captures nothing.
+
+There is no bare `--update` and no list of what CI replays. Every fixture under
+the vintages tree is replayed by the plain command, so committing a captured
+fixture is the whole of adding one. A default seed set would only ever serve a
+*missing* fixture, which is exactly when nothing on disk knows which test covers
+the pattern.
+
+`--capture-changed` captures for every test key whose fixtures have all fallen
+behind today's source. The trigger needs no new measurement: the replay already
+computes `changed` per target, so a fixture replaying with `changed === 0` **is**
+the current generation, and once no fixture for a key reports zero the next is
+due. A fixture with no targets proved nothing and a failed fixture is the gate's
+own red, so neither counts as evidence of currency.
+
+Unrecognised flags are rejected. An unknown flag matches no command, so the run
+would otherwise fall through to the plain gate, replay everything and exit 0 —
+reporting the tree healthy to someone who asked for something else.
+
+**No writing command runs in CI**, and there are three of them: `--update`
+captures a first pinned fixture, `--capture-changed` captures a generation, and
+`--pin` promotes one. CI runs only the plain gate, which reads the tree and
+never writes to it. All three land fixtures in the working tree to be committed
+and reviewed like any other change; a gate that wrote its own evidence would be
+grading its own homework.
+
+## Invariants
+
+- **A test pattern creates stores; it is never an upgrade target.** The replay
+  path refuses a program whose entry resolves to a `*.test.tsx`. A
+  test-populated store puts the *test* pattern at the top with the pattern
+  under test as a nested instance, so applying the test pattern makes the gate
+  weaker. Enforced mechanically rather than by comment, with its own case in
+  `tasks/pattern-vintage-run.test.ts`: prose was already the plan's wording
+  when the shortcut got taken anyway.
+- **Capture only ever adds.** No command overwrites or deletes an existing
+  fixture, in either tier. Deleting one is a deliberate act visible in a diff.
+  Unlike Tier 1's baselines there is no mechanical checker here, so this rests
+  on the commands' refusal plus review — a deliberate choice to operate on
+  trust.
+- **Retention cannot reach a pinned vintage.** `autoGenerationsToPrune` filters
+  the tier *before* it sorts or slices, so no ordering of the later steps can
+  name a pinned fixture, and `removeVintages` refuses one again at the point of
+  deletion. A deep vintage cannot be recaptured — the pattern that wrote it no
+  longer exists in runnable form — and a pruner is invoked by people doing
+  something else.
+- **Promotion never overwrites.** `git mv` refuses a destination file that
+  exists, but moves a *directory* into an existing directory of the same name
+  rather than refusing, so both the primary file and the companion directory
+  are checked. The check is conditional on there being a source companion,
+  which is what lets a re-run of `--pin` finish an interrupted promotion.
+- **Each capture gets a fresh store.** Vintages are independent snapshots of
+  one version's world, never one database migrated forward: a carried-forward
+  lineage would already be shaped by every migration since, and would no longer
+  be state written by a version that knew nothing about today's.
+- **Required patterns come from the runtime's own constants.**
+  `HOME_PATTERN_SOURCE` and `DEFAULT_APP_PATTERN_SOURCE` derive the set CI
+  insists on, so the gate cannot drift from what actually auto-updates. A
+  constant that stops deriving a key stops the run rather than emptying the
+  requirement.
+
+## Adding a pattern to Tier 2
+
+```
+deno task pattern-vintage --update <path to the test that drives it>
+```
+
+Commit the `.sqlite` file it writes. Capture refuses if the test fails — the
+fixture would record a state the pattern never legitimately reaches — or if the
+run made no assertions, since the fixture would hold no state. It also refuses
+a run that instantiated no upgradable pattern, or one whose roots cannot be
+mapped back to a file, because a capture the gate accepts must be a replay it
+accepts.
+
+## Limits
+
+Named rather than implied, because a gate's uncovered edges are part of its
+specification:
+
+- **Migration coverage is not built.** When a memory-engine schema change
+  lands, the affected captures should be *promoted* to pinned rather than
+  recaptured — a dump regenerated after a migration proves nothing, since the
+  pre-migration state is the artifact. The selection rule differs from
+  everything else here: the trigger is a memory change rather than a pattern
+  change, and it wants breadth across *shapes* rather than depth per pattern.
+- **A changed value only warns.** See "Findings are graded" above.
+- **Whether a fixture rots is unresolved.** The by-identity load keys its
+  compile cache on a runtime version and falls back to recompiling the stored
+  source closure on a miss, which reintroduces "old source must still compile
+  under today's API". Whether a pinned vintage stays replayable across a
+  runtime bump, or whether the fallback needs pinning too, is not settled.
+- **The open-argument residual.** The class is validated on every update route,
+  but a root carrying no `patternSetupIdentity` marker at all still skips the
+  re-stage, because absence cannot be told from a pending update. The window is
+  one setup wide per root; closing it means deciding what a root with no marker
+  and an unreadable argument should do at boot.
+- **Cross-space fixtures are synthetic.** Every committed fixture is
+  single-space. `tasks/pattern-vintage-run.test.ts` is the whole of the
+  coverage for companion stores, and deliberately so: it can break a child on
+  purpose, which a pinned fixture cannot.
+- **Restore exercises the migration chain.** `snapshotSpaceStore` runs no
+  migrations, but reopening an old store does. That is a feature — evidence
+  that memory migrations preserve old spaces — but it means a red fixture can
+  be a migration bug rather than a pattern bug. Worth knowing when triaging.
+
+## References
+
+- [`pattern-imports/pattern-updates.md`](pattern-imports/pattern-updates.md) —
+  the updater these gates guard, and the section requiring this work
+- [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md)
+  — rehearsing a pattern update against a clone of a real space
+- [`../history/plans/pattern-update-state-continuity.md`](../history/plans/pattern-update-state-continuity.md)
+  — the executed plan: the measurements that decided this design, including the
+  ones that reversed it

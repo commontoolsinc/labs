@@ -96,7 +96,7 @@ Data flows through the reactive pipeline in this order. Every layer preserves
 sparseness:
 
 ```
-Write path:  value → fabricFromNativeValue → recursivelyAddIDIfNeeded → storage
+Write path:  value → normalizeAndDiff (conversion + anchoring) → storage
 Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc.)
 ```
 
@@ -105,21 +105,28 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/data-model/native-conversion.ts`** — `shallowFabricFromNativeValue` and
-  `fabricFromNativeValue` use `i in arr` checks.
-- **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
-  `/hole` entries; decodes them back to true holes via `new Array(len)`.
-- **`packages/data-model/value-hash.ts`** — Handles holes in hash computation.
+- **`packages/data-model/src/native-conversion.ts`** —
+  `shallowFabricFromNativeValue` and `fabricFromNativeValue` use `i in arr`
+  checks. An array returned from a `toJSON()` method gets the same care: the
+  result goes through `cloneHelper()`, which rebuilds it with
+  `new Array(length)` and copies only the indices that are present.
+- **`packages/data-model/src/codec-json/JsonEncodingContext.ts`** — Encodes a
+  run of holes as a single hole-tagged count; decoding rebuilds them as true
+  holes.
+- **`packages/data-model/src/value-hash.ts`** — Feeds holes to the hash
+  directly, coalescing each run into one hole entry.
 
-### Value validation (`packages/data-model/fabric-value.ts`)
+### Value validation (`packages/data-model/src/type-check.ts`)
 
-`isFabricArray` accepts sparse arrays — holes are valid fabric structure. It
-uses `for` + `i in` because it needs early return.
+`isFabricValueLayer()` and `isFabricValue()` accept sparse arrays — holes are
+valid fabric structure. `isFabricValue()` uses `for` + `i in` because it needs
+early return, skipping holes rather than validating them as values.
 
 ### v2-transaction write path (`packages/runner/src/storage/v2-transaction.ts`)
 
 The hot write path (since PR #3704) goes through `applyMutablePathWrite`,
-which calls `cloneForMutation` (in `value-clone.ts`) to shallow-thaw the
+which calls `cloneForMutation` (in
+`packages/data-model/src/value-clone.ts`) to shallow-thaw the
 spine and then mutates the leaf parent in place. `cloneForMutation`'s
 shallow-thaw step uses `cloneIfNecessary({ frozen: false, deep: false })`
 on each spine container, which for arrays preserves sparseness: it
@@ -150,12 +157,14 @@ between Chronicle's `IAttestation`-shaped inputs and
 `applyMutablePathWrite`'s `FabricValue`-rooted form. Sparse-array
 handling is therefore identical between the two layers.
 
-### Cell write path (`packages/runner/src/cell.ts`)
+### Cell write path (`packages/runner/src/data-updating.ts`)
 
-`recursivelyAddIDIfNeeded` adds internal ID fields to objects in arrays for
-change tracking. It uses `forEach` into a pre-allocated `new Array(value.length)`
-— the callback is only called for present elements, so holes are preserved. The
-ID counter only increments for object elements; holes are skipped.
+Objects in arrays are anchored into entity documents inside
+`normalizeAndDiff()`'s array branch, driven by the writer's anchor id source
+(`DiffWalkState.nextAnchorId`, a builder frame's counter). The branch's
+per-index loop skips hole→hole positions outright (`!inNew && !inCur →
+continue`), so holes are preserved and draw no ids; the counter is consumed
+only for present object elements.
 
 The cell `push` method concatenates arrays using `forEach` on the original
 (sparse) array, then a `for` loop for the appended (dense) values.
@@ -205,14 +214,13 @@ changes reactively:
 - **Hole becomes value:** A new pattern run is created (or reused from
   `elementRuns` if the identity key matches a previous run).
 
-### Hashing boundary (`packages/memory/reference.ts`)
+### Hashing boundary (`packages/data-model/src/value-hash.ts`)
 
-The merkle-reference library cannot hash sparse array holes (it throws
-`TypeError: Unknown type undefined`). The `wrappedNodeBuilder.toTree` wrapper
-detects sparse arrays and densifies them (holes → `null`) before passing to the
-default node builder. This only affects hash computation — the actual data in
-storage remains sparse. The modern hash path (`value-hash.ts`) handles
-holes natively and does not need this workaround.
+Holes are hashed as themselves. `feedArray()` walks the array by index and,
+on reaching an absent one, coalesces the whole run of consecutive holes into a
+single hole entry carrying its length. A hole is therefore distinct from a
+`null` or an `undefined` element in the hash, exactly as it is in storage, so
+two arrays that differ only in sparseness hash differently.
 
 ## Writing new code that handles arrays
 
@@ -248,9 +256,9 @@ Test coverage verifies sparse preservation at each layer:
   the full Cell write path (which lands in `applyMutablePathWrite`) preserve
   holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip
   sparseness.
-- **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
-  reading it back preserves holes; `push` onto a sparse array preserves existing
-  holes.
+- **`packages/runner/test/array-push-mergeable.test.ts`** — `push` onto a
+  sparse array preserves the existing holes, including when the cell had no
+  prior value and when a concurrent edit touches a hole.
 - **`packages/runner/test/traverse.test.ts`** — Sparse array roundtrip through
   `traverse` preserves holes (both `traverseDAG` and schema-driven
   `traverseArrayWithSchema` paths).
@@ -264,10 +272,3 @@ Test coverage verifies sparse preservation at each layer:
 These tests use the `in` operator to assert true sparseness (`1 in result`
 should be `false`), not just value equality. A regression that densifies arrays
 will fail these assertions.
-
-## Known limitations
-
-- **`data-model/native-conversion.ts` `HasToJSON` path:**
-  `Object.freeze([...converted])` in the `HasToJSON` case would densify a sparse
-  array returned from `toJSON()`. This is an edge case — `toJSON()` rarely
-  returns sparse arrays.
