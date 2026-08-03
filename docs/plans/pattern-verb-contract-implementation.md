@@ -1097,21 +1097,44 @@ change that alters them.
   review: the closed shapes already in argument-side baselines likely
   derive from `never`-typed events that were never meant to assert "only
   empty events are valid" — clean that up in the generator eventually;
-  until then the exemptions carry the cost. The chosen rule must still
-  weigh the
-  FORWARD skew case the stripped-was-never-contract argument does not cover:
-  adding an optional event field is legal argument widening, but during any
-  deploy window a newer client sends that field to a still-running older
-  piece whose closed schema does not declare it — today stripped and
-  harmless, under closed-world a hard reject at dispatch. Mixed-version
-  callers are exactly the live board's incident history (the cross-version
-  write storms, the legacy-field mirroring `topics` still carries), so the
-  decision needs a story for widened payloads against not-yet-updated
-  pieces — deploy ordering, a skew-tolerant reject-only-on-collision rule,
-  or an explicit versioning step — before emission lands. Until the rule
-  and its skew story land, generated event schemas stay open and
-  closed-world enforcement is per-schema opt-in at dispatch (C5's runner
-  gate).
+  until then the exemptions carry the cost. **The rule is built**: a
+  `verbEvent` compatibility context in
+  `packages/piece/src/schema-compatibility.ts`, entered where BOTH
+  contracts mark a node `asCell: ["stream"]` (the exemption never applies
+  across a one-sided marker — that stays an `asCell changed` refusal) and
+  carried through the event subtree. Below it, boolean↔boolean
+  `additionalProperties` transitions are free in both directions — closed
+  events also remain evolvable by optional fields under the existing
+  evolution policy, and closed→open stays free so the `never`-derived
+  closure cleanup never reads as a break — while schema-valued
+  `additionalProperties` still compares on either side: a constraint on
+  the extras' SHAPE is a data contract even on an event. Each of those
+  properties is pinned in `schema-compatibility.test.ts` ("verb event
+  closed-world transitions").
+
+  The FORWARD skew case is resolved by RECORDED POLICY rather than new
+  machinery — **reject-on-collision, loud, local-first, id-preserving**:
+  adding an optional event field is legal widening, and during a deploy
+  window a newer client's widened payload against a not-yet-updated closed
+  piece is REJECTED, deliberately. Three grounds. (1) The pre-closed
+  alternative was never harmless: the stale piece stripped the field and
+  ran anyway, so the caller believed semantics it did not get — the same
+  silent-loss defect class rule 1 exists to kill, now merely bounded to
+  deploy windows. (2) The common path never reaches dispatch: the CLI
+  validates against the DEPLOYED schema before sending (rule 1's own
+  design: "fails loudly instead of silently losing data") and the verbs
+  listing carries the deployed source identity for skew detection, so a
+  well-behaved client discovers the skew locally with the invocation id
+  unspent. (3) A payload that does reach dispatch is refused through C5's
+  thrown-handler path — no receipt, id preserved — so the recovery is a
+  same-id re-invoke once the piece updates, which completes exactly once.
+  No deploy ordering and no versioning step; the mixed-version incident
+  history (write storms, legacy-field mirroring) was silent-corruption
+  class, which loud rejection shrinks rather than grows. Until emission
+  lands (generator change + mapping-spec entry + `stream-result.test.ts`
+  flip + fixture/baseline re-records), generated event schemas stay open
+  and closed-world enforcement is per-schema opt-in at dispatch (C5's
+  runner gate).
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.
