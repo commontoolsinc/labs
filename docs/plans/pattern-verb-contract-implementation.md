@@ -122,7 +122,8 @@ Made 2026-07-24, shaping everything below:
 Named so their absence reads as intent, not oversight:
 
 - The **wrapper-tier marker** for verb listing (semantics are settled in the
-  design; the marker mechanism ships after the listing).
+  design; the marker mechanism ships after the listing — specced 2026-08-03
+  as queued work, see the WS-F bullet).
 - **Cryptographic agent identity / delegation** (design OQ2) — the CFC track
   distinguishes runtime-attested execution context from a separately keyed or
   delegated agent, but does not deliver delegation.
@@ -836,6 +837,50 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   everything per the decided semantics; handler result schemas appear once
   WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
   deployed pattern's source identity (skew detection).
+- **Wrapper-tier + deprecation marks for the listing default (specced
+  2026-08-03; queued).** Everything stays CALLABLE — the marks shape only
+  what `cf piece verbs` shows by default (decided with Mike, 2026-08-03).
+  One mechanism, two producers, one consumer:
+  - The generated stream schema carries two independent annotation-class
+    marks: `tier: "wrapper"` (a UI affordance outside the headless
+    contract) and standard JSON Schema `deprecated: true`. Compile-time
+    facts in the schema — no client-side heuristics, so FUSE and shell
+    inherit the same classification for free.
+  - Producer 1, inference: a stream whose handler binds session-scoped
+    state is wrapper-tier by the design's own settled semantics ("reading
+    per-session state is very nearly the tier's definition"). Bound-state
+    schemas already carry the `scope` extension, so a handler context
+    containing session scope at any depth stamps the stream — zero
+    authoring; topics' five composer wrappers get marked without touching
+    topics. No explicit author override ships until a real pattern needs
+    one.
+  - Producer 2, `@deprecated` JSDoc lowers to `deprecated: true` (the
+    generator already reads JSDoc and today filters `@`-tags out of
+    descriptions). Catches `setMyName`-class legacy streams, which
+    inference cannot — deprecation is a different axis (user-scoped
+    bindings, still contract).
+  - Consumer: `cf piece verbs` — text and `--json` alike — omits both
+    classes by default and reports the omission ("N wrapper, M deprecated
+    hidden; --all lists them"), so nothing is silently invisible. `--all`
+    shows everything; listed rows always carry their marks; `cf piece
+    call` never consults them.
+  - **Step zero, measured 2026-08-03:** the compat checker refuses both
+    keys today — `unknownKeywordIssue`
+    (`packages/piece/src/schema-compatibility.ts`) equality-compares every
+    key outside its handled set, so adding OR later removing either mark
+    fails the gate: precisely the C3 append-only lesson. The unblock is
+    one principled change: classify both keys in `ANNOTATION_KEYS` — they
+    are validation-neutral by construction, the same class as
+    `description`/`title`/`tags`. Riding the existing `tags` hashtag
+    channel was weighed and rejected: it is a general JSDoc-mirror
+    surface, and a hashtag that hides a verb is load-bearing spooky
+    action.
+  - Order of work: (1) `ANNOTATION_KEYS` + a checker pin that the marks
+    add and remove freely; (2) generator emission — inference +
+    `@deprecated` — with mapping-spec entries and fixtures; (3) the CLI
+    default filter, hidden-count line, and `--all`; (4) fleet re-record
+    where schemas gain marks (annotation-class, so baselines move
+    freely).
 - Generic identity annotation for data reads and callable results
   (`--show-links` / `--include-ids`). Patterns return child references and
   never manufacture their own fid fields for this purpose. Two shapes were
