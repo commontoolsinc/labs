@@ -39,11 +39,6 @@ export class EmulatedStorageManager extends StorageManager {
 
   static emulate(
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
-    serverOptions: {
-      /** Tests whose fixture is controlled staleness opt out of the
-       * CT-1927 default-on pre-verdict flush here. */
-      flushBeforeVerdict?: boolean;
-    } = {},
   ): EmulatedStorageManager {
     return new this(
       {
@@ -54,7 +49,6 @@ export class EmulatedStorageManager extends StorageManager {
       },
       () =>
         new MemoryV2Server.Server({
-          ...serverOptions,
           authorizeSessionOpen(message) {
             const principal = (message.authorization as { principal?: unknown })
               ?.principal;

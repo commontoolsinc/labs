@@ -58,11 +58,11 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
-// CT-1927: with flushBeforeVerdict defaulting on, transact verdicts are
-// preceded by session sync effects (including marker-only empty frames for
-// watch-less sessions). Tests whose subject is not verdict ordering shift
-// past them here; the ordering itself is pinned by
-// v2-flush-before-verdict-test.ts.
+// CT-1927: every transact verdict stages a catch-up marker that rides the
+// next batched frame — a marker-only empty frame when nothing watched is
+// dirty. Tests whose subject is not verdict ordering shift past those
+// frames here; the ordering contract itself is pinned by
+// v2-verdict-catchup-test.ts.
 const nextResponse = <Result>(
   messages: ServerMessage[],
 ): ResponseMessage<Result> => {
@@ -101,12 +101,10 @@ const assertEffect = (
 const createServer = (
   store: string,
   refreshDelayMs = 0,
-  options: { flushBeforeVerdict?: boolean } = {},
 ) =>
   new Server({
     store: new URL(store),
     subscriptionRefreshDelayMs: refreshDelayMs,
-    ...options,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
         ?.principal;
@@ -1535,10 +1533,20 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
         }],
       },
     }));
-    // CT-1927 default-on ordering: the watch-expansion effect precedes the
-    // verdict on the socket.
+    // Verdict-first (CT-1927): the response is inline; the watch-expansion
+    // effect rides the batched fan-out behind it.
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).requestId,
+      "expand",
+    );
+    await tick();
     const effect = assertEffect(shiftMessage(messages));
+    // The root appears too: the seed (writer session) and the expansion
+    // (this session) both wrote it inside one batch window, so mixed
+    // provenance clears the echo-suppression origin and the doc fans out
+    // authoritatively — delivering current durable state is always sound.
     const expectedUpdatedIds = [
+      fixture.rootId,
       ...fixture.expandedReachableIds.filter((id) =>
         !fixture.initialReachableIds.includes(id)
       ),
@@ -1548,10 +1556,6 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
       expectedUpdatedIds,
     );
     assertEquals(effect.effect.removes, []);
-    assertEquals(
-      nextResponse<any>(messages).requestId,
-      "expand",
-    );
   } finally {
     await server.close();
   }
@@ -2226,6 +2230,11 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
     );
 
     await tick();
+    // The accept's catch-up marker rides an otherwise-empty frame
+    // (CT-1927); no watched novelty is echoed.
+    const marker = assertEffect(shiftMessage(messages));
+    assertEquals(marker.effect.upserts, []);
+    assertEquals(marker.effect.caughtUpLocalSeq, 2);
     assertEquals(messages, []);
   } finally {
     await server.close();
@@ -2352,6 +2361,11 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
     );
 
     await tick();
+    // The accept's catch-up marker rides an otherwise-empty frame
+    // (CT-1927); no watched novelty is echoed.
+    const marker2 = assertEffect(shiftMessage(messages));
+    assertEquals(marker2.effect.upserts, []);
+    assertEquals(marker2.effect.caughtUpLocalSeq, 2);
     assertEquals(messages, []);
   } finally {
     await server.close();
@@ -2547,6 +2561,11 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
 
     await server.flushSessions([space]);
 
+    // The writer hears no echo of its own doc — only the accept's marker on
+    // an otherwise-empty frame (CT-1927).
+    const writerMarker = assertEffect(shiftMessage(writerMessages));
+    assertEquals(writerMarker.effect.upserts, []);
+    assertEquals(writerMarker.effect.caughtUpLocalSeq, 1);
     assertEquals(writerMessages, []);
     const observerEffect = assertEffect(shiftMessage(observerMessages));
     assertEquals(observerEffect.effect.upserts, [{
@@ -2566,11 +2585,9 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
 });
 
 Deno.test("memory v2 server returns conflicts before deferred caught-up session sync", async () => {
-  // Pins the OPT-OUT (rollback) path's historical verdict-first contract;
-  // default-on ordering is pinned by v2-flush-before-verdict-test.ts.
-  const server = createServer("memory://memory-v2-server-conflict-flush", 20, {
-    flushBeforeVerdict: false,
-  });
+  // Verdict-first is the design (CT-1927): the rejection returns inline and
+  // the deferred sync (with its marker) follows on the batch pass.
+  const server = createServer("memory://memory-v2-server-conflict-flush", 20);
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-conflict-flush";
@@ -2709,12 +2726,11 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
 });
 
 Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", async () => {
-  // Pins the OPT-OUT (rollback) path's historical verdict-first contract;
-  // default-on ordering is pinned by v2-flush-before-verdict-test.ts.
+  // Verdict-first is the design (CT-1927): the rejection returns inline and
+  // the deferred sync (with its marker) follows on the batch pass.
   const server = createServer(
     "memory://memory-v2-server-empty-caught-up-from-seq",
     20,
-    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -2795,12 +2811,11 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
 });
 
 Deno.test("memory v2 server processes back-to-back websocket messages in receive order before returning conflicts", async () => {
-  // Pins the OPT-OUT (rollback) path's historical verdict-first contract;
-  // default-on ordering is pinned by v2-flush-before-verdict-test.ts.
+  // Verdict-first is the design (CT-1927): the rejection returns inline and
+  // the deferred sync (with its marker) follows on the batch pass.
   const server = createServer(
     "memory://memory-v2-server-conflict-receive-order",
     20,
-    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -2947,13 +2962,10 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
 
 Deno.test("memory v2 server waits for queued receives before rerunning scheduled watch refresh", async () => {
   const time = new FakeTime();
-  // Pins the TIMER pipeline's drain-wait choreography; the pre-verdict
-  // flush reorders the scripted calls. Opt out — default-on ordering is
-  // pinned by v2-flush-before-verdict-test.ts.
+  // Pins the TIMER pipeline's drain-wait choreography.
   const server = createServer(
     "memory://memory-v2-server-refresh-after-queue-drain",
     1,
-    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const writerMessages: ServerMessage[] = [];
@@ -3165,13 +3177,10 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
 Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", async () => {
   const time = new FakeTime();
   // Pins the TIMER pipeline's deferral choreography (its gated sync stub
-  // scripts the batched pass); the pre-verdict flush would consume the
-  // gated call first. Opt out — default-on ordering is pinned by
-  // v2-flush-before-verdict-test.ts.
+  // scripts the batched pass).
   const server = createServer(
     "memory://memory-v2-server-refresh-max-deferral",
     1,
-    { flushBeforeVerdict: false },
   );
   const messages: ServerMessage[] = [];
   const writerMessages: ServerMessage[] = [];

@@ -1,20 +1,17 @@
-// CT-1927: with `flushBeforeVerdict` on, every transact verdict is preceded
-// on the session's socket by the delivery of the space's relevant sync state
-// — implementing 04-protocol.md §4.11.2 and extending it to accepts. The
-// frame that precedes the verdict carries `caughtUpLocalSeq` for the commit
-// it reflects (the tightened stamping contract: the marker rides the frame
-// that carries the outcome), which is what client-side frame-time overlay
-// retirement keys on. Off (the rollback hatch — the flag defaults ON),
-// behavior stays verdict-first: the batched fan-out delivers novelty later —
-// the deviation CT-1872 catalogued.
+// CT-1927: transact verdicts return INLINE — the fan-out stays batched, so
+// N commits can apply against one watch-union recompute — and the ordering
+// contract is enforced through the catch-up marker instead: every verdict
+// (accepts as well as conflict rejections) stages a `caughtUpLocalSeq`
+// obligation, and the batched fan-out stamps the marker on the next frame to
+// the committing session — an otherwise-empty frame if nothing it watches is
+// dirty. The CLIENT parks each accept's promotion until the marker covers
+// it (04-protocol.md §4.11.2); these tests pin the server half: the marker
+// rides the frame that reflects the decided outcomes, and it always arrives.
 //
-// The long refresh delay in the flag-on tests is deliberate: it parks the
-// writer's novelty behind a timer the pre-verdict flush must cancel and
-// absorb, proving the ordering comes from the flush, not from a lucky timer.
+// The long refresh delay parks the writer's novelty behind a timer so each
+// test drives delivery explicitly with flushSessions().
 
 import { assertEquals, assertExists } from "@std/assert";
-import { FakeTime } from "@std/testing/time";
-import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -26,6 +23,7 @@ import {
   type SessionOpenAuthMetadata,
   type SessionSync,
 } from "../v2.ts";
+import { Server } from "../v2/server.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const HELLO = {
@@ -82,7 +80,6 @@ const watchBoth = (space: string, sessionId: string) => ({
 });
 
 const setup = async (options: {
-  flushBeforeVerdict: boolean;
   subscriptionRefreshDelayMs: number;
   store: string;
 }) => {
@@ -90,13 +87,12 @@ const setup = async (options: {
     ...testSessionOpenServerOptions,
     store: new URL(options.store),
     subscriptionRefreshDelayMs: options.subscriptionRefreshDelayMs,
-    flushBeforeVerdict: options.flushBeforeVerdict,
   });
   const committerMessages: ServerMessage[] = [];
   const committer = server.connect((message) =>
     committerMessages.push(message)
   );
-  const space = "did:key:z6Mk-flush-before-verdict";
+  const space = "did:key:z6Mk-verdict-catchup";
 
   await committer.receive(encodeMemoryBoundary(HELLO));
   const committerSessionOpen = expectHelloOk(committerMessages);
@@ -119,9 +115,7 @@ const setup = async (options: {
 
   // Foreign novelty the committer has NOT received: the out-of-band direct
   // write path (the blob-upload path) marks the space dirty behind the
-  // refresh timer WITHOUT a transact verdict — under the flag, a transacting
-  // foreign session would have flushed the space itself, which is the
-  // feature. seq 1 = doc:b.
+  // refresh timer WITHOUT a transact verdict. seq 1 = doc:b.
   await server.writeDocument(space, "of:doc:b", { from: "writer" });
 
   return {
@@ -133,14 +127,13 @@ const setup = async (options: {
   };
 };
 
-Deno.test("memory v2 server: flush-before-verdict delivers relevant novelty and the outcome marker ahead of an accept", async () => {
+Deno.test("memory v2 server: an accept returns inline and its marker rides the batched frame with the parked novelty", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
-    // Deliberately parked: the pre-verdict flush must cancel and absorb it.
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-accept",
+    store: "memory://verdict-catchup-accept",
   });
-  const { space, committer, committerMessages, committerSessionId } = context;
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
 
   await committer.receive(encodeMemoryBoundary({
     type: "transact",
@@ -158,11 +151,20 @@ Deno.test("memory v2 server: flush-before-verdict delivers relevant novelty and 
     },
   }));
 
-  // FIRST the frame: the parked foreign write to doc:b, stamped with the
-  // outcome marker for localSeq 1. The committer's own accepted doc:a is
-  // echo-suppressed by dirty-origin tracking — the verdict itself carries
-  // its truth (CT-1926's post-apply document) — so the frame covers exactly
-  // the foreign novelty the verdict must not outrun.
+  // The verdict is INLINE — no flush precedes it; the fan-out stays batched
+  // so a burst of commits shares one watch-union recompute.
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
+  assertEquals(committerMessages.length, 0);
+
+  // The batched pass then delivers the parked foreign write STAMPED with the
+  // accept's marker: the frame reflects every decided outcome ≤ 1 for the
+  // docs it covers, and the client applies the parked promotion on it. The
+  // committer's own accepted doc:a is echo-suppressed — the parked verdict
+  // carries its truth.
+  await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(sync.caughtUpLocalSeq, 1);
@@ -173,22 +175,59 @@ Deno.test("memory v2 server: flush-before-verdict delivers relevant novelty and 
       { id: "of:doc:b", seq: 1, doc: { value: { from: "writer" } } },
     ],
   );
+  assertEquals(committerMessages.length, 0);
+});
 
-  // THEN the verdict.
+Deno.test("memory v2 server: an accept with no watched novelty still gets its marker on an otherwise-empty frame", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-empty-frame",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Drain the fixture's parked doc:b first so nothing watched is dirty.
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-a",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
   const verdict = assertResponse<{ seq: number }>(
     shiftMessage(committerMessages),
   );
   assertEquals(verdict.ok?.seq, 2);
-  assertEquals(committerMessages.length, 0);
+
+  // The client's parked promotion is keyed on this marker, so it MUST
+  // arrive even when the session's own write is the only novelty (and is
+  // echo-suppressed): the obligation forces an otherwise-empty frame.
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(sync.upserts, []);
+  assertEquals(sync.removes, []);
 });
 
-Deno.test("memory v2 server: flush-before-verdict delivers read repair ahead of a rejection", async () => {
+Deno.test("memory v2 server: a rejection's read repair rides the batched frame with the rejection's marker", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-reject",
+    store: "memory://verdict-catchup-reject",
   });
-  const { space, committer, committerMessages, committerSessionId } = context;
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
 
   // Stale confirmed read: doc:b moved at seq 1; the committer claims seq 0.
   await committer.receive(encodeMemoryBoundary({
@@ -210,12 +249,14 @@ Deno.test("memory v2 server: flush-before-verdict delivers read repair ahead of 
     },
   }));
 
-  // FIRST the repair (the winning doc:b), stamped with the rejected commit's
-  // marker — §4.11.2's MUST, no longer compensated by a client-side gate
-  // waiting on a 30s timeout. (Coverage of a rejected doc is staged, not
-  // guaranteed: had the session cache already held the winning value,
-  // sameSnapshot would elide the upsert and the overlay would retire at the
-  // verdict instead.)
+  // Rejection inline; the client's read-repair gate holds the drop.
+  const verdict = assertResponse(shiftMessage(committerMessages));
+  assertExists(verdict.error);
+  assertEquals(committerMessages.length, 0);
+
+  // The staged repair (the winning doc:b) arrives with the rejected
+  // commit's marker — the gate releases against repaired state.
+  await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(sync.caughtUpLocalSeq, 1);
@@ -223,108 +264,35 @@ Deno.test("memory v2 server: flush-before-verdict delivers read repair ahead of 
     sync.upserts.map((upsert) => ({ id: upsert.id, seq: upsert.seq })),
     [{ id: "of:doc:b", seq: 1 }],
   );
-
-  // THEN the rejection.
-  const verdict = assertResponse(shiftMessage(committerMessages));
-  assertExists(verdict.error);
-  assertEquals(committerMessages.length, 0);
-});
-
-Deno.test("memory v2 server: a pre-verdict flush failure never eats the verdict", async () => {
-  const context = await setup({
-    flushBeforeVerdict: true,
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-failure",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
-
-  // Break the flush. The verdict must still arrive: the commit's fate is
-  // durable, and the batched refresh remains the recovery path.
-  const realFlush = server.flushSessions.bind(server);
-  (server as unknown as { flushSessions: () => Promise<void> }).flushSessions =
-    () => Promise.reject(new Error("synthetic flush failure"));
-
-  await committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-a",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:doc:a",
-        value: { value: { from: "committer" } },
-      }],
-    },
-  }));
-  const verdict = assertResponse<{ seq: number }>(
-    shiftMessage(committerMessages),
-  );
-  assertEquals(verdict.ok?.seq, 2);
-
-  // Restore and drain so the parked refresh timer is cancelled cleanly.
-  (server as unknown as { flushSessions: typeof realFlush }).flushSessions =
-    realFlush;
-  await realFlush([space]);
-});
-
-Deno.test("memory v2 server: flag off keeps verdict-first delivery (the catalogued deviation)", async () => {
-  const context = await setup({
-    flushBeforeVerdict: false,
-    subscriptionRefreshDelayMs: 0,
-    store: "memory://flush-before-verdict-off",
-  });
-  const {
-    server,
-    space,
-    committer,
-    committerMessages,
-    committerSessionId,
-  } = context;
-
-  await committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-a",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:doc:a",
-        value: { value: { from: "committer" } },
-      }],
-    },
-  }));
-
-  // Verdict arrives with the foreign doc:b novelty still undelivered.
-  const verdict = assertResponse<{ seq: number }>(
-    shiftMessage(committerMessages),
-  );
-  assertEquals(verdict.ok?.seq, 2);
-
-  // The batched fan-out delivers it afterwards (own doc:a echo-suppressed).
-  await server.flushSessions([space]);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  const sync = effect.effect as SessionSync;
-  assertEquals(
-    sync.upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
-  );
 });
 
 Deno.test("memory v2 server: a failed fan-out requeues the batch and the scheduled refresh recovers", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-requeue",
+    store: "memory://verdict-catchup-requeue",
   });
   const { server, space, committer, committerMessages, committerSessionId } =
     context;
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-a",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
 
   // Fail INSIDE the fan-out — after refreshLoop has consumed the dirty
   // state — unlike a stubbed flushSessions, which never consumes it.
@@ -339,31 +307,19 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
     }
     return original(...args);
   };
-
-  await committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-a",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:doc:a",
-        value: { value: { from: "committer" } },
-      }],
-    },
-  }));
-  // The verdict survives the failure.
-  const verdict = assertResponse<{ seq: number }>(
-    shiftMessage(committerMessages),
-  );
-  assertEquals(verdict.ok?.seq, 2);
+  let threw = false;
+  try {
+    await server.flushSessions([space]);
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+  assertEquals(committerMessages.length, 0);
 
   // Recovery: the consumed batch was REQUEUED, so the next pass delivers
-  // the parked foreign novelty and the outcome marker — "batched refresh
-  // recovers" is a kept promise, not a hope.
+  // the parked foreign novelty and the outcome marker the client's parked
+  // promotion is waiting for — "batched refresh recovers" is a kept
+  // promise, not a hope.
   await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
@@ -376,11 +332,11 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
 
 Deno.test("memory v2 server: same-doc foreign novelty is not echo-suppressed by the writer's own commit", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-mixed-origin",
+    store: "memory://verdict-catchup-mixed-origin",
   });
-  const { space, committer, committerMessages, committerSessionId } = context;
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
 
   // The committer patches doc:b ITSELF — the doc already carrying parked
   // foreign novelty. Mixed provenance must clear the echo-suppression
@@ -402,7 +358,12 @@ Deno.test("memory v2 server: same-doc foreign novelty is not echo-suppressed by 
       }],
     },
   }));
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
 
+  await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(sync.caughtUpLocalSeq, 1);
@@ -418,20 +379,14 @@ Deno.test("memory v2 server: same-doc foreign novelty is not echo-suppressed by 
       doc: { value: { from: "writer", mine: true } },
     }],
   );
-  const verdict = assertResponse<{ seq: number }>(
-    shiftMessage(committerMessages),
-  );
-  assertEquals(verdict.ok?.seq, 2);
 });
 
-Deno.test("memory v2 server: a durable write is visible to a concurrent commit's flush while its side effects await", async () => {
+Deno.test("memory v2 server: a durable write is visible to a concurrent flush while its side effects await", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-durable-visibility",
+    store: "memory://verdict-catchup-durable-visibility",
   });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
+  const { server, space, committerMessages } = context;
 
   // Second session, gated in its post-commit side effects AFTER the durable
   // apply. Installed after setup so the fixture's writeDocument is not
@@ -489,24 +444,10 @@ Deno.test("memory v2 server: a durable write is visible to a concurrent commit's
   }));
   await reached.promise;
 
-  // The committer's concurrent commit must see the durable doc:a in its
-  // pre-verdict flush: dirty-marking happens before the first await, so a
-  // later verdict can never outrun earlier durable watched novelty.
-  await committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-c",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:doc:c",
-        value: { value: { from: "committer" } },
-      }],
-    },
-  }));
+  // A flush during the await must see the durable doc:a: dirty-marking
+  // happens before the first await, so a batch pass can never miss earlier
+  // durable watched novelty.
+  await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(
@@ -517,93 +458,26 @@ Deno.test("memory v2 server: a durable write is visible to a concurrent commit's
       { id: "of:doc:b", seq: 1 },
     ],
   );
-  const verdict = assertResponse<{ seq: number }>(
-    shiftMessage(committerMessages),
-  );
-  assertEquals(verdict.ok?.seq, 3);
 
   gate.resolve();
   await secondCommit;
-});
-
-Deno.test("memory v2 server: a queued second receive does not recreate the drain-wait cycle", async () => {
-  const time = new FakeTime();
-  const context = await setup({
-    flushBeforeVerdict: true,
-    subscriptionRefreshDelayMs: 0,
-    store: "memory://flush-before-verdict-queued-receive",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
-  const gate = Promise.withResolvers<void>();
-  const originalTransact = server.transact.bind(server);
-  (server as unknown as {
-    transact(
-      message: Parameters<Server["transact"]>[0],
-    ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
-    if (message.requestId === "tx-1") {
-      await gate.promise;
-    }
-    return await originalTransact(message);
-  };
-
-  try {
-    const transactFor = (requestId: string, id: string) =>
-      encodeMemoryBoundary({
-        type: "transact",
-        requestId,
-        space,
-        sessionId: committerSessionId,
-        commit: {
-          localSeq: requestId === "tx-1" ? 1 : 2,
-          reads: { confirmed: [], pending: [] },
-          operations: [{ op: "set", id, value: { value: { requestId } } }],
-        },
-      });
-
-    // Two receives: tx-1 gated inside transact, tx-2 SERIALIZED behind it.
-    const first = committer.receive(transactFor("tx-1", "of:doc:a"));
-    const second = committer.receive(transactFor("tx-2", "of:doc:c"));
-
-    // The scheduled refresh (armed by setup's writeDocument) fires and
-    // starts drain-waiting with BOTH receives counted. Under the fake
-    // clock its deadline never expires: pre-fix, releasing the gate then
-    // deadlocks — tx-1's flush chains behind the drain-waiting pass, which
-    // waits for queued tx-2, which cannot run until tx-1 finishes. The
-    // whole-queue suspension breaks the cycle deterministically.
-    await time.tickAsync(0);
-    gate.resolve();
-    await first;
-    await second;
-
-    const effect = assertEffect(shiftMessage(committerMessages));
-    assertEquals(
-      (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
-      ["of:doc:b"],
-    );
-    assertEquals(
-      assertResponse<{ seq: number }>(shiftMessage(committerMessages)).ok?.seq,
-      2,
-    );
-  } finally {
-    gate.resolve();
-    time.restore();
-  }
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(secondMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
 });
 
 Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-multi-space",
+    store: "memory://verdict-catchup-multi-space",
   });
   const { server, space, committerMessages } = context;
 
   // A SECOND space with its own observing session, so stranding is
   // observable: without an observer, a stranded space holds dirty docs no
   // assertion can see, and the pin passes even against the pre-fix code.
-  const spaceB = "did:key:z6Mk-flush-before-verdict-second-space";
+  const spaceB = "did:key:z6Mk-verdict-catchup-second-space";
   const observerMessages: ServerMessage[] = [];
   const observer = server.connect((message) => observerMessages.push(message));
   await observer.receive(encodeMemoryBoundary(HELLO));
@@ -681,9 +555,8 @@ Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", 
 
 Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
   const context = await setup({
-    flushBeforeVerdict: true,
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://flush-before-verdict-requeue-origin",
+    store: "memory://verdict-catchup-requeue-origin",
   });
   const { server, space, committerMessages, committerSessionId } = context;
 
@@ -698,7 +571,7 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
   }).syncSessionForConnection = (...args) => {
     if (!failed) {
       failed = true;
-      server.markSpaceDirty(space, ["space\u0000of:doc:b"], {
+      server.markSpaceDirty(space, ["space of:doc:b"], {
         sessionId: committerSessionId,
         // doc:b's ACTUAL seq: echo suppression fires only when the origin's
         // seq matches the delivered upsert's seq, so a fabricated seq would

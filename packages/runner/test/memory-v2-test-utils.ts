@@ -158,9 +158,13 @@ export abstract class ScriptedSessionTransport
   protected onHello(_helloCount: number): void {}
 
   /** Flags advertised on hello.ok — override to script an older server
-   * (e.g. one without `pendingReadStacks`). */
+   * (e.g. one without `pendingReadStacks`) or a newer one. Scripted
+   * transports do NOT advertise `verdictCatchUpMarkers` by default: a
+   * client that believed it would park every accept's promotion on markers
+   * a hand-rolled script never emits. Tests that script markers
+   * (pushSync with caughtUpLocalSeq) opt in by overriding this. */
   protected helloFlags(): ReturnType<typeof getMemoryProtocolFlags> {
-    return getMemoryProtocolFlags();
+    return { ...getMemoryProtocolFlags(), verdictCatchUpMarkers: false };
   }
 
   /** Wire codec seams — override together when a harness needs a specific

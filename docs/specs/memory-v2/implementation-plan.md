@@ -27,7 +27,8 @@ Implemented on the current branch:
   `graph.query`, `session.watch.set`, `session.watch.add`, `session.ack`,
   `response`, and `session/effect`
 - session-scoped watch-union sync with catch-up frames, `removes`, and
-  pre-verdict sync flushing (conflicts and accepts, CT-1927)
+  per-verdict catch-up markers with client-side verdict parking (conflicts
+  and accepts, CT-1927)
 - one-shot `graph.query` support for `branch` and `atSeq`
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected

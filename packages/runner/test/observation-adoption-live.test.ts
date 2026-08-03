@@ -45,11 +45,8 @@ class SharedServerStorageManager extends EmulatedStorageManager {
   }
 }
 
-const newSharedServer = (
-  serverOptions: { flushBeforeVerdict?: boolean } = {},
-) =>
+const newSharedServer = () =>
   new MemoryV2Server.Server({
-    ...serverOptions,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
         ?.principal;
@@ -109,14 +106,7 @@ describe("incremental observation adoption (live)", () => {
   let managerB: SharedServerStorageManager;
 
   beforeEach(() => {
-    // Opt out of the CT-1927 default-on pre-verdict flush: adoption rides
-    // the writer's POST-verdict observation batch, which pre-verdict
-    // delivery outruns — the receiver then re-runs instead of adopting.
-    // This suite pins adoption under the batched (opt-out / old-server)
-    // delivery; the default-on describe below pins the current
-    // timing-dependent reality (re-run or adoption, converging either
-    // way). Reliable adoption under default-on delivery is CT-1930.
-    server = newSharedServer({ flushBeforeVerdict: false });
+    server = newSharedServer();
     managerA = SharedServerStorageManager.connectTo(server, { as: signer });
     managerB = SharedServerStorageManager.connectTo(server, { as: signer });
   });
@@ -253,110 +243,6 @@ describe("incremental observation adoption (live)", () => {
           (v) => v === 14,
         ),
       ).toBe(14);
-
-      cancelSink1();
-      cancelSink2();
-    } finally {
-      await rt1.dispose();
-      await rt2.dispose();
-    }
-  });
-});
-
-// CT-1927 default-on reality: the pre-verdict flush delivers the value frame
-// BEFORE the writer's post-verdict computation run exists, so its adoption
-// observation cannot ride along — the receiver usually re-runs the
-// computation. But the observation-only commit rides the NEXT sync window,
-// and when that window reaches the receiver before its deferred dispatch
-// fires, adoption still wins — the race is real in both directions, so
-// neither outcome can be asserted (CI observed both). What IS deterministic:
-// the receiver converges, and its dirt resolves through one of exactly two
-// paths — adoption or re-run. Restoring RELIABLE dedup under pre-verdict
-// delivery is CT-1930.
-describe("incremental observation adoption (live, CT-1927 default-on)", () => {
-  let server: MemoryV2Server.Server;
-  let managerA: SharedServerStorageManager;
-  let managerB: SharedServerStorageManager;
-
-  beforeEach(() => {
-    server = newSharedServer();
-    managerA = SharedServerStorageManager.connectTo(server, { as: signer });
-    managerB = SharedServerStorageManager.connectTo(server, { as: signer });
-  });
-
-  afterEach(async () => {
-    await managerA?.close();
-    await managerB?.close();
-    await server?.close();
-  });
-
-  it("a receiver converges under pre-verdict delivery via re-run or adoption", async () => {
-    const rt1 = newRuntime(managerA);
-    const rt2 = newRuntime(managerB);
-    try {
-      const tx1 = rt1.edit();
-      const valueCell1 = rt1.getCell(space, "adopt-value", VALUE_SCHEMA, tx1);
-      valueCell1.withTx(tx1).set(1);
-      const compiled = await rt1.patternManager.compilePattern(PROGRAM, {
-        space,
-        tx: tx1,
-      });
-      const resultCell1 = rt1.getCell(space, "adopt-result", undefined, tx1);
-      const r1 = rt1.run(
-        tx1,
-        // deno-lint-ignore no-explicit-any
-        compiled as any,
-        { value: valueCell1 },
-        resultCell1,
-      );
-      rt1.prepareTxForCommit(tx1);
-      expect((await tx1.commit()).error).toBeUndefined();
-      const cancelSink1 = r1.sink(() => {});
-      await rt1.idle();
-      expect(await r1.key("doubled").pull()).toBe(2);
-      await rt1.patternManager.flushCompileCacheWrites();
-      await rt1.storageManager.synced();
-      await rt1.idle();
-      await rt1.storageManager.synced();
-
-      const resultLink = r1.getAsNormalizedFullLink();
-      const resultCell2 = rt2.getCellFromLink(resultLink);
-      await resultCell2.sync();
-      expect(await rt2.start(resultCell2)).toBeTruthy();
-      const cancelSink2 = resultCell2.key("doubled").sink(() => {});
-      await rt2.idle();
-      await rt2.storageManager.synced();
-      await rt2.idle();
-      expect(resultCell2.key("doubled").getAsQueryResult()).toBe(2);
-
-      rt2.scheduler.setActionRunTraceEnabled(true);
-      const adoptedBefore = adoptOkCount();
-      const tx2 = rt1.edit();
-      valueCell1.withTx(tx2).set(10);
-      expect((await tx2.commit()).error).toBeUndefined();
-      await rt1.idle();
-      await rt1.storageManager.synced();
-
-      expect(
-        await waitForCellValue<number>(
-          rt2,
-          resultCell2.key("doubled"),
-          (v) => v === 20,
-        ),
-      ).toBe(20);
-      // Let the receiver's scheduler finish resolving the integrate dirt
-      // before inspecting how it did so.
-      await rt2.idle();
-      // The value-frame-vs-observation race lands EITHER way (pre-verdict
-      // delivery usually outruns the observation and forces a re-run, but
-      // the observation's next-window delivery can still beat the deferred
-      // dispatch and adopt), so no single outcome is asserted. The
-      // deterministic pin: the dirt was resolved through one of the two
-      // legitimate paths, never left dangling. Reliable dedup is CT-1930.
-      const liveTrace = rt2.scheduler.getActionRunTrace();
-      expect(
-        opRuns(liveTrace).length > 0 || adoptOkCount() > adoptedBefore,
-      ).toBe(true);
 
       cancelSink1();
       cancelSink2();

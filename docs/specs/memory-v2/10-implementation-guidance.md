@@ -235,10 +235,11 @@ Practical guidance:
 - keep the client watch view incrementally ordered instead of rebuilding and
   sorting the full entity set on every emit
 
-Before returning ANY transact verdict — `ConflictError` or an accept — flush
-any already-committed relevant sync so the client acts on fresh watched state
-(04-protocol.md section 4.11.2; shipped default-on as `flushBeforeVerdict`,
-CT-1927).
+Return transact verdicts inline and keep the fan-out batched — N commits
+share one watch-union recompute. Stage a catch-up obligation for EVERY
+verdict so the next batched frame to the committing session carries
+`caughtUpLocalSeq`; the client parks each verdict's state application until
+that marker covers it (04-protocol.md section 4.11.2, CT-1927).
 
 ## 11. Query / Traversal Reuse
 

@@ -19,8 +19,7 @@ export class StorageManager extends V2Storage.StorageManager {
 
   static emulate(
     options: Omit<V2Storage.Options, "memoryHost" | "spaceHostMap">,
-    serverOptions: { flushBeforeVerdict?: boolean } = {},
   ): EmulatedStorageManager {
-    return EmulatedStorageManager.emulate(options, serverOptions);
+    return EmulatedStorageManager.emulate(options);
   }
 }

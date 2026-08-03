@@ -354,11 +354,10 @@ interface SessionSync {
   toSeq: number;
   // Outcome marker (SESSION localSeq space): every verdict of the receiving
   // session's commits through this localSeq is decided, and this frame
-  // reflects those outcomes for the docs it covers. Stamped on the frame
-  // that carries the outcome (section 4.11.2); releases the client's
-  // read-repair gate and keys frame-time overlay retirement, which is
-  // scoped to the frame's covered docs precisely because a bare marker on
-  // an empty frame covers nothing.
+  // reflects those outcomes for the docs it covers (section 4.11.2).
+  // Releases the client's read-repair gate and applies parked accepts —
+  // the promotion of accepted-but-unpromoted commits from pending overlay
+  // to confirmed mirror.
   caughtUpLocalSeq?: number;
   upserts: Array<{
     branch: BranchId;
@@ -974,32 +973,41 @@ Clients MUST:
 The server processes writes serially within a branch, or with equivalent
 serializable isolation.
 
-For live sync:
+For live sync, transact verdicts return INLINE and the fan-out stays
+batched: N commits can apply against one watch-union recompute, which is
+where the subscription pipeline's throughput comes from. The ordering
+contract is enforced through the catch-up marker and CLIENT-side verdict
+parking instead of server-side response queuing (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
-- before returning ANY transact verdict — `ConflictError` or an accept — the
-  server MUST first flush any already committed relevant changes that would
-  otherwise leave the client's subscribed view stale
-- the server SHOULD carry dirty-document information through this flush so it
-  only recomputes affected watch unions
-- the flush stamps `caughtUpLocalSeq` on the frame that actually carries the
-  outcome it announces: the marker means "every verdict of yours through this
-  localSeq is decided, and this frame reflects those outcomes for the docs it
-  covers." The session's own ACCEPTED writes are echo-suppressed from frames
-  (dirty-origin tracking): the verdict itself carries their truth (the
-  post-apply `document` on patch revisions, §4.3.1). REJECTED commits' docs
-  are staged origin-less, so repair frames DO cover them.
+- for EVERY transact verdict — accepts as well as conflict rejections — the
+  server MUST stage a catch-up obligation for the committing session, and
+  the next frame the batched fan-out sends that session MUST carry
+  `caughtUpLocalSeq` at or above the verdict's localSeq — an
+  otherwise-empty frame when nothing the session watches is dirty
+- the marker means "every verdict of yours through this localSeq is
+  decided, and this frame reflects those outcomes for the docs it covers."
+  The session's own ACCEPTED writes are echo-suppressed from frames
+  (dirty-origin tracking): the parked verdict carries their truth (with the
+  post-apply `document` on patch revisions where provided, §4.3.1).
+  REJECTED commits' docs are staged origin-less, so repair frames DO cover
+  them.
+- the CLIENT MUST NOT apply a verdict's state effects ahead of the marker
+  that covers it: an accept's promotion (pending overlay to confirmed
+  mirror, removing the pending local copy) is PARKED until
+  `caughtUpLocalSeq` reaches its localSeq, so promotion extrapolates over a
+  base reflecting the foreign novelty the accept was applied on top of; a
+  conflict rejection's drop/revert is held by the read-repair gate
+  (`finalizeRejection`, with a timeout backstop for lost connections).
+  Visible state is unaffected by parking — the pending overlay already
+  shows the write.
 
-Implementation status: the verdict-ordering MUST ships ON BY DEFAULT
-(`flushBeforeVerdict` on the server, catalogued in
-`docs/development/EXPERIMENTAL_OPTIONS.md`; `false` is the rollback hatch —
-CT-1927). With the flag off, the implementation reverts to the historical
-deviation: verdicts return inline while the flush rides the batched fan-out
-timer, compensated by the client-side read-repair gate (`finalizeRejection`
-holds drop/revert until `caughtUpLocalSeq` reaches the rejected commit's
-evaluation point, with a 30-second timeout backstop). The gate remains in
-place with the flag on, demoted to belt-and-suspenders.
+The server advertises this contract with the build-inherent
+`verdictCatchUpMarkers` protocol flag. A client that sees it absent (an
+older server that stamps markers only for conflicts) applies verdicts
+immediately, as before; a client with no active sync consumer (no watch
+view — so no frame stream to order against) also applies immediately.
 
 ## 4.12 Mapping from Current Implementation
 

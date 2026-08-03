@@ -489,9 +489,11 @@ The required ordering invariant is:
 2. Recompute the affected watch unions against that latest state.
 3. Emit sync only after the recomputation is complete.
 
-While such a refresh is pending, the server MUST flush the affected watch
-unions before returning ANY transact verdict for the space — a `ConflictError`
-or an accept (04-protocol.md section 4.11.2, extended by CT-1927).
+Transact verdicts return inline without waiting for such a refresh; the
+verdict's catch-up obligation guarantees the next frame to the committing
+session carries `caughtUpLocalSeq` covering it, and the CLIENT parks the
+verdict's state application until that marker (04-protocol.md section
+4.11.2, CT-1927).
 
 ### 5.4.6 Session Watch State
 

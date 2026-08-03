@@ -132,11 +132,11 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
-// CT-1927: with flushBeforeVerdict defaulting on, transact verdicts are
-// preceded by session sync effects (including marker-only empty frames for
-// watch-less sessions). Tests whose subject is not verdict ordering shift
-// past them here; the ordering itself is pinned by
-// v2-flush-before-verdict-test.ts.
+// CT-1927: every transact verdict stages a catch-up marker that rides the
+// next batched frame — a marker-only empty frame when nothing watched is
+// dirty. Tests whose subject is not verdict ordering shift past those
+// frames here; the ordering contract itself is pinned by
+// v2-verdict-catchup-test.ts.
 const nextResponse = <Result>(
   messages: ServerMessage[],
 ): ResponseMessage<Result> => {

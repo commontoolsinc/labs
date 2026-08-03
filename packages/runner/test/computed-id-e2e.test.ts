@@ -36,11 +36,7 @@ describe("computed-cell id end-to-end (default-on instantiation)", () => {
   let remoteSession: MemoryV2Client.SpaceSession;
 
   beforeEach(async () => {
-    // The strict-conflict step fixtures controlled staleness; opt out of the
-    // CT-1927 default-on pre-verdict flush (which would repair it early).
-    storageManager = StorageManager.emulate({ as: e2eSigner }, {
-      flushBeforeVerdict: false,
-    });
+    storageManager = StorageManager.emulate({ as: e2eSigner });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,

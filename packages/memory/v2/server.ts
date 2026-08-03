@@ -374,7 +374,6 @@ class Connection {
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
-  #receiveFlushSuspensions = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
 
   constructor(
@@ -534,48 +533,12 @@ class Connection {
     }
   }
 
-  /**
-   * Runs `work` with this connection's ENTIRE serialized receive queue
-   * exempt from drain accounting (CT-1927). The pre-verdict flush awaits
-   * the refresh pipeline, and an in-flight timer pass's
-   * `waitForConnectionQueuesToDrain` counts pending receives — the transact
-   * awaiting the flush AND everything queued behind it, none of which can
-   * execute until the flush returns. Left counted, the two sides wait for
-   * each other until the drain deadline (a latency cliff in real time; a
-   * deadlock under a fake clock). A receive queue blocked ON fan-out is
-   * not pressure the fan-out should yield to. Suspension wakes any
-   * drain-waiter parked on this connection's idle signal so it re-checks.
-   */
-  private async withReceiveUncounted<T>(work: () => Promise<T>): Promise<T> {
-    this.#receiveFlushSuspensions += 1;
-    this.#receiveIdle?.resolve();
-    this.#receiveIdle = null;
-    try {
-      return await work();
-    } finally {
-      this.#receiveFlushSuspensions -= 1;
-    }
-  }
-
   hasPendingReceives(): boolean {
-    return this.effectivePendingReceives() > 0;
-  }
-
-  /**
-   * Receives are serialized per connection, so while the HEAD receive is
-   * suspended awaiting the pre-verdict flush (CT-1927), nothing queued
-   * behind it can execute either — the WHOLE queue is exempt from drain
-   * accounting, not just the head. Counting the queued tail recreates the
-   * wait cycle one layer out: the drain waits for a queued receive that
-   * cannot run until the head's flush returns, which waits behind the
-   * drain.
-   */
-  private effectivePendingReceives(): number {
-    return this.#receiveFlushSuspensions > 0 ? 0 : this.#pendingReceives;
+    return this.#pendingReceives > 0;
   }
 
   async waitForReceiveQueueToDrain(deadlineMs: number): Promise<boolean> {
-    while (this.effectivePendingReceives() > 0) {
+    while (this.#pendingReceives > 0) {
       const remainingMs = deadlineMs - Date.now();
       if (remainingMs <= 0) {
         return false;
@@ -593,7 +556,7 @@ class Connection {
         clearTimeout(timeoutId);
       }
       if (!drained) {
-        return this.effectivePendingReceives() === 0;
+        return this.#pendingReceives === 0;
       }
     }
     return true;
@@ -690,30 +653,16 @@ class Connection {
         ) {
           return;
         }
-        const response = await this.server.transact(parsed);
-        // CT-1927 (flag-gated): deliver the space's pending novelty BEFORE
-        // the verdict, so the verdict is preceded on this socket by every
-        // relevant frame — including the frame carrying this commit's own
-        // outcome and its `caughtUpLocalSeq` marker (accepts mark their
-        // writes dirty and stage the obligation in `transact`; rejections
-        // stage theirs in `stageConflictRefreshDirtyIds`). `flushSessions`
-        // serializes on the global refresh chain, so this cannot race a
-        // concurrent pass. A flush failure must not eat the verdict: the
-        // commit's fate is already durable, and the batched refresh remains
-        // scheduled as the recovery path.
-        if (this.server.options.flushBeforeVerdict !== false) {
-          try {
-            await this.withReceiveUncounted(() =>
-              this.server.flushSessions([parsed.space])
-            );
-          } catch (error) {
-            console.warn(
-              "memory v2: pre-verdict flush failed; verdict proceeds, batched refresh recovers",
-              error,
-            );
-          }
-        }
-        this.send(response);
+        // CT-1927: the verdict returns inline — batching amortization is
+        // the point of the fan-out timer (N commits apply, ONE watch-union
+        // recompute covers the batch). The ordering contract is enforced
+        // client-side instead: accepts and conflict rejections stage a
+        // catch-up obligation (`pendingCaughtUpLocalSeq`), the batched
+        // fan-out stamps `caughtUpLocalSeq` on the frame that reflects the
+        // decided outcomes, and the CLIENT parks each verdict's state
+        // application (accept promotion / rejection drop) until that marker
+        // covers it. See 04-protocol.md §4.11.2.
+        this.send(await this.server.transact(parsed));
         return;
       }
       case "graph.query":
@@ -997,20 +946,6 @@ export class Server {
       sessions?: SessionRegistry;
       store?: URL;
       subscriptionRefreshDelayMs?: number;
-      /**
-       * CT-1927 (default ON; catalogued in
-       * docs/development/EXPERIMENTAL_OPTIONS.md): deliver relevant sync
-       * state to the committing session's space BEFORE sending any transact
-       * verdict, implementing 04-protocol.md §4.11.2 and extending it to
-       * accepts. Restores the cross-channel ordering guarantee (a verdict at
-       * seq N is preceded on the socket by every relevant frame < N) and
-       * stamps `caughtUpLocalSeq` on the frame that actually carries the
-       * outcome, enabling client-side frame-time overlay retirement. Set
-       * `false` to opt out (the rollback hatch): behavior then reverts to
-       * the historical deviation — inline verdicts, batched fan-out, the
-       * client read-repair gate compensating.
-       */
-      flushBeforeVerdict?: boolean;
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -2267,29 +2202,24 @@ export class Server {
             previousReadSpaces,
             session,
           );
-          if (this.options.flushBeforeVerdict !== false) {
-            // CT-1927: stamp the accept's catch-up obligation BEFORE the
-            // pre-verdict flush, so the frame that precedes the verdict
-            // carries `caughtUpLocalSeq >= this localSeq` — the marker
-            // client-side frame-time overlay retirement keys on. The
-            // stamping contract: the frame reflects every decided outcome
-            // ≤ W for the docs it COVERS. The session's own accepted writes
-            // are echo-suppressed by dirty-origin tracking (the verdict
-            // itself carries their truth — CT-1926's post-apply document),
-            // so accepted overlays settle at verdict time as today;
-            // REJECTED commits' docs are staged origin-less
-            // (stageConflictRefreshDirtyIds), so repair frames DO cover
-            // them and their overlays can retire at frame time — closing
-            // the phantom window. (Coverage is staged, not guaranteed:
-            // sameSnapshot elides a doc whose durable value the session
-            // cache already holds, in which case the overlay retires at the
-            // verdict as always.) Foreign novelty is what this flush exists
-            // to front-run.
-            session.pendingCaughtUpLocalSeq = Math.max(
-              session.pendingCaughtUpLocalSeq,
-              message.commit.localSeq,
-            );
-          }
+          // CT-1927: stage the accept's catch-up obligation. The batched
+          // fan-out stamps `caughtUpLocalSeq >= this localSeq` on the next
+          // frame to this session (an otherwise-empty frame if nothing it
+          // watches is dirty), and the CLIENT holds the accepted commit's
+          // promotion — pending overlay to confirmed mirror — until that
+          // marker arrives, so promotion always extrapolates over a base
+          // that reflects the foreign novelty the accept was applied on
+          // top of. The stamping contract: the frame reflects every
+          // decided outcome ≤ W for the docs it COVERS. The session's own
+          // accepted writes are echo-suppressed by dirty-origin tracking
+          // (the parked verdict carries their truth — with CT-1926's
+          // post-apply document where the server provides it); REJECTED
+          // commits' docs are staged origin-less
+          // (stageConflictRefreshDirtyIds), so repair frames DO cover them.
+          session.pendingCaughtUpLocalSeq = Math.max(
+            session.pendingCaughtUpLocalSeq,
+            message.commit.localSeq,
+          );
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
             "entity.count",
