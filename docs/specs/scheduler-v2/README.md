@@ -784,11 +784,13 @@ the same `{ resultFor: cause }` cell that hosts a launched pattern when the
 handler returns one; when the handler launches nothing, the cell is simply
 the receipt. This gives handlers the same shape as computations: one
 canonical output document per unit of work, whose creation doubles as the
-exactly-once witness. A receipt-only handling writes `{}`; under the
-experimental `plainResultReceipts` flag it instead carries the handler's
-normalized return, so the verb's result is readable back by receipt address
-(`docs/development/EXPERIMENTAL_OPTIONS.md`; verb-contract plan). That value
-is written through the receipt cell's standard write conversion — plain JSON
+exactly-once witness. A receipt-only handling carries the handler's normalized
+return, so the verb's result is readable back by receipt address; the
+experimental `plainResultReceipts` flag governs that projection and defaults
+on — an explicit `false` restores the older discard-everything-to-`{}`
+behavior while the flag exists (`docs/development/EXPERIMENTAL_OPTIONS.md`;
+verb-contract plan). A value-less handler still writes `{}`. That value is
+written through the receipt cell's standard write conversion — plain JSON
 persists as-is, a live cell handle converts to a link, so a one-line setter
 verb's receipt links to the cell it mutated. The create-only witness
 semantics are unchanged either way.

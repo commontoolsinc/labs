@@ -219,9 +219,12 @@ export interface ExperimentalOptions {
    * instead of the empty `{}` witness, so a caller — or a same-id retry that
    * collides on the receipt — can read the verb's result back by receipt
    * address. Reactive-bearing returns already project via the result-pattern
-   * path; this covers plain values, which are otherwise discarded. Default
-   * off; flips after the invocation-protocol integration proof (verb
-   * contract, docs/plans/pattern-verb-contract-implementation.md WS-C/WS-D).
+   * path; this covers plain values, which are otherwise discarded. Defaults
+   * to on since the invocation-protocol integration proof (#5244's
+   * three-topic fixture; verb contract,
+   * docs/plans/pattern-verb-contract-implementation.md WS-C/WS-D). Pass
+   * `false` (or `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`) as a temporary
+   * rollback override while the flag exists.
    */
   plainResultReceipts?: boolean | undefined;
   /**
@@ -969,10 +972,13 @@ export class Runtime {
       }
     }
 
-    // Unlike ambient flags, computedCellIds is consumed from this Runtime's
-    // builder frame. Normalize its local default after override logging so an
-    // omitted option does not appear as an explicit `true` override.
+    // Unlike ambient flags, computedCellIds and plainResultReceipts are
+    // consumed from this Runtime instance (the builder frame and the runner's
+    // receipt-only branch respectively). Normalize their local defaults after
+    // override logging so an omitted option does not appear as an explicit
+    // `true` override.
     this.experimental.computedCellIds ??= true;
+    this.experimental.plainResultReceipts ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
