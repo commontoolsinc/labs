@@ -1,33 +1,24 @@
 ---
 name: task-management
-description: Guide for managing tasks within a session using bd (beads) for subtasks and local todo lists. Use this skill when breaking down plans into issues, tracking progress, managing dependencies, or coordinating work across sessions and agents. Triggers include requests to "manage tasks", "track progress", "break down this work", or questions about bd workflow.
+description: Guide for coordinating implementation work through Common Fabric Topics, Linear, and concise handoff notes. Use this skill when breaking down plans into issues, tracking progress, managing dependencies, or coordinating work across sessions and agents. Triggers include requests to "manage tasks", "track progress", "break down this work", or prepare a handoff.
 ---
 
 # Task Management
 
-At the user level, we use Linear to manage tasks. When the Linear MCP is
-available, you can consult this directly.
+Prefer the Common Fabric Topics board for collaborative work that benefits from
+a living description, discussion, progress comments, and links. Its deployment,
+authorship conventions, and CLI surface are mapped in `skills/topics/SKILL.md`.
 
-Our workflow is to run many worktrees and checkouts of the repo and work on
-multiple research tasks and tasks in parallel. For managing todos and progress
-WITHIN a session you are encouraged to use `bd` (beads) to manage the work -
-falling back to a NOTES.md text based flow otherwise.
+Use Linear for organization-level planning and for work that already has a
+Linear issue. Keep its status, scope, dependencies, and useful implementation
+findings current as work progresses.
 
-`bd` is an external tool, not part of this repo, and is not installed on every
-machine. Check for it first (`which bd`); when it is absent, use the NOTES.md
-flow without asking about it.
+Keep temporary planning in the active task. When work genuinely needs to span
+sessions or pass between agents, use a short `FOCUS.md` handoff note containing:
 
-If available, use `bd` to manage subtasks and local todo lists (`bd quickstart`
-and `bd --help`)
+- the current objective and scope
+- verified facts and relevant commits
+- remaining work and dependencies
+- blockers or decisions that need user input
 
-- Break down plans into issues with dependencies and keep up-to-date during
-  development
-- Instruct subagents to consult `bd` regularly
-- Use this to offload detail from your working memory and record extra details,
-  bugs along the way with the user
-
-The goal is to avoid 'clinging' to a context window, making it trivial to clear
-the session and re-hydrate context from `bd`. When you start a task, update
-FOCUS.md with a high-level understanding of the task. If a user, or another
-agent, reads your `bd` issues, commits and `FOCUS.md` they should be able to
-immediately take over and help with the work.
+Do not add generated tracker state or local task databases to the repository.
