@@ -28,16 +28,15 @@ If this document conflicts with code or passing tests, code/tests win.
 Package exports (`deno.jsonc`): `.` → `src/index.ts` (no `mod.ts`), plus
 six subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
 `./type-traversal`, `./property-optionality`, `./property-name`.
-`src/index.ts` exports the `SchemaGenerator` class,
-`createSchemaTransformerV2`, the `ISchemaGenerator` type, and re-exports
-`MutableJSONSchemaObj`.
+`src/index.ts` exports the `SchemaGenerator` class, the `ISchemaGenerator`
+type, and re-exports `MutableJSONSchemaObj`.
 
 Consumers, as of this writing (verified by import grep): the only external
 consumer package is `@commonfabric/ts-transformers`, along two axes:
 
 1. **Schema generation proper** — `SchemaGeneratorTransformer`
-   (`packages/ts-transformers/src/transformers/schema-generator.ts`) calls
-   `createSchemaTransformerV2()` and feeds it the pipeline's bare cross-stage
+   (`packages/ts-transformers/src/transformers/schema-generator.ts`)
+   constructs a `SchemaGenerator` and feeds it the pipeline's bare cross-stage
    maps `typeRegistry` / `schemaHints`
    (`ts-transformers/src/core/cross-stage-state.ts`; its header notes
    this package reads only the bare `WeakMap`s, not `CrossStageState`).
@@ -61,13 +60,6 @@ type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
 typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
 passes `checker.getAnyType()` as the type, forcing the auto-detection
 below onto the node-based path.
-
-`createSchemaTransformerV2()` (`src/plugin.ts`) wraps one shared
-`SchemaGenerator` instance and exposes both methods. Type-level drift: the
-plugin's signatures narrow `schemaHints` to `WeakMap<ts.Node, { items?:
-unknown }>` (`plugin.ts`) while the class and `GenerationContext` accept
-the full `{ items?, cfcUiContract? }` shape (`interface.ts`) —
-runtime-compatible, type-level under-description.
 
 **Path selection** (`shouldUseNodeBasedAnalysis`,
 `src/schema-generator.ts`): node-based analysis is used iff a

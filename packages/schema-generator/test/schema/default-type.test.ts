@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Default<T,V>", () => {
@@ -16,7 +16,7 @@ describe("Schema: Default<T,V>", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect(result.required).toEqual(["text", "count", "enabled", "missing"]);
@@ -44,7 +44,7 @@ describe("Schema: Default<T,V>", () => {
       type T = Default<undefined>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "Default<undefined> is unsupported",
@@ -58,7 +58,7 @@ describe("Schema: Default<T,V>", () => {
       type T = Default<U>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "Default<undefined> is unsupported",
@@ -71,7 +71,7 @@ describe("Schema: Default<T,V>", () => {
       type T = Default<number, 5>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
     expect(result.type).toBe("number");
     expect(result.default).toBe(5);
@@ -83,7 +83,7 @@ describe("Schema: Default<T,V>", () => {
       type T = Default<string[], ["a", "b"]>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
     expect(result.type).toBe("array");
     const items = result.items as any;

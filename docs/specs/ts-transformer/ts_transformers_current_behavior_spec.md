@@ -1392,7 +1392,7 @@ Behavior:
    survives. Why the checker recovers no constant value at this stage is not
    established here; treat only literal values as supported.
 3. extract `widenLiterals` generation option
-4. generate schema via `createSchemaTransformerV2`
+4. generate schema via a `SchemaGenerator` instance
 5. merge non-generation options into resulting schema object
 6. emit literal as:
    - `<schemaAst> as const satisfies __cfHelpers.JSONSchema`
