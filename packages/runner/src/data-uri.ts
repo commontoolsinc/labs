@@ -37,6 +37,7 @@ import {
   KeepAsCell,
   parseLink,
 } from "./link-utils.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
 import {
@@ -151,7 +152,7 @@ export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
-    if (dataLink.id?.startsWith("data:")) {
+    if (dataLink.id !== undefined && hasDataUriScheme(dataLink.id)) {
       let dataValue: any = valueFromDataUri(dataLink.id);
       const path = [...dataLink.path];
 

@@ -23,6 +23,21 @@ type UriString = `${string}:${string}`;
 export const DATA_URI_MEDIA_TYPE = "application/vnd.common-fabric.data";
 
 /**
+ * Is `id` a `data:` URI? This is the broad test of the pair: does the
+ * identifier carry its own frozen value, rather than name a document stored
+ * in a space? Such a cell is read by decoding its identifier, so there is no
+ * document to fetch, to sync, or to write, and no commit precondition to
+ * state about one.
+ *
+ * Only the scheme is examined. Every media type counts, and the payload is
+ * neither decoded nor validated. {@link isFabricDataUri} is the narrow
+ * companion, accepting just the one media type this codec mints.
+ */
+export function hasDataUriScheme(id: string): boolean {
+  return id.startsWith("data:");
+}
+
+/**
  * Is `mediaType` the `data:` URI media type? Exactly one type is
  * accepted; there are no parameters (the payload is always base64url of
  * UTF-8 text, so none are needed).
@@ -32,11 +47,12 @@ export function isDataUriMediaType(mediaType: string): boolean {
 }
 
 /**
- * Does `id` look like one of this codec's `data:` URIs? (Prefix check
- * only -- notably NOT any-`data:`-URI-at-all; the payload
- * is not validated.)
+ * Does `id` carry this codec's media type? This is the narrow test of the
+ * pair, for readers that go on to decode the payload;
+ * {@link hasDataUriScheme} accepts any media type. Only the prefix is
+ * examined; the payload is not validated.
  */
-export function isDataUri(id: string): boolean {
+export function isFabricDataUri(id: string): boolean {
   return id.startsWith(`data:${DATA_URI_MEDIA_TYPE}`);
 }
 
@@ -88,7 +104,7 @@ export function extractDataUriPayloadText(
   uri: string,
 ): { mediaType: string; text: string } {
   const commaIndex = uri.indexOf(",");
-  if (!uri.startsWith("data:") || commaIndex === -1) {
+  if (!hasDataUriScheme(uri) || commaIndex === -1) {
     throw new Error(`Invalid data URI format: ${uri}`);
   }
 
