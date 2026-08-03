@@ -23,6 +23,37 @@ import {
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();
 
+function closedFilterVariant(kind: string): JSONSchema {
+  return {
+    type: "object",
+    properties: { kind: { const: kind } },
+    required: ["kind"],
+    additionalProperties: false,
+  };
+}
+
+// Path authority is checked before the transform graph uses the source Cell.
+// This minimal boundary Cell keeps these tests focused on that pre-graph guard,
+// including compound item schemas that the runtime query does not materialize.
+function filterGuardSource(
+  itemSchema: JSONSchema,
+  value: FabricValue,
+): Cell<FabricValue[]> {
+  const sourceSchema: JSONSchema = { type: "array", items: itemSchema };
+  return {
+    schema: sourceSchema,
+    resolveAsCell() {
+      return this;
+    },
+    asSchema() {
+      return this;
+    },
+    pull() {
+      return Promise.resolve([value]);
+    },
+  } as unknown as Cell<FabricValue[]>;
+}
+
 describe("cf piece get transforms", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -744,6 +775,71 @@ describe("cf piece get transforms", () => {
     );
   });
 
+  it("formats an excluded numeric filter path", async () => {
+    const source = filterGuardSource({
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["items"],
+      additionalProperties: false,
+    }, { items: [{}] });
+
+    await expect(
+      derivePieceGetValue(runtime, space, source, {
+        filter: parsePieceGetFilter(".items[0].secret != null"),
+      }),
+    ).rejects.toThrow(
+      '--filter path ".items[0].secret" is not declared by this slot\'s schema',
+    );
+  });
+
+  it("rejects excluded filter paths across schema compositions", async () => {
+    const cases: Array<{
+      schema: JSONSchema;
+      value: FabricValue;
+    }> = [
+      {
+        schema: {
+          allOf: [closedFilterVariant("a"), closedFilterVariant("a")],
+        },
+        value: { kind: "a" },
+      },
+      {
+        schema: {
+          anyOf: [closedFilterVariant("a"), closedFilterVariant("b")],
+        },
+        value: { kind: "a" },
+      },
+      {
+        schema: {
+          oneOf: [closedFilterVariant("a"), closedFilterVariant("b")],
+        },
+        value: { kind: "a" },
+      },
+    ];
+
+    for (const testCase of cases) {
+      await expect(
+        derivePieceGetValue(
+          runtime,
+          space,
+          filterGuardSource(testCase.schema, testCase.value),
+          { filter: parsePieceGetFilter(".secret != null") },
+        ),
+      ).rejects.toThrow(
+        '--filter path ".secret" is not declared by this slot\'s schema',
+      );
+    }
+  });
+
   it("keeps a declared link scope cap during transforms", async () => {
     const tx = runtime.edit();
     const target = runtime.getCell(
@@ -1449,6 +1545,22 @@ describe("cf piece get transforms", () => {
         { type: "string" },
         { anyOf: source.oneOf },
       ],
+    });
+
+    expect(
+      selectSourceSchema(cfc, {
+        type: "object",
+        properties: { visible: { type: "string" } },
+        additionalProperties: false,
+      }, {
+        type: "object",
+        properties: { excluded: true },
+        additionalProperties: false,
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {},
+      additionalProperties: false,
     });
   });
 

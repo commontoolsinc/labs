@@ -171,6 +171,49 @@ describe("resolveCellPath through linked slots", () => {
     );
   });
 
+  it("reads through a nested asCell slot at an intermediate segment", () => {
+    const statusCell = runtime.getCell(
+      space,
+      "nested asCell status source",
+      { type: "object", properties: { spaceName: { type: "string" } } },
+      tx,
+    );
+    statusCell.set({ spaceName: "test-space" });
+    const innerHandle = runtime.getCell(
+      space,
+      "nested asCell status handle",
+      {
+        type: "object",
+        properties: { spaceName: { type: "string" } },
+        asCell: ["cell"],
+      },
+      tx,
+    );
+    innerHandle.set(statusCell as never);
+
+    const pieceCell = runtime.getCell(
+      space,
+      "piece with nested asCell status",
+      {
+        type: "object",
+        properties: {
+          status: {
+            type: "object",
+            properties: { spaceName: { type: "string" } },
+            asCell: ["cell", "cell"],
+          },
+        },
+      },
+      tx,
+    );
+    pieceCell.set({ status: innerHandle as never });
+
+    assertEquals(
+      resolveCellPath(pieceCell as never, ["status", "spaceName"]),
+      "test-space",
+    );
+  });
+
   it("still reports non-object traversal through a cell-valued slot", () => {
     // Reading through the cell must not weaken the non-object guard: a
     // linked slot holding a scalar still errors when the path continues.
