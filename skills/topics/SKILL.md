@@ -189,10 +189,11 @@ verification succeeded.
 - If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
   do not call the board empty. Preserve the input evidence and report the
   result-materialization failure.
-- A compact transformed read exits nonzero when its value is unavailable or
-  rejected and explicitly says the failure is not JSON `null`. A printed `null`
-  is a valid projected null, not an empty array or proof of no matches; use
-  `--filter '.title != null'` when null Topic rows are irrelevant.
+- A compact transformed read of a present source exits nonzero when its value
+  cannot materialize and explicitly says the failure is not JSON `null`. A
+  printed `null` is a valid projected null or an absent optional source, not an
+  empty array or proof of no matches; use `--filter '.title != null'` when null
+  Topic rows are irrelevant.
 - Do not substitute `piece ls` for the board's topic list. Pieces created inside
   handlers can be absent from that listing; `crossrefs --step` is the canonical
   fid index, with `topics --input` as the durable fallback.

@@ -2,15 +2,22 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
-import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  ContextualFlowControl,
+  type JSONSchema,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   derivePieceGetValue,
   evaluatePieceGetPredicate,
+  mergeMasks,
   parsePieceGetFilter,
   parsePieceGetProjection,
   PieceGetTransformError,
   schemaMayBeArray,
+  selectSourceSchema,
 } from "../lib/piece-get-transform.ts";
 
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
@@ -236,15 +243,54 @@ describe("cf piece get transforms", () => {
   it("detects arrays through refs and cyclic schema compositions", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.anyOf = [cyclic, { type: "array" }];
+    const rootDefs: JSONSchema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          anyOf: [
+            { $ref: "#/$defs/Leaf" },
+            { $ref: "#/$defs/Branch" },
+          ],
+        },
+        Leaf: { type: "object" },
+        Branch: { type: "array", items: { $ref: "#/$defs/Leaf" } },
+      },
+    };
 
     expect(schemaMayBeArray(false)).toBe(false);
     expect(schemaMayBeArray(cyclic as JSONSchema)).toBe(true);
+    expect(schemaMayBeArray(rootDefs)).toBe(true);
     expect(() =>
       schemaMayBeArray({
         $ref: "#/$defs/Missing",
         $defs: {},
       })
     ).toThrow("Could not resolve source schema reference for --schema");
+  });
+
+  it("merges predicate reads through aligned array masks", () => {
+    expect(mergeMasks(
+      {
+        type: "object",
+        properties: { body: true },
+        additionalProperties: false,
+      },
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { author: true },
+          additionalProperties: false,
+        },
+      },
+    )).toEqual({
+      type: "array",
+      items: {
+        type: "object",
+        properties: { body: true, author: true },
+        additionalProperties: false,
+      },
+    });
   });
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
@@ -1055,17 +1101,24 @@ describe("cf piece get transforms", () => {
         properties: {
           comments: {
             $ref: "#/$defs/Comments",
-            $defs: {
-              Comments: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    body: { type: "string" },
-                    privateNote: { type: "string" },
-                  },
-                },
-              },
+          },
+        },
+        $defs: {
+          Comments: {
+            anyOf: [
+              { $ref: "#/$defs/CommentList" },
+              { type: "null" },
+            ],
+          },
+          CommentList: {
+            type: "array",
+            items: { $ref: "#/$defs/Comment" },
+          },
+          Comment: {
+            type: "object",
+            properties: {
+              body: { type: "string" },
+              privateNote: { type: "string" },
             },
           },
         },
@@ -1105,6 +1158,93 @@ describe("cf piece get transforms", () => {
         projection: await parsePieceGetProjection("comments.body"),
       }),
     ).toEqual({ comments: [{ body: "Visible" }] });
+  });
+
+  it("does not leak siblings when a nested value may be an array or object", async () => {
+    const variants: JSONSchema[] = [
+      {
+        anyOf: [
+          {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                body: { type: "string" },
+                privateNote: { type: "string" },
+              },
+            },
+          },
+          {
+            type: "object",
+            properties: {
+              body: { type: "string" },
+              privateNote: { type: "string" },
+            },
+          },
+        ],
+      },
+      {
+        type: ["array", "object"],
+        items: {
+          type: "object",
+          properties: {
+            body: { type: "string" },
+            privateNote: { type: "string" },
+          },
+        },
+        properties: {
+          body: { type: "string" },
+          privateNote: { type: "string" },
+        },
+      },
+    ];
+
+    for (const [index, entrySchema] of variants.entries()) {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        `array-object-union-${index}`,
+        {
+          type: "object",
+          properties: { entry: entrySchema },
+        },
+        tx,
+      );
+      source.set({
+        entry: { body: "Visible", privateNote: "hidden" },
+      });
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await derivePieceGetValue(runtime, space, source, {
+          projection: await parsePieceGetProjection("entry.body"),
+        }),
+      ).toEqual({ entry: { body: "Visible" } });
+    }
+  });
+
+  it("keeps anyOf and oneOf constraints distinct on source reads", () => {
+    const source: JSONSchema = {
+      anyOf: [{ type: "string" }, { type: "number" }],
+      oneOf: [{ const: "a" }, { const: "b" }],
+      allOf: [{ type: "string" }],
+    };
+    const mask = {
+      type: "object" as const,
+      properties: { body: true as const },
+      additionalProperties: false as const,
+    };
+    const cfc = new ContextualFlowControl();
+    expect(selectSourceSchema(cfc, source, mask)).toBe(source);
+    expect(
+      selectSourceSchema(cfc, source, mask, "projected-output"),
+    ).toEqual({
+      anyOf: source.anyOf,
+      allOf: [
+        { type: "string" },
+        { anyOf: source.oneOf },
+      ],
+    });
   });
 
   it("handles schema-less filters and identity projection schemas", async () => {

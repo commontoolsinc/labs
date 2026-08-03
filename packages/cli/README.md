@@ -157,9 +157,10 @@ properties, including `type` arrays and `anyOf` unions. When the source schema
 does not identify a nested container, the concise form applies the same field
 mask across arrays encountered in the value so siblings still cannot leak; use
 an explicit JSON Schema when the output schema itself must be fixed. If a
-transformed value is unavailable or rejected, the command exits nonzero and
-states that the failure is not JSON `null`; a printed `null` is therefore a
-valid projected null.
+present source value cannot materialize the transform, the command exits nonzero
+and states that the failure is not JSON `null`. An absent optional source
+remains the ordinary successful `null` CLI response, as does a valid projected
+null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 The runtime's list filter/map builtins therefore handle CFC exactly as authored

@@ -794,32 +794,40 @@ function schemaFromProjectionMask(mask: ProjectionMask): JSONSchema {
 /** @internal Exported for focused schema-shape tests. */
 export function schemaMayBeArray(
   schema: JSONSchema | undefined,
-  seen = new Set<object>(),
+  root: JSONSchema = schema ?? true,
+  ancestors = new Set<object>(),
 ): boolean {
   if (!isRecord(schema)) return false;
-  if (seen.has(schema)) return false;
-  seen.add(schema);
-  if (schema.$ref !== undefined) {
-    try {
-      return schemaMayBeArray(
-        ContextualFlowControl.resolveSchemaRefsOrThrow(schema, schema),
-        seen,
-      );
-    } catch (error) {
-      throw new PieceGetTransformError(
-        `Could not resolve source schema reference for --schema: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
+  if (ancestors.has(schema)) return false;
+  ancestors.add(schema);
+  const documentRoot = schema.$defs !== undefined ? schema : root;
+  try {
+    if (schema.$ref !== undefined) {
+      let resolved: JSONSchema;
+      try {
+        resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+          schema,
+          documentRoot,
+        );
+      } catch (error) {
+        throw new PieceGetTransformError(
+          `Could not resolve source schema reference for --schema: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error },
+        );
+      }
+      return schemaMayBeArray(resolved, documentRoot, ancestors);
     }
+    if (schemaTypes(schema).includes("array")) return true;
+    return [
+      ...schema.anyOf ?? [],
+      ...schema.oneOf ?? [],
+      ...schema.allOf ?? [],
+    ].some((option) => schemaMayBeArray(option, documentRoot, ancestors));
+  } finally {
+    ancestors.delete(schema);
   }
-  if (schemaTypes(schema).includes("array")) return true;
-  return [
-    ...schema.anyOf ?? [],
-    ...schema.oneOf ?? [],
-    ...schema.allOf ?? [],
-  ].some((option) => schemaMayBeArray(option, seen));
 }
 
 function alignConciseProjectionMask(
@@ -831,10 +839,9 @@ function alignConciseProjectionMask(
 
   if (schemaMayBeArray(source)) {
     const sourceItem = schemaAtArrayItem(cfc, source);
-    const itemMask = mask.type === "array" ? mask.items : mask;
     return {
       type: "array",
-      items: alignConciseProjectionMask(cfc, sourceItem, itemMask),
+      items: alignConciseProjectionMask(cfc, sourceItem, mask),
     };
   }
 
@@ -872,6 +879,9 @@ function projectValue(
     );
   }
   if (!isRecord(value)) return value;
+  if (implicitArrayTraversal && schema.items !== undefined) {
+    return projectValue(value, schema.items, implicitArrayTraversal);
+  }
 
   const properties = schema.properties ?? {};
   const projected: Record<string, unknown> = {};
@@ -927,12 +937,18 @@ function maskFromPaths(
   return paths.length === 0 ? true : build(paths);
 }
 
-function mergeMasks(
+/** @internal Exported for focused mask-composition tests. */
+export function mergeMasks(
   left: PredicateMask,
   right: ProjectionMask,
 ): ProjectionMask {
   if (left === true || right === true) return true;
-  if (right.type !== "object") return true;
+  if (right.type === "array") {
+    return {
+      type: "array",
+      items: mergeMasks(left, right.items),
+    };
+  }
   const properties: Record<string, ProjectionMask> = {};
   for (
     const key of new Set([
@@ -951,10 +967,12 @@ function mergeMasks(
   return { type: "object", properties, additionalProperties: false };
 }
 
-function selectSourceSchema(
+/** @internal Exported for focused source-schema selection tests. */
+export function selectSourceSchema(
   cfc: ContextualFlowControl,
   source: JSONSchema | undefined,
   mask: ProjectionMask,
+  purpose: "source-read" | "projected-output" = "source-read",
 ): JSONSchema {
   // An absent/wildcard source schema cannot prove that a structural mask has
   // the same container shape as the current value. Keep that read permissive;
@@ -966,24 +984,36 @@ function selectSourceSchema(
   if (source.$ref !== undefined) {
     return source;
   }
-  if (source.anyOf !== undefined || source.oneOf !== undefined) {
+  if (
+    source.anyOf !== undefined || source.oneOf !== undefined ||
+    source.allOf !== undefined
+  ) {
     const {
-      anyOf: _anyOf,
-      oneOf: _oneOf,
+      anyOf,
+      oneOf,
+      allOf,
       ...metadata
     } = source;
-    const options = [...source.anyOf ?? [], ...source.oneOf ?? []].map(
-      (option) => selectSourceSchema(cfc, option, mask),
-    );
-    return { ...metadata, anyOf: options };
-  }
-  if (source.allOf !== undefined) {
-    const { allOf: _allOf, ...metadata } = source;
+    if (purpose === "source-read") {
+      // Projection can make formerly exclusive branches overlap or discard a
+      // discriminator altogether. Keep the declared composition intact at the
+      // read boundary; only the materialized output schema uses projected
+      // (existential) branches.
+      return source;
+    }
+    const projectOptions = (options: readonly JSONSchema[] | undefined) =>
+      options?.map((option) => selectSourceSchema(cfc, option, mask, purpose));
+    const projectedAnyOf = projectOptions(anyOf);
+    const projectedOneOf = projectOptions(oneOf);
+    const projectedAllOf = projectOptions(allOf);
+    const conjunctions = [
+      ...projectedAllOf ?? [],
+      ...(projectedOneOf === undefined ? [] : [{ anyOf: projectedOneOf }]),
+    ];
     return {
       ...metadata,
-      allOf: source.allOf.map((option) =>
-        selectSourceSchema(cfc, option, mask)
-      ),
+      ...(projectedAnyOf === undefined ? {} : { anyOf: projectedAnyOf }),
+      ...(conjunctions.length === 0 ? {} : { allOf: conjunctions }),
     };
   }
 
@@ -993,7 +1023,7 @@ function selectSourceSchema(
     const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
     return {
       ...metadata,
-      items: selectSourceSchema(cfc, sourceItem, mask.items),
+      items: selectSourceSchema(cfc, sourceItem, mask.items, purpose),
     };
   }
 
@@ -1017,6 +1047,7 @@ function selectSourceSchema(
       cfc,
       child === false ? undefined : child,
       childMask,
+      purpose,
     );
   }
   const selectedRequired = required?.filter((key) => key in properties);
@@ -1062,9 +1093,10 @@ function resolveProjection(
         cfc,
         dereferencedElementSchema(source),
         mask,
+        "projected-output",
       ),
       KeepAsCell.OnlyStream,
-    ) ?? projectionSchema;
+    );
     return projectsArrayItems
       ? {
         outputSchema: filteredOutputSchema(sourceSchema, outputSchema),

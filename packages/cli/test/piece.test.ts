@@ -726,10 +726,11 @@ describe("cli piece parsing", () => {
     )).rejects.toThrow(PieceResultProjectionError);
   });
 
-  it("distinguishes an unavailable transformed value from JSON null", async () => {
+  it("distinguishes failed transforms, JSON null, and absent sources", async () => {
+    let sourceRaw: unknown;
     const targetCell = {
       schema: { type: ["object", "null"] },
-      getRaw: () => undefined,
+      getRaw: () => sourceRaw,
     };
     const rootCell = { key: () => targetCell };
     const controller = {
@@ -759,10 +760,14 @@ describe("cli piece parsing", () => {
       options,
       {
         ...deps,
-        derivePieceGetValue: () => Promise.resolve(undefined),
+        derivePieceGetValue: () => {
+          sourceRaw = { id: "loaded-during-transform" };
+          return Promise.resolve(undefined);
+        },
       },
     )).rejects.toThrow("This is not JSON null");
 
+    sourceRaw = null;
     await expect(getCellValue(
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
       ["value"],
@@ -772,6 +777,17 @@ describe("cli piece parsing", () => {
         derivePieceGetValue: () => Promise.resolve(null),
       },
     )).resolves.toBeNull();
+
+    sourceRaw = undefined;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).resolves.toBeUndefined();
   });
 
   it("steps, reads, syncs, and stops in one get operation", async () => {
