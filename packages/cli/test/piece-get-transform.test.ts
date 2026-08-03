@@ -675,12 +675,13 @@ describe("cf piece get transforms", () => {
         properties: {
           id: { type: "number" },
           title: { type: "string" },
+          subtitle: { type: ["string", "null"] },
         },
-        required: ["id", "title"],
+        required: ["id", "title", "subtitle"],
       },
       tx,
     );
-    source.set({ id: 1, title: "Visible" });
+    source.set({ id: 1, title: "Visible", subtitle: null });
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
@@ -695,12 +696,24 @@ describe("cf piece get transforms", () => {
     ).toEqual({});
     expect(
       await derivePieceGetValue(runtime, space, source, {
+        projection: await parsePieceGetProjection(JSON.stringify({
+          type: "object",
+          properties: {
+            subtitle: { type: ["string", "null"] },
+          },
+          additionalProperties: false,
+        })),
+      }),
+    ).toEqual({ subtitle: null });
+    expect(
+      await derivePieceGetValue(runtime, space, source, {
         projection: await parsePieceGetProjection('{"type":"object"}'),
       }),
-    ).toEqual({ id: 1, title: "Visible" });
+    ).toEqual({ id: 1, title: "Visible", subtitle: null });
     expect(await derivePieceGetValue(runtime, space, source, {})).toEqual({
       id: 1,
       title: "Visible",
+      subtitle: null,
     });
   });
 
