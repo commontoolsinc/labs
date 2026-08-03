@@ -22,11 +22,9 @@ export class DebugController implements ReactiveController {
   #host: ReactiveControllerHost & HTMLElement;
   #connected = false;
 
-  constructor(host: ReactiveControllerHost & HTMLElement, enabled: boolean) {
+  constructor(host: ReactiveControllerHost & HTMLElement) {
     this.#host = host;
-    if (enabled) {
-      this.#host.addController(this);
-    }
+    this.#host.addController(this);
   }
 
   hostConnected(): void {
