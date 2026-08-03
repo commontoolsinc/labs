@@ -13,6 +13,7 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -148,6 +149,13 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   level: "warn",
   logCountEvery: 0,
 });
+
+/**
+ * How many prepared/stopped result shortcuts one runner keeps. Sized well
+ * above any plausible number of simultaneously live pieces, so the bound is
+ * reached only by a pattern churning through results it will not revisit.
+ */
+const RESULT_SHORTCUT_LIMIT = 4096;
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -989,14 +997,20 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
-  private locallyPreparedResults = new Map<
+  // Both maps record that this runner prepared or stopped a result, so a later
+  // start of the same result can reuse the cells it already assembled instead
+  // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
+  // a missing entry costs a slower start, never a wrong one. They are bounded
+  // for that reason — a result key names one result document, and a pattern
+  // that keeps starting and stopping children adds keys it will never revisit.
+  private locallyPreparedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
-  private locallyStoppedResults = new Map<
+  >(RESULT_SHORTCUT_LIMIT);
+  private locallyStoppedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
+  >(RESULT_SHORTCUT_LIMIT);
   // Successful event-result starts that are still live in this runner. This is
   // intentionally local and bounded by live starts: it lets a sequential
   // redelivery avoid re-materializing an already-won result before the
