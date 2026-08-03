@@ -114,7 +114,7 @@ describe("refs-only pattern JSON at the boundary", () => {
   });
 
   it("a graph crossing the boundary carries no live builder artifact", () => {
-    // The nodes a pattern holds carry LIVE modules: `toJSONWithAliasBindings`
+    // The nodes a pattern holds carry LIVE modules: `withAliasBindings`
     // builds a node by copying its module member by member, function members
     // included. A graph emitted with those still in it is not a serialized
     // value -- it depends on whatever reads it next to finish the job by
