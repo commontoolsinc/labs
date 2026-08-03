@@ -524,11 +524,13 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   without racing a clock; a `--message` that differs on the retry proves the
   settled outcome stands rather than being overwritten. Each scenario spawns
   a fresh `cf` process, so the fresh-process case is the default rather than
-  a special one. One half of the third scenario is not covered yet: the
+  a special one. ~~One half of the third scenario is not covered yet: the
   collision is asserted through `deduplicated` and exit 0, but not by reading
-  a *result* back off the receipt, because a void verb leaves none to read.
-  That assertion joins when WS-C gives verbs return values — or sooner
-  against `plainResultReceipts`.
+  a *result* back off the receipt, because a void verb leaves none to
+  read.~~ — closed by D4's integration fixture (`run_three_topic_fixture`,
+  same file): a settled create replayed under its id, with a different
+  payload, must report `deduplicated` AND carry the ORIGINAL declared
+  result, read back off the receipt under `plainResultReceipts`.
 - ~~**cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
   deferred.** The pre-dispatch validator passes `input === undefined`
   unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
@@ -830,7 +832,7 @@ change that alters them.
   plumbing, collision, reclassification, and readback against an isolated
   toolshed.
 - **End-to-end fixture (D4, Phase 4):** the three-topic graph from the live
-  session, run as an integration test and as the live pass — create an
+  session, run ~~as an integration test~~ and as the live pass — create an
   umbrella with body (returns its child reference); create two children whose
   bodies reference it; revise the umbrella to reference both; deliberately
   drop one create response and retry with the same invocation id. Verify
@@ -839,6 +841,30 @@ change that alters them.
   to the acting agent. Record command
   count, payload sizes, per-phase timings, and cold/warm durations — the
   baseline the session-mode decision (Non-goals) reads.
+
+  **The integration half is done** — `run_three_topic_fixture` in
+  `packages/cli/integration/integration.sh` (the piece-call shard, its own
+  space, `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` on every call), driving a
+  declared-result fixture pattern
+  (`packages/cli/integration/pattern/topic-graph.tsx`) against an isolated
+  toolshed. References adapt to that setting: a create returns
+  `{ id, path }` and the test opens the canonical child by that path
+  directly, standing in for the live pass's fid rendering; the
+  dropped-response retry — and a same-id replay with a different payload —
+  must read the ORIGINAL result back off the receipt (the assertion D3 left
+  open). The drop is deterministic, not a recorded race branch: the call
+  runs with a test-only per-phase stderr announcement
+  (`CF_TEST_ANNOUNCE_INVOCATION_PHASES`, off by default) and is killed only
+  after a blocking pipe read sees `phase: committed`, so the
+  commit-then-lost-response window is a property of the mechanism and the
+  dedup-with-original-result path is asserted unconditionally, every run.
+  Results flow schema-free per the C3 deferral: the value path is
+  what the fixture proves, and no assertion reads a result schema from the
+  durable store. Command counts, payload sizes, and per-command wall-clock
+  print as `[d4-baseline]` lines (per-phase timings await #5233's
+  `--verbose`). **The live pass stays open**, gated on the write-storm
+  machinery (Risks): until that gate clears, no live-board run has happened
+  and D4 is not done.
 - **Live acceptance checklist**, per phase, against the Estuary board — a
   scenario per phase (six-call filing shrinking to five in Phase 1, a
   deliberate duplicate retry in Phase 2, a returned handle in Phase 4), and

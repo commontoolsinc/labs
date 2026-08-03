@@ -1778,6 +1778,52 @@ describe("piece call stdin payloads", () => {
     expect(rethrowLines).toEqual([]);
   });
 
+  it("announces per-phase lines only under the test hook", () => {
+    // Disabled (the default): no phase lines — normal output stays exactly
+    // the single dispatch announcement.
+    const silent: string[] = [];
+    const off = invocationPhaseReporter(
+      "inv-10",
+      () => {},
+      (m) => silent.push(m),
+    );
+    off("initial_sync");
+    off("dispatched");
+    off("committed");
+    expect(silent).toEqual(["invocation: inv-10"]);
+
+    // Enabled: every advance also carries `invocation: <id> phase: <phase>`,
+    // the shape failure exits already print. The `committed` line is the one
+    // the dropped-response fixture blocks on before killing its call — it
+    // must appear at committed, and not before.
+    const announced: string[] = [];
+    const seen: string[] = [];
+    const on = invocationPhaseReporter(
+      "inv-11",
+      (p) => seen.push(p),
+      (m) => announced.push(m),
+      true,
+    );
+    on("initial_sync");
+    expect(announced).toEqual(["invocation: inv-11 phase: initial_sync"]);
+    on("dispatched");
+    on("committed");
+    on("readback");
+    expect(announced).toEqual([
+      "invocation: inv-11 phase: initial_sync",
+      "invocation: inv-11",
+      "invocation: inv-11 phase: dispatched",
+      "invocation: inv-11 phase: committed",
+      "invocation: inv-11 phase: readback",
+    ]);
+    expect(seen).toEqual([
+      "initial_sync",
+      "dispatched",
+      "committed",
+      "readback",
+    ]);
+  });
+
   it("shapes the settled Invocation JSON an agent parses", () => {
     expect(invocationJson({ id: "inv-1", status: "settled" })).toEqual({
       invocation: "inv-1",
