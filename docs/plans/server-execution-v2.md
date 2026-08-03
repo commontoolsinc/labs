@@ -47,8 +47,12 @@ Tasks:
       per-run identity for served effects (runtime-mapping.md N57).
       **In progress 2026-08-02**: the batch-3 rulings are drafted as
       [scopes.md](../specs/server-side-execution/scopes.md) (scope
-      keys instances, never authority); a scope-mechanics scout is
-      verifying anchors; scopes.md §7 carries the residual opens.
+      keys instances, never authority). Scout complete 2026-08-02:
+      scopes.md anchored (§Anchors verified), the five
+      main-vs-SpaceServer mismatches M1–M5 recorded (scopes.md §7);
+      scopes.md §8 carries the residual opens (basis-index keying,
+      watermark × fan-out, context-floor fate, session-data GC, the
+      M3 write path).
 - [ ] Name the single flag, register it in `EXPERIMENTAL_OPTIONS.md` with
       both states defined; OFF is today byte-for-byte.
 - [ ] CI runs a flag-ON arm of the integration suites from the first PR

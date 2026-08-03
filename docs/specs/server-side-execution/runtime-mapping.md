@@ -447,8 +447,13 @@ scoped state reclassified authored-adjacent) are rejected — scoped
 derived state stays derived and server-committed, keeping today's
 reload persistence. The persisted-state context ladder (row 60)
 stays tripwired. The Phase 0 review continues (README §6 Q7, was
-ledger L10): scopes.md §7 lists what it still owes, and row 57's
-identity remainder stays with it.
+ledger L10). The 2026-08-02 scout pass verified scopes.md's anchors
+and recorded in scopes.md §7 the five assumptions of main's scope
+machinery that a SpaceServer breaks (M1–M5: per-identity scope
+discovery; scope-NAME in-memory keying; no all-principals write
+path; scope-NAME wake keys; no session-data GC); scopes.md §8 lists
+what the review still owes, and row 57's identity remainder stays
+with it.
 
 **N57 (identity/authority).** Today one runtime = one
 `userIdentityDID` (`runtime.ts:669`) and all first-party HTTP is
@@ -460,7 +465,10 @@ cardinality, and only quota attribution stays open (README §6). The
 sqlite RPC signing, space provisioning principals — still has no v2
 statement; the Phase 0 cell-scopes review inherits it, and the
 mapping's recommendation is to make identity per-action-context
-(from the event/handle), never a SpaceServer-ambient user.
+(from the event/handle), never a SpaceServer-ambient user. scopes.md
+§7 M3 records the concrete storage-side blocker: no all-principals
+write path exists — `resolveScopeKey` binds scoped writes to the
+authenticated session (`packages/memory/v2/server.ts:1577-1580`).
 
 **N59/N60/N61 (persisted observations vs the basis index).** Today's
 experimental `persistentSchedulerState` writes payload-carrying

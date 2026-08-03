@@ -3,24 +3,54 @@
 Normative spec for scope semantics wherever scoped state appears
 (plan Phases 1–5; the Phase 0 scopes review owns this doc and is in
 progress). Drafted from the owner rulings of 2026-08-02, batch 3
-(S1–S5 below). Read [README.md](README.md) §3.8 and §6 Q7 first;
-assumes [serving-loop.md](serving-loop.md) vocabulary. MUST/NEVER
-language is binding on implementers.
+(S1–S5 below); anchors verified by the scope-mechanics scout pass of
+2026-08-02 (§Anchors, §7). Read [README.md](README.md) §3.8 and §6
+Q7 first; assumes [serving-loop.md](serving-loop.md) vocabulary.
+MUST/NEVER language is binding on implementers.
 
-## Anchors (PENDING SCOUT — do not code against this section yet)
+## Anchors (verified 2026-08-02, scout pass)
 
-A scope-mechanics inventory scout is verifying today's code surface
-in parallel with this draft. Until its pass lands here, every anchor
-below is a placeholder; runtime-mapping.md rows 49/56/57/60 carry
-the pre-draft anchors. The scout must pin:
+Today's scope machinery, pinned read-only by the scout. Paths are
+relative to `packages/runner/src/` unless another package is named;
+runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
 
-- the scope enum and the output-narrowing site in the runner
-  (declared vs discovered output scope) — PENDING SCOUT;
-- the scoped-slot write path that bypasses declared-surface checks
-  today — PENDING SCOUT;
-- session-scoped result cells (`navigateTo`'s) — PENDING SCOUT;
-- the link/redirect primitive the narrowing write reuses, if any —
-  PENDING SCOUT (its exact on-disk shape is also an owner open, §7).
+- **Lattice and enum**: `scope.ts:11`; `narrowestScope` picks the
+  narrowest by rank (`scope.ts:129-139`).
+- **Discovered output scope**: a per-transaction ratchet,
+  `narrowestReadScope`
+  (`storage/extended-storage-transaction.ts:273`, `827-847`) — every
+  read, link hops included, ratchets it. The runner resets it before
+  reading inputs (`runner.ts:5515`), reads the floor after the fn
+  returns (`runner.ts:5598`), and derives `effectiveOutputScope`
+  from it (`runner.ts:5062-5066`).
+- **The narrowing redirect write**: `pattern-binding.ts:281-307` —
+  when the discovered scope is narrower than the resolved binding,
+  the runtime writes the value at `{...ref, scope: outputScope}`
+  (same space, same doc id, same path — only the scope differs) and
+  a sigil link to that scoped ref at the broader slot. On-disk
+  shape: a sigil link at the broader address resolving to
+  `{scope: "user"|"session", id: <same doc id>}` (asserted by
+  `packages/runner/test/pattern-scope.test.ts:2837-2848`).
+- **Declared-scope redirects** (schema `asCell: [{kind, scope}]`):
+  `data-updating.ts:646-692`; eager redirects for omitted scoped
+  properties `data-updating.ts:1478-1517`.
+- **Scoped-slot writes outside the declared surface**: warn-only
+  diagnostics, with per-user/per-session writes exempted
+  (`scheduler/run.ts:616-654`, exemption `631-638`).
+- **Session-scoped result cells**: the runner keeps result cells per
+  scope, `previousResultCellRef.byScope` (`runner.ts:5068-5092`);
+  `navigateTo`'s result cell is session-scoped
+  (`builtins/navigate-to.ts:46`).
+- **Instance addressing**: scope never changes the doc id. Storage
+  rows are keyed `(branch, id, scope_key)`
+  (`packages/memory/v2/engine.ts:368-403`), with scope keys
+  `'space'`, `'user:<principal>'`,
+  `'session:<principal>:<sessionId>'`, resolved by `resolveScopeKey`
+  (`engine.ts:98-126`) from the authenticated session.
+- **Dirtiness**: storage-side reader matching is by exact
+  `scope_key` (`packages/memory/v2/engine.ts:3024-3066`); the
+  client dependency graph is keyed by scope NAME only —
+  `${space}/${scope}/${id}` (`scheduler/keys.ts:6-8`).
 
 ## 1. North star
 
@@ -38,7 +68,7 @@ is.
 v1's contrary framing — scope as execution RANK (lanes, per-rank
 claims, the context ladder) — stays dead (README §5;
 runtime-mapping.md row 60). serving-loop.md §8's tripwires already
-ban its identifiers; §8 below adds the scope-specific ones.
+ban its identifiers; §9 below adds the scope-specific ones.
 
 ## 2. The lattice, and scope discovered by running (S1)
 
@@ -64,7 +94,15 @@ A space→session narrowing writes CHAINED redirects,
 space→user→session — ALWAYS via user, even when discovery jumps
 straight to session, so every chain has the one uniform shape
 ("just in case": a later user-level reader finds a well-formed user
-link to follow).
+link to follow). **The eager double-hop is a v2 CHOICE, and it
+DIFFERS from main** — flag for implementation. Today each narrowing
+EVENT writes exactly ONE hop (`pattern-binding.ts:286-306`,
+`data-updating.ts:664-691`); chains only ACCUMULATE across
+successive events, because the write-redirect resolution starts
+from the current chain end (a later session-narrowing lands its
+redirect inside the user instance). No code on main emits both hops
+for a single space→session discovery; v2 implementations MUST add
+the eager via-user hop.
 
 ```
 outDoc@space ─redirect─► outDoc@user(u) ─redirect─► outDoc@sess(u,s)
@@ -102,6 +140,20 @@ users read the same space-level doc — so one written redirect
 narrows the node for every reader of that address at once. Instance
 sets are therefore CLEAN PRODUCTS over principals, NEVER ragged
 (narrow for some principals, broad for others).
+
+**Permanence (ruled by code): narrowing NEVER widens back.** A
+written redirect is permanent. Rewrites MUST NOT strip stored
+redirects — today's write path already preserves them
+(`data-updating.ts:1470-1474`) — and the narrowing branch fires
+only strictly-narrower, so a later broader-scoped run writes
+THROUGH the sticky redirect into the narrow instance instead of
+un-narrowing the slot; the server-side context floor narrows
+monotonically by SQL construction
+(`packages/memory/v2/engine.ts:3828-3832`). Per-scope
+result cells (`byScope`, §Anchors) let a node's output LINKS point
+broader again, but the slot redirect stays. No un-narrowing code
+exists anywhere on main, and v2 keeps it that way: the widen-back
+question (formerly open) is closed NO.
 
 ## 3. Lifecycle: durable, with retirement (S2)
 
@@ -142,9 +194,9 @@ session — so the server-side handler run resolves scoped reads and
 writes against THAT principal, never against a SpaceServer-ambient
 identity. (events.md §1's sketched shape spells only the session;
 whether `firedAt` carries the user explicitly or derives it from
-the authenticated append is a shape detail for the scout pass. The
-wider served-effect identity surface stays with the Phase 0 review
-— runtime-mapping.md N57.)
+the authenticated append is a shape detail the 2026-08-02 scout
+pass did not settle. It and the wider served-effect identity
+surface stay with the Phase 0 review — runtime-mapping.md N57.)
 
 An event MAY operate ENTIRELY within user or session scope: when
 the state a handler modifies is user- or session-scoped, its
@@ -166,23 +218,82 @@ Quota attribution for per-instance runs stays DEFERRED (README
 §3.8, §6 item 1); nothing in this doc decides whose quota a served
 instance run is charged against.
 
-## 7. Open — scout + owner (what the Phase 0 review still owes)
+## 7. What main's machinery assumes that a SpaceServer breaks
 
-1. **Widen-back.** Whether a narrowing can ever widen back, or a
-   written redirect is permanent.
-2. **Redirect shape on disk.** The exact durable form of the
-   redirect and its chain (link kind, doc shape, where chain nodes
-   live) — PENDING SCOUT inventory of today's narrowing writes
-   first.
-3. **Basis-index keying per instance.** serving-loop.md §3b's rows
+The scout inventory (2026-08-02) surfaced five load-bearing
+assumptions in today's scope machinery. All five hold for a client
+that computes ONLY ITS OWN instance and break for a SpaceServer
+deriving EVERY instance (§1). Each is live code, not spec debt;
+Phases 1–5 meet them wherever scoped state appears.
+
+- **M1 — Scope is discovered by running AS (principal, session).**
+  Discovery is ambient per-transaction state
+  (`storage/extended-storage-transaction.ts:273`): a run's scope is
+  learned by BEING the principal+session whose reads ratchet it,
+  and the floor ratchet assumes monotone evidence per fingerprint
+  (`packages/memory/v2/engine.ts:3990-4004`). → v2: the server must
+  evaluate per-instance just to DISCOVER per-instance scope — N
+  runs under N identities, with N time-varying (§2).
+- **M2 — Every in-memory identity key uses the scope NAME, never
+  the scope_key.** `getDocKey` (`runner.ts:3201-3204`), `entityKey`
+  (`scheduler/keys.ts:6-8`), `byScope` (`runner.ts:5068`) — all
+  `${space}/${scope}/${id}`, sound only at cardinality 1;
+  per-instance keying exists only in storage columns. → v2: the
+  scheduler, the dependency graph, and the basis index must re-key
+  per instance — the single biggest scope cost of the arc.
+- **M3 — There is no all-principals write path.** `resolveScopeKey`
+  binds to the authenticated session
+  (`packages/memory/v2/server.ts:1577-1580`), and mirrors refuse to
+  re-derive scope context (`engine.ts:2580-2596`): a scoped write
+  requires that instance's principal. → v2: derived-class commits
+  need an explicit scopeKey-carrying write sanctioned at admission —
+  extending the delegated-capability metadata (protocol.md §2b) to
+  scoped derived writes (§8 item 5).
+- **M4 — Wake/sync dirties by scope NAME.** Storage-side reader
+  matching is exact-scope_key
+  (`packages/memory/v2/engine.ts:3024-3066`), but the wake/sync
+  path keys dirtiness by `(id, scope-name)` (`server.ts:3233-3239`)
+  — fine while each session re-evaluates only itself, quadratic
+  waste once one server hosts every instance. → v2: the push path
+  must key by scope_key.
+- **M5 — Retention assumes instances are cheap to re-derive per
+  owner.** Session EXECUTION CONTEXTS are capped at 32 per action
+  (`packages/memory/v2/engine.ts:55`); session DATA rows are never
+  GC'd — nothing retires session data today. → v2: §3's
+  durable-with-retirement needs an actual GC design (§8 item 4),
+  and a server owning ALL instances cannot have its working set
+  silently evicted.
+
+## 8. Open — scout + owner (what the Phase 0 review still owes)
+
+Closed by the scout pass, 2026-08-02: widen-back (NO — §2
+Permanence) and the redirect's on-disk shape (§Anchors). Still
+open:
+
+1. **Basis-index keying per instance.** serving-loop.md §3b's rows
    are `(action, entity, seq)`; under fan-out one action yields
    many instances — how the index keys them, and what "overwritten
-   in place" means then.
-4. **Watermark × fan-out.** W is one integer per space (protocol.md
+   in place" means then (M2 names the cost; this item owns the
+   design).
+2. **Watermark × fan-out.** W is one integer per space (protocol.md
    §4); how a fan-out wave's multiplied work reports settledness
    through W.
+3. **`scheduler_context_floor`'s fate under the Phase-1 reduction.**
+   The floor table keys observation SHARING
+   (`packages/memory/v2/engine.ts:300-321`; resolution
+   `engine.ts:3964-4027`) — part of the persisted-scheduler-state
+   machinery Phase 1 slims (runtime-mapping.md N59–N61). Whether
+   any of it survives as per-instance keying evidence or it deletes
+   whole must be ruled before Phase 1 touches those tables.
+4. **Session-data GC (M5).** The mechanism that actually retires a
+   retired session's scoped instances — none exists today, so §3's
+   ONE retirement rule needs it designed, not assumed.
+5. **The M3 write path shape.** The explicit scopeKey-carrying
+   derived write and its admission check — the exact metadata
+   shape, and how it composes with protocol.md §2b's
+   `actingPrincipal`/`capabilityRef` validation.
 
-## 8. Tripwires
+## 9. Tripwires
 
 FORBIDDEN in v2 scope code (additive to serving-loop.md §8):
 
@@ -196,6 +307,6 @@ FORBIDDEN in v2 scope code (additive to serving-loop.md §8):
 - static scope inference (compile-time or load-time) feeding
   placement, admission, or fan-out;
 - per-scope or per-instance watermarks (W stays one integer —
-  protocol.md §4; §7 item 4 escalates, it does not fork W);
+  protocol.md §4; §8 item 2 escalates, it does not fork W);
 - reviving the persisted-state context ladder or rehydration ranks
   for instance sharing (runtime-mapping.md row 60).
