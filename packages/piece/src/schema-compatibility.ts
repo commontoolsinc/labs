@@ -532,17 +532,10 @@ function objectSubsetIssue(
         return `${path}.${property}: result field is no longer required`;
       }
     }
-    for (const property of sourceRequired) {
-      if (
-        !Object.hasOwn(targetProperties, property) &&
-        (!allowEvolutionDefaults || !schemaProvidesValidDefault(
-          sourceProperties[property],
-          context.sourceRoot,
-        ))
-      ) {
-        return `${path}.${property}: newly required result field has no default`;
-      }
-    }
+    // The candidate pattern produces its result. A newly required field does
+    // not need a migration default: the new graph materializes that output when
+    // it runs. Existing required-result guarantees above still cannot weaken,
+    // and existing field types remain checked covariantly below.
 
     const previousAdditional = target.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {

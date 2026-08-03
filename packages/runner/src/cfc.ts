@@ -9,7 +9,7 @@ import type {
   JSONSchema,
   SchemaScope,
 } from "./builder/types.ts";
-import { isSchemaScope } from "./scope.ts";
+import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
@@ -727,8 +727,8 @@ export class ContextualFlowControl {
     return cfcSchemaIsTrue(schema);
   }
 
-  // We don't need to check ID, since it won't be included in Object.keys
-  // return values.
+  // Symbol keys are not included in Object.keys return values, so no
+  // symbol-keyed entry needs checking here.
   static isInternalSchemaKey(key: string): boolean {
     return cfcSchemaIsInternalKey(key);
   }
@@ -780,5 +780,42 @@ export class ContextualFlowControl {
     if (isSchemaScope(entryScope)) return entryScope;
     if (isSchemaScope(schema.scope)) return schema.scope;
     return undefined;
+  }
+
+  /**
+   * The follow cap declared by an `asCell` ENTRY, looking through `anyOf` /
+   * `oneOf` wrappers.
+   *
+   * Two differences from {@link getSchemaScopeCap}, both deliberate:
+   *
+   * - No `schema.scope` fallback. Authors write `scope` on a node to say "this
+   *   value lives at that scope"; reading it as a follow cap at a handle
+   *   boundary invents a restriction nobody asked for.
+   * - It descends into `anyOf`/`oneOf`. A cap wrapped in a compound schema —
+   *   `{anyOf: [{...asCell: [{kind:"cell", scope:"space"}]}, {type:"null"}]}`
+   *   — is a real shape here, and reading only the top level made it a
+   *   one-line cap bypass. Branches that declare no `asCell` at all (a `null`
+   *   alternative) are not handles and are skipped; among those that do, the
+   *   NARROWEST wins, since the runtime value may be any of them.
+   */
+  static getAsCellFollowScopeCap(
+    schema: JSONSchema | undefined,
+  ): SchemaScope | undefined {
+    if (!isRecord(schema)) return undefined;
+    const entryScope = ContextualFlowControl.getAsCellScope(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    );
+    if (isSchemaScope(entryScope)) return entryScope;
+    let cap: SchemaScope | undefined;
+    for (const branches of [schema.anyOf, schema.oneOf]) {
+      if (!Array.isArray(branches)) continue;
+      for (const branch of branches) {
+        const branchCap = ContextualFlowControl.getAsCellFollowScopeCap(
+          branch as JSONSchema,
+        );
+        cap = narrowerScopeCap(cap, branchCap);
+      }
+    }
+    return cap;
   }
 }

@@ -68,7 +68,7 @@ const castVote = handler({
     ]);
 });
 const __cfLift_1 = __cfHelpers.lift<{
-    castVote: __cfHelpers.HandlerFactory<{ votes: __cfHelpers.Cell<VoteEvent[]>; }, VoteEvent, void>;
+    castVote: __cfHelpers.HandlerFactory<VoteEvent, { votes: __cfHelpers.Cell<VoteEvent[]>; }, void>;
     state: {
         votes: VoteEvent[];
     };

@@ -116,6 +116,49 @@ standard error and continues searching that piece and the rest of the space.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
+### Transforming `piece get` output
+
+`piece get` can filter an array before it reaches stdout and project the result
+to a smaller shape:
+
+```bash
+cf piece get --piece ID items --filter '.status == "open"'
+cf piece get --piece ID items \
+  --filter '.status == "open" and .score >= 10' \
+  --schema id,title,author.name
+```
+
+`--filter` is jq-inspired rather than a full jq interpreter. It applies only to
+arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
+`.tags[-1]`), JSON literals, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`,
+`not`, and parentheses. Like jq, only `false` and `null` are falsey, so a
+missing path simply does not match. A stored `undefined` is treated like a
+missing value and is also falsey. Filtering happens before schema projection.
+
+`--schema` accepts one of three forms:
+
+- a comma-separated field projection such as `id,title,author.name`;
+- an inline JSON Schema object;
+- `@path/to/schema.json`.
+
+For an array result, the concise form describes each item. An inline/file JSON
+Schema describes the complete returned value, so a schema combined with
+`--filter` must have an array root. Object `properties` are a whitelist by
+default; use `"additionalProperties": true` to retain unspecified properties.
+Projection schemas support structural `properties`, `items`, and scalar leaf
+schemas. In an array-item projection, a scalar leaf whose declared type does not
+match the stored value is omitted by the runtime rather than reported as an
+error; prefer `true` leaves unless that type filtering is intentional. Schema
+combinators and references are rejected.
+
+Both transforms run as a short-lived computed pattern in the caller's session.
+The runtime's list filter/map builtins therefore handle CFC exactly as authored
+pattern expressions do: predicate observations label array membership,
+projection reads propagate labels, and filtered elements retain their source
+links. The source cell's schema remains authoritative for Common Fabric
+metadata. A caller cannot introduce or override `ifc`, `asCell`, `scope`, or
+`default` through `--schema`.
+
 ## Built Binary
 
 `deno task build-binaries cf` compiles the CLI to `dist/cf` — fully

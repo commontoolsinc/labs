@@ -292,6 +292,7 @@ const recordOutputSchemaPolicyInputs = (
           path: [...targetLink.path],
         },
         schema,
+        schemaRole: "output",
       });
     }
     return;
@@ -329,6 +330,7 @@ const recordSchemaPolicyInputForLink = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   if (schema === undefined) {
     return;
@@ -342,6 +344,7 @@ const recordSchemaPolicyInputForLink = (
       path: [...link.path],
     },
     schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -368,8 +371,8 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
         ),
     );
     const schema = bindingLink.schema ?? link.schema;
-    recordSchemaPolicyInputForLink(tx, bindingLink, schema);
-    recordSchemaPolicyInputForLink(tx, link, schema);
+    recordSchemaPolicyInputForLink(tx, bindingLink, schema, "output");
+    recordSchemaPolicyInputForLink(tx, link, schema, "output");
     return;
   }
 
@@ -453,6 +456,7 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     tx,
     result.getAsNormalizedFullLink(),
     result.schema,
+    "output",
   );
 };
 
@@ -1283,7 +1287,23 @@ export class Runner {
       argumentSchema,
       validationArgument,
       argumentSchema,
-      { acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink },
+      {
+        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+        // An OPTIONAL key holding `undefined` carries no data, and a handler
+        // mints one without meaning to: `comments.push({ author, ... })` with
+        // no author in hand writes the key, and the codec stores that presence.
+        // Measuring it here asks whether `undefined` satisfies the property's
+        // declared type, which nothing ordinary answers yes to — and THIS
+        // refusal is permanent, because the same identity refuses identically
+        // (see `isStoredArgumentSchemaRefusal`). A pattern would be unable to
+        // update documents it wrote itself. Measured on `topics/topic.tsx`
+        // (`author`) and `lunch-poll/main.tsx` (`imageUrl`).
+        //
+        // Scoped to THIS caller rather than made the validator's rule: writing
+        // `undefined` where a number is declared is still a mistake worth
+        // rejecting at a result write, while the caller can still see it.
+        optionalUndefinedIsAbsent: true,
+      },
     );
     if (validationFailure !== undefined) {
       throw new Error(
@@ -1341,7 +1361,7 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     if (!deepEqual(previous, resultSchema)) {
-      cell.setMetaRaw("schema", resultSchema as FabricValue);
+      cell.setMetaRaw("schema", resultSchema);
     }
   }
 
@@ -1467,9 +1487,12 @@ export class Runner {
       );
       // Convert-and-freeze (default): a deep-frozen value lets the storage
       // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze.
+      // deep-cloning-to-freeze. The result root marks the whole result
+      // document as generated: setup rewrites the complete projection.
       writableResultCell.setRawUntyped(
         fabricFromNativeValue(result),
+        false,
+        "output",
       );
     }
   }
@@ -2466,7 +2489,23 @@ export class Runner {
         // Without cleanup the piece stays registered in `this.cancels`, so
         // every later start() reports "already running" for a piece that has
         // no nodes or event handlers — events sent to it are then dropped.
-        cleanup();
+        //
+        // Cleanup runs every registered cancel, any of which may itself throw.
+        // Letting that escape would REPLACE the error being handled, so what
+        // surfaced would describe the cleanup rather than the failure that
+        // caused it — and a cancel running against half-initialized state
+        // fails in ways that look nothing like the original. Report it and
+        // rethrow what actually went wrong.
+        try {
+          cleanup();
+        } catch (cleanupError) {
+          logger.warn(
+            "start",
+            "Cleanup failed while handling a start error; reporting the " +
+              "start error, which is the one that matters.",
+            cleanupError,
+          );
+        }
         throw error;
       }
       if (!doNotUpdateOnPatternChange) {
@@ -4586,7 +4625,7 @@ export class Runner {
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
     // binding, which must not be followed at this level.
-    let value: FabricValue = inputs.$event as FabricValue;
+    let value: FabricValue = inputs.$event;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
@@ -6710,7 +6749,7 @@ function initializePieceSourceHistory(
     source: sourceRetentionLink(runtime, resultCell, tx, pattern),
     ...(origin === undefined ? {} : { origin }),
     operation: "create",
-  }] as unknown as FabricValue);
+  }]);
 }
 
 function samePieceSourceSnapshot(

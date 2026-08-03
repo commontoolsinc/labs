@@ -179,10 +179,13 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
 /**
  * Object/record of fabric values.
  *
- * Note: `.__proto__` and `constructor()` properties are not currently guarded
- * against at the type level or at runtime in clone/conversion internals.
- * If prototype pollution becomes a concern, add boundary validation where
- * values enter the fabric system (e.g., `fabricFromNativeValue()`).
+ * The names `__proto__` and `constructor` are refused at the boundaries where
+ * values enter or leave storage, so no `FabricPlainObject` carries one. The
+ * type cannot say as much -- a string index signature admits every string --
+ * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
+ * loops are unguarded and rely on it: they rebuild records by assignment,
+ * which for `__proto__` would repoint the copy's prototype rather than
+ * creating a property.
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
@@ -228,6 +231,12 @@ export type MutableFabricValueLayer =
  * `toJSON()`-based conversion path, included here so the
  * `isFabricCompatible()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
+ *
+ * Arrays are the exception the arm cannot state structurally: an array is
+ * decided by the array rule whatever it carries, so one bearing a `toJSON`
+ * method is rejected rather than converted, even though it satisfies this
+ * arm's shape. A type cannot say "any object with `toJSON()` except an
+ * array", so the carve-out lives here in prose.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.

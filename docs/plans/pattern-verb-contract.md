@@ -364,15 +364,13 @@ board topic). Until that lands, board-level routing
 (`addComment {topicFid, body}`) is the documented workaround — pragmatic, not
 the target shape.
 
-Two client affordances surfaced in review (2026-07-28) and are deferred,
-blocking nothing: `cf piece get` could grow flags that let an agent control
-how much data a read returns when exploring the fabric interactively — a
-`--schema` override reading through a narrower schema (the runtime's
-`asSchema`; the CLI already narrows its own internal reads this way, e.g.
-the `asSchema` narrowing in `packages/cli/lib/piece-render.ts`), and a limit on the number of records
-returned from a large array. Adjacent CLI work for when board scale demands it,
-recorded here so the deferral is deliberate; neither is an ask on any
-workstream in the implementation plan.
+`cf piece get` lets an agent control how much data an exploratory read returns:
+`--filter` narrows array membership and `--schema` projects fields through the
+runtime's `asSchema` read path. Both execute through computed pattern nodes so
+their CFC behavior matches pattern expressions. A limit on the number of
+records returned from a large array remains deferred, blocking nothing. It is
+adjacent CLI work for when board scale demands it, not an ask on any workstream
+in this implementation plan.
 
 **A set of verbs wants to be a structural interface, and the machinery for that
 already exists.** Schemas are the type system, so a verb set is a schema

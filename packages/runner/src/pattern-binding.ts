@@ -1,9 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import {
   type FabricExecValue,
   isPattern,
@@ -293,16 +290,16 @@ function sendValueToBindingInner<T>(
           cell.runtime,
           tx,
           scopedRef,
-          value as FabricValue,
+          value,
           { cell: cell.getAsNormalizedFullLink(), binding },
-          { meta: ignoreReadForScheduling },
+          { meta: ignoreReadForScheduling, schemaRole: "output" },
         );
       }
       tx.writeValueOrThrow(
         bindingLink,
         createSigilLinkFromParsedLink(scopedRef, {
           base: bindingLink,
-        }) as FabricValue,
+        }),
       );
       return;
     }
@@ -316,7 +313,7 @@ function sendValueToBindingInner<T>(
       ) {
         const newValue = createSigilLinkFromParsedLink(
           valueLink,
-        ) as FabricValue;
+        );
         // Skip the write when the redirect already holds this exact link. Raw
         // builtins (ifElse/when/unless/map/...) re-run and re-send their result
         // whenever their inputs change, but the output binding points at a
@@ -337,9 +334,9 @@ function sendValueToBindingInner<T>(
       cell.runtime,
       tx,
       ref,
-      value as FabricValue,
+      value,
       { cell: cell.getAsNormalizedFullLink(), binding },
-      { meta: ignoreReadForScheduling },
+      { meta: ignoreReadForScheduling, schemaRole: "output" },
     );
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {

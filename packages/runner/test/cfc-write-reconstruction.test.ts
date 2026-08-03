@@ -2,7 +2,6 @@ import { assertEquals, assertStrictEquals } from "@std/assert";
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
 import { normalizeCellScope } from "../src/scope.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type {
   IExtendedStorageTransaction,
@@ -193,7 +192,7 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
     meta: { seen: false, tags: ["a", "b"] },
   }));
   const base = deepFreeze(
-    { items: bigList, status: "draft" } as unknown as FabricValue,
+    { items: bigList, status: "draft" },
   ) as unknown as Record<string, unknown>;
 
   const tx = txWith([

@@ -877,7 +877,7 @@ const applyOperation = (
     );
   }
   const next = applyPatch(
-    { value: clone(current) ?? {} } as FabricValue,
+    { value: clone(current) ?? {} },
     operation.patches,
   ) as { value?: RootValue };
   return next.value;

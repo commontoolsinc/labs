@@ -353,6 +353,15 @@ match exactly. There is no automatic name mapping. `chartData` and
 Coordinate naming across related patterns before implementation. Mismatched
 field names create silent friction later and are easy to miss during assembly.
 
+Keep the receiving side's data contract as narrow as its actual reads and
+writes. Pattern schemas select and validate runtime data and preserve requested
+live-cell/stream bindings, so importing a producer's full `Input` or `Output`
+type can fetch, bind, and migration-couple much more than the relationship
+needs. Prefer a consumer-owned structural type containing only the required
+fields. When several independent consumers share a genuine role, have the
+producer export a shallow role model rather than its full pattern schema. See
+`docs/common/patterns/composition.md#keep-external-data-contracts-narrow`.
+
 ## Workflow Guidance
 
 The common operating rhythm is:

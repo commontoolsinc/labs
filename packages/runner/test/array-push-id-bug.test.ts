@@ -1,9 +1,10 @@
 /**
- * Minimal repro for CT-1173: Array push() via query result proxy doesn't add [ID] to items
+ * Minimal repro for CT-1173: Array push() via query result proxy didn't
+ * assign identity to items.
  *
- * This test verifies that when using .push() on arrays accessed via query result proxies,
- * new items get [ID] symbols added automatically, ensuring they're stored as separate
- * entity documents rather than inline data.
+ * This test verifies that when using .push() on arrays accessed via query
+ * result proxies, new items are anchored automatically, ensuring they're
+ * stored as separate entity documents rather than inline data.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -38,7 +39,7 @@ describe("CT-1173: array push via query-result-proxy", () => {
     await storageManager?.close();
   });
 
-  it("should add [ID] to objects pushed via query-result-proxy", () => {
+  it("should anchor objects pushed via query-result-proxy", () => {
     // Create a cell with an empty array
     const arrayCell = runtime.getCell<{ name: string }[]>(
       space,
@@ -70,8 +71,8 @@ describe("CT-1173: array push via query-result-proxy", () => {
         true, // writable
       );
 
-      // Push objects WITHOUT explicitly adding [ID]
-      // The bug was that [ID] should be added automatically but wasn't
+      // Push objects without any explicit identity.
+      // The bug was that they should be anchored automatically but weren't.
       proxy.push({ name: "Alice" });
       proxy.push({ name: "Bob" });
     } finally {
@@ -88,9 +89,9 @@ describe("CT-1173: array push via query-result-proxy", () => {
     // The array should have 2 items
     expect(result.length).toBe(2);
 
-    // Each item should be stored as a cell link (entity reference), not inline data
-    // If [ID] was added correctly, diffAndUpdate would have created entity documents
-    // and stored links to them in the array
+    // Each item should be stored as a cell link (entity reference), not
+    // inline data: anchoring creates an entity document per pushed object
+    // and stores a link to it in the array.
     for (let i = 0; i < result.length; i++) {
       const item = result[i];
       console.log(`Item ${i}:`, item, "isLink:", isPrimitiveCellLink(item));

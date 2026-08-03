@@ -397,7 +397,7 @@ function handlerInternal<E, T>(
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E> {
+): HandlerFactory<E, T> {
   let writableProxy = false;
   if (typeof eventSchema === "function") {
     if (
@@ -428,7 +428,7 @@ function handlerInternal<E, T>(
     stateSchema as JSONSchema | undefined,
   );
 
-  const module: Handler<T, E> & toJSON & {
+  const module: Handler<E, T> & toJSON & {
     bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
@@ -487,19 +487,19 @@ export function handler<
   eventSchema: E,
   stateSchema: T,
   handler: (event: Schema<E>, props: Schema<T>) => any,
-): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+): HandlerFactory<SchemaWithoutCell<E>, SchemaWithoutCell<T>>;
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (Event: E, props: T) => any,
   options: { proxy: true },
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 // Declared results, reached only by naming all three type arguments — the
 // same explicit-only rule as `action`'s result overload, mirrored here and in
 // api's `HandlerFunction` (both halves are hand-maintained; an overload
@@ -510,14 +510,14 @@ export function handler<E, T, R>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => R,
-): HandlerFactory<T, E, R>;
+): HandlerFactory<E, T, R>;
 export function handler<E, T, R>(
   handler: (event: E, props: T) => R,
   options: { proxy: true },
-): HandlerFactory<T, E, R>;
+): HandlerFactory<E, T, R>;
 export function handler<E, T, R>(
   handler: (event: E, props: T) => R,
-): HandlerFactory<T, E, R>;
+): HandlerFactory<E, T, R>;
 export function handler<E, T, R = void>(
   eventSchema:
     | JSONSchema
@@ -525,10 +525,10 @@ export function handler<E, T, R = void>(
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E, R> {
+): HandlerFactory<E, T, R> {
   return handlerInternal(eventSchema, stateSchema, handler) as HandlerFactory<
-    T,
     E,
+    T,
     R
   >;
 }

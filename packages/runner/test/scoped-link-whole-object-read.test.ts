@@ -36,8 +36,8 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 // The fix lives at the piece read boundary:
 // schemaWithScopedLinkRequiredsRelaxed derives a projection schema whose
 // `required` no longer claims properties stored as narrower-scoped links,
-// and PiecePropIo.get reads through it — expressing partial visibility in
-// the schema, exactly as #4746 prescribes.
+// and PiecePropIo.get reads both roots and selected subtrees through it —
+// expressing partial visibility in the schema, exactly as #4746 prescribes.
 class SharedServerStorageManager extends EmulatedStorageManager {
   static connectTo(
     server: MemoryV2Server.Server,

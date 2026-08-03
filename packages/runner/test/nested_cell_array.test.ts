@@ -6,7 +6,7 @@ import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -98,7 +98,7 @@ describe("Nested Cell Array", () => {
     expect(isCell(cellItems[0].get())).toBe(false);
   });
 
-  it("[ID] property converts to entity in diffAndUpdate - test this works", () => {
+  it("pushed objects convert to entities via anchoring", () => {
     const schema = {
       type: "array",
       items: {
@@ -114,16 +114,13 @@ describe("Nested Cell Array", () => {
     } as const satisfies JSONSchema;
     const arrayCell = runtime.getCell(space, "test-array-with-id", schema, tx);
 
-    // Push an object WITHOUT [ID]
+    // Both pushes anchor automatically under the ambient frame.
     arrayCell.push({
-      name: "without-id",
+      name: "first",
       value: 1,
     });
-
-    // Push an object WITH [ID]
     arrayCell.push({
-      [ID]: "test/id",
-      name: "with-id",
+      name: "second",
       value: 2,
     } as any);
 

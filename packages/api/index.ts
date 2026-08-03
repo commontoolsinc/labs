@@ -329,7 +329,6 @@ export interface FabricExecPlainObject
 
 // Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
-export declare const ID: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -1652,8 +1651,7 @@ export type UnwrapCell<T> =
  * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
  * and allow any part of T that is currently wrapped in AnyCell<> to be used
  * unwrapped. This is designed for use with cell method parameters, allowing
- * flexibility in how values are passed. The ID metadata symbol allows
- * controlling id generation and can only be passed to write operations.
+ * flexibility in how values are passed.
  */
 export type AnyCellWrapping<T> =
   // Handle existing AnyBrandedCell<> types, allowing unwrapping
@@ -1668,7 +1666,6 @@ export type AnyCellWrapping<T> =
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
-          & { [ID]?: AnyCellWrapping<JSONValue> }
         | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
     : T | AnyBrandedCell<T>;
@@ -1698,11 +1695,12 @@ export type toJSON = {
  * declares back to a caller (`void` for the value-less majority), and **`T`**
  * is the handler's bound state, present only where there is one.
  *
- * `Handler`'s second parameter was spelled `R` before a result existed; it has
- * always been the event type, so it is `E` now and `R` means one thing
- * everywhere. Type parameters are positional — no caller changes.
+ * `Handler` and `HandlerFactory` take them event-first — `Handler<E, T, R>` —
+ * the same order `handler()`'s own type parameters and `Stream<E, R>` read,
+ * so one tuple means the same thing at the declaration, the builder call, and
+ * the produced stream (#5161).
  */
-export type Handler<T = any, E = any, R = void> = Module & {
+export type Handler<E = any, T = any, R = void> = Module & {
   with: (inputs: FactoryInput<StripCell<T>>) => Stream<E, R>;
 };
 
@@ -1731,16 +1729,15 @@ export type ModuleFactory<T, R> =
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
 
-export type HandlerFactory<T, E, R = void> =
+export type HandlerFactory<E, T, R = void> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
-  & Handler<T, E, R>
+  & Handler<E, T, R>
   & toJSON;
 
 // JSON types
 
 /**
- * Pure deeply-immutable JSON value, with the addition of a sidecar of
- * annotations keyed by unique symbols.
+ * Pure deeply-immutable JSON value.
  */
 export type JSONValue =
   | null
@@ -1748,17 +1745,11 @@ export type JSONValue =
   | number
   | string
   | JSONArray
-  | JSONObject & IDFields;
+  | JSONObject;
 
 export interface JSONArray extends ReadonlyArray<JSONValue> {}
 
 export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
-
-// Annotations when writing data that help determine the entity id. They are
-// removed before sending to storage.
-export interface IDFields {
-  readonly [ID]?: unknown;
-}
 
 /**
  * Deeply-mutable version of `JSONValue`.
@@ -1862,7 +1853,6 @@ export type JSONSchemaObj = {
   readonly $comment?: string;
 
   // Common Fabric extensions
-  readonly [ID]?: unknown;
   readonly scope?: SchemaScope;
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.
@@ -2434,17 +2424,17 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => any,
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   // Without schemas
   <E, T>(
     handler: (event: E, props: T) => any,
     options: { proxy: true },
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   // Declared results, reached only by naming all three type arguments —
   // `ActionFunction`'s explicit-only rule, for the same reason: the `=> any`
@@ -2454,16 +2444,16 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<T, E, R>;
+  ): HandlerFactory<E, T, R>;
 
   <E, T, R>(
     handler: (event: E, props: T) => R,
     options: { proxy: true },
-  ): HandlerFactory<T, E, R>;
+  ): HandlerFactory<E, T, R>;
 
   <E, T, R>(
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<T, E, R>;
+  ): HandlerFactory<E, T, R>;
 }
 
 /**

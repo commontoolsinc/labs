@@ -2253,6 +2253,46 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    if (!path?.length) {
+      return await this.#getFromRoot(targetCell, []);
+    }
+    // Pull the requested cell, not the whole input/result root. The sync
+    // started by pull() sends its path plus narrowed schema to Memory v2, so
+    // this avoids traversing unrelated linked fields (an input can contain a
+    // broad authoring graph even when the caller asks for one small durable
+    // field). No per-segment asCell handling is needed on the way down: key()
+    // walks the schema (so an asCell ancestor's `properties` keep narrowing the
+    // query) and link resolution follows the stored link at that segment during
+    // the read. A TERMINAL asCell is simply unwrapped: since #5231 the
+    // projection applies the asCell scope cap itself, so a capped handle stays
+    // capped without routing through resolveAsCell().
+    const selectedCell = targetCell.key(...path);
+    await selectedCell.pull();
+    // Relax `required` for scoped links that this session cannot materialize,
+    // at the selected subtree rather than the root — same boundary as
+    // #getFromRoot, see schemaWithScopedLinkRequiredsRelaxed.
+    const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
+    if (isCell(selected)) {
+      // An asCell projection materializes even an absent or explicitly
+      // undefined slot as a Cell, so inspect the stored slot before reading
+      // through the handle. Falling back preserves the root read's
+      // absent-vs-undefined rules and its missing-path diagnostics.
+      if (selectedCell.getRaw() === undefined) {
+        return await this.#getFromRoot(targetCell, path);
+      }
+      const handle = cellWithScopedLinkRequiredsRelaxed(selected);
+      await handle.pull();
+      return handle.get();
+    }
+    if (selected === undefined) {
+      return await this.#getFromRoot(targetCell, path);
+    }
+    return selected;
+  }
+
+  async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
+    // Preserve the existing missing-path diagnostics and the distinction
+    // between an absent field and a schema-valid undefined value.
     await targetCell.pull();
     // Terminal read boundary: relax `required` for properties whose stored
     // value links into a scope this session may not be able to materialize
@@ -2262,7 +2302,7 @@ class PiecePropIo implements PieceCellIo {
     // #4746-compatible rationale.
     return resolveCellPath(
       cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path ?? [],
+      path,
     );
   }
 
@@ -2295,10 +2335,7 @@ class PiecePropIo implements PieceCellIo {
       committedTargetCell = targetCell;
 
       // Build the path with transaction context
-      let txCell = targetCell.withTx(tx);
-      for (const segment of (path ?? [])) {
-        txCell = txCell.key(segment as keyof unknown) as Cell<unknown>;
-      }
+      const txCell = targetCell.withTx(tx).key(...(path ?? []));
 
       const writePath = path ?? [];
       const writeTargetDiffers = (
