@@ -72,18 +72,36 @@ on activate(space):
   W = read watermark doc (0 if absent)
   subscribe(space, from = W + 1)
 
-on commits [s..n] arriving:
+on commits [s..n] arriving (the wave's input batch; commits arriving
+mid-wave belong to the NEXT wave — natural double-buffering, no timers):
   for each commit c:
     if c.class == derived and c.holder == self: continue   // own echo
     mark dirty: resolve c's written docs/paths against the dependency
     graph's input links (the scheduler's existing dirtiness path)
     if c.class == event-append: enqueue for handler processing (events.md)
-  run scheduler to fixpoint IN MEMORY (handlers first, then derivations —
-  the scheduler's existing ordering)
+  // COALESCING: drain ALL queued events through their handlers first,
+  // in per-stream seq order; handler writes accumulate in memory.
+  // Handlers in the batch read derived state as of the last completed
+  // wave (D-v2-2) — intermediate derived states for superseded inputs
+  // are never computed at all.
+  run every queued handler
+  run the derivation fixpoint ONCE, to QUIESCENCE — scheduler.idle()
+  (packages/runner/src/scheduler/facade.ts) resolves; this INCLUDES the
+  scheduler's eager/idle-scheduled actions and whatever they cascade
+  into. There is no separate commit for idle-time work.
   commit one derived-class transaction containing:
-    - all derived cell changes of this wave
+    - all derived cell changes of this wave (final values only)
+    - consequenceOf: every eventId drained this wave
     - watermark doc := n
   hand external effects to the outbox (post-commit; see §5)
+
+on wave budget exhaustion (a cascade that will not quiesce within the
+scheduler's pass budget): commit the wave anyway — the in-memory state is
+a consistent snapshot — count wavesBudgetExhausted, DO NOT advance the
+watermark past inputs whose cascade was truncated, and continue the
+cascade as the next wave's dirtiness. W catches up at true quiescence;
+crash recovery stays sound because replay from W+1 re-marks the truncated
+dirtiness and memo hits suppress effect re-fires.
 
 on idle (no dirty work, no queued events) for IDLE_PARK_MS:
   park per activation policy
@@ -167,10 +185,10 @@ is wrong somewhere else — stop and escalate.
 ## 7. Counters (implement with the loop, not after)
 
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
-block: `servingLoop: { activeSpaces, waves, authoredSeen, derivedCommits,
-watermarkLag, events: {appended, processed, skippedIdempotent}, memo:
-{hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
-{held, lost} }`. Every Phase gate in the plan reads these counters; tests
+block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
+authoredSeen, derivedCommits, watermarkLag, events: {appended, processed,
+coalescedPerWaveMax, skippedIdempotent}, memo: {hits, misses, inflight},
+outbox: {queued, completed, failed}, lease: {held, lost} }`. Every Phase gate in the plan reads these counters; tests
 MUST assert on counters, not logs.
 
 ## 8. Tripwires (grep-able FORBIDDEN list)

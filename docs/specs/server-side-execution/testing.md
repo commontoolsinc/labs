@@ -68,7 +68,7 @@ v2 gate set. Existing product tests double as gates where noted.
 | --- | --- |
 | 1 | `sx2-serving-loop` (counters, amplification, restart-memo); existing `counter`, `cfc-group-chat-demo-multi-runtime` in ON arm |
 | 2 | `sx2-speculation` (echo latency, overlay retirement, zero client derived commits); byte-identical suite both arms |
-| 3 | `sx2-events` (two-user lunch poll via server handlers; kill-between-event-and-consequence restart; duplicate-submit rejection); propagation ≤300 ms p50 measured on `lunch-poll-vote` UNMODIFIED |
+| 3 | `sx2-events` (two-user lunch poll via server handlers; kill-between-event-and-consequence restart; duplicate-submit rejection; rapid-fire coalescing: N events fired faster than wave time yield ≪N derived commits and final-only values); propagation ≤300 ms p50 measured on `lunch-poll-vote` UNMODIFIED |
 | 4 | `sx2-effect-channel` (navigate intent/ack; reload between intent and ack; optimistic-enact reconcile); existing `topics-navigation` ON |
 | 5 | existing `shared-profile`, `profile-embed`, `sqlite-read-clearance-multi-runtime` green ON — the v1 stragglers are the acceptance tests |
 | 6 | `sx2-scale` (cf-checkbox in-suite ≈ isolated; budget: hostile LLM fan-out in space A leaves space B's propagation in budget); no poll-loops left in the suite |

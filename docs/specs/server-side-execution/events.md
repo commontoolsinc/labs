@@ -59,6 +59,15 @@ handler fires
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
   beyond the space's commit sequence — same as today.
+- **Batching (D-v2-2, proposed)**: a wave drains every queued event
+  before the derivation fixpoint runs (serving-loop.md §3). Rapid-fire
+  events therefore share one derived commit whose `consequenceOf` lists
+  them all, and only the LATEST derived values are ever computed.
+  Handler-visible consequence: handlers in one batch read derived state
+  as of the last completed wave, not state refreshed between events. A
+  handler chain that requires inter-event propagation is a pattern
+  smell; if a real need appears, it escalates to an owner ruling rather
+  than a scheduler mode.
 
 ## 3. Payload capture rule
 
