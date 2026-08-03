@@ -548,7 +548,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const value = binding[i];
         const next = convert(
           value,
-          cfc.getSchemaAtPath(targetSchema, [`${i}`]),
+          cfc.getSchemaAtPath(targetSchema, [String(i)]),
         );
         if (next === value) continue;
         // First change: copy the whole array, not just the prefix. `slice()`
