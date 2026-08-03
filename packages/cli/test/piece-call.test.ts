@@ -2494,6 +2494,39 @@ function linkedReceiptCell(
   };
 }
 
+/**
+ * A fully addressable receipt cell that logs every `key()` segment the
+ * walk requests into `requested` (as `/`-joined paths) — the observable
+ * seam for "the walk never addresses inside a live object". Descent is cut
+ * off after a small budget, so an errant walk fails a path assertion
+ * deterministically instead of racing the stack limit, whose overflow the
+ * walk's own addressability catch can swallow.
+ */
+function recordingReceiptCell(
+  doc: MockLinkedDoc,
+  requested: string[],
+  path: string[] = [],
+): CallableCellLike {
+  const cell: CallableCellLike = {
+    get: () => undefined,
+    resolveAsCell: () => cell,
+    getAsNormalizedFullLink: () => ({
+      id: doc.id,
+      space: doc.space,
+      path,
+    }),
+    key: (segment: string) => {
+      if (requested.length >= 32) {
+        throw new Error("fake cell budget exhausted");
+      }
+      const next = [...path, segment];
+      requested.push(next.join("/"));
+      return recordingReceiptCell(doc, requested, next);
+    },
+  };
+  return cell;
+}
+
 describe("collectInvocationResultLinks", () => {
   const receiptLink = { id: "of:receipt-1", space: "did:key:test-home" };
   const receiptRef = {
@@ -2705,6 +2738,70 @@ describe("collectInvocationResultLinks", () => {
     expect(
       collectInvocationResultLinks(receiptLink, undefined, { a: { b: 1 } }),
     ).toEqual({ "/": receiptRef });
+  });
+
+  it("addresses no path inside a live (non-plain) object in the result", () => {
+    // The --show-links crash shape: a stream on a returned piece is a live
+    // runtime object whose runtime/scheduler properties refer back to each
+    // other, and a walk that descends into it recurses until the stack runs
+    // out. "Terminates without throwing" is NOT a testable contract for that
+    // bug: when the overflow happens to land on the `cell.key()` call, the
+    // walk's own addressability catch swallows the RangeError and unwinds
+    // cleanly, so whether a crash is observable depends on where the stack
+    // limit falls (fake frame sizes, V8 --stack-size) — not on the walk.
+    // What the walk must guarantee is stronger and observable at this seam:
+    // it never ADDRESSES a path inside a non-plain object, whose properties
+    // belong to the runtime rather than the result. The fake records every
+    // key() the walk requests and cuts descent off after a small budget, so
+    // an errant walk fails the path assertion deterministically, far from
+    // any stack limit.
+    class FakeScheduler {
+      runtime!: FakeRuntime;
+    }
+    class FakeRuntime {
+      scheduler = new FakeScheduler();
+      constructor() {
+        this.scheduler.runtime = this;
+      }
+    }
+    class FakeStream {
+      runtime = new FakeRuntime();
+    }
+    const value = { child: { touch: new FakeStream() } };
+    const requested: string[] = [];
+    const links = collectInvocationResultLinks(
+      receiptLink,
+      recordingReceiptCell(receiptLink, requested),
+      value,
+    );
+    // The stream itself is addressed — it is a property of the result and
+    // may carry a document of its own. Nothing below it is.
+    expect(requested).toEqual(["child", "child/touch"]);
+    expect(links).toEqual({ "/": receiptRef });
+  });
+
+  it("addresses nothing when the result is itself a live object", () => {
+    // The same contract at the root: the walk's entry guard — not only the
+    // per-child check — is what keeps a live result's properties
+    // unaddressed. With the guard on children alone, the walk enumerated a
+    // root instance and addressed "scheduler".
+    class FakeScheduler {
+      runtime!: FakeRuntime;
+    }
+    class FakeRuntime {
+      scheduler = new FakeScheduler();
+      constructor() {
+        this.scheduler.runtime = this;
+      }
+    }
+    const requested: string[] = [];
+    const links = collectInvocationResultLinks(
+      receiptLink,
+      recordingReceiptCell(receiptLink, requested),
+      new FakeRuntime(),
+    );
+    expect(requested).toEqual([]);
+    expect(links).toEqual({ "/": receiptRef });
   });
 });
 
