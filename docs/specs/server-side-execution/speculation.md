@@ -37,6 +37,11 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   one idempotent GET".
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
   is reversible. The overlay records the nonce it acted on.
+- Child-piece instantiation (result-as-pattern and `compile-and-run`,
+  builtins.md §3): client speculation NEVER instantiates child pieces.
+  The overlay renders a placeholder — the branch's ordinary loading
+  state — until the authoritative push delivers the instantiated child
+  (runtime-mapping.md N37/N38).
 - **Unreplicated inputs**: a speculative read of a doc/path the client
   has not replicated is PENDING for that branch — speculation NEVER
   blocks on a fetch and never triggers a network read. The branch
@@ -61,9 +66,11 @@ On each pushed `derived` commit with `derivedThrough = W` and
 1. Apply the commit to the local store replica (existing path).
 2. Retire overlay entries whose `origin` is `intent(e)` for `e ∈ E` —
    the authoritative consequences now exist; the echo's job is done.
-3. Retire overlay entries with `baseSeq < W` whose `origin` is `input` if
-   the store now agrees with them; keep live-input echoes that are ahead
-   of the store (the user is mid-typing).
+3. Retire overlay entries whose `origin` is `input` once their authored
+   commit is acked AND `W ≥` that commit's seq — regardless of value
+   agreement (the store wins); keep live-input echoes whose authored
+   commit is still unacked or not yet covered by `W` (the user is
+   mid-typing).
 4. If any local intents remain un-consequenced (offline queue, in-flight
    events), re-run their speculation against the fresh store state so
    the echo rebases instead of going stale.

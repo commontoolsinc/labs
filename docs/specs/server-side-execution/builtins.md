@@ -16,8 +16,10 @@ serving loop from its row plus the referenced sections.
 ## 1. Pure structural — serve as-is, speculable
 
 `map`, `filter`, `flatmap`, `if-else`, `when`, `unless`,
-`list-element-link`, `list-op-argument-usage`, `list-result-schema`,
-`op-pattern-ref`, `inspect-conf-label`, `scope-policy`, `wish`.
+`inspect-conf-label`, `wish`. (`list-element-link`,
+`list-op-argument-usage`, `list-result-schema`, `op-pattern-ref` and
+`scope-policy` are helper modules, not registered built-ins — nothing
+to place.)
 
 Contract: deterministic functions of their resolved inputs; no memo, no
 authority, no outbox. They run wherever the graph runs (server
@@ -37,9 +39,9 @@ key; client speculation reads through (speculation.md §2).
 
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
-| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc |
+| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); migrate it onto the result doc | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
-| `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2) | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
+| `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
 | `sqlite*` | database link, statement, params, **reader principal** | cleared rows per reader | read served under the reader's clearance | reader in the key is what "per-reader row admissibility" means mechanically (Phase 5 gate) |
 
@@ -56,6 +58,14 @@ toolshed — reuse that path. Async work stays on the post-commit outbox
 (the v1 lesson that ported: never block the loop on compilation).
 Instantiated pieces join the space's graph and are served like any other.
 
+Result-as-pattern instantiation — a lift or handler RETURNING a
+pattern, instantiated into a deterministic result cell — is a RUNNER
+path distinct from `compile-and-run` (no compilation step), and it runs
+server-side as an ordinary consequence of the graph run: the child
+joins the space's graph the same way (runtime-mapping.md N37/N38).
+Client speculation NEVER instantiates child pieces on either path
+(speculation.md §2).
+
 ## 4. Client-enacted — `navigate-to`
 
 Split contract (protocol.md §5): the SERVED half computes the target
@@ -69,23 +79,31 @@ reconciles it.
 Implementation note: the served half needs the firing session's identity
 — it comes from the event (`firedAt.session`, events.md §1). A
 navigation computed outside any event context (pure derivation) has no
-session and is a pattern error: navigateTo MUST be reachable only from
-handler consequences. Enforce with a runtime check, not a type dance.
+session, and a server-fired event (`firedAt.session = server`,
+events.md §2) has no client to enact — both are the SAME runtime
+ERROR: navigateTo MUST be reachable only from the consequences of a
+client-fired event. Enforce with a runtime check, not a type dance.
 
 ## 5. Deferred / excluded
 
 - `stream-data`: disabled under the flag (owner, 2026-08-02 — unused;
   low-latency UI wants a different mechanism). A pattern using it under
   the flag gets a clear runtime error naming this section.
-- `resume-recover`, `resume-republish`: v1-era compensation machinery.
-  Do not port. If something seems to need them, that something is a bug
-  in the serving loop's recovery (serving-loop.md §6) — fix it there.
+- `resume-recover`, `resume-republish`: re-evaluate under v2 recovery —
+  they are currently LOAD-BEARING on main in `filter.ts`/`flatmap.ts`
+  (#4367, #4438), so "do not port" is not on the table; decide their
+  end state against serving-loop.md §6 when Phase 1 lands the list
+  coordinators.
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 
-1. Classify: pure / effectful / client-enacted. There is no fourth class.
+1. Classify: pure / effectful / compile-instantiate / client-enacted /
+   deferred — README §3.5's five classes. There is no sixth.
 2. Pure ⇒ nothing else. Effectful ⇒ define the memo-key basis in §2's
-   table via spec edit, wire the outbox, never the loop. Client-enacted ⇒
-   new `kind` in protocol.md §5 via spec edit.
+   table via spec edit, wire the outbox, never the loop.
+   Compile-instantiate ⇒ §3's contract (async on the outbox; the result
+   joins the graph). Client-enacted ⇒ new `kind` in protocol.md §5 via
+   spec edit. Deferred ⇒ disabled under the flag with a runtime error
+   naming §5.
 3. If the built-in seems to need per-run persisted provenance, a claim,
    or its own commit class — it does not; re-read README §2.

@@ -23,9 +23,9 @@ implemented as the gates below. Method inherited from the v1 learning run
   arms); NOTE the store persists across `deno task integration`
   invocations — suite-scale tests (Phase 6) exploit this deliberately,
   latency tests must not inherit it accidentally.
-- `deno task test` exits 0 on red batteries — read counts, never exit
-  codes. It also does not run `packages/patterns/integration`; CI runs
-  both, so must local verification before any push.
+- `deno task test` never RUNS the `.test.tsx` pattern lane or the
+  integration lanes — the caveat is lane coverage, not exit codes. CI
+  runs them all; so must local verification before any push.
 
 ## 2. CI arms
 
@@ -49,8 +49,11 @@ for *what* rendered; the watermark answers *when*.
 `/api/health/stats` → `servingLoop` block (serving-loop.md §7). Gate
 tests assert counters, not logs:
 
-- amplification: `derivedCommits / authoredSeen ≤ 2` on the lunch-poll
-  workload (Phase 1 gate; v1 measured 60×).
+- amplification, ONE metric: `derivedCommits / (authoredSeen −
+  effectAcks) ≤ 2` on pure workloads (lunch-poll, the Phase 1 gate; v1
+  measured 60×) and `≤ 3` on workloads with effectful nodes (their
+  completion commits are derived-class). A logical write is one
+  authored commit excluding effect-channel acks.
 - single-run: `waves == authored input batches` ballpark;
   `memo.hits/misses` sane on restart tests.
 - idempotency: `events.skippedIdempotent` == replayed-event count in the
@@ -81,6 +84,8 @@ Recorded 2026-08-02 (quiet box), the numbers v2 is measured against:
 - Cross-user propagation, client-computed (today): 92–294 ms.
 - Actor-side interactive latency (today): ~318 ms.
 - Amplification (today): ~15× commits per logical write on lunch-poll
-  (150 commits / ~10 writes — deploys and bootstrap included); v2's ≤2
-  budget is for the steady-state interaction window, measured between
-  first and last user action.
+  (150 commits / ~10 writes — deploys and bootstrap included); v2's
+  budget (≤2 pure / ≤3 effectful, §4's single metric, logical write =
+  one authored commit excluding effect-channel acks) is for the
+  steady-state interaction window, measured between first and last
+  user action.

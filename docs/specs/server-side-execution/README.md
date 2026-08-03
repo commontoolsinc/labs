@@ -25,6 +25,7 @@ domain:
 | [`protocol.md`](protocol.md) | commit classes, the whole admission table, push, watermark, client-effect channel, wire discipline | 1–4 |
 | [`builtins.md`](builtins.md) | per-built-in contracts: placement, memo keys, navigateTo split, deferred list | 1, 4, 5 |
 | [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |
+| [`runtime-mapping.md`](runtime-mapping.md) | today's runtime, behavior by behavior → its v2 placement, statused COVERED/CHANGED/GAP | all |
 
 Each detail doc opens with **Anchors** — module paths verified on main
 2026-08-02, to re-verify before coding — and closes with FORBIDDEN
@@ -153,13 +154,16 @@ Corollaries already ruled:
 
 ### 3.1 Server
 
-One committing runtime per space, hosted by the executor pool.
+One committing runtime per space, hosted by the executor host — a
+Phase 1 rebuild; the v1 branch's pool is prior art, not existing
+substrate.
 
 - Subscribes to its space; on any accepted commit, runs the affected
   reactive graph to fixpoint and commits the derived changes. One
   authoritative run per change; no shadow pass, no claim round trip.
-- Performs all external effects (`"server-executor"` remains the one
-  declaration of `externalSinkDisposition: "allow"`).
+- Performs all external effects (`"server-executor"` returns, rebuilt,
+  as the one declaration of `externalSinkDisposition: "allow"` — v1
+  prior art; nothing of it exists on main).
 - Processes **events** (§3.6): an event appended to a stream — by a
   client, by another piece, or by a server-run computation calling
   `stream.send()` — is handled by the server-side handler run, whose
@@ -244,11 +248,11 @@ and silently dropped side effects in the OFF arm.
 ### 3.5 Built-in coverage — every one, placed
 
 The full inventory (from `packages/runner/src/builtins/`), so nothing is
-discovered mid-rebuild. Three placement classes:
+discovered mid-rebuild. Five placement classes:
 
 | class | built-ins | runs on | client speculation |
 | --- | --- | --- | --- |
-| **Pure structural** | `map`, `filter`, `flatmap`, `if-else`/`when`/`unless`, `list-element-link`, `list-op-argument-usage`, `list-result-schema`, `op-pattern-ref`, `inspect-conf-label`, `scope-policy`, `wish` | server | yes — free to discard |
+| **Pure structural** | `map`, `filter`, `flatmap`, `if-else`/`when`/`unless`, `inspect-conf-label`, `wish` (the `list-*` modules, `op-pattern-ref` and `scope-policy` are helper modules, not registered built-ins — builtins.md §1) | server | yes — free to discard |
 | **Deferred** | `stream-data` | disabled in the v2 interim (unused today; the low-latency UI it promises likely wants a different mechanism — owner, 2026-08-02) | — |
 | **Effectful / network** | `fetch` (`fetchData`), `fetch-program`, `llm` (`generateText`/`generateObject`), `llm-dialog`, `sqlite*` | **server only** | **never** — speculation reads through to the last committed result |
 | **Compile / instantiate** | `compile-and-run` (charm creation, incl. from handlers) | server (sandboxed worker; toolshed already compiles) | no |
@@ -261,8 +265,9 @@ and bind results to the wrong network vantage point. The request-hash
 memoization these built-ins already carry is what makes reading-through
 sound: same inputs → the committed result *is* the value.
 
-`resume-recover` / `resume-republish` are v1-era compensation machinery —
-apply the survival test before carrying them over.
+`resume-recover` / `resume-republish`: re-evaluate under v2 recovery —
+currently load-bearing on main in `filter.ts`/`flatmap.ts` (#4367,
+#4438); builtins.md §5 carries the call.
 
 ### 3.6 Events are the client's computational commit (D-v2-1, RULED 2026-08-02)
 
@@ -378,13 +383,22 @@ intent, the following have no decision left to make:
 - `completeSchedulerScopeSummary` emission and every consumer, through to
   the memory protocol's claimed-commit admission
 - shadow/authoritative action-transaction routing
-- the observation evidence log (observation / snapshot / replay tables at
-  derived-run frequency; `persistentSchedulerState` returns to its pre-arc
-  scope)
+- the observation evidence log (observation / snapshot / replay tables
+  at derived-run frequency; `persistentSchedulerState`'s persisted form
+  reduces to the v2 basis index — see below)
 - unserved markers, demand-shrink compensation, the legacy-background
   exclusion protocol, `resume-recover`-style compensations
 - the arc's write-firewall-as-admission (write bounding moves to handle
   grant time; client computational commits narrow to event appends)
+
+Two entries are live on MAIN, not only on the archived branches:
+`completeSchedulerScopeSummary` emission and its consumers (~10 source
+files across ts-transformers and the runner), and
+`persistentSchedulerState`'s observation tables (full-JSON payloads,
+OFF by default). For those two, "delete" is live Phase 1 deletion work
+on main — tracked in the plan — not merely "do not rebuild"; the
+observation tables reduce to the v2 basis index
+(serving-loop.md §3b).
 
 Anything on this list that seems needed during the rebuild triggers the
 survival test before it triggers implementation.

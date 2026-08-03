@@ -12,11 +12,19 @@ measure through `deno task integration --port-offset=NNN`, uninstrumented
 workloads, byte-identical across arms, adjacent runs, counters over
 latencies, no latency quoted above load ~5, causation by ablation.
 
-Main carries essentially none of the v1 machinery (no
-`packages/runner/src/executor/`, no `serverPrimaryExecution` in
-`packages/memory/v2.ts`) — this is a greenfield build, and the spec §5
-deletion list is enforced by *not rebuilding*, with the survival test as
-the gate on anything that feels needed.
+Main carries no executor (no `packages/runner/src/executor/`, no
+`serverPrimaryExecution` in `packages/memory/v2.ts`) — but it DOES
+carry the certificate/observation surface:
+`completeSchedulerScopeSummary` is emitted and consumed across ~10
+source files (ts-transformers `core/transformers.ts`,
+`schema-injection.ts`, `lift-applied-strategy.ts`,
+`capability-analysis.ts`, plus runner consumers), and
+`persistentSchedulerState` (OFF by default) persists full-JSON
+`scheduler_observation` payloads. Phase 1 is therefore partly a
+REDUCTION OF MAIN — delete that surface, reduce the observation tables
+to the v2 basis index — and partly a build. The spec §5 deletion list
+is enforced by deleting on main and *not rebuilding*, with the survival
+test as the gate on anything that feels needed.
 
 ## Phase 0 — Rulings and guardrails
 
@@ -47,26 +55,50 @@ The executor hosts one committing runtime per space: wake on accepted
 commit, run the affected graph to fixpoint, commit derived changes. No
 shadow pass, no claims, no evidence log. Placement from input links.
 
+Interim posture: until Phase 3 lands, client HANDLER writes continue to
+ride authored-class commits exactly as today (protocol.md §1); Phase 1
+changes who commits derivations, not who commits handler writes, and
+the client derivation-commit path is removed in Phase 2.
+
 Tasks:
 
 - [ ] Executor host + per-space runtime lifecycle (start, wake, idle,
       stop); borrow lessons, not code, from the archived pool.
+- [ ] Create the `execution_lease` table (engine-v3 migration — none
+      exists on main; v1-branch shape as prior art) and the lease
+      acquire/renew/expire cycle (serving-loop.md §2).
+- [ ] Delete main's certificate surface: `completeSchedulerScopeSummary`
+      emission (ts-transformers) and every consumer (runner); reduce the
+      observation tables to the v2 basis index — standalone
+      `(action, entity, seq)` rows replacing the full-JSON payload form
+      (serving-loop.md §3b).
 - [ ] Serve pure structural built-ins (spec §3.5 table, row 1).
 - [ ] Serve effectful built-ins server-side — `fetch*`, `generate*`,
       `sqlite*` — behind request-hash memoization; egress performed only
       here (effect authority per Q6 ruling).
-- [ ] Recovery: restart → recompute pure nodes, reuse memoized effect
-      results; no replay.
+- [ ] Recovery: restart → basis-index re-marking, recompute pure nodes,
+      reuse memoized effect results; no replay (serving-loop.md §6).
+- [ ] Settled-ness watermark ("derived current through seq N") rides
+      derived commits + the watermark doc; `waitForSettled(space, seq)`
+      test helper lands with it (protocol.md §4, testing.md §3).
+- [ ] Pattern-source watcher + hot-swap run in the SpaceServer under
+      the flag — the `systemPatternAutoUpdate` posture flips
+      server-side (serving-loop.md §3e; `pattern-update-testing.md`
+      scenarios are the acceptance surface).
 - [ ] Disable `stream-data` under the flag (deferred per spec §3.5).
 
 Success criteria:
 
 - [ ] `counter` and `cfc-group-chat-demo-multi-runtime` green in the ON
-      arm with client derivation commits disabled.
+      arm (client derivation commits stay enabled until Phase 2, client
+      handler writes until Phase 3 — the interim posture above).
+- [ ] `sx2-` gate tests settle on `waitForSettled`, no text-polling
+      (testing.md §3).
 - [ ] One authoritative run per upstream change (scheduler-run and commit
       counters, not logs).
 - [ ] **~1 protocol commit per logical write** on the lunch-poll workload
-      (v1 measured 60×; the counter exists — use it).
+      (v1 measured 60×; the counters exist — use them; the gate metric
+      is testing.md §4's single ratio, ≤ 2 on pure workloads).
 - [ ] Server restart mid-test: derived state reconverges, effectful nodes
       do not re-fire (store shows no duplicate effect results).
 
@@ -87,8 +119,9 @@ Success criteria:
 
 - [ ] Byte-identical workload tests pass in both arms.
 - [ ] Actor-side interactive latency at parity (v1 measured 292 vs 318 ms).
-- [ ] Store session-attribution query shows zero client-committed derived
-      writes in the ON arm.
+- [ ] Client derivation commits disabled (moved here from Phase 1): the
+      store session-attribution query shows zero client-committed
+      derived writes in the ON arm.
 
 ## Phase 3 — Events-down handlers (D-v2-1)
 
@@ -151,12 +184,15 @@ Success criteria:
       foreign and home commits — replay converges on the same DIDs, no
       orphans, no duplicates.
 
-## Phase 6 — Watermark, budgets, scale
+## Phase 6 — Push priority, budgets, scale
+
+The watermark and `waitForSettled` land in Phase 1; this phase keeps
+only push priority and the budget/backpressure hardening.
 
 Tasks:
 
-- [ ] Settled-ness watermark ("derived current through seq N") rides the
-      push; integration tests wait on it instead of text-polling.
+- [ ] Push priority on the subscription channel: subscribed-doc
+      `derived` commits flush first (protocol.md §3).
 - [ ] Per-space budgets in the executor (CPU per wave, outstanding LLM
       calls, egress rate); a runaway pattern degrades only its own space.
 - [ ] Event/binding backpressure shaping ahead of the commit stream.

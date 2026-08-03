@@ -9,8 +9,9 @@ between client, memory server, and SpaceServer.
   `/api/storage/memory` (`packages/toolshed/routes/storage/memory/`).
 - Client storage stack: `packages/runner/src/storage/` (`interface.ts`,
   `extended-storage-transaction.ts`, `query.ts`, `reactivity-log.ts`).
-- Store tables: `commit`, `revision`, `head`, `branch`,
-  `execution_lease` (engine-v3).
+- Store tables: `commit`, `revision`, `head`, `branch` (engine-v3).
+  `execution_lease` does not exist on main — it is created in Phase 1
+  (serving-loop.md §2; v1-branch shape as prior art).
 
 ## 1. Commit classes
 
@@ -18,7 +19,7 @@ Every commit carries a `class` in its metadata. Three values, closed set:
 
 | class | producer | contents |
 | --- | --- | --- |
-| `authored` | any authorized session | doc writes (UI bindings, widget edits) or event appends (events.md §1) |
+| `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits — and, until Phase 3 lands, client handler writes: the plan's stated interim posture) or event appends (events.md §1) |
 | `derived` | the space's SpaceServer (lease holder) | derivation results, watermark advance, `consequenceOf` |
 | `system` | memory server itself | space bootstrap, authorization changes — pre-existing, unchanged |
 
@@ -31,7 +32,8 @@ even construct one).
 | commit class | checks, in order |
 | --- | --- |
 | `authored` doc write | session authenticated → write authority on doc/path (existing ACL) → CAS on base revision |
-| `authored` event append | session authenticated → append authority on stream doc → `eventId` unique on stream (CAS) |
+| `authored` event append | session authenticated → append authority on stream doc → `eventId` unique among stream entries above the stream's `eventWatermark` (CAS — the dedupe horizon, events.md §4) |
+| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries `actingPrincipal` + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → CAS |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
 
@@ -42,12 +44,15 @@ happened elsewhere. If an admission question cannot be answered by
 
 ## 2b. Cross-space writes
 
-The storage layer already enforces the load-bearing rule (anchor:
-`packages/runner/src/storage/interface.ts` `writer(space)` — a
-transaction FAILS if a writer for a different space was already opened
-on it): **one transaction writes one space.** Reads cross freely
-(serving-loop.md §3b; cross-space label metadata flows with them). v2
-keeps that invariant and adds the class discipline:
+The storage layer already enforces the load-bearing rule: **one
+transaction writes one space — by DEFAULT, with one explicit opt-in.**
+A transaction FAILS if a writer for a different space was already
+opened on it (anchor: `packages/runner/src/storage/interface.ts`
+`writer(space)`) unless it opted in through `enableMultiSpaceWrites`
+(`interface.ts:786`), reachable only via the `.inSpace()` chain below —
+which is what makes an UNMARKED crossing always a bug. Reads cross
+freely (serving-loop.md §3b; cross-space label metadata flows with
+them). v2 keeps that invariant and adds the class discipline:
 
 | crossing | mechanism |
 | --- | --- |
@@ -61,26 +66,35 @@ keeps that invariant and adds the class discipline:
 The event append crosses as an ordinary `authored` commit under the
 piece's append capability, carried by the OUTBOX (serving-loop.md §5):
 at-least-once, deduped by `eventId` at the target's admission, FIFO per
-(source wave → target stream). The target's SpaceServer processes it
-like any event. This matches the codebase's own convention — patterns
-already mutate cross-space through exported streams — and it is now the
-rule, not a style: a server action tx that opens a foreign-space writer
-is a runtime error naming this section.
+(source wave → target stream). The commit carries
+`actingPrincipal` + `capabilityRef` metadata and the target's admission
+validates that grant (§2) — delegation, never impersonation. The
+target's SpaceServer processes it like any event. This matches the
+codebase's own convention — patterns already mutate cross-space through
+exported streams — and it is now the rule, not a style: a server action
+tx that opens a foreign-space writer is a runtime error naming this
+section.
 
 **Provisioning writes — the second sanctioned crossing
 (`.inSpace(...)`)**: the profile-system patterns create foreign spaces —
 even mint new ones — from a handler (`profile-create.tsx`,
-`ProfileHome.inSpace()`); the transaction layer already threads a
-`destinationSpace` per write (`extended-storage-transaction.ts`) and
-today splits the commit foreign-first, home-after-success. v2 keeps the
-API, the split, and the order, relocated into the wave's commit step:
+`ProfileHome.inSpace()`). The real chain is an explicit opt-in
+end to end: `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
+(`builder/pattern.ts:1084`) → `enableCrossSpaceChildCommit`
+(`runner.ts:4733`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts:786`) →
+`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:2077/2156` —
+sequential, stop at first failure): today already foreign-first,
+home-after-success. v2 keeps the API, the split, and the order,
+relocated into the wave's commit step:
 
 - Provisioning writes seal as AUTHORED-class commits into the
   destination space, under the **acting principal of the event** whose
   handler produced them (creating THEIR space — the one settled case of
-  Q6). Never derived-class: single-deriver per space is untouched, and
-  the minted space's own SpaceServer activates later (first session or
-  event) as its only deriver.
+  Q6), carried as `actingPrincipal` + `capabilityRef` commit metadata
+  for the target's admission (§2). Never derived-class: single-deriver
+  per space is untouched, and the minted space's own SpaceServer
+  activates later (first session or event) as its only deriver.
 - Sequencing at the wave commit step: foreign provisioning commits land
   FIRST (per destination space), then the home derived commit carrying
   the links and the `eventWatermark` advance. Same host, same process —
@@ -93,10 +107,14 @@ API, the split, and the order, relocated into the wave's commit step:
   event), so a replayed handler re-derives the SAME ids and the
   re-provisioning is a CAS no-op. The today-orphan window (foreign
   landed, home did not) becomes convergent instead of dangling.
+  Provisioning handlers MUST therefore be deterministic given
+  payload + cells — no clock, no randomness (events.md §3); replay
+  convergence depends on it. A transformer lint can trail.
 - The foreign-writer runtime error therefore narrows to ACCIDENTAL
-  crossings: a server action tx may write a foreign space exactly where
-  the API marked it (`destinationSpace` present). Unmarked foreign
-  writes remain an error naming this section.
+  crossings: a server action tx may write a foreign space exactly
+  where the API opted in (the `.inSpace()` chain above). Unmarked
+  foreign writes remain an error naming this section — one tx, one
+  space is the default, so an unmarked crossing is always a bug.
 - Sharded future (spaces not co-hosted): provisioning becomes
   outbox-carried and the home commit defers a wave. Out of v2 scope.
 
@@ -131,6 +149,10 @@ the target's `eventWatermark` makes processing exactly-once.
 - Client use: "settled" for a client = `W ≥ seq(my last authored
   commit)`. Integration tests MUST wait on this instead of text-polling
   (testing.md §3). Sync indicators read the same signal.
+- W covers DEMANDED derivations (pull-based laziness, serving-loop.md
+  §3b). Client subscriptions are demand, so a fresh subscription
+  arriving after W may still trigger a recompute, whose results land in
+  a later derived commit.
 - The watermark is ONE integer per space. Not per-doc, not per-piece, not
   vectorized. If a consumer seems to need a finer watermark, escalate
   before building it.
@@ -155,8 +177,11 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   is reversible). Reload between intent and ack: on resubscribe the
   client sees unacked intents and enacts them; nonces make re-enactment
   detectable.
-- Effects docs are session-lifetime: retired with the session. Nothing
-  global, nothing cross-session.
+- Session lifecycle: `sessionId` is minted at client connect, persisted
+  client-side across reloads, and retired explicitly on logout or by
+  TTL. Effects docs are session-lifetime: a dead session's unacked
+  intents retire with its effects doc. Nothing global, nothing
+  cross-session.
 
 FORBIDDEN: new kinds without a spec edit here; a push channel outside the
 doc/subscription model; server-side retries of enactment.
@@ -171,13 +196,17 @@ serving loop. `stream-data` stays disabled (README §3.5).
 ## 7. Wire-shape discipline
 
 - Commit metadata additions in v2, complete list: `class`, `holder`
-  (derived only), `derivedThrough` (derived only),
-  `consequenceOf` (derived only), `eventId`/`firedAt` (event appends).
-  Anything further needs a spec edit here first.
-- All metadata is small and fixed-shape. The v1 failure mode — 130 KB of
+  (derived only), `derivedThrough` (derived only), `consequenceOf`
+  (derived only), `eventId`/`firedAt` (event appends),
+  `actingPrincipal`/`capabilityRef` (server-produced authored commits
+  only — §2). Anything further needs a spec edit here first.
+- All metadata is small and fixed-shape, with one bounded carve-out:
+  `consequenceOf` scales with the wave's INPUT (the events drained that
+  wave), never with graph size. The v1 failure mode — 130 KB of
   serialized read links per record — is structurally impossible if this
-  list is respected. A metadata field that scales with graph size is
+  list is respected. A metadata field that scales with GRAPH size is
   FORBIDDEN.
 - Writes inside a `derived` commit keep PER-ACTION provenance for CFC
-  label purposes (serving-loop.md §3c): the commit is a transport batch,
-  never a label boundary.
+  label purposes (serving-loop.md §3c), carried in the write PAYLOAD,
+  never as commit metadata: the commit is a transport batch, never a
+  label boundary.
