@@ -9,6 +9,7 @@ import type {
   GenerationContext,
   SchemaGenerationOptions,
   SchemaGenerator as ISchemaGenerator,
+  SchemaHints,
   TypeFormatter,
 } from "./interface.ts";
 import { attachUiContract, getUiContractHint } from "./ui-contract.ts";
@@ -58,21 +59,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
   ): MutableJSONSchema {
     return this.generateSchemaInternal(
@@ -97,21 +84,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
     options?: SchemaGenerationOptions,
   ): MutableJSONSchema {
@@ -138,21 +111,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
   ): MutableJSONSchema {
     // Create unified context with all state
