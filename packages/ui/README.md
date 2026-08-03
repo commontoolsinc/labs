@@ -162,6 +162,23 @@ Useful references:
 | `cf-drop-zone` | `cf-keybind`   | `cf-piece`       | `cf-piece-menu` |
 | `cf-render`    | `cf-toolbar`   | `cf-updater`     |                 |
 
+### Retired
+
+Kept as inert passthroughs: they render their children and nothing else, warn
+once per session when used, and are `@deprecated` so authoring flags them.
+Durable pattern source still names them, and a piece runs the source it was
+stored with — so deleting the definition strands that source rather than
+retiring the element. They leave once nothing durable emits them. See
+`src/v2/core/retired-element.ts`.
+
+Replacements are named unbacktick'd on purpose: the registration test reads
+every backticked `cf-*` in this section as a registered element, and a name
+repeated here is a duplicate.
+
+| Element           | Retired in | Use instead   |
+| ----------------- | ---------- | ------------- |
+| `cf-cell-context` | #5132      | cf-piece-menu |
+
 ## 🔒 Security Constraints
 
 Components are designed for secure, sandboxed environments:
