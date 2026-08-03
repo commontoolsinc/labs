@@ -68,7 +68,6 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import { hasEncodableForm } from "./encodable-form.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type AddCancel,
@@ -5127,42 +5126,32 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    // Keyed on the pattern's ENCODABLE FORM, hashed, and ABSENT when the
-    // pattern has no such form -- a hand-built one does not.
+    // Keyed on a HASH of the pattern's encodable form, rather than on a
+    // stringification of the pattern.
     //
-    // The distinction is the whole point. `JSON.stringify` has three ways of
-    // saying nothing (`undefined` for an unserializable value, `null` for such
-    // an array element, `{}` for an object of them), and the first is also
-    // what a cache miss looks like. Comparing them made a pattern that had
-    // never been seen read as unchanged, so it was never instantiated -- two
-    // absences agreeing, with nothing to observe at the comparison. An absent
-    // key now means "cannot say", which re-instantiates rather than skips.
+    // Not a bug fix: the value here is always a factory, which carries a
+    // serializer, so `JSON.stringify` of it was always a string. It is a
+    // better key. A content hash is canonical where `JSON.stringify` is
+    // sensitive to key order, and it cannot answer `undefined` -- which
+    // matters because `undefined` is also what a cache MISS looks like, so a
+    // stringification that ever failed to produce one would read as "seen
+    // this, unchanged" for a pattern never seen at all. Three sites in this
+    // tree already guard that shape by hand; keying on a hash removes the
+    // need to.
     //
-    // Note the key follows resolution state: the encodable form omits a
-    // module's stringified body when the reading runtime's harness can resolve
-    // its `$implRef`, so an answer that changes re-keys the pattern.
-    // Through the preflight, not the pattern's own form alone: a sub-graph
-    // reached through a node's `inputs` (an op) is not covered by the graph
-    // serializer, and a live function reaching the hash is an error where
-    // `JSON.stringify` merely dropped it. Fixing the route rather than the
-    // one path keeps this consumer honest as new routes appear.
-    const resultPatternKey = hasEncodableForm(resultPattern)
-      ? hashStringOf(flattenBuilderArtifacts(resultPattern))
-      : undefined;
+    // Taken through the artifact walk, so an artifact reached by any route --
+    // including a sub-graph under a node's `inputs` -- is serialized before it
+    // is hashed. `hashOf` refuses a live function where `JSON.stringify`
+    // silently dropped one, so an unflattened value would throw here.
+    const resultPatternKey = hashStringOf(
+      flattenBuilderArtifacts(resultPattern),
+    );
     const cacheKey = this.getDocKey(resultCell);
     const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
-    const patternUnchanged = resultPatternKey !== undefined &&
-      previousResultPatternKey === resultPatternKey;
+    const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      // Only a key that says something is worth remembering; "cannot say"
-      // must not be recorded, or the next comparison inherits the ambiguity
-      // this whole shape exists to remove.
-      if (resultPatternKey !== undefined) {
-        this.resultPatternCache.set(cacheKey, resultPatternKey);
-      } else {
-        this.resultPatternCache.delete(cacheKey);
-      }
+      this.resultPatternCache.set(cacheKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,

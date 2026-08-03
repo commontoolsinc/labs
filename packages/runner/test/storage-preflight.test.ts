@@ -15,6 +15,11 @@ function artifact(serialized: unknown): Record<string, unknown> {
   };
 }
 
+/** A factory: a function carrying its module's members. */
+function factoryArtifact(serialized: unknown): () => void {
+  return Object.assign(() => {}, artifact(serialized));
+}
+
 describe("flattenBuilderArtifacts()", () => {
   describe("values carrying no artifact", () => {
     it("answers a record by identity", () => {
@@ -52,6 +57,32 @@ describe("flattenBuilderArtifacts()", () => {
         tools: { send: { handler: { serialized: true } } },
         list: [{ second: true }],
       });
+    });
+
+    it("replaces a FUNCTION-shaped artifact", () => {
+      // A factory is a function carrying its module's members, so an artifact
+      // is reached in two shapes and both have to be covered. This is the
+      // shape the live idiom produces: `tools: { x: { pattern: SomePattern } }`.
+      const value = { tool: { pattern: factoryArtifact({ flat: true }) } };
+      expect(flattenBuilderArtifacts(value))
+        .toEqual({ tool: { pattern: { flat: true } } });
+    });
+
+    it("reads each member once", () => {
+      // A copy built by re-reading would run an accessor twice and keep the
+      // second answer, recording a value the object never held at any single
+      // moment.
+      let reads = 0;
+      const value = {
+        artifact: artifact({ flat: true }),
+        get accessor() {
+          reads++;
+          return reads;
+        },
+      };
+      const result = flattenBuilderArtifacts(value) as Record<string, unknown>;
+      expect(reads).toBe(1);
+      expect(result.accessor).toBe(1);
     });
 
     it("descends into the serialized form", () => {
