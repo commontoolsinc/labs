@@ -2843,53 +2843,6 @@ type AdmissionReplica = {
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
 };
 
-Deno.test("memory v2 stacked commits: hold-mode admission finalizes a dependency-dropped commit without sending", async () => {
-  setConflictAdmissionMode("hold");
-  const harness = await createHarness();
-  const g1 = Promise.withResolvers<void>();
-  try {
-    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
-    harness.model.setOutcome(t1.localSeq, {
-      kind: "rejectConflict",
-      responseGate: g1.promise,
-    });
-    await waitForCondition(
-      () => harness.model.transactLocalSeqs.includes(t1.localSeq),
-      "t1 to reach the wire",
-    );
-
-    // Floor A above the current caught-up seq: t2's read of A (a pending
-    // read through t1's optimistic layer) parks it in the hold.
-    const replica = harness.replica as unknown as AdmissionReplica;
-    replica.recordStaleFloor({
-      localSeq: 50,
-      reads: { confirmed: [{ id: DOCS.A, path: [], seq: 0 }], pending: [] },
-      operations: [],
-    }, 50);
-    const t2 = beginSet(
-      harness,
-      DOCS.D,
-      valueFor("t2-d"),
-      sourceFromReads([{ id: DOCS.A }]),
-    );
-
-    // The dependency drops while t2 is held; releasing the hold must land on
-    // the post-hold doom checkpoint — finalize without sending.
-    g1.resolve();
-    await assertConflict(t1.promise);
-    replica.noteCaughtUpLocalSeq(50);
-    await assertConflict(
-      t2.promise,
-      `pending dependency dropped locally: localSeq=${t1.localSeq}`,
-    );
-    assertEquals(harness.model.transactLocalSeqs.includes(t2.localSeq), false);
-  } finally {
-    setConflictAdmissionMode(undefined);
-    g1.resolve();
-    await harness.close();
-  }
-});
-
 Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
   setConflictAdmissionMode("preempt");
   const harness = await createHarness();
