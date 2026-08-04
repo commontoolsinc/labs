@@ -101,6 +101,7 @@ import {
 } from "./cfc/metadata.ts";
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -484,6 +485,19 @@ declare module "@commonfabric/api" {
     getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): Reactive<T>;
+    /**
+     * Returns the sigil link naming this cell, or `null` when the cell has no
+     * full link yet (one that has not been created). This is how a cell reaches
+     * storage: the link is what stands in for it, and `hasEncodableForm()` asks
+     * for this member by name.
+     */
+    toSigilLinkOrNull(): SigilLink | null;
+    /**
+     * Answers the JSON protocol with the same link `toSigilLinkOrNull()` gives,
+     * so a cell embedded in a value being stringified reads as what it names.
+     * `packages/html`'s VDOM key generation depends on this. Nothing on the way
+     * to storage consults it.
+     */
     toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
@@ -542,6 +556,7 @@ const cellMethods = new Set<
   "filterWithPattern",
   "flatMap",
   "flatMapWithPattern",
+  "toSigilLinkOrNull",
   "toJSON",
   "for",
   "asSchema",
@@ -1804,7 +1819,7 @@ export class CellImpl<T extends FabricValue>
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
       const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(candidate)
+        ? fabricFromNativeValue(flattenBuilderArtifacts(candidate))
         : candidate;
       return existing.some((element) => valueEqual(element, comparable));
     };
@@ -2866,7 +2881,7 @@ export class CellImpl<T extends FabricValue>
     return result;
   }
 
-  toJSON(): SigilLink | null {
+  toSigilLinkOrNull(): SigilLink | null {
     // Return null when no link exists (cell hasn't been created yet)
     if (!this.hasFullLink()) {
       return null;
@@ -2874,6 +2889,17 @@ export class CellImpl<T extends FabricValue>
 
     // Use sigil link format which includes space for cross-space references
     return createSigilLinkFromParsedLink(this.link);
+  }
+
+  toJSON(): SigilLink | null {
+    // The JSON protocol's name for the same link. `generateKey()` in
+    // `packages/html/src/worker/keying.ts` stringifies render nodes to key
+    // them, and a cell inside one has to come out as the link it names for a
+    // key to be stable across renders.
+    //
+    // It carries no weight on the way to storage: what a cell reaches storage
+    // as is read from `toSigilLinkOrNull()` by name.
+    return this.toSigilLinkOrNull();
   }
 
   get __debugValue(): T {
