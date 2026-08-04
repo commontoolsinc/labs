@@ -58,16 +58,26 @@ const SUBJECT_CHANGED = SUBJECT
       "  return { items, later };",
   );
 
+const CHILD_KEY = "adopt-child.tsx";
+const CHILD_CAUSE = "adopt-child-root";
+
+/** A second, independent pattern standing in for a sub-pattern root: the
+ * adopter addresses children by entity id, so where the id came from does not
+ * matter to what is under test. */
+const CHILD = SUBJECT.replace("['kept']", "['child-kept']");
+
 describe("vintage adopt", () => {
   let dir = "";
   let roots: AdoptRoots;
   let snapshotPath = "";
   let identity = "";
+  let childCellId = "";
 
   beforeEach(async () => {
     dir = await Deno.makeTempDir({ prefix: "vintage-adopt-test-" });
     await Deno.mkdir(`${dir}/patterns`, { recursive: true });
     await Deno.writeTextFile(`${dir}/patterns/${KEY}`, SUBJECT);
+    await Deno.writeTextFile(`${dir}/patterns/${CHILD_KEY}`, CHILD);
     roots = {
       repoRoot: dir,
       patternsRoot: `${dir}/patterns`,
@@ -100,6 +110,30 @@ describe("vintage adopt", () => {
           space: capture.space as never,
         }),
       )!.identity;
+
+      const childProgram = await capture.runtime.harness.resolve(
+        new FileSystemProgramResolver(`${dir}/patterns/${CHILD_KEY}`, dir),
+      );
+      const childOutcome = await materializeOnCell(
+        capture,
+        childProgram as never,
+        (v, resultSchema) =>
+          v.runtime.getCell(
+            v.space as never,
+            CHILD_CAUSE,
+            resultSchema as never,
+          ),
+      );
+      expect(childOutcome.error).toBeUndefined();
+      childCellId = String(
+        (capture.runtime.getCell(
+          capture.space as never,
+          CHILD_CAUSE,
+          undefined as never,
+        ) as { getAsNormalizedFullLink(): { id: string } })
+          .getAsNormalizedFullLink().id,
+      );
+
       snapshotPath = `${dir}/external-capture.sqlite`;
       await capture.snapshot(snapshotPath);
     } finally {
@@ -143,6 +177,40 @@ describe("vintage adopt", () => {
     expect(changed).toBe(1);
     expect(updated).toBe(1);
     expect(stranded).toBe(0);
+  });
+
+  it("records children the replay then materializes as targets", async () => {
+    // The reason `children` exists: a manifest holding only the root leaves
+    // every sub-pattern root outside the gate's presence and state controls.
+    // Each child's identity and symbol must come from its own stored
+    // patternIdentity, and the child must replay as a full target.
+    await Deno.writeTextFile(`${dir}/patterns/${KEY}`, SUBJECT_CHANGED);
+    await Deno.writeTextFile(
+      `${dir}/patterns/${CHILD_KEY}`,
+      CHILD.replace("['child-kept']", "['child-kept', 'evolved']"),
+    );
+    await adopt({
+      children: [{ cellId: childCellId, main: `/patterns/${CHILD_KEY}` }],
+    });
+
+    const report = await replayAll(roots);
+    expect(report.failures).toEqual([]);
+    expect(report.targets).toBe(2);
+    expect(report.changed).toBe(2);
+    expect(report.updated).toBe(2);
+    expect(report.stranded).toBe(0);
+  });
+
+  it("refuses a child id that carries no patternIdentity", async () => {
+    await expect(
+      adopt({
+        children: [{
+          cellId: "of:fid1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          main: `/patterns/${CHILD_KEY}`,
+        }],
+      }),
+    ).rejects.toThrow("carries no patternIdentity");
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
   });
 
   it("refuses a main the replay could not map, writing nothing", async () => {

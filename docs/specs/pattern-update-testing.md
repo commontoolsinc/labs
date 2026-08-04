@@ -309,7 +309,7 @@ that revision's own pinned Deno, compiler, runner and memory stack — and the
 current tree **adopts** the resulting store:
 
 ```
-deno run -A tasks/vintage-adopt.ts <snapshot.sqlite> <identity> <test key> <main> [cause]
+deno run -A tasks/vintage-adopt.ts <snapshot.sqlite> <identity> <test key> <main> [cause] [--child=<cellId>=<main>]...
 ```
 
 The snapshot file is the interchange format; reopening it in the current tree
@@ -319,6 +319,15 @@ trusting the old tree's id formatting — cause-derived entity ids are stable
 across revisions, and a mismatch here fails the adopt rather than producing a
 fixture whose manifest addresses nothing. It then writes the in-store manifest
 and emits a normal pinned fixture.
+
+Record the sub-pattern roots too, via `--child`. A manifest holding only the
+entry root leaves every child outside the gate's presence and state controls —
+and for a pattern like home, the children ARE the state whose survival is in
+question. A child's id is position-derived rather than cause-derived, so it
+cannot be re-derived at adopt time: enumerate the snapshot's
+`patternIdentity`-carrying cells (a SQL query over `head`/`revision` suffices)
+and hand each one's id and source path to `--child`; the identity and symbol
+come from the child's own stored marker.
 
 Two accommodations exist for adopted fixtures, both in the harness:
 
@@ -365,7 +374,14 @@ specification:
   (`pattern-load-error`), then heals because the updated root re-instantiates
   children from today's compiled program. The gate stays green through those
   load failures — it has no eyes on them — so a path that *depends* on such a
-  load succeeding is outside what a green run asserts.
+  load succeeding is outside what a green run asserts. Two consequences worth
+  naming: the replay runtime sets neither `systemPatternAutoUpdate` nor a CFC
+  enforcement mode, so the heal above is the parent re-creating children, not
+  the production roll-forward repair — that path has its own flags-on
+  assertion in `packages/runner/test/pattern-pointer-unloadable-swap.test.ts`;
+  and what an adopted fixture pins is old *source*, not old *storage format* —
+  the memory migration chain runs once at adopt time, so the committed file
+  already carries today's schema and CI does not re-exercise the migrations.
 - **The open-argument residual.** The class is validated on every update route,
   but a root carrying no `patternSetupIdentity` marker at all still skips the
   re-stage, because absence cannot be told from a pending update. The window is

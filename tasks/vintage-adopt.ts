@@ -67,6 +67,18 @@ export interface AdoptOptions {
   /** Capture cause of the root cell. Defaults to `"home-pattern"`, the cause
    * `ensureDefaultPattern` mints the home root with. */
   cause?: string;
+  /**
+   * Sub-pattern roots to record alongside the entry root, addressed by the
+   * entity id the capture minted them at (a child's id is position-derived,
+   * not cause-derived, so it cannot be re-derived here — enumerate the
+   * snapshot's `patternIdentity`-carrying cells to find them). Without these
+   * the manifest holds only the root, and the gate's presence and
+   * before/after state controls never touch the children — which for a
+   * pattern like home is exactly the state whose survival the fixture exists
+   * to check. Each child's identity and symbol come from its own stored
+   * `patternIdentity`; each `main` is validated like the root's.
+   */
+  children?: readonly { cellId: string; main: string }[];
   roots: AdoptRoots;
   /** Capture stamp; injectable so a test is deterministic. */
   now?: Date;
@@ -79,24 +91,9 @@ function patternsPrefix(roots: AdoptRoots): string {
   return `${roots.patternsRoot.slice(roots.repoRoot.length)}/`;
 }
 
-/**
- * Validate and adopt. Returns the path of the written fixture. Throws — with
- * nothing written — on any refusal.
- */
-export async function adoptVintage(options: AdoptOptions): Promise<string> {
-  const {
-    snapshotPath,
-    expectedIdentity,
-    testKey,
-    main,
-    roots,
-    now = new Date(),
-    log = () => {},
-  } = options;
-  const cause = options.cause ?? "home-pattern";
-
-  // Static entry validation first: these need no runtime, and an entry the
-  // replay cannot address must never reach the store-writing steps.
+/** Map `main` to a pattern key, refusing anything the replay could not
+ * identity-compare. Shared by the root and every child entry. */
+function mappedRepoKey(main: string, roots: AdoptRoots): string {
   const key = patternKeyFromMain(main, patternsPrefix(roots));
   if (key === undefined) {
     throw new Error(
@@ -117,6 +114,30 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
         `${patternsPrefix(roots)}${key} instead`,
     );
   }
+  return key;
+}
+
+/**
+ * Validate and adopt. Returns the path of the written fixture. Throws — with
+ * nothing written — on any refusal.
+ */
+export async function adoptVintage(options: AdoptOptions): Promise<string> {
+  const {
+    snapshotPath,
+    expectedIdentity,
+    testKey,
+    main,
+    roots,
+    now = new Date(),
+    log = () => {},
+  } = options;
+  const cause = options.cause ?? "home-pattern";
+  const children = options.children ?? [];
+
+  // Static entry validation first: these need no runtime, and an entry the
+  // replay cannot address must never reach the store-writing steps.
+  const key = mappedRepoKey(main, roots);
+  const childKeys = children.map((child) => mappedRepoKey(child.main, roots));
   const candidate: VintageManifestEntry = {
     identity: expectedIdentity,
     symbol: "default",
@@ -160,28 +181,66 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
       );
     }
 
-    // Today's source must resolve and compile — the replay's first two moves
-    // per target, run here so a fixture cannot be pinned pointing at a source
-    // that is already missing or broken.
-    const source = `${roots.patternsRoot}/${key}`;
-    let program;
-    try {
-      program = await vintage.runtime.harness.resolve(
-        new FileSystemProgramResolver(source, roots.repoRoot),
-      );
-    } catch (error) {
-      throw new Error(
-        `today's source for "${main}" does not resolve (${source}): ${error}`,
-      );
+    // Each child root, addressed by the id the capture minted. The stored
+    // `patternIdentity` supplies its identity and symbol — a cell without one
+    // is a wrong id or an entity that is not a pattern root, and refusing it
+    // here beats a manifest entry the replay reports as missing forever.
+    const childEntries: VintageManifestEntry[] = [];
+    for (const child of children) {
+      const cell = vintage.runtime.getCellFromEntityId(
+        vintage.space as never,
+        child.cellId as never,
+        [],
+        undefined as never,
+      ) as Cell<unknown>;
+      await cell.sync();
+      const childRef = getPatternIdentityRef(cell);
+      if (childRef === undefined) {
+        throw new Error(
+          `child ${child.cellId} carries no patternIdentity — wrong id, or ` +
+            `not a pattern root`,
+        );
+      }
+      const childEntry: VintageManifestEntry = {
+        identity: childRef.identity,
+        symbol: childRef.symbol,
+        main: child.main,
+        cellId: child.cellId,
+        space: vintage.space,
+      };
+      if (!isUpgradeTarget(childEntry)) {
+        throw new Error(
+          `child "${child.main}" (identity ${childRef.identity}) is not an ` +
+            `upgrade target`,
+        );
+      }
+      childEntries.push(childEntry);
     }
-    try {
-      await vintage.runtime.patternManager.compilePattern(program as never, {
-        space: vintage.space as never,
-      });
-    } catch (error) {
-      throw new Error(
-        `today's source for "${main}" does not compile: ${error}`,
-      );
+
+    // Today's source must resolve and compile for EVERY recorded main — the
+    // replay's first two moves per target, run here so a fixture cannot be
+    // pinned pointing at a source that is already missing or broken.
+    for (const entryKey of new Set([key, ...childKeys])) {
+      const source = `${roots.patternsRoot}/${entryKey}`;
+      let program;
+      try {
+        program = await vintage.runtime.harness.resolve(
+          new FileSystemProgramResolver(source, roots.repoRoot),
+        );
+      } catch (error) {
+        throw new Error(
+          `today's source ${source} does not resolve: ${error}`,
+        );
+      }
+      try {
+        await vintage.runtime.patternManager.compilePattern(program as never, {
+          space: vintage.space as never,
+        });
+      } catch (error) {
+        throw new Error(
+          `today's source ${source} does not compile: ${error}`,
+        );
+      }
     }
 
     const entry: VintageManifestEntry = {
@@ -191,7 +250,7 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
       cellId: String(link.id),
       space: vintage.space,
     };
-    await writeVintageManifest(vintage, [entry]);
+    await writeVintageManifest(vintage, [entry, ...childEntries]);
     const back = await readVintageManifest(vintage);
     log(`manifest readback: ${JSON.stringify(back)}`);
 
@@ -230,21 +289,33 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
 }
 
 if (import.meta.main) {
-  const [snapshotPath, expectedIdentity, testKey, main] = Deno.args;
+  const childArgs = Deno.args.filter((arg) => arg.startsWith("--child="));
+  const positional = Deno.args.filter((arg) => !arg.startsWith("--child="));
+  const [snapshotPath, expectedIdentity, testKey, main] = positional;
   if (!snapshotPath || !expectedIdentity || !testKey || !main) {
     console.error(
       "usage: vintage-adopt.ts <snapshot.sqlite> <identity> <test key> " +
-        "<main> [cause]",
+        "<main> [cause] [--child=<cellId>=<main>]...",
     );
     Deno.exit(2);
   }
+  const children = childArgs.map((arg) => {
+    const value = arg.slice("--child=".length);
+    const split = value.indexOf("=");
+    if (split < 1) {
+      console.error(`malformed --child argument: ${arg}`);
+      Deno.exit(2);
+    }
+    return { cellId: value.slice(0, split), main: value.slice(split + 1) };
+  });
   const repoRoot = Deno.cwd();
   await adoptVintage({
     snapshotPath,
     expectedIdentity,
     testKey,
     main,
-    cause: Deno.args[4],
+    cause: positional[4],
+    children,
     roots: {
       repoRoot,
       patternsRoot: `${repoRoot}/packages/patterns`,

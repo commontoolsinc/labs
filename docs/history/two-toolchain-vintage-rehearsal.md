@@ -249,6 +249,14 @@ console.log(JSON.stringify({
   presence accepts `patternIdentity` as well as `patternSetupIdentity`
   (the setup marker postdates every genuinely-old store), and the adopter
   stamps the restore-control doc a native capture gets from its test run.
+- The committed fixture's manifest records five entries — the home root plus
+  its four children (favorites-manager, self, profile-picker,
+  profile-create), each addressed by the entity id the June capture minted
+  and carrying its own stored June identity. The children were discovered by
+  enumerating the snapshot's `patternIdentity`-carrying cells and matched to
+  sources by their `$NAME`s. All five replay as identity-compared targets;
+  a root-only manifest was measured first and left the children — the state
+  whose blanking motivated the work — outside every gate control.
 
 ## CT-1939 relevance (why this vintage, why now)
 
