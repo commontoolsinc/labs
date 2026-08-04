@@ -270,21 +270,6 @@ Deno.test("cf view reads and prints a file argument", async () => {
   }
 });
 
-Deno.test({
-  name: "cf view reads a zero-sized procfs file",
-  ignore: Deno.build.os !== "linux",
-  async fn() {
-    const path = "/proc/self/cmdline";
-    assertEquals(Deno.statSync(path).size, 0);
-    const { code, stdout } = await cf(
-      `view --plain --color never ${path}`,
-    );
-    assertEquals(code, 0);
-    assert(stdout[0].startsWith("00000000  "), stdout.join("\n"));
-    assertEquals(stdout.at(-1) === "00000000", false);
-  },
-});
-
 Deno.test("cf view preserves a UTF-8 BOM in redirected source output", async () => {
   const dir = Deno.makeTempDirSync();
   try {

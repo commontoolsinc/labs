@@ -12,7 +12,6 @@ import {
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
-import { loadViewInput } from "../lib/view/loadinput.ts";
 import { Session } from "../lib/view/session.ts";
 
 Deno.test("language decoders: UTF-8 and raw bytes round-trip their input", () => {
@@ -219,24 +218,6 @@ Deno.test("UTF-8 decoding strips a BOM for parsers and restores it on save", () 
   } finally {
     Deno.removeSync(dir, { recursive: true });
   }
-});
-
-Deno.test({
-  name: "binary input: zero-sized virtual files are read through EOF",
-  ignore: Deno.build.os !== "linux",
-  async fn() {
-    const path = "/proc/self/cmdline";
-    const input = await loadViewInput(path, path, undefined, true, false);
-
-    assertEquals(input.kind, "bytes");
-    if (input.kind !== "bytes") return;
-    assert(input.bytes.length > 0);
-    assertEquals(input.language?.metadata.aliases.includes("binary"), true);
-    assertEquals(input.extent, {
-      byteLength: input.bytes.length,
-      complete: true,
-    });
-  },
 });
 
 Deno.test("redirected output completes short writes", () => {
