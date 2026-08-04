@@ -669,6 +669,15 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`verdictCatchUpMarkers`** is a build-inherent capability, hardwired to
+>   `true`, advertising that the server stages a `caughtUpLocalSeq` catch-up
+>   obligation for every accept and conflict rejection, delivered on the
+>   batched fan-out (CT-1927; `04-protocol.md` §4.11.2). It is not
+>   configuration: the CLIENT keys verdict parking on it — an accepted
+>   commit's promotion waits for the marker only when the server advertises
+>   the capability AND a sync consumer is live; against an older server (or
+>   with no watch view) verdicts apply immediately, the historical behavior.
+>   Added by Robin McCollum (CT-1927). It is permanent.
 > - **`pendingReadStacks`** is a build-inherent capability, hardwired to `true`,
 >   advertising that this build's engine resolves array-`localSeq` pending reads
 >   (the full-stack dependency sets of CT-1872 1c; `resolvePendingReads` in

@@ -9,6 +9,7 @@ import {
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
+  type SessionSync,
 } from "../v2.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
@@ -29,6 +30,39 @@ const assertResponse = <Result>(
 ): ResponseMessage<Result> => {
   assertEquals(message.type, "response");
   return message as ResponseMessage<Result>;
+};
+
+// CT-1927: every transact verdict stages a catch-up marker that rides the
+// next batched frame — a marker-only empty frame when nothing watched is
+// dirty. Tests whose subject is not verdict ordering shift past those
+// frames here; the ordering contract itself is pinned by
+// v2-verdict-catchup-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+    // Only MARKER-ONLY frames may be skipped implicitly: no upserts, no
+    // removes, no scheduler observations, and carrying the caughtUpLocalSeq
+    // marker that is such a frame's reason to exist. Anything else is
+    // content a test must consume explicitly, or an erroneous self-echo,
+    // observation delivery, or markerless empty frame would be silently
+    // swallowed here.
+    const effect = (message as SessionEffectMessage)
+      .effect as unknown as SessionSync;
+    if (
+      effect.upserts.length > 0 || effect.removes.length > 0 ||
+      (effect.observations?.length ?? 0) > 0 ||
+      effect.caughtUpLocalSeq === undefined
+    ) {
+      throw new Error(
+        "nextResponse skipped a non-marker-only sync frame; consume it explicitly",
+      );
+    }
+  }
 };
 
 const assertEffect = (message: ServerMessage): SessionEffectMessage => {
@@ -74,8 +108,8 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       session: {},
       invocation: authInvocation(writerSessionOpen),
     }));
-    const writerOpen = assertResponse<{ sessionId: string; serverSeq: number }>(
-      shiftMessage(writerMessages),
+    const writerOpen = nextResponse<{ sessionId: string; serverSeq: number }>(
+      writerMessages,
     );
 
     await watcher.receive(encodeMemoryBoundary({
@@ -85,10 +119,10 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       session: {},
       invocation: authInvocation(watcherSessionOpen),
     }));
-    const watcherOpen = assertResponse<{
+    const watcherOpen = nextResponse<{
       sessionId: string;
       serverSeq: number;
-    }>(shiftMessage(watcherMessages));
+    }>(watcherMessages);
 
     const writerSessionId = writerOpen.ok!.sessionId;
     const watcherSessionId = watcherOpen.ok!.sessionId;
@@ -112,7 +146,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
         }],
       },
     }));
-    assertEquals(assertResponse(shiftMessage(writerMessages)).ok, {
+    assertEquals(nextResponse(writerMessages).ok, {
       seq: 1,
       branch: "",
       revisions: [{
@@ -201,7 +235,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       },
     }));
     assertEquals(
-      (assertResponse(shiftMessage(writerMessages)).ok as any)?.seq,
+      (nextResponse(writerMessages).ok as any)?.seq,
       2,
     );
 

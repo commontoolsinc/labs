@@ -132,6 +132,39 @@ const assertResponse = <Result>(
   return message as ResponseMessage<Result>;
 };
 
+// CT-1927: every transact verdict stages a catch-up marker that rides the
+// next batched frame — a marker-only empty frame when nothing watched is
+// dirty. Tests whose subject is not verdict ordering shift past those
+// frames here; the ordering contract itself is pinned by
+// v2-verdict-catchup-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+    // Only MARKER-ONLY frames may be skipped implicitly: no upserts, no
+    // removes, no scheduler observations, and carrying the caughtUpLocalSeq
+    // marker that is such a frame's reason to exist. Anything else is
+    // content a test must consume explicitly, or an erroneous self-echo,
+    // observation delivery, or markerless empty frame would be silently
+    // swallowed here.
+    const effect = (message as SessionEffectMessage)
+      .effect as unknown as SessionSync;
+    if (
+      effect.upserts.length > 0 || effect.removes.length > 0 ||
+      (effect.observations?.length ?? 0) > 0 ||
+      effect.caughtUpLocalSeq === undefined
+    ) {
+      throw new Error(
+        "nextResponse skipped a non-marker-only sync frame; consume it explicitly",
+      );
+    }
+  }
+};
+
 const expectHelloOk = (messages: ServerMessage[]): SessionOpenAuthMetadata => {
   const hello = shiftMessage(messages) as HelloOkMessage;
   assertEquals(hello.type, "hello.ok");
@@ -820,9 +853,7 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
         session: {},
         invocation: authInvocation(sessionOpen),
       }));
-      const opened = assertResponse<SessionOpenResult>(
-        shiftMessage(messages),
-      );
+      const opened = nextResponse<SessionOpenResult>(messages);
       assertExists(opened.ok);
 
       const upsert = repeatedSchemaSync(1).upserts[0];
@@ -841,7 +872,9 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
           }],
         },
       }));
-      shiftMessage(messages);
+      // Consume the transact verdict (and, CT-1927 default-on, the
+      // marker-only frame preceding it).
+      nextResponse(messages);
 
       await connection.receive(encodeMemoryBoundary({
         type: "session.watch.add",
@@ -863,7 +896,7 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
         }],
       }));
 
-      const watched = assertResponse<WatchAddResult>(shiftMessage(messages));
+      const watched = nextResponse<WatchAddResult>(messages);
       assertExists(watched.ok);
       return (watched.ok.sync as SchemaTableSessionSync).schemaTable;
     } finally {

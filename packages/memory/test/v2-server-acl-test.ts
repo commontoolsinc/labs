@@ -12,8 +12,10 @@ import {
   type ResponseMessage,
   type ServerMessage,
   type SessionDescriptor,
+  type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenResult,
+  type SessionSync,
 } from "../v2.ts";
 
 const HELLO_FLAGS = getMemoryProtocolFlags();
@@ -40,6 +42,39 @@ const assertResponse = <Result>(
 ): ResponseMessage<Result> => {
   assertEquals(message.type, "response");
   return message as ResponseMessage<Result>;
+};
+
+// CT-1927: every transact verdict stages a catch-up marker that rides the
+// next batched frame — a marker-only empty frame when nothing watched is
+// dirty. Tests whose subject is not verdict ordering shift past those
+// frames here; the ordering contract itself is pinned by
+// v2-verdict-catchup-test.ts.
+const nextResponse = <Result>(
+  messages: ServerMessage[],
+): ResponseMessage<Result> => {
+  while (true) {
+    const message = shiftMessage(messages);
+    if (message.type !== "session/effect") {
+      return assertResponse<Result>(message);
+    }
+    // Only MARKER-ONLY frames may be skipped implicitly: no upserts, no
+    // removes, no scheduler observations, and carrying the caughtUpLocalSeq
+    // marker that is such a frame's reason to exist. Anything else is
+    // content a test must consume explicitly, or an erroneous self-echo,
+    // observation delivery, or markerless empty frame would be silently
+    // swallowed here.
+    const effect = (message as SessionEffectMessage)
+      .effect as unknown as SessionSync;
+    if (
+      effect.upserts.length > 0 || effect.removes.length > 0 ||
+      (effect.observations?.length ?? 0) > 0 ||
+      effect.caughtUpLocalSeq === undefined
+    ) {
+      throw new Error(
+        "nextResponse skipped a non-marker-only sync frame; consume it explicitly",
+      );
+    }
+  }
 };
 
 /** Server whose session principal is taken (untested-crypto, test-only) from
@@ -100,9 +135,7 @@ const openSession = async (
       challenge: sessionOpen.challenge.value,
     },
   }));
-  return assertResponse<SessionOpenResult>(
-    shiftMessage(messages),
-  );
+  return nextResponse<SessionOpenResult>(messages);
 };
 
 const transactOperation = async (
@@ -125,7 +158,7 @@ const transactOperation = async (
       operations: [operation as unknown as Operation],
     },
   }));
-  return assertResponse<{ seq: number }>(shiftMessage(messages));
+  return nextResponse<{ seq: number }>(messages);
 };
 
 const transactSet = async (
@@ -158,7 +191,7 @@ const graphQuery = async (
     sessionId,
     query: { roots: [{ id, selector: { path: [], schema: false } }] },
   }));
-  return assertResponse<GraphQueryResult>(shiftMessage(messages));
+  return nextResponse<GraphQueryResult>(messages);
 };
 
 /** Initialize a fresh space through the space identity, then transfer OWNER
@@ -1062,12 +1095,17 @@ Deno.test("acl enforce: owner removing their own access still gets the commit re
       selfRemove.ok,
       "self-removal commit must succeed and report ok, not a revocation",
     );
-    // No session/revoked was pushed to the writing connection for its own tx.
+    // The terminal session/revoked ARRIVES — but only AFTER the verdict
+    // (transactSet consumed the response above, so it ordered first). The
+    // detached session can never be delivered a catch-up marker, and the
+    // revocation is what tells the client its sync channel is gone so a
+    // parked accept applies immediately (CT-1927).
     assertEquals(
-      alice.messages.length,
-      0,
-      "writer must not be revoked before its own response",
+      alice.messages.map((message) => (message as { type?: string }).type),
+      ["session/revoked"],
+      "the writer is revoked only after its own response",
     );
+    alice.messages.length = 0;
 
     // The writer's session was still dropped from the registry (so it receives
     // no further pushes without READ): its next message fails closed as an
