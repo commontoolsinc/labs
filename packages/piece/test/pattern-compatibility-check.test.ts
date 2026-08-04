@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import {
+  getPatternIdentityRef,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
@@ -12,9 +16,12 @@ import { PiecesController } from "../src/ops/pieces-controller.ts";
 // a schema-subset assertion, a retained-link proof, or an argument validation
 // failure at the setup-commit boundary. Fix one, meet the next.
 //
-// `checkPattern()` answers the question up front and applies nothing. It runs
-// the SAME review the apply path runs (`pieceSourceCompatibilityReview`), which
-// is the property worth pinning: a preflight that reimplements the rules drifts
+// `checkPattern()` answers the question up front without changing the piece.
+// (It is not a pure read — compiling the candidate writes content-addressed
+// artifacts into the space — but it moves no pointer and re-stages nothing.)
+// It runs the SAME review the apply path runs
+// (`pieceSourceCompatibilityReview`), which is the property worth pinning: a
+// preflight that reimplements the rules drifts
 // from enforcement and becomes a liar. So these cases assert the two verdicts
 // agree, not merely that each is individually plausible.
 
@@ -169,10 +176,17 @@ describe("setsrc compatibility preflight", () => {
     const piece = await livePiece();
     await runtime.idle();
     const before = JSON.stringify(piece.getCell().getAsQueryResult());
+    const refBefore = getPatternIdentityRef(piece.getCell());
 
     await piece.checkPattern(incompatibleProgram());
     await runtime.idle();
 
+    // The piece is what must be untouched. (The check is not a pure read: it
+    // compiles the candidate, which writes content-addressed artifacts into
+    // the space. Those are attached to nothing — the POINTER is the thing a
+    // caller cares about, so assert it directly rather than inferring it from
+    // the rendered result.)
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(refBefore);
     expect(JSON.stringify(piece.getCell().getAsQueryResult())).toBe(before);
 
     // And the piece still accepts a compatible source afterwards: the refused

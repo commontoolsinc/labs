@@ -3220,13 +3220,19 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Would `setPattern(program)` be accepted? Answers without applying anything.
+   * Would `setPattern(program)` be accepted? Answers without changing the piece.
    *
    * Drives the SAME review the apply path runs — no second copy of the rules,
-   * because a preflight that reimplements them drifts and starts lying. It
-   * compiles the candidate (which the runtime caches, so the subsequent apply
-   * does not pay for it twice) and reads the piece's argument; it opens no
-   * transaction and writes nothing.
+   * because a preflight that reimplements them drifts and starts lying.
+   *
+   * It is not, however, a pure read. Compiling the candidate goes through
+   * `compileAndSavePattern`, which writes the compiled module set and its
+   * source docs into the space's content-addressed store (CT-1623) — the same
+   * write the apply would do, idempotent, and attached to nothing. What it
+   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
+   * source transition, no revision. So a refused check leaves the piece
+   * running exactly what it was running, which is the guarantee a caller
+   * actually needs; it does not leave the space byte-identical.
    */
   async checkPattern(
     program: RuntimeProgram,
