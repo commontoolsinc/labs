@@ -5,7 +5,7 @@ import type {
   GenerateTextRoute,
   GetModelsRoute,
 } from "./llm.routes.ts";
-import { httpStatusForError, LLMUpstreamError } from "./errors.ts";
+import { httpStatusForError } from "./errors.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
