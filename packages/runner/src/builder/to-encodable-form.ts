@@ -29,7 +29,11 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
-import { replaceArtifacts } from "../encodable-form.ts";
+import {
+  encodableFormOf,
+  hasEncodableForm,
+  replaceArtifacts,
+} from "../encodable-form.ts";
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -192,8 +196,7 @@ export function withAliasBindings(
     // serializer (its toJSON under the internal-serialization context): this
     // function builds the in-memory node representation, so embedded
     // sub-pattern graphs must stay bare — no boundary `$patternRef`.
-    const valueToProcess = (isPattern(value) &&
-        typeof (value as unknown as toJSON).toJSON === "function")
+    const valueToProcess = (isPattern(value) && hasEncodableForm(value))
       ? serializePatternGraph(value as unknown as Pattern) as Record<
         string,
         any
@@ -230,11 +233,16 @@ export function withAliasBindings(
 
 export function moduleToEncodableForm(module: Module) {
   const frame = getTopFrame();
-  // Destructure-and-drop the runtime-only methods that handler modules
-  // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
-  // They are not part of the serialized contract; left in, they would surface
-  // as a "not representable as a `FabricValue`: function per se" rejection, so
-  // they are destructured out here.
+  // Destructure-and-drop the runtime-only members a module carries for the
+  // builder's own use: its serializer under BOTH the names it answers to
+  // (`toEncodableForm`, and `toJSON` for the JSON protocol -- see
+  // `json-member.ts`), and the handler ergonomics
+  // (`mod.with(...)`/`mod.bind(...)`). None is part of the serialized
+  // contract; left in, each would surface as a "not representable as a
+  // `FabricValue`: function per se" rejection, so they are destructured out
+  // here. `to-encodable-form.test.ts` asserts the whole resulting key set, an extra
+  // member being a changed content-derived id for every value that carries a
+  // module.
   const {
     implementation: _implementation,
     toEncodableForm: _toEncodableForm,
@@ -363,10 +371,10 @@ let internalGraphSerialization = false;
  * `withAliasBindings` (builder-time node serialization, which the
  * `$opFallback` graphs descend from) and debug tooling.
  *
- * Calls the pattern's own `toJSON` rather than `patternToEncodableForm` directly:
- * factory `toJSON` closures deliberately serialize the ROOT factory (which
- * carries `.program`, set after construction — see builder/pattern.ts), so
- * the indirection is load-bearing.
+ * Asks the pattern for its own encodable form rather than calling
+ * `patternToEncodableForm` directly: a factory's closure deliberately serializes the
+ * ROOT factory (which carries `.program`, set after construction — see
+ * builder/pattern.ts), so the indirection is load-bearing.
  */
 export function serializePatternGraph(
   pattern: Pattern,
@@ -374,9 +382,8 @@ export function serializePatternGraph(
   const previous = internalGraphSerialization;
   internalGraphSerialization = true;
   try {
-    const withToJSON = pattern as unknown as Partial<toJSON>;
-    return (typeof withToJSON.toJSON === "function"
-      ? withToJSON.toJSON()
+    return (hasEncodableForm(pattern)
+      ? encodableFormOf(pattern)
       : patternToEncodableForm(pattern)) as Record<string, unknown>;
   } finally {
     internalGraphSerialization = previous;
@@ -414,16 +421,19 @@ export function patternToEncodableForm(pattern: Pattern) {
     ...(programIdentity ? { program: programIdentity } : {}),
   };
   if (internalGraphSerialization) return graph;
-  // JSON boundary (cell writes, JSON.stringify): REFS-ONLY (design §7,
+  // JSON boundary (cell writes, `JSON.stringify`): REFS-ONLY (design §7,
   // identity E4). The ref is content-derived, so identical bytes re-emit the
-  // identical ref across sessions. Schemas ride along so consumers can read
-  // them without resolving (llm-dialog tool schemas). Rehydration goes by
-  // identity: the session-lifetime artifact index covers every module
-  // evaluated in the reading session (any authored op, by construction), and
-  // async readers fall back to the storage-backed `loadPatternByIdentity` —
-  // compiled artifacts persist in-space as an expected part of compilation.
-  // A pattern with NO entry ref (manually constructed / dynamic) still
-  // serializes its full graph: nothing could ever resolve its ref.
+  // identical ref across sessions. Schemas ride along so consumers read them
+  // without resolving. Rehydration is by identity: the session-lifetime
+  // artifact index, or `loadPatternByIdentity` for an async reader.
+  //
+  // A pattern with NO entry ref serializes its full graph instead, since
+  // nothing could resolve its ref. That graph holds LIVE modules, so the walk
+  // replaces its artifacts here.
+  //
+  // `moduleToEncodableForm` reads `getTopFrame()` to decide `$implRef`. A
+  // frame inherits its parent's runtime (`builder/pattern.ts`), so
+  // `frame.runtime` is the same at every point along one stack.
   const entryRef = getArtifactEntryRef(pattern);
   return entryRef
     ? {

@@ -268,7 +268,7 @@ but equal decoded shells, pre-seal failure, and arbitrary-function rejection.
   `contextSchema` and `eventSchema` before the internal `$ctx`/`$event` schema
   combination.
 - [ ] Populate state from the complete builder descriptor, never from
-  `moduleToJSON(...).$implRef`.
+  `moduleToEncodableForm(...).$implRef`.
 - [ ] Reuse or generalize the derivation/root tracking in
   `packages/runner/src/builder/pattern-metadata.ts` so `asScope()`, `inSpace()`,
   later `.curry()`, and traversal copies share one root token and late ref.

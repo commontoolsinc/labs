@@ -73,6 +73,7 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type AddCancel,
   type Cancel,
@@ -1167,8 +1168,9 @@ export class Runner {
   private locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
-  // Map whose key is the result cell's full key, and whose values are the
-  // patterns as strings
+  // Map whose key is the result cell's full key, and whose values are a hash
+  // of the pattern's encodable form -- what `writeJavaScriptActionResult`
+  // compares to decide whether a returned sub-pattern has changed.
   private resultPatternCache = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
@@ -1399,6 +1401,10 @@ export class Runner {
       undefined,
       tx,
     );
+    // A sub-pattern's argument can carry a builder artifact -- a pattern
+    // handed to another pattern as an input. This is a storage boundary like
+    // any other, so the artifact is replaced on the way in, once, for every
+    // write below: they must agree on what was stored.
     const storable = flattenBuilderArtifacts(argument);
     argumentCell.set(storable);
     // The policy recorder sees the RAW argument, as its sibling in
@@ -5349,14 +5355,25 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    const resultPatternAsString = JSON.stringify(resultPattern);
+    // The change key is a content hash of the pattern's encodable form, taken
+    // through the artifact walk so an artifact reached by any route --
+    // including a sub-graph under a node's `inputs` -- is serialized before it
+    // is hashed. A hash is canonical, so a difference in member order is not a
+    // difference in the key.
+    //
+    // `hashOf` throws on anything the data model refuses. That is a second
+    // line of defense rather than the first: `normalizeSandboxResult` runs on
+    // every route here and already rejects a bare function at any depth, with
+    // a better message than a hash could give.
+    const resultPatternKey = hashStringOf(
+      flattenBuilderArtifacts(resultPattern),
+    );
     const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
-    const patternUnchanged =
-      previousResultPatternAsString === resultPatternAsString;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternAsString);
+      this.resultPatternCache.set(cacheKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -6293,6 +6310,14 @@ export class Runner {
       resultCell,
     );
 
+    // The input bindings are about to cross into the data model, and a
+    // pattern author can bind a builder artifact (a handler, a pattern) as an
+    // ordinary input value at any depth. Each is replaced with its serialized
+    // form on the way, so what crosses is representable -- by the walk INSIDE
+    // `getImmutableCell`, not by a call here. That it happens there and not
+    // alongside the `op` substitution above is what keeps it clear of
+    // `findAllWriteRedirectCells`, which walks the same bindings for a
+    // different purpose and must see them as bound.
     const inputsCell = this.runtime.getImmutableCell(
       resultCell.space,
       mappedInputBindings,

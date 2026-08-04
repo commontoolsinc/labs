@@ -2004,6 +2004,11 @@ export class Runtime {
     // (this data is immutable as given). `fabricFromNativeValue()` converts
     // what callers actually pass -- notably `Cell`s, which become sigil
     // links via their `toJSON()` -- into an encodable `FabricValue`.
+    // Builder artifacts are replaced HERE rather than at each caller. This is
+    // the designed intake, and the callers are many: raw and JavaScript node
+    // inputs, wish candidates, schema defaults. Covering them one at a time was
+    // tried and is whack-a-mole -- each site that is missed fails as a
+    // rejection at the conversion, or worse as a cleanup error that masks it.
     const asDataURI = dataUriFromValue(
       fabricFromNativeValue(flattenBuilderArtifacts(data)),
     );

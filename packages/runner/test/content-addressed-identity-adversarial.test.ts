@@ -807,20 +807,20 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         type: "javascript" as const,
         implementation: dyn,
         implementationRef: "dyn-ref",
-        toJSON: undefined as unknown,
+        toEncodableForm: undefined as unknown,
       };
       // moduleToEncodableForm is reached via the builder; call the same path the real
       // module uses. We re-import it lazily to avoid widening the import surface.
       const { moduleToEncodableForm } = await import(
         "../src/builder/to-encodable-form.ts"
       );
-      const json = moduleToEncodableForm(
+      const encodable = moduleToEncodableForm(
         dynModule as unknown as Module,
       ) as Record<
         string,
         unknown
       >;
-      expect(json.$implRef).toBeUndefined();
+      expect(encodable.$implRef).toBeUndefined();
     });
   });
 

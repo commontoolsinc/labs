@@ -21,7 +21,7 @@ function artifact(serialized: unknown): Record<string, unknown> {
   return {
     type: "javascript",
     implementation: () => "not representable",
-    toJSON: () => serialized,
+    toEncodableForm: () => serialized,
   };
 }
 
