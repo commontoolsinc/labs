@@ -21,7 +21,7 @@ import {
   type Module,
   type toEncodableForm,
 } from "../src/builder/types.ts";
-import { withJsonMember } from "../src/builder/json-member.ts";
+import { toJSONMethod } from "../src/builder/json-member.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
@@ -955,9 +955,9 @@ describe("moduleToEncodableForm", () => {
       argumentSchema: { type: "object" } as JSONSchema,
       with: () => {},
       bind: () => {},
+      toJSON: toJSONMethod,
       toEncodableForm: () => moduleToEncodableForm(module as unknown as Module),
     };
-    withJsonMember(module as unknown as Module & toEncodableForm);
 
     const serialized =
       (module.toEncodableForm as () => Record<string, unknown>)();

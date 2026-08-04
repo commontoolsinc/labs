@@ -21,6 +21,8 @@ import {
   type Module,
   type Pattern,
   type Reactive,
+  type toEncodableForm,
+  type toJSON,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
 import {
@@ -417,9 +419,7 @@ export function moduleToEncodableForm(module: Module) {
     with: _with,
     bind: _bind,
     ...rest
-  } = module as Module & {
-    toEncodableForm: () => unknown;
-    toJSON?: () => unknown;
+  } = module as Module & toEncodableForm & Partial<toJSON> & {
     with?: unknown;
     bind?: unknown;
   };

@@ -48,7 +48,7 @@ import {
   patternToJSON,
   withAliasBindings,
 } from "./json-utils.ts";
-import { withJsonMember } from "./json-member.ts";
+import { toJSONMethod } from "./json-member.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
   REPLAYABLE_BUILTIN_REFS,
@@ -593,15 +593,15 @@ function factoryFromPattern<T, R>(
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
-        const module: Module & toEncodableForm = {
+        const module: Module & toEncodableForm & toJSON = {
           type: "pattern",
           implementation: factory,
           ...(factory.defaultScope !== undefined
             ? { defaultScope: factory.defaultScope }
             : {}),
+          toJSON: toJSONMethod,
           toEncodableForm: () => moduleToEncodableForm(module),
         };
-        withJsonMember(module);
 
         const outputs = reactive<R>();
         const frame = getTopFrame();

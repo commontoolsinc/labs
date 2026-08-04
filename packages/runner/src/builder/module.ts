@@ -18,6 +18,7 @@ import type {
   Stream,
   StripCell,
   toEncodableForm,
+  toJSON,
 } from "./types.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
@@ -27,7 +28,7 @@ import {
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToEncodableForm } from "./json-utils.ts";
-import { withJsonMember } from "./json-member.ts";
+import { toJSONMethod } from "./json-member.ts";
 import {
   brandTrustedBuilderArtifact,
   getArtifactEntryRef,
@@ -131,11 +132,11 @@ export function createNodeFactory<T = any, R = any>(
     moduleSpec.implementation = implementation;
   }
 
-  const module: Module & toEncodableForm = {
+  const module: Module & toEncodableForm & toJSON = {
     ...moduleSpec,
+    toJSON: toJSONMethod,
     toEncodableForm: () => moduleToEncodableForm(module),
   };
-  withJsonMember(module);
   // A module with ifc confidentiality on its argument schema should have at least
   // that value on its result schema
   module.resultSchema = applyArgumentIfcToResult(
@@ -433,7 +434,7 @@ function handlerInternal<E, T>(
     stateSchema as JSONSchema | undefined,
   );
 
-  const module: Handler<E, T> & toEncodableForm & {
+  const module: Handler<E, T> & toEncodableForm & toJSON & {
     bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
@@ -443,6 +444,7 @@ function handlerInternal<E, T>(
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
     bind: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
+    toJSON: toJSONMethod,
     toEncodableForm: () => moduleToEncodableForm(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(writableProxy && { writableProxy: true }),
@@ -471,7 +473,7 @@ function handlerInternal<E, T>(
 
       return eventStream;
     },
-    withJsonMember(module),
+    module,
   );
 
   // Provenance brand, like every factory from `createNodeFactory` (whose
