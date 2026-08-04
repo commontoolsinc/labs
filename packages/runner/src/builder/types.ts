@@ -159,6 +159,7 @@ export type {
   Stream,
   StripCell,
   StripDefaultBrand,
+  toEncodableForm,
   toJSON,
   ToSchemaFunction,
   UiActionProps,

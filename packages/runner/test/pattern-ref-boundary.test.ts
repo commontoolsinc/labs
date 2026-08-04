@@ -7,7 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import {
-  patternToJSON,
+  patternToEncodableForm,
   serializePatternGraph,
   withAliasBindings,
 } from "../src/builder/json-utils.ts";
@@ -108,7 +108,7 @@ describe("refs-only pattern JSON at the boundary", () => {
       result: {},
       nodes: [],
     } as unknown as Pattern;
-    const serialized = patternToJSON(fake);
+    const serialized = patternToEncodableForm(fake);
     expect("$patternRef" in serialized).toBe(false);
     expect(Array.isArray((serialized as { nodes: unknown }).nodes)).toBe(true);
   });
@@ -141,7 +141,7 @@ describe("refs-only pattern JSON at the boundary", () => {
       ],
     } as unknown as Pattern;
 
-    const serialized = patternToJSON(fake);
+    const serialized = patternToEncodableForm(fake);
     const live: string[] = [];
     const walk = (value: unknown, path: string) => {
       if (typeof value === "function") live.push(path);

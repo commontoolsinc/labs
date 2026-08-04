@@ -6,7 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Module } from "../src/builder/types.ts";
 import type { toJSON } from "../src/builder/types.ts";
-import { moduleToJSON } from "../src/builder/json-utils.ts";
+import { moduleToEncodableForm } from "../src/builder/json-utils.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 
@@ -47,7 +47,7 @@ describe("host-trusted values ride a pseudo-module", () => {
     const module: Module & toJSON = {
       type: "javascript",
       implementation: fn,
-      toJSON: () => moduleToJSON(module),
+      toJSON: () => moduleToEncodableForm(module),
     };
     return module;
   };
