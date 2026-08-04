@@ -60,8 +60,9 @@ piece:  fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
 url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
 ```
 
-Its deployed source is this checkout's `main.tsx`. Two things still make this
-piece unlike the `rapids` one:
+Its deployed source is the mainline pattern, but this host is redeployed rarely,
+so expect it to lag this checkout. `cf piece inspect` reports the source ref it
+is actually on. Two things still make this piece unlike the `rapids` one:
 
 - **Its space holds real data, so an update here is rehearsal-grade.** Rehearse
   against a clone before any `setsrc` the compatibility checker rejects — see
