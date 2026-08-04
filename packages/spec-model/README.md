@@ -15,7 +15,11 @@ stamping, the wave with commit splits, `eventWatermark` idempotency, the
 crash-lossy process-local outbox, navigateTo's session-connection requirement
 (LT3), the effect channel's enact/ack window (LT8), the lease fence (DR1:
 per-process holder + the in-process abort-before-reacquire discipline, with the
-discipline-off residue characterized), and `scope_key` push filtering.
+discipline-off residue characterized), the mid-wave conflict machinery (staged
+compute/commit waves with per-doc CAS per write class: superseded pure writes
+DROP, raced consequences REQUEUE — never lost, never doubled — unrunnable events
+DROP with a notice, and budget-exhausted waves commit with W pinned), and
+`scope_key` push filtering.
 
 Why it exists: the scenario-trace and field-provenance instruments (see those
 docs' §1 protocols) check hand-enumerated journeys and per-field chains; neither

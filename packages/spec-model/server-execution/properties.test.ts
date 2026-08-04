@@ -466,3 +466,176 @@ Deno.test("C7b: the residue the MUST exists for — discipline OFF makes a same-
   assertEquals(w.admittedProbes, 0, "the stale probe was rejected");
   assertEquals(w.servers.A.pendingProbes.length, 0, "probe consumed");
 });
+
+// ---------- C8: mid-wave conflicts, per write class (§3d) ----------
+
+function c8World() {
+  return makeWorld({
+    spaces: {
+      A: {
+        streams: { s: { writes: ["space"] } }, // consequence → s-out
+        derivations: [{ from: "d-in", out: "d-out" }], // pure
+      },
+    },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+  });
+}
+
+Deno.test("C8a: a superseded PURE derived write is DROPPED — the intruding authored write survives, the next wave recomputes over it (serving-loop §3d; protocol §1 threat model)", () => {
+  let w = c8World();
+  w = apply(w, { kind: "clientWrite", session: S1, space: "A", doc: "d-in" });
+  w = apply(w, { kind: "waveCompute", space: "A" });
+  // the race: an authored write to the DERIVED OUTPUT lands mid-wave
+  w = apply(w, { kind: "clientWrite", session: S1, space: "A", doc: "d-out" });
+  const intruder = w.spaces.A.docs["d-out/space"];
+  w = apply(w, { kind: "waveCommit", space: "A" });
+  assertEquals(w.supersededWrites, 1, "the stale derived write dropped");
+  assertEquals(
+    w.spaces.A.docs["d-out/space"],
+    intruder,
+    "the authored write was NOT clobbered by the stale wave",
+  );
+  // the racing commit is the next wave's input: recompute wins
+  w = apply(w, { kind: "wave", space: "A" });
+  assertEquals(
+    w.spaces.A.docs["d-out/space"],
+    w.spaces.A.docs["d-in/space"],
+    "the next wave recomputed the derivation over the intrusion",
+  );
+});
+
+Deno.test("C8b: a raced handler CONSEQUENCE is REQUEUED — never lost, never doubled, watermark holds until it lands (serving-loop §3d; events §4)", () => {
+  let w = c8World();
+  w = apply(w, { kind: "fire", session: S1, space: "A", stream: "s" });
+  const eventId = w.spaces.A.streams.s.entries[0].eventId;
+  w = apply(w, { kind: "waveCompute", space: "A" });
+  // the race: an authored write to the CONSEQUENCE TARGET lands
+  w = apply(w, { kind: "clientWrite", session: S1, space: "A", doc: "s-out" });
+  w = apply(w, { kind: "waveCommit", space: "A" });
+  assertEquals(w.requeues, 1, "the event rolled back to unconsequenced");
+  const entry = w.spaces.A.streams.s.entries[0];
+  assertEquals(entry.consequenced, false, "requeued, not consequenced");
+  assertEquals(entry.error, undefined, "a raced event is NEVER dropped (T3)");
+  assertEquals(
+    w.spaces.A.streams.s.eventWatermark < entry.seq,
+    true,
+    "the watermark cannot pass an unconsequenced event",
+  );
+  // the retry wave lands it exactly once
+  w = apply(w, { kind: "wave", space: "A" });
+  const appearances = w.spaces.A.commits.flatMap((c) => c.consequenceOf ?? [])
+    .filter((id) => id === eventId).length;
+  assertEquals(appearances, 1, "consequences committed exactly once");
+  assertEquals(w.spaces.A.streams.s.entries[0].consequenced, true);
+});
+
+Deno.test("C8c: exactly-once under exhaustive racing — no event's consequences ever commit twice, and W never passes an unconsequenced event", () => {
+  const w0 = apply(c8World(), {
+    kind: "fire",
+    session: S1,
+    space: "A",
+    stream: "s",
+  });
+  const menu: Step[] = [
+    { kind: "waveCompute", space: "A" },
+    { kind: "waveCommit", space: "A" },
+    { kind: "clientWrite", session: S1, space: "A", doc: "s-out" },
+    { kind: "clientWrite", session: S1, space: "A", doc: "d-in" },
+    { kind: "wave", space: "A" },
+  ];
+  const { all } = explore(w0, menu, { maxSteps: 7 });
+  noViolations(all);
+  for (const w of all) {
+    const counts = new Map<string, number>();
+    for (const c of w.spaces.A.commits) {
+      for (const id of c.consequenceOf ?? []) {
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+    }
+    for (const [id, n] of counts) {
+      assert(n <= 1, `event ${id} consequenced ${n}× in ${w.trace.join(" ")}`);
+    }
+    // W soundness: every entry at or below W is consequenced
+    for (const st of Object.values(w.spaces.A.streams)) {
+      for (const e of st.entries) {
+        if (e.seq <= w.spaces.A.W) {
+          assert(e.consequenced, "W passed an unconsequenced event");
+        }
+      }
+    }
+  }
+});
+
+// ---------- C9: DROP vs REQUEUE — the T3 distinction ----------
+
+Deno.test("C9: an UNRUNNABLE event DROPS (notice + watermark advance, non-wedging); a RACED event never does (events §5; serving-loop §3d)", () => {
+  const base = makeWorld({
+    spaces: {
+      A: { streams: { t: { writes: ["space"], requiresDoc: "pre" } } },
+    },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+  });
+  // happy path first: precondition present → runs normally
+  let ok = apply(base, {
+    kind: "clientWrite",
+    session: S1,
+    space: "A",
+    doc: "pre",
+  });
+  ok = apply(ok, { kind: "fire", session: S1, space: "A", stream: "t" });
+  ok = apply(ok, { kind: "wave", space: "A" });
+  assertEquals(ok.spaces.A.streams.t.entries[0].error, undefined);
+  // drop path: the doc the handler must write against is DELETED
+  let w = apply(base, {
+    kind: "clientWrite",
+    session: S1,
+    space: "A",
+    doc: "pre",
+  });
+  w = apply(w, { kind: "fire", session: S1, space: "A", stream: "t" });
+  w = apply(w, { kind: "clientDelete", session: S1, space: "A", doc: "pre" });
+  w = apply(w, { kind: "wave", space: "A" });
+  const entry = w.spaces.A.streams.t.entries[0];
+  assert(entry.error?.includes("dropped"), "the drop notice is the surface");
+  assertEquals(entry.consequenced, true, "watermark passes it — non-wedging");
+  assert(w.spaces.A.streams.t.eventWatermark >= entry.seq);
+  const rows = w.spaces.A.commits.filter((c) => c.class === "derived")
+    .flatMap((c) => c.writes);
+  assertEquals(rows.length, 0, "no consequences from a dropped event");
+  assertEquals(w.requeues, 0, "an unrunnable event is never requeued");
+});
+
+// ---------- C10: budget exhaustion — W pinned, continuation ----------
+
+Deno.test("C10: an exhausted wave commits WITHOUT advancing W; continuation waves finish; W jumps only at true quiescence (serving-loop §3)", () => {
+  let w = makeWorld({
+    spaces: { A: { streams: { s: { writes: ["space"] } } } },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+    waveBudget: 1,
+  });
+  w = apply(w, { kind: "fire", session: S1, space: "A", stream: "s" });
+  w = apply(w, { kind: "fire", session: S1, space: "A", stream: "s" });
+  w = apply(w, { kind: "wave", space: "A" });
+  // one event processed, one left: the commit carries NO W movement
+  const derived1 = w.spaces.A.commits.filter((c) => c.class === "derived");
+  assertEquals(derived1.length, 1);
+  assertEquals(derived1[0].derivedThrough, 0, "derivedThrough pinned at old W");
+  assertEquals(w.spaces.A.W, 0, "W did not advance");
+  assertEquals(
+    w.spaces.A.streams.s.entries.filter((e) => e.consequenced).length,
+    1,
+    "the processed event's consequences DID commit (with its watermark)",
+  );
+  // continuation wave reaches quiescence: W jumps
+  w = apply(w, { kind: "wave", space: "A" });
+  assert(w.spaces.A.W > 0, "W advances at true quiescence");
+  assert(w.spaces.A.streams.s.entries.every((e) => e.consequenced));
+  // exactly-once across the exhaustion boundary
+  const counts = new Map<string, number>();
+  for (const c of w.spaces.A.commits) {
+    for (const id of c.consequenceOf ?? []) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  for (const n of counts.values()) assertEquals(n, 1);
+});
