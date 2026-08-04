@@ -460,12 +460,17 @@ these.
   under the inter-server trust ruling (future: remote attestation);
   retirement sweeps every space's instances. [protocol §5, §2;
   scopes §3])
-- Q5: B's effects doc, S1's instance, in B's wave commit [builtins
-  §4; protocol §5]. (LT3 RULED 2026-08-03: cross-space navigateTo
-  is DEFERRED — the intent write requires the acting session
-  CONNECTED to the computing space; a cross-space chain computing
-  navigateTo is the runtime error. Future direction recorded:
-  client-vended stream target, reversing the flow. [builtins §4])
+- Q5: DEFERRED / runtime ERROR (LT3, RULED 2026-08-03) — H_B's
+  chain is cross-space and S1 is not a connected session of B (the
+  computing space), so the intent write ERRORS before any effects
+  doc is touched; no subscription delivers anything, because there
+  is nothing to deliver. Future direction recorded: client-vended
+  stream target, reversing the flow. [builtins §4]
+  (Re-run 2026-08-03 caught the first draft of this cell keeping
+  its pre-ruling headline — the write asserted beside the ruling
+  that forbids it. The ledger question itself had presupposed the
+  write and asked only about delivery; the ruling answered one
+  level deeper.)
 - Q6: eventId uniqueness above B's `eventWatermark` at admission;
   post-horizon duplicates skip as `skippedIdempotent`. [protocol §2,
   §2b; events §4]
