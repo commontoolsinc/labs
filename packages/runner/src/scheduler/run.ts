@@ -712,7 +712,6 @@ function attachSchedulerActionObservation(
     telemetry,
   );
   const runtimeFingerprint = schedulerRuntimeFingerprint();
-  const completeScopeSummary = annotated.completeSchedulerScopeSummary;
   const observation = buildSchedulerActionObservation({
     ...(observationIdentity.ownerSpace !== undefined
       ? { ownerSpace: observationIdentity.ownerSpace }
@@ -741,24 +740,6 @@ function attachSchedulerActionObservation(
       (annotated.ignoredSchedulingWrites ?? []).map(toMemorySpaceAddress),
       [],
     ),
-    ...(completeScopeSummary && implementationFingerprint.startsWith("impl:")
-      ? {
-        completeActionScopeSummary: {
-          version: 1 as const,
-          complete: true as const,
-          piece: toMemorySpaceAddress(completeScopeSummary.piece),
-          reads: completeScopeSummary.reads.map(toMemorySpaceAddress),
-          writes: completeScopeSummary.writes.map(toMemorySpaceAddress),
-          materializerWriteEnvelopes: completeScopeSummary
-            .materializerWriteEnvelopes.map(
-              toMemorySpaceAddress,
-            ),
-          directOutputs: completeScopeSummary.directOutputs.map(
-            toMemorySpaceAddress,
-          ),
-        },
-      }
-      : {}),
     ...(actionOptions ? { actionOptions } : {}),
     status: args.error ? "failed" : "success",
     ...(args.error

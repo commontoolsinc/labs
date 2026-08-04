@@ -192,92 +192,12 @@ const schedulerContextRank = (contextKey: string): number =>
     ? 2
     : -1;
 
-const schedulerAddressScopeRank = (address: IMemorySpaceAddress): number =>
-  (address.scope ?? "space") === "session"
-    ? 2
-    : (address.scope ?? "space") === "user"
-    ? 1
-    : 0;
-
-const schedulerEnvelopeCovers = (
-  envelope: IMemorySpaceAddress,
-  address: IMemorySpaceAddress,
-): boolean =>
-  envelope.space === address.space &&
-  envelope.id === address.id &&
-  (envelope.scope ?? "space") === (address.scope ?? "space") &&
-  envelope.path.length <= address.path.length &&
-  envelope.path.every((segment, index) => segment === address.path[index]);
-
-const observationMinimumContextRank = (
-  observation: SchedulerActionObservation,
-): number => {
-  const summary = observation.completeActionScopeSummary;
-  if (!summary || !observation.implementationFingerprint.startsWith("impl:")) {
-    return 2;
-  }
-  const pieceScope = summary.piece.scope ?? "space";
-  if (
-    summary.piece.space !== observation.ownerSpace ||
-    `${pieceScope}:${summary.piece.id}` !== observation.pieceId
-  ) {
-    return 2;
-  }
-  let rank = pieceScope === "session" ? 2 : pieceScope === "user" ? 1 : 0;
-  let crossesSpace = false;
-  for (
-    const address of [
-      ...summary.reads,
-      ...summary.writes,
-      ...summary.materializerWriteEnvelopes,
-      ...summary.directOutputs,
-    ]
-  ) {
-    crossesSpace ||= address.space !== summary.piece.space;
-    rank = Math.max(rank, schedulerAddressScopeRank(address));
-  }
-  if (crossesSpace && rank === 0) return 2;
-
-  const runtimeGroups: Array<[
-    readonly IMemorySpaceAddress[],
-    readonly IMemorySpaceAddress[],
-  ]> = [
-    [
-      [...observation.reads, ...observation.shallowReads],
-      summary.reads,
-    ],
-    [
-      [
-        ...observation.actualChangedWrites,
-        ...observation.currentKnownWrites,
-        ...(observation.declaredWrites ?? []),
-        ...(observation.ignoredSchedulingWrites ?? []),
-      ],
-      [
-        ...summary.writes,
-        ...summary.materializerWriteEnvelopes,
-        ...summary.directOutputs,
-      ],
-    ],
-    [
-      observation.materializerWriteEnvelopes,
-      summary.materializerWriteEnvelopes,
-    ],
-  ];
-  for (const [observed, envelopes] of runtimeGroups) {
-    for (const address of observed) {
-      if (
-        !envelopes.some((envelope) =>
-          schedulerEnvelopeCovers(envelope, address)
-        )
-      ) {
-        return 2;
-      }
-      rank = Math.max(rank, schedulerAddressScopeRank(address));
-    }
-  }
-  return rank;
-};
+// Without a transformer-proven completeness certificate — deleted from the
+// tree (docs/specs/server-side-execution/serving-loop.md §3b) — no observation
+// can prove it is safe to share across principals or sessions, so only the
+// exact-session context row is ever adoptable (the fail-closed arm of
+// incremental-observation-adoption.md C6).
+const SCHEDULER_MINIMUM_CONTEXT_RANK = 2;
 
 type SchedulerStorageRehydrationOptions =
   & SchedulerObservationIdentity
@@ -946,7 +866,7 @@ export class Scheduler {
         candidate.executionContextKey,
       );
       if (
-        contextRank < observationMinimumContextRank(observation) ||
+        contextRank < SCHEDULER_MINIMUM_CONTEXT_RANK ||
         contextRank <= selectedRank
       ) {
         continue;

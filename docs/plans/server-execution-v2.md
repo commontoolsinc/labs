@@ -207,7 +207,7 @@ Stages, one PR each except C, which is a three-PR train (below):
 - [ ] **C — main reduction** (a THREE-PR TRAIN, not one PR — the
       surface is ~25 source files across five packages plus ~110
       goldens, and the seams below are where it cuts cleanly):
-  - [ ] **C.1 — emission + consumers + goldens**: delete
+  - [x] **C.1 — emission + consumers + goldens**: delete
         `completeSchedulerScopeSummary` /
         `completeActionScopeSummary` emission (ts-transformers) and
         every consumer (runner), and REGENERATE the ~110 fixtures
