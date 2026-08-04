@@ -129,10 +129,10 @@ function replace(
     // Anything else -- a `Cell`, a `FabricInstance`, a `Date` -- is the
     // conversion's to interpret, and carries no builder artifact.
     //
-    // A null-prototype object is excluded too, hence `false`: it is not a
-    // fabric record, so it is not the walk's to rewrite. Whether the
-    // conversion accepts one is the conversion's question, asked of the value
-    // as it stands.
+    // A null-prototype object is excluded too -- hence the `false` argument
+    // to `isPlainObject()`. It is not a fabric record, so it is not the
+    // walk's to rewrite. Whether the conversion accepts one is the
+    // conversion's question, asked of the value as it stands.
     return value;
   }
 
