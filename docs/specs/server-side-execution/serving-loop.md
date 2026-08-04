@@ -99,8 +99,14 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   protocol" must not be read as "on the wire".
 - **(b) memory server → ExecutorHost**, in-process: the
   admission-hook activation feed — an authored admission into a
-  space with no live lease activates that space (this section;
-  never a poll).
+  space with no live lease NOTIFIES the host, and activation then
+  follows this section's ACTIVE criteria (≥1 live session or
+  undelivered events; never a poll). The distinction matters for
+  provisioning: an `.inSpace` write is an authored admission into
+  a lease-less space, but alone it meets neither criterion, so the
+  minted space stays parked until its first session or event —
+  reconciling protocol.md §2b's "activates later" with this hook
+  (trace finding T11.Q7).
 - **(c) ExecutorHost → engine tables**: lease acquire and renew by
   direct table update — the direct-engine plane's ONLY traffic, and
   a renewal is NEVER a commit (§2).
@@ -542,7 +548,7 @@ the wave's read basis, and conflict handling is PER WRITE CLASS:
   DROPPED from the wave commit — the concurrent commit is already the
   next wave's input and recomputes that derivation from fresher state.
   Dropping is sound exactly because derived values are re-derivable.
-  Count drops as `wave.supersededWrites`.
+  Count drops as `supersededWrites` (exposed in §7's counters).
 - **Non-re-derivable writes** — `eventWatermark` advances,
   handler-consequence writes, effect intents — are REBASED AND RETRIED:
   re-CAS against the new head, merging at field level (these are
@@ -695,7 +701,8 @@ escalate.
 
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
-authoredSeen, effectAcks, derivedCommits, watermarkLag, events:
+supersededWrites, authoredSeen, effectAcks, derivedCommits,
+watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
 {held, lost} }` (`effectAcks` counts effect-channel ack writes, so the
