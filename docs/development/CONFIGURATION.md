@@ -236,6 +236,29 @@ longer exist.
 
 ---
 
+## Runner diagnostics
+
+Environment toggles read by `packages/runner` when it starts. None of them
+change what a traversal computes; they decide what it records about itself.
+All are off by default, and each is read once, so a process picks up a change
+to the environment only on restart.
+
+A test therefore cannot switch one on by setting the variable. For doc-visit
+diagnostics, call `setTraverseDiagnostics(true)` from
+`packages/runner/src/traverse.ts`, which overrides the variable for the process
+and is read again at the start of every traversal; pass `undefined` to hand the
+decision back to the environment. For captures, construct a
+`TraverseCaptureRecorder` directly, as `traverse-replay.test.ts` does — the
+variables only decide whether the module installs one of its own on startup.
+
+| Var | Default | Notes |
+|---|---|---|
+| `CF_TRAVERSE_DIAGNOSTICS` | _(unset)_ | Set to exactly `1` to count, for each traversal, how many times it visited each doc and how many distinct doc-and-path pairs it reached. Only the slow-traverse warning reads those counts. Without this, that warning reports `uniqueDocs=0`, `uniquePaths=0`, and `topDocs=n/a`. It is off by default because the tracking builds a string and touches a `Map` and a `Set` on every schema visit, which is measurable on large traversals. |
+| `CF_TRAVERSE_CAPTURE` | _(unset)_ | Path to write a traverse fixture to. Every `SchemaObjectTraverser.traverse()` call is recorded in order, along with the value of each doc it visited, and written to that path periodically and on unload. `packages/runner/test/traverse-replay/replay.ts` replays a fixture against a read-only transaction; `packages/runner/src/traverse-recorder.ts` documents the fidelity limits, of which the important one is that a doc written during the run replays with its earliest captured value. |
+| `CF_TRAVERSE_CAPTURE_MAX` | `20000` | How many invocations one capture records before it stops. Anything that is not a finite number above zero falls back to the default. Read only when `CF_TRAVERSE_CAPTURE` is set. |
+
+---
+
 ## Experimental flags
 
 [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) is the

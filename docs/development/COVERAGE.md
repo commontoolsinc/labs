@@ -137,6 +137,61 @@ The
 works through two real instances, and describes how to localize a group-level
 change down to the specific file and line so you know what to write a test for.
 
+### Diagnostics that fire on wall-clock time
+
+The slow-traverse report in `packages/runner/src/traverse.ts` was one of those
+instances. It logged a traversal's counters only when that traversal had taken
+more than 100 milliseconds of real time, so it ran on a loaded machine and did
+not run on an idle one. Thirty-nine lines moved with the load: the body of the
+report, plus the two `MapSet` getters that nothing but the report called.
+Several unrelated pull requests spent an `ACCEPT_COVERAGE_DEBT` marker on the
+result.
+
+Write such a diagnostic so that the elapsed time reaches it as a parameter,
+rather than having the reporting code measure the time for itself. Put the
+threshold comparison and the report together in a function that takes the
+elapsed time, and call that function from the timed path every time, with no
+condition around the call. That is what `maybeReportSlowTraverse()` does now.
+Every line of the diagnostic then runs on every machine, and the clock decides
+nothing except which way the comparison inside goes.
+
+A test reaches the report by choosing the elapsed time. It can call the
+function directly with a time over the threshold, or it can pin the clock the
+timed path reads, which also proves that the path still reaches the
+diagnostic. The `SchemaObjectTraverser slow-traverse reporting` cases in
+`packages/runner/test/traverse.test.ts` are the worked example of the second.
+They replace `performance.now` — what `logger.timeStart` and `timeEnd` read —
+for the length of one traversal, and advance it from a store read, because
+`traverse()` is synchronous and a test cannot step a clock from outside a call
+that never yields. That the traversal really did read the store is asserted, so
+a traversal that stopped reading could not pass the test vacuously.
+
+The fake clock that a package's test task preloads does not cover a branch like
+this one, and cannot. It replaces `performance.now` with logical time, and
+logical time moves only when a positive-delay timer fires. A synchronous call
+arms no timers, so a span timed around synchronous work measures exactly zero:
+under the runner package's preload, `elapsed > 100` is deterministically false
+in every test in the package. The `clock.tick(ms)` control is asynchronous and
+advances nothing until it is awaited, so there is no way to move logical time
+from inside a synchronous call either. A test that wants a chosen elapsed time
+therefore replaces `performance.now` outright, saving and restoring it rather
+than assuming it is the native one, since the preload already owns that
+property. That is also why the movement was collected by the
+pattern-integration jobs rather than by the runner suite: their coverage comes
+from a browser worker, which a Deno `--preload` never reaches.
+
+Leaving the threshold comparison behind at the call site does not reduce the
+movement to nothing. The lines inside a guard are covered only on a run that
+took the branch, so a call site of the form
+`if (elapsed > SLOW_TRAVERSE_MS) report(...)` keeps its reporting line moving
+from one run to the next, and one line of movement fails the ratchet exactly as
+thirty-nine did. Do not reason from what the `if` line itself reports either.
+That count is a projection of V8's block ranges onto lines: it differs between
+the one-line and the braced form of the same guard, and it changed between deno
+2.8.3 and the pinned 2.9.4, which now credits a braced guard's line with the
+condition's own count. See
+[deno coverage: one-line guard reported uncovered when its branch is not taken](deno-coverage-guard-line-artifact.md).
+
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for
