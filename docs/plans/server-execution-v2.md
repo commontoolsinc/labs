@@ -181,7 +181,11 @@ Stages, one PR each except C, which is a three-PR train (below):
 - [ ] **B — lease**: create the `execution_lease` table (engine-v3
       migration — none exists on main; v1-branch shape as prior art),
       the acquire/renew/expire cycle, and the derived-class admission
-      equality check (serving-loop.md §2).
+      equality check (serving-loop.md §2). `holder` is a PER-PROCESS
+      identity — service identity + process-instance component,
+      minted at process start (DR1, RULED 2026-08-03; serving-loop
+      §2) — with the abort-before-reacquire discipline enforced
+      in-process.
 - [ ] **C — main reduction** (a THREE-PR TRAIN, not one PR — the
       surface is ~25 source files across five packages plus ~110
       goldens, and the seams below are where it cuts cleanly):

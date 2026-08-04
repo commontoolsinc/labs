@@ -128,6 +128,25 @@ processes* (deploy overlap, partition) it holds via the lease:
   The table is CREATED in Phase 1 — it does not exist on main; the v1
   branch's richer shape (see Anchors) is prior art to reduce from, not
   substrate to keep.
+- **`holder` is a PER-PROCESS identity (DR1, RULED 2026-08-03):**
+  the SpaceServer's service identity plus a process-instance
+  component minted at PROCESS START — stable across every renew and
+  reacquire within one process lifetime (it stays a nameable,
+  attestable identity, so protocol.md §1's "the envelope principal
+  IS the lease holder" reads literally), fresh whenever the process
+  is genuinely new. The equality check below thereby fences every
+  CROSS-process succession (deploy overlap, a successor host) for
+  free. The one residue — a same-process reacquire after a pause
+  that outlived the TTL (a runtime GC pause is the canonical cause;
+  nothing to do with the deferred session-data GC of scopes.md §8) —
+  is covered by the stop-committing-immediately MUST below,
+  enforced IN-PROCESS before reacquiring (an in-memory generation
+  counter suffices; co-hosting makes the abort-before-reacquire
+  sequencing local and cheap). This is also why the FORBIDDEN list
+  bans per-commit fencing tokens: v1's `lease_generation` is not
+  needed — not because fencing is unwanted, but because the
+  holder's process component already fences across processes and
+  the in-process residue is a local obligation, not wire machinery.
 - Acquire with a conditional write; TTL 15 s; renew every 5 s **by direct
   table update — a lease renewal is NEVER a commit** (v1's renewal-adjacent
   traffic was part of the storm).
