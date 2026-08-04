@@ -3282,6 +3282,14 @@ export function frameAnchorIds(
 /**
  * Converts cells and objects that can be turned to cells to links.
  *
+ * `seen` tracks the ANCESTORS of the value being converted, so what it
+ * recognizes is a cycle. A value reachable twice by different paths is not one:
+ * it is shared, and each position gets its own conversion. Answering a shared
+ * reference with a back-link would rewrite one of its positions into a pointer
+ * at the other -- and a graph holds plenty of shared structure that is nobody's
+ * cycle, an empty `path: []` array reachable from every alias in it being the
+ * common case.
+ *
  * @param value - The value to convert.
  * @returns The converted value.
  */
@@ -3326,7 +3334,10 @@ export function convertCellsToLinks(
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  seen.set(value, path); // ...which needs to be tracked for circularity.
+  // Held before the conversions below reassign `value`, since what `seen` is
+  // keyed on -- and cleared of on the way back out -- is the object as given.
+  const original = value;
+  seen.set(original, path); // ...which needs to be tracked for circularity.
 
   // A schema-bearing read hangs a non-enumerable `toCell` symbol on the arrays
   // it returns. That symbol is machinery, not content, and an array carrying it
@@ -3369,17 +3380,25 @@ export function convertCellsToLinks(
     // it still falls to the object branch and is rebuilt from zero enumerable
     // own properties. Same marker as the sibling walk in `builder/to-encodable-form.ts`.
     return value;
-  } else if (Array.isArray(value)) {
-    return value.map((value, index) =>
-      convertCellsToLinks(value, options, [...path, String(index)], seen)
-    );
-  } else {
+  }
+
+  // Cleared on the way back out, so `seen` holds ancestors rather than
+  // everything visited: a value reached again at a sibling path is converted
+  // again rather than answered as a cycle.
+  try {
+    if (Array.isArray(value)) {
+      return value.map((value, index) =>
+        convertCellsToLinks(value, options, [...path, String(index)], seen)
+      );
+    }
     return Object.fromEntries(
       Object.entries(value).map(([key, value]) => [
         key,
         convertCellsToLinks(value, options, [...path, String(key)], seen),
       ]),
     );
+  } finally {
+    seen.delete(original);
   }
 }
 
