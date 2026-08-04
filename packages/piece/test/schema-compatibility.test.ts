@@ -2151,15 +2151,13 @@ describe("listing marks are annotation-class", () => {
   const marked = verbArgument({ tier: "wrapper", deprecated: true });
 
   it("lets both marks arrive on a recorded verb", () => {
-    expect(() =>
-      assertPatternSchemasBackwardCompatible(unmarked, marked)
-    ).not.toThrow();
+    expect(() => assertPatternSchemasBackwardCompatible(unmarked, marked)).not
+      .toThrow();
   });
 
   it("lets both marks leave again", () => {
-    expect(() =>
-      assertPatternSchemasBackwardCompatible(marked, unmarked)
-    ).not.toThrow();
+    expect(() => assertPatternSchemasBackwardCompatible(marked, unmarked)).not
+      .toThrow();
   });
 
   it("still refuses a genuinely unknown keyword (control)", () => {
