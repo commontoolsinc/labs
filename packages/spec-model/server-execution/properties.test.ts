@@ -12,6 +12,7 @@ import {
   applicableSet,
   apply,
   explore,
+  holderId,
   makeWorld,
   pushRowsFor,
   sessionKey,
@@ -394,13 +395,74 @@ Deno.test("C6: derived admission is the lease equality check — forgeries and n
     clients: [{ user: U1, session: S1, connected: ["A"] }],
   });
   const sp = w.spaces.A;
-  assert(admitDerived(sp, { holder: "server:A", envelope: "service:A" }));
-  assert(!admitDerived(sp, { holder: "server:B", envelope: "service:B" }));
+  const me = holderId("A", 0);
+  assert(admitDerived(sp, { holder: me, envelope: "service:A" }));
+  assert(
+    !admitDerived(sp, { holder: holderId("B", 0), envelope: "service:B" }),
+  );
   assert(!admitDerived(sp, { holder: undefined, envelope: "service:A" }));
   // a client cannot even represent a derived commit: envelope check
   assert(
-    !admitDerived(sp, { holder: "server:A", envelope: sessionKey(U1, S1) }),
+    !admitDerived(sp, { holder: me, envelope: sessionKey(U1, S1) }),
   );
   sp.leaseHolder = null; // expired lease matches NOBODY (protocol §2)
-  assert(!admitDerived(sp, { holder: "server:A", envelope: "service:A" }));
+  assert(!admitDerived(sp, { holder: me, envelope: "service:A" }));
+});
+
+// ---------- C7: the lease fence (DR1, serving-loop §2) ----------
+
+const C7_MENU: Step[] = [
+  { kind: "sealProbe", space: "A" },
+  { kind: "expireLease", space: "A" },
+  { kind: "restartProcess", space: "A" },
+  { kind: "reacquire", space: "A" },
+  { kind: "deliverProbe", space: "A" },
+];
+
+function c7World(leaseDiscipline: boolean) {
+  return makeWorld({
+    spaces: { A: { streams: {} } },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+    leaseDiscipline,
+  });
+}
+
+Deno.test("C7a: DR1 verified — per-process holder + in-process discipline admits NO stale-tenure commit on any schedule", () => {
+  const { all } = explore(c7World(true), C7_MENU, { maxSteps: 9 });
+  for (const w of all) {
+    assertEquals(
+      w.staleAdmissions,
+      0,
+      `stale admission in trace ${w.trace.join(" ")}`,
+    );
+  }
+  // and the fence is not vacuous: some schedule does deliver a live
+  // probe successfully
+  assert(
+    all.some((w) => w.admittedProbes > 0),
+    "live probes still flow",
+  );
+});
+
+Deno.test("C7b: the residue the MUST exists for — discipline OFF makes a same-process stale admission reachable; cross-process stays fenced regardless", () => {
+  const { all } = explore(c7World(false), C7_MENU, { maxSteps: 9 });
+  const stale = all.filter((w) => w.staleAdmissions > 0);
+  assert(
+    stale.length > 0,
+    "the same-process pause window is real without the discipline — " +
+      "this is WHY serving-loop §2's stop-committing MUST exists",
+  );
+  // and the CROSS-process path stays fenced even with the discipline
+  // off — the directed schedule: seal under p0, expire, RESTART
+  // (fresh process component p1), reacquire as p1, deliver the p0
+  // probe → the one equality check rejects it (DR1's free fence)
+  let w = c7World(false);
+  w = apply(w, { kind: "sealProbe", space: "A" });
+  w = apply(w, { kind: "expireLease", space: "A" });
+  w = apply(w, { kind: "restartProcess", space: "A" });
+  w = apply(w, { kind: "reacquire", space: "A" });
+  w = apply(w, { kind: "deliverProbe", space: "A" });
+  assertEquals(w.staleAdmissions, 0, "process component fences cross-process");
+  assertEquals(w.admittedProbes, 0, "the stale probe was rejected");
+  assertEquals(w.servers.A.pendingProbes.length, 0, "probe consumed");
 });

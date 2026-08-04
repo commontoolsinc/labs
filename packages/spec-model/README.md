@@ -13,8 +13,9 @@ envelopes, `firedAt` stamping and actor inheritance (uniform across run kinds โ€
 LT6), same-space cascade carriage (LT1), delegated cross-space carriage and
 stamping, the wave with commit splits, `eventWatermark` idempotency, the
 crash-lossy process-local outbox, navigateTo's session-connection requirement
-(LT3), the effect channel's enact/ack window (LT8), and `scope_key` push
-filtering.
+(LT3), the effect channel's enact/ack window (LT8), the lease fence (DR1:
+per-process holder + the in-process abort-before-reacquire discipline, with the
+discipline-off residue characterized), and `scope_key` push filtering.
 
 Why it exists: the scenario-trace and field-provenance instruments (see those
 docs' ยง1 protocols) check hand-enumerated journeys and per-field chains; neither

@@ -102,6 +102,9 @@ export interface SpaceState {
   W: number;
   commits: CommitRecord[];
   leaseHolder: string | null;
+  /** lease tenure counter: bumps at every (re)acquire (model-only
+   * audit — lets properties detect a stale-tenure admission). */
+  tenure: number;
 }
 
 export interface OutboxEntry {
@@ -119,6 +122,11 @@ export interface ServerState {
   outbox: OutboxEntry[];
   /** audit trail of entries destroyed by crashes (model-only). */
   lostAppends: OutboxEntry[];
+  /** bumped per genuinely-new process (DR1: holder's process part). */
+  processGen: number;
+  /** derived commits sealed + sent but not yet admitted — in flight
+   * at the store's door, the lease-fencing race's carrier. */
+  pendingProbes: Array<{ holder: string; tenure: number }>;
 }
 
 export interface ClientSession {
@@ -144,6 +152,15 @@ export interface World {
   trace: string[];
   /** config: split every wave commit in two (serving-loop §3). */
   splitWaves: boolean;
+  /** DR1's in-process discipline: abort in-flight commits BEFORE
+   * reacquiring (serving-loop §2's stop-committing MUST). */
+  leaseDiscipline: boolean;
+  /** admitted derived probes sealed under an ENDED tenure — must
+   * stay 0 whenever the discipline is on. */
+  staleAdmissions: number;
+  /** all admitted probes (audit — also keeps a successful delivery
+   * from state-colliding with the pre-seal world in the explorer). */
+  admittedProbes: number;
 }
 
 // ---------- construction ----------
@@ -152,10 +169,15 @@ export interface SpaceSpec {
   streams: Record<DocId, HandlerSpec>;
 }
 
+/** DR1: holder = service identity + process-instance component. */
+export const holderId = (space: SpaceId, processGen: number): string =>
+  `service:${space}#p${processGen}`;
+
 export function makeWorld(opts: {
   spaces: Record<SpaceId, SpaceSpec>;
   clients: Array<{ user: UserId; session: SessionId; connected: SpaceId[] }>;
   splitWaves?: boolean;
+  leaseDiscipline?: boolean;
 }): World {
   const spaces: Record<SpaceId, SpaceState> = {};
   const servers: Record<SpaceId, ServerState> = {};
@@ -171,9 +193,16 @@ export function makeWorld(opts: {
       effects: {},
       W: 0,
       commits: [],
-      leaseHolder: `server:${id}`,
+      leaseHolder: holderId(id, 0),
+      tenure: 1,
     };
-    servers[id] = { alive: true, outbox: [], lostAppends: [] };
+    servers[id] = {
+      alive: true,
+      outbox: [],
+      lostAppends: [],
+      processGen: 0,
+      pendingProbes: [],
+    };
   }
   const clients: Record<SessionId, ClientSession> = {};
   for (const c of opts.clients) {
@@ -195,6 +224,9 @@ export function makeWorld(opts: {
     violations: [],
     trace: [],
     splitWaves: opts.splitWaves ?? false,
+    leaseDiscipline: opts.leaseDiscipline ?? true,
+    staleAdmissions: 0,
+    admittedProbes: 0,
   };
 }
 
@@ -448,7 +480,12 @@ export type Step =
   }
   | { kind: "enact"; session: SessionId; space: SpaceId }
   | { kind: "ack"; session: SessionId; space: SpaceId }
-  | { kind: "reload"; session: SessionId };
+  | { kind: "reload"; session: SessionId }
+  | { kind: "expireLease"; space: SpaceId }
+  | { kind: "reacquire"; space: SpaceId }
+  | { kind: "restartProcess"; space: SpaceId }
+  | { kind: "sealProbe"; space: SpaceId }
+  | { kind: "deliverProbe"; space: SpaceId };
 
 export function apply(w0: World, step: Step): World {
   const w = clone(w0);
@@ -527,6 +564,62 @@ export function apply(w0: World, step: Step): World {
       // the overlay is process-memory: the enacted-nonce record dies
       // (speculation §1; the LT8-accepted window)
       w.clients[step.session].enactedNonces = [];
+      break;
+    }
+    case "expireLease": {
+      // the memory server's clock expires the row: matches NOBODY
+      // (protocol §2; serving-loop §2)
+      w.spaces[step.space].leaseHolder = null;
+      break;
+    }
+    case "reacquire": {
+      // same process, new tenure. DR1: holder value UNCHANGED (the
+      // process component is stable within a process lifetime); the
+      // discipline aborts in-flight commits BEFORE reacquiring.
+      const sp = w.spaces[step.space];
+      const srv = w.servers[step.space];
+      if (!srv.alive || sp.leaseHolder !== null) break;
+      if (w.leaseDiscipline) srv.pendingProbes = [];
+      sp.leaseHolder = holderId(step.space, srv.processGen);
+      sp.tenure += 1;
+      break;
+    }
+    case "restartProcess": {
+      // a genuinely-new process: the holder's process component is
+      // fresh (DR1), so the equality check fences the old reign's
+      // in-flight commits. The old process's sent commits stay in
+      // flight (they are the fence's test subjects).
+      const srv = w.servers[step.space];
+      srv.processGen += 1;
+      srv.alive = true;
+      break;
+    }
+    case "sealProbe": {
+      // a derived commit sealed and SENT under the current lease —
+      // not yet admitted (in flight at the store's door)
+      const sp = w.spaces[step.space];
+      const srv = w.servers[step.space];
+      if (
+        !srv.alive || sp.leaseHolder !== holderId(step.space, srv.processGen)
+      ) {
+        break;
+      }
+      srv.pendingProbes.push({ holder: sp.leaseHolder, tenure: sp.tenure });
+      break;
+    }
+    case "deliverProbe": {
+      const sp = w.spaces[step.space];
+      const srv = w.servers[step.space];
+      const probe = srv.pendingProbes.shift();
+      if (probe === undefined) break;
+      const admitted = admitDerived(sp, {
+        holder: probe.holder,
+        envelope: `service:${step.space}`,
+      });
+      if (admitted) {
+        w.admittedProbes += 1;
+        if (probe.tenure < sp.tenure) w.staleAdmissions += 1;
+      }
       break;
     }
   }
