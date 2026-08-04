@@ -108,9 +108,12 @@ are deep-frozen.
 
 `findAndInlineDataUriLinks(value)` in `packages/runner/src/data-uri.ts` works
 the other direction from minting: it walks a value looking for links whose
-identifier is a `data:` URI and replaces each with the value that identifier
-carries. If the decoded payload has another link on the way to the link's path,
-that link is followed instead, with the remaining path segments appended to it.
+identifier is a `data:` URI of this codebase's media type, and replaces each
+with the value that identifier carries. If the decoded payload has another link
+on the way to the link's path, that link is followed instead, with the
+remaining path segments appended to it. A link carrying any other media type is
+returned as it came in, on the same footing as a link naming a document in a
+space.
 
 ### The payload is the value, not the document
 
@@ -159,6 +162,19 @@ The confidentiality contract code makes the same split. `eventEnvelopePayloads`
 in `packages/runner/src/cfc/ui-contract.ts` screens an event link with the
 narrow test before calling `valueFromDataUri` on it, so a `data:` link of some
 other media type simply contributes no authoring context.
+
+The inlining path uses the narrow test at two points that have to agree.
+`findAndInlineDataUriLinks` screens with it before decoding.
+`normalizeAndDiff` in `packages/runner/src/data-updating.ts` screens with it
+before re-entering itself on that call's result, which is progress only when
+the call replaced the link with the content behind it. Using the broad test at
+either point breaks the agreement. At the first, the decode throws on a media
+type it does not speak, and the throw escapes the whole walk rather than
+leaving one link alone. At the second, the re-entry repeats on a link the
+inlining call handed back unchanged, until the stack runs out. Both screening
+narrowly, a foreign media type is simply an ordinary link: a write stores it
+as one, and a read through it reports the media type as the loader's
+`UnsupportedMediaTypeError`.
 
 `Address.isInline(address)` in
 `packages/runner/src/storage/transaction/address.ts` is the broad test applied
