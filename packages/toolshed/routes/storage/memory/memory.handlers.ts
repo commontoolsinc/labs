@@ -140,7 +140,7 @@ export const bufferTextMessagesUntilNegotiated = (
 // `memwrite-trace.ts`.
 let memwriteConnSeq = 0;
 
-const attachMemorySocketPipeline = (
+export const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
