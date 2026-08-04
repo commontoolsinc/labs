@@ -26,7 +26,6 @@
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
@@ -136,12 +135,18 @@ export function dataUriFromValueWithResolvedLinks(
 /**
  * Find any data: URI links and inline them.
  *
- * A `FabricSpecialObject` is a leaf, matching the treatment
- * {@link dataUriFromValueWithResolvedLinks} gives it on the way in: the walk
- * hands one back by reference rather than descending into its enumerable own
- * properties, and a link path that continues into one resolves to
- * `undefined`. The link check runs ahead of that leaf check, so a link
- * carried as a fabric instance still inlines.
+ * A `FabricPrimitive` is an opaque leaf: the walk hands one back whole rather
+ * than descending into its enumerable own properties, of which it has none,
+ * and a link path that continues into one resolves to `undefined`.
+ *
+ * A `FabricInstance` throws. It is not a leaf -- it is a container holding
+ * other `FabricValue`s, so a `data:` URI link within it needs inlining, but
+ * reaching one means descending by codec contents rather than by property
+ * name. Handing the instance back whole reads as success while leaving any
+ * link inside it un-inlined.
+ *
+ * Both checks run behind the link check. Under the modern cell representation
+ * a link is a `FabricLink`, which is itself a `FabricInstance`.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -185,9 +190,18 @@ export function findAndInlineDataUriLinks(value: any): any {
           return findAndInlineDataUriLinks(newSigilLink);
         }
         if (path.length === 0) break;
-        if (dataValue instanceof FabricSpecialObject) {
-          // The remaining path names nothing inside a leaf.
+        if (dataValue instanceof FabricPrimitive) {
+          // An opaque leaf: the remaining path names nothing within it.
           return undefined;
+        }
+        if (dataValue instanceof FabricInstance) {
+          // TODO(danfuzz): reaching a path within a `FabricInstance` descends
+          // it by its codec contents, which does not exist yet. Fail loudly
+          // until it does.
+          throw new Error(
+            `Cannot yet handle \`${dataValue.constructor.name}\` (a ` +
+              "`FabricInstance`) in a data URI payload path.",
+          );
         }
         dataValue = dataValue[path.shift()!];
       }
@@ -196,8 +210,19 @@ export function findAndInlineDataUriLinks(value: any): any {
     } else {
       return value;
     }
-  } else if (value instanceof FabricSpecialObject) {
+  } else if (value instanceof FabricPrimitive) {
+    // An opaque leaf whose state lives in private fields, so it has zero
+    // enumerable own properties and the record branch below would rebuild it
+    // as a bare `{}`. It leaves whole instead.
     return value;
+  } else if (value instanceof FabricInstance) {
+    // TODO(danfuzz): a `FabricInstance` is a container reached by its codec
+    // contents rather than by property name, so inlining has no way to descend
+    // one. Fail loudly until that exists.
+    throw new Error(
+      `Cannot yet handle \`${value.constructor.name}\` (a ` +
+        "`FabricInstance`) when inlining data URI links.",
+    );
   } else if (Array.isArray(value)) {
     let next: any[] | undefined;
     for (let index = 0; index < value.length; index++) {

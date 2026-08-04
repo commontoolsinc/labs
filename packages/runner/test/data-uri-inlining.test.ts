@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  UnknownValue,
+} from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -245,7 +248,7 @@ describe("data URI inlining", () => {
       expect(findAndInlineDataUriLinks(null)).toBe(null);
     });
 
-    it("keeps a fabric instance whose own property holds a link intact", () => {
+    it("throws on a fabric instance reached by the walk", () => {
       const dataURI = dataUriFromValueWithResolvedLinks("inline me");
       const causeLink = {
         "/": {
@@ -256,20 +259,30 @@ describe("data URI inlining", () => {
         },
       };
       // `cause` is an enumerable own property of the error, and here it holds
-      // a link that inlines.
+      // a link. Rebuilding the error from its own properties would inline that
+      // link and flatten the instance to a plain object; descending it by
+      // codec contents, which would reach the link properly, does not exist.
       const error = new FabricError({
         type: "Error",
         message: "boom",
         stack: undefined,
         cause: causeLink,
       });
-      const value = { error, sibling: causeLink };
 
-      const result = findAndInlineDataUriLinks(value);
-      expect(result).not.toBe(value);
-      expect(result.sibling).toBe("inline me");
-      expect(result.error).toBe(error);
-      expect(result.error.cause).toBe(causeLink);
+      expect(() => findAndInlineDataUriLinks({ error })).toThrow(
+        /Cannot yet handle `FabricError` \(a `FabricInstance`\)/,
+      );
+    });
+
+    it("throws on a fabric instance with no enumerable own properties", () => {
+      // Nothing about the instance's own-property count changes the answer:
+      // its codec contents are unreachable either way.
+      const unknown = new UnknownValue("FutureType@2", { a: 1 });
+      expect(Object.keys(unknown)).toEqual([]);
+
+      expect(() => findAndInlineDataUriLinks({ unknown })).toThrow(
+        /Cannot yet handle `UnknownValue` \(a `FabricInstance`\)/,
+      );
     });
 
     it("keeps a fabric primitive intact when a sibling inlines", () => {
@@ -292,7 +305,7 @@ describe("data URI inlining", () => {
       expect(result.bytes).toBe(bytes);
     });
 
-    it("resolves a path continuing into a fabric instance to undefined", () => {
+    it("throws on a payload path continuing into a fabric instance", () => {
       const error = new FabricError({
         type: "Error",
         message: "boom",
@@ -302,7 +315,8 @@ describe("data URI inlining", () => {
       const dataURI = dataUriFromValueWithResolvedLinks({ error });
 
       // `message` is an own property of the decoded instance and `deepClone`
-      // is inherited from its prototype. Neither is addressable content.
+      // is inherited from its prototype. Reading either answers with a JS
+      // property rather than addressed content.
       for (const segment of ["message", "deepClone"]) {
         const link = {
           "/": {
@@ -313,8 +327,25 @@ describe("data URI inlining", () => {
           },
         };
 
-        expect(findAndInlineDataUriLinks(link)).toBe(undefined);
+        expect(() => findAndInlineDataUriLinks(link)).toThrow(
+          /Cannot yet handle `FabricError` \(a `FabricInstance`\)/,
+        );
       }
+    });
+
+    it("resolves a payload path continuing into a fabric primitive to undefined", () => {
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const dataURI = dataUriFromValueWithResolvedLinks({ bytes });
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: ["bytes", "byteLength"],
+          },
+        },
+      };
+
+      expect(findAndInlineDataUriLinks(link)).toBe(undefined);
     });
 
     it("returns a fabric instance addressed by the whole payload path", () => {
