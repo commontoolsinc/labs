@@ -19,7 +19,9 @@ import {
   type JSONSchema,
   type JSONSchemaObj,
   type Module,
+  type toEncodableForm,
 } from "../src/builder/types.ts";
+import { withJsonMember } from "../src/builder/json-member.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
@@ -941,10 +943,11 @@ describe("moduleToEncodableForm", () => {
   it("writes exactly the module's own members, and none of its machinery", () => {
     // The serialized form is what a content-derived id gets minted from, so
     // an extra member is a changed id for every value carrying a module. The
-    // members a module carries for the builder's benefit -- its serializer,
-    // `with`, `bind` -- are machinery, and the serializer is responsible for
-    // leaving every one of them behind. Asserted as the WHOLE key set: a
-    // subset match cannot see a member that should not be there.
+    // members a module carries for the builder's benefit -- its serializer
+    // under BOTH names it answers to, `with`, `bind` -- are machinery, and the
+    // serializer is responsible for leaving every one of them behind.
+    // Asserted as the WHOLE key set: a subset match cannot see a member that
+    // should not be there.
     const module: Record<string, unknown> = {
       type: "javascript",
       implementation: Object.assign(() => 1, { preview: "() => 1" }),
@@ -954,6 +957,7 @@ describe("moduleToEncodableForm", () => {
       bind: () => {},
       toEncodableForm: () => moduleToEncodableForm(module as unknown as Module),
     };
+    withJsonMember(module as unknown as Module & toEncodableForm);
 
     const serialized =
       (module.toEncodableForm as () => Record<string, unknown>)();

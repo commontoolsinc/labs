@@ -48,6 +48,29 @@ const PROGRAM: RuntimeProgram = {
   ],
 };
 
+/**
+ * A pattern whose node module is backed by a LIVE FUNCTION. `PROGRAM`'s single
+ * node is a `ref` module whose implementation is already a string, so it
+ * cannot exhibit anything about function-valued members either way.
+ */
+const HANDLER_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern, handler, Cell } from 'commonfabric';",
+        "const bump = handler((_e: unknown, s: { n: Cell<number> }) => {",
+        "  s.n.set(s.n.get() + 1);",
+        "});",
+        "export default pattern<{ n: number }>(({ n }) => {",
+        "  return { n, go: bump({ n }) };",
+        "});",
+      ].join("\n"),
+    },
+  ],
+};
+
 describe("refs-only pattern JSON at the boundary", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -176,6 +199,34 @@ describe("refs-only pattern JSON at the boundary", () => {
     ) as Record<string, unknown>;
     expect("$patternRef" in viaLegacyAliases).toBe(false);
     expect(Array.isArray(viaLegacyAliases.nodes)).toBe(true);
+  });
+
+  it("a stringified internal graph keeps every module's body", async () => {
+    // The internal graph is the in-memory instantiation representation, so it
+    // holds LIVE modules and a live module's `implementation` is a function.
+    // `JSON.stringify` consults `toJSON` and no other name, and drops a
+    // function-valued property without a word -- so a module that did not
+    // answer that name would round-trip to a node with no executable body and
+    // no `$implRef` naming one. No throw, no `undefined`, just a smaller
+    // object; only an assertion on the round-tripped GRAPH can see it.
+    const compiled = await runtime.patternManager.compilePattern(
+      HANDLER_PROGRAM,
+    );
+    const internal = serializePatternGraph(compiled as unknown as Pattern);
+    const nodes = (internal as { nodes: { module: Record<string, unknown> }[] })
+      .nodes;
+    expect(nodes.some((n) => typeof n.module.implementation === "function"))
+      .toBe(true);
+
+    const roundTripped = JSON.parse(JSON.stringify(internal)) as {
+      nodes: { module: Record<string, unknown> }[];
+    };
+    expect(roundTripped.nodes.length).toBe(nodes.length);
+    for (const { module } of roundTripped.nodes) {
+      const hasRef = "$implRef" in module;
+      const hasBody = typeof module.implementation === "string";
+      expect(hasRef || hasBody).toBe(true);
+    }
   });
 
   it("nodes of a freshly compiled pattern embed bare op graphs (no $patternRef)", async () => {

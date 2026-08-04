@@ -401,7 +401,9 @@ function itemsSchemaFromArray(
 export function moduleToEncodableForm(module: Module) {
   const frame = getTopFrame();
   // Destructure-and-drop the runtime-only members a module carries for the
-  // builder's own use: its serializer, and the handler ergonomics
+  // builder's own use: its serializer under BOTH the names it answers to
+  // (`toEncodableForm`, and `toJSON` for the JSON protocol -- see
+  // `json-member.ts`), and the handler ergonomics
   // (`mod.with(...)`/`mod.bind(...)`). None is part of the serialized
   // contract; left in, each would surface as a "not representable as a
   // `FabricValue`: function per se" rejection, so they are destructured out
@@ -411,11 +413,13 @@ export function moduleToEncodableForm(module: Module) {
   const {
     implementation: _implementation,
     toEncodableForm: _toEncodableForm,
+    toJSON: _toJSON,
     with: _with,
     bind: _bind,
     ...rest
   } = module as Module & {
     toEncodableForm: () => unknown;
+    toJSON?: () => unknown;
     with?: unknown;
     bind?: unknown;
   };

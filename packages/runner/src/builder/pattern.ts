@@ -48,6 +48,7 @@ import {
   patternToJSON,
   withAliasBindings,
 } from "./json-utils.ts";
+import { withJsonMember } from "./json-member.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
   REPLAYABLE_BUILTIN_REFS,
@@ -600,6 +601,7 @@ function factoryFromPattern<T, R>(
             : {}),
           toEncodableForm: () => moduleToEncodableForm(module),
         };
+        withJsonMember(module);
 
         const outputs = reactive<R>();
         const frame = getTopFrame();

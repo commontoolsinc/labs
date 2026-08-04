@@ -18,7 +18,6 @@ import type {
   Stream,
   StripCell,
   toEncodableForm,
-  toJSON,
 } from "./types.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
@@ -28,6 +27,7 @@ import {
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToEncodableForm } from "./json-utils.ts";
+import { withJsonMember } from "./json-member.ts";
 import {
   brandTrustedBuilderArtifact,
   getArtifactEntryRef,
@@ -117,11 +117,6 @@ const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
 const SYNTHETIC_MAPPED_LINE = 1;
 const SYNTHETIC_MAPPED_COLUMN = 23;
 
-/** See the `toJSON` type: the member a FACTORY keeps for `JSON.stringify`. */
-function jsonMemberFor(module: Module & toEncodableForm): toJSON {
-  return { toJSON: () => module.toEncodableForm() };
-}
-
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
@@ -140,6 +135,7 @@ export function createNodeFactory<T = any, R = any>(
     ...moduleSpec,
     toEncodableForm: () => moduleToEncodableForm(module),
   };
+  withJsonMember(module);
   // A module with ifc confidentiality on its argument schema should have at least
   // that value on its result schema
   module.resultSchema = applyArgumentIfcToResult(
@@ -157,10 +153,6 @@ export function createNodeFactory<T = any, R = any>(
       return outputs;
     },
     module,
-    // A factory adds `toJSON`, which a module does not carry: a factory is
-    // what pattern source holds, so `JSON.stringify(someFactory)` has to keep
-    // answering. Same form, by the name that means it here.
-    jsonMemberFor(module),
   ) as ModuleFactory<T, R>;
   factory.asScope = (scope: CellScope) =>
     createNodeFactory({ ...module, defaultScope: scope });
@@ -479,8 +471,7 @@ function handlerInternal<E, T>(
 
       return eventStream;
     },
-    module,
-    jsonMemberFor(module),
+    withJsonMember(module),
   );
 
   // Provenance brand, like every factory from `createNodeFactory` (whose

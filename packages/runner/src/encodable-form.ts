@@ -3,13 +3,17 @@
  * takes on the way to being encoded, which reaches storage without ever being
  * stringified.
  *
- * The name is `toJSON`, because that is the data model's own duck-typed
- * protocol and this asks the same question the conversion would. It is a poor
- * name for what it does here and that is a separate change; this one is about
- * asking the question in one place rather than four.
+ * Two names answer, and they are asked for in this order:
  *
- * Answered by a builder module, by the factory that carries its members, and
- * by a `Cell`, for which it is how the cell becomes a link.
+ * - `toEncodableForm`, carried by every builder artifact -- a module, a
+ *   handler, a pattern, and the factory that carries a module's members.
+ * - `toJSON`, the JSON protocol's name. A `Cell` answers only this one, for
+ *   which it is how the cell becomes a link; a builder artifact answers it too,
+ *   delegating (see `builder/json-member.ts`).
+ *
+ * Preferring the first is the point: what the runtime wants is the encodable
+ * form, and `toJSON` names a protocol rather than that. The fallback is what
+ * keeps a value whose only serializer IS the JSON one -- a `Cell` -- answering.
  */
 function encodableFormMethod(value: unknown): (() => unknown) | undefined {
   if (
@@ -19,13 +23,23 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
     return undefined;
   }
 
-  const artifact = value as { toJSON?: unknown };
+  const artifact = value as { toEncodableForm?: unknown; toJSON?: unknown };
+  if (typeof artifact.toEncodableForm === "function") {
+    return artifact.toEncodableForm as () => unknown;
+  }
   return typeof artifact.toJSON === "function"
     ? artifact.toJSON as () => unknown
     : undefined;
 }
 
-/** Checks whether a value can produce an encodable form of itself. */
+/**
+ * Checks whether a value can produce an encodable form of itself.
+ *
+ * Deliberately BROADER than the walk's own test (`hasOwnEncodableForm`): this
+ * accepts either name and an inherited member, because its callers ask about a
+ * specific value they already hold -- a pattern, a cell -- rather than sifting
+ * an arbitrary graph. The walk cannot afford either latitude; see there.
+ */
 export function hasEncodableForm(value: unknown): boolean {
   return encodableFormMethod(value) !== undefined;
 }
@@ -56,17 +70,18 @@ export type OnCopy = (copy: unknown, original: unknown) => void;
  * Replaces every builder artifact reachable from `value` with its encodable
  * form, yielding a value the data model can represent.
  *
- * A builder artifact carries its serializer as a `toJSON` method (see
+ * A builder artifact carries its serializer as a `toEncodableForm` method (see
  * `builder/module.ts` and `builder/pattern.ts`). A method is a function-valued
  * property and a fabric record has none, so an artifact has to be replaced
  * before the value crosses into the data model. An artifact sits wherever a
  * pattern author put it -- under a tool's `handler` key, in a result, inside a
  * node's `inputs` -- so finding one takes a walk.
  *
- * `toJSON` is the data model's own duck-typed protocol, so what counts as an
- * artifact here is exactly what the conversion would otherwise have honoured:
- * any plain object with an own one, builder-made or not. Deliberately so --
- * moving WHERE serialization happens must not change WHAT is serialized.
+ * Keying on that name is what makes this walk's subject BUILDER ARTIFACTS
+ * specifically, rather than everything the data model's duck-typed `toJSON`
+ * protocol would honour. The narrower question is the intended one: a plain
+ * object that answers `toJSON` and was not built here is the conversion's to
+ * interpret, and is left to it.
  *
  * This looks for THE ARTIFACT rather than for the POSITIONS an artifact is
  * allowed to occupy. A traversal written the other way round has to be told
@@ -234,11 +249,18 @@ function copyPreservingHoles(value: readonly unknown[]): unknown[] {
 }
 
 /**
- * Checks whether a value carries its own callable `toJSON` method.
+ * Checks whether a value carries its own callable `toEncodableForm` method --
+ * the walk's test for "this is a builder artifact".
  *
  * OWN, not inherited: an inherited one is not the value's own serializer, and
- * a single assignment to `Object.prototype.toJSON` would otherwise route every
- * plain object in the process through this.
+ * a single assignment to `Object.prototype.toEncodableForm` would otherwise
+ * route every plain object in the process through this.
+ *
+ * And that name only, unlike `hasEncodableForm` above: this one decides, for
+ * every object in an arbitrary graph, whether the runtime serializes it here
+ * instead of leaving it to the conversion. Admitting `toJSON` would widen that
+ * to any object carrying the JSON protocol's member, which is a question about
+ * user data, not about builder artifacts.
  */
 function hasOwnEncodableForm(
   value: object | ((...args: unknown[]) => unknown),
