@@ -24,6 +24,39 @@ to cells require a transaction context.
 4. **Commit**: `tx.commit()` attempts to persist changes
 5. **Abort**: `tx.abort()` discards changes (or automatic on error)
 
+### Settle Outcomes
+
+A transaction settles in one of three ways: its commit succeeds, its commit is
+rejected, or something aborts it. All three run the callbacks registered through
+`addCommitCallback`. A rejected commit and an abort both deliver an error to
+those callbacks, because both discard every write the transaction staged.
+
+Those callbacks are the compensation hook: they undo in-memory state that only
+makes sense if the transaction's writes became durable. Two rules govern one.
+
+A callback that undoes such state checks that the state is still the state this
+transaction established. Another transaction can reach the same deterministic
+address and take ownership before this one settles, and its bookkeeping matches
+durable writes of its own.
+
+Not every failure calls for compensation. A stale basis — a conflict, or a local
+inconsistency — is resolved by re-running the same work against fresh state, and
+that re-run may depend on the very bookkeeping a compensating callback would
+discard; undoing it there can stop the work converging at all.
+`storage/rejection.ts` classifies the outcomes, so a callback acts only on the
+ones no re-run follows.
+
+External side effects belong in the post-commit outbox instead, which runs only
+after a successful commit.
+
+Work that re-runs what another transaction already carries, so the two can be
+compared, wants none of this. The idempotency validator is the case that exists.
+Its callbacks would compensate for state belonging to the run it duplicates,
+which has already committed it, so it takes its transaction from
+`createDuplicateWorkTransaction` — a wrapper that drops settle callbacks rather
+than registering them, leaving nothing to take back when the transaction is
+discarded.
+
 ### Read-Your-Writes
 
 Within a transaction, reads reflect pending writes:

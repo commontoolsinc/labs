@@ -40,6 +40,7 @@ import type {
   SqliteOperation,
 } from "@commonfabric/memory/v2";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
+import { TransactionAborted } from "./transaction-errors.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -1752,7 +1753,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
-    return this.tx.abort(reason);
+    const result = this.tx.abort(reason);
+    // An abort is a terminal outcome, and it discards the staged writes the
+    // same way a rejected commit does. Settle callbacks compensate for writes
+    // that did not become durable, so they run here as well.
+    if (!result.error) {
+      this.runCommitCallbacks({ error: TransactionAborted(reason) });
+    }
+    return result;
   }
 
   private runCommitCallbacks(result: Result<Unit, CommitError>): void {
@@ -1972,6 +1980,14 @@ export interface TransactionWrapperOptions {
    * wrapped transaction.
    */
   childCellTx?: IExtendedStorageTransaction;
+
+  /**
+   * If true, drops settle callbacks instead of registering them. For work that
+   * duplicates what another transaction already carries: the state such a
+   * callback would compensate for belongs to the original, so this transaction
+   * has nothing to take back when it ends.
+   */
+  discardSettleCallbacks?: boolean;
 }
 
 /**
@@ -2343,8 +2359,25 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void {
+    if (this.options.discardSettleCallbacks === true) return;
     return this.wrapped.addCommitCallback(callback);
   }
+}
+
+/**
+ * Create a transaction wrapper for work that re-runs what another transaction
+ * already carries, so the two can be compared, and is discarded afterwards.
+ *
+ * The re-run registers the same settle callbacks the original did. Those
+ * callbacks undo in-memory state on the way to a transaction that did not
+ * become durable, and here the state belongs to the original run, which has
+ * already committed it — so this wrapper drops them rather than letting the
+ * discard tear down live state the original owns.
+ */
+export function createDuplicateWorkTransaction(
+  tx: IExtendedStorageTransaction,
+): TransactionWrapper {
+  return new TransactionWrapper(tx, { discardSettleCallbacks: true });
 }
 
 /**
