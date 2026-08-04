@@ -37,6 +37,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import { replaceArtifacts } from "../encodable-form.ts";
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -598,5 +599,5 @@ export function patternToJSON(pattern: Pattern) {
       argumentSchema: pattern.argumentSchema,
       resultSchema: pattern.resultSchema,
     }
-    : graph;
+    : replaceArtifacts(graph, noteDerivedCopy);
 }

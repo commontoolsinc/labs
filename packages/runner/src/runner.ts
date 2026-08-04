@@ -72,6 +72,7 @@ import {
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   type AddCancel,
   type Cancel,
@@ -1398,7 +1399,13 @@ export class Runner {
       undefined,
       tx,
     );
-    argumentCell.set(argument);
+    const storable = flattenBuilderArtifacts(argument);
+    argumentCell.set(storable);
+    // The policy recorder sees the RAW argument, as its sibling in
+    // `updateResultProjection` does. Handing it the flattened one would walk
+    // a serialized pattern graph it previously stopped at -- a function halts
+    // its descent, a record does not -- and record structural-provenance
+    // claims from positions it has never seen.
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
@@ -1410,7 +1417,7 @@ export class Runner {
       this.runtime,
       tx,
       argumentLink,
-      argument,
+      storable,
       argumentLink,
     );
   }
@@ -1665,7 +1672,11 @@ export class Runner {
     // throws `hashOf: unsupported object type` instead of deciding anything.
     // Converting first also makes the gate compare what a write would actually
     // store, since the stored side is already a `FabricValue`.
-    const fabricResult = fabricFromNativeValue(result);
+    // A result can carry a builder artifact -- a pattern tool, say -- and an
+    // artifact is not a `FabricValue`, so it is replaced before the
+    // conversion. That keeps the gate below comparing what a write would
+    // actually store, which is the whole point of converting first.
+    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
