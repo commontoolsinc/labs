@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2025-07-20
+archived: 2026-08-04
+reason: "Pre-implementation pitch for CellController; the shipped controller diverged from it and the speculative options it describes were never built."
+---
+
 # CellController Design Document
 
 ## Overview
