@@ -102,7 +102,8 @@ covered a line.
 
 One detail of the gate's accounting is worth knowing when reasoning about
 pattern coverage. A file with no LCOV record has every tracked line counted as
-uncovered. A file with a record is scored against the lines that record names.
+uncovered, unless it compiles to no code at all — see the next subsection. A
+file with a record is scored against the lines that record names.
 For a file measured by Deno's V8 coverage that is every executable line; pattern
 instrumentation names only the statements it could instrument, so a pattern
 file's first record both covers real lines and drops the never-named lines out of
@@ -115,6 +116,36 @@ of the file's lines and the rest stop being counted, so it settles at a lower �
 and therefore stricter — bar rather than failing anything. The instrumented
 statements are also the only lines this mechanism can speak to: a line the
 instrumentation cannot reach is not a line a pattern test could cover.
+
+### A file that compiles to nothing is charged nothing
+
+Charging every tracked line of a file with no coverage record is how the gate
+catches source that no test ever loaded. A second kind of file also has no
+record: one holding only declarations — interfaces, type aliases, ambient
+declarations — which compiles to an empty module. Such a file has no statement
+to run, so a test that loads it executes nothing and Deno's coverage has nothing
+to report. No test can cover a line of it, so the gate charges it nothing.
+
+The gate tells the two apart by compiling each file it finds no record for, and
+charges it only when something comes out. `tasks/executable-source.ts` runs the
+file through the TypeScript compiler and reads the emitted JavaScript: a file
+that emits no statement, an `export {}` module marker aside, is charged nothing,
+and every other file is charged its full tracked-line count. Which constructs
+reach the output is the compiler's rule. An enum, a namespace holding a value,
+and an import kept for its side effects all emit code. A type-only import, a
+namespace holding only types, and a comment do not. The compile happens at gate
+time, once per file the report leaves out. A file with a record never pays for
+it, because its record already says which of its lines ran.
+
+Such a file occasionally does get a record. A comment that survives into the
+emitted output leaves Deno one line to report, and that line is hit the moment
+the module loads, so the file contributes nothing either way.
+
+The charge is all or nothing. The first line of runnable code added to such a
+file charges the whole file, which is the bill a new module of that size runs
+up. A file that gains code usually gains a coverage record with it, and that
+brings the charge down to the lines no test reached. The full charge stands
+only while nothing loads the file.
 
 ## Coverage must not depend on the execution environment
 

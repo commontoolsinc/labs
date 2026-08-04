@@ -2210,6 +2210,11 @@
           "npm:htmlparser2@12",
           "npm:marked@^18.0.6"
         ]
+      },
+      "tasks": {
+        "dependencies": [
+          "npm:typescript@6.0.3"
+        ]
       }
     }
   }

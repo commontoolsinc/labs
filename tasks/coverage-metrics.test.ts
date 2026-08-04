@@ -175,6 +175,48 @@ Deno.test("collectCoverageDebtMetricsFromLcov computes debt from compact reports
   }
 });
 
+Deno.test("a file that compiles to nothing carries no debt", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-types-test-" });
+  try {
+    const writeSourceFile = async (relativePath: string, content: string) => {
+      const fullPath = path.join(rootDir, ...relativePath.split("/"));
+      await Deno.mkdir(path.dirname(fullPath), { recursive: true });
+      await Deno.writeTextFile(fullPath, content);
+    };
+
+    // Declarations only: no statement to run, so no test could cover a line of
+    // it, and Deno's coverage reports no record for it either way.
+    await writeSourceFile(
+      "packages/example/src/types.ts",
+      [
+        "export interface Shape {",
+        "  sides: number;",
+        "}",
+        "export type Either = Shape | number;",
+      ].join("\n"),
+    );
+    // Real code no test loaded: charged in full.
+    await writeSourceFile(
+      "packages/example/src/untested.ts",
+      ["export function untested() {", "  return 1;", "}"].join("\n"),
+    );
+
+    const metrics = await collectCoverageDebtMetricsFromLcov({
+      rootDir,
+      lcov: "",
+    });
+
+    assertEquals(
+      metrics.find((metric) =>
+        metric.name === "coverage-debt: packages/example uncovered lines"
+      )?.uncoveredLines,
+      3,
+    );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
 Deno.test("integration pattern coverage feeds the debt metric", async () => {
   const rootDir = await Deno.makeTempDir({ prefix: "coverage-fold-test-" });
   try {
@@ -261,6 +303,28 @@ Deno.test("collectUncoveredLinesForFiles resolves lines only for requested files
     assertEquals(uncovered.has("scripts/build.ts"), false);
     assertEquals(uncovered.has("packages/example/src/covered.test.ts"), false);
     assertEquals(uncovered.has("packages/example/src/other.ts"), false);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectUncoveredLinesForFiles reports no lines for a file that compiles to nothing", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-lines-test-" });
+  try {
+    const typesPath = path.join(rootDir, "packages/example/src/types.ts");
+    await Deno.mkdir(path.dirname(typesPath), { recursive: true });
+    await Deno.writeTextFile(
+      typesPath,
+      ["export interface Shape {", "  sides: number;", "}"].join("\n"),
+    );
+
+    const uncovered = await collectUncoveredLinesForFiles({
+      rootDir,
+      lcov: "",
+      files: ["packages/example/src/types.ts"],
+    });
+
+    assertEquals(uncovered.size, 0);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }
