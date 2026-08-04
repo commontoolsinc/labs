@@ -92,6 +92,33 @@ describe("flattenBuilderArtifacts()", () => {
       expect(result.first).toBe(result.second);
     });
 
+    it("reads each element once", () => {
+      // The array sibling of the record case below, and the same hazard: a
+      // copy built by re-reading runs an accessor-backed element a second
+      // time and keeps that second answer, storing a value the array never
+      // held at any single moment and which the walk never inspected.
+      //
+      // Order matters. The accessor sits BEFORE the artifact, so it has
+      // already been read by the time the artifact forces a copy -- which is
+      // exactly the window a copy-by-re-reading reads it in again.
+      let reads = 0;
+      const value: unknown[] = [];
+      Object.defineProperty(value, 0, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          reads++;
+          return reads;
+        },
+      });
+      value[1] = artifact({ flat: true });
+
+      const result = flattenBuilderArtifacts(value) as unknown[];
+      expect(reads).toBe(1);
+      expect(result[0]).toBe(1);
+      expect(result[1]).toEqual({ flat: true });
+    });
+
     it("reads each member once", () => {
       // A copy built by re-reading would run an accessor twice and keep the
       // second answer, recording a value the object never held at any single
