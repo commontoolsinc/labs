@@ -35,6 +35,29 @@ const SUBJECT = [
   "",
 ].join("\n");
 
+/**
+ * A compatible evolution of SUBJECT — a new defaulted field — so today's
+ * identity differs from the captured one and the replay actually
+ * materializes and compares state instead of short-circuiting on an
+ * unchanged identity. This is the shape a real adoption always has: the
+ * whole point of an old-toolchain capture is that today's source moved on.
+ */
+const SUBJECT_CHANGED = SUBJECT
+  .replace(
+    "import { Writable, pattern }",
+    "import { Default, Writable, pattern }",
+  )
+  .replace(
+    "export interface Output { items: Writable<string[]> }",
+    "export interface Output { items: Writable<string[]>; " +
+      "later: Writable<string[] | Default<[]>> }",
+  )
+  .replace(
+    "  return { items };",
+    "  const later = new Writable<string[]>([]).for('later');\n" +
+      "  return { items, later };",
+  );
+
 describe("vintage adopt", () => {
   let dir = "";
   let roots: AdoptRoots;
@@ -101,17 +124,25 @@ describe("vintage adopt", () => {
       ...overrides,
     });
 
-  it("adopts a snapshot the replay then accepts", async () => {
-    // The invariant itself, end to end: what the adopter writes, the
-    // unmodified gate replays with no failures — including the restore
-    // control and per-root presence checks.
+  it("adopts a snapshot the replay then accepts and MIGRATES", async () => {
+    // The invariant itself, end to end — and through the path adoption
+    // exists for. The source moves on after the capture, so today's identity
+    // differs from the recorded one and the replay must actually materialize
+    // today's source over the adopted root and compare state, not
+    // short-circuit on an unchanged identity.
+    await Deno.writeTextFile(`${dir}/patterns/${KEY}`, SUBJECT_CHANGED);
     const dest = await adopt();
     expect((await Deno.stat(dest)).size).toBeGreaterThan(0);
     expect(await collectVintages(roots.vintagesRoot)).toHaveLength(1);
 
-    const { replayed, failures } = await replayAll(roots);
+    const { replayed, failures, changed, updated, stranded } = await replayAll(
+      roots,
+    );
     expect(failures).toEqual([]);
     expect(replayed).toBe(1);
+    expect(changed).toBe(1);
+    expect(updated).toBe(1);
+    expect(stranded).toBe(0);
   });
 
   it("refuses a main the replay could not map, writing nothing", async () => {
@@ -124,6 +155,16 @@ describe("vintage adopt", () => {
   it("refuses a test entry, which is never an upgrade target", async () => {
     await expect(adopt({ main: "/patterns/adopt-subject.test.tsx" })).rejects
       .toThrow("not an upgrade target");
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
+  });
+
+  it("refuses a served route, which is not identity-compared", async () => {
+    // `patternKeyFromMain` maps `/api/patterns/...` too, but the replay
+    // accounts served routes apart from identity comparison — the opposite of
+    // what an adopted fixture is for.
+    await expect(adopt({ main: `/api/patterns/${KEY}` })).rejects.toThrow(
+      "served route",
+    );
     expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
   });
 

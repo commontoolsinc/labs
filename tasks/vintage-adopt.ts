@@ -105,6 +105,18 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
         `source for it`,
     );
   }
+  // The repo-path branch of that mapping only. `patternKeyFromMain` also maps
+  // `/api/patterns/...` routes, but the replay accounts a served route apart
+  // from identity comparison — and an adopted fixture is defined as an
+  // identity-compared repo-path target (`pattern-update-testing.md`), so a
+  // route here is an input error, not an alternative.
+  if (!main.startsWith(patternsPrefix(roots))) {
+    throw new Error(
+      `main "${main}" is a served route — an adopted fixture is an ` +
+        `identity-compared repo-path target; record the repo path ` +
+        `${patternsPrefix(roots)}${key} instead`,
+    );
+  }
   const candidate: VintageManifestEntry = {
     identity: expectedIdentity,
     symbol: "default",
