@@ -49,6 +49,35 @@ const writeResult = transaction.write({
 const commitResult = await transaction.commit();
 ```
 
+A transaction reaches **Done** in one of three ways. Its commit succeeds, its
+commit is rejected, or something calls `abort()` on it. All three are settle
+outcomes, and all three run the callbacks registered through
+`addCommitCallback`. A rejected commit and an abort both deliver an error to
+those callbacks, because both discard every write the transaction staged.
+
+Work that re-runs what another transaction already carries, so the two can be
+compared, is the one case that wants none of this. The idempotency validator is
+the example that exists. Its callbacks would compensate for state belonging to
+the run it duplicates, which has already committed it. Such a re-run takes its
+transaction from `createDuplicateWorkTransaction`, a `TransactionWrapper` that
+drops settle callbacks rather than registering them, so discarding it has
+nothing to take back.
+
+Those callbacks are the runtime's compensation hook: they undo in-memory state
+that only makes sense if the transaction's writes became durable. A callback
+that undoes such state has to check that the state is still the state this
+transaction established, because another transaction can reach the same
+deterministic address and take ownership before this one settles. External side
+effects belong in the post-commit outbox instead, which runs only after a
+successful commit.
+
+Not every failure calls for compensation. A stale basis — a conflict, or a local
+inconsistency — is resolved by re-running the same work against fresh state, and
+that re-run may depend on the very bookkeeping a compensating callback would
+discard; undoing it there can stop the work converging at all. `rejection.ts`
+classifies the outcomes, so a callback can act only on the ones no re-run
+follows.
+
 ### Key Design Principles
 
 **1. Write Isolation**: A transaction can only write to one memory space. This
@@ -142,6 +171,13 @@ The distinction between these errors is important:
   the data type changes
 - **StorageTransactionInconsistent** indicates retry is needed - the underlying
   data changed
+
+Those are the errors a read or a write produces while the transaction is open. A
+commit that reaches storage can also be rejected afterwards, which is a separate
+family: a conflict, a precondition failure, a commit-rule refusal, a transport
+failure. `rejection.ts` classifies them, and that classification carries the
+same weight as the distinctions above. It says whether re-running the work can
+converge, which is what a settle callback consults before compensating.
 
 ## Advanced Features
 

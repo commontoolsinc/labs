@@ -5370,9 +5370,19 @@ export class Runner {
       addCancel(() => this.stop(resultCell));
 
       tx.addCommitCallback((_committedTx, result) => {
-        if (result.error) {
-          this.stop(resultCell);
+        if (!result.error) return;
+        // Stopping the child is only half of the rollback: this memo of what
+        // the result cell holds decides whether the next run materializes the
+        // child again. A rejected commit rolls the child's links back and the
+        // notification for that rollback clears the memo, but an abort settles
+        // without reaching storage, so clear it here. Left set, the memo makes
+        // the next run treat the pattern as unchanged and skip a child that
+        // now exists nowhere. Cleared ahead of the stop, so a materialization
+        // that stopping re-enters keeps the memo it writes.
+        if (this.resultPatternCache.get(cacheKey) === resultPatternAsString) {
+          this.resultPatternCache.delete(cacheKey);
         }
+        this.stop(resultCell);
       });
       this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }

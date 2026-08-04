@@ -1337,19 +1337,27 @@ export interface IExtendedStorageTransaction
   hasPendingPostCommitEffects(): boolean;
 
   /**
-   * Add a callback to be called when the transaction commit completes.
-   * The callback receives the transaction as a parameter and is called
-   * regardless of whether the commit succeeded or failed.
+   * Add a callback to be called when the transaction settles. The callback
+   * receives the transaction as a parameter and is called regardless of
+   * whether the commit succeeded or failed. `abort()` settles the transaction
+   * too, and delivers a `StorageTransactionAborted` error to the callback: the
+   * writes it staged are discarded either way, so a callback that compensates
+   * a failed commit describes the rollback an abort performs as well.
    *
    * Internal-only hook. Callbacks may run after failed commits and therefore
    * must not perform external side effects or release external requests. Use
    * the CFC post-commit outbox for effectful work that should happen only after
    * a successful commit.
    *
-   * Note: Callbacks are called synchronously after commit completes.
+   * A callback that undoes in-memory state must check that the state it is
+   * about to undo is still the state this transaction established. Another
+   * transaction can reach the same deterministic address and take ownership
+   * before this one settles.
+   *
+   * Note: Callbacks are called synchronously after the transaction settles.
    * If a callback throws, the error is logged but doesn't affect other callbacks.
    *
-   * @param callback - Function to call after commit
+   * @param callback - Function to call when the transaction settles
    */
   addCommitCallback(
     callback: (

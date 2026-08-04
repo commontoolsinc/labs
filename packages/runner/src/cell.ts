@@ -1359,10 +1359,10 @@ export class CellImpl<T extends FabricValue>
   set(
     newValue: AnyCellWrapping<T> | T,
     /**
-     * Internal-only commit callback. This runs after this transaction's final
-     * commit result, including failure, so it must remain non-effectful. Use
-     * the post-commit outbox for external side effects that must happen only
-     * after success.
+     * Internal-only settle callback. This runs once this transaction reaches
+     * its final outcome, which includes a rejected commit and an abort, so it
+     * must remain non-effectful. Use the post-commit outbox for external side
+     * effects that must happen only after success.
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     /**
