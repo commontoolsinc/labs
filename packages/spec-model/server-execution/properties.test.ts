@@ -92,6 +92,14 @@ Deno.test("C1: cascade inherits the root actor; intents reach the clicking sessi
         2,
         "same-space cascade processed in the SAME wave (LT1, T3.Q8)",
       );
+      // LT1's carriage is VISIBLE in the commit representation: the
+      // cascade's durable entry rides THIS commit as a write-level
+      // row at THIS commit's seq (the P1 oracle fix)
+      assertEquals(c.entryWrites?.length, 1, "entry carried in the commit");
+      const entry = sp.streams.s2.entries.find(
+        (e) => e.eventId === c.entryWrites![0].eventId,
+      );
+      assertEquals(entry?.seq, c.seq, "entry seq == its wave commit's seq");
     }
     // no outbox involvement for a same-space cascade (LT1)
     assertEquals(w.servers.A.outbox.length, 0);
@@ -134,9 +142,21 @@ Deno.test("C1-split: every split commit repeats the FULL consequenceOf (serving-
     for (const group of byWave.values()) {
       if (group.length > 1) sawSplit = true;
       const first = JSON.stringify(group[0].consequenceOf);
+      const seqs = new Set(group.map((c) => c.seq));
+      assertEquals(seqs.size, group.length, "each split has its OWN seq");
       for (const c of group) {
         assertEquals(JSON.stringify(c.consequenceOf), first);
         assertEquals(c.derivedThrough, group[0].derivedThrough);
+      }
+      if (group.length > 1) {
+        const last = group.reduce((a, b) => (a.seq > b.seq ? a : b));
+        for (const c of group) {
+          assertEquals(
+            c.watermarkDoc === true,
+            c === last,
+            "the watermark DOC write rides ONLY the last split",
+          );
+        }
       }
     }
   }
@@ -286,14 +306,38 @@ Deno.test("C2-dedupe: at-least-once redelivery is idempotent at the target (even
   w = apply(w, { kind: "deliver", space: "A" });
   w.spaces.A.outboundAppends.push(entry); // the retry
   w = apply(w, { kind: "deliver", space: "A" });
-  assertEquals(w.spaces.B.streams.t1.entries.length, 1, "deduped by eventId");
-  w = apply(w, { kind: "wave", space: "B" });
-  w.spaces.A.outboundAppends.push(entry); // late retry, post-processing
-  w = apply(w, { kind: "deliver", space: "A" });
   assertEquals(
     w.spaces.B.streams.t1.entries.length,
     1,
-    "post-watermark duplicate skipped (idempotent)",
+    "above-horizon duplicate REJECTED by the uniqueness CAS",
+  );
+  w = apply(w, { kind: "wave", space: "B" });
+  const rowsBefore = w.spaces.B.commits.flatMap((c) => c.writes).length;
+  w.spaces.A.outboundAppends.push(entry); // late retry, post-processing
+  w = apply(w, { kind: "deliver", space: "A" });
+  // events §4: an at-or-below-horizon duplicate ADMITS as a new
+  // entry — admission must not bless a stronger, permanent dedupe
+  // than the contract (the Codex P2 fix)
+  assertEquals(
+    w.spaces.B.streams.t1.entries.length,
+    2,
+    "the late duplicate ADMITS (the horizon bounds admission's CAS)",
+  );
+  w = apply(w, { kind: "wave", space: "B" });
+  assertEquals(
+    w.skippedIdempotent,
+    1,
+    "processing SKIPS the duplicate, counted skippedIdempotent",
+  );
+  assertEquals(
+    w.spaces.B.streams.t1.entries[1].consequenced,
+    true,
+    "the skipped entry is passed by the watermark (non-wedging)",
+  );
+  assertEquals(
+    w.spaces.B.commits.flatMap((c) => c.writes).length,
+    rowsBefore,
+    "no consequences from the skipped duplicate",
   );
 });
 
@@ -650,4 +694,102 @@ Deno.test("C10: an exhausted wave commits WITHOUT advancing W; continuation wave
     }
   }
   for (const n of counts.values()) assertEquals(n, 1);
+});
+
+// ---------- C8d + C0: rollback closure and the guard rails ----------
+
+Deno.test("C8d: a requeued parent's same-wave cascade NEVER escapes — rollback closes over descendants (events §4; serving-loop §3d)", () => {
+  const w0 = makeWorld({
+    spaces: {
+      A: {
+        streams: {
+          s1: { writes: ["space"], cascadeTo: { space: "A", stream: "s2" } },
+          s2: { writes: ["space"] },
+        },
+      },
+    },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+  });
+  let w = apply(w0, { kind: "fire", session: S1, space: "A", stream: "s1" });
+  w = apply(w, { kind: "waveCompute", space: "A" });
+  // race the PARENT's consequence target mid-wave
+  w = apply(w, { kind: "clientWrite", session: S1, space: "A", doc: "s1-out" });
+  w = apply(w, { kind: "waveCommit", space: "A" });
+  assertEquals(w.requeues, 1, "parent requeued; the child folds into it");
+  assertEquals(
+    w.spaces.A.streams.s2.entries.length,
+    0,
+    "only the committing attempt's cascades escape the wave",
+  );
+  assertEquals(w.spaces.A.streams.s1.entries[0].consequenced, false);
+  // the retry lands cleanly, cascade escapes exactly once
+  w = apply(w, { kind: "wave", space: "A" });
+  assertEquals(w.spaces.A.streams.s2.entries.length, 1);
+  assert(w.spaces.A.streams.s1.entries[0].consequenced);
+  assert(w.spaces.A.streams.s2.entries[0].consequenced);
+});
+
+Deno.test("C0-guards: connection guards; no-actor space writes carry no attribution; mid-wave lease loss aborts; sessionless delegated stamping", () => {
+  const w0 = makeWorld({
+    spaces: {
+      A: { streams: { s: { writes: ["space"] } } },
+      B: { streams: {} },
+    },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+  });
+  // a session cannot act on a space it holds no connection to
+  let w = apply(w0, { kind: "fire", session: S1, space: "B", stream: "s" });
+  assertEquals(w.violations, ["fire without connection"]);
+  w = apply(w0, { kind: "clientWrite", session: S1, space: "B", doc: "d" });
+  assertEquals(w.spaces.B.commits.length, 0);
+  w = apply(w0, { kind: "clientDelete", session: S1, space: "B", doc: "d" });
+  assertEquals(w.spaces.B.commits.length, 0);
+  // deleting a doc that does not exist is a no-op, not a commit
+  w = apply(w0, { kind: "clientDelete", session: S1, space: "A", doc: "g" });
+  assertEquals(w.spaces.A.commits.length, 0);
+  // a space-scope write from a run with NO acting user: addressing
+  // yes, attribution NONE (protocol §1)
+  w = apply(w0, {
+    kind: "derivationEmit",
+    space: "A",
+    stream: "s",
+    acting: {},
+  });
+  w = apply(w, { kind: "wave", space: "A" });
+  const row = w.spaces.A.commits.flatMap((c) => c.writes)[0];
+  assertEquals(row.scopeKey, "space");
+  assertEquals(row.attribution, undefined, "no actor ⇒ no attribution");
+  // lease lost between compute and commit: the wave ABORTS (§2)
+  let w2 = apply(w0, { kind: "fire", session: S1, space: "A", stream: "s" });
+  w2 = apply(w2, { kind: "waveCompute", space: "A" });
+  w2 = apply(w2, { kind: "expireLease", space: "A" });
+  w2 = apply(w2, { kind: "waveCommit", space: "A" });
+  assertEquals(
+    w2.spaces.A.commits.filter((c) => c.class === "derived").length,
+    0,
+    "in-flight transaction aborted on lease loss",
+  );
+  assertEquals(w2.spaces.A.streams.s.entries[0].consequenced, false);
+  // a SESSIONLESS chain's cross-space append stamps session="server"
+  // at the target while carrying the acting user (events §2)
+  const w3base = makeWorld({
+    spaces: {
+      A: {
+        streams: { s: { writes: [], cascadeTo: { space: "B", stream: "t" } } },
+      },
+      B: { streams: { t: { writes: ["user"] } } },
+    },
+    clients: [{ user: U1, session: S1, connected: ["A"] }],
+  });
+  let w3 = apply(w3base, {
+    kind: "derivationEmit",
+    space: "A",
+    stream: "s",
+    acting: { user: U1 },
+  });
+  w3 = apply(w3, { kind: "wave", space: "A" });
+  w3 = apply(w3, { kind: "deliver", space: "A" });
+  const t = w3.spaces.B.streams.t.entries[0];
+  assertEquals(t.firedAt.session, "server");
+  assertEquals(t.firedAt.user, U1);
 });

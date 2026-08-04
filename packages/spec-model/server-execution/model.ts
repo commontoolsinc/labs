@@ -93,6 +93,17 @@ export interface CommitRecord {
   consequenceOf?: EventId[];
   writes: WriteRow[];
   waveId?: number;
+  /** LT1: same-space cascade entries carried as WRITE-LEVEL rows of
+   * THIS commit (eventId + inherited firedAt) — so the oracle can
+   * reject an implementation persisting the append separately. */
+  entryWrites?: Array<{
+    stream: DocId;
+    eventId: EventId;
+    firedAt: StreamEntry["firedAt"];
+  }>;
+  /** the watermark DOC write — rides ONLY the last split, and only
+   * when W advanced (serving-loop §3). */
+  watermarkDoc?: boolean;
 }
 
 export interface Intent {
@@ -172,6 +183,9 @@ export interface EventContribution {
   dropped?: string;
   /** handler-run error (error-is-the-consequence). */
   errored?: string;
+  /** events §4: an admitted at-or-below-horizon duplicate — skipped
+   * at processing, counted, never run. */
+  skipped?: boolean;
 }
 
 export interface PendingWave {
@@ -223,6 +237,8 @@ export interface World {
   supersededWrites: number;
   /** events rolled back to unconsequenced at commit (§3d REQUEUE). */
   requeues: number;
+  /** duplicate events skipped at processing time (events §4). */
+  skippedIdempotent: number;
 }
 
 // ---------- construction ----------
@@ -298,6 +314,7 @@ export function makeWorld(opts: {
     waveBudget: opts.waveBudget ?? null,
     supersededWrites: 0,
     requeues: 0,
+    skippedIdempotent: 0,
   };
 }
 
@@ -339,13 +356,14 @@ function admitClientAppend(
 function admitDelegatedAppend(w: World, entry: OutboxEntry): void {
   const sp = w.spaces[entry.targetSpace];
   const st = sp.streams[entry.targetStream];
+  // events §4: admission uniqueness applies ONLY above the dedupe
+  // horizon. An at-or-below duplicate ADMITS as a new entry and is
+  // skipped at PROCESSING time (skippedIdempotent) — admission must
+  // not bless a stronger, permanent dedupe than the contract.
   const dup = st.entries.some(
     (e) => e.eventId === entry.eventId && e.seq > st.eventWatermark,
   );
-  const processed = st.entries.some(
-    (e) => e.eventId === entry.eventId && e.seq <= st.eventWatermark,
-  );
-  if (dup || processed) return; // dedupe horizon / idempotent skip
+  if (dup) return; // the uniqueness CAS above the horizon
   sp.seq += 1;
   st.entries.push({
     seq: sp.seq,
@@ -529,6 +547,29 @@ function computeWave(w: World, space: SpaceId): void {
       break;
     }
     const item = queue.shift()!;
+    // events §4: a duplicate of an already-consequenced event (an
+    // at-or-below-horizon redelivery that admission let through)
+    // SKIPS at processing — never runs, counted skippedIdempotent
+    const duplicateOfConsequenced = sp.streams[item.doc].entries.some(
+      (e) =>
+        e.eventId === item.eventId && e.consequenced &&
+        (item.entrySeq === null || e.seq !== item.entrySeq),
+    );
+    if (duplicateOfConsequenced) {
+      pw.contributions.push({
+        eventId: item.eventId,
+        stream: item.doc,
+        entrySeq: item.entrySeq,
+        parent: item.parent,
+        writes: [],
+        cascadesSame: [],
+        cascadesCross: [],
+        intents: [],
+        skipped: true,
+      });
+      processed += 1;
+      continue;
+    }
     const c = stageEvent(
       w,
       space,
@@ -608,20 +649,8 @@ function commitWave(w: World, space: SpaceId): void {
     return c.parent === undefined || !requeued.has(c.parent);
   });
   w.requeues += survivingRequeues.length;
-  // commit application: cascade entries first, then the commit seq
   const writes: WriteRow[] = [];
   const consequenceOf: EventId[] = [];
-  for (const c of committed) {
-    for (const casc of c.cascadesSame) {
-      sp.seq += 1;
-      sp.streams[casc.stream].entries.push({
-        seq: sp.seq,
-        eventId: casc.eventId,
-        firedAt: clone(casc.firedAt),
-        consequenced: false,
-      });
-    }
-  }
   // pure derived writes: superseded ⇒ DROPPED, sound because
   // re-derivable — the racing commit is the next wave's input (§3d)
   for (const row of pw.pureWrites) {
@@ -632,45 +661,88 @@ function commitWave(w: World, space: SpaceId): void {
     }
   }
   for (const c of committed) {
+    if (c.skipped === true) {
+      w.skippedIdempotent += 1; // no consequences, no consequenceOf
+      continue;
+    }
     writes.push(...c.writes);
     consequenceOf.push(c.eventId);
   }
-  if (writes.length === 0 && consequenceOf.length === 0) return;
-  sp.seq += 1;
-  const commitSeq = sp.seq;
-  // entry effects: consequenced/error/drop notices; watermark AFTER
+  if (committed.length === 0 && writes.length === 0) return;
+  // seq allocation: ONE per split (each split is a separate accepted
+  // commit); same-space cascade entries ride the FIRST split at ITS
+  // seq as write-level rows (LT1); the watermark DOC write rides
+  // only the LAST split (serving-loop §3)
+  const splitting = w.splitWaves && writes.length > 1;
+  const mid = splitting ? Math.ceil(writes.length / 2) : writes.length;
+  const firstSeq = sp.seq + 1;
+  const lastSeq = splitting ? firstSeq + 1 : firstSeq;
+  sp.seq = lastSeq;
+  const entryWrites: NonNullable<CommitRecord["entryWrites"]> = [];
   for (const c of committed) {
+    for (const casc of c.cascadesSame) {
+      sp.streams[casc.stream].entries.push({
+        seq: firstSeq,
+        eventId: casc.eventId,
+        firedAt: clone(casc.firedAt),
+        consequenced: false,
+      });
+      entryWrites.push({
+        stream: casc.stream,
+        eventId: casc.eventId,
+        firedAt: clone(casc.firedAt),
+      });
+    }
+  }
+  // entry effects: consequenced/error/drop notices; watermark AFTER
+  // (match by seq too — an admitted at-or-below-horizon duplicate
+  // SHARES its eventId with the original entry)
+  for (const c of committed) {
+    // committed ⇒ the entry exists: client-fired entries pre-exist,
+    // and a committed cascade's entry was pushed above (its parent
+    // is committed — a requeued parent folds the child into the
+    // requeue set)
     const entry = sp.streams[c.stream].entries.find(
-      (e) => e.eventId === c.eventId,
-    );
-    if (entry === undefined) continue;
+      (e) =>
+        e.eventId === c.eventId &&
+        (c.entrySeq === null || e.seq === c.entrySeq),
+    )!;
     entry.consequenced = true;
     if (c.dropped !== undefined) entry.error = c.dropped;
     else if (c.errored !== undefined) entry.error = c.errored;
   }
-  // eventWatermark: highest seq with EVERYTHING at or below it
-  // consequenced — a requeued entry holds it back (events §4's
-  // seq > watermark reprocess rule must still reach it)
+  // eventWatermark: highest seq S such that EVERY entry at or below
+  // S is consequenced — a requeued entry holds it back, and entries
+  // sharing one commit seq advance only together
   for (const st of Object.values(sp.streams)) {
-    const sorted = [...st.entries].sort((a, b) => a.seq - b.seq);
+    const seqs = [...new Set(st.entries.map((e) => e.seq))].sort(
+      (a, b) => a - b,
+    );
     let wm = st.eventWatermark;
-    for (const e of sorted) {
-      if (e.seq <= wm) continue;
-      if (e.consequenced) wm = e.seq;
-      else break;
+    for (const s of seqs) {
+      if (s <= wm) continue;
+      if (st.entries.filter((e) => e.seq === s).every((e) => e.consequenced)) {
+        wm = s;
+      } else break;
     }
     st.eventWatermark = wm;
   }
-  for (const row of writes) {
-    sp.docs[`${row.doc}/${row.scopeKey}`] = row.value;
-    sp.docHeads[`${row.doc}/${row.scopeKey}`] = commitSeq;
-  }
+  const firstRows = writes.slice(0, mid);
+  const lastRows = writes.slice(mid);
+  const applyRows = (rows: WriteRow[], s: number) => {
+    for (const row of rows) {
+      sp.docs[`${row.doc}/${row.scopeKey}`] = row.value;
+      sp.docHeads[`${row.doc}/${row.scopeKey}`] = s;
+    }
+  };
+  applyRows(firstRows, firstSeq);
+  if (splitting) applyRows(lastRows, lastSeq);
   for (const c of committed) {
     for (const it of c.intents) {
       const list = sp.effects[it.key] ?? (sp.effects[it.key] = []);
       list.push({
         nonce: w.nextNonce++,
-        issuedIn: commitSeq,
+        issuedIn: firstSeq,
         target: it.target,
         acked: false,
       });
@@ -686,9 +758,8 @@ function commitWave(w: World, space: SpaceId): void {
     Object.values(sp.streams).every((st) =>
       st.entries.every((e) => e.consequenced)
     );
-  if (quiescent) sp.W = commitSeq;
-  const base: Omit<CommitRecord, "writes"> = {
-    seq: commitSeq,
+  if (quiescent) sp.W = lastSeq;
+  const base: Omit<CommitRecord, "writes" | "seq"> = {
     class: "derived",
     envelope: `service:${space}`,
     holder: sp.leaseHolder,
@@ -696,14 +767,31 @@ function commitWave(w: World, space: SpaceId): void {
     consequenceOf: [...consequenceOf],
     waveId: pw.waveId,
   };
-  if (w.splitWaves && writes.length > 1) {
-    const mid = Math.ceil(writes.length / 2);
+  if (splitting) {
     // every split repeats derivedThrough AND the full consequenceOf
-    // (serving-loop §3, as ruled after the provenance run)
-    sp.commits.push({ ...clone(base), writes: writes.slice(0, mid) });
-    sp.commits.push({ ...clone(base), writes: writes.slice(mid) });
+    // (serving-loop §3, as ruled after the provenance run); each
+    // split is its own accepted commit with its own seq; entries
+    // ride the first, the watermark doc only the last
+    sp.commits.push({
+      ...clone(base),
+      seq: firstSeq,
+      writes: firstRows,
+      ...(entryWrites.length > 0 ? { entryWrites } : {}),
+    });
+    sp.commits.push({
+      ...clone(base),
+      seq: lastSeq,
+      writes: lastRows,
+      ...(quiescent ? { watermarkDoc: true } : {}),
+    });
   } else {
-    sp.commits.push({ ...base, writes });
+    sp.commits.push({
+      ...base,
+      seq: firstSeq,
+      writes,
+      ...(entryWrites.length > 0 ? { entryWrites } : {}),
+      ...(quiescent ? { watermarkDoc: true } : {}),
+    });
   }
 }
 
