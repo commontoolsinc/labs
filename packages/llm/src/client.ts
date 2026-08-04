@@ -320,7 +320,7 @@ export interface ConversationFixture {
  * broken, so the hint follows the status rather than blaming the caller for
  * everything.
  */
-function failureHint(status: number, parameters: string): string {
+export function failureHint(status: number, parameters: string): string {
   if (status === 429 || status === 503) {
     return "The model provider is busy. Make the request again later.";
   }
