@@ -484,6 +484,37 @@ Deno.test("diff doc: structure is file → hunk → the workspace file's nodes",
   }
 });
 
+Deno.test("diff doc: a decoded BOM stays outside TypeScript structure ranges", () => {
+  const bom = "\uFEFF";
+  const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1 +1 @@
+-${bom}const alpha = 0;
++${bom}const alpha = 1;
+`;
+  const ws: DiffWorkspace = {
+    resolve: () => "/m.ts",
+    read: () => "const alpha = 1;\n",
+    hasUtf8Bom: () => true,
+  };
+  const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+  const alpha = doc.flatStructure.find((node) => node.name === "alpha");
+
+  assert(alpha);
+  assertEquals(alpha.startCol, 2);
+  assertEquals(alpha.startOffset, diff.indexOf("const alpha = 1;"));
+  assert(diff.slice(alpha.nameOffset!).startsWith("alpha"));
+
+  const fragment = buildDiffDocument(diff, parseDiff(diff)!, NO_WS).doc;
+  const fragmentAlpha = fragment.flatStructure.find((node) =>
+    node.name === "alpha"
+  );
+  assert(fragmentAlpha);
+  assertEquals(fragmentAlpha.startOffset, diff.indexOf("const alpha = 1;"));
+  assert(diff.slice(fragmentAlpha.nameOffset!).startsWith("alpha"));
+});
+
 Deno.test("diff doc: missing workspace file still highlights and structures via fragments", () => {
   const model = parseDiff(DIFF)!;
   const { doc, maps } = buildDiffDocument(DIFF, model, NO_WS);

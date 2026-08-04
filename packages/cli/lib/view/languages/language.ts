@@ -1,12 +1,12 @@
 /**
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
- * right language for a file. A language is a stateless strategy object: one
- * instance describes each supported syntax, and plain text handles input that
- * has no recognized filename or shebang. The pager selects the right one for a
- * source ONCE (via {@link languageForSource}) and then dispatches every
- * operation through that object's methods — there is no per-operation branch
- * on the file extension.
+ * right language and byte decoder for a file. A language is a stateless
+ * strategy object: one instance describes each supported syntax, and plain
+ * text handles input that has no recognized filename or shebang. The pager
+ * selects the right one for a source ONCE (via {@link languageForInput}) and
+ * then dispatches every operation through that object's methods — there is no
+ * per-operation branch on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -17,13 +17,22 @@
  * does not depend on any concrete language at run time; only the selection
  * functions below pull the concrete languages in.
  */
-import type { Definition, Document, Line, StructureNode } from "../model.ts";
+import type {
+  Definition,
+  Document,
+  Line,
+  StructureNode,
+  ViewMode,
+} from "../model.ts";
 import type { DiffMaps } from "../diffdoc.ts";
+import type { DecodedLanguageSource, LanguageDecoder } from "./decoder.ts";
+import { utf8Decoder } from "./decoder.ts";
 import { typeScriptLanguage } from "./typescript/language.ts";
 import { markdownLanguage } from "./markdown/language.ts";
 import { jsonLanguage } from "./json/language.ts";
 import { yamlLanguage } from "./yaml/language.ts";
 import { pythonLanguage } from "./python/language.ts";
+import { binaryLanguage } from "./binary/language.ts";
 import { plainTextLanguage } from "./plain-text/language.ts";
 
 /**
@@ -84,6 +93,50 @@ export interface SemanticsOptions {
   fileName?: string;
 }
 
+/** Byte extent retained for a rendered preview. */
+export interface RenderInputExtent {
+  /** Total byte count when {@link complete} is true, otherwise bytes retained. */
+  readonly byteLength: number;
+  /** Whether {@link byteLength} is the complete input size. */
+  readonly complete: boolean;
+}
+
+/** Incremental recognition for a language whose source model retains bytes. */
+export interface ByteLanguageDetector {
+  write(bytes: Uint8Array): boolean;
+  finish(): boolean;
+}
+
+interface LanguageInputBase {
+  /** How file bytes become the string retained by the view model. */
+  readonly decoder: LanguageDecoder;
+  /** When present, files using this input representation are read-only. */
+  readonly readOnlyReason?: string;
+}
+
+/** Input behavior shared by ordinary source languages. */
+export interface TextLanguageInput extends LanguageInputBase {
+  readonly kind: "text";
+}
+
+/** Input behavior required for a byte-oriented language. */
+export interface ByteLanguageInput extends LanguageInputBase {
+  readonly kind: "bytes";
+  readonly readOnlyReason: string;
+  /** Build a fresh incremental content detector. */
+  createDetector(): ByteLanguageDetector;
+  /** Maximum raw bytes retained for an interactive rendered preview. */
+  readonly previewByteLimit: number;
+  /** Render retained bytes as a bounded whole-file view. */
+  renderLines(raw: string, extent?: RenderInputExtent): Line[];
+  /** Render complete redirected input without retaining it. */
+  renderByteStream(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Line>;
+  /** Number of rows produced for a complete byte count. */
+  renderedByteLineCount(byteLength: number): number;
+}
+
+export type LanguageInput = TextLanguageInput | ByteLanguageInput;
+
 /**
  * Everything a language needs to project a file's own structure tree into the
  * coordinates of a single diff hunk. `doc` is the parsed source the nodes come
@@ -95,6 +148,8 @@ export interface HunkStructureContext {
   readonly doc: Document;
   /** Source line (file or fragment) → diff line, for the lines the hunk shows. */
   readonly lineToDiff: Map<number, number>;
+  /** Whether UTF-8 decoding removed a BOM before this document was parsed. */
+  readonly sourceOmitsUtf8Bom: boolean;
   /** Line starts of the source text `doc` was parsed from. */
   readonly sourceLineStarts: number[];
   /** Last diff line of the hunk (its extent). */
@@ -128,8 +183,11 @@ export interface LanguageMetadata {
  */
 export interface Language {
   /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
-   * `"yaml"`, `"python"`, or `"plain-text"`. */
+   * `"yaml"`, `"python"`, `"binary"`, or `"plain-text"`. */
   readonly id: string;
+
+  /** Decoding and, for byte languages, incremental rendering behavior. */
+  readonly input: LanguageInput;
 
   /** Filename, explicit-name, and shebang selectors for this language. */
   readonly metadata: LanguageMetadata;
@@ -145,14 +203,31 @@ export interface Language {
   highlightLines(text: string, fileName?: string): Line[];
 
   /**
-   * Format `text` as the language's rendered representation. The result keeps
-   * one display line for every source line, including blank display lines for
-   * source-only delimiters. That shared line topology keeps line numbers,
-   * structure ranges, diff markers, expansion, and source editing aligned. A
-   * line that omits meaningful source content sets `renderedSourceHidden` so a
-   * diff can retain its source form when that content changes.
+   * Format `text` as the language's rendered representation. A source-topology
+   * renderer keeps one display line for every source line, including blank
+   * display lines for source-only delimiters. That shared line topology keeps
+   * line numbers, structure ranges, diff markers, expansion, and source editing
+   * aligned. A line that omits meaningful source content sets
+   * `renderedSourceHidden` so a diff can retain its source form when that
+   * content changes. A renderer with independent topology owns its whole-file
+   * display layout and is not used inside diffs.
    */
-  renderLines?(text: string, fileName?: string): Line[];
+  renderLines?(
+    text: string,
+    fileName?: string,
+    extent?: RenderInputExtent,
+  ): Line[];
+
+  /** Whether rendered lines preserve the source's one-line-per-line layout.
+   * The default is `"source"`. Independent layouts are whole-file views and
+   * are not projected onto diff lines. */
+  readonly renderLineTopology?: "source" | "independent";
+
+  /** Representation used when the caller did not request one explicitly. */
+  readonly defaultViewMode?: ViewMode;
+
+  /** Whether an empty decoded input is a complete view. */
+  readonly allowsEmptyInput?: boolean;
 
   /**
    * Rendering needs the complete file because syntax before a fragment can
@@ -195,19 +270,29 @@ export interface Language {
   ): Semantics | undefined;
 }
 
-/** Render through a language and enforce the shared source-line topology. */
+/** Whether a renderer can be projected onto line-aligned diff content. */
+export function canRenderDiffLines(language: Language): boolean {
+  return languageRenderer(language) !== undefined &&
+    language.renderLineTopology !== "independent";
+}
+
+/** Render through a language and validate its declared line topology. */
 export function renderedLinesFor(
   language: Language,
   text: string,
   fileName?: string,
+  extent?: RenderInputExtent,
 ): Line[] | undefined {
-  if (!language.renderLines) return undefined;
-  const lines = language.renderLines(text, fileName);
-  const sourceLineCount = text.split("\n").length;
-  if (lines.length !== sourceLineCount) {
-    throw new Error(
-      `${language.id} rendered ${lines.length} lines for ${sourceLineCount} source lines`,
-    );
+  const renderLines = languageRenderer(language);
+  if (renderLines === undefined) return undefined;
+  const lines = renderLines(text, fileName, extent);
+  if (language.renderLineTopology !== "independent") {
+    const sourceLineCount = text.split("\n").length;
+    if (lines.length !== sourceLineCount) {
+      throw new Error(
+        `${language.id} rendered ${lines.length} lines for ${sourceLineCount} source lines`,
+      );
+    }
   }
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
@@ -225,6 +310,39 @@ export function renderedLinesFor(
     }
   }
   return lines;
+}
+
+function languageRenderer(
+  language: Language,
+):
+  | ((
+    text: string,
+    fileName?: string,
+    extent?: RenderInputExtent,
+  ) => Line[])
+  | undefined {
+  const input = language.input;
+  if (input.kind === "bytes") {
+    return (text, _fileName, extent) => input.renderLines(text, extent);
+  }
+  return language.renderLines;
+}
+
+/** The decoder selected by a language's input representation. */
+export function decoderFor(language: Language): LanguageDecoder {
+  return language.input.decoder;
+}
+
+/** A language's byte-oriented input behavior, when it has one. */
+export function byteInputFor(
+  language: Language,
+): ByteLanguageInput | undefined {
+  return language.input.kind === "bytes" ? language.input : undefined;
+}
+
+/** Why a language cannot be edited, when it is read-only. */
+export function readOnlyReasonFor(language: Language): string | undefined {
+  return language.input.readOnlyReason;
 }
 
 // --- selection ---------------------------------------------------------------
@@ -247,8 +365,35 @@ function allLanguages(): readonly Language[] {
     jsonLanguage,
     yamlLanguage,
     pythonLanguage,
+    binaryLanguage,
     plainTextLanguage,
   ];
+}
+
+/** Incrementally select any byte language from streamed content. */
+export function createByteLanguageDetector(): {
+  readonly previewByteLimit: number;
+  write(bytes: Uint8Array): Language | undefined;
+  finish(): Language | undefined;
+} {
+  const entries = allLanguages().flatMap((language) => {
+    const input = byteInputFor(language);
+    return input === undefined
+      ? []
+      : [{ language, input, detector: input.createDetector() }];
+  });
+  return {
+    previewByteLimit: Math.max(
+      0,
+      ...entries.map(({ input }) => input.previewByteLimit),
+    ),
+    write(bytes) {
+      return entries.find(({ detector }) => detector.write(bytes))?.language;
+    },
+    finish() {
+      return entries.find(({ detector }) => detector.finish())?.language;
+    },
+  };
 }
 
 /** Whether metadata claims a filename. */
@@ -277,6 +422,56 @@ export function languageForFile(fileName: string | undefined): Language {
   return languageMatchingFilename(fileName) ?? plainTextLanguage;
 }
 
+/**
+ * Select a language before decoding input. Content detectors take precedence
+ * over implicit filename selection, then a decoded shebang can select syntax.
+ */
+export function languageForInput(
+  fileName: string | undefined,
+  bytes: Uint8Array,
+): Language {
+  return decodeLanguageInput(fileName, bytes).language;
+}
+
+/** Select a language from bytes and decode them exactly once. */
+export function decodeLanguageInput(
+  fileName: string | undefined,
+  bytes: Uint8Array,
+): { language: Language; source: DecodedLanguageSource } {
+  const byFilename = languageMatchingFilename(fileName);
+  if (byFilename?.input.kind === "bytes") {
+    return {
+      language: byFilename,
+      source: byFilename.input.decoder.decode(bytes),
+    };
+  }
+  const detector = createByteLanguageDetector();
+  const detected = detector.write(bytes) ?? detector.finish();
+  if (detected !== undefined) {
+    return {
+      language: detected,
+      source: detected.input.decoder.decode(bytes),
+    };
+  }
+  let source: DecodedLanguageSource;
+  try {
+    source = (byFilename?.input.decoder ?? utf8Decoder).decode(bytes);
+  } catch {
+    const fallback = allLanguages().find((language) =>
+      language.input.kind === "bytes"
+    );
+    if (fallback === undefined) {
+      throw new TypeError("No byte language available.");
+    }
+    return { language: fallback, source: fallback.input.decoder.decode(bytes) };
+  }
+  return {
+    language: byFilename ?? languageForShebang(source.text) ??
+      plainTextLanguage,
+    source,
+  };
+}
+
 function languageMatchingFilename(
   fileName: string | undefined,
 ): Language | undefined {
@@ -296,7 +491,7 @@ export function languageForSource(
 ): Language {
   const byFilename = languageMatchingFilename(fileName);
   if (byFilename !== undefined) return byFilename;
-  return languageForShebang(text) ?? plainTextLanguage;
+  return languageForShebang(text.replace(/^\uFEFF/, "")) ?? plainTextLanguage;
 }
 
 let languagesByName: ReadonlyMap<string, Language> | undefined;

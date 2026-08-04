@@ -1646,6 +1646,103 @@ Deno.test("realGit: reads and writes selected files through clean filters", asyn
   }
 });
 
+Deno.test("realGit: rejects binary commit blobs before merging them as text", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    await git(root, ["init", "-q"]);
+    await git(root, ["config", "user.email", "t@t.test"]);
+    await git(root, ["config", "user.name", "Test"]);
+    const nulPath = `${root}/payload.data`;
+    const namedBinaryPath = `${root}/asset.png`;
+    await Deno.writeFile(
+      nulPath,
+      new Uint8Array([98, 101, 102, 111, 114, 101, 10, 0, 97]),
+    );
+    await Deno.writeTextFile(namedBinaryPath, "printable source text\n");
+    await git(root, ["add", "payload.data", "asset.png"]);
+    await git(root, ["commit", "-q", "-m", "binary inputs"]);
+    const runner = realGit(root);
+    const head = runner.headSha();
+    assert(head, "repository has a HEAD commit");
+
+    assertThrows(
+      () => runner.fileAtCommit(head, nulPath),
+      Error,
+      "Binary data is shown as a hex dump",
+    );
+    assertThrows(
+      () => runner.fileAtCommit(head, namedBinaryPath),
+      Error,
+      "Binary data is shown as a hex dump",
+    );
+    assertThrows(
+      () =>
+        runner.amendCommit(
+          null,
+          new Map([[nulPath, "edited text\n"]]),
+          head,
+        ),
+      Error,
+      "Binary data is shown as a hex dump",
+    );
+    assertEquals(runner.headSha(), head);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("realGit: preserves a UTF-8 BOM when amended text is re-encoded", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    await git(root, ["init", "-q"]);
+    await git(root, ["config", "user.email", "t@t.test"]);
+    await git(root, ["config", "user.name", "Test"]);
+    const path = `${root}/value.ts`;
+    await Deno.writeFile(
+      path,
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode("export const value = 1;\n"),
+      ]),
+    );
+    await git(root, ["add", "value.ts"]);
+    await git(root, ["commit", "-q", "-m", "initial"]);
+    const runner = realGit(root);
+    const head = runner.headSha();
+    assert(head, "repository has a HEAD commit");
+    assertEquals(
+      runner.fileAtCommit(head, path),
+      "export const value = 1;\n",
+    );
+
+    runner.amendCommit(
+      null,
+      new Map([[path, "export const value = 2;\n"]]),
+      head,
+    );
+    const shown = await new Deno.Command("git", {
+      cwd: root,
+      args: ["show", "HEAD:value.ts"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    assert(shown.success, new TextDecoder().decode(shown.stderr));
+    assertEquals(
+      shown.stdout,
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode("export const value = 2;\n"),
+      ]),
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("realGit: handles an index path beginning with a stage prefix", async () => {
   const root = await Deno.makeTempDir();
   try {

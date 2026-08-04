@@ -364,7 +364,8 @@ export class Session {
     // The edit buffer mirrors the document text; for an editable file the two
     // stay in lock-step (the document is a re-parse of the buffer).
     if (source) this.buffer = new EditBuffer(doc.text);
-    if (options.viewMode === "rendered" && source?.render) {
+    const initialViewMode = options.viewMode ?? source?.defaultViewMode;
+    if (initialViewMode === "rendered" && source?.render) {
       this.viewMode = "rendered";
       this.setSourceDocument(doc);
     }
@@ -415,6 +416,10 @@ export class Session {
   }
 
   private toggleViewMode(): void {
+    if (this.source?.renderLineTopology === "independent") {
+      this.message = "This rendered view has no line-aligned source view.";
+      return;
+    }
     const changed = this.setViewMode(
       this.viewMode === "source" ? "rendered" : "source",
     );
@@ -939,7 +944,8 @@ export class Session {
         ? this.displayAdjacentDiffMetadataRows(offeredExpand)
         : [],
       canEdit: !this.cursorOn && !!this.source?.editable,
-      canRender: !!this.source?.render,
+      canRender: !!this.source?.render &&
+        this.source.renderLineTopology !== "independent",
       viewMode: this.viewMode,
       hasNonPrintables: this.hasNonPrintables(),
       notice: null,
@@ -4017,6 +4023,7 @@ export class Session {
       return;
     }
     this.source = opened.source;
+    this.viewMode = opened.source.defaultViewMode ?? "source";
     this.buffer = new EditBuffer(opened.text);
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file

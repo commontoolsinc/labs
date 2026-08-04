@@ -1508,16 +1508,23 @@ export function markdownHeadingNodes(
 
     const endText = rawLines[end] ?? "";
     const startText = rawLines[diffLine] ?? "";
+    const markerWidth = startText.length === 0 ? 0 : 1;
+    const bomWidth = node.startLine === 0 &&
+        startText[markerWidth] === "\uFEFF"
+      ? 1
+      : 0;
+    const codeStart = markerWidth + bomWidth;
     return {
       kind: "section",
       label: node.label,
       name: node.name,
       startLine: diffLine,
       endLine: end,
-      // Past the one-column diff marker.
-      startCol: Math.min(1, cpLen(startText)),
+      // Past the diff marker and any BOM removed before parsing.
+      startCol: Math.min(codeStart, cpLen(startText)),
       endCol: cpLen(endText),
-      startOffset: diffLineStarts[diffLine] + Math.min(1, startText.length),
+      startOffset: diffLineStarts[diffLine] +
+        Math.min(codeStart, startText.length),
       endOffset: diffLineStarts[end] + endText.length,
       depth,
       children: [],
