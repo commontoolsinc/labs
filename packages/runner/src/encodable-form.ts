@@ -1,6 +1,47 @@
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /**
+ * Reads the method by which a value produces its encodable form -- the form it
+ * takes on the way to being encoded, which reaches storage without ever being
+ * stringified.
+ *
+ * The name is `toJSON`, because that is the data model's own duck-typed
+ * protocol and this asks the same question the conversion would. It is a poor
+ * name for what it does here and that is a separate change; this one is about
+ * asking the question in one place rather than four.
+ *
+ * Answered by a builder module, by the factory that carries its members, and
+ * by a `Cell`, for which it is how the cell becomes a link.
+ */
+function encodableFormMethod(value: unknown): (() => unknown) | undefined {
+  if (
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function")
+  ) {
+    return undefined;
+  }
+
+  const artifact = value as { toJSON?: unknown };
+  return typeof artifact.toJSON === "function"
+    ? artifact.toJSON as () => unknown
+    : undefined;
+}
+
+/** Checks whether a value can produce an encodable form of itself. */
+export function hasEncodableForm(value: unknown): boolean {
+  return encodableFormMethod(value) !== undefined;
+}
+
+/**
+ * Produces the encodable form of a value that has one, or `undefined` for a
+ * value that does not. Ask `hasEncodableForm()` to tell those apart from a
+ * value whose encodable form is itself `undefined`.
+ */
+export function encodableFormOf(value: unknown): unknown {
+  return encodableFormMethod(value)?.call(value);
+}
+
+/**
  * Marks an object whose replacement is under way -- an ancestor in the walk --
  * so a cycle is recognized instead of followed forever.
  */

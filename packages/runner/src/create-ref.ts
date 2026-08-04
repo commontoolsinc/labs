@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { encodableFormOf, hasEncodableForm } from "./encodable-form.ts";
 import { hasEntityUriScheme } from "./entity-kind.ts";
 import {
   BaseFabricPrimitive,
@@ -92,15 +93,11 @@ export function createRef(
     if (obj instanceof BaseFabricPrimitive) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
-    // If there is a .toJSON method, replace obj with it, then descend.
-    // TODO(seefeld): We have to accept functions for now as the pattern factory
-    // is a function and has a .toJSON method. But we plan to move away from
-    // that kind of serialization anyway, so once we did, remove this.
-    if (
-      (isRecord(obj) || typeof obj === "function") &&
-      typeof obj.toJSON === "function"
-    ) {
-      obj = obj.toJSON() ?? obj;
+    // A builder artifact is replaced by its encodable form, then descended
+    // into: what the ref is derived from is the form that gets written.
+    // Functions qualify because a pattern factory is one.
+    if (hasEncodableForm(obj)) {
+      obj = encodableFormOf(obj) ?? obj;
     }
 
     if (isReactive(obj)) {
