@@ -49,3 +49,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md).
   The plan stays live until the practice has been exercised on a real
   migration.
+- [Verb results: references, not expansions](verb-result-selection.md) makes a
+  verb's result render references as references instead of expanding them —
+  bounding the payload and keeping identity in-band — and adds the `cf
+  invocation get` reader that re-opens a settled outcome without re-executing
+  the verb.
