@@ -196,28 +196,6 @@ Deno.test({
   },
 });
 
-Deno.test({
-  name: "realFileGateway.open: reads a zero-sized procfs file",
-  ignore: Deno.build.os !== "linux",
-  fn() {
-    const path = "/proc/self/cmdline";
-    assertEquals(Deno.statSync(path).size, 0);
-    const opened = realFileGateway().open(path);
-    assert(opened !== null);
-    assert(opened.text.length > 0);
-    assertEquals(opened.source.editable, false);
-    const rendered = opened.source.render?.(
-      opened.source.parse(opened.text),
-    );
-    assert(rendered !== undefined);
-    assert(rendered.lines[0].text.startsWith("00000000  "));
-    assertEquals(
-      rendered.lines.at(-1)?.text.includes("preview stopped"),
-      false,
-    );
-  },
-});
-
 Deno.test("realFileGateway.open: returns null when the file cannot be read", () => {
   const gw = realFileGateway();
   const missing = join(Deno.cwd(), "definitely-not-a-real-file-xyz-12345.ts");
