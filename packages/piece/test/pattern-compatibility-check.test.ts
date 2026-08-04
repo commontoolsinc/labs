@@ -40,7 +40,11 @@ function baseProgram(): RuntimeProgram {
   };
 }
 
-/** A later revision of the same contract: accepted. */
+/**
+ * A later revision of the same contract: accepted. Its output is observably
+ * different for the same stored argument, so applying it proves the swap
+ * happened AND that the argument survived it.
+ */
 function compatibleProgram(): RuntimeProgram {
   return {
     main: "/main.tsx",
@@ -51,7 +55,7 @@ function compatibleProgram(): RuntimeProgram {
         "export default pattern<{ seed?: string }, { label: string }>(",
         "  ({ seed }) => ({",
         "    [NAME]: 'Compatibility check',",
-        "    label: seed ?? 'still unset',",
+        "    label: `seen:${seed ?? 'unset'}`,",
         "  }),",
         ");",
         "",
@@ -137,7 +141,7 @@ describe("setsrc compatibility preflight", () => {
   });
 
   const livePiece = async () =>
-    await pieces.create(baseProgram(), { seed: "hello" });
+    await pieces.create(baseProgram(), { input: { seed: "hello" } });
 
   it("clears a source that can replace the current one", async () => {
     const piece = await livePiece();
@@ -172,11 +176,13 @@ describe("setsrc compatibility preflight", () => {
     expect(JSON.stringify(piece.getCell().getAsQueryResult())).toBe(before);
 
     // And the piece still accepts a compatible source afterwards: the refused
-    // check left no half-applied state behind to trip over.
+    // check left no half-applied state behind to trip over. The new output
+    // proves the swap landed; `hello` inside it proves the stored argument
+    // came through unchanged.
     await piece.setPattern(compatibleProgram());
     await runtime.idle();
     expect((piece.getCell().getAsQueryResult() as { label?: string }).label)
-      .toBe("still unset");
+      .toBe("seen:hello");
   });
 
   it("agrees with the apply path, and names the same reason", async () => {
