@@ -545,7 +545,7 @@ filesystem sync but differs in important ways:
   With an API, you need explicit merge logic.
 
 For webhook infrastructure details, see
-[docs/specs/webhook-ingress/README.md](/docs/specs/webhook-ingress/README.md).
+[docs/specs/webhook-ingress/README.md](../specs/webhook-ingress/README.md).
 
 ### Edits as Lifecycle Entities
 
@@ -715,7 +715,7 @@ Key considerations:
   the corresponding edit to `succeeded`.
 
 For webhook infrastructure, see
-[docs/specs/webhook-ingress/README.md](/docs/specs/webhook-ingress/README.md).
+[docs/specs/webhook-ingress/README.md](../specs/webhook-ingress/README.md).
 
 ### Consistency Backstop: Full Rebuild
 

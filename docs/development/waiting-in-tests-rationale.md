@@ -524,7 +524,7 @@ hammering the host. The growing backoff — 25 milliseconds doubling to a
 30-second cap, with up to 20 percent jitter — is the honest way to keep
 checking whether the server is back without flooding it. It is the same shape
 as the committed-write backoff in [committed-write
-backpressure](committed-write-backpressure.md), where a capped exponential
+backpressure](../features/committed-write-backpressure.md), where a capped exponential
 backoff also stands in for a retry that has no event to wait on.
 
 Cancelling an in-progress backoff stays event-driven: the pause between

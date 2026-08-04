@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-// Host-embedding contract seam 7 (docs/development/HOST_EMBEDDING.md §7): pinning
+// Host-embedding contract seam 7 (docs/features/host-embedding.md §7): pinning
 // an element to a profile is authorized by OWNERSHIP, not by a trusted-UI
 // gesture. The single authorized writer of profile `elements` is
 // `mutateElements` in profile-home.tsx, typed `OwnerProtectedProfileWrite`

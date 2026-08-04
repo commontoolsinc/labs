@@ -1138,7 +1138,7 @@ export function normalizeAndDiff(
   // NOTHING -- returned here without descending. This is load-bearing for
   // the mergeable collection ops (`push`/`addUnique`) twice over: their
   // array read is excluded from the commit's conflict set (see
-  // docs/development/mergeable-collection-writes.md), which is only safe
+  // docs/features/mergeable-collection-writes.md), which is only safe
   // while the op emits no writes below the tail, so (1) the element itself
   // must not be re-anchored or rewritten, and (2) it must not be DESCENDED
   // either -- descending would register its interior objects in

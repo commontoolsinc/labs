@@ -171,8 +171,9 @@ run directory.
 - [BENCHMARKS.md](BENCHMARKS.md) — how `*.bench.ts` files run in CI, how the
   team ops dashboard charts their trends, and the naming and stdout
   constraints a bench file must satisfy.
-- [LLM_TESTING.md](LLM_TESTING.md) — testing patterns and server routes that
-  call the LLM, including the test-environment guard and conversation fixtures.
+- [llm-testing.md](../features/llm-testing.md) — testing patterns and server
+  routes that call the LLM, including the test-environment guard and
+  conversation fixtures.
 - [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser
   integration tests.
 - [../specs/pattern-update-testing.md](../specs/pattern-update-testing.md) —

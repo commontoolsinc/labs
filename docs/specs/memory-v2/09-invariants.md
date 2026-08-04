@@ -233,7 +233,7 @@ with delayed verdict delivery is the natural next step if this area churns.
 > exhaustion). There is no path on which it silently vanishes.
 
 Stated in
-[Committed-write backpressure](../../development/committed-write-backpressure.md);
+[Committed-write backpressure](../../features/committed-write-backpressure.md);
 listed here because retry-loop and backpressure optimizations are the changes
 most likely to violate it.
 

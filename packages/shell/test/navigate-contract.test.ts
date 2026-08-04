@@ -7,7 +7,7 @@ import {
   updatePageTitle,
 } from "../shared/navigate.ts";
 
-// Host-embedding contract seam 3 (docs/development/HOST_EMBEDDING.md §3): a host
+// Host-embedding contract seam 3 (docs/features/host-embedding.md §3): a host
 // embeds by listening on `globalThis` for the navigation CustomEvents these
 // helpers dispatch. The contract an embedder binds to is the event *name* and
 // the detail *shape* — both are asserted here so a rename or a detail reshape

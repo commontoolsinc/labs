@@ -25,7 +25,7 @@ three known ways:
   a FUSE mount, and a browser-driving agent is the recommended local workflow,
   and all of those actors count as a single identity. The publicly derivable
   `implicit trust` identity collapses every caller that derives it into one
-  principal. See [`SHARED_IDENTITY.md`](SHARED_IDENTITY.md).
+  principal. See [`shared-identity.md`](shared-identity.md).
 - **Principals that are not people.** The toolshed server identity, the DIDs
   listed in `MEMORY_SERVICE_DIDS`, and background services act as principals in
   the same way a user does. Exclude them explicitly when counting people.

@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-// Host-embedding contract seam 5 (docs/development/HOST_EMBEDDING.md §5): every
+// Host-embedding contract seam 5 (docs/features/host-embedding.md §5): every
 // cf-* component's index.ts guards its customElements.define with
 // `if (!customElements.get(tag))`, so importing a component module twice — or
 // importing a component whose tag is already registered — is a no-op instead of

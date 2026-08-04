@@ -118,13 +118,13 @@ It is a shared, publicly-derivable key — every developer who derives it gets
 the same DID. Never use it against a server other people use, and don't deploy
 your own work as it even locally: it collapses you into the server principal
 (and into one identity for user counting — see
-[`active-user-counting.md`](./active-user-counting.md)). Full policy:
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+[`active-user-counting.md`](../features/active-user-counting.md)). Full policy:
+[`shared-identity.md`](../features/shared-identity.md).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
 can import a CLI PKCS8/PEM key via `Import CLI Key`. See
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+[`shared-identity.md`](../features/shared-identity.md).
 
 **First-time browser login:**
 
@@ -346,4 +346,4 @@ Or use the `<cf-updater>` component in your piece's UI.
 | `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-piece` |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
-See `packages/background-piece-service/CLAUDE.md` for more details.
+See `packages/background-piece-service/AGENTS.md` for more details.

@@ -20,7 +20,7 @@ bound on a network call raises a different question: what should happen when a
 remote peer never answers. This document settles that.
 
 The test is the one in
-[`waiting-in-tests.md`](waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress):
+[`waiting-in-tests.md`](../development/waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress):
 not "is the bound comfortably large" but "is firing early safe". A bound whose
 early fire only repeats work is tolerable. A bound whose early fire drops a real
 result is not.

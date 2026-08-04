@@ -21,7 +21,7 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 // HTTP surface is ingest. Self-serve creation (gated on real caller auth) is the
 // additive "make it generic/self-serve later" step. All registry helpers take
 // `runtime` explicitly so the operator script can reuse them without booting the
-// server. See docs/development/proposals/ingest-channels-journal-sink.md.
+// server. See docs/plans/ingest-channels-journal-sink.md.
 
 const INGEST_SECRET_BYTES = 32;
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";

@@ -47,7 +47,7 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
-      - name: 🧭 Check skill facts
+      - name: 🧭 Check agent-facing facts
         run: deno task check-skill-facts
 
       - name: 📄 Type-check docs code blocks
