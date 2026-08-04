@@ -60,17 +60,30 @@ export function isInertPlainObject(
     return false;
   }
 
-  // A single pass over the own keys checks all three requirements: each key
-  // must be a string (`Reflect.ownKeys()` yields symbol keys too, which a
-  // count-based comparison would need a second key walk to exclude), and its
-  // descriptor must be enumerable and carry `value` (an accessor answers
-  // `get` / `set` instead).
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== "string") {
-      return false;
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
-    if (!descriptor.enumerable || !("value" in descriptor)) {
+  // Three key reads settle the two *key* requirements. `Object.keys()` is the
+  // enumerable string keys; `Object.getOwnPropertyNames()` is those plus the
+  // non-enumerable ones, so equal lengths mean every string key is enumerable;
+  // and no symbol keys means `Object.getOwnPropertySymbols()` is empty. This
+  // sits on the hot write path, and each of the three has an engine fast path
+  // that `Reflect.ownKeys()` -- which would answer both questions at once --
+  // does not: the three together cost a fraction of the one.
+  const keys = Object.keys(value);
+
+  if (Object.getOwnPropertyNames(value).length !== keys.length) {
+    return false;
+  }
+
+  if (Object.getOwnPropertySymbols(value).length !== 0) {
+    return false;
+  }
+
+  // The remaining requirement is data-ness, which only a descriptor answers: an
+  // accessor carries `get` / `set` where a data property carries `value`. The
+  // keys walked here are every own key, the two reads above having established
+  // that there are no others.
+  for (let i = 0; i < keys.length; i++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, keys[i]!)!;
+    if (!("value" in descriptor)) {
       return false;
     }
   }
