@@ -93,6 +93,14 @@ Tasks:
 - [ ] CI runs a flag-ON arm of the integration suites from the first PR
       that has anything to test (v1 lesson: the flags-on branch never went
       through CI).
+- [x] Stand up the scenario-trace suite
+      ([scenario-traces.md](../specs/server-side-execution/scenario-traces.md),
+      2026-08-03) — twelve end-to-end journeys, cell-by-cell with
+      citations, executed by smaller-model agents under the
+      cite-or-GAP / flag-don't-fix protocol with owner-tier
+      adjudication. STANDING RULE: re-run affected traces after
+      every ruling batch that edits a detail doc; unexplained
+      reference-answer drift is a finding.
 - [ ] Audit what server-execution surface, if any, exists on main
       (executor remnants, stats routes, doc references) and record it in
       this plan.
