@@ -16,7 +16,6 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { isFabricValueLayer } from "./type-check.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
@@ -150,10 +149,9 @@ export function shallowCleanPlainObject(
  * converted into `FabricNativeWrapper` subclasses, `FabricPrimitive` types,
  * or `FabricInstance` types by the conversion layer.
  *
- * Arrays, plain objects, objects with `toJSON()`, and system-defined special
- * primitives are recognized by `tagFromNativeValue()` but are NOT convertible
- * native instances -- they have their own handling paths in the conversion
- * layer.
+ * Arrays, plain objects, and system-defined special primitives are recognized
+ * by `tagFromNativeValue()` but are NOT convertible native instances -- they
+ * have their own handling paths in the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
   switch (tagFromNativeValue(value)) {
@@ -311,26 +309,6 @@ export function shallowFabricFromNativeValue(
       );
     }
 
-    case NATIVE_TAGS.HasToJSON: {
-      // Objects (or class instances) with a `toJSON()` method. Arrays never
-      // reach here: they are tagged `Array` whatever they carry.
-      // Call `toJSON()` and validate the result.
-      const converted = (value as { toJSON: () => unknown }).toJSON();
-      if (!isFabricValueLayer(converted)) {
-        throw new Error(
-          `\`toJSON()\` on ${typeof value} returned something other than a ` +
-            "`FabricValue`",
-        );
-      }
-      return cloneHelper(
-        converted as FabricValue,
-        freeze,
-        false,
-        false,
-        null,
-      );
-    }
-
     case NATIVE_TAGS.FabricInstance: {
       // `FabricInstance` values (`FabricError`, `UnknownValue`, etc.)
       // are already valid `FabricValue` members. Delegate frozenness
@@ -361,19 +339,8 @@ export function shallowFabricFromNativeValue(
         case "bigint":
           return value;
         case "function":
-          if (hasToJSONMethod(value)) {
-            const converted = value.toJSON();
-            if (!isFabricValueLayer(converted)) {
-              throw new Error(
-                "`toJSON()` on function returned something other than a " +
-                  "`FabricValue`",
-              );
-            }
-            return converted;
-          }
           throw new Error(
-            "Not representable as a `FabricValue`: function per se (needs " +
-              "to have a `toJSON()` method)",
+            "Not representable as a `FabricValue`: function",
           );
         case "symbol":
           // Registry-interned symbols are valid fabric primitives; unique
@@ -393,33 +360,14 @@ export function shallowFabricFromNativeValue(
     }
 
     default:
-      // Unrecognized object types (`Map`, `Set`, `Uint8Array`, class instances
-      // without `toJSON()`, etc.) -- not valid `FabricValue`. Death before
-      // confusion!
+      // Unrecognized object types (`Map`, `Set`, class instances, etc.) --
+      // not valid `FabricValue`. Death before confusion!
       throw new Error(
         `Not representable as a \`FabricValue\`: ${
           (value as object).constructor?.name ?? typeof value
         } (not a recognized fabric type)`,
       );
   }
-}
-
-/**
- * Checks whether a value has a callable `toJSON()` method.
- *
- * TODO: Remove `toJSON()` support once all callers have migrated to
- * `[CODEC]`-based encoding. See spec Section 7.1.
- *
- * This function is a TypeScript type guard for `{ toJSON: () => unknown }`.
- */
-function hasToJSONMethod(
-  value: unknown,
-): value is { toJSON: () => unknown } {
-  return (
-    value !== null &&
-    "toJSON" in (value as object) &&
-    typeof (value as { toJSON: unknown }).toJSON === "function"
-  );
 }
 
 // Sentinel value used to indicate an object is currently being processed
@@ -498,10 +446,12 @@ function fabricFromNativeValueInternal(
   // Spelled as a `typeof` test rather than `!isRecord()` so the non-object
   // arms of `FabricValueLayer` narrow: every non-object layer value is
   // already a `FabricValue`.
+  //
+  // Nothing is recorded in `converted` here. Reaching this means `original`
+  // was not a record: every record the shallow conversion accepts answers with
+  // an object, so a record cannot arrive at this branch, and a non-record is
+  // not a key the map holds.
   if (typeof value !== "object" || value === null) {
-    if (isOriginalRecord) {
-      converted.set(original, value);
-    }
     return value;
   }
 
@@ -621,8 +571,7 @@ function rebuildFabricErrorDeep(
  * - `isFabricCompatible(x)`: "could x be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?"
  *
- * `isFabricCompatible()` additionally accepts `FabricNativeObject` types and
- * objects/functions with `toJSON()` methods that return fabric values. It
+ * `isFabricCompatible()` additionally accepts `FabricNativeObject` types. It
  * checks recursively, so all nested values in arrays and objects must also be
  * fabric-compatible or convertible.
  *
@@ -658,11 +607,7 @@ function isFabricCompatibleInternal(
     }
 
     case "function": {
-      // Functions are only fabric-compatible if they have toJSON().
-      if (hasToJSONMethod(value)) {
-        const converted = value.toJSON();
-        return isFabricCompatibleInternal(converted, seen);
-      }
+      // A function is live code, and has no fabric representation.
       return false;
     }
 
@@ -697,15 +642,7 @@ function isFabricCompatibleInternal(
         return true;
       }
 
-      // Objects with toJSON() -- check the converted result.
-      if (hasToJSONMethod(value)) {
-        const converted = value.toJSON();
-        const result = isFabricCompatibleInternal(converted, seen);
-        seen.delete(value);
-        return result;
-      }
-
-      // Class instances without toJSON() are not fabric-compatible.
+      // Class instances are not fabric-compatible.
       if (isInstance(value)) {
         seen.delete(value);
         return false;

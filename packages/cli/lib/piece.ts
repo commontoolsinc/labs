@@ -14,6 +14,7 @@ import {
   isCellResult,
   isReadableCell,
   isSlugAddress,
+  type MemorySpace,
   NAME,
   Runtime,
   runtimePresets,
@@ -35,6 +36,7 @@ import {
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
+  type PatternCompatibilityReport,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -1283,6 +1285,40 @@ export async function setPiecePattern(
   );
 }
 
+/**
+ * Would `setPiecePattern` be accepted for this piece? Applies nothing.
+ *
+ * Same shape as `setPiecePattern` up to the point of the swap, so the verdict
+ * is about the source the user would actually apply — including its resolved
+ * imports and pinned program — rather than an approximation of it.
+ */
+export async function checkPiecePattern(
+  config: PieceConfig,
+  entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<PatternCompatibilityReport> {
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  return await piece.checkPattern(
+    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+      manager,
+      entry,
+    ),
+  );
+}
+
 export async function savePiecePattern(
   config: PieceConfig,
   outPath: string,
@@ -1342,7 +1378,7 @@ function getCallableValue(rootValue: unknown, callableName: string): unknown {
 async function tryResolvePieceCallableAt(
   piece: any,
   manager: any,
-  space: string,
+  space: MemorySpace,
   callableName: string,
   cellProp: "input" | "result",
 ): Promise<ResolvedPieceCallable | null> {
@@ -1360,10 +1396,8 @@ async function tryResolvePieceCallableAt(
     callableCell,
     callableKind,
     cellKey: callableName,
-    cellProp,
     commandSpec: callableCommandSpec(callableCell, callableKind),
     manager,
-    piece,
     space,
   };
 }
@@ -1400,7 +1434,7 @@ function probeForcedStreamCell(cell: any, name: string): any | null {
 async function tryResolvePieceHandler(
   piece: any,
   manager: any,
-  space: string,
+  space: MemorySpace,
   callableName: string,
 ): Promise<ResolvedPieceCallable | null> {
   const pieceCell = piece.getCell?.();
@@ -1427,13 +1461,11 @@ async function tryResolvePieceHandler(
     callableCell: streamCell,
     callableKind: "handler",
     cellKey: callableName,
-    cellProp: "result",
     // The link-derived cell still carries whatever payload schema the piece
     // does publish, which the forced stream cast does not; keep using it for
     // the command spec so `--help` and input validation are unaffected.
     commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
     manager,
-    piece,
     space,
   };
 }
@@ -1441,7 +1473,7 @@ async function tryResolvePieceHandler(
 async function tryResolveLivePieceToolCallable(
   piece: any,
   manager: any,
-  space: string,
+  space: MemorySpace,
   callableName: string,
   pieceScope?: PieceConfig["pieceScope"],
 ): Promise<any | null> {
@@ -1484,7 +1516,7 @@ async function loadPieceForCallables(
 ): Promise<{
   manager: any;
   piece: any;
-  space: string;
+  space: MemorySpace;
   resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
 }> {
   const manager = await (deps.loadManager ?? loadManager)(config);

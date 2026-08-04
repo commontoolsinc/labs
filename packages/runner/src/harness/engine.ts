@@ -399,10 +399,8 @@ export class Engine extends EventTarget {
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
-          diagnosticMessageTransformer: new (compilerStack()
-            .ReactiveErrorTransformer)({
-            verbose: options.verboseErrors,
-          }),
+          diagnosticMessageTransformer: compilerStack()
+            .createReactiveErrorTransformer(options.verboseErrors),
           beforeTransformers: (program) => {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({

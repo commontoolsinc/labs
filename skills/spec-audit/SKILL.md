@@ -23,7 +23,7 @@ load-bearing evidence quickly.
   `packages/ts-transformers/test/fixtures/**` input/expected corpus. Inspect
   live emission with `deno task cf check <file> --show-transformed --no-run`.
 - Canonical constants the specs cite (spot-check the citations still resolve):
-  `CFC_TRANSFORMER_STAGE_SPECS` (cf-pipeline.ts),
+  `CFC_TRANSFORMER_STAGES` (cf-pipeline.ts),
   `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY` (+ its runner-factory guard test),
   `CrossStageState`, `getExpressionContainerKind`,
   `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES`, wrapper vocabulary in

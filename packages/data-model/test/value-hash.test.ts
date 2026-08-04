@@ -1167,9 +1167,11 @@ describe("value-hash", () => {
         );
       });
 
-      it("throws for HasToJSON (deferred — needs recursive translation)", () => {
+      it("throws for a member that is a function", () => {
+        // `toJSON` gets no special reading here either: it is a function-valued
+        // member, and functions have no hash.
         const obj = { toJSON: () => "hello" };
-        expect(() => hashOf(obj)).toThrow("unsupported object type");
+        expect(() => hashOf(obj)).toThrow("unsupported type: function");
       });
     });
   });

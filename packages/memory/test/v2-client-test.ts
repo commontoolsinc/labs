@@ -1317,6 +1317,28 @@ Deno.test("memory v2 client readyToRetry rejects when same session ID is not res
   }
 });
 
+Deno.test("memory v2 client fires onSessionReplaced when a restore is not resumed", async () => {
+  // The marker epoch dies with the replaced session; consumers holding
+  // marker-keyed state (the runner's parked accepted promotions, CT-1927)
+  // reconcile through this callback rather than waiting on markers the
+  // fresh session can never issue.
+  const transport = new ConflictReadyFreshSameSessionTransport();
+  const client = await connect({ transport });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-session-replaced-callback",
+  );
+  try {
+    let replaced = 0;
+    session.onSessionReplaced = () => {
+      replaced += 1;
+    };
+    await session.restore();
+    assertEquals(replaced, 1);
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   const transport = new AckCountingTransport();
   const client = await connect({ transport });

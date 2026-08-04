@@ -81,12 +81,19 @@ Opt-out note:
 ### 2.2 Pipeline object and cross-stage state
 
 `CommonFabricTransformerPipeline` (`src/cf-pipeline.ts`) constructs one ordered
-pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
+pipeline from `CFC_TRANSFORMER_STAGES`. Every stage shares:
 
 - a single `diagnosticsCollector: TransformationDiagnostic[]`
 - a single `CrossStageState` instance (`src/core/cross-stage-state.ts`), which
   is the sole owner of cross-transformer communication. It replaced the
   formerly-separate registry fields on `TransformationOptions`.
+
+A stage reaches that instance as `context.state`. `TransformationContext`
+resolves it once in its constructor — taking the caller's `options.state` when
+one is supplied and creating a fresh instance otherwise — and stores the result
+back into its own `options`, so a nested context built from those options joins
+the same run. Every registry a stage reads through `context.state` is therefore
+present; no stage handles a missing one.
 
 `CrossStageState` organizes its registries into three deliberate families
 (mirroring the TypeScript compiler's `NodeLinks` pattern):
@@ -119,7 +126,7 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
 ## 3. Pipeline Order (Normative)
 
-The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
+The authoritative ordering lives in `CFC_TRANSFORMER_STAGES` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
 in this order (24 stages):
 
@@ -447,13 +454,15 @@ Diagnostics emitted in all modes:
     runs once when the result is stored and freezes its return to a snapshot; a
     method, setter, or function-valued property is a function value the
     reactive data model cannot store (it throws
-    ``Not representable as a `FabricValue`: function per se``)
+    ``Not representable as a `FabricValue`: function``)
   - exempt: members inside compute wrappers (computed/lift/handler/action),
     object literals outside pattern/render context, JSX event handlers,
     array-method/render callbacks, and a `toJSON` member that reads no reactive
-    value (a toJSON-bearing object is storable — the data model converts it via
-    `toJSON()`); class members are covered separately by
+    value; class members are covered separately by
     `pattern-context:function-creation`
+  - the `toJSON` exemption admits a member the data model will not store: the
+    conversion reads `toJSON` as the ordinary function-valued member it is and
+    refuses it, so such a pattern compiles here and throws at its first write
 - **Error** `pattern-context:builder-placement`
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
@@ -2862,15 +2871,16 @@ trusted-name lists).
 
 ## 18. Diagnostics Message Transformation (Optional Consumer Layer)
 
-Diagnostic message transformers are exported separately from AST transform
-pipeline. Current built-in behavior:
+Diagnostic message transformation is exported separately from AST transform
+pipeline. A diagnostic message transform is a plain function taking a
+TypeScript diagnostic message and returning either a replacement message or
+null when it does not apply. Current built-in behavior:
 
-- `ReactiveErrorTransformer` rewrites TypeScript messages matching
+- `createReactiveErrorTransformer` builds a transform that rewrites TypeScript
+  messages matching
   `"Property 'get' does not exist on type 'OpaqueCell<...>'"` into user-facing
   guidance about unnecessary `.get()`.
-- optional `verbose` mode appends original TypeScript message.
-- `CompositeDiagnosticTransformer` returns the first matching transformer
-  result.
+- its optional `verbose` argument appends the original TypeScript message.
 
 ## 19. Current Known Limits (Observed)
 
@@ -2966,7 +2976,7 @@ re-listing it. The enforced sources of truth:
 
 | Spec content | Canonical source | Guard / note |
 | --- | --- | --- |
-| Pipeline stage set + order (§3) | `CFC_TRANSFORMER_STAGE_SPECS` / `CFC_TRANSFORMER_STAGE_NAMES` (`src/cf-pipeline.ts`) | the array literal is the order |
+| Pipeline stage set + order (§3) | `CFC_TRANSFORMER_STAGES` / `CFC_TRANSFORMER_STAGE_NAMES` (`src/cf-pipeline.ts`) | the array literal is the order; the names are the class names |
 | Cross-stage registries (§2.2) | `CrossStageState` (`src/core/cross-stage-state.ts`) | NodeLinks-shaped families |
 | Recognized runtime exports + which are reactive origins (§5, §6.3) | `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY` (`src/core/commonfabric-runtime-registry.ts`) | `test/core/commonfabric-runtime-registry.test.ts` asserts coverage of the runner builder factory |
 | SES self-contained callback boundaries (§6.5) | `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES` (`src/transformers/pattern-context-validation.ts`) | excludes `sqlite-row-label-rule` by design |

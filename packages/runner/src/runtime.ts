@@ -52,6 +52,7 @@ import {
   type Cell,
   createCell,
   internCellLinkSchema,
+  isCell,
   schemaCellScope,
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
@@ -611,6 +612,17 @@ type RuntimeSetupOptions = {
 
 function isMemorySpaceDID(value: string): boolean {
   return /^did:[^:]+:.+/.test(value);
+}
+
+/**
+ * Helper for `Runtime.getImmutableCell()`, which tells the storage preflight
+ * what a `Cell` stands for -- the sigil link naming it -- and leaves everything
+ * else to the walk. A cell has no fabric representation of its own, so one
+ * reached anywhere inside a value bound for the data model has to become its
+ * link first.
+ */
+function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
+  return isCell(value) ? value.toSigilLinkOrNull() : value;
 }
 
 /**
@@ -2016,17 +2028,24 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is unwanted here
-    // (this data is immutable as given). `fabricFromNativeValue()` converts
-    // what callers actually pass -- notably `Cell`s, which become sigil
-    // links via their `toJSON()` -- into an encodable `FabricValue`.
-    // Builder artifacts are replaced HERE rather than at each caller. This is
-    // the designed intake, and the callers are many: raw and JavaScript node
-    // inputs, wish candidates, schema defaults. Covering them one at a time was
-    // tried and is whack-a-mole -- each site that is missed fails as a
-    // rejection at the conversion, or worse as a cleanup error that masks it.
+    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is
+    // unwanted here (this data is immutable as given).
+    //
+    // Builder artifacts become their encodable form and cells become sigil
+    // links HERE rather than at each caller. Neither has a fabric
+    // representation, so both have to go before the value reaches
+    // `fabricFromNativeValue()`. This is the designed intake, and the callers
+    // are many: raw and JavaScript node inputs, wish candidates, schema
+    // defaults. Covering them one at a time was tried and is whack-a-mole --
+    // each site that is missed fails as a rejection at the conversion, or worse
+    // as a cleanup error that masks it.
+    //
+    // One walk covers both. A cell is a leaf to it -- what stands in for a cell
+    // is the link it names, not a container to descend into -- and an
+    // artifact's encodable form is walked in turn, so a cell inside one is
+    // reached as well.
     const asDataURI = dataUriFromValue(
-      fabricFromNativeValue(flattenBuilderArtifacts(data)),
+      fabricFromNativeValue(flattenBuilderArtifacts(data, cellAsLink)),
     );
     return createCell(
       this,

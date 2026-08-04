@@ -317,6 +317,21 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   pendingReadStacks: boolean;
+  /**
+   * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
+   * catch-up obligation for every accept and every conflict rejection —
+   * other rejection kinds carry none — so the batched fan-out's next frame to the
+   * committing session carries a marker covering the verdict (an
+   * otherwise-empty frame if nothing it watches is dirty). The CLIENT keys
+   * verdict parking on this: it holds an accepted commit's promotion
+   * (pending overlay to confirmed mirror) until the marker covers it, so
+   * promotion extrapolates over a base reflecting the foreign novelty the
+   * accept was applied on top of. A client that sees this absent (an older
+   * server that stamps markers only for conflicts) applies verdicts
+   * immediately, as before. Inherent to the build, so a server of this
+   * version always advertises it.
+   */
+  verdictCatchUpMarkers: boolean;
   /** The server can list live space-scoped entity identifiers without values. */
   entityIdListing: boolean;
   /** The server can page one stable entity-identifier snapshot. */
@@ -335,6 +350,7 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
+  verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
   entityIdLookup?: boolean;
@@ -955,6 +971,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // pending reads (resolvePendingReads), so it always advertises it. Clients
   // that see it absent scalarize to top-of-stack before sending.
   pendingReadStacks: true,
+  // Likewise build-inherent: this build's server stages the catch-up
+  // obligation for every verdict (accepts included), so it always
+  // advertises it. Clients that see it absent apply verdicts immediately.
+  verdictCatchUpMarkers: true,
   // The engine answers this request from its identifier index without
   // selecting stored entity values.
   entityIdListing: true,
@@ -1033,6 +1053,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const verdictCatchUpMarkers = value.verdictCatchUpMarkers;
+  if (
+    verdictCatchUpMarkers !== undefined &&
+    typeof verdictCatchUpMarkers !== "boolean"
+  ) {
+    return null;
+  }
+
   const entityIdListing = value.entityIdListing;
   if (
     entityIdListing !== undefined &&
@@ -1068,6 +1096,10 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older server) parses to false: clients scalarize pending
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
+    // Absent (an older server that stamps markers only for conflicts)
+    // parses to false: clients apply verdicts immediately instead of
+    // parking them on marker coverage.
+    verdictCatchUpMarkers: verdictCatchUpMarkers === true,
     entityIdListing: entityIdListing === true,
     entityIdPagination: entityIdPagination === true,
     entityIdLookup: entityIdLookup === true,
@@ -1086,6 +1118,7 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
+  verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,
   entityIdLookup: flags.entityIdLookup,

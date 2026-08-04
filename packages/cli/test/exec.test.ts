@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
-import { PiecesController } from "@commonfabric/piece/ops";
+import type { PieceManager } from "@commonfabric/piece";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
   normalizeCallableInputForExecution,
@@ -1969,12 +1970,14 @@ describe("mounted callable resolution and execution", () => {
 
     // Commit, then drain to a fully settled state, then read the result cell
     // once. No poll loop and no deadline: `settled()` awaits the tool's async
-    // work to completion.
+    // work to completion. The trailing sync is the auto-step that follows
+    // every mounted invocation.
     expect(harness.tracker.events).toEqual([
       "run",
       "idle",
       "commit",
       "settled",
+      "manager.synced",
     ]);
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
@@ -2036,6 +2039,7 @@ describe("mounted callable resolution and execution", () => {
       "idle",
       "commit",
       "settled",
+      "manager.synced",
     ]);
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "from-sink" });
   });
@@ -2829,10 +2833,17 @@ function createExecHarness(options: {
     pull: () => Promise.resolve(state.pullValue ?? state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
+    getAsNormalizedFullLink: () => ({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+      path: [],
+    }),
   };
 
   const piece = {
     id: options.pieceId,
+    getCell: () => ({ pull: () => Promise.resolve() }),
     input: {
       getCell: () => Promise.resolve(rootCell),
       set: (value: unknown, path?: (string | number)[]) => {
@@ -2869,6 +2880,7 @@ function createExecHarness(options: {
           return Promise.resolve();
         },
       }),
+      prepareTxForCommit: () => {},
       getCell: (
         space: string,
         _id: string,
@@ -2913,7 +2925,13 @@ function createExecHarness(options: {
     },
   };
 
-  return { manager, piece, tracker };
+  // The doubles implement the slice of the manager and piece surfaces the
+  // invocation engine exercises; the cast is at this seam alone.
+  return {
+    manager: manager as unknown as PieceManager,
+    piece: piece as unknown as PieceController,
+    tracker,
+  };
 }
 
 function createMockCell(
@@ -2939,6 +2957,12 @@ function createMockCell(
       options?.onSchemaFromLinks?.();
       return cell;
     },
+    getAsNormalizedFullLink: () => ({
+      id: "of:mock-cell",
+      space: "did:key:test-home",
+      scope: "space",
+      path: [],
+    }),
     send: options?.send,
     isStream: options?.isStream,
     key: (key: string) => {

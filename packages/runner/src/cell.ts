@@ -101,6 +101,7 @@ import {
 } from "./cfc/metadata.ts";
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -286,9 +287,10 @@ export const recordRelevantSchemaWritePolicyInput = (
  * these — from an `additionalProperties: false` event schema. The marker is
  * PROVENANCE, not shape, and must stay unforgeable: it rides this
  * in-process options argument, never the event value, so no remote or CLI
- * caller can express it — payloads are plain data, and the CLI's send
- * surface (`CallableCellLike.send`, packages/cli/lib/callable.ts) forwards
- * only `eventId`. In-process callers are gated too: the value must be an
+ * caller can express it — payloads are plain data, and the CLI's invocation
+ * engine (`executeResolvedCallable`, packages/cli/lib/callable.ts) builds the
+ * send options itself and puts only `eventId` in them. In-process callers are
+ * gated too: the value must be an
  * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
  * path drops any other value — and the mint lives in runner internals no
  * pattern compartment can import, so sandboxed pattern code holding a real
@@ -483,6 +485,19 @@ declare module "@commonfabric/api" {
     getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): Reactive<T>;
+    /**
+     * Returns the sigil link naming this cell, or `null` when the cell has no
+     * full link yet (one that has not been created). This is how a cell reaches
+     * storage: the link is what stands in for it, and `hasEncodableForm()` asks
+     * for this member by name.
+     */
+    toSigilLinkOrNull(): SigilLink | null;
+    /**
+     * Answers the JSON protocol with the same link `toSigilLinkOrNull()` gives,
+     * so a cell embedded in a value being stringified reads as what it names.
+     * `packages/html`'s VDOM key generation depends on this. Nothing on the way
+     * to storage consults it.
+     */
     toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
@@ -541,6 +556,7 @@ const cellMethods = new Set<
   "filterWithPattern",
   "flatMap",
   "flatMapWithPattern",
+  "toSigilLinkOrNull",
   "toJSON",
   "for",
   "asSchema",
@@ -1359,10 +1375,10 @@ export class CellImpl<T extends FabricValue>
   set(
     newValue: AnyCellWrapping<T> | T,
     /**
-     * Internal-only commit callback. This runs after this transaction's final
-     * commit result, including failure, so it must remain non-effectful. Use
-     * the post-commit outbox for external side effects that must happen only
-     * after success.
+     * Internal-only settle callback. This runs once this transaction reaches
+     * its final outcome, which includes a rejected commit and an abort, so it
+     * must remain non-effectful. Use the post-commit outbox for external side
+     * effects that must happen only after success.
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     /**
@@ -1803,7 +1819,7 @@ export class CellImpl<T extends FabricValue>
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
       const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(candidate)
+        ? fabricFromNativeValue(flattenBuilderArtifacts(candidate))
         : candidate;
       return existing.some((element) => valueEqual(element, comparable));
     };
@@ -2865,7 +2881,7 @@ export class CellImpl<T extends FabricValue>
     return result;
   }
 
-  toJSON(): SigilLink | null {
+  toSigilLinkOrNull(): SigilLink | null {
     // Return null when no link exists (cell hasn't been created yet)
     if (!this.hasFullLink()) {
       return null;
@@ -2873,6 +2889,17 @@ export class CellImpl<T extends FabricValue>
 
     // Use sigil link format which includes space for cross-space references
     return createSigilLinkFromParsedLink(this.link);
+  }
+
+  toJSON(): SigilLink | null {
+    // The JSON protocol's name for the same link. `generateKey()` in
+    // `packages/html/src/worker/keying.ts` stringifies render nodes to key
+    // them, and a cell inside one has to come out as the link it names for a
+    // key to be stable across renders.
+    //
+    // It carries no weight on the way to storage: what a cell reaches storage
+    // as is read from `toSigilLinkOrNull()` by name.
+    return this.toSigilLinkOrNull();
   }
 
   get __debugValue(): T {

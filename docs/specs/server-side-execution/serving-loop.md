@@ -218,8 +218,11 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
     - watermark doc := n
   hand external effects to the outbox (post-commit; see §5)
 
-on wave budget exhaustion (a cascade that will not quiesce within the
-scheduler's pass budget): commit the wave anyway — the in-memory state is
+on wave budget exhaustion — EITHER trigger (deadline RULED, owner
+2026-08-04): (a) a cascade that will not quiesce within the
+scheduler's pass budget, or (b) the CONSEQUENCE-FLUSH DEADLINE — a
+wave still running at T_flush commits what is sealed so far. ONE
+mechanism for both: commit the wave anyway — the in-memory state is
 a consistent snapshot — count wavesBudgetExhausted, and advance W NOT AT
 ALL: an exhausted wave's commit carries no watermark movement
 (`derivedThrough` stays at the current W). Continuation waves carry the
@@ -231,6 +234,44 @@ effect re-fires.
 on idle (no dirty work, no queued events) for IDLE_PARK_MS:
   park per activation policy
 ```
+
+**The deadline is the MULTI-USER LATENCY bound.** Without it, one
+user's heavy demanded fan-out delays every other user's consequence
+visibility in the same batch — head-of-line blocking ACROSS users,
+because the whole input batch commits once at the batch's derived
+closure. With it, a consequence is visible within roughly
+2·T_flush + push even while the wave behind it keeps deriving.
+Light waves never reach the deadline and stay single-commit — the
+zero-delta case, which is why this is a trigger on the EXISTING
+exhaustion machinery rather than a new commit topology. T_flush is
+a policy knob (order 50–100 ms), tuned in Phase 6 with the other
+budgets; `wavesBudgetExhausted` counts both triggers, and the
+amplification budget's inspection rule treats deadline flushes
+under load as a legitimate re-baseline reason (testing.md §4).
+
+**Sealing order makes the first flush worth flushing**: events and
+their handler consequences MUST seal ahead of deep demanded
+recomputes. The loop already behaves this way — events run eagerly,
+derivations are demanded pulls — this sentence pins it so an
+implementation does not reorder. Per-stream `eventWatermark` still
+advances for events fully processed in an exhausted wave, and
+`consequenceOf` carries them, so overlay echoes retire on the FIRST
+flush (speculation.md §4) even when W lags to quiescence.
+
+**Considered and RECORDED as the fallback, not built** (owner,
+2026-08-04): the two-tier WRITE-CLASS split — every wave committing
+its non-re-derivable tier (handler consequences, `eventWatermark`
+advances, effect intents, cascade entries) ahead of a re-derivable
+tier. It buys constant consequence latency at a CONSTANT 2×
+amplification floor plus a steady-state consistency seam between
+consequences and their derived views; the deadline buys the same
+latency bound load-adaptively on machinery that already exists and
+is model-verified (C10). Adopt the split ONLY if Phase 3's
+propagation gate (≤300 ms p50, testing.md §5) fails under realistic
+fan-out with the deadline alone — and if adopting, split by WRITE
+CLASS (the §3d conflict seam, which makes the second tier
+drop-only and keeps the watermark-with-consequences atomicity),
+never by "handlers vs reactive".
 
 Rules:
 

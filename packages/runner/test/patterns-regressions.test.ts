@@ -266,7 +266,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
   });
 
-  it("normalizes nested toJSON values before raw runner writes in v2", async () => {
+  it("normalizes nested builder artifacts before raw runner writes in v2", async () => {
     await commitTx();
     await runtime.dispose();
     await storageManager.close();
@@ -281,13 +281,15 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
     bindBuilder();
 
+    // Shaped like a builder artifact: a function carrying its own
+    // `toEncodableForm`, which is the member the write path keys on.
     const initialRecipe = Object.assign(() => {}, {
-      toJSON() {
+      toEncodableForm() {
         return { name: "initial recipe" };
       },
     });
     const resultRecipe = Object.assign(() => {}, {
-      toJSON() {
+      toEncodableForm() {
         return { name: "result recipe" };
       },
     });
@@ -297,7 +299,7 @@ describe("Pattern Runner - Regressions", () => {
       resultSchema: {},
       derivedInternalCells: [{
         partialCause: "recipe",
-        schema: { default: initialRecipe.toJSON() },
+        schema: { default: initialRecipe.toEncodableForm() },
       }],
       result: {
         internalRecipe: {

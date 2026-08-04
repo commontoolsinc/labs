@@ -648,7 +648,7 @@ function shouldAddReactiveFor(
   const type = getTypeAtLocationWithFallback(
     expression,
     context.checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
     context.options.logger,
   );
   return isCellLikeType(type, context.checker);
@@ -726,9 +726,9 @@ function isReactiveArrayMethodCall(
       allowImplicitReactiveParameters: false,
       allowReactiveArrayCallbackParameters: false,
       sameScope: getEnclosingFunctionLikeDeclaration(call),
-      typeRegistry: context.options.state?.typeRegistry,
-      syntheticReactiveCollectionRegistry: context.options.state
-        ?.syntheticReactiveCollectionRegistry,
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry: context.state
+        .syntheticReactiveCollectionRegistry,
       logger: context.options.logger,
     },
   ) || isExplicitReactiveCall(target.expression, context);
@@ -761,7 +761,7 @@ function shouldRetargetReactiveReference(
   const type = getTypeAtLocationWithFallback(
     target,
     context.checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
     context.options.logger,
   );
   if (type) {
@@ -898,7 +898,7 @@ function shouldUseStreamCause(
   const type = getTypeAtLocationWithFallback(
     target,
     context.checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
     context.options.logger,
   );
   return isStreamLikeType(type, context.checker);

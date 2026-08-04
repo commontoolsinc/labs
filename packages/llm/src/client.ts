@@ -314,6 +314,25 @@ export interface ConversationFixture {
   responses: ConversationFixtureEntry[];
 }
 
+/**
+ * What a failed request points at, read off its status. The service reports a
+ * request the caller has to change apart from a provider that was busy or
+ * broken, so the hint follows the status rather than blaming the caller for
+ * everything.
+ */
+export function failureHint(status: number, parameters: string): string {
+  if (status === 429 || status === 503) {
+    return "The model provider is busy. Make the request again later.";
+  }
+  if (status >= 500) {
+    return "The LLM service or the model provider failed. The request was not the problem.";
+  }
+  if (status === 400 || status === 422) {
+    return `The LLM server or the model provider rejected the request. Check that you're passing the correct parameters (${parameters})`;
+  }
+  return "The LLM service turned the request down.";
+}
+
 function extractMessageText(
   content: unknown,
 ): string {
@@ -517,7 +536,7 @@ export class LLMClient {
       console.error(
         `%c[generateObject Error]%c HTTP ${response.status}\n` +
           `Response: ${errorText}\n` +
-          `%cCommon cause: Check that you're passing the correct parameters (messages, schema, model, etc.)`,
+          `%c${failureHint(response.status, "messages, schema, model, etc.")}`,
         "color: red; font-weight: bold",
         "color: inherit",
         "color: gray; font-style: italic",
@@ -620,7 +639,7 @@ export class LLMClient {
       console.error(
         `%c[generateText Error]%c HTTP ${response.status}\n` +
           `Response: ${errorText}\n` +
-          `%cCommon cause: Check that you're passing the correct parameters (messages, prompt, model, etc.)`,
+          `%c${failureHint(response.status, "messages, prompt, model, etc.")}`,
         "color: red; font-weight: bold",
         "color: inherit",
         "color: gray; font-style: italic",

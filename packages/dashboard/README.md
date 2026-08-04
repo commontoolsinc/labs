@@ -331,21 +331,53 @@ the prior month's tail until it covers 14 days or reaches the first available
 billing day. The chart shows up to 45 finished UTC days and highlights the part
 used for the estimate.
 
-A day is finished when the export has stopped adding to it, which the tile reads
-from the export's own progress: a day counts as finished once a later day's usage
-has been written since that day was last written to. This matters because the
-export lands a day's usage in batches and goes on adding to a day well into the
-following one, so a day it has not finished holds only part of that day's cost.
-Such a day belongs in the month-to-date total, where it is a running figure, and
-not in the rate behind the projection or at the end of the chart, where it would
-read as spend falling away. When the export has finished no day for more than
-four days the tile goes gray and says how far behind it is, rather than
+Which days are finished matters, because the export lands a day's usage in
+batches spread over the day or two after it ends, and works on several days at
+once. A day it has not finished holds only part of that day's cost. Such a day
+belongs in the month-to-date total, where it is a running figure, and not in the
+rate behind the projection or at the end of the chart, where it would read as
+spend falling away.
+
+Nothing in the export marks a day as complete, so the tile establishes it two
+ways at once, and a day has to satisfy both.
+
+The first is how much of the day the export has accounted for. Alongside cost,
+the query totals the billable time on each day's usage — the seconds of instance,
+disk, and other metered life the export has recorded. A running fleet books close
+to the same amount every day, and unlike cost it does not move when a promotion
+or a price change lands, so a day holding less than half of the day before it is
+one the export is still filling in. A fleet that really does shrink trips this
+for the day it shrinks on, and then the days after it stand against the new level
+and the window moves on.
+
+The second is how long the export has had. It records when it last added a
+material batch to each day, which the tile turns into how long the export is
+currently taking to finish with a day. That figure is measured from the export's
+own record across the window rather than assumed here, so it follows an export
+that speeds up or slows down. A day is finished once the export has had that long
+since the day ended. The newest day in the window is never finished, because the
+export has written nothing after it to show it has moved past it.
+
+Each check covers where the other is blind. Billable time alone would accept a
+day the export happens to be most of the way through; elapsed time alone would
+accept a day the export has fallen behind on. When no day passes both for more
+than four days the tile goes gray and says how far behind it is, rather than
 projecting a month from stale history.
+
+Both checks read only the export's `regular` rows. Invoice adjustments and
+rounding corrections arrive weeks after the fact and carry no usage, so counting
+them would make a long-closed day look freshly written.
 
 A promotional credit is finite, so the spend the tile reports rises when a grant
 runs out even though nothing about the usage changed. How much of a grant is left
 is not in the billing export: Google publishes it only in the console's billing
 credits page.
+
+A grant may also arrive in monthly tranches that land on a few days rather than
+spreading across the month. The rate window is a fortnight, so it either covers
+those days or it does not, and the projection steps up or down as they pass out
+of it. The month-to-date figure in the header carries whatever has landed so far
+and is the one to read when a tranche is due but has not arrived.
 
 ### `OPENAI_ADMIN_KEY`
 

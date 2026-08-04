@@ -235,8 +235,13 @@ Practical guidance:
 - keep the client watch view incrementally ordered instead of rebuilding and
   sorting the full entity set on every emit
 
-Before returning a `ConflictError`, flush any already-committed relevant sync so
-the client can retry on fresh watched state.
+Return transact verdicts inline and keep the fan-out batched — N commits
+share one watch-union recompute. Stage a catch-up obligation for accepts
+and conflict rejections so the next batched frame to the committing session
+carries `caughtUpLocalSeq`; the client parks each accept's state
+application until that marker covers it, and the read-repair gate holds
+conflict drops the same way (04-protocol.md section 4.11.2, CT-1927).
+Other rejection kinds carry no marker obligation and apply immediately.
 
 ## 11. Query / Traversal Reuse
 

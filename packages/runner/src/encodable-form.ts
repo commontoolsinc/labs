@@ -9,13 +9,14 @@ import { isPlainObject } from "@commonfabric/utils/types";
  *
  * - `toEncodableForm`, carried by every builder artifact -- a module, a
  *   handler, a pattern, and the factory that carries a module's members.
- * - `toJSON`, the JSON protocol's name. A `Cell` answers only this one, for
- *   which it is how the cell becomes a link; a builder artifact answers it too,
- *   delegating (see `builder/json-member.ts`).
+ * - `toSigilLinkOrNull`, carried by a `Cell`, for which producing the link it
+ *   names IS how it reaches storage.
  *
- * Preferring the first is the point: what the runtime wants is the encodable
- * form, and `toJSON` names a protocol rather than that. The fallback is what
- * keeps a value whose only serializer IS the JSON one -- a `Cell` -- answering.
+ * Both are the runtime's OWN names, and that is the point. Asking by name
+ * rather than by class is what lets this module stay a leaf -- naming `Cell`
+ * here would mean importing the runtime's core, and the graph already runs the
+ * other way. Neither name is a public protocol, so no value acquires an
+ * encodable form by carrying a member it defined for some other purpose.
  */
 function encodableFormMethod(value: unknown): (() => unknown) | undefined {
   if (
@@ -25,12 +26,15 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
     return undefined;
   }
 
-  const artifact = value as { toEncodableForm?: unknown; toJSON?: unknown };
-  if (typeof artifact.toEncodableForm === "function") {
-    return artifact.toEncodableForm as () => unknown;
+  const named = value as {
+    toEncodableForm?: unknown;
+    toSigilLinkOrNull?: unknown;
+  };
+  if (typeof named.toEncodableForm === "function") {
+    return named.toEncodableForm as () => unknown;
   }
-  return typeof artifact.toJSON === "function"
-    ? artifact.toJSON as () => unknown
+  return typeof named.toSigilLinkOrNull === "function"
+    ? named.toSigilLinkOrNull as () => unknown
     : undefined;
 }
 
@@ -40,7 +44,9 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
  * Deliberately BROADER than the walk's own test (`hasOwnEncodableForm`): this
  * accepts either name and an inherited member, because its callers ask about a
  * specific value they already hold -- a pattern, a cell -- rather than sifting
- * an arbitrary graph. The walk cannot afford either latitude; see there.
+ * an arbitrary graph. A cell answers here through an inherited member, that
+ * being where a class puts its methods. The walk cannot afford either latitude;
+ * see there.
  */
 export function hasEncodableForm(value: unknown): boolean {
   return encodableFormMethod(value) !== undefined;
@@ -69,8 +75,22 @@ const IN_PROGRESS = Symbol("IN_PROGRESS");
 type OnCopy = (copy: unknown, original: unknown) => void;
 
 /**
+ * Asked about each value the walk would otherwise pass through untouched,
+ * and answers what should stand in its place -- the value itself to leave it
+ * alone. This is how a caller says what ELSE has no fabric representation: a
+ * `Cell`, whose encodable form is the link it stands for. Recognizing one takes
+ * `isCell()`, and that lives in the runtime's core rather than here, so the
+ * knowledge arrives as a function instead of as an import.
+ */
+type ReplaceOther = (value: object | AnyFunction) => unknown;
+
+/** Shorthand for the callable shape the walk reaches. */
+type AnyFunction = (...args: never[]) => unknown;
+
+/**
  * Replaces every builder artifact reachable from `value` with its encodable
- * form, yielding a value the data model can represent.
+ * form, yielding a value the data model can represent. `replaceOther` extends
+ * that to values the walk does not descend into (see `ReplaceOther`).
  *
  * A builder artifact carries its serializer as a `toEncodableForm` method (see
  * `builder/module.ts` and `builder/pattern.ts`). A method is a function-valued
@@ -104,14 +124,19 @@ type OnCopy = (copy: unknown, original: unknown) => void;
  * the cycle or an artifact still raw inside the partial result: an ancestor is
  * answered as itself, so a copy's cycle edge points at the original.
  */
-export function replaceArtifacts<T>(value: T, onCopy: OnCopy): T {
-  return replace(value, new Map(), onCopy) as T;
+export function replaceArtifacts<T>(
+  value: T,
+  onCopy: OnCopy,
+  replaceOther: ReplaceOther = (value) => value,
+): T {
+  return replace(value, new Map(), onCopy, replaceOther) as T;
 }
 
 function replace(
   value: unknown,
   seen: Map<object, unknown>,
   onCopy: OnCopy,
+  replaceOther: ReplaceOther,
 ): unknown {
   if (value === null) return value;
   const isFunction = typeof value === "function";
@@ -127,10 +152,12 @@ function replace(
   // the builder, and a function that is not an artifact has no fabric
   // representation for the conversion to find either way.
   if (isFunction) {
-    if (!hasOwnEncodableForm(value)) return value;
+    if (!hasOwnEncodableForm(value)) {
+      return replaced(value, replaceOther, seen, onCopy);
+    }
     seen.set(value, IN_PROGRESS);
     return copied(
-      replace(value.toEncodableForm(), seen, onCopy),
+      replace(value.toEncodableForm(), seen, onCopy, replaceOther),
       value,
       seen,
       onCopy,
@@ -141,36 +168,57 @@ function replace(
   // is only ever descended into.
   const isArray = Array.isArray(value);
   if (!isArray && !isPlainObject(value, false)) {
-    // Anything else -- a `Cell`, a `FabricInstance`, a `Date` -- is the
-    // conversion's to interpret, and carries no builder artifact.
+    // Anything else -- a `FabricInstance`, a `Date` -- carries no builder
+    // artifact, and is the conversion's to interpret unless `replaceOther`
+    // claims it. A `Cell` is what that hook is for: the walk cannot name one
+    // from here, and the conversion has no representation for it either.
     //
     // A null-prototype object is excluded too -- hence the `false` argument
     // to `isPlainObject()`. It is not a fabric record, so it is not the
     // walk's to rewrite. That is not the same as the conversion refusing one:
-    // `native-type-tags.ts` answers it `Object`, and upgrades it to
-    // `HasToJSON` when it carries a callable one. Whether to accept it is the
+    // `native-type-tags.ts` answers it `Object`. Whether to accept it is the
     // conversion's question, asked of the value as it stands.
-    return value;
+    return replaced(value, replaceOther, seen, onCopy);
   }
 
   seen.set(value, IN_PROGRESS);
   let flattened: unknown;
   if (isArray) {
-    flattened = replaceInElements(value, seen, onCopy);
+    flattened = replaceInElements(value, seen, onCopy, replaceOther);
   } else if (hasOwnEncodableForm(value)) {
     // The artifact's OWN method is what gets called, rather than the
     // serializer it delegates to: the method a copy carries is closed over the
     // artifact the copy was made from, and that original is what the
     // serialized form describes.
-    flattened = replace(value.toEncodableForm(), seen, onCopy);
+    flattened = replace(value.toEncodableForm(), seen, onCopy, replaceOther);
   } else {
     flattened = replaceInEntries(
       value as Record<string, unknown>,
       seen,
       onCopy,
+      replaceOther,
     );
   }
   return copied(flattened, value, seen, onCopy);
+}
+
+/**
+ * Helper for `replace()`, which offers a value the walk does not descend into
+ * to `replaceOther` and records whatever comes back.
+ *
+ * The replacement is NOT descended into. What the hook answers stands for the
+ * value itself -- a link, say -- rather than being a container the walk has any
+ * further claim on.
+ */
+function replaced(
+  value: object | AnyFunction,
+  replaceOther: ReplaceOther,
+  seen: Map<object, unknown>,
+  onCopy: OnCopy,
+): unknown {
+  const replacement = replaceOther(value);
+  if (replacement === value) return value;
+  return copied(replacement, value, seen, onCopy);
 }
 
 /**
@@ -201,6 +249,7 @@ function replaceInElements(
   value: readonly unknown[],
   seen: Map<object, unknown>,
   onCopy: OnCopy,
+  replaceOther: ReplaceOther,
 ): readonly unknown[] {
   // Read each element ONCE, and build any copy from what was read -- the
   // array counterpart of the entries `replaceInEntries` materializes, for the
@@ -221,7 +270,7 @@ function replaceInElements(
     // a hole here too.
     if (!(i in value)) continue;
     const element = value[i];
-    const flattened = replace(element, seen, onCopy);
+    const flattened = replace(element, seen, onCopy, replaceOther);
     replaced[i] = flattened;
     if (flattened !== element) changed = true;
   }
@@ -232,6 +281,7 @@ function replaceInEntries(
   value: Record<string, unknown>,
   seen: Map<object, unknown>,
   onCopy: OnCopy,
+  replaceOther: ReplaceOther,
 ): Record<string, unknown> {
   // Read each member ONCE, and build any copy from what was read: reading a
   // second time to copy would run an accessor twice and keep the second
@@ -241,7 +291,7 @@ function replaceInEntries(
   let result: Record<string, unknown> | undefined;
   for (let i = 0; i < entries.length; i++) {
     const [key, element] = entries[i];
-    const flattened = replace(element, seen, onCopy);
+    const flattened = replace(element, seen, onCopy, replaceOther);
     if (flattened === element) continue;
     result ??= Object.fromEntries(entries);
     result[key] = flattened;
