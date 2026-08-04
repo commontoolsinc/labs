@@ -291,6 +291,21 @@ describe("cf piece get transforms", () => {
     expect(schemaRootKind(cyclic as JSONSchema)).toBe("unknown");
   });
 
+  it("falls back conservatively when a source reference cannot resolve", () => {
+    const broken: JSONSchema = {
+      $ref: "#/$defs/Missing",
+      $defs: {},
+    };
+    const mask = {
+      type: "object" as const,
+      properties: { id: true as const },
+      additionalProperties: false as const,
+    };
+
+    expect(schemaRootKind(broken)).toBe("unknown");
+    expect(selectSourceSchema(broken, mask)).toBe(broken);
+  });
+
   it("merges predicate reads through aligned array masks", () => {
     expect(mergeMasks(
       {
@@ -1602,6 +1617,38 @@ describe("cf piece get transforms", () => {
     await expect(derivePieceGetValue(runtime, space, source, {
       filter: parsePieceGetFilter(".id == 1"),
     })).rejects.toThrow("--filter can only be applied to an array");
+  });
+
+  it("reports schema/value root mismatches with CLI-level errors", async () => {
+    const tx = runtime.edit();
+    const nullSource = runtime.getCell(
+      space,
+      "declared-array-null-filter-source",
+      { type: "array", items: { type: "object" } },
+      tx,
+    );
+    nullSource.set(null as never);
+    const objectSource = runtime.getCell(
+      space,
+      "declared-array-object-projection-source",
+      { type: "array", items: { type: "object" } },
+      tx,
+    );
+    objectSource.set({ id: 1 } as never);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    await expect(derivePieceGetValue(runtime, space, nullSource, {
+      filter: parsePieceGetFilter("true"),
+    })).rejects.toThrow(/^--filter can only be applied to an array$/);
+    await expect(derivePieceGetValue(runtime, space, nullSource, {
+      filter: parsePieceGetFilter("true"),
+      projection: await parsePieceGetProjection("id"),
+    })).rejects.toThrow(/^--filter can only be applied to an array$/);
+    await expect(derivePieceGetValue(runtime, space, objectSource, {
+      projection: await parsePieceGetProjection("id"),
+    })).rejects.toThrow(
+      /^--schema can only project array items from an array value$/,
+    );
   });
 
   it("reports runtime predicate failures as transform errors", async () => {
