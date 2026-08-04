@@ -5362,7 +5362,7 @@ export class Runner {
     // difference in the key.
     //
     // `hashOf` throws on anything the data model refuses. That is a second
-    // line of defence rather than the first: `normalizeSandboxResult` runs on
+    // line of defense rather than the first: `normalizeSandboxResult` runs on
     // every route here and already rejects a bare function at any depth, with
     // a better message than a hash could give.
     const resultPatternKey = hashStringOf(
