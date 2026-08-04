@@ -7,6 +7,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { realFileGateway } from "../lib/view/filegateway.ts";
+import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
 
 /** Make a fresh temp directory and ensure it is removed after `fn` runs. */
 async function withTempDir(
@@ -143,6 +144,78 @@ Deno.test("realFileGateway.open: keeps shebang selection in the editable source"
       "the editable source retains Python selection",
     );
   });
+});
+
+Deno.test("realFileGateway.open: preserves binary bytes in a read-only source", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "payload.data");
+    const bytes = new Uint8Array([0x41, 0x00, 0xff]);
+    Deno.writeFileSync(path, bytes);
+
+    const opened = realFileGateway().open(path);
+    assert(opened !== null);
+    assertEquals(
+      [...opened.text].map((value) => value.charCodeAt(0)),
+      [...bytes],
+    );
+    assertEquals(opened.source.editable, false);
+    assertEquals(opened.source.defaultViewMode, "rendered");
+    const source = opened.source.parse(opened.text);
+    assert(opened.source.render?.(source).lines[0].text.endsWith("|A␀␦|"));
+  });
+});
+
+Deno.test("realFileGateway.open: bounds a large binary preview", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "asset.png");
+    Deno.writeFileSync(
+      path,
+      new Uint8Array(MAX_BINARY_VIEW_BYTES + 16).fill(0x41),
+    );
+
+    const opened = realFileGateway().open(path);
+    assert(opened !== null);
+    assertEquals(opened.text.length, MAX_BINARY_VIEW_BYTES);
+    const rendered = opened.source.render?.(opened.source.parse(opened.text));
+    assert(rendered?.lines.at(-2)?.text.includes("16 bytes omitted"));
+    assertEquals(rendered?.lines.at(-1)?.text, "00040010");
+  });
+});
+
+Deno.test({
+  name: "realFileGateway.open: rejects a FIFO without waiting for a writer",
+  ignore: Deno.build.os === "windows",
+  async fn() {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "events");
+      const created = await new Deno.Command("mkfifo", { args: [path] })
+        .output();
+      assertEquals(created.success, true);
+      assertEquals(realFileGateway().open(path), null);
+    });
+  },
+});
+
+Deno.test({
+  name: "realFileGateway.open: reads a zero-sized procfs file",
+  ignore: Deno.build.os !== "linux",
+  fn() {
+    const path = "/proc/self/cmdline";
+    assertEquals(Deno.statSync(path).size, 0);
+    const opened = realFileGateway().open(path);
+    assert(opened !== null);
+    assert(opened.text.length > 0);
+    assertEquals(opened.source.editable, false);
+    const rendered = opened.source.render?.(
+      opened.source.parse(opened.text),
+    );
+    assert(rendered !== undefined);
+    assert(rendered.lines[0].text.startsWith("00000000  "));
+    assertEquals(
+      rendered.lines.at(-1)?.text.includes("preview stopped"),
+      false,
+    );
+  },
 });
 
 Deno.test("realFileGateway.open: returns null when the file cannot be read", () => {

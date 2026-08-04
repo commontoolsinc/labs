@@ -47,6 +47,58 @@ Deno.test("realWorkspace: read of a bounded directory returns null (catch branch
   }
 });
 
+Deno.test("realWorkspace: binary files do not become editable source text", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.mkdirSync(join(root, ".git"));
+    const namedBinary = join(root, "asset.png");
+    Deno.writeTextFileSync(namedBinary, "printable bytes without a NUL\n");
+    const invalidBinary = join(root, "unknown.data");
+    Deno.writeFileSync(invalidBinary, new Uint8Array([0x61, 0xff, 0x62]));
+    const nulBinary = join(root, "nul.data");
+    Deno.writeFileSync(nulBinary, new Uint8Array([0x61, 0x00, 0x62]));
+
+    const ws = realWorkspace(root);
+    assertEquals(ws.read(namedBinary), null);
+    assertEquals(ws.read(invalidBinary), null);
+    assertEquals(ws.read(nulBinary), null);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("realWorkspace: text writes retain the encoding observed on read", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.mkdirSync(join(root, ".git"));
+    const path = join(root, "value.json");
+    Deno.writeFileSync(
+      path,
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode('{"value": 1}\n'),
+      ]),
+    );
+
+    const ws = realWorkspace(root);
+    assertEquals(ws.read(path), '{"value": 1}\n');
+    ws.write!(path, '{"value": 2}\n');
+    assertEquals(
+      Deno.readFileSync(path),
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode('{"value": 2}\n'),
+      ]),
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("realWorkspace: resolve of a bounded directory falls through to null", () => {
   const root = Deno.makeTempDirSync();
   try {

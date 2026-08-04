@@ -82,6 +82,32 @@ Deno.test("buildView: transformed compiler output keeps the TypeScript default",
   );
 });
 
+Deno.test("buildView: a UTF-8 BOM does not hide transformed or diff selectors", () => {
+  const withBom = (text: string): Uint8Array =>
+    new Uint8Array([
+      0xef,
+      0xbb,
+      0xbf,
+      ...new TextEncoder().encode(text),
+    ]);
+  const transformed = buildView(withBom(TRANSFORMED));
+  assert(
+    transformed.doc.structure.some((node) => node.kind === "section"),
+    "the transformed header remains the first decoded line",
+  );
+
+  const diffText = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-const value = 1;
++const value = 2;
+`;
+  const diff = buildView(withBom(diffText));
+  assertEquals(diff.editSource.isDiff, true);
+  assertEquals(diff.doc.text, diffText);
+});
+
 Deno.test("buildView: a virtual filename selects piped source without making it editable", () => {
   const source = 'def greet(name):\n    return f"Hello, {name}"\n';
   const r = buildView(source, undefined, undefined, {

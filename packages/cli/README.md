@@ -15,11 +15,28 @@ alias. Both options keep the pipe read-only and suppress unified-diff
 auto-detection. An explicit language takes priority when both options are
 present. Use `--diff` instead when the pipe is a unified diff.
 
-Automatic container detection is limited to structurally identified raw unified
-diffs and standard Git commit output. A raw diff starts at the first nonblank
-line. Recognized shebangs and transformed compiler headers remain explicit
-selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
-not guessed from its syntax.
+The binary language handles known binary filenames, input containing a NUL byte,
+and input that is not valid UTF-8. It starts in a read-only rendered view with
+16 bytes per hex-dump row. Printable ASCII bytes appear at the right of each
+row. Other bytes use the same control-picture glyphs as the pager's
+non-printable display mode. Use `--language binary` or its `bytes` alias to
+select it explicitly for piped input. Interactive views retain at most 256 KiB
+and report the omitted byte count when the complete size is known. Use `--plain`
+to stream the complete dump without building it in memory.
+
+Each language selects how bytes are decoded. Text languages currently require
+valid UTF-8. The binary language keeps each raw byte unchanged. An explicit
+language also selects its decoder, so an invalid UTF-8 sequence reported under
+an explicit text language is an error rather than silently becoming binary. A
+UTF-8 byte order mark is removed before parsing and restored when an edited file
+is saved. Binary workspace files and Git blobs remain outside text diff editing
+and TypeScript semantic lookup.
+
+Automatic content detection is limited to binary input, structurally identified
+raw unified diffs, and standard Git commit output. A raw diff starts at the
+first nonblank line. Recognized shebangs and transformed compiler headers remain
+explicit selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped
+source is not guessed from its syntax.
 
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
@@ -32,9 +49,10 @@ wrapping, and word wrapping. Hard wrapping fills every screen row before it
 continues. Word wrapping breaks at whitespace and repeats the line's leading
 punctuation and whitespace on each continuation row.
 
-Redirected output keeps the source text verbatim by default and adds ANSI color
-only when the selected color mode permits it. Pass `--rendered` to start in, or
-print, the rendered representation when one is available. Editing from a
+Redirected text output keeps the source text verbatim by default and adds ANSI
+color only when the selected color mode permits it. Binary output uses its
+hex-dump view by default. Pass `--rendered` to start in, or print, another
+language's rendered representation when one is available. Editing from a
 rendered view returns to source first.
 
 ```bash
@@ -45,6 +63,7 @@ git diff upstream/main | cf view
 cf view --rendered README.md
 generate-source | cf view --filename generated.py
 generate-markdown | cf view --language markdown --rendered
+generate-bytes | cf view --language binary
 ```
 
 ## Piece discovery

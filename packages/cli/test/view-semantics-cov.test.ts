@@ -456,6 +456,38 @@ const b = ext();`;
   }
 });
 
+Deno.test("semantics: binary external sources stay out of the program and viewer", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "deno.json"),
+      JSON.stringify({ imports: { asset: "./asset.png" } }),
+    );
+    Deno.writeTextFileSync(
+      join(root, "asset.png"),
+      "export const asset: number = 1;\n",
+    );
+    Deno.writeFileSync(
+      join(root, "asset.data"),
+      new Uint8Array([97, 0, 98]),
+    );
+    const blob = `// transformed: /main.ts
+import { asset } from "asset";
+const value = asset;`;
+    const doc = parseDocument(blob);
+    const sem = createSemantics(blob, { cwd: root })!;
+    assertEquals(sem.typeAt(nameOffsetOf(doc, "value")), null);
+    assert(
+      !sem.definitionOf(blob.lastIndexOf("asset")).some((d) => d.filePath),
+      "the binary source is not an external definition",
+    );
+    assertEquals(sem.fileLines(join(root, "asset.png")), null);
+    assertEquals(sem.fileLines(join(root, "asset.data")), null);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 // --- createDiffSemantics: full service over a real workspace ----------------
 
 const FILE_TEXT = `export function double(n: number): number {
@@ -590,6 +622,54 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
     assertEquals(sem.fileLines(join(root, "..", "outside.ts")), null);
   } finally {
     done();
+  }
+});
+
+Deno.test("diff semantics: binary external sources stay out of the program and viewer", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "deno.json"), "{}");
+    Deno.writeTextFileSync(
+      join(root, "asset.png"),
+      "export const asset: number = 1;\n",
+    );
+    Deno.writeFileSync(
+      join(root, "asset.data"),
+      new Uint8Array([97, 0, 98]),
+    );
+    Deno.writeTextFileSync(
+      join(root, "m.ts"),
+      `import { asset } from "./asset.png";\nconst value = asset;\n`,
+    );
+    const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,2 @@
+ import { asset } from "./asset.png";
++const value = asset;
+`;
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => {
+        try {
+          return Deno.readTextFileSync(path);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(diff)!;
+    const { doc, maps } = buildDiffDocument(diff, model, ws);
+    const sem = createDiffSemantics(diff, maps, { cwd: root })!;
+    assertEquals(sem.typeAt(nameOffsetOf(doc, "value")), null);
+    assert(
+      !sem.definitionOf(diff.lastIndexOf("asset")).some((d) => d.filePath),
+      "the binary source is not an external definition",
+    );
+    assertEquals(sem.fileLines(join(root, "asset.png")), null);
+    assertEquals(sem.fileLines(join(root, "asset.data")), null);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
   }
 });
 

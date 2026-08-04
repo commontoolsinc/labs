@@ -6,7 +6,9 @@
  * print path without a terminal.
  */
 import { assert, assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import { cf } from "./utils.ts";
+import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
 
 const SRC = "export const x = pattern(() => ({ value: 1 }));\nconst y = x;\n";
 const DIFF = `diff --git a/m.ts b/m.ts
@@ -105,6 +107,100 @@ Deno.test("cf view --language aliases override a piped virtual filename", async 
   assertEquals(stdout, ["Title with weight"]);
 });
 
+Deno.test("cf view --language binary renders piped bytes as a hex dump", async () => {
+  const { code, stdout } = await cf(
+    "view --plain --color never --language binary",
+    new Uint8Array([0x41, 0x00, 0xff]),
+  );
+
+  assertEquals(code, 0);
+  assertEquals(stdout.length, 2);
+  assert(stdout[0].startsWith("00000000  41 00 ff"), stdout.join("\n"));
+  assert(stdout[0].endsWith("|A␀␦|"), stdout.join("\n"));
+  assertEquals(stdout[1], "00000003");
+});
+
+Deno.test("cf view detects binary content and binary virtual filenames", async () => {
+  for (
+    const [command, input] of [
+      ["view --plain --color never", new Uint8Array([0xff])],
+      [
+        "view --plain --color never --filename asset.png",
+        new TextEncoder().encode("PNG"),
+      ],
+    ] as const
+  ) {
+    const { code, stdout } = await cf(command, input);
+    assertEquals(code, 0);
+    assert(stdout[0].startsWith("00000000"), stdout.join("\n"));
+  }
+});
+
+Deno.test("cf view --plain streams a complete large binary file", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const file = `${dir}/large.png`;
+    Deno.writeFileSync(
+      file,
+      new Uint8Array(MAX_BINARY_VIEW_BYTES + 16).fill(0x41),
+    );
+    const { code, stdout } = await cf(
+      `view --plain --color never ${file}`,
+    );
+
+    assertEquals(code, 0);
+    assertEquals(stdout.length, MAX_BINARY_VIEW_BYTES / 16 + 2);
+    assertEquals(stdout.at(-1), "00040010");
+    assertEquals(stdout.some((line) => line.includes("omitted")), false);
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("cf view --plain detects and streams a large unknown binary file", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const file = `${dir}/large.data`;
+    const bytes = new Uint8Array(MAX_BINARY_VIEW_BYTES + 16).fill(0x41);
+    bytes[0] = 0xff;
+    Deno.writeFileSync(file, bytes);
+    const { code, stdout } = await cf(
+      `view --plain --color never ${file}`,
+    );
+
+    assertEquals(code, 0);
+    assertEquals(stdout.length, MAX_BINARY_VIEW_BYTES / 16 + 2);
+    assert(stdout[0].startsWith("00000000  ff 41"), stdout[0]);
+    assertEquals(stdout.at(-1), "00040010");
+    assertEquals(stdout.some((line) => line.includes("omitted")), false);
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("cf view explicit text decoding overrides a binary virtual filename", async () => {
+  const { code, stdout } = await cf(
+    "view --plain --color never --language plain-text --filename asset.png",
+    "PNG\n",
+  );
+
+  assertEquals(code, 0);
+  assertEquals(stdout, ["PNG"]);
+});
+
+Deno.test("cf view reports bytes that the selected text decoder rejects", async () => {
+  const { code, stderr } = await cf(
+    "view --plain --language plain-text",
+    new Uint8Array([0xff]),
+  );
+
+  assertEquals(code, 1);
+  assert(
+    stderr.join("\n").includes("cannot be decoded as utf-8"),
+    stderr.join("\n"),
+  );
+});
+
 Deno.test("cf view rejects an unknown --language", async () => {
   const { code, stderr } = await cf("view --plain --language ruby", SRC);
   assertEquals(code, 1);
@@ -164,6 +260,48 @@ Deno.test("cf view reads and prints a file argument", async () => {
   }
 });
 
+Deno.test({
+  name: "cf view reads a zero-sized procfs file",
+  ignore: Deno.build.os !== "linux",
+  async fn() {
+    const path = "/proc/self/cmdline";
+    assertEquals(Deno.statSync(path).size, 0);
+    const { code, stdout } = await cf(
+      `view --plain --color never ${path}`,
+    );
+    assertEquals(code, 0);
+    assert(stdout[0].startsWith("00000000  "), stdout.join("\n"));
+    assertEquals(stdout.at(-1) === "00000000", false);
+  },
+});
+
+Deno.test("cf view preserves a UTF-8 BOM in redirected source output", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const path = join(dir, "bom.txt");
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x68, 0x69, 0x0a]);
+    Deno.writeFileSync(path, bytes);
+    const result = await new Deno.Command(Deno.execPath(), {
+      cwd: join(import.meta.dirname!, ".."),
+      args: [
+        "task",
+        "cli-no-pwd-override",
+        "view",
+        "--plain",
+        "--color",
+        "never",
+        path,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    assertEquals(result.code, 0);
+    assertEquals(result.stdout, bytes);
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
 Deno.test("cf view rejects piped-input overrides with a file argument", async () => {
   const dir = Deno.makeTempDirSync();
   try {
@@ -209,6 +347,21 @@ Deno.test("cf view reports an empty file argument", async () => {
       stderr.join("\n").toLowerCase().includes("empty"),
       stderr.join("\n"),
     );
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("cf view accepts an empty known binary file", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const file = `${dir}/empty.png`;
+    Deno.writeFileSync(file, new Uint8Array());
+    const { code, stdout } = await cf(
+      `view --plain --color never ${file}`,
+    );
+    assertEquals(code, 0);
+    assertEquals(stdout, ["00000000"]);
   } finally {
     Deno.removeSync(dir, { recursive: true });
   }

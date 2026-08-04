@@ -7,6 +7,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
+import { buildView } from "../lib/view/mod.ts";
 import type { EditableSource } from "../lib/view/editsource.ts";
 import type { DirEntry, FileGateway } from "../lib/view/filegateway.ts";
 
@@ -139,6 +140,36 @@ Deno.test("filepicker: opening a file from a subdirectory works", () => {
   press(s, "down", "enter"); // into sub/
   press(s, "down", "enter"); // ".." -> "c.ts", open it
   assertEquals(s.doc.text, FILES["/work/sub/c.ts"]);
+});
+
+Deno.test("filepicker: opening a binary source applies its rendered default", () => {
+  const opened = buildView(
+    new Uint8Array([0x41, 0x00, 0xff]),
+    "/work/payload.png",
+  );
+  const files: FileGateway = {
+    cwd: () => "/work",
+    list: () => [{ name: "payload.png", isDir: false }],
+    open: () => ({ source: opened.editSource, text: opened.doc.text }),
+    join: (dir, segment) => normalize(`${dir}/${segment}`),
+    parent: (path) => normalize(`${path}/..`),
+    base: (path) => path.split("/").filter(Boolean).pop() ?? path,
+  };
+  const path = "/work/a.ts";
+  const s = new Session(
+    parseDocument(FILES[path], path),
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 20 },
+    undefined,
+    fakeSource(path),
+    files,
+  );
+
+  openPicker(s);
+  press(s, "down", "enter");
+
+  assert(s.doc.lines[0].text.endsWith("|A␀␦|"));
+  assertEquals(s.doc.lines.at(-1)?.text, "00000003");
 });
 
 Deno.test("filepicker: the .. entry steps back up", () => {
