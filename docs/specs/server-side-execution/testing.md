@@ -78,6 +78,19 @@ New tests live in `packages/patterns/integration/` with the prefix
 `sx2-` (server execution v2), so the suite filter `sx2` runs the whole
 v2 gate set. Existing product tests double as gates where noted.
 
+**Ahead of every gate: the executable spec model**
+(`packages/spec-model/server-execution/`) checks the identity/commit
+machinery's schedule-dependent properties — inheritance, LT1
+carriage, delegated stamping, split repetition, watermark
+idempotency, push filtering, the enact/ack window — by exhaustive
+small-configuration interleaving with fault injection, unattended
+(`deno task test`). It re-verifies each ruling batch mechanically,
+carried the FP1 characterization until its 2026-08-03 ruling and
+now asserts CLOSURE (durable append rows — no schedule loses an
+append), and is the seed the `sx2-` conformance tests grow
+from: a stage's semantics get modeled before its implementation
+exists, then the properties become the implementation's oracle.
+
 | phase | gate tests |
 | --- | --- |
 | 1 | stages A–G land dark: OFF arm byte-identical per stage (§2), stage E's instance re-keying included (OFF-arm neutral by construction); ON arm runs in CI with explicit skip lists (no ON gates — the first ON milestone is Phase 2's) |

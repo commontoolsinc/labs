@@ -2122,6 +2122,11 @@
           "npm:@opentelemetry/sdk-trace-web@^2.9.0"
         ]
       },
+      "packages/spec-model": {
+        "dependencies": [
+          "jsr:@std/assert@^1.0.19"
+        ]
+      },
       "packages/state-inspector": {
         "dependencies": [
           "jsr:@db/sqlite@0.13.0",
