@@ -40,6 +40,9 @@ const sessionKey = (space: string, sessionId: string): string =>
 const authorizationError = (message: string): Error =>
   Object.assign(new Error(message), { name: "AuthorizationError" });
 
+const revokedError = (message: string): Error =>
+  Object.assign(new Error(message), { name: "SessionRevokedError" });
+
 const nextSessionToken = (): SessionToken =>
   crypto.randomUUID() as SessionToken;
 
@@ -69,7 +72,7 @@ export class SessionRegistry {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
     const key = sessionKey(space, sessionId);
-    let existing = this.#sessions.get(key);
+    const existing = this.#sessions.get(key);
     if (
       existing?.principal !== undefined &&
       principal !== existing.principal
@@ -78,35 +81,23 @@ export class SessionRegistry {
         `session ${sessionId} is already bound to ${existing.principal}`,
       );
     }
-    let displacedConnectionId: string | undefined;
     if (
       existing !== undefined &&
       session.sessionToken !== existing.sessionToken
     ) {
-      displacedConnectionId = existing.ownerConnectionId ?? undefined;
-      // A stale resume token is most often the artifact of a LOST
-      // session.open response: the registry rotated the token, the client
-      // never received it, and its retry presents the previous one.
-      // Treating that as a terminal revocation strands the client (the
-      // memory client closes the session for good). Treat it as a FRESH
-      // session under the same id instead: same principal (checked above),
-      // none of the old session's state, `resumed` absent — so the client
-      // runs its replacement path (watch reinstall, marker-epoch reset,
-      // parked-accept reconciliation). A racing old connection still gets
-      // revoked through `revokedConnectionId` below (CT-1927 review,
-      // round 7).
-      existing = undefined;
+      throw revokedError(
+        `session ${sessionId} resume token is no longer valid`,
+      );
     }
     const seenSeq = Math.max(
       existing?.seenSeq ?? 0,
       session.seenSeq ?? 0,
     );
     const sessionToken = nextSessionToken();
-    const currentHolderConnectionId = existing?.ownerConnectionId ??
-      displacedConnectionId ?? null;
-    const revokedConnectionId = currentHolderConnectionId !== null &&
-        currentHolderConnectionId !== ownerConnectionId
-      ? currentHolderConnectionId
+    const revokedConnectionId = existing?.ownerConnectionId !== undefined &&
+        existing.ownerConnectionId !== null &&
+        existing.ownerConnectionId !== ownerConnectionId
+      ? existing.ownerConnectionId
       : undefined;
     this.#sessions.set(key, {
       id: sessionId,

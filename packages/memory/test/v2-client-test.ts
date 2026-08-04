@@ -3266,18 +3266,15 @@ Deno.test("memory v2 client closes a revoked session after takeover and rejects 
     });
     assertEquals(applied.seq, 1);
 
-    // A stale token cannot RESUME state, but it is not terminal: the open
-    // degrades to a fresh session under the same id (the lost-open-response
-    // recovery path, CT-1927 round 7). The fresh session sees none of the
-    // taken-over session's identity material.
-    const stale = await staleClient.mount(space, {
-      sessionId: first.sessionId,
-      sessionToken: initialToken,
-    }, testSessionOpenAuthFactory);
-    assertEquals(stale.sessionId, first.sessionId);
-    assertExists(stale.sessionToken);
-    assertEquals(stale.sessionToken === initialToken, false);
-    assertEquals(stale.sessionToken === second.sessionToken, false);
+    await assertRejects(
+      () =>
+        staleClient.mount(space, {
+          sessionId: first.sessionId,
+          sessionToken: initialToken,
+        }, testSessionOpenAuthFactory),
+      Error,
+      "resume token is no longer valid",
+    );
   } finally {
     await firstClient.close();
     await secondClient.close();

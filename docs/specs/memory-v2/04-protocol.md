@@ -235,12 +235,7 @@ Rules:
   resume an existing logical session; server-issued, principal-bound ids remain
   deferred
 - `sessionToken` is a server-issued opaque resume capability; clients MUST
-  present the latest token when resuming an existing session. A stale token
-  does NOT resume and is NOT a terminal revocation: the server opens a
-  FRESH session under the same id (`resumed` absent, none of the old
-  session's state) and revokes the displaced holder — the recovery path for
-  a client whose `session.open` response (carrying the rotated token) was
-  lost
+  present the latest token when resuming an existing session
 - `seenSeq` is the highest canonical seq the client has fully integrated into
   confirmed state
 - `resumed: true` means the server found an existing logical session for the

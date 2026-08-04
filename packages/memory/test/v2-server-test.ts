@@ -1317,25 +1317,13 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
       },
       invocation: authInvocation(firstSessionOpen),
     }));
-    // A stale token can never RESUME the session's state — but it is not a
-    // terminal revocation either (a lost open response leaves an honest
-    // client holding the previous token; terminal closure would strand it,
-    // CT-1927 round 7). The open succeeds as a FRESH session under the
-    // same id: `resumed` absent, none of the old state, and the current
-    // holder's connection revoked as any takeover would be.
-    const reopened = nextResponse<{
-      sessionId: string;
-      sessionToken: string;
-      resumed?: boolean;
-    }>(firstMessages);
-    assertEquals(reopened.ok?.sessionId, "session:fixed");
-    assertEquals(reopened.ok?.resumed, undefined);
-    assertExists(reopened.ok?.sessionToken);
-    assertEquals(shiftMessage(secondMessages), {
-      type: "session/revoked",
-      space,
-      sessionId: "session:fixed",
-      reason: "taken-over",
+    assertEquals(shiftMessage(firstMessages), {
+      type: "response",
+      requestId: "open-3",
+      error: {
+        name: "SessionRevokedError",
+        message: "session session:fixed resume token is no longer valid",
+      },
     });
   } finally {
     await server.close();
