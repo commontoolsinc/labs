@@ -42,7 +42,6 @@ import type {
   DID,
   IExtendedStorageTransaction,
   IStorageManager,
-  IStorageProvider,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
@@ -169,7 +168,7 @@ Error.stackTraceLimit = 500;
 
 export const DEFAULT_MAX_RETRIES = 5;
 
-export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
+export type { IExtendedStorageTransaction, MemorySpace };
 
 export interface ConsoleHandlerOutput {
   method: ConsoleMethod;

@@ -83,7 +83,7 @@ import {
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IStorageProviderWithReplica,
+  IStorageProvider,
   IStorageSubscription,
   MemorySpace,
   URI,
@@ -763,10 +763,10 @@ type SchedulerRehydrationSubscriptionOptions = {
       readonly PersistedSchedulerObservationSnapshot[]
     >;
     addressesCurrentAtOrBelow?: NonNullable<
-      IStorageProviderWithReplica["areSchedulerAddressesCurrentAtOrBelow"]
+      IStorageProvider["areSchedulerAddressesCurrentAtOrBelow"]
     >;
     hasPendingWriteOverlapping?: NonNullable<
-      IStorageProviderWithReplica["schedulerHasPendingWriteOverlapping"]
+      IStorageProvider["schedulerHasPendingWriteOverlapping"]
     >;
   };
   // The owning pattern instance for this reader, set unconditionally (not only

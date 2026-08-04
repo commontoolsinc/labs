@@ -77,7 +77,7 @@ import type {
   ISpaceReplica,
   IStorageManager,
   IStorageNotification,
-  IStorageProviderWithReplica,
+  IStorageProvider,
   IStorageSubscription,
   IStorageTransaction,
   IStorageTransactionInconsistent,
@@ -630,11 +630,6 @@ export interface Options {
   spaceIdentity?: Signer;
 }
 
-export const defaultSettings: IRemoteStorageProviderSettings = {
-  maxSubscriptionsPerSpace: 50_000,
-  connectionTimeout: 30_000,
-};
-
 /**
  * Max concurrent watch-refresh round trips per space when
  * `experimentalConcurrentWatchRefresh` is on. Bounds how many requests a
@@ -931,7 +926,7 @@ export class StorageManager implements IStorageManager {
     this.id = options.id ?? crypto.randomUUID();
     this.#sessionId = this.id;
     this.as = options.as;
-    this.#settings = options.settings ?? defaultSettings;
+    this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
@@ -1008,7 +1003,7 @@ export class StorageManager implements IStorageManager {
     this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
   }
 
-  open(space: MemorySpace): IStorageProviderWithReplica {
+  open(space: MemorySpace): IStorageProvider {
     let provider = this.#providers.get(space);
     if (!provider) {
       // Session principal drives user/session scoped storage. Even when we have
@@ -1775,7 +1770,7 @@ type ProviderSyncRequest = {
  */
 type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
-class Provider implements IStorageProviderWithReplica {
+class Provider implements IStorageProvider {
   replica: SpaceReplica;
   #syncRequests = new Map<string, ProviderSyncRequest>();
   #destroyed = false;
@@ -1987,10 +1982,6 @@ class Provider implements IStorageProviderWithReplica {
       this.options.routeState.generation++;
     }
     await this.replica.closeNow();
-  }
-
-  getReplica(): string | undefined {
-    return this.options.space;
   }
 }
 
