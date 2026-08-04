@@ -133,6 +133,18 @@ describe("vintage adopt", () => {
     expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
   });
 
+  it("refuses when today's source no longer compiles", async () => {
+    // The drift class itself, pointed the WRONG way: the fixture must hold an
+    // old source today cannot compile, but a pin against a broken CURRENT
+    // source would fail every replay from the moment it lands.
+    await Deno.writeTextFile(
+      `${dir}/patterns/${KEY}`,
+      SUBJECT.replace("['kept']", "(no_such_symbol)"),
+    );
+    await expect(adopt()).rejects.toThrow("does not compile");
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
+  });
+
   it("refuses an identity the stored root does not carry", async () => {
     await expect(adopt({ expectedIdentity: "someOtherIdentity" })).rejects
       .toThrow("!= expected");
