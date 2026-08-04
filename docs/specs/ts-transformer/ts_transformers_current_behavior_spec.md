@@ -2869,15 +2869,16 @@ trusted-name lists).
 
 ## 18. Diagnostics Message Transformation (Optional Consumer Layer)
 
-Diagnostic message transformers are exported separately from AST transform
-pipeline. Current built-in behavior:
+Diagnostic message transformation is exported separately from AST transform
+pipeline. A diagnostic message transform is a plain function taking a
+TypeScript diagnostic message and returning either a replacement message or
+null when it does not apply. Current built-in behavior:
 
-- `ReactiveErrorTransformer` rewrites TypeScript messages matching
+- `createReactiveErrorTransformer` builds a transform that rewrites TypeScript
+  messages matching
   `"Property 'get' does not exist on type 'OpaqueCell<...>'"` into user-facing
   guidance about unnecessary `.get()`.
-- optional `verbose` mode appends original TypeScript message.
-- `CompositeDiagnosticTransformer` returns the first matching transformer
-  result.
+- its optional `verbose` argument appends the original TypeScript message.
 
 ## 19. Current Known Limits (Observed)
 

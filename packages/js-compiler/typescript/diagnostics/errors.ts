@@ -32,17 +32,11 @@ function flattenDiagnosticMessageText(
 }
 
 /**
- * Interface for transforming diagnostic error messages.
- * Implementations can convert confusing TypeScript errors into clearer messages.
+ * Rewrites a diagnostic error message, converting confusing TypeScript errors
+ * into clearer ones. Takes the original TypeScript diagnostic message and
+ * returns the replacement, or null when no rewrite applies.
  */
-export interface DiagnosticMessageTransformer {
-  /**
-   * Transform a diagnostic message.
-   * @param message The original TypeScript diagnostic message
-   * @returns Transformed message, or null if no transformation applies
-   */
-  transform(message: string): string | null;
-}
+export type DiagnosticMessageTransformer = (message: string) => string | null;
 
 export interface ErrorDetails {
   readonly diagnostic: Diagnostic;
@@ -107,7 +101,7 @@ export class CompilationError {
 
     // Apply custom message transformer if configured
     if (messageTransformer) {
-      const transformed = messageTransformer.transform(message);
+      const transformed = messageTransformer(message);
       if (transformed !== null) {
         return { type: "ERROR", message: transformed };
       }
