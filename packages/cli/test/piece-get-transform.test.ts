@@ -12,6 +12,7 @@ import {
   parsePieceGetProjection,
   PieceGetTransformError,
   schemaMayBeArray,
+  schemaRootKind,
   selectSourceSchema,
 } from "../lib/piece-get-transform.ts";
 
@@ -263,6 +264,33 @@ describe("cf piece get transforms", () => {
     ).toThrow("Could not resolve source schema reference for --schema");
   });
 
+  it("classifies only unambiguous declared root shapes", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.allOf = [cyclic];
+
+    expect(schemaRootKind(undefined)).toBe("unknown");
+    expect(schemaRootKind({ type: "array" })).toBe("array");
+    expect(schemaRootKind({ type: "object" })).toBe("non-array");
+    expect(schemaRootKind({ type: ["array", "null"] })).toBe("unknown");
+    expect(schemaRootKind({
+      $ref: "#/$defs/List",
+      $defs: { List: { type: "array" } },
+    })).toBe("array");
+    expect(schemaRootKind({
+      anyOf: [{ type: "array" }, { type: "array" }],
+    })).toBe("array");
+    expect(schemaRootKind({
+      oneOf: [{ type: "array" }, { type: "object" }],
+    })).toBe("unknown");
+    expect(schemaRootKind({
+      allOf: [{}, { type: "object" }],
+    })).toBe("non-array");
+    expect(schemaRootKind({
+      allOf: [{ type: "array" }, { type: "object" }],
+    })).toBe("unknown");
+    expect(schemaRootKind(cyclic as JSONSchema)).toBe("unknown");
+  });
+
   it("merges predicate reads through aligned array masks", () => {
     expect(mergeMasks(
       {
@@ -286,6 +314,50 @@ describe("cf piece get transforms", () => {
         additionalProperties: false,
       },
     });
+  });
+
+  it("narrows referenced source schemas without dropping Fabric metadata", () => {
+    const source: JSONSchema = {
+      $ref: "#/$defs/Item",
+      $defs: {
+        Item: {
+          type: "object",
+          scope: "user",
+          ifc: { confidentiality: ["item-secret"] },
+          properties: {
+            visible: {
+              type: "string",
+              ifc: { confidentiality: ["field-secret"] },
+            },
+            omitted: { type: "string" },
+          },
+          required: ["visible", "omitted"],
+        },
+      },
+    };
+    const selected = selectSourceSchema(source, {
+      type: "object",
+      properties: { visible: true },
+      additionalProperties: false,
+    });
+
+    expect(selected).toMatchObject({
+      type: "object",
+      scope: "user",
+      ifc: { confidentiality: ["item-secret"] },
+      properties: {
+        visible: {
+          type: "string",
+          ifc: {
+            confidentiality: ["item-secret", "field-secret"],
+          },
+        },
+      },
+      required: ["visible"],
+      additionalProperties: false,
+    });
+    expect(Object.keys((selected as { properties: object }).properties))
+      .toEqual(["visible"]);
   });
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
@@ -432,6 +504,100 @@ describe("cf piece get transforms", () => {
       { title: "Second" },
       { title: "Third" },
     ]);
+  });
+
+  it("narrows the initial source selector to predicate and projection fields", async () => {
+    const tx = runtime.edit();
+    const detailsSchema = {
+      type: "object",
+      properties: {
+        body: { type: "string" },
+        comments: { type: "array", items: { type: "string" } },
+      },
+      required: ["body", "comments"],
+    } as const satisfies JSONSchema;
+    const itemSchema = {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        title: { type: "string" },
+        status: { type: "string" },
+        details: { ...detailsSchema, asCell: ["cell"] },
+      },
+      required: ["id", "title", "status", "details"],
+    } as const satisfies JSONSchema;
+    const sourceSchema = {
+      type: "array",
+      items: { $ref: "#/$defs/Item" },
+      $defs: { Item: itemSchema },
+    } as const satisfies JSONSchema;
+    const unavailableDetails = runtime.getCell(
+      space,
+      "initial-selector-unavailable-details",
+      detailsSchema,
+      tx,
+    );
+    const source = runtime.getCell(
+      space,
+      "initial-selector-transform-source",
+      sourceSchema,
+      tx,
+    );
+    source.set([{
+      id: 1,
+      title: "First",
+      status: "open",
+      details: unavailableDetails as never,
+    }]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const sourceRead = runtime.getCell(
+      space,
+      "initial-selector-transform-source",
+      sourceSchema,
+    );
+    const sourceId = sourceRead.getAsNormalizedFullLink().id;
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const sourceSelectors: unknown[] = [];
+    const syncedUris: string[] = [];
+    provider.sync = ((uri, selector, scope) => {
+      syncedUris.push(uri);
+      if (uri === sourceId) sourceSelectors.push(selector?.schema);
+      return originalSync(uri, selector, scope);
+    }) as typeof provider.sync;
+
+    expect(
+      await derivePieceGetValue(runtime, space, sourceRead, {
+        filter: parsePieceGetFilter('.status == "open"'),
+        projection: await parsePieceGetProjection("id,title"),
+      }),
+    ).toEqual([{ id: 1, title: "First" }]);
+    const initialSelector = sourceSelectors.at(0) as {
+      type?: string;
+      items?: {
+        properties?: Record<string, unknown>;
+        required?: string[];
+        additionalProperties?: boolean;
+      };
+    };
+    expect(initialSelector.type).toBe("array");
+    expect(Object.keys(initialSelector.items?.properties ?? {}).sort()).toEqual(
+      [
+        "id",
+        "status",
+        "title",
+      ],
+    );
+    expect(initialSelector.items?.required).toEqual([
+      "id",
+      "title",
+      "status",
+    ]);
+    expect(initialSelector.items?.additionalProperties).toBe(false);
+    expect(syncedUris).not.toContain(
+      unavailableDetails.getAsNormalizedFullLink().id,
+    );
   });
 
   it("filters and projects through a linked array slot", async () => {

@@ -684,6 +684,71 @@ function schemaIsArray(schema: JSONSchema | undefined): boolean {
   return schemaTypes(schema).includes("array");
 }
 
+type SchemaRootKind = "array" | "non-array" | "unknown";
+
+/**
+ * Classify a root container only when the declared schema makes its shape
+ * unambiguous. This is intentionally conservative: an unknown shape falls
+ * back to inspecting the value so schema-less and union-shaped cells retain
+ * their existing projection semantics.
+ */
+/** @internal Exported for focused root-shape tests. */
+export function schemaRootKind(
+  schema: JSONSchema | undefined,
+  root: JSONSchema = schema ?? true,
+  ancestors = new Set<object>(),
+): SchemaRootKind {
+  if (!isRecord(schema) || ancestors.has(schema)) return "unknown";
+  ancestors.add(schema);
+  const documentRoot = schema.$defs !== undefined ? schema : root;
+  try {
+    const types = schemaTypes(schema);
+    if (types.length > 0) {
+      const hasArray = types.includes("array");
+      if (!hasArray) return "non-array";
+      return types.every((type) => type === "array") ? "array" : "unknown";
+    }
+
+    if (schema.$ref !== undefined) {
+      try {
+        return schemaRootKind(
+          ContextualFlowControl.resolveSchemaRefsOrThrow(
+            schema,
+            documentRoot,
+          ),
+          documentRoot,
+          ancestors,
+        );
+      } catch {
+        return "unknown";
+      }
+    }
+
+    const alternatives = [...schema.anyOf ?? [], ...schema.oneOf ?? []];
+    if (alternatives.length > 0) {
+      const kinds = alternatives.map((option) =>
+        schemaRootKind(option, documentRoot, ancestors)
+      );
+      const first = kinds[0];
+      return first !== "unknown" && kinds.every((kind) => kind === first)
+        ? first
+        : "unknown";
+    }
+
+    if (schema.allOf !== undefined) {
+      const kinds = new Set(
+        schema.allOf.map((option) =>
+          schemaRootKind(option, documentRoot, ancestors)
+        ).filter((kind) => kind !== "unknown"),
+      );
+      return kinds.size === 1 ? [...kinds][0] : "unknown";
+    }
+    return "unknown";
+  } finally {
+    ancestors.delete(schema);
+  }
+}
+
 function schemaAtArrayItem(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
@@ -978,7 +1043,21 @@ export function selectSourceSchema(
     return source;
   }
   if (source.$ref !== undefined) {
-    return source;
+    if (source.$ref.startsWith("#/") && source.$defs === undefined) {
+      return source;
+    }
+    try {
+      return selectSourceSchema(
+        ContextualFlowControl.resolveSchemaRefsOrThrow(source, source),
+        mask,
+        purpose,
+      );
+    } catch {
+      // A malformed or unsupported source reference is not projection's job
+      // to reinterpret. Preserve the declared selector and let the runtime
+      // report the underlying schema problem.
+      return source;
+    }
   }
   if (
     source.anyOf !== undefined || source.oneOf !== undefined ||
@@ -1178,8 +1257,11 @@ export async function derivePieceGetValue(
     return await sourceValueCell.pull();
   }
 
-  const sourceValue = await sourceValueCell.pull();
-  if (transform.filter !== undefined && !Array.isArray(sourceValue)) {
+  const rootKind = schemaRootKind(sourceSchema);
+  const sourceIsArray = rootKind === "unknown"
+    ? Array.isArray(await sourceValueCell.pull())
+    : rootKind === "array";
+  if (transform.filter !== undefined && !sourceIsArray) {
     throw new PieceGetTransformError(
       "--filter can only be applied to an array",
     );
@@ -1187,7 +1269,7 @@ export async function derivePieceGetValue(
   const projection = resolveProjection(
     transform.projection,
     sourceSchema,
-    Array.isArray(sourceValue),
+    sourceIsArray,
   );
   const sourceItemSchema = schemaAtArrayItem(sourceSchema);
   const predicateItemMask = transform.filter === undefined
