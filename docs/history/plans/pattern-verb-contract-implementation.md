@@ -129,9 +129,9 @@ Made 2026-07-24, shaping everything below:
 
 Named so their absence reads as intent, not oversight:
 
-- The **wrapper-tier marker** for verb listing (semantics are settled in the
-  design; the marker mechanism ships after the listing — specced 2026-08-03
-  as queued work, see the WS-F bullet).
+- ~~The **wrapper-tier marker** for verb listing~~ — **shipped 2026-08-04**
+  (see the WS-F bullet: the marks, both producers, the default-hidden
+  listing with `--all`, and the annotation-class compat classification).
 - **Cryptographic agent identity / delegation** (design OQ2) — the CFC track
   distinguishes runtime-attested execution context from a separately keyed or
   delegated agent, but does not deliver delegation.
@@ -846,7 +846,17 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
   deployed pattern's source identity (skew detection).
 - **Wrapper-tier + deprecation marks for the listing default (specced
-  2026-08-03; queued).** Everything stays CALLABLE — the marks shape only
+  2026-08-03; built 2026-08-04).** Landed as specced with ONE measured
+  narrowing: the inference requires a VOID event in addition to a
+  session-scoped binding. Without the conjunct the rule marks
+  `topics.addTopic` — the flagship headless verb — because it incidentally
+  clears the composer draft after a create; a wrapper's input IS the session
+  draft, so a verb with a real payload that touches a session cell is doing
+  its job, not wrapping a UI (current-behavior spec §12.1). Measured outcome
+  on topics: exactly the six composer wrappers mark wrapper-tier and
+  `setMyName` marks deprecated; `addTopic`/`addComment`/`addLink`/`setBody`
+  stay clean, and the deployed-board listing hides 1 wrapper + 1 deprecated
+  with the loud count line.** Everything stays CALLABLE — the marks shape only
   what `cf piece verbs` shows by default (decided with Mike, 2026-08-03).
   One mechanism, two producers, one consumer:
   - The generated stream schema carries two independent annotation-class
