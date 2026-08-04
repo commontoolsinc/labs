@@ -446,10 +446,12 @@ function fabricFromNativeValueInternal(
   // Spelled as a `typeof` test rather than `!isRecord()` so the non-object
   // arms of `FabricValueLayer` narrow: every non-object layer value is
   // already a `FabricValue`.
+  //
+  // Nothing is recorded in `converted` here. Reaching this means `original`
+  // was not a record: every record the shallow conversion accepts answers with
+  // an object, so a record cannot arrive at this branch, and a non-record is
+  // not a key the map holds.
   if (typeof value !== "object" || value === null) {
-    if (isOriginalRecord) {
-      converted.set(original, value);
-    }
     return value;
   }
 
