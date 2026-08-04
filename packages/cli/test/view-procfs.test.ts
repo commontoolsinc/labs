@@ -21,7 +21,7 @@ Deno.test({
     assertEquals(input.kind, "bytes");
     if (input.kind !== "bytes") return;
     assert(input.bytes.length > 0);
-    assertEquals(input.language?.metadata.aliases.includes("binary"), true);
+    assertEquals(input.language?.id, "binary");
     assertEquals(input.extent, {
       byteLength: input.bytes.length,
       complete: true,
