@@ -213,6 +213,29 @@ describe("main command", () => {
     );
   });
 
+  it("shows the supervisor's own help for the direct supervisor entry point", async () => {
+    // The subcommand forwards its raw argv to the supervisor's parser, so the
+    // compiled binary and a direct `deno run` of the supervisor answer with the
+    // same flags and the same help.
+    const { code, stdout } = await cf("fuse-supervisor --help");
+
+    expect(code).toBe(0);
+    expect(stdout.join("\n")).toContain(
+      "Usage: fuse-supervisor <mountpoint> [options]",
+    );
+    expect(stdout.join("\n")).toContain("--supervisor-status <path>");
+  });
+
+  it("rejects an unknown flag on the direct supervisor entry point", async () => {
+    const { code, stdout, stderr } = await cf("fuse-supervisor /mnt --json");
+
+    expect(code).not.toBe(0);
+    expect(stdout).toEqual([]);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      "Unknown fuse supervisor option: --json",
+    );
+  });
+
   it("keeps rejection help off stdout when --json is unsupported", async () => {
     const { code, stdout, stderr } = await cf("acl --json");
 
