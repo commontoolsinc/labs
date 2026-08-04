@@ -106,7 +106,13 @@ Tasks:
       Phase 3's spec side); sessions client-global under
       inter-server trust; cross-space navigateTo deferred with the
       client-vended-stream future note; inheritance uniform across
-      run kinds; plus the LT4/5/7/8/9 one-liners.
+      run kinds; plus the LT4/5/7/8/9 one-liners. Companion
+      instrument
+      [field-provenance.md](../specs/server-side-execution/field-provenance.md)
+      (2026-08-03): per-field producer→carrier→consumer→retirement
+      chains closure-checked across six path families — targets
+      the destroyed-in-transit defect class the trace run showed
+      dominant; same protocol, same re-run cadence.
 - [ ] Audit what server-execution surface, if any, exists on main
       (executor remnants, stats routes, doc references) and record it in
       this plan.

@@ -28,6 +28,7 @@ domain:
 | [`builtins.md`](builtins.md) | per-built-in contracts: placement, memo keys, navigateTo split, deferred list | 1, 4, 5 |
 | [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |
 | [`scenario-traces.md`](scenario-traces.md) | VERIFICATION INSTRUMENT (non-normative): twelve canonical end-to-end journeys traced cell by cell with citations; gaps/flags/contradictions feed the rulings ledger; re-run after every ruling batch | all |
+| [`field-provenance.md`](field-provenance.md) | VERIFICATION INSTRUMENT (non-normative): per-field producer→carrier→consumer→retirement chains, closure-checked across six path families — the bottom-up complement to the traces | all |
 | [`runtime-mapping.md`](runtime-mapping.md) | today's runtime, behavior by behavior → its v2 placement, statused COVERED/CHANGED/GAP | all |
 
 Each detail doc opens with **Anchors** — module paths verified on main
