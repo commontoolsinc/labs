@@ -218,11 +218,15 @@ export function map(
         resultSchema,
         tx,
       );
-      result = scopedCell(runtime, tx, baseResult, listScope);
-      setResultCell(result, parentCell);
+      const boundResult = scopedCell(runtime, tx, baseResult, listScope);
+      setResultCell(boundResult, parentCell);
       // Link the new result cells to the pattern cell too
-      setPatternCell(result, parentCell.key("pattern"));
-      sendResult(tx, result);
+      setPatternCell(boundResult, parentCell.key("pattern"));
+      sendResult(tx, boundResult);
+      // The container outlives this reconcile's transaction; a cell bound to
+      // it would pin the settled transaction and its journal for the life of
+      // the coordinator. Rebind per use instead.
+      result = boundResult.withTx();
     }
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
@@ -369,12 +373,17 @@ export function map(
         existing.lastIndex = i;
         newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
       } else {
-        const resultCell = runtime.getCell(
+        const boundResultCell = runtime.getCell(
           parentCell.space,
           { map: result, elementKey },
           undefined,
           tx,
         );
+        // The stored cell outlives this reconcile's transaction: it lives in
+        // `elementRuns` and in the cancel closure below, both of which last as
+        // long as the coordinator. A cell bound to the transaction would pin
+        // the settled transaction, its journal, and everything it read.
+        const resultCell = boundResultCell.withTx();
         runtime.runner.run(
           tx,
           opPattern,
@@ -386,9 +395,9 @@ export function map(
           },
         );
         // Link these individual cells to the top cell
-        setResultCell(resultCell, parentCell);
+        setResultCell(boundResultCell, parentCell);
         // Link the new result cells to the pattern cell too
-        setPatternCell(resultCell, parentCell.key("pattern"));
+        setPatternCell(boundResultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
         newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
