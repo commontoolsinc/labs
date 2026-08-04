@@ -1715,9 +1715,16 @@ export type toJSON = {
  * `moduleToEncodableForm` or `patternToJSON`, and both answer a record by
  * construction -- there is no artifact whose serialized form is a primitive,
  * an array, or `null`.
+ *
+ * Its members are {@link FabricExecValue}, NOT {@link FabricValue}: a form can
+ * still hold live functions. A module whose implementation is a nested pattern
+ * with no entry ref answers with that pattern's graph embedded, and such a
+ * graph holds live modules. That is precisely why the artifact walk descends
+ * into what this returns rather than treating it as finished -- typing it as
+ * durable would assert the very thing the walk cannot assume.
  */
 export type toEncodableForm = {
-  toEncodableForm(): Record<string, unknown>;
+  toEncodableForm(): Record<string, FabricExecValue>;
 };
 
 /**
