@@ -158,7 +158,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 - Builder APIs (`pattern`, `lift`, `handler`, helper exports).
 - Runtime cell creation, alias resolution, and pattern instantiation.
-- Serialization (`json-utils.ts`, pattern manager persistence, result metadata).
+- Serialization (`to-encodable-form.ts`, pattern manager persistence, result metadata).
 - Tests and tooling that assume path-based aliases or reactive-only helpers.
 
 ## Implementation Plan

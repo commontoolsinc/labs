@@ -1,7 +1,7 @@
 /**
  * Filesystem sync daemon for a todo list backed by a markdown file.
  *
- * Demonstrates every load-bearing piece from the bidirectional_sync doc:
+ * Demonstrates every load-bearing piece from the bidirectional-sync doc:
  * - CAS retry loop with editWatermark
  * - editIdMap surviving retries
  * - Single-transaction commit (apply edits + update state + clear queue)

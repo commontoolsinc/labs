@@ -18,8 +18,7 @@ import {
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
-import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
-import { defaultSettings } from "../src/storage/v2.ts";
+import type { IStorageProvider } from "../src/storage/interface.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -34,7 +33,7 @@ const space = signer.did();
 // the concurrency test proves the observed max equals this.
 const WINDOW = 8;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   sync(
     uri: URI,
@@ -150,7 +149,6 @@ function makeProvider(concurrent: boolean) {
     as: signer,
     memoryHost: new URL(`memory://concurrent-refresh-${concurrent}`),
     settings: {
-      ...defaultSettings,
       experimentalConcurrentWatchRefresh: concurrent,
     },
   }, new SingleSessionFactory(transport));

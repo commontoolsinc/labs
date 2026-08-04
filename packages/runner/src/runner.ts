@@ -10,6 +10,7 @@ import {
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
 import type { EntityKind } from "./entity-kind.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -71,6 +72,8 @@ import {
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type AddCancel,
   type Cancel,
@@ -81,7 +84,7 @@ import {
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IStorageProviderWithReplica,
+  IStorageProvider,
   IStorageSubscription,
   MemorySpace,
   URI,
@@ -293,7 +296,7 @@ const recordOutputSchemaPolicyInputs = (
     );
     const schema = schemaPath.length === 0
       ? resultSchema
-      : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+      : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
     if (schema === undefined) {
       return;
     }
@@ -568,7 +571,7 @@ const recordSetupProjectionPolicyInputs = (
 
   const schema = schemaPath.length === 0
     ? resultSchema
-    : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+    : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
   if (schema === undefined) {
     return;
   }
@@ -761,10 +764,10 @@ type SchedulerRehydrationSubscriptionOptions = {
       readonly PersistedSchedulerObservationSnapshot[]
     >;
     addressesCurrentAtOrBelow?: NonNullable<
-      IStorageProviderWithReplica["areSchedulerAddressesCurrentAtOrBelow"]
+      IStorageProvider["areSchedulerAddressesCurrentAtOrBelow"]
     >;
     hasPendingWriteOverlapping?: NonNullable<
-      IStorageProviderWithReplica["schedulerHasPendingWriteOverlapping"]
+      IStorageProvider["schedulerHasPendingWriteOverlapping"]
     >;
   };
   // The owning pattern instance for this reader, set unconditionally (not only
@@ -1165,8 +1168,9 @@ export class Runner {
   private locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
-  // Map whose key is the result cell's full key, and whose values are the
-  // patterns as strings
+  // Map whose key is the result cell's full key, and whose values are a hash
+  // of the pattern's encodable form -- what `writeJavaScriptActionResult`
+  // compares to decide whether a returned sub-pattern has changed.
   private resultPatternCache = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
@@ -1397,7 +1401,17 @@ export class Runner {
       undefined,
       tx,
     );
-    argumentCell.set(argument);
+    // A sub-pattern's argument can carry a builder artifact -- a pattern
+    // handed to another pattern as an input. This is a storage boundary like
+    // any other, so the artifact is replaced on the way in, once, for every
+    // write below: they must agree on what was stored.
+    const storable = flattenBuilderArtifacts(argument);
+    argumentCell.set(storable);
+    // The policy recorder sees the RAW argument, as its sibling in
+    // `updateResultProjection` does. Handing it the flattened one would walk
+    // a serialized pattern graph it previously stopped at -- a function halts
+    // its descent, a record does not -- and record structural-provenance
+    // claims from positions it has never seen.
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
@@ -1409,7 +1423,7 @@ export class Runner {
       this.runtime,
       tx,
       argumentLink,
-      argument,
+      storable,
       argumentLink,
     );
   }
@@ -1639,7 +1653,6 @@ export class Runner {
     // that actual execution value here, then restore its association with
     // `Cell<R>`.
     let result = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       pattern.result,
       argumentCellLink,
       resultCell,
@@ -1665,7 +1678,11 @@ export class Runner {
     // throws `hashOf: unsupported object type` instead of deciding anything.
     // Converting first also makes the gate compare what a write would actually
     // store, since the stored side is already a `FabricValue`.
-    const fabricResult = fabricFromNativeValue(result);
+    // A result can carry a builder artifact -- a pattern tool, say -- and an
+    // artifact is not a `FabricValue`, so it is replaced before the
+    // conversion. That keeps the gate below comparing what a write would
+    // actually store, which is the whole point of converting first.
+    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -3720,7 +3737,6 @@ export class Runner {
         try {
           inputs = findAllWriteRedirectCells(
             unwrapOneLevelAndBindToDoc(
-              this.runtime.cfc,
               node.inputs,
               argumentMetaLink,
               resultCell,
@@ -3730,7 +3746,6 @@ export class Runner {
           );
           outputs = findAllWriteRedirectCells(
             unwrapOneLevelAndBindToDoc(
-              this.runtime.cfc,
               node.outputs,
               argumentMetaLink,
               resultCell,
@@ -3949,7 +3964,6 @@ export class Runner {
       let spotLink: NormalizedFullLink | undefined;
       try {
         const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
-          this.runtime.cfc,
           node.outputs,
           argumentLink,
           resultCell,
@@ -4292,14 +4306,12 @@ export class Runner {
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -5343,14 +5355,25 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    const resultPatternAsString = JSON.stringify(resultPattern);
+    // The change key is a content hash of the pattern's encodable form, taken
+    // through the artifact walk so an artifact reached by any route --
+    // including a sub-graph under a node's `inputs` -- is serialized before it
+    // is hashed. A hash is canonical, so a difference in member order is not a
+    // difference in the key.
+    //
+    // `hashOf` throws on anything the data model refuses. That is a second
+    // line of defense rather than the first: `normalizeSandboxResult` runs on
+    // every route here and already rejects a bare function at any depth, with
+    // a better message than a hash could give.
+    const resultPatternKey = hashStringOf(
+      flattenBuilderArtifacts(resultPattern),
+    );
     const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
-    const patternUnchanged =
-      previousResultPatternAsString === resultPatternAsString;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternAsString);
+      this.resultPatternCache.set(cacheKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -6245,14 +6268,12 @@ export class Runner {
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6289,6 +6310,14 @@ export class Runner {
       resultCell,
     );
 
+    // The input bindings are about to cross into the data model, and a
+    // pattern author can bind a builder artifact (a handler, a pattern) as an
+    // ordinary input value at any depth. Each is replaced with its serialized
+    // form on the way, so what crosses is representable -- by the walk INSIDE
+    // `getImmutableCell`, not by a call here. That it happens there and not
+    // alongside the `op` substitution above is what keeps it clear of
+    // `findAllWriteRedirectCells`, which walks the same bindings for a
+    // different purpose and must see them as bound.
     const inputsCell = this.runtime.getImmutableCell(
       resultCell.space,
       mappedInputBindings,
@@ -6527,14 +6556,12 @@ export class Runner {
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6565,14 +6592,12 @@ export class Runner {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
@@ -6597,7 +6622,6 @@ export class Runner {
     // lives — at a DIFFERENT entity from the identity bind's only when the
     // descriptor carries a kind. See the identity bind for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6658,7 +6682,6 @@ export class Runner {
       // must use the id the VALUE bind minted: where the descriptor was
       // computed, reading the `of:` one returns undefined for a healthy piece.
       const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-        this.runtime.cfc,
         outputBindings,
         argumentCellLink,
         resultCell,

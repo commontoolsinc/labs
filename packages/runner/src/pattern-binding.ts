@@ -96,7 +96,6 @@ type UnwrapOneLevelOptions = {
  * they keep inheriting the reader's schema during link resolution.
  */
 const foldDeclaredScopeIntoLinkSchema = (
-  cfc: ContextualFlowControl,
   link: NormalizedFullLink,
   authoredRootSchema: JSONSchema | undefined,
   path: readonly string[],
@@ -106,7 +105,7 @@ const foldDeclaredScopeIntoLinkSchema = (
     return link;
   }
   const authoredSlotSchema = path.length > 0
-    ? cfc.getSchemaAtPath(authoredRootSchema, [...path])
+    ? ContextualFlowControl.getSchemaAtPath(authoredRootSchema, [...path])
     : authoredRootSchema;
   const declaredCap = ContextualFlowControl.getSchemaScopeCap(
     authoredSlotSchema,
@@ -121,7 +120,6 @@ const foldDeclaredScopeIntoLinkSchema = (
 };
 
 const scopedLinkForPath = (
-  cfc: ContextualFlowControl,
   link: NormalizedFullLink,
   path: readonly string[],
   schemaOverride?: JSONSchema,
@@ -131,7 +129,7 @@ const scopedLinkForPath = (
   let childSchema: JSONSchema | undefined;
 
   for (const key of path) {
-    childSchema = cfc.getSchemaAtPath(schema, [key]);
+    childSchema = ContextualFlowControl.getSchemaAtPath(schema, [key]);
     if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
       scope = childSchema.scope;
     }
@@ -242,7 +240,6 @@ function sendValueToBindingInner<T>(
         )!;
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(
-            cell.runtime.cfc,
             getDerivedInternalCellLink(cell as any, descriptor),
             alias.path,
             alias.schema,
@@ -265,7 +262,7 @@ function sendValueToBindingInner<T>(
         }
         const path = alias.path;
         binding = createSigilLinkFromParsedLink(
-          scopedLinkForPath(cell.runtime.cfc, link, path, alias.schema),
+          scopedLinkForPath(link, path, alias.schema),
           { includeSchema: true, overwrite: "redirect" },
         );
       }
@@ -408,7 +405,6 @@ function sendValueToBindingInner<T>(
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
-  cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
   resultCell: AnyCell<unknown>,
@@ -499,10 +495,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const sourceSchema = alias.schema !== undefined
           ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
-          ? cfc.schemaAtPath(link.schema, path)
+          ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
         return createSigilLinkFromParsedLink(
-          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+          scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
           { includeSchema: true, overwrite: "redirect" },
         );
       } else {
@@ -522,15 +518,14 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const sourceSchema = alias.schema !== undefined
           ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
-          ? cfc.schemaAtPath(link.schema, path)
+          ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
         const authoredRootSchema = alias.cell === "argument"
           ? options?.sourceSchemas?.argument
           : undefined;
         return createSigilLinkFromParsedLink(
           foldDeclaredScopeIntoLinkSchema(
-            cfc,
-            scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+            scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
           ),
@@ -560,7 +555,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const value = binding[i];
         const next = convert(
           value,
-          cfc.getSchemaAtPath(targetSchema, [String(i)]),
+          ContextualFlowControl.getSchemaAtPath(targetSchema, [String(i)]),
         );
         if (next === value) continue;
         // First change: copy the whole array, not just the prefix. `slice()`
@@ -581,7 +576,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       let converted: Record<string, FabricExecValue> | undefined;
       for (const key of Object.keys(binding)) {
         const value = binding[key];
-        const next = convert(value, cfc.getSchemaAtPath(targetSchema, [key]));
+        const next = convert(
+          value,
+          ContextualFlowControl.getSchemaAtPath(targetSchema, [key]),
+        );
         if (next === value) continue;
         converted ??= { ...binding };
         converted[key] = next;

@@ -236,7 +236,7 @@ standing refinement that would bring this invariant into scope.
 > exhaustion). There is no path on which it silently vanishes.
 
 Stated in
-[Committed-write backpressure](../../development/committed-write-backpressure.md);
+[Committed-write backpressure](../../features/committed-write-backpressure.md);
 listed here because retry-loop and backpressure optimizations are the changes
 most likely to violate it.
 
@@ -295,9 +295,8 @@ Layer: client (sync-frame buffering while a transaction builds).
 Soundness direction: MAY buffer integration longer than necessary; MUST NOT
 let a transaction observe two prefixes.
 
-Checked by: chronicle re-validation tests; no dedicated checker (the
-durable-history oracle would surface a resulting incoherent acceptance as an
-INV-1 hit).
+Checked by: no dedicated checker (the durable-history oracle would surface a
+resulting incoherent acceptance as an INV-1 hit).
 
 ### INV-11 — Idempotent replay
 

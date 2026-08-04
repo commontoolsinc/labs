@@ -22,11 +22,8 @@
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import { SelectorTracker } from "../src/storage/selector-tracker.ts";
 import type { BaseMemoryAddress } from "../src/traverse.ts";
-
-const cfc = new ContextualFlowControl();
 
 const address: BaseMemoryAddress = {
   id: "of:bench-entity" as BaseMemoryAddress["id"],
@@ -97,7 +94,7 @@ const stableSelector: SchemaPathSelector = {
   schema: noteSchema(0) as SchemaPathSelector["schema"],
 };
 // Warm any caches for the stable-identity case.
-tracker.getSupersetSelector(address, stableSelector, cfc);
+tracker.getSupersetSelector(address, stableSelector);
 
 const ROUNDS = 32;
 
@@ -107,7 +104,7 @@ Deno.bench({
   baseline: true,
 }, () => {
   for (let i = 0; i < ROUNDS; i++) {
-    tracker.getSupersetSelector(address, stableSelector, cfc);
+    tracker.getSupersetSelector(address, stableSelector);
   }
 });
 
@@ -121,7 +118,7 @@ Deno.bench({
   );
   b.start();
   for (const selector of selectors) {
-    tracker.getSupersetSelector(address, selector, cfc);
+    tracker.getSupersetSelector(address, selector);
   }
   b.end();
 });
@@ -142,7 +139,7 @@ Deno.bench({
   );
   b.start();
   for (const selector of selectors) {
-    tracker.getSupersetSelector(address, selector, cfc);
+    tracker.getSupersetSelector(address, selector);
   }
   b.end();
 });
@@ -164,7 +161,7 @@ Deno.bench({
   );
   b.start();
   for (const selector of selectors) {
-    tracker.getSupersetSelector(address, selector, cfc);
+    tracker.getSupersetSelector(address, selector);
   }
   b.end();
 });

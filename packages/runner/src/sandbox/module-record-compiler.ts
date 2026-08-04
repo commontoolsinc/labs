@@ -43,13 +43,12 @@ const logger = getLogger("module-record-compiler");
  * one parse per distinct body per process.
  *
  * Keying on the body (not the module's source `identity`) is deliberate: a
- * content-hash identity is a hash of the *authored source*, and the same
- * identity can map to *different* compiled bytes across compilation modes /
- * runtime versions (cf. the `recordCache` note in `compileSourcesToRecords`,
- * where a precompiled body and a bare-transpiled body share a content-hash key).
- * An identity key could therefore serve one body's parse for another; the body
- * fully determines the parse, so a body key is exact and cross-contamination is
- * impossible.
+ * content-hash identity is a hash of the *authored source*, so one identity can
+ * map to different compiled bytes across compilation modes and runtime
+ * versions — the CF-transformed body and the bare-transpiled body of the same
+ * source share a content-hash key. An identity key could therefore serve one
+ * body's parse for another; the body fully determines the parse, so a body key
+ * is exact and cross-contamination is impossible.
  *
  * The two maps are process-global and unbounded by design: one small
  * record-surface entry (export names + import specifiers) per distinct compiled
@@ -352,27 +351,6 @@ export function createWriteOnceExports(): Record<string, unknown> {
   });
 }
 
-/** Per-module compiled artifact, cacheable by module hash (Phase 4). */
-export interface CompiledModuleArtifact {
-  exports: string[];
-  compiled: string;
-}
-
-/**
- * Cache of compiled module artifacts keyed by content-addressed module hash.
- * Because the hash already folds in the transitive import closure, a cached
- * artifact is valid as long as its key matches — editing one file invalidates
- * only that module (and its importers, whose hashes change).
- *
- * The cache assumes the fixed compiler options used by this adapter (CommonJS,
- * ES2023, esModuleInterop). A caller sharing one cache across differing
- * compiler options would need to fold an options tag into the key.
- */
-export interface ModuleRecordCache {
-  get(moduleHash: string): CompiledModuleArtifact | undefined;
-  set(moduleHash: string, artifact: CompiledModuleArtifact): void;
-}
-
 export interface CompileSourcesOptions {
   /**
    * Names exported by each bare runtime module specifier (e.g.
@@ -381,8 +359,6 @@ export interface CompileSourcesOptions {
    */
   runtimeModules?: Record<string, string[]>;
   runtimeFingerprint?: string;
-  /** Optional per-module compiled-artifact cache, keyed by module hash. */
-  recordCache?: ModuleRecordCache;
   /**
    * Pre-compiled CommonJS body per source name. When provided (e.g. from
    * `TypeScriptCompiler.compileToModules`, which runs the full CF transformer
@@ -659,23 +635,12 @@ export function compileSourcesToRecords(
     const sourceMap = options.precompiledSourceMaps?.get(source.name);
     if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
     const precompiled = options.precompiledBodies?.get(source.name);
-    let exportNames: string[];
+    const exportNames = resolveFullExports(source.name);
     let compiled: string;
-    // A precompiled (CF-transformed) body is authoritative. Do NOT consult or
-    // populate the shared cache: it may hold a bare-transpiled body under the
-    // same content-hash key (different compilation mode), which must not mix.
-    const cached = precompiled === undefined
-      ? options.recordCache?.get(moduleHash)
-      : undefined;
     if (precompiled !== undefined) {
-      exportNames = resolveFullExports(source.name);
       compiled = precompiled;
-    } else if (cached) {
-      exportNames = cached.exports;
-      compiled = cached.compiled;
     } else {
       const { ts: tsc } = compilerStack();
-      exportNames = resolveFullExports(source.name);
       compiled = tsc.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
@@ -684,7 +649,6 @@ export function compileSourcesToRecords(
           esModuleInterop: true,
         },
       }).outputText;
-      options.recordCache?.set(moduleHash, { exports: exportNames, compiled });
     }
 
     // Runtime imports are exactly the `require()` calls in the compiled output.

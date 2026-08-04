@@ -28,7 +28,7 @@ was last checked against the code.
 | Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
-| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
+| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | on | Mike Salisbury (verb contract WS-C) | fold into receipt semantics and delete flag after a bake period | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
@@ -662,10 +662,6 @@ the per-epic implementation notes).
 > Two neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
 >
-> - **`syncSchemaTable`** is the older, index-keyed predecessor of
->   `syncSchemaTableV2`. It is hardwired to `false` in `getMemoryProtocolFlags`
->   and has no config function; it is effectively dead and can be deleted from
->   the protocol types once no peer negotiates it.
 > - **`sqliteCommitRowLabelEval`** is a build-inherent capability, hardwired to
 >   `true`, advertising that this build's engine evaluates row-label rules at
 >   commit time. It is not configuration: an older server that lacks the

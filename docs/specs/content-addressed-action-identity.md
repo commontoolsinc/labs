@@ -28,7 +28,7 @@ Phase 3 shipped in two PRs:
   `writeAuthorizedBy` claims keep verifying without a `verifiedLoadId`.
 - **E2 (legacy machinery deletion)**: every loadId surface is gone — frame
   threading, side tables, `seedVerifiedLoadIds`, per-load registry
-  partitions and capture walks, the loadId-scoped `Harness` methods, the
+  partitions and capture walks, the loadId-scoped `Engine` methods, the
   CFC `implementationRef`×`verifiedLoadId` arm (provenance is the only
   source of `kind: "verified"`), `FunctionCache`, and the prewarm walk. New
   `writeAuthorizedBy` claims are stamped with `moduleIdentity` only. What
@@ -135,7 +135,7 @@ it badly:
    matching works only because pattern instantiation is deterministic. It keys
    four string-indexed maps in the `ExecutableRegistry`, the per-runner
    `FunctionCache`, the CFC verified-identity resolution, and rides along in
-   serialized module JSON (`moduleToJSON` spreads it via `...rest`).
+   serialized module JSON (`moduleToEncodableForm` spreads it via `...rest`).
 
 2. **`unsafe_originalPattern` / `unsafe_parentPattern`** (symbols in
    `builder/types.ts`) — in-memory backrefs from serialized pattern copies to
@@ -214,8 +214,8 @@ or stops needing identity-carry, the symbols die with it.)
 
 | # | Copy site | What it does | Verdict |
 |---|---|---|---|
-| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `withAliasBindings` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
-| C2 | `moduleToJSON` pattern-type implementation (`json-utils.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
+| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `withAliasBindings` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`to-encodable-form.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
+| C2 | `moduleToEncodableForm` pattern-type implementation (`to-encodable-form.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
 | C3 | `traverseValue` (`traverse-utils.ts:54`): copies during build traversal (`collectCellsAndNodes`, `node-utils` connect) | Preserves the backref so a traversal copy still resolves `getArtifactEntryRef` | **Copy stays; backref replaced** by side-table registration at the same line. |
 | C4 | `unwrapOneLevelAndBindToDoc` (`pattern-binding.ts:333–340`): instantiation-time rebinding copies | Propagates backref + the `verifiedLoadId` side-table entry to the bound copy | **Copy stays; backref replaced** by side-table registration; the `verifiedLoadId` propagation is deleted outright (CFC identity no longer flows through loadIds — § CFC). |
 | C5 | `unsafe_noteParentOnPatterns` (`pattern-binding.ts:346–358`): writes `unsafe_parentPattern` | Nothing reads it | **Delete now.** Independent of the rest of this design. |
@@ -345,7 +345,7 @@ per surrounding file set; `moduleIdentity` is stable for byte-identical code.
 
 Consequences:
 - `verifiedLoadId` threading through frames / `JavaScriptNodeContext` /
-  `json-utils` (`frame.verifiedLoadId` in `moduleToJSON`'s
+  `to-encodable-form` (`frame.verifiedLoadId` in `moduleToEncodableForm`'s
   `admittedImplementation` probe) is deleted. `setVerifiedLoadId` /
   `getVerifiedLoadId` side tables and `seedVerifiedLoadIds` /
   `annotateVerifiedPatterns` walks are deleted (their job — marking which load
@@ -435,9 +435,9 @@ but `toJSON` runs when a value is *written to a cell* — after
 
 - `Pattern.toJSON()` → `{ $patternRef: { identity, symbol } }` (plus
   `argumentSchema`/`resultSchema` if consumers need them without resolving).
-- `moduleToJSON` for a pattern-type implementation (C2) → the same ref, not an
+- `moduleToEncodableForm` for a pattern-type implementation (C2) → the same ref, not an
   embedded graph.
-- `moduleToJSON` for javascript modules → `$implRef` (§1).
+- `moduleToEncodableForm` for javascript modules → `$implRef` (§1).
 - `Pattern.nodes` / `result` / `initial` stay as the in-memory instantiation
   representation only; nothing outside the runner consumes them as JSON.
 
@@ -473,7 +473,7 @@ tolerate a miss. E4 (same day) removed that blocker and completed the flip:
   `test/pre-e3-pattern-value-canary.test.ts` alongside the refs-only
   vintage's two resolution paths.
 - The internal/boundary split is structural: `serializePatternGraph()`
-  (json-utils) serializes the full graph under an internal-serialization
+  (to-encodable-form) serializes the full graph under an internal-serialization
   context that suppresses `$patternRef`; `withAliasBindings` (the
   builder-time node serializer) routes pattern values through it, so
   `Pattern.nodes` stays a bare-graph in-memory representation.
@@ -543,8 +543,8 @@ canary test compiling+resolving with `$implRef` stripped.
   `setVerifiedFunctionRegistrar` ambient in `function-hardening.ts`.
 - `builder/types.ts`: `unsafe_originalPattern`, `unsafe_parentPattern`, their
   `Pattern` declarations and `index.ts` exports.
-- `json-utils.ts`: backref write (line ~183), `admittedImplementation` probe,
-  the "must carry implementationRef" throw; `moduleToJSON` emits `$implRef`.
+- `to-encodable-form.ts`: backref write (line ~183), `admittedImplementation` probe,
+  the "must carry implementationRef" throw; `moduleToEncodableForm` emits `$implRef`.
 - `traverse-utils.ts` / `pattern-binding.ts`: backref/`verifiedLoadId`
   propagation → `noteDerivedCopy`; `unsafe_noteParentOnPatterns` deleted.
 - `pattern-metadata.ts`: chain walks in `isTrustedPattern` /
@@ -555,7 +555,7 @@ canary test compiling+resolving with `$implRef` stripped.
 - `harness/executable-registry.ts`: ~everything string-keyed (§4);
   `function-cache.ts` re-keyed or deleted.
 - `cfc/implementation-identity.ts`: loadId/ref plumbing → provenance WeakMap;
-  `Harness` interface loses `getVerifiedLoadId`, `getVerifiedFunctionInLoad`,
+  `Engine` loses `getVerifiedLoadId`, `getVerifiedFunctionInLoad`,
   `isVerifiedSourceInLoad`, `getVerifiedBundleId`, `getVerifiedBindingMetadata`,
   `registerVerifiedFunction`, `getExecutableFunction`, `associatePattern`.
 - `runner.ts`: `resolveJavaScriptFunction` ref path, `discoverAndCacheFunctions`,
@@ -614,7 +614,7 @@ canary test compiling+resolving with `$implRef` stripped.
    session-lifetime, per-engine content-addressed implementation index
    (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
    `Engine.recordModuleProvenance`, surfaced as
-   `Harness.getVerifiedImplementation`, consulted by `resolveByImplRef` after
+   `Engine.getVerifiedImplementation`, consulted by `resolveByImplRef` after
    the bounded artifact index misses). Chosen over refcount pinning (piece
    lifecycle is fuzzy; high complexity) and a WeakRef shadow (fails exactly in
    the post-eviction-GC scenario it must cover). Memory is bounded by the set

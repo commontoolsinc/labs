@@ -87,6 +87,9 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
+  — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
+  pattern, August 2026.
 - [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
   — active-repository syntax inventory and `cf view` support snapshot, July
   2026.
@@ -231,6 +234,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [2026-08-lunch-poll-join-name-fill-timeout.md](development/debugging/2026-08-lunch-poll-join-name-fill-timeout.md)
+  — why the lunch poll's intermittent `#lp-join-name` fill timeout is not a
+  fill-helper problem: the field never renders because the "Continue as guest"
+  handler's write does not reach the rendered view, and settling the view before
+  the fill does not change it. Includes a local reproduction, August 2026.
 - [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
   — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
@@ -267,6 +275,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
+  — why a rename-only pull request owed coverage debt: a wall-clock-guarded
+  diagnostic and a shard re-partition each moved the `packages/runner`
+  uncovered-line count with no change to that package, July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)
@@ -299,6 +311,12 @@ One line per archived document; each document's header carries the fuller
 - [09-remediation-direction.md](specs/scheduler-v2/addenda/09-remediation-direction.md)
   — scheduler-v2 addendum: remediation direction — coalesce/dedup, not
   version-skip.
+- [server-side-execution/](specs/server-side-execution/README.md) — the v1
+  server-primary execution learning run (2026-07-07 → 2026-08-02): original
+  design, implementation plan, context-lattice claims, client-passivity
+  design, claim-deletion scoping, and the orchestration log carrying the
+  full lesson record. Superseded by the live
+  [server-primary execution v2 spec](../specs/server-side-execution/README.md).
 - [OPTIMIZATION-JOURNAL.md](packages/runner/test/traverse-replay/OPTIMIZATION-JOURNAL.md)
   — traverse optimization log.
 - [SCHEMA_INJECTION_NOTES.md](packages/ts-transformers/SCHEMA_INJECTION_NOTES.md),

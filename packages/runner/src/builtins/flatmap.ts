@@ -38,7 +38,10 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
-import { createResumeRepublisher } from "./resume-republish.ts";
+import {
+  createResumeRepublisher,
+  type ElementContribution,
+} from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
 import {
   linkResolutionProbe,
@@ -49,6 +52,21 @@ import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
+
+// Rebuild the flattened list from the per-element results: spread an array
+// result one level deep, push a defined scalar directly, and treat an undefined
+// result as still streaming in. forEach over the array skips holes, so sparse
+// per-element results densify here. See resume-republish.ts for the convergence
+// machinery.
+export const flatMapContribution: ElementContribution = (
+  elemResult,
+  _inputElement,
+  out,
+) => {
+  if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
+  else if (elemResult !== undefined) out.push(elemResult);
+  else return "pending";
+};
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -109,11 +127,6 @@ export function flatMap(
     logger,
   });
 
-  // Rebuild the flattened list from the per-element results: spread an array
-  // result one level deep, push a defined scalar directly, and treat an undefined
-  // result as still streaming in. forEach over the array skips holes, so sparse
-  // per-element results densify here. See resume-republish.ts for the convergence
-  // machinery.
   const { awaitPendingThenRepublish } = createResumeRepublisher({
     runtime,
     logger,
@@ -124,11 +137,7 @@ export function flatMap(
     elementRuns,
     aggregateNoun: "flatMap result",
     elementNoun: "result",
-    contribute: (elemResult, _inputElement, out) => {
-      if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
-      else if (elemResult !== undefined) out.push(elemResult);
-      else return "pending";
-    },
+    contribute: flatMapContribution,
   });
 
   // Hold the durable list while the input list itself confirms. On a resume
@@ -194,13 +203,13 @@ export function flatMap(
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
+        const slotLink = listElementLink(listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const argumentUsage = inferListOpArgumentUsage(opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
       ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),

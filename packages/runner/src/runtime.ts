@@ -6,6 +6,7 @@ import {
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -15,7 +16,6 @@ import type {
   Pattern,
   Schema,
 } from "./builder/types.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
@@ -42,7 +42,6 @@ import type {
   DID,
   IExtendedStorageTransaction,
   IStorageManager,
-  IStorageProvider,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
@@ -169,7 +168,7 @@ Error.stackTraceLimit = 500;
 
 export const DEFAULT_MAX_RETRIES = 5;
 
-export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
+export type { IExtendedStorageTransaction, MemorySpace };
 
 export interface ConsoleHandlerOutput {
   method: ConsoleMethod;
@@ -632,7 +631,6 @@ export class Runtime {
   readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
   readonly pieceCreatedCallback?: PieceCreatedCallback;
-  readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
   /** See `RuntimeOptions.onPatternInstantiated`. */
   readonly onPatternInstantiated?: PatternInstantiationObserver;
@@ -1075,7 +1073,6 @@ export class Runtime {
     this.patternManager = new PatternManager(this);
     this.patternUpdater = new PatternUpdater(this);
     this.runner = new Runner(this);
-    this.cfc = new ContextualFlowControl();
     this.onPatternInstantiated = options.onPatternInstantiated;
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
@@ -2007,7 +2004,14 @@ export class Runtime {
     // (this data is immutable as given). `fabricFromNativeValue()` converts
     // what callers actually pass -- notably `Cell`s, which become sigil
     // links via their `toJSON()` -- into an encodable `FabricValue`.
-    const asDataURI = dataUriFromValue(fabricFromNativeValue(data));
+    // Builder artifacts are replaced HERE rather than at each caller. This is
+    // the designed intake, and the callers are many: raw and JavaScript node
+    // inputs, wish candidates, schema defaults. Covering them one at a time was
+    // tried and is whack-a-mole -- each site that is missed fails as a
+    // rejection at the conversion, or worse as a cleanup error that masks it.
+    const asDataURI = dataUriFromValue(
+      fabricFromNativeValue(flattenBuilderArtifacts(data)),
+    );
     return createCell(
       this,
       {
@@ -2215,12 +2219,32 @@ export class Runtime {
   }
 
   /**
+   * The default host's self-reported git commit, captured from its
+   * `/_health` response's `x-cf-git-sha` header by the most recent
+   * `healthCheck()` call. Null before any check or when the host omits
+   * the header (older servers). Read from the headers — never the body
+   * — so the capture completes exactly when the health probe does; a
+   * stalled or truncated body cannot delay it.
+   */
+  get serverGitSha(): string | null {
+    return this.#serverGitSha;
+  }
+  #serverGitSha: string | null = null;
+  #healthCheckGeneration = 0;
+
+  /**
    * True iff the default host AND every distinct mapped host are
    * reachable — one runtime can span hosts, so health is the
    * conjunction over all of them.
    */
   async healthCheck(): Promise<boolean> {
-    const hosts = new Set([this.apiUrl.toString()]);
+    // Overlapping calls each capture into their own generation; only the
+    // newest call's capture publishes, so a slow earlier response cannot
+    // overwrite a newer one after the fact.
+    const generation = ++this.#healthCheckGeneration;
+    this.#serverGitSha = null;
+    const defaultHost = this.apiUrl.toString();
+    const hosts = new Set([defaultHost]);
     for (
       const host of [
         ...Object.values(this.spaceHostMap ?? {}),
@@ -2236,6 +2260,12 @@ export class Runtime {
     const checks = [...hosts].map(async (host) => {
       try {
         const res = await fetch(new URL("/_health", host));
+        if (
+          host === defaultHost && generation === this.#healthCheckGeneration
+        ) {
+          const sha = res.headers.get("x-cf-git-sha")?.trim();
+          this.#serverGitSha = sha ? sha : null;
+        }
         return res.ok;
       } catch (_) {
         return false;

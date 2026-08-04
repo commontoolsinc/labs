@@ -46,11 +46,10 @@ const deriveIndices = (
   reachableCount: number,
 ): void => {
   const schema = makeSchema(definitionCount, reachableCount);
-  const cfc = new ContextualFlowControl();
   let result: JSONSchema = false;
   b.start();
   for (let index = 0; index < INDEX_COUNT; index++) {
-    result = cfc.schemaAtPath(schema, [String(index)]);
+    result = ContextualFlowControl.schemaAtPath(schema, [String(index)]);
   }
   b.end();
   if (result === false) throw new Error("unexpected rejecting schema");
@@ -63,11 +62,12 @@ const deriveRendererIndices = (
   // Give every benchmark iteration a cold root identity while retaining the
   // production renderer schema's root $ref, union, and recursive definitions.
   const schema = deepFreeze({ ...rendererVDOMSchema });
-  const cfc = new ContextualFlowControl();
   let result: JSONSchema = false;
   b.start();
   for (let index = 0; index < INDEX_COUNT; index++) {
-    result = cfc.schemaAtPath(schema, [distinct ? String(index) : "0"]);
+    result = ContextualFlowControl.schemaAtPath(schema, [
+      distinct ? String(index) : "0",
+    ]);
   }
   b.end();
   if (result === false) throw new Error("unexpected rejecting schema");

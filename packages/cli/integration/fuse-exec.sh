@@ -961,7 +961,7 @@ exec 9>&-
 # `releaseCb` traces the handle's state before deciding anything, so its line
 # reports whether close() found the descriptor armed, on either truncate path
 # and whichever callback does the flushing. The cell value cannot report that;
-# `docs/development/waiting-in-tests.md` records why.
+# `docs/development/waiting-in-tests-rationale.md` records why.
 STALE_FH=$(resolve_traced_write_fh "$STALE_TRACE_MARK" "${#STALE_CONTENT}") ||
   error "Could not resolve the handle the daemon assigned to fd 9."
 

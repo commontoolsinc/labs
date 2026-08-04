@@ -197,6 +197,30 @@ describe("data URI inlining", () => {
       expect(result).toBe(link);
     });
 
+    it("should preserve links whose data: URI carries a foreign media type", () => {
+      // Only this codec's media type names content that can be inlined. A
+      // `data:` URI of any other media type is left alone, exactly as a link
+      // naming a document in a space is.
+      for (
+        const id of [
+          "data:image/png;base64,iVBORw0KGgo",
+          "data:text/plain,hello",
+          "data:,",
+        ]
+      ) {
+        const link = {
+          "/": {
+            [LINK_V1_TAG]: {
+              id,
+              path: [],
+            },
+          },
+        };
+
+        expect(findAndInlineDataUriLinks(link)).toBe(link);
+      }
+    });
+
     it("should preserve object identity when no data URI links are present", () => {
       const value = {
         name: "Ada",
@@ -444,6 +468,32 @@ describe("data URI inlining", () => {
 
       // The raw value should be the inlined value, not the data URI link
       expect(rawValue).toBe("test");
+    });
+
+    it("should surface the storage error for a foreign-media-type data URI", () => {
+      // Such a link is not inlined, so the write treats it as an ordinary
+      // link and reads through it to diff against what it names. That read
+      // reports the media type, as the storage layer's typed error. Landing
+      // on that error is also what pins the inlining re-entry as unreached;
+      // the re-entry recurs on a value the inlining call leaves alone.
+      const targetCell = runtime.getCell(space, "target", undefined, tx);
+
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "data:image/png;base64,iVBORw0KGgo",
+            path: [],
+          },
+        },
+      };
+
+      let error: { name?: string } | undefined;
+      try {
+        targetCell.set(link);
+      } catch (caught) {
+        error = caught as { name?: string };
+      }
+      expect(error?.name).toBe("UnsupportedMediaTypeError");
     });
   });
 

@@ -28,7 +28,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
  * to the lower value. A caller whose endpoint is slow enough that duplicates
  * matter raises its own bound with `options.mutexTimeoutMs`.
  *
- * `docs/development/fetch-request-deadlines.md` records why this bound stays
+ * `docs/features/fetch-request-deadlines.md` records why this bound stays
  * and what an early takeover costs.
  */
 export const MUTEX_STALE_AFTER = 1000 * 5;

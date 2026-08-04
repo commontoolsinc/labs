@@ -22,7 +22,7 @@ import type { FabricValue } from "@commonfabric/api";
  * `sendToStream` (a transient, unmarked overwrite — see `webhooks.utils.ts`).
  * Moving webhooks onto a marked, durable trail is the planned `stream`-sink
  * follow-on of the ingest-channel work, not something this file already does —
- * see docs/development/proposals/ingest-channels-journal-sink.md.
+ * see docs/plans/ingest-channels-journal-sink.md.
  *
  * The split-mint runs here: the payload is written under the ordinary member
  * identity (so the runtime gate strips any provenance atom an attacker smuggled
@@ -30,7 +30,7 @@ import type { FabricValue } from "@commonfabric/api";
  * *verified channel metadata* — channel, audience, receive time, and a digest
  * of the bytes we wrote — from which it mints the trusted mark. The two never
  * share an authoring identity. See
- * docs/development/proposals/vouched-ingest-channel-mint-design.md.
+ * docs/features/vouched-ingest-channel-mint.md.
  *
  * Honest limit: v1 is operator-trusted. This runtime is `as: identity` and sees
  * the plaintext; the split-mint protects the *mark*, not the *bytes*.

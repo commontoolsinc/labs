@@ -87,7 +87,7 @@ function lowerComputedCall(
   // Do not forward node.typeArguments: computed<R> has one type param (the
   // result), while lift<T, R> has two with T as input. Forwarding [R] would
   // place R in lift's input slot. Type args are recomputed downstream by
-  // LiftAppliedStrategy / SchemaInjection from the callback's parameter and
+  // the lift-applied closure transform / SchemaInjection from the callback's parameter and
   // return types.
   const innerLiftCall = context.cfHelpers.createHelperCall(
     "lift",

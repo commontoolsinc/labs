@@ -47,7 +47,7 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
-      - name: 🧭 Check skill facts
+      - name: 🧭 Check agent-facing facts
         run: deno task check-skill-facts
 
       - name: 📄 Type-check docs code blocks
@@ -55,6 +55,9 @@ jobs:
 
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
+
+      - name: 🩹 Check for unresolved merge-conflict markers
+        run: deno task check-conflict-markers
 
       - name: 🔎 Check for unused import map dependencies
         run: deno task check-unused-deps

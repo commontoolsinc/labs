@@ -1,6 +1,5 @@
 import type { IMemoryAddress } from "../interface.ts";
 import { normalizeCellScope } from "../../scope.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 export const toString = (address: IMemoryAddress) =>
   `/${normalizeCellScope(address.scope)}/${address.id}/${
     JSON.stringify(address.path)
@@ -34,34 +33,4 @@ export const includes = (
   }
 
   return true;
-};
-
-export const intersects = (
-  source: IMemoryAddress,
-  candidate: IMemoryAddress,
-) => {
-  if (
-    source.id !== candidate.id ||
-    normalizeCellScope(source.scope) !== normalizeCellScope(candidate.scope)
-  ) {
-    return false;
-  }
-
-  // Check if either path is a prefix of the other
-  const minLength = Math.min(source.path.length, candidate.path.length);
-
-  for (let i = 0; i < minLength; i++) {
-    if (source.path[i] !== candidate.path[i]) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-/**
- * Returns true if the address represents an inline data URI.
- */
-export const isInline = (address: IMemoryAddress): boolean => {
-  return hasDataUriScheme(address.id);
 };

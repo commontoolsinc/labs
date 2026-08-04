@@ -116,6 +116,27 @@ and therefore stricter — bar rather than failing anything. The instrumented
 statements are also the only lines this mechanism can speak to: a line the
 instrumentation cannot reach is not a line a pattern test could cover.
 
+## Coverage must not depend on the execution environment
+
+Whether a line counts as covered must not depend on how fast the machine ran,
+how the test files were distributed across shards, or any other property of the
+environment or configuration. A line that is covered on one run and uncovered
+on the next is a defect in the tests. It is not noise for the gate to absorb,
+and it is not something to wave through with an override.
+
+So when you find a line whose coverage moves with the environment — a branch
+guarded on elapsed wall-clock time, a line whose count changes when test files
+are redistributed across shards, a path that only some runs happen to take —
+write a test that covers that line reliably on every run and under every
+configuration. Extract the code into something a plain unit test can call
+directly if that is what it takes: a unit test that constructs the input it
+wants does not care how loaded the machine is or which shard it landed in.
+
+The
+[2026-07-28 investigation record](../history/development/coverage-ratchet-noise-2026-07-28.md)
+works through two real instances, and describes how to localize a group-level
+change down to the specific file and line so you know what to write a test for.
+
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for

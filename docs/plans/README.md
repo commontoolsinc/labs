@@ -22,10 +22,19 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
+- [Ingest channels and the journal sink](ingest-channels-journal-sink.md)
+  proposes a minted, bearer-authed inbound endpoint that accumulates what it
+  receives as a provenance-marked, append-only log — the shared capability
+  behind webhooks, beacons, and any source with no runtime of its own. It
+  builds on the split-mint seam in
+  [`../features/vouched-ingest-channel-mint.md`](../features/vouched-ingest-channel-mint.md).
 - [Integration-test video demos](integration-test-video-demos.md) tracks
   optional CI adoption and further fixture hardening.
 - [Inverting the physics of trust](inverting-the-physics-of-trust.md) explains
   the runtime's trust model and the work that follows from it.
+- [Server-primary execution v2](server-execution-v2.md) sequences the
+  greenfield rebuild that executes the server-side-execution v2 spec, with
+  per-phase task and success-criteria checkboxes.
 - [Pattern verb contract implementation](pattern-verb-contract-implementation.md)
   sequences the implementation of the
   [pattern verb contract](pattern-verb-contract.md).

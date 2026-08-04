@@ -246,7 +246,7 @@ const storedSchemaForWritePolicyInput = (
   if (!isRecord(stored) || stored.value === undefined) {
     return undefined;
   }
-  return new ContextualFlowControl().getSchemaAtPath(
+  return ContextualFlowControl.getSchemaAtPath(
     stored.value as JSONSchema,
     [...link.path],
   );
@@ -1129,7 +1129,21 @@ export class CellImpl<T extends FabricValue>
    *          dependencies have been computed.
    */
   pull(): Promise<Readonly<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.synced) {
+      // Register the kicked first sync in the settled pool the convergence
+      // loop below drains. sync() resolves once the doc is confirmed —
+      // arrived or absent — and an UNREGISTERED kick is exactly the race
+      // sync()'s own doc comment warns about: over a low-latency link the
+      // doc lands before the scheduler goes idle, so the read sees it; over
+      // a real network it does not, and pull() resolved from held,
+      // not-yet-loaded state (measured: a same-id retry's receipt readback
+      // returned undefined against a remote host while identical calls
+      // passed against a local toolshed). Failures are swallowed like
+      // link-resolution's kicks: the read still resolves from the replica.
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     // Check if we need to traverse the result to register all dependencies.
     // This is needed when there's no schema or when the schema is TrueSchema ("any"),
@@ -2081,7 +2095,9 @@ export class CellImpl<T extends FabricValue>
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
-        ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
+        ? ContextualFlowControl.getSchemaAtPath(currentLink.schema, [
+          key.toString(),
+        ])
         : undefined;
 
       // Create a child link with an extended path. schemaAtPath retains the
@@ -3324,7 +3340,7 @@ export function convertCellsToLinks(
     // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
     // container reached by its codec contents rather than by property name, so
     // it still falls to the object branch and is rebuilt from zero enumerable
-    // own properties. Same marker as the sibling walk in `builder/json-utils.ts`.
+    // own properties. Same marker as the sibling walk in `builder/to-encodable-form.ts`.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

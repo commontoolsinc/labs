@@ -76,34 +76,6 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 - [Browser UI Stale After a Handler Write](gotchas/browser-stale-ui.md) - Inspect actual cell state before assuming the write failed
 - [A Field Typed `unknown` Reads Back as Undefined](gotchas/unknown-typed-field-reads-undefined.md) - The reading operand's schema decides what materializes; naming the field is what makes the read follow the link
 
-### Compatibility entry points
-
-These short documents preserve older links and direct readers to the current
-guide:
-
-- [`computed-cell-object-object.md`](gotchas/computed-cell-object-object.md)
-  redirects to the object-interpolation entry in the quick gotchas.
-- [`filter-map-find-not-a-function.md`](gotchas/filter-map-find-not-a-function.md)
-  redirects to the collection-method entry in the quick gotchas.
-- [`get-is-not-a-function.md`](gotchas/get-is-not-a-function.md) redirects to
-  the reactive-value access entry in the quick gotchas.
-- [`handler-binding-error.md`](gotchas/handler-binding-error.md) redirects to
-  the handler-binding entry in the quick gotchas.
-- [`ifelse-composed-pattern-cells.md`](gotchas/ifelse-composed-pattern-cells.md)
-  redirects to the composed-pattern-cell entry in the quick gotchas.
-- [`lift-returns-stale-data.md`](gotchas/lift-returns-stale-data.md) redirects
-  to the stale or empty `lift()` entry in the quick gotchas.
-- [`onclick-inside-computed.md`](gotchas/onclick-inside-computed.md) redirects
-  to the event-handler placement entry in the quick gotchas.
-- [`stream-subscribe-dont-exist.md`](gotchas/stream-subscribe-dont-exist.md)
-  redirects to the stream-subscription entry in the quick gotchas.
-- [`logger-system.md`](logger-system.md) points to the browser-console and
-  runtime-logger guides that replaced it.
-- [`performance.md`](performance.md) redirects to the performance entries in
-  the quick gotchas.
-- [`type-errors.md`](type-errors.md) redirects to the binding and writable-array
-  entries in the quick gotchas.
-
 ### Error Categories
 
 - [Quick Gotchas](gotchas/quick.md) - Type binding mistakes, Writable arrays, and other short gotchas
@@ -128,7 +100,7 @@ guide:
   See
   [`memwrite-trace.ts`](../../../packages/toolshed/routes/storage/memory/memwrite-trace.ts).
 - [VDOM Debug Helpers](vdom-debug.md) - `commonfabric.vdom.*` VDOM tree inspection
-- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
+- [Logger Internals](../../features/logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
 
 ### Diagnosis
 

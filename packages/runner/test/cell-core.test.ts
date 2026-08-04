@@ -1215,7 +1215,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 //
 // Historical context: these tests were authored alongside the deletion of
 // two defensive `JSON.parse` blocks that previously existed in
-// `runner/src/storage/transaction.ts` (in `read()`) and `runner/src/cell.ts`
+// the storage transaction read path and `runner/src/cell.ts`
 // (in the old source metadata path). Both blocks guarded a parse with the same shape —
 // `typeof value === "string" && value.startsWith('{"/":')` — and were
 // originally added (PRs #1472, #1562) to handle string-form values

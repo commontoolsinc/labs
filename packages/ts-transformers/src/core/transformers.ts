@@ -236,14 +236,3 @@ export abstract class HelpersOnlyTransformer extends Transformer {
     return context.cfHelpers.sourceHasHelpers();
   }
 }
-
-export class Pipeline {
-  #transformers: Transformer[];
-  constructor(transformers: Transformer[]) {
-    this.#transformers = transformers;
-  }
-
-  toFactories(program: ts.Program): ts.TransformerFactory<ts.SourceFile>[] {
-    return this.#transformers.map((t) => t.toFactory(program));
-  }
-}

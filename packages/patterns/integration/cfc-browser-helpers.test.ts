@@ -1,5 +1,14 @@
-import { Browser, type Page } from "@commonfabric/integration";
-import { assert, assertEquals } from "@std/assert";
+import {
+  Browser,
+  installPresentationInteractions,
+  type Page,
+} from "@commonfabric/integration";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import {
   CLICK_TARGET_ATTR,
@@ -7,11 +16,27 @@ import {
   clickCfButtonsConcurrently,
   clickNthCfButton,
   clickTrustedAction,
+  fillCfInput,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 
 /** One element's live click marks, in attribute order. */
 type MarkProbe = { clicks: number; marksAtClick: string[]; marks: string[] };
+
+/** Presentation config with every demo delay removed. */
+const testPresentationConfig = {
+  enabled: true,
+  outputDir: ".",
+  videoFileName: "unused.mp4",
+  viewport: { width: 1280, height: 720 },
+  typingDelayMs: 0,
+  cursorTravelMs: 0,
+  cursorSettleMs: 0,
+  clickPulseMs: 0,
+  postResultHoldMs: 0,
+  jpegQuality: 85,
+  keepFrames: false,
+} as const;
 
 describe("CFC browser helpers", () => {
   let browser: Browser;
@@ -462,5 +487,342 @@ describe("CFC browser helpers", () => {
     );
     assertEquals(result.marksAtClick.length, 2);
     assertEquals(result.marks, ["held-by-another-click"]);
+  });
+
+  it("drives the page to settle before filling a cf input", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "settling-fill-input";
+      Object.assign(host.style, {
+        display: "block",
+        height: "40px",
+        width: "240px",
+      });
+      const root = host.attachShadow({ mode: "open" });
+      const input = document.createElement("input");
+      Object.assign(input.style, {
+        display: "block",
+        height: "32px",
+        width: "200px",
+      });
+      root.append(input);
+      document.body.append(host);
+
+      let settleCalls = 0;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __settlingFillResult: () => { settleCalls: number; value?: string };
+      }).__settlingFillResult = () => ({
+        settleCalls,
+        value: host.shadowRoot?.querySelector("input")?.value,
+      });
+    });
+
+    await fillCfInput(page, "#settling-fill-input", "Bob");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __settlingFillResult: () => { settleCalls: number; value?: string };
+      }).__settlingFillResult()
+    );
+    assertEquals(result.value, "Bob");
+    assert(
+      result.settleCalls > 0,
+      "the fill read the DOM without asking the view to settle, so it only " +
+        "watches the page instead of driving it",
+    );
+  });
+
+  it("fills a cf input that only pending page work renders", async () => {
+    await page.evaluate(() => {
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          if (!document.querySelector("#pending-work-input")) {
+            const host = document.createElement("div");
+            host.id = "pending-work-input";
+            Object.assign(host.style, {
+              display: "block",
+              height: "40px",
+              width: "240px",
+            });
+            const root = host.attachShadow({ mode: "open" });
+            const input = document.createElement("input");
+            Object.assign(input.style, {
+              display: "block",
+              height: "32px",
+              width: "200px",
+            });
+            root.append(input);
+            document.body.append(host);
+          }
+          return Promise.resolve();
+        },
+      };
+    });
+
+    await fillCfInput(page, "#pending-work-input", "Bob");
+
+    const value = await page.evaluate(() =>
+      document.querySelector("#pending-work-input")?.shadowRoot
+        ?.querySelector("input")?.value
+    );
+    assertEquals(value, "Bob");
+  });
+
+  it("fills the live input when a commit replaces the one it typed into", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div") as HTMLDivElement & {
+        commit: () => Promise<void>;
+      };
+      host.id = "replacing-commit-input";
+      Object.assign(host.style, {
+        display: "block",
+        height: "40px",
+        width: "240px",
+      });
+      const root = host.attachShadow({ mode: "open" });
+      const makeInput = () => {
+        const input = document.createElement("input");
+        Object.assign(input.style, {
+          display: "block",
+          height: "32px",
+          width: "200px",
+        });
+        return input;
+      };
+      root.append(makeInput());
+      document.body.append(host);
+
+      // The first commit re-renders the control, as a Lit host does when the
+      // committed cell value flows back into its template. Later commits leave
+      // it in place, so the fill converges on the replacement.
+      let replaced = false;
+      host.commit = () => {
+        if (!replaced) {
+          replaced = true;
+          root.querySelector("input")?.remove();
+          root.append(makeInput());
+        }
+        return Promise.resolve();
+      };
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+    });
+
+    await fillCfInput(page, "#replacing-commit-input", "Bob");
+
+    const value = await page.evaluate(() =>
+      document.querySelector("#replacing-commit-input")?.shadowRoot
+        ?.querySelector("input")?.value
+    );
+    assertEquals(value, "Bob");
+  });
+
+  it("settles pending page work before presentation typing resolves its input", async () => {
+    const presentationPage = await browser.newPage();
+    const presentation = installPresentationInteractions(
+      presentationPage,
+      testPresentationConfig,
+      { label: "Bob", color: "#0891b2" },
+    );
+    try {
+      await presentationPage.evaluate(() => {
+        // The shell's own controls sit inside shadow roots, so the target hangs
+        // off one.
+        const view = document.createElement("div");
+        view.id = "pending-presentation-view";
+        const viewRoot = view.attachShadow({ mode: "open" });
+        document.body.append(view);
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = {
+          viewSettled: () => {
+            if (!viewRoot.querySelector("#pending-presentation-input")) {
+              const host = document.createElement("div");
+              host.id = "pending-presentation-input";
+              Object.assign(host.style, {
+                display: "block",
+                height: "40px",
+                width: "240px",
+              });
+              const root = host.attachShadow({ mode: "open" });
+              const input = document.createElement("input");
+              Object.assign(input.style, {
+                display: "block",
+                height: "32px",
+                width: "200px",
+              });
+              root.append(input);
+              viewRoot.append(host);
+            }
+            return Promise.resolve();
+          },
+        };
+      });
+
+      await fillCfInput(presentationPage, "#pending-presentation-input", "Bob");
+
+      const value = await presentationPage.evaluate(() =>
+        document.querySelector("#pending-presentation-view")?.shadowRoot
+          ?.querySelector("#pending-presentation-input")?.shadowRoot
+          ?.querySelector("input")?.value
+      );
+      assertEquals(value, "Bob");
+    } finally {
+      presentation.uninstall();
+      await presentationPage.close();
+    }
+  });
+
+  it("drives the page to settle before presentation typing", async () => {
+    const presentationPage = await browser.newPage();
+    const presentation = installPresentationInteractions(
+      presentationPage,
+      testPresentationConfig,
+      { label: "Bob", color: "#0891b2" },
+    );
+    try {
+      await presentationPage.evaluate(() => {
+        // The shell's own controls sit inside shadow roots, so the target hangs
+        // off one.
+        const view = document.createElement("div");
+        view.id = "settling-presentation-view";
+        const viewRoot = view.attachShadow({ mode: "open" });
+        document.body.append(view);
+        const host = document.createElement("div");
+        host.id = "settling-presentation-input";
+        Object.assign(host.style, {
+          display: "block",
+          height: "40px",
+          width: "240px",
+        });
+        const root = host.attachShadow({ mode: "open" });
+        const input = document.createElement("input");
+        Object.assign(input.style, {
+          display: "block",
+          height: "32px",
+          width: "200px",
+        });
+        root.append(input);
+        viewRoot.append(host);
+
+        let settleCalls = 0;
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = {
+          viewSettled: () => {
+            settleCalls++;
+            return Promise.resolve();
+          },
+        };
+        (globalThis as typeof globalThis & {
+          __settlingPresentationResult: () => {
+            settleCalls: number;
+            value?: string;
+          };
+        }).__settlingPresentationResult = () => ({
+          settleCalls,
+          value: input.value,
+        });
+      });
+
+      await fillCfInput(
+        presentationPage,
+        "#settling-presentation-input",
+        "Bob",
+      );
+
+      const result = await presentationPage.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __settlingPresentationResult: () => {
+            settleCalls: number;
+            value?: string;
+          };
+        }).__settlingPresentationResult()
+      );
+      assertEquals(result.value, "Bob");
+      assert(
+        result.settleCalls > 0,
+        "presentation typing resolved its control without asking the view to " +
+          "settle, so it only watches the page instead of driving it",
+      );
+    } finally {
+      presentation.uninstall();
+      await presentationPage.close();
+    }
+  });
+
+  it("reports a control a presentation commit replaced", async () => {
+    const presentationPage = await browser.newPage();
+    const presentation = installPresentationInteractions(
+      presentationPage,
+      testPresentationConfig,
+      { label: "Bob", color: "#0891b2" },
+    );
+    try {
+      await presentationPage.evaluate(() => {
+        // The shell's own controls sit inside shadow roots, so the target hangs
+        // off one.
+        const view = document.createElement("div");
+        const viewRoot = view.attachShadow({ mode: "open" });
+        document.body.append(view);
+        const host = document.createElement("div") as HTMLDivElement & {
+          commit: () => Promise<void>;
+        };
+        host.id = "replaced-presentation-input";
+        Object.assign(host.style, {
+          display: "block",
+          height: "40px",
+          width: "240px",
+        });
+        const root = host.attachShadow({ mode: "open" });
+        const makeInput = () => {
+          const input = document.createElement("input");
+          Object.assign(input.style, {
+            display: "block",
+            height: "32px",
+            width: "200px",
+          });
+          return input;
+        };
+        root.append(makeInput());
+        viewRoot.append(host);
+        host.commit = () => {
+          root.querySelector("input")?.remove();
+          root.append(makeInput());
+          return Promise.resolve();
+        };
+
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+      });
+
+      // The typed value survives on the detached control, so a verification
+      // that reads it reports a fill that never reached the live field.
+      const error = await assertRejects(
+        () =>
+          fillCfInput(presentationPage, "#replaced-presentation-input", "Bob"),
+        Error,
+      );
+      assertStringIncludes(
+        (error.cause as Error).message,
+        "was replaced while committing",
+      );
+    } finally {
+      presentation.uninstall();
+      await presentationPage.close();
+    }
   });
 });

@@ -195,7 +195,7 @@ agent-browser eval "window._cancel()"
 
 The remaining sections are the API reference. For the logger TypeScript API
 used when *writing* runtime code (creating loggers, `timeStart`/`timeEnd`,
-`logCountEvery`), see [logger-internals](../logger-internals.md).
+`logCountEvery`), see [logger-internals](../../features/logger-internals.md).
 
 ## Logger Access
 

@@ -120,8 +120,8 @@ computed(() =>
 
 For the full model and trade-offs (including the add-wins-after-delete
 ordering), see
-[mergeable collection writes](../../../development/mergeable-collection-writes.md)
-and [keyed collection writes](../../../development/keyed-collection-writes.md).
+[mergeable collection writes](../../../features/mergeable-collection-writes.md)
+and [keyed collection writes](../../../features/keyed-collection-writes.md).
 
 ## Passing Values to Pattern Inputs
 

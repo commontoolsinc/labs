@@ -601,3 +601,24 @@ exports.default = (0, commonfabric_1.patternTool)(() => ({ ok: true }));
     );
   });
 });
+
+it("accepts multiUserTest's descriptor of trusted-builder results", () => {
+  // The one builder WITHOUT a callback: it tags a descriptor object whose
+  // leaves are other trusted-builder results, so each argument verifies as
+  // a trusted value expression rather than through the callback path. The
+  // real shape `cf test` compiles: patterns hoisted to module consts, then
+  // `multiUserTest({ setup, participants: { ... } })` as the default
+  // export. Pinned here deterministically — this branch was otherwise
+  // covered only when integration sharding happened to compile a
+  // multi-user fixture, which made the coverage gate's runner count
+  // flutter by scheduling rather than by anyone's diff.
+  const body = `
+${IMPORT}
+const __cfPattern_1 = (0, commonfabric_1.pattern)(() => ({}));
+const __cfPattern_2 = (0, commonfabric_1.pattern)(() => ({}));
+const __cfPattern_3 = (0, commonfabric_1.pattern)(() => ({}));
+exports.default = (0, commonfabric_1.multiUserTest)({ setup: __cfPattern_1, participants: { gideon: __cfPattern_2, fable: __cfPattern_3 } });
+`;
+
+  expect(() => verify(body)).not.toThrow();
+});

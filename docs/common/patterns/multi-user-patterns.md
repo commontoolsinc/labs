@@ -480,8 +480,8 @@ if this name is free") is not made safe this way; keep its explicit `.get()` so
 it conflicts-and-retries, or use `addUnique` when the condition is uniqueness.
 See [Writable → Mergeable writes](../concepts/types-and-schemas/writable.md#mergeable-writes-for-shared-multi-user-state)
 for the full method list and the
-[mergeable](../../development/mergeable-collection-writes.md) /
-[keyed](../../development/keyed-collection-writes.md) collection-write design
+[mergeable](../../features/mergeable-collection-writes.md) /
+[keyed](../../features/keyed-collection-writes.md) collection-write design
 notes. The lunch poll (`packages/patterns/lunch-poll/`) is a worked example: its
 votes and options are keyed, mergeable, multi-user state.
 
@@ -525,7 +525,7 @@ debugging missing data.
 
 See:
 
-- `docs/development/SHARED_IDENTITY.md`
+- `docs/features/shared-identity.md`
 - `docs/common/ai/manual-testing-guide.md`
 - `docs/development/debugging/gotchas/scoped-cell-pitfalls.md`
 

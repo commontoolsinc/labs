@@ -239,6 +239,21 @@ describe("types", () => {
       expect(isPlainObject(Object.create(null))).toBe(true);
     });
 
+    it("excludes null-prototype objects when asked to", () => {
+      // The narrower question -- "is this rooted at `Object.prototype`?" --
+      // for a caller to which a null-prototype object is not merely a
+      // different shape but something it must not treat as a record.
+      expect(isPlainObject(Object.create(null), false)).toBe(false);
+      expect(isPlainObject(Object.create(null), true)).toBe(true);
+    });
+
+    it("answers the same either way for everything else", () => {
+      class MyClass {}
+      for (const value of [{}, { a: 1 }, [], new Date(), new MyClass(), null]) {
+        expect(isPlainObject(value, false)).toBe(isPlainObject(value, true));
+      }
+    });
+
     it("returns false for arrays and class instances", () => {
       class MyClass {}
       expect(isPlainObject([])).toBe(false);

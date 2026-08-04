@@ -42,7 +42,7 @@ import { applyPatch } from "../../memory/v2/patch.ts";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type {
-  IStorageProviderWithReplica,
+  IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import { setConflictAdmissionMode } from "../src/storage/v2.ts";
@@ -70,7 +70,7 @@ const DOCS = {
 } as const;
 type DocKey = keyof typeof DOCS;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
 };
 

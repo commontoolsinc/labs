@@ -14,6 +14,7 @@ import {
   systemPatternSource,
 } from "./pattern-source-scheme.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import type { MemorySpace } from "./storage/interface.ts";
@@ -282,7 +283,10 @@ export function getResultCellWithSourceSchema<T = unknown>(
   if (link.schema === undefined) {
     const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
     if (resultSchema !== undefined) {
-      const schema = cell.runtime.cfc.schemaAtPath(resultSchema, link.path);
+      const schema = ContextualFlowControl.schemaAtPath(
+        resultSchema,
+        link.path,
+      );
       return cell.asSchema<T>(schema);
     }
   }

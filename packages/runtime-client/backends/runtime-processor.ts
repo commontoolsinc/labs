@@ -53,10 +53,7 @@ import {
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import {
-  defaultSettings,
-  StorageManager,
-} from "../../runner/src/storage/cache.ts";
+import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   getMetaLink,
   KeepAsCell,
@@ -537,7 +534,6 @@ export class RuntimeProcessor {
       // watch-refresh round trips up to a bounded window. Off unless the host
       // set it; the default is strict single-flight.
       settings: {
-        ...defaultSettings,
         experimentalConcurrentWatchRefresh:
           data.concurrentWatchRefresh === true,
       },

@@ -28,16 +28,15 @@ If this document conflicts with code or passing tests, code/tests win.
 Package exports (`deno.jsonc`): `.` → `src/index.ts` (no `mod.ts`), plus
 six subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
 `./type-traversal`, `./property-optionality`, `./property-name`.
-`src/index.ts` exports the `SchemaGenerator` class,
-`createSchemaTransformerV2`, the `ISchemaGenerator` type, and re-exports
-`MutableJSONSchemaObj`.
+`src/index.ts` exports the `SchemaGenerator` class, the `ISchemaGenerator`
+type, and re-exports `MutableJSONSchemaObj`.
 
 Consumers, as of this writing (verified by import grep): the only external
 consumer package is `@commonfabric/ts-transformers`, along two axes:
 
 1. **Schema generation proper** — `SchemaGeneratorTransformer`
-   (`packages/ts-transformers/src/transformers/schema-generator.ts`) calls
-   `createSchemaTransformerV2()` and feeds it the pipeline's bare cross-stage
+   (`packages/ts-transformers/src/transformers/schema-generator.ts`)
+   constructs a `SchemaGenerator` and feeds it the pipeline's bare cross-stage
    maps `typeRegistry` / `schemaHints`
    (`ts-transformers/src/core/cross-stage-state.ts`; its header notes
    this package reads only the bare `WeakMap`s, not `CrossStageState`).
@@ -61,13 +60,6 @@ type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
 typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
 passes `checker.getAnyType()` as the type, forcing the auto-detection
 below onto the node-based path.
-
-`createSchemaTransformerV2()` (`src/plugin.ts`) wraps one shared
-`SchemaGenerator` instance and exposes both methods. Type-level drift: the
-plugin's signatures narrow `schemaHints` to `WeakMap<ts.Node, { items?:
-unknown }>` (`plugin.ts`) while the class and `GenerationContext` accept
-the full `{ items?, cfcUiContract? }` shape (`interface.ts`) —
-runtime-compatible, type-level under-description.
 
 **Path selection** (`shouldUseNodeBasedAnalysis`,
 `src/schema-generator.ts`): node-based analysis is used iff a
@@ -660,12 +652,16 @@ as of this writing.
 
 ## 13. The Hints Channel (`schemaHints`)
 
-Hint shape (`src/interface.ts`): `WeakMap<ts.Node, { items?: unknown;
-cfcUiContract?: { helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-action?; surface?; role?; kind?; trustedPattern?; requiredEventIntegrity? } }>`.
-Lookups always try the node and `ts.getOriginalNode(node)`
-(`schema-generator.ts`; `object-formatter.ts`; the producer
-writes both — `cross-stage-state.ts`).
+Hint shape (`src/interface.ts`): `SchemaHints` is `WeakMap<ts.Node,
+SchemaHint>`, where `SchemaHint` is `{ items?: unknown; cfcUiContract?:
+UiContractHint }` and `UiContractHint` is `{ helper: "UiAction" |
+"UiPromptSlot" | "UiDisclosure"; action?; surface?; role?; kind?;
+trustedPattern?; requiredEventIntegrity? }`. Every member is read-only: the
+generator only reads hints, and copies the `requiredEventIntegrity` list on the
+way into the emitted schema. Lookups always try the node and
+`ts.getOriginalNode(node)` (`src/ui-contract.ts`, called from
+`schema-generator.ts` and `object-formatter.ts`; the producer writes both —
+`cross-stage-state.ts`).
 
 - **`items: false`** — array-typed wrapper contents collapse to
   `items: { type: "unknown", …element wrapper markers }` for property-only
@@ -678,8 +674,8 @@ writes both — `cross-stage-state.ts`).
   `array-formatter.ts` via `context.arrayItemsOverride`,
   `interface.ts`). Tested: capability-wrapper-types ×2.
 - **`cfcUiContract`** attaches `ifc.uiContract` at three layers: generation
-  root (`applyNodeSchemaHints`/`attachUiContract`,
-  `schema-generator.ts`), the `$UI` property inside objects
+  root (`applyNodeSchemaHints` calling the shared `attachUiContract`,
+  `schema-generator.ts` / `ui-contract.ts`), the `$UI` property inside objects
   (`object-formatter.ts`), and post-hoc in the transformer
   against the emitted literal
   (`ts-transformers/.../schema-generator.ts`, preferring an
@@ -832,7 +828,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 | CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts`) | — |
 | CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts`) | cfc-authoring tests |
 | `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts`) | — |
-| Hint shape (§13) | `GenerationContext["schemaHints"]` (`src/interface.ts`) | note plugin.ts drift (§2) |
+| Hint shape (§13) | `SchemaHint` / `UiContractHint` (`src/interface.ts`) | — |
 | Generation options (§14) | `GenerationContext["widenLiterals"]` (`src/interface.ts`) | sole option as of this writing |
 | Throw inventory (§15) | grep `throw new Error` under `src/` | messages quoted above verified this snapshot |
 | Fixture env knobs (§17) | `test/fixtures-runner.test.ts`; `packages/test-support/src/fixture-runner.ts` | — |

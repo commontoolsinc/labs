@@ -826,7 +826,8 @@ The Runtime coordinates several core services:
 - **PatternManager**: Loads, compiles, and caches pattern definitions
 - **ModuleRegistry**: Manages module registration and retrieval for patterns
 - **Runner**: Executes patterns and manages their lifecycle
-- **Harness**: Provides the execution environment for pattern code
+- **Engine** (`runtime.harness`): Provides the execution environment for pattern
+  code
 
 All services receive the Runtime instance as a dependency, enabling proper
 isolation and testability without global state.
