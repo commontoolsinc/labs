@@ -4,16 +4,19 @@ See the [verifiable-execution document map](README.md) for navigation.
 
 ## 6. Capabilities API
 
-This section describes the high-level operations supported by the memory
-protocol. The current, authoritative wire shapes are the TypeScript types in
-`packages/memory/interface.ts` (e.g. `Invocation`, `Transaction`, `Query`,
-`Subscribe`, `SchemaQuery`).
+This section describes the high-level operations the memory protocol supports,
+in terms of the invocation envelope this specification is written around. It is
+a design-level account, not a transcript of the wire: the shapes a client and
+server actually exchange are defined by the Memory v2 protocol
+([`docs/specs/memory-v2/04-protocol.md`](../memory-v2/04-protocol.md)) and
+declared in `packages/memory/v2.ts`. Read this section for the operations and
+their semantics, and that one for what goes over a socket.
 
 ### 6.0 Notes on Current Implementation
 
-- **Delegation:** `Invocation.prf` exists for a future delegation model, but
-  delegation is not yet implemented (`Delegation = never`), so `prf` is empty
-  in practice.
+- **Delegation:** `Invocation.prf` exists for a future delegation model.
+  Delegation is not implemented, so `prf` is empty in practice, and a
+  participant's access comes directly from the space's access-control list.
 - **Subscriptions:** The current subscription commands are
   `"/memory/query/subscribe"` and `"/memory/query/unsubscribe"`.
 - **Schema-aware retrieval:** Implementations also support schema-guided
@@ -71,8 +74,8 @@ type Query = {
 };
 ```
 
-**Wildcards:** The selector type supports `_` as a wildcard key (see
-`packages/memory/interface.ts` `Select<>`). For example:
+**Wildcards:** The selector type supports `_` as a wildcard key, matching any
+value at that level. For example:
 
 - `{ "_": { "_": { "_": { is: {} } } } }` - include values for all facts
 - `{ "user:alice": { "_": { "_": { is: {} } } } }` - all facts for user:alice
@@ -90,8 +93,8 @@ Receive push-based updates for facts matching a selector.
 and either `args.select` (normal selector) or `args.selectSchema` (schema/path
 selector), plus an optional `since` cursor.
 
-**Updates:** The subscription stream delivers updates over time (as
-`EnhancedCommit` effects in the current implementation). Each update MUST
+**Updates:** The subscription stream delivers updates over time, each carrying
+the committed revisions and the commit that produced them. Each update MUST
 respect the subscriber's authorization and CFC/IFC context (e.g., via
 redaction).
 

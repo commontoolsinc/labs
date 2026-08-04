@@ -192,14 +192,13 @@ or Unclaimed (genesis).
 | Entity                | `URI` (`${string}:${string}`)                    | memory  |
 | Fact                  | `Assertion \| Retraction`                        | memory  |
 | Unclaimed             | `{the, of}` with no `is` or `cause`              | memory  |
-| Commit                | Fact with `the: "application/commit+json"`       | memory  |
-| CommitData            | `{since, transaction, labels?}`                  | memory  |
+| Commit                | `ClientCommit` (`packages/memory/v2.ts`)         | memory  |
 | Space                 | `MemorySpace` (`did:${string}:${string}`)        | memory  |
 | Append-only log       | SQLite `fact` table                              | memory  |
 | Current state         | SQLite `memory` table                            | memory  |
 | ACL                   | `ACL` type with `Capability`                     | memory  |
 | Signer                | `Signer` interface                               | memory  |
-| Authorization         | UCAN-based `Authorization` type                  | memory  |
+| Authorization         | Signed session open (`v2/session-open-auth.ts`)  | memory  |
 | Address tracking      | `IMemoryAddress` (`{id, type, path}`)            | runner  |
 | Read/Write tracking   | `Activity` type in `ITransactionJournal`         | runner  |
 | Transaction           | `IStorageTransaction` with `Journal`/`Chronicle` | runner  |
