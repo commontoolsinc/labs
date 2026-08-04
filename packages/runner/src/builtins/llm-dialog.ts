@@ -661,15 +661,13 @@ function serializeForLLMObservation(
   const nextSeen = new Set(seen);
   nextSeen.add(value);
 
-  const cfc = new ContextualFlowControl();
-
   if (Array.isArray(value)) {
     const observedParts: Array<readonly unknown[] | undefined> = [
       nodeConfidentiality,
     ];
     const serialized = value.map((v, index) => {
       const linkSchema = schema !== undefined
-        ? cfc.schemaAtPath(schema, [index.toString()])
+        ? ContextualFlowControl.schemaAtPath(schema, [index.toString()])
         : undefined;
       let child = serializeForLLMObservation({
         value: v,
@@ -716,7 +714,7 @@ function serializeForLLMObservation(
         const child = serializeForLLMObservation({
           value: propValue,
           schema: schema !== undefined
-            ? cfc.schemaAtPath(schema, [key])
+            ? ContextualFlowControl.schemaAtPath(schema, [key])
             : undefined,
           seen: nextSeen,
           contextSpace,

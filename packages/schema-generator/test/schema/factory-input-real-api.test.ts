@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl, join } from "@std/path";
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema } from "../utils.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../../../", import.meta.url));
@@ -159,7 +159,7 @@ describe("Schema: real API FactoryInput", () => {
       code,
       "SchemaRoot",
     );
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(
       gen.generateSchema(
         type,

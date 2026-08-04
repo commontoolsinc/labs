@@ -13,6 +13,28 @@ export interface WriterSourceIdentity {
   readonly moduleIdentity?: string;
 }
 
+/** The `ifc.uiContract` a caller asks the generator to emit for a node. */
+export interface UiContractHint {
+  readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+  readonly action?: string;
+  readonly surface?: string;
+  readonly role?: string;
+  readonly kind?: string;
+  readonly trustedPattern?: string;
+  readonly requiredEventIntegrity?: readonly string[];
+}
+
+/**
+ * Per-node overrides supplied by the caller, keyed by the node the hint
+ * applies to. The generator only reads these, so every member is read-only.
+ */
+export interface SchemaHint {
+  readonly items?: unknown;
+  readonly cfcUiContract?: UiContractHint;
+}
+
+export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
+
 /** Options that affect schema generation without changing the authored type. */
 export interface SchemaGenerationOptions {
   readonly widenLiterals?: boolean;
@@ -67,21 +89,7 @@ export interface GenerationContext {
     fileName: string,
   ) => WriterSourceIdentity;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
-  schemaHints?: WeakMap<
-    ts.Node,
-    {
-      items?: unknown;
-      cfcUiContract?: {
-        helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-        action?: string;
-        surface?: string;
-        role?: string;
-        kind?: string;
-        trustedPattern?: string;
-        requiredEventIntegrity?: string[];
-      };
-    }
-  >;
+  schemaHints?: SchemaHints;
   /** Override for array items schema, propagated from wrapper types */
   arrayItemsOverride?: JSONSchema;
 }
@@ -116,21 +124,7 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
   ): SchemaDefinition;
 
@@ -147,21 +141,7 @@ export interface SchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
     options?: SchemaGenerationOptions,
   ): SchemaDefinition;

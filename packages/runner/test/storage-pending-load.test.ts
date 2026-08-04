@@ -1,6 +1,5 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
 import {
   createSchedulerTestRuntime,
@@ -103,7 +102,6 @@ describe("storage pending-load generations", () => {
       value,
       base,
       undefined,
-      new ContextualFlowControl(),
       promises,
       new Set(),
     );
@@ -182,7 +180,6 @@ describe("storage pending-load generations", () => {
           value,
           base,
           undefined,
-          new ContextualFlowControl(),
           [],
           new Set(),
         )
@@ -226,7 +223,6 @@ describe("storage pending-load generations", () => {
         value,
         base,
         undefined,
-        new ContextualFlowControl(),
         promises,
         new Set(),
       );

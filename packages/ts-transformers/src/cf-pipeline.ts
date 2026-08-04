@@ -23,10 +23,10 @@ import {
   WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
+import ts from "typescript";
 import { LiftLoweringTransformer } from "./lift/transformer.ts";
 import {
   CrossStageState,
-  Pipeline,
   TransformationDiagnostic,
   TransformationOptions,
   Transformer,
@@ -150,8 +150,9 @@ export const CFC_TRANSFORMER_STAGE_NAMES = CFC_TRANSFORMER_STAGE_SPECS.map(
   (spec) => spec.name,
 ) as readonly string[];
 
-export class CommonFabricTransformerPipeline extends Pipeline {
-  private readonly diagnosticsCollector: TransformationDiagnostic[] = [];
+export class CommonFabricTransformerPipeline {
+  private readonly transformers: Transformer[];
+  private readonly diagnosticsCollector: TransformationDiagnostic[];
   private readonly state: CrossStageState;
 
   constructor(options: TransformationOptions = {}) {
@@ -165,16 +166,18 @@ export class CommonFabricTransformerPipeline extends Pipeline {
       ...ops,
       diagnosticsCollector: [],
     };
-    const transformers: Transformer[] = CFC_TRANSFORMER_STAGE_SPECS.map(
+    this.transformers = CFC_TRANSFORMER_STAGE_SPECS.map(
       (stage) => stage.create(sharedOps),
     );
-
-    super(transformers);
 
     // Store reference to shared collector
     // Note: We need to access it after construction, so we store the array reference
     this.diagnosticsCollector = sharedOps.diagnosticsCollector!;
     this.state = state;
+  }
+
+  toFactories(program: ts.Program): ts.TransformerFactory<ts.SourceFile>[] {
+    return this.transformers.map((t) => t.toFactory(program));
   }
 
   /**

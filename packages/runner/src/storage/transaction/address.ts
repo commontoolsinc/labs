@@ -60,7 +60,11 @@ export const intersects = (
 };
 
 /**
- * Returns true if the address represents an inline data URI.
+ * Returns true if the address is served by decoding its own id -- a `data:`
+ * URI carrying the value -- rather than by a document stored in a space.
+ * There is nothing to fetch, to sync, or to write for such an address. This
+ * is the broad test: every media type counts, and the payload is not
+ * examined (see `data-uri-codec.ts`).
  */
 export const isInline = (address: IMemoryAddress): boolean => {
   return hasDataUriScheme(address.id);

@@ -12,7 +12,6 @@ import {
   MapSetStringToPathSelectors,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type {
@@ -140,7 +139,6 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
         true,
       ),
@@ -236,7 +234,6 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
         true,
       ),
@@ -330,7 +327,6 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
         true,
       ),
@@ -455,7 +451,6 @@ describe("Query", () => {
       { path: ["value"], schema },
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
         true,
       ),
@@ -560,7 +555,6 @@ describe("Query", () => {
       selector,
       createTraversalContext(
         tracker,
-        new ContextualFlowControl(),
         schemaTracker,
         true,
       ),
