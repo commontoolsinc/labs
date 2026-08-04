@@ -69,6 +69,9 @@ const config: Config = {
       "$EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE": Deno.env.get(
         "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
       ),
+      "$EXPERIMENTAL_SERVER_EXECUTION": Deno.env.get(
+        "EXPERIMENTAL_SERVER_EXECUTION",
+      ),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,
     },

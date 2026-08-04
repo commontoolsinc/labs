@@ -16,6 +16,7 @@ import {
   type BranchName,
   type CellScope,
   type ClientCommit,
+  type CommitClass,
   commitPreconditionValueHash,
   type CompleteActionScopeSummary,
   decodeMemoryBoundary,
@@ -353,6 +354,13 @@ CREATE TABLE IF NOT EXISTS "commit" (
   original           JSON    NOT NULL,
   resolution         JSON    NOT NULL,
   created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+  -- Server-execution v2 commit class: 'authored' | 'derived' | 'system', a
+  -- closed set (docs/specs/server-side-execution/protocol.md §1). Determined
+  -- by the admission path that processed the commit, never client-supplied.
+  -- Written in every flag arm; enforced only under
+  -- EXPERIMENTAL_SERVER_EXECUTION. Kept last so migrated stores and fresh
+  -- stores agree on column order.
+  class              TEXT    NOT NULL DEFAULT 'authored',
   FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
   FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
@@ -447,7 +455,8 @@ INSERT INTO "commit" (
   invocation_ref,
   authorization_ref,
   original,
-  resolution
+  resolution,
+  class
 )
 VALUES (
   :seq,
@@ -457,7 +466,8 @@ VALUES (
   :invocation_ref,
   :authorization_ref,
   :original,
-  :resolution
+  :resolution,
+  :class
 )
 `;
 
@@ -919,6 +929,15 @@ export type ApplyCommitOptions = {
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
+  /** The commit's class (docs/specs/server-side-execution/protocol.md §1),
+   *  determined by the ADMISSION PATH that processed the commit — the
+   *  session-facing transact path is `authored` (the default here, since
+   *  `applyCommit` is that path's admission core), the memory server's own
+   *  direct writes pass `system`, and only a lease-holding SpaceServer will
+   *  pass `derived` (Phase 1 stage B). Never populated from any
+   *  client-supplied value: `ClientCommit` cannot express a class, so a field
+   *  smuggled into the payload is inert. */
+  commitClass?: CommitClass;
 };
 
 export type AppliedRevision = {
@@ -1506,6 +1525,22 @@ COMMIT;
 CREATE INDEX IF NOT EXISTS idx_head_live_entity_ids
   ON head (branch, scope_key, id, op)
   WHERE op <> 'delete';
+`);
+};
+
+// Server-execution v2 stage A: every commit row carries its `class`
+// (docs/specs/server-side-execution/protocol.md §1). Pre-class rows backfill
+// as 'authored' via the column default — on main every historical commit came
+// through client-session admission, and the distinction the class exists for
+// (`derived` vs the rest) has no historical instances to preserve.
+const migrateCommitClass = (database: Database): void => {
+  if (hasColumn(database, "commit", "class")) {
+    return;
+  }
+
+  database.exec(`
+ALTER TABLE "commit"
+ADD COLUMN class TEXT NOT NULL DEFAULT 'authored';
 `);
 };
 
@@ -2323,6 +2358,7 @@ export const open = async (
   database.exec(INIT(!schedulerSchemaExists));
   migrateScopedEntityTables(database);
   migrateHeadCurrentOp(database);
+  migrateCommitClass(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
   );
@@ -5053,8 +5089,21 @@ const applyCommitTransaction = (
     principal,
     commit,
     sqliteAttachments,
+    commitClass = "authored",
   }: ApplyCommitOptions,
 ): AppliedCommit => {
+  // Discovery tripwire, not the real admission rule: a `derived` commit is
+  // admissible only from the space's live `execution_lease` holder
+  // (docs/specs/server-side-execution/protocol.md §2), and that check lands
+  // with the lease itself (Phase 1 stage B, serving-loop.md §2). Until then
+  // nothing may claim the class — in either flag arm — so refuse loudly
+  // rather than stamping a class whose admission rule does not exist yet.
+  if (commitClass === "derived") {
+    throw new ProtocolError(
+      "derived-class commits require the execution_lease admission check, " +
+        "which lands with server-execution Phase 1 stage B (serving-loop.md §2)",
+    );
+  }
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const schedulerObservation = commit
     .schedulerObservation as SchedulerActionObservation | undefined;
@@ -5204,6 +5253,7 @@ const applyCommitTransaction = (
     authorization_ref: authorizationRef,
     original,
     resolution,
+    class: commitClass,
   });
 
   const revisions: AppliedRevision[] = [];

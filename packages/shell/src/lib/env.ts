@@ -7,6 +7,7 @@ declare global {
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
+  var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -35,6 +36,10 @@ const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
 const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
   typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
     ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE
+    : undefined;
+const EXPERIMENTAL_SERVER_EXECUTION_DEFINE =
+  typeof $EXPERIMENTAL_SERVER_EXECUTION === "string"
+    ? $EXPERIMENTAL_SERVER_EXECUTION
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -73,4 +78,7 @@ export const EXPERIMENTAL = {
   // home-golden-replay.test.ts, so the home root no longer needs a second flag.
   systemPatternAutoUpdate:
     flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
+  // Server-execution v2 (docs/specs/server-side-execution/). Default OFF —
+  // today's behavior byte-for-byte.
+  serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE),
 };

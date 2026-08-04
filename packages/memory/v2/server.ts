@@ -1374,6 +1374,9 @@ export class Server {
           value: { value },
         }],
       },
+      // The memory server's own direct-write path: `system` class
+      // (protocol.md §1's third row — the memory server itself as producer).
+      commitClass: "system",
     });
     await this.runPostCommitSchedulerSideEffects(
       space,
@@ -2131,6 +2134,10 @@ export class Server {
                     principal: session.principal,
                     commit: commitPayload,
                     sqliteAttachments,
+                    // Session-facing transact admission: `authored`, always.
+                    // The class is determined HERE, by the admission path —
+                    // never read from the client payload (protocol.md §1).
+                    commitClass: "authored",
                   });
                 } finally {
                   persistSpan.end();

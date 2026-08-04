@@ -574,6 +574,111 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
+  # The server-execution v2 ON arm (docs/specs/server-side-execution/testing.md
+  # §2): the same package integration suites, byte-identical workloads, with
+  # EXPERIMENTAL_SERVER_EXECUTION=true on both the toolshed server and the test
+  # processes. Skips happen only through the explicit per-phase lists in
+  # tasks/server-execution-on-skips.ts, printed by the run step — never by
+  # silent filtering. No coverage collection: the OFF arm owns coverage, and
+  # this arm exists to prove behavior under the flag. Browser-side runtimes
+  # still run the binary's baked-in shell build (flag OFF): no stage has
+  # browser-side ON behavior yet; the phase that adds one must add an ON
+  # shell build here or list the affected tests.
+  package-integration-test-server-execution-on:
+    name: "Package Integration Tests / server-execution ON (${{ matrix.suite_name }})"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    needs: ["build-toolshed"]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite_name: runner
+            package_dir: packages/runner
+            junit_name: runner-server-execution-on
+            step_name: runner integration tests
+            headless: false
+          - suite_name: runtime-client
+            package_dir: packages/runtime-client
+            junit_name: runtime-client-server-execution-on
+            step_name: runtime-client integration tests
+            headless: false
+          - suite_name: shell
+            package_dir: packages/shell
+            junit_name: shell-server-execution-on
+            step_name: shell integration tests
+            headless: true
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 📥 Download toolshed binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 🔌 Start Toolshed server for testing (flag ON)
+        env:
+          TOOLSHED_PORT: 8000
+        run: |
+          chmod +x ./common-binaries/toolshed
+          # --background spawns the server, waits until it has bound its port,
+          # then returns, so the test steps never race a not-yet-listening
+          # server. The server logs to --log-file, which the launcher prints on
+          # success and dumps if the server exits before binding.
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
+
+      - name: 🧪 Run ${{ matrix.step_name }} (flag ON)
+        working-directory: ${{ matrix.package_dir }}
+        env:
+          HEADLESS_ENABLED: ${{ matrix.headless }}
+          JUNIT_NAME: ${{ matrix.junit_name }}
+          TOOLSHED_PORT: 8000
+        run: |
+          mkdir -p ../../test-results
+          if [ "$HEADLESS_ENABLED" = "true" ]; then
+            export HEADLESS=1
+          fi
+          # The explicit ON-arm skip list; the script prints every skip (or
+          # that there are none) and emits the matching --ignore flag.
+          SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
+          API_URL="http://localhost:${TOOLSHED_PORT}/" \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
+          deno task integration
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-timing-package-integration-${{ matrix.junit_name }}
+          path: test-results/${{ matrix.junit_name }}.xml
+          retention-days: 90
+          if-no-files-found: ignore
+
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -866,6 +971,108 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
+  # The server-execution v2 ON arm of the end-to-end pattern suite
+  # (docs/specs/server-side-execution/testing.md §2): the same shards,
+  # byte-identical workloads, with EXPERIMENTAL_SERVER_EXECUTION=true on both
+  # the toolshed server and the test processes. Skips happen only through the
+  # explicit per-phase lists in tasks/server-execution-on-skips.ts, printed by
+  # the run step — never by silent filtering. No coverage collection and no
+  # cache save-back: the OFF arm owns both; the compile byte cache is
+  # restored read-only (compiled bytes do not depend on the flag).
+  # Browser-side runtimes still run the binary's baked-in shell build (flag
+  # OFF): no stage has browser-side ON behavior yet; the phase that adds one
+  # must add an ON shell build here or list the affected tests.
+  pattern-integration-test-server-execution-on:
+    name: "Pattern Integration Tests / server-execution ON (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    needs: ["build-toolshed"]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # Read-only seed from the OFF arm's compile byte cache (same key
+      # family): compiled module bytes are a function of sources, not of the
+      # runtime flag, so reuse is sound; only the OFF arm saves.
+      - name: ♻️ Restore compile byte cache (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
+          restore-keys: |
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+
+      - name: 📥 Download toolshed binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 🔌 Start Toolshed server for testing (flag ON)
+        run: |
+          chmod +x ./common-binaries/toolshed
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          ./common-binaries/toolshed \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
+
+      - name: 🧩 Run end-to-end patterns integration tests (flag ON)
+        working-directory: packages/patterns
+        run: |
+          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' "${TEST_FILES[@]}"
+          # The explicit ON-arm skip list; the script prints every skip (or
+          # that there are none) and emits the matching --ignore flag.
+          SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns)
+          mkdir -p ../../test-results
+          # --no-check: the Check job type-checks packages/patterns/integration
+          # (tasks/check.sh).
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
+          CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
+          deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
+            --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
+            ${SX_ON_IGNORE} \
+            "${TEST_FILES[@]}"
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-timing-pattern-integration-server-execution-on-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
+
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -1094,8 +1301,10 @@ jobs:
       - build-cf
       - generated-patterns-integration-test
       - package-integration-test
+      - package-integration-test-server-execution-on
       - cli-integration-test
       - pattern-integration-test
+      - pattern-integration-test-server-execution-on
       - pattern-reload-integration-test
       - pattern-unit-test
       - coverage-check
