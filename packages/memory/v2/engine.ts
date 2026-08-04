@@ -24,6 +24,7 @@ import {
   encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
+  getServerExecutionConfig,
   isEntityDocument,
   type Operation,
   type PatchOp,
@@ -361,6 +362,12 @@ CREATE TABLE IF NOT EXISTS "commit" (
   -- EXPERIMENTAL_SERVER_EXECUTION. Kept last so migrated stores and fresh
   -- stores agree on column order.
   class              TEXT    NOT NULL DEFAULT 'authored',
+  -- The producing lease holder, derived-class commits only (protocol.md §7's
+  -- closed metadata list: 'holder' — derived only). NULL on every other
+  -- class. Admission verified it against the live execution_lease row before
+  -- the insert (serving-loop.md §2), so a stored value names the holder that
+  -- actually held the lease at admission time.
+  holder             TEXT,
   FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
   FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
@@ -424,6 +431,23 @@ CREATE TABLE IF NOT EXISTS branch (
 INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
 VALUES ('', 0, 0, 'active');
 
+-- Server-execution v2: the single-deriver lease
+-- (docs/specs/server-side-execution/serving-loop.md §2). One row per space,
+-- EXACTLY three fields — the v1 branch's richer shape (branch PK,
+-- generation/host/on-behalf-of columns, a state enum) is prior art this
+-- REDUCES from, not substrate. 'holder' is a per-process identity (service
+-- identity + process-instance component, minted at process start — DR1), so
+-- the admission equality check itself fences cross-process succession.
+-- Acquire/renew are DIRECT table writes on the direct-engine plane
+-- (serving-loop.md §1 plane (c)) — a lease renewal is never a commit.
+-- Liveness is judged by the memory server's own clock against expires_at;
+-- an expired row matches nobody. References nothing; nothing references it.
+CREATE TABLE IF NOT EXISTS execution_lease (
+  space       TEXT    NOT NULL PRIMARY KEY,
+  holder      TEXT    NOT NULL,
+  expires_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
   data          BLOB    NOT NULL,
@@ -456,7 +480,8 @@ INSERT INTO "commit" (
   authorization_ref,
   original,
   resolution,
-  class
+  class,
+  holder
 )
 VALUES (
   :seq,
@@ -467,7 +492,8 @@ VALUES (
   :authorization_ref,
   :original,
   :resolution,
-  :class
+  :class,
+  :holder
 )
 `;
 
@@ -672,6 +698,17 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
+// The derived-class admission read (serving-loop.md §2): the space's LIVE
+// lease row, liveness judged by the memory server's own clock (the :now the
+// admission path passes is always this process's Date.now()). An expired row
+// is not returned, so it matches nobody.
+const SELECT_LIVE_EXECUTION_LEASE = `
+SELECT holder
+FROM execution_lease
+WHERE space = :space
+  AND expires_at > :now
+`;
+
 const SELECT_SET_DELETE_CONFLICT = `
 SELECT seq
 FROM revision
@@ -836,6 +873,7 @@ interface PreparedStatements {
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
   selectLatestSnapshot: PreparedStatement;
+  selectLiveExecutionLease: PreparedStatement;
   selectNextSeq: PreparedStatement;
   selectPatchConflicts: PreparedStatement;
   selectPatchConflictsExcludingSession: PreparedStatement;
@@ -938,6 +976,14 @@ export type ApplyCommitOptions = {
    *  client-supplied value: `ClientCommit` cannot express a class, so a field
    *  smuggled into the payload is inert. */
   commitClass?: CommitClass;
+  /** The producing lease holder of a `derived`-class commit — the DR1
+   *  per-process identity the SpaceServer minted at process start
+   *  (serving-loop.md §2). Admission compares it against the space's live
+   *  `execution_lease` row: one equality check, judged by this process's own
+   *  clock. Server-internal like `commitClass`: `ClientCommit` cannot express
+   *  a holder, and no session-facing path supplies one. Meaningless (and
+   *  ignored) on other classes. */
+  holder?: string;
 };
 
 export type AppliedRevision = {
@@ -1243,6 +1289,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
+  selectLiveExecutionLease: database.prepare(SELECT_LIVE_EXECUTION_LEASE),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
   selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
   selectPatchConflictsExcludingSession: database.prepare(
@@ -1541,6 +1588,23 @@ const migrateCommitClass = (database: Database): void => {
   database.exec(`
 ALTER TABLE "commit"
 ADD COLUMN class TEXT NOT NULL DEFAULT 'authored';
+`);
+};
+
+// Server-execution v2 stage B: derived-class commits carry their producing
+// lease holder (protocol.md §7 — `holder`, derived only). Historical rows
+// stay NULL: no derived commit could exist before the lease admission check
+// this column lands with, so there is nothing to backfill. Runs after
+// migrateCommitClass so migrated stores and fresh stores agree on column
+// order (class, then holder).
+const migrateCommitHolder = (database: Database): void => {
+  if (hasColumn(database, "commit", "holder")) {
+    return;
+  }
+
+  database.exec(`
+ALTER TABLE "commit"
+ADD COLUMN holder TEXT;
 `);
 };
 
@@ -2359,6 +2423,7 @@ export const open = async (
   migrateScopedEntityTables(database);
   migrateHeadCurrentOp(database);
   migrateCommitClass(database);
+  migrateCommitHolder(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
   );
@@ -5090,19 +5155,40 @@ const applyCommitTransaction = (
     commit,
     sqliteAttachments,
     commitClass = "authored",
+    holder,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
-  // Discovery tripwire, not the real admission rule: a `derived` commit is
-  // admissible only from the space's live `execution_lease` holder
-  // (docs/specs/server-side-execution/protocol.md §2), and that check lands
-  // with the lease itself (Phase 1 stage B, serving-loop.md §2). Until then
-  // nothing may claim the class — in either flag arm — so refuse loudly
-  // rather than stamping a class whose admission rule does not exist yet.
+  // The derived-class admission rule (serving-loop.md §2, protocol.md §2's
+  // `derived` row): the producer holds the space's live `execution_lease` —
+  // ONE equality check against the row's holder, not admission machinery.
+  // Enforced only under EXPERIMENTAL_SERVER_EXECUTION; off the flag the
+  // class stays unclaimable in this arm too, because `derived` names the
+  // single-deriver posture and nothing outside the flag may claim it
+  // (protocol.md §1). Liveness is judged by THIS process's clock — the
+  // memory server's own, never the holder's: the select excludes expired
+  // rows, so an expired lease matches nobody and a derived commit under one
+  // is rejected even before any successor acquires.
   if (commitClass === "derived") {
-    throw new ProtocolError(
-      "derived-class commits require the execution_lease admission check, " +
-        "which lands with server-execution Phase 1 stage B (serving-loop.md §2)",
-    );
+    if (!getServerExecutionConfig()) {
+      throw new ProtocolError(
+        "derived-class commits are unclaimable while " +
+          "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §1)",
+      );
+    }
+    const lease = space === undefined
+      ? undefined
+      : engine.statements.selectLiveExecutionLease.get({
+        space,
+        now: Date.now(),
+      }) as { holder: string } | undefined;
+    if (
+      holder === undefined || lease === undefined || lease.holder !== holder
+    ) {
+      throw new ProtocolError(
+        "derived-class commit rejected: producer does not hold the live " +
+          "execution_lease for the space (serving-loop.md §2)",
+      );
+    }
   }
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const schedulerObservation = commit
@@ -5254,6 +5340,7 @@ const applyCommitTransaction = (
     original,
     resolution,
     class: commitClass,
+    holder: commitClass === "derived" ? holder ?? null : null,
   });
 
   const revisions: AppliedRevision[] = [];

@@ -187,14 +187,23 @@ Stages, one PR each except C, which is a three-PR train (below):
       `authored`, the server's direct writes `system`; `derived`
       tripwired until stage B's lease check), and the ON arms run
       the full suites (skip lists empty).
-- [ ] **B — lease**: create the `execution_lease` table (engine-v3
-      migration — none exists on main; v1-branch shape as prior art),
-      the acquire/renew/expire cycle, and the derived-class admission
-      equality check (serving-loop.md §2). `holder` is a PER-PROCESS
-      identity — service identity + process-instance component,
-      minted at process start (DR1, RULED 2026-08-03; serving-loop
-      §2) — with the abort-before-reacquire discipline enforced
-      in-process.
+- [x] **B — lease**: create the `execution_lease` table (engine-v3
+      migration — none existed before it; v1-branch shape as prior
+      art), the acquire/renew/expire cycle, and the derived-class
+      admission equality check (serving-loop.md §2). `holder` is a
+      PER-PROCESS identity — service identity + process-instance
+      component, minted at process start (DR1, RULED 2026-08-03;
+      serving-loop §2) — with the abort-before-reacquire discipline
+      enforced in-process. LANDED 2026-08-04: the table is
+      `(space, holder, expires_at)` — exactly three fields, the v1
+      shape reduced away; acquire/renew/release are direct engine-table
+      writes (`packages/memory/v2/execution-lease.ts` — a renewal is
+      never a commit), the in-memory tenure counter makes a reacquire
+      unreachable without first ending the lapsed tenure, and admission
+      enforces the one equality check under the flag, judged by the
+      memory server's clock (an expired row matches nobody). Landed
+      dark: nothing drives the renew cadence until stage F's
+      SpaceServer.
 - [ ] **C — main reduction** (a THREE-PR TRAIN, not one PR — the
       surface is ~25 source files across five packages plus ~110
       goldens, and the seams below are where it cuts cleanly):
