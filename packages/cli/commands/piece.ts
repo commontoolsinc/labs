@@ -1035,7 +1035,7 @@ export const piece = new Command()
   )
   .option(
     "--check",
-    "Report whether the source could replace the piece's current one, and change nothing.",
+    "Report whether the source could replace the piece's current one, without updating the piece. Exits non-zero when it could not.",
   )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {

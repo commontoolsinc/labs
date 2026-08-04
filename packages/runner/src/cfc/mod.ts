@@ -216,14 +216,23 @@ export {
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
+  loadStoredCfcEnvelope,
   prepareBoundaryCommit,
+  storedSchemaCoversCandidateEnvelope,
 } from "./prepare.ts";
 export type {
   CfcPrefixBoundSource,
   CfcPrefixProvenanceSummary,
   CfcPrefixProvenanceWrite,
   CfcPrepareInstrumentation,
+  StoredCfcEnvelope,
 } from "./prepare.ts";
+export { readStoredCfcMetadata } from "./metadata.ts";
+export { cfcSchemaMergeIssue } from "./schema-merge.ts";
+export type {
+  CfcSchemaMergeIssue,
+  MergeCfcSchemaEnvelopeOptions,
+} from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,
