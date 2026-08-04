@@ -9,7 +9,7 @@ import type { Pattern } from "../src/builder/types.ts";
 import {
   patternToJSON,
   serializePatternGraph,
-  toJSONWithAliasBindings,
+  withAliasBindings,
 } from "../src/builder/json-utils.ts";
 import {
   resolveOpPattern,
@@ -26,7 +26,7 @@ import type { FactoryInput } from "../src/builder/types.ts";
  * session-lifetime artifact index (sync) or the storage-backed
  * `loadPatternByIdentity` (async; compiled artifacts persist in-space as part
  * of compilation). INTERNAL serialization (`serializePatternGraph`, used by
- * builder-time node serialization through `toJSONWithAliasBindings`) stays the
+ * builder-time node serialization through `withAliasBindings`) stays the
  * full bare graph — `Pattern.nodes` is the in-memory instantiation
  * representation, not a wire format.
  */
@@ -114,7 +114,7 @@ describe("refs-only pattern JSON at the boundary", () => {
   });
 
   it("a graph crossing the boundary carries no live builder artifact", () => {
-    // The nodes a pattern holds carry LIVE modules: `toJSONWithAliasBindings`
+    // The nodes a pattern holds carry LIVE modules: `withAliasBindings`
     // builds a node by copying its module member by member, function members
     // included. A graph emitted with those still in it is not a serialized
     // value -- it depends on whatever reads it next to finish the job by
@@ -171,7 +171,7 @@ describe("refs-only pattern JSON at the boundary", () => {
     expect("$patternRef" in internal).toBe(false);
     expect(Array.isArray((internal as { nodes: unknown }).nodes)).toBe(true);
 
-    const viaLegacyAliases = toJSONWithAliasBindings(
+    const viaLegacyAliases = withAliasBindings(
       compiled as unknown as FactoryInput<unknown>,
     ) as Record<string, unknown>;
     expect("$patternRef" in viaLegacyAliases).toBe(false);

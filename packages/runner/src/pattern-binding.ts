@@ -700,11 +700,16 @@ export function findAllWriteRedirectCells<T>(
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
-      // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
-      // path today, but will in the not-too-distant future; at that point this
-      // guard-less `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a
-      // `FabricInstance` is walked by internal slots rather than codec
-      // contents). Mark ahead of that.
+      // A `FabricPrimitive` reaches the `isRecord` branch below, and is
+      // harmless there. This walk collects write-redirect links, and a
+      // primitive is an opaque scalar: it can contain no redirect, and its
+      // state lives in private fields, so `Object.values()` yields nothing and
+      // the recursion ends immediately. Decomposition would matter to a walk
+      // that REBUILT its input; this one only reads.
+      //
+      // TODO(danfuzz): Latent — a `FabricInstance` is not harmless in the same
+      // way. It is a container reached by its codec contents rather than by
+      // property name, so a write redirect nested inside one is missed here.
     } else if (isRecord(binding) && !isCellLink(binding)) {
       // If the binding is an object, recurse into each value.
       for (const value of Object.values(binding)) find(value, baseCell);

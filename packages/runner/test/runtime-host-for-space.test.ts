@@ -62,9 +62,61 @@ describe("Runtime.registerSpaceHost", () => {
       await runtime.dispose();
     }
   });
+
+  it("rejects non-HTTP hints before forwarding them to storage", async () => {
+    const storageVerdicts: Array<[string, string]> = [];
+    const storageManager = Object.assign(
+      StorageManager.emulate({ as: signer }),
+      {
+        registerSpaceHost(space: string, host: string) {
+          storageVerdicts.push([space, host]);
+          return true;
+        },
+      },
+    );
+    const runtime = new Runtime({
+      apiUrl: new URL("http://host-a.test/"),
+      storageManager,
+    });
+    try {
+      for (
+        const host of [
+          "ws://host-b.test",
+          "wss://host-b.test",
+          "ftp://host-b.test",
+        ]
+      ) {
+        expect(() => runtime.registerSpaceHost(spaceB, host))
+          .toThrow(`Invalid host for space ${spaceB}`);
+      }
+      expect(storageVerdicts).toEqual([]);
+
+      expect(runtime.registerSpaceHost(spaceB, "https://host-b.test"))
+        .toBe(true);
+      expect(storageVerdicts).toEqual([
+        [spaceB, "https://host-b.test/"],
+      ]);
+      expect(runtime.mappedHostFor(spaceB)).toBe("https://host-b.test/");
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });
 
 describe("Runtime.hostForSpace", () => {
+  it("rejects seeded hosts that cannot serve HTTP requests", () => {
+    for (
+      const host of [
+        "ws://host-b.test",
+        "wss://host-b.test",
+        "ftp://host-b.test",
+      ]
+    ) {
+      expect(() => makeRuntime({ [spaceB]: host }))
+        .toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+    }
+  });
+
   it("resolves mapped spaces to their host and others to apiUrl", async () => {
     const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
     try {

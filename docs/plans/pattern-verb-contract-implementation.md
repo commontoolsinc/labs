@@ -4,6 +4,44 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-31 (second pass)**, C5 measured outcome: dispatch-side
+closed-world enforcement shipped (the runner refuses a present payload that
+fails an event schema declaring `additionalProperties: false`, through the
+existing thrown-handler path), while the schema-generator EMISSION of
+`additionalProperties: false` is stopped on a measured pattern-update-gate
+refusal for argument-side verbs — see the WS-C bullet for what shipped and
+Risks for the migration step landing the emission now requires.
+
+**Amended 2026-07-31 (second pass, flip staging)**: governing decision 2's
+gate is satisfied — the three-topic fixture (D4, #5244, merged) proves
+declared-result readback end to end, including the original result surviving
+a dropped-response retry and a same-id replay — and the `plainResultReceipts`
+default flip lands in #5245, approved by Berni (2026-08-03, on the measured
+fleet exposure: 40 expression-body setter verbs across 11 non-test pattern
+files begin publishing a link to the state cell they mutate) and by Mike. Env `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` stays the
+opt-out while the flag exists. Staging the flip surfaced a latent C4 bug,
+reachable via the env flag before any flip: the receipt-only branch wrote the
+handler's return as RAW JSON (`setRaw`), so a return carrying a live `Cell` —
+most commonly the incidental chained return of an expression-body
+`action(() => cell.set(...))`, since `set()` returns its cell — failed the
+handling on an uncloneable storage write. Per review (Berni), the fix is not
+to discard such returns but to route the receipt value through the same
+standard cell-write conversion `receipt.set(value)` applies: plain JSON
+persists as before, cell handles convert to links, and a one-line setter
+verb's receipt (and `cf piece call` result) therefore carries a link to the
+mutated cell where it used to be empty — receipts reflect what was returned.
+That fix landed separately as #5262, ahead of and independent of this flip.
+Create-only witness semantics are unchanged. One tension is recorded as
+decided, not overlooked (Berni, set explicitly and twice): receipts are
+runtime-honest, while C2's absorption rule governs DECLARATION — a concise
+completion value still declares nothing at the type layer, and with C3
+withdrawn no result schema exists to contradict — so receipts may carry
+values, including links from incidental cell returns, that no contract
+declares. Consumers must treat undeclared receipt content as advisory. The
+declared-versus-incidental distinction becomes enforceable when the
+Fabric-types stream evolution brings declared-result metadata — precisely
+the deferred-C3 gap.
+
 **Amended 2026-07-31**, C3 withdrawn in review (Berni): no result-schema
 emission for now — values flow schema-free through receipts, discovery falls
 back to prose descriptions, and the durable shape waits for the Fabric-types
@@ -58,7 +96,11 @@ Made 2026-07-24, shaping everything below:
    as its own workstream from day one, in parallel with the small wins.
 2. **Plain-return projection ships behind a flag, default-off**, per the
    `EXPERIMENTAL_OPTIONS.md` process; the default flips after the integration
-   suite proves readback end to end.
+   suite proves readback end to end. *That proof landed as the three-topic
+   fixture (D4, #5244); the flip is staged in #5245 (draft, held for the
+   explicit go from Mike and Berni), with an explicit `false` — env
+   `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` or programmatic — as the
+   rollback override while the flag exists.*
 3. **Continuous dogfood.** The live Estuary topics board gets `setsrc` as each
    phase lands. The compat checker gates schema breaks; every phase ends with a
    live-board acceptance pass.
@@ -110,30 +152,53 @@ Named so their absence reads as intent, not oversight:
 
 Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
 
-- `AddTopicEvent` gains optional `body` — argument widening, compat-checker
+- ~~`AddTopicEvent` gains optional `body` — argument widening, compat-checker
   clean — and `addTopic` creates the child with it, making `setBody` an
-  editing verb rather than part of every create.
-- Silent early-returns on mutating verbs become throws: empty title, blank
+  editing verb rather than part of every create.~~ — **done (#4991)**: the
+  create is atomic (no reader observes the title-only halfway state) and the
+  body is preserved verbatim, matching `setBody`.
+- ~~Silent early-returns on mutating verbs become throws: empty title, blank
   `agentName`, empty comment body, invalid link URL. UI composer wrappers
   (`submitTopic`, `submitComment`, `saveBody`, …) keep their silent guards —
-  an empty draft is a non-event in a composer, a defect headlessly.
-- A compact discovery `index` result on the board — one reference-plus-summary
+  an empty draft is a non-event in a composer, a defect headlessly.~~ —
+  **done (#4991)**: `rejectMutation` throws on every headless mutating verb;
+  `topics-rejections.test.tsx` pins each rejection asserting no write
+  happened, and the composer wrappers' silent guards are exercised in
+  `topics.test.tsx`.
+- ~~A compact discovery `index` result on the board — one reference-plus-summary
   row per topic: the child reference plus scalar summaries (`title`,
   `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`) and reference
   edges as sibling references — never expanded pieces, and no pattern-authored
   fid fields (identity rendering is the CLI's job — decision 6, F2).
   `crossrefs` stays as the UI's reference graph; it is not compact — each row
   expands to full pieces, and a live full-board read through it exceeded 300k
-  tokens — and stops being the documented survey surface.
-- Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create,
+  tokens — and stops being the documented survey surface.~~ — **done**:
+  `index` rows reuse the crossref join, but every reference-valued field is
+  DECLARED through a title-only `TopicIndexRef` — schemas filter visibility,
+  so the row schema rather than reader discipline is what bounds a survey
+  read. The summary scalars ride in the row itself as plain numbers — the
+  computed coalesces a mixed-version sibling's absent path to 0, so only
+  `createdBy` (which has no honest zero) keeps the absent-path shaping. The compat gate records the
+  new contract as updatable from every recorded baseline (a result addition
+  is widening).
+- ~~Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create,
   each thrown rejection (asserting no write happened), and the index
-  (asserting no expanded piece/action/runtime values serialize).
-- Docs riding the change: `packages/patterns/topics/README.md`,
+  (asserting no expanded piece/action/runtime values serialize).~~ —
+  **done**: the rejection pins landed with #4991 in their own
+  `topics-rejections.test.tsx` (those runs expect runtime errors);
+  `topics.test.tsx` covers body-at-create and now the index — rows, edges,
+  and a serialization pin asserting no expanded content, no verb streams,
+  and title-only reference projections (`Object.keys` is exactly `title`).
+- ~~Docs riding the change: `packages/patterns/topics/README.md`,
   `skills/topics/SKILL.md` (`addTopic` example gains `body`;
-  `deno task check-skill-facts` gates the citations).
-- **Exit:** filing-with-body is five CLI calls; a blank `agentName` fails with
-  a nonzero exit; a full-board survey is one bounded read of `index`; live
-  board updated via `setsrc` (gated — see Risks).
+  `deno task check-skill-facts` gates the citations).~~ — **done** across
+  #4991 (body) and the index change (README names `index` as the bounded
+  survey read; the skill documents it with a deployed-board lag caveat until
+  the setsrc lands).
+- **Exit:** filing-with-body is five CLI calls ✓; a blank `agentName` fails
+  with a nonzero exit ✓ (#4991); a full-board survey is one bounded read of
+  `index` ✓ in the pattern (deploy pending); live board updated via `setsrc`
+  — OPEN, gated on the clone rehearsal (see Risks).
 
 ### WS-B — CLI settlement hygiene
 
@@ -326,11 +391,70 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   and agents cannot learn a result's shape before calling; the interim for
   both is prose in the verb's `description`. Revisit as part of the
   Fabric-types stream design, not before.
-  Verb **input**
+  ~~Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
-  in the mapping spec.
+  in the mapping spec.~~ — **dispatch enforcement done (C5); the emission is
+  stopped on a measured update-gate refusal.** What shipped: the runner's
+  handler wrapper refuses a PRESENT payload that cannot satisfy an event
+  schema declaring `additionalProperties: false` (checked on `$event` itself
+  and on the def a top-level local `$ref` names), judging the relaxed schema
+  with the D6 helpers — the same relax-then-validate composition as the CLI
+  gate, which is why D6 moved them. Rejection fails the handling through the
+  EXISTING thrown-handler path: the body never runs, the transaction aborts,
+  no receipt is created so the event id survives for a corrected same-id
+  retry, onError fires, and the commit callback settles errored — no new
+  receipt shape or error class (WS-E owns codes). Absent payloads stay
+  deliverable as `undefined` (the D5 measured table holds), and OPEN schemas
+  keep the characterized behavior — measured before the gate: an undeclared
+  extra field was silently STRIPPED, the body ran, and the receipt spent the
+  id. One measured carve-out: the LLM tool-call path INJECTS a `result` cell
+  into every handler-tool payload (`llm-dialog.ts` sends
+  `{ ...input, result }` and hides the slot from the advertised schema via
+  `stripInjectedResult`; the CLI's `cloneWithoutBoundToolKeys` does the
+  same) — the runtime cannot refuse a field the runtime itself injected,
+  and the unmodified gate rejected every closed-schema tool call in the CFC
+  integrity suites. The exemption is PROVENANCE, not shape (review,
+  2026-07-31): the injection site names its keys through the send's
+  internal options (`runtimeInjectedEventKeys`, cell.ts
+  `StreamSendOptions`), which travel out-of-band through the queued event
+  to the dispatch transaction
+  (`tx.dispatchedRuntimeInjectedEventKeys`) — payload data can never
+  express them, so a caller-supplied `result`, cell-link-valued or not,
+  arrives unmarked and is refused like any other undeclared field. Pinned
+  both ways in `packages/runner/test/scheduler-event-receipts.test.ts`
+  ("closed-world event schemas at dispatch"), and end-to-end by the CFC
+  tool-integrity suites, which dispatch through the real injection site. What stopped: emitting
+  `additionalProperties: false` on generated event schemas fails
+  `deno task pattern-compat` — the update gate judges a stream property
+  under its enclosing role, and the argument-role additionalProperties rule
+  refuses open→closed against every recorded baseline (measured 2026-07-31:
+  calendar/calendar.tsx `argument.events[].setDate: additional properties
+  accepted previously would now be rejected`; lunch-poll/
+  poll-option-card.tsx `argument.castVote`; notes/note.tsx
+  `argument.parentNotebook`; 28 baseline groups carry verbs in argument
+  schemas). Emission cannot be position-scoped either: one hoisted def
+  serves a type's every use, and the same verb type legitimately appears on
+  both sides. Landing it needs the migration step now named under Risks;
+  until then closure is a per-schema author opt-in that the dispatch gate
+  honors, and the open event side is pinned as a decision in
+  `packages/schema-generator/test/stream-result.test.ts`.
+
+  **Review outcome (Berni, 2026-08-03, on the PR):** the boundary the
+  exemption depends on is CONFIRMED — the mint lives in runner internals no
+  pattern compartment can reach, and an enforcement gate may depend on
+  that. The injection itself, though, is a pre-receipts hack: now that
+  receipts exist, `llm-dialog`'s `{ ...input, result }` slot should be
+  REMOVED entirely and the tool result delivered through the handling's
+  receipt. Design for that world. **Follow-up task:** retire the
+  injection — deliver the tool result via receipt, then drop the marker
+  machinery (`markRuntimeInjectedEventKeys`, the dispatch exemption, this
+  carve-out) with its only production mint site, along with the
+  `stripInjectedResult` / `cloneWithoutBoundToolKeys` schema-hiding it
+  forced. Sequencing: leans on receipt delivery of plain-JSON results, so
+  it slots naturally after the `plainResultReceipts` flip decision
+  (#5245); piece-carrying results already flow on the production default.
 
   **A value-less verb wants `{ type: "object", properties: {} }`, not the
   generic `void` sentinel**, which lowers to `{ asCell: ["opaque"] }` — a
@@ -489,8 +613,15 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   (`initial_sync | dispatched | committed | readback`) beside the invocation
   id — **done (D2)** for the annotation (tracked through an `onPhase`
   callback, printed on failure exits); verbose output adds per-phase timings
-  (initial sync / dispatch / handler / commit / result sync / readback) —
-  still open. With a caller-supplied id a retry is safe in every phase, so
+  — **done**: `cf piece call --verbose` streams one wall-clock span per
+  observed phase transition to stderr (stdout stays exactly the settled
+  Invocation JSON), at the granularity the `onPhase` callback observes:
+  initial sync→dispatch, dispatch→commit acknowledgement (the handler run
+  and its commit are one span — nothing between them is observable from the
+  CLI without new runner instrumentation, and result sync is inside the
+  readback span for the same reason), receipt classification, and
+  readback→settlement; a failure exit closes the in-flight span with
+  `failed`. With a caller-supplied id a retry is safe in every phase, so
   phase is diagnosis; a derived `retrySafe` convenience flag may ride along.
 - ~~**Acknowledgement is transaction-local.** The call path awaits *this
   handling's* commit (D1's commit callback) plus receipt sync — never
@@ -517,11 +648,13 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   without racing a clock; a `--message` that differs on the retry proves the
   settled outcome stands rather than being overwritten. Each scenario spawns
   a fresh `cf` process, so the fresh-process case is the default rather than
-  a special one. One half of the third scenario is not covered yet: the
+  a special one. ~~One half of the third scenario is not covered yet: the
   collision is asserted through `deduplicated` and exit 0, but not by reading
-  a *result* back off the receipt, because a void verb leaves none to read.
-  That assertion joins when WS-C gives verbs return values — or sooner
-  against `plainResultReceipts`.
+  a *result* back off the receipt, because a void verb leaves none to
+  read.~~ — closed by D4's integration fixture (`run_three_topic_fixture`,
+  same file): a settled create replayed under its id, with a different
+  payload, must report `deduplicated` AND carry the ORIGINAL declared
+  result, read back off the receipt under `plainResultReceipts`.
 - ~~**cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
   deferred.** The pre-dispatch validator passes `input === undefined`
   unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
@@ -726,6 +859,25 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   and Invocation is required to be authored open-world precisely so protocol
   fields can be added later. Cost is bounded by emitting links only for paths
   that have them, and only when asked.
+
+  **Done (F2) for callable results:** `cf piece call --show-links` emits the
+  decided shape — a `links` field on the Invocation JSON, `{ "/path":
+  <link> }` with RFC 6901 pointer keys — with entries only where a path's
+  backing document differs from its enclosing one, resolved through the
+  receipt cell's own link traversal (`key()` steps plus `resolveAsCell`)
+  after readback. The root `"/"` entry is the result value's own backing
+  document, resolved like any other path — the scalar-is-its-own-doc case
+  is the shape's whole point, so a result that is itself a reference maps
+  `"/"` to the referenced document and keeps the receipt address under the
+  reserved bare key `receipt` (pointer keys always begin with `/`, so no
+  result path can collide); in the common receipt-internal case `"/"` IS
+  the receipt address. Link values reuse the CLI's existing cell-address
+  shape (`resultRef`'s `{ space, id, scope }`), plus a `path` when the link
+  points below the backing document's root. `resultRef` itself stays as-is,
+  and `--show-links --no-wait` is refused — the links ride the readback
+  `--no-wait` skips. The data-read surface (`cf piece get` /
+  `--include-ids`) is not part of that change and picks up the same
+  dictionary shape when it lands.
 - ~~**Read-path guard:** `cf piece get` on a path that resolves to a verb
   returns the stream's serialization rather than redirecting. The llm-dialog
   `read` tool already rejects this case with the right message — "Path
@@ -743,7 +895,36 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   for inline values, so a read guard built on it would refuse plain data
   outputs. Reads fail open; tool bindings read as data (the llm-dialog read
   tool reads them too); parent objects and plain data paths read as before.
-- `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
+- ~~`--await` / `--no-wait` and the caller-controlled wait bound — with
+  WS-D.~~ — **done (F3)**, with these semantics: the default is unchanged —
+  wait for this handling's transaction-local commit acknowledgement plus
+  receipt readback (what D2 built) — and `--await` is that default's explicit
+  spelling, so a script can state its intent; combined with `--no-wait` it is
+  refused as a contradiction. `--no-wait` awaits the transaction-local
+  commit acknowledgement and skips ONLY the receipt readback (sync + read);
+  stdout carries the Invocation JSON with the furthest observed phase as its
+  `status` (`{"invocation": "<id>", "status": "committed"}`), and a commit
+  failure exits nonzero exactly as the default path would. The
+  acknowledgement is not skippable: `cf piece call` executes the handler in
+  the CLI's own runtime, so a process that exits before the commit is
+  acknowledged abandons the invocation un-executed — nothing durable
+  happened — rather than leaving it settling elsewhere. What makes skipping
+  the readback sound is the caller-supplied id (D1/D3): the acknowledged
+  commit is durable on the server, and a later same-id call deduplicates
+  against the create-only receipt and returns the original outcome, so the
+  readback's confirmation can be fetched at any time. Handler sends only: a
+  tool's result is delivered by this process, and the receipt-less
+  set-fallback dispatch leaves nothing to read back — both refuse the flag.
+  `--wait <seconds>` is a caller-chosen patience bound on the default wait,
+  not a correctness timeout: one clearable deadline racing the outermost
+  await (no polling, no bound anywhere inside the settlement path), and on
+  expiry the exit is nonzero with D2's failure shape — invocation id plus
+  furthest phase on stderr — while stdout carries the Invocation JSON with
+  that phase as `status`. An early fire is recoverable rather than
+  lossless: before the `committed` phase the invocation may not have
+  executed or committed at all, and the recovery is re-invoking with the
+  SAME id — it deduplicates when the commit landed and re-executes when it
+  never did.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
   makes them unnecessary.
@@ -775,7 +956,7 @@ change that alters them.
   plumbing, collision, reclassification, and readback against an isolated
   toolshed.
 - **End-to-end fixture (D4, Phase 4):** the three-topic graph from the live
-  session, run as an integration test and as the live pass — create an
+  session, run ~~as an integration test~~ and as the live pass — create an
   umbrella with body (returns its child reference); create two children whose
   bodies reference it; revise the umbrella to reference both; deliberately
   drop one create response and retry with the same invocation id. Verify
@@ -784,6 +965,30 @@ change that alters them.
   to the acting agent. Record command
   count, payload sizes, per-phase timings, and cold/warm durations — the
   baseline the session-mode decision (Non-goals) reads.
+
+  **The integration half is done** — `run_three_topic_fixture` in
+  `packages/cli/integration/integration.sh` (the piece-call shard, its own
+  space, `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` on every call), driving a
+  declared-result fixture pattern
+  (`packages/cli/integration/pattern/topic-graph.tsx`) against an isolated
+  toolshed. References adapt to that setting: a create returns
+  `{ id, path }` and the test opens the canonical child by that path
+  directly, standing in for the live pass's fid rendering; the
+  dropped-response retry — and a same-id replay with a different payload —
+  must read the ORIGINAL result back off the receipt (the assertion D3 left
+  open). The drop is deterministic, not a recorded race branch: the call
+  runs with a test-only per-phase stderr announcement
+  (`CF_TEST_ANNOUNCE_INVOCATION_PHASES`, off by default) and is killed only
+  after a blocking pipe read sees `phase: committed`, so the
+  commit-then-lost-response window is a property of the mechanism and the
+  dedup-with-original-result path is asserted unconditionally, every run.
+  Results flow schema-free per the C3 deferral: the value path is
+  what the fixture proves, and no assertion reads a result schema from the
+  durable store. Command counts, payload sizes, and per-command wall-clock
+  print as `[d4-baseline]` lines (per-phase timings await #5233's
+  `--verbose`). **The live pass stays open**, gated on the write-storm
+  machinery (Risks): until that gate clears, no live-board run has happened
+  and D4 is not done.
 - **Live acceptance checklist**, per phase, against the Estuary board — a
   scenario per phase (six-call filing shrinking to five in Phase 1, a
   deliberate duplicate retry in Phase 2, a returned handle in Phase 4), and
@@ -829,6 +1034,39 @@ change that alters them.
   copy of them. It does not measure commit rates, so the rehearsal above
   stands; what it removes is discovering an incompatibility by attempting the
   swap on the live board.
+- **Closed-world event emission needs a compat-gate migration step first**
+  (WS-C, measured on C5): adding `additionalProperties: false` to generated
+  event schemas fails the pattern-update gate for every verb reachable
+  through a piece's ARGUMENT schema — the checker judges the event object
+  under the enclosing property's role, and the argument-role rule correctly
+  refuses open→closed ("additional properties accepted previously would now
+  be rejected"). This is not a covariant-direction addition the gate can
+  wave through: closing an event genuinely refuses callers that previously
+  sent extra fields (they were accepted-and-stripped, per the C5
+  characterization), so the gate is doing its job under its current rules.
+  The unblock was a design decision, not a workaround, and it is DECIDED
+  (Berni, 2026-08-03, on #5246): a verb-event-role rule in the checker —
+  the (a) fork — taking the position that accepted-and-STRIPPED was never
+  contract, defensible precisely because the runtime never delivered an
+  undeclared field to any handler. Implementation note from the same
+  review: the closed shapes already in argument-side baselines likely
+  derive from `never`-typed events that were never meant to assert "only
+  empty events are valid" — clean that up in the generator eventually;
+  until then the exemptions carry the cost. The chosen rule must still
+  weigh the
+  FORWARD skew case the stripped-was-never-contract argument does not cover:
+  adding an optional event field is legal argument widening, but during any
+  deploy window a newer client sends that field to a still-running older
+  piece whose closed schema does not declare it — today stripped and
+  harmless, under closed-world a hard reject at dispatch. Mixed-version
+  callers are exactly the live board's incident history (the cross-version
+  write storms, the legacy-field mirroring `topics` still carries), so the
+  decision needs a story for widened payloads against not-yet-updated
+  pieces — deploy ordering, a skew-tolerant reject-only-on-collision rule,
+  or an explicit versioning step — before emission lands. Until the rule
+  and its skew story land, generated event schemas stay open and
+  closed-world enforcement is per-schema opt-in at dispatch (C5's runner
+  gate).
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.

@@ -5,13 +5,22 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // This schema is embedded in the code, so we can have simpler links.
   VNode: { $ref: "https://commonfabric.org/schemas/vnode.json" },
-  Date: { type: "string", format: "date-time" },
+  // A `Date` is stored as a `FabricEpochNsec` and a `Uint8Array` as a
+  // `FabricBytes`, so both are objects at the fabric boundary. There is no
+  // schema vocabulary for `Fabric*` types yet; `"object"` is what they are
+  // called in the meantime, and a value stored as one reads back intact
+  // through it. (`{ type: "string" }` does not: the read projects to
+  // `undefined`, which is what the `Date` mapping used to do to every value
+  // read through the schema its own TS type generates.)
+  Date: { type: "object" },
+  RegExp: { type: "object" },
+  Uint8Array: { type: "object" },
+  // A `URL` converts to a plain string, so this one is accurate as written.
   URL: { type: "string", format: "uri" },
   ArrayBuffer: true,
   ArrayBufferLike: true,
   SharedArrayBuffer: true,
   ArrayBufferView: true,
-  Uint8Array: true,
   Uint8ClampedArray: true,
   Int8Array: true,
   Uint16Array: true,
@@ -30,6 +39,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
 const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
 const LIB_DECLARED_NATIVE_TYPES = new Set([
   "Date",
+  "RegExp",
   "URL",
   "ArrayBuffer",
   "ArrayBufferLike",

@@ -1184,14 +1184,21 @@ One integration test (runner-level, in-process, two "deploys"):
   ACL. Host-qualified refs register their accepted hint through the ordinary
   per-space storage manager before opening the target space. Do not use a
   secondary session. A seeded route can only be confirmed. Once a late hint is
-  accepted, a different hint is a conflict even before the space opens. After
-  the space opens, only the hint already in effect can be confirmed. The
-  current registry still needs the pre-open conflict guard. Dynamic
-  registration and site-table hydration exist as foundations, but
-  import-resolver integration, host failure, and space relocation remain work.
-  Cross-host publication also needs CFC label propagation for fetched source
-  (spec § Security). A possible public-pattern HTTP endpoint remains open under
-  the public distribution question in the spec.
+  accepted, a different hint is a conflict before or after the space opens. An
+  unseeded provider opened through the default host remains provisional while
+  it is read-only. Its first hint can replace that provider. Overlapping reads
+  follow the replay, which also loads dependencies discovered from the hinted
+  data. A different-host hint can replace an operation that is waiting for a
+  session. The route becomes fixed when the session accepts a stateful
+  operation for issue, even if acknowledgement later fails. Initial site-table
+  hydration selects the last valid HTTP or HTTPS entry for each space without
+  replacing a route already accepted through IPC.
+  A conflicting table route accepted first makes later IPC registration fail.
+  Dynamic registration and site-table hydration exist as foundations, but
+  import-resolver integration, host failure, and replacement of an explicit
+  route remain work. Cross-host publication also needs CFC label propagation
+  for fetched source (spec § Security). A possible public-pattern HTTP endpoint
+  remains open under the public distribution question in the spec.
 - **M4 explicit subpaths**: extend lifecycle source ingestion and retained
   publications with the following behavior.
 

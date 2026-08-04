@@ -14,7 +14,11 @@ import { JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IStorageTransaction,
+} from "../src/storage/interface.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -252,6 +256,53 @@ describe("Cell commit callbacks", () => {
     await tx.commit();
 
     expect(callbackStatuses).toEqual(["error"]);
+  });
+
+  it("runs generic commit callbacks when the storage promise rejects", async () => {
+    const rejection = new Error("storage promise rejected");
+    const inner = {
+      journal: {},
+      clearReadOnly() {},
+      commit: () => Promise.reject(rejection),
+    } as unknown as IStorageTransaction;
+    const extended = new ExtendedStorageTransaction(inner);
+    const callbackErrors: unknown[] = [];
+    const callbackStatuses: string[] = [];
+    extended.enqueuePostCommitEffect({
+      id: "rejected-commit-effect",
+      kind: "test",
+      flush() {
+        throw new Error("a rejected commit must not flush its outbox");
+      },
+    });
+    extended.addCommitCallback((committedTx, result) => {
+      callbackStatuses.push(committedTx.status().status);
+      callbackErrors.push(result.error);
+    });
+    extended.setReadOnly("commit callback rejection test");
+
+    let thrown: unknown;
+    try {
+      await extended.commit();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(rejection);
+    expect(callbackStatuses).toEqual(["error"]);
+    expect(callbackErrors).toHaveLength(1);
+    expect(callbackErrors[0]).toMatchObject({
+      name: "StorageTransactionAborted",
+      reason: rejection,
+    });
+    expect(extended.status()).toMatchObject({
+      status: "error",
+      error: {
+        name: "StorageTransactionAborted",
+        reason: rejection,
+      },
+    });
+    expect(extended.hasPendingPostCommitEffects()).toBe(false);
   });
 
   describe("set operations with arrays", () => {

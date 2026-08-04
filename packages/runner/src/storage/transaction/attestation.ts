@@ -25,8 +25,8 @@ import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
 import {
   extractDataUriPayloadText,
-  isDataUri,
   isDataUriMediaType,
+  isFabricDataUri,
   valueFromDataUriPayloadText,
 } from "@commonfabric/data-model/data-uri-codec";
 
@@ -244,7 +244,7 @@ export const load = (
   >;
 
   try {
-    if (!isDataUri(address.id)) {
+    if (!isFabricDataUri(address.id)) {
       result = {
         error: UnsupportedMediaTypeError(
           `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,

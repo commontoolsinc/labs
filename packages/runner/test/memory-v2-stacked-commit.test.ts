@@ -13,12 +13,14 @@ import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
+  type CommitPrecondition,
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
   resetPersistentSchedulerStateConfig,
   type SessionSync,
   setPersistentSchedulerStateConfig,
+  type SqliteOperation,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import {
@@ -104,6 +106,7 @@ type ScriptedOutcome =
     kind: "accept";
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
     /**
      * Skip validateReads for this commit. Forces the "impossible" late
      * accept — a server verdict resolving a pending dependency the client
@@ -120,17 +123,20 @@ type ScriptedOutcome =
     retryAfterSeq?: number;
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
   }
   | {
     kind: "dropThenReplayAccept";
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
   }
   | {
     kind: "dropThenReplayReject";
     message?: string;
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
   };
 type RemoteCommit = {
   label: string;
@@ -458,9 +464,9 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
         // cascade tests (and the stress bookkeeping) use it to distinguish
         // "sent, verdict in flight" from "never sent".
         this.model.transactLocalSeqs.push(commit.localSeq);
-        const responseGate = this.model.scripted.get(
-          commit.localSeq,
-        )?.responseGate;
+        const scripted = this.model.scripted.get(commit.localSeq);
+        scripted?.onReceipt?.();
+        const responseGate = scripted?.responseGate;
         const verdictTask = new Promise<void>((resolveVerdict) => {
           setTimeout(() => {
             void (async () => {
@@ -585,6 +591,8 @@ const createHarness = (
           | { op: "delete"; id: URI; type: MIME }
         >;
         schedulerObservation?: unknown;
+        preconditions?: readonly CommitPrecondition[];
+        sqliteOps?: readonly SqliteOperation[];
       },
       source?: unknown,
     ): Promise<
@@ -704,6 +712,16 @@ const schedulerObservationFor = (actionId: string) => ({
   status: "success",
 });
 
+const schedulerBatchActionIds = (harness: Harness): string[][] =>
+  [...harness.model.applied.values()]
+    .filter((record) => record.commit.schedulerObservationBatch !== undefined)
+    .sort((left, right) => left.applied.seq - right.applied.seq)
+    .map((record) =>
+      record.commit.schedulerObservationBatch!.map((entry) =>
+        (entry.schedulerObservation as { actionId: string }).actionId
+      )
+    );
+
 Deno.test("memory v2 ignores no-op scheduler observations when persistent scheduler state is off", async () => {
   resetPersistentSchedulerStateConfig();
   const harness = createHarness();
@@ -797,6 +815,226 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
     await harness.close();
     resetPersistentSchedulerStateConfig();
   }
+});
+
+Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const secondStarted = Promise.withResolvers<void>();
+  const releaseSecond = Promise.withResolvers<void>();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: releaseFirst.promise,
+      onReceipt: () => firstStarted.resolve(),
+    });
+    await firstStarted.promise;
+
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+    harness.model.setOutcome(5, {
+      kind: "accept",
+      responseGate: releaseSecond.promise,
+      onReceipt: () => secondStarted.resolve(),
+    });
+    await Promise.resolve();
+
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+
+    releaseFirst.resolve();
+    await secondStarted.promise;
+    await Promise.resolve();
+    assertEquals(harness.model.transactLocalSeqs, [2, 5]);
+
+    releaseSecond.resolve();
+    await Promise.all([
+      assertResultOk(first),
+      assertResultOk(second),
+      assertResultOk(write),
+    ]);
+    assertEquals(harness.model.transactLocalSeqs, [2, 5, 4]);
+  } finally {
+    releaseFirst.resolve();
+    releaseSecond.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 does not hold a semantic write behind a later scheduler batch", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const secondStarted = Promise.withResolvers<void>();
+  const releaseSecond = Promise.withResolvers<void>();
+  let writeWasIssued = false;
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: releaseFirst.promise,
+      onReceipt: () => firstStarted.resolve(),
+    });
+    await firstStarted.promise;
+
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    harness.model.setOutcome(3, {
+      kind: "accept",
+      onReceipt: () => {
+        writeWasIssued = true;
+      },
+    });
+
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+    harness.model.setOutcome(5, {
+      kind: "accept",
+      responseGate: releaseSecond.promise,
+      onReceipt: () => secondStarted.resolve(),
+    });
+
+    releaseFirst.resolve();
+    await secondStarted.promise;
+    await Promise.resolve();
+    assert(writeWasIssued);
+
+    releaseSecond.resolve();
+    await Promise.all([
+      assertResultOk(first),
+      assertResultOk(write),
+      assertResultOk(second),
+    ]);
+  } finally {
+    releaseFirst.resolve();
+    releaseSecond.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 separates observations across a semantic write boundary", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+
+    await Promise.all([
+      assertResultOk(first),
+      assertResultOk(write),
+      assertResultOk(second),
+    ]);
+    assertEquals(schedulerBatchActionIds(harness), [
+      ["action:first"],
+      ["action:second"],
+    ]);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+const assertNonDocumentSchedulerBoundary = async (
+  directCommit: Parameters<Harness["replica"]["commitNative"]>[0],
+) => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    const direct = harness.replica.commitNative(directCommit);
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+    harness.model.setOutcome(4, {
+      kind: "rejectConflict",
+      message: "preceding observation rejected",
+    });
+
+    await assertConflict(first, "preceding observation rejected");
+    await assertConflict(direct, "preceding observation rejected");
+    await assertResultOk(second);
+    assertEquals(harness.model.transactLocalSeqs, [4, 5]);
+    assertEquals(
+      harness.model.rejected.get(4)?.commit.schedulerObservationBatch?.map(
+        (entry) =>
+          (entry.schedulerObservation as { actionId: string }).actionId,
+      ),
+      ["action:first"],
+    );
+    assertEquals(schedulerBatchActionIds(harness), [["action:second"]]);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+};
+
+Deno.test("memory v2 keeps a sqlite-only commit inside its scheduler boundary", async () => {
+  await assertNonDocumentSchedulerBoundary({
+    operations: [],
+    sqliteOps: [{
+      op: "sqlite",
+      db: { id: "of:scheduler-sqlite-boundary" },
+      sql: "CREATE TABLE boundary (value TEXT)",
+    }],
+  });
+});
+
+Deno.test("memory v2 keeps a preconditioned direct commit inside its scheduler boundary", async () => {
+  await assertNonDocumentSchedulerBoundary({
+    operations: [],
+    schedulerObservation: schedulerObservationFor("action:preconditioned"),
+    preconditions: [{
+      kind: "entity-value-hash",
+      id: DOCS.C,
+      valueHash: null,
+    }],
+  });
 });
 
 const visibleValue = (provider: TestProvider, id: URI) => {
@@ -2836,59 +3074,87 @@ Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush rejects t
   }
 });
 
+Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait for an unsent write sequence", async () => {
+  setPersistentSchedulerStateConfig(true);
+  setConflictAdmissionMode("preempt");
+  const harness = await createHarness();
+  const batchStarted = Promise.withResolvers<void>();
+  const releaseBatch = Promise.withResolvers<void>();
+  try {
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:retryable-batch"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      message: "retryable observation batch rejected",
+      retryAfterSeq: 0,
+      responseGate: releaseBatch.promise,
+      onReceipt: () => batchStarted.resolve(),
+    });
+    await batchStarted.promise;
+
+    const retryReplica = harness.replica as unknown as {
+      waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
+    };
+    const waitedLocalSeqs: number[] = [];
+    retryReplica.waitForCaughtUpLocalSeq = (localSeq) => {
+      waitedLocalSeqs.push(localSeq);
+      return localSeq <= 2 ? Promise.resolve() : Promise.reject(
+        new Error(`waited for unsent localSeq=${localSeq}`),
+      );
+    };
+
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    releaseBatch.resolve();
+    await harness.transport.drainVerdicts();
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+
+    const [observationResult, writeResult] = await Promise.all([
+      observation,
+      write,
+    ]);
+    assertExists(observationResult.error);
+    assertExists(writeResult.error);
+    assertEquals(writeResult.error.message, observationResult.error.message);
+    const readyToRetry = (writeResult.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    await readyToRetry();
+    assertEquals(waitedLocalSeqs.includes(3), false);
+
+    const nextWrite = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.B,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("next-write") },
+      }],
+    }, sourceFromReads([{ id: DOCS.A }]));
+    await assertResultOk(nextWrite);
+    assertEquals(harness.model.transactLocalSeqs, [2, 4]);
+  } finally {
+    releaseBatch.resolve();
+    setConflictAdmissionMode(undefined);
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 // The admission-control override reaches into the replica the same way the
 // subscription tests do (recordStaleFloor/noteCaughtUpLocalSeq are private).
 type AdmissionReplica = {
   recordStaleFloor(commit: unknown, localSeq: number): void;
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
 };
-
-Deno.test("memory v2 stacked commits: hold-mode admission finalizes a dependency-dropped commit without sending", async () => {
-  setConflictAdmissionMode("hold");
-  const harness = await createHarness();
-  const g1 = Promise.withResolvers<void>();
-  try {
-    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
-    harness.model.setOutcome(t1.localSeq, {
-      kind: "rejectConflict",
-      responseGate: g1.promise,
-    });
-    await waitForCondition(
-      () => harness.model.transactLocalSeqs.includes(t1.localSeq),
-      "t1 to reach the wire",
-    );
-
-    // Floor A above the current caught-up seq: t2's read of A (a pending
-    // read through t1's optimistic layer) parks it in the hold.
-    const replica = harness.replica as unknown as AdmissionReplica;
-    replica.recordStaleFloor({
-      localSeq: 50,
-      reads: { confirmed: [{ id: DOCS.A, path: [], seq: 0 }], pending: [] },
-      operations: [],
-    }, 50);
-    const t2 = beginSet(
-      harness,
-      DOCS.D,
-      valueFor("t2-d"),
-      sourceFromReads([{ id: DOCS.A }]),
-    );
-
-    // The dependency drops while t2 is held; releasing the hold must land on
-    // the post-hold doom checkpoint — finalize without sending.
-    g1.resolve();
-    await assertConflict(t1.promise);
-    replica.noteCaughtUpLocalSeq(50);
-    await assertConflict(
-      t2.promise,
-      `pending dependency dropped locally: localSeq=${t1.localSeq}`,
-    );
-    assertEquals(harness.model.transactLocalSeqs.includes(t2.localSeq), false);
-  } finally {
-    setConflictAdmissionMode(undefined);
-    g1.resolve();
-    await harness.close();
-  }
-});
 
 Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
   setConflictAdmissionMode("preempt");

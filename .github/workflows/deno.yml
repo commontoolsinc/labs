@@ -1437,11 +1437,35 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      # STAGING_SHELL_API_URL names the toolshed this shell talks to, which is
+      # the host the deploy-rapids job above keeps current. It is a variable
+      # rather than a secret because it is served in plaintext inside the
+      # bundle, and because the checks below can then name it when they fail.
+      - name: 🔎 Require a staging API host
+        env:
+          API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+        run: |
+          # An empty API_URL builds a shell that falls back to its own origin,
+          # which serves static assets and no API. Require a value up front, so
+          # the build never runs with nothing to point at.
+          if [ -z "$API_URL" ]; then
+            echo "::error::API_URL is empty: the STAGING_SHELL_API_URL variable is unset."
+            exit 1
+          fi
+
       - name: 🏗️ Build shell with staging API URL
         working-directory: packages/shell
-        run: deno task production
+        run: |
+          deno task production
+
+          # The build substitutes API_URL into the bundle in place of the
+          # `$API_URL` token. Confirm it landed before anything is uploaded.
+          if ! grep -rqF -e "$API_URL" dist/scripts; then
+            echo "::error::The built shell does not reference $API_URL."
+            exit 1
+          fi
         env:
-          API_URL: ${{ secrets.CLUSTERDUCK_SHELL_API_URL }}
+          API_URL: ${{ vars.STAGING_SHELL_API_URL }}
           COMMIT_SHA: ${{ github.sha }}
 
       - name: 🔑 Authenticate to Google Cloud
@@ -1462,3 +1486,18 @@ jobs:
 
           echo "📦 Staging Shell deployed"
           echo "https://staging.commontools.dev/"
+
+      - name: 🔎 Verify the published shell targets the staging API
+        env:
+          API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+        run: |
+          # Read the scripts back out of the bucket, so this checks the uploaded
+          # objects rather than the local build directory. Going to the bucket
+          # rather than to the site's own URL also bypasses the CDN, which may
+          # still be serving the previous build.
+          gsutil cat "gs://staging-commontools-dev/scripts/*.js" > published-scripts.js
+          if ! grep -qF -e "$API_URL" published-scripts.js; then
+            echo "::error::The published shell does not reference $API_URL."
+            exit 1
+          fi
+          echo "Published shell targets $API_URL"

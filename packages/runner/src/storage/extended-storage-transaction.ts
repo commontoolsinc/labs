@@ -1889,15 +1889,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // that promise always resolves, even if the commit fails, in which case it
     // passes an error message as result. An exception here would be an internal
     // error that should propagate.
-    promise.then((result) => {
-      this.runCommitCallbacks(result);
-    }).catch((error) => {
-      logger.error(
-        "storage-error",
-        "Transaction commit promise rejected:",
-        error,
-      );
-    });
+    promise.then(
+      (result) => {
+        this.runCommitCallbacks(result);
+      },
+      (reason) => {
+        const error: CommitError = {
+          name: "StorageTransactionAborted",
+          message: "Transaction commit promise rejected",
+          reason,
+        };
+        this.statusOverride = {
+          status: "error",
+          journal: this.tx.journal,
+          error,
+        };
+        this.clearPostCommitOutbox();
+        this.runCommitCallbacks({ error });
+        logger.error(
+          "storage-error",
+          "Transaction commit promise rejected:",
+          reason,
+        );
+      },
+    );
 
     const result = await promise;
     if (result.ok && !readOnly) {

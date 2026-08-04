@@ -1,7 +1,15 @@
-// Retained heap while a list projects a window that moves back and forth.
+// Retained heap while a list projects a window over a long list.
 //
 //   deno run -A --v8-flags=--expose-gc \
-//     packages/runner/test/window-retention-probe.ts [shape] [moves]
+//     packages/runner/test/window-retention-probe.ts [shape] [moves] \
+//     [rowBytes] [walk]
+//
+// Two movement patterns, selected by the fourth argument:
+//   toggle (default) — the window alternates between two positions, so every
+//                      move re-shows rows the run has already shown
+//   walk             — the window steps forward, so every move shows a
+//                      position the run has never shown, the way a reader
+//                      pages forward through a long list
 //
 // Shapes select what the projection does with each element:
 //   inline   — elements are plain values, the element pattern returns fields
@@ -9,6 +17,9 @@
 //   cells    — elements are stable child cells, projected the same way
 //   opaque   — elements are stable child cells, and the nested pattern takes
 //              one of them as an opaque cell input
+//   index    — rows live in their own documents, linked from an index
+//              document, each carrying rowBytes of filler and an opaque
+//              manifest the row does not read
 //
 // The heap is reported after a forced collection, so the figures are reachable
 // memory rather than uncollected garbage.
@@ -154,8 +165,10 @@ export default pattern<
 
 const shape = Deno.args[0] ?? "child";
 const moves = Number(Deno.args[1] ?? 10);
-const rowCount = WINDOW_SIZE * 4;
 const rowBytes = Number(Deno.args[2] ?? 100);
+const walk = Deno.args[3] === "walk";
+// A walk needs a position per move, plus the two the warm-up visits.
+const rowCount = walk ? WINDOW_SIZE * (moves + 2) : WINDOW_SIZE * 4;
 const source = PROGRAMS[shape];
 if (source === undefined) {
   throw new Error(`unknown shape ${shape}; try ${Object.keys(PROGRAMS)}`);
@@ -251,13 +264,18 @@ try {
   await moveWindow(0);
 
   const baseline = heapMb();
-  console.log(`shape=${shape} rows=${rowCount} window=${WINDOW_SIZE}`);
+  console.log(
+    `shape=${shape} rows=${rowCount} window=${WINDOW_SIZE} ` +
+      `moves=${moves} ${walk ? "walk" : "toggle"}`,
+  );
   console.log(
     `after the window has visited both positions: ${baseline.toFixed(1)} MB`,
   );
   for (let move = 0; move < moves; move++) {
-    await moveWindow(move % 2 === 0 ? WINDOW_SIZE : 0);
-    if (move % 2 === 1) {
+    await moveWindow(
+      walk ? (move + 2) * WINDOW_SIZE : move % 2 === 0 ? WINDOW_SIZE : 0,
+    );
+    if (walk || move % 2 === 1) {
       const heap = heapMb();
       console.log(
         `after ${move + 1} more moves: ${heap.toFixed(1)} MB ` +

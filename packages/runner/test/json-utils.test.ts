@@ -4,12 +4,16 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 import {
   createJsonSchema,
   moduleToEncodableForm,
-  toJSONWithAliasBindings,
+  withAliasBindings,
 } from "../src/builder/json-utils.ts";
 import {
   type JSONSchema,
@@ -678,7 +682,7 @@ describe("json-utils", () => {
     });
   });
 
-  describe("toJSONWithAliasBindings", () => {
+  describe("withAliasBindings", () => {
     it("should serialize shared object references correctly", () => {
       // Regression test: shared style objects used across siblings in .map()
       // should all serialize with full data, not {} for the 3rd+ occurrence.
@@ -700,7 +704,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithAliasBindings(tree as any) as any;
+      const result = withAliasBindings(tree as any) as any;
 
       // All 5 children should have the full style object
       for (let i = 0; i < 5; i++) {
@@ -716,7 +720,7 @@ describe("json-utils", () => {
       const circular: any = { name: "root", child: {} };
       circular.child.parent = circular; // true circular reference
 
-      const result = toJSONWithAliasBindings(circular as any) as any;
+      const result = withAliasBindings(circular as any) as any;
 
       // The root should serialize, but the circular back-reference should be {}
       expect(result.name).toEqual("root");
@@ -733,7 +737,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithAliasBindings(tree as any) as any;
+      const result = withAliasBindings(tree as any) as any;
 
       expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
       expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
@@ -750,7 +754,7 @@ describe("json-utils", () => {
         path: [],
       });
 
-      const result = toJSONWithAliasBindings(
+      const result = withAliasBindings(
         cellWithFalseSchema as any,
         (cell) => {
           const { schema, scope } = cell.export();
@@ -786,9 +790,112 @@ describe("json-utils", () => {
       // pass through unchanged.
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
 
-      const result = toJSONWithAliasBindings({ payload: bytes } as any) as any;
+      const result = withAliasBindings({ payload: bytes } as any) as any;
 
       expect(result.payload).toBe(bytes);
+    });
+
+    it("converts a native to its canonical fabric form", () => {
+      // A `Uint8Array` is NOT a `FabricValue`. Left to the `for...in` copy it
+      // is rebuilt by property name into `{"0":7,"1":9}` -- which IS an inert
+      // plain object and so passes `isFabricValue()`. That is the hazard: not
+      // a lost value, but a legal one meaning something else, stored with no
+      // trace of what it was. A `Date` goes the same way, to `{}`.
+      const fromBytes = withAliasBindings(new Uint8Array([7, 9]) as any) as any;
+      expect(fromBytes).toBeInstanceOf(FabricBytes);
+      expect([...fromBytes.slice()]).toEqual([7, 9]);
+
+      const fromDate = withAliasBindings(new Date(0) as any) as any;
+      expect(fromDate).toBeInstanceOf(FabricEpochNsec);
+
+      const nested = withAliasBindings(
+        { v: new Uint8Array([4, 5]) } as any,
+      ) as any;
+      expect(nested.v).toBeInstanceOf(FabricBytes);
+      expect([...nested.v.slice()]).toEqual([4, 5]);
+    });
+
+    it("refuses a FabricInstance rather than flattening it", () => {
+      // A `FabricInstance` is a CONTAINER reached by its codec contents, not by
+      // property name. The `for...in` copy would rebuild it from zero
+      // enumerable own-props as `{}`, so it refuses instead -- the same
+      // disposition the sibling binding walk uses.
+      const err = FabricError.fromNativeError(new Error("boom"));
+      expect(() => withAliasBindings(err as any)).toThrow("FabricError");
+      expect(() => withAliasBindings({ e: err } as any)).toThrow("FabricError");
+
+      // ...including one the conversion itself mints, from a native `Error`.
+      expect(() => withAliasBindings({ e: new Error("x") } as any)).toThrow(
+        "FabricError",
+      );
+    });
+
+    it("keeps shared and circular structure intact around a converted native", () => {
+      // The conversion can hand back a DIFFERENT object than it was given (it
+      // clones in order to freeze), and this walk keys circularity on object
+      // identity. So conversion and the `seen` bookkeeping have to agree, or a
+      // cycle stops being detected and recurses until the stack dies. This
+      // pins the two working together rather than each alone.
+      const shared = { tag: "s" };
+      const tree: Record<string, unknown> = {
+        a: shared,
+        b: shared,
+        blob: new Uint8Array([1, 2]),
+      };
+      tree.self = tree;
+
+      const out = withAliasBindings(tree as any) as any;
+
+      // the native converted...
+      expect(out.blob).toBeInstanceOf(FabricBytes);
+      expect([...out.blob.slice()]).toEqual([1, 2]);
+      // ...a shared (non-circular) reference still serializes at each site...
+      expect(out.a).toEqual({ tag: "s" });
+      expect(out.b).toEqual({ tag: "s" });
+      // ...and the cycle is still caught rather than followed.
+      expect(out.self).toEqual({});
+    });
+
+    it("rejects a plain object that is not inert, rather than laundering it", () => {
+      // These are the cases that separate `isInertPlainObject()` from a plain
+      // `isPlainObject()` at the routing test above. Were they excluded from
+      // the conversion, the `for...in` rebuild would silently drop the symbol
+      // key, EVALUATE the accessor into a data property, and reparent the
+      // null-prototype object -- each producing a plain object that satisfies
+      // `isFabricValue()` while meaning something else, with nothing
+      // downstream able to notice. They must be refused here.
+      const sym = Symbol("s");
+      expect(() => withAliasBindings({ a: 1, [sym]: "x" } as any)).toThrow(
+        "Not representable",
+      );
+      expect(() =>
+        withAliasBindings({
+          a: 1,
+          get live() {
+            return 42;
+          },
+        } as any)
+      ).toThrow("Not representable");
+      expect(() =>
+        withAliasBindings(
+          Object.assign(Object.create(null), { a: 1 }) as any,
+        )
+      ).toThrow("Not representable");
+
+      // ...while an ordinary inert plain object still walks through untouched.
+      expect(withAliasBindings({ a: 1 } as any)).toEqual({ a: 1 });
+    });
+
+    it("leaves ordinary containers alone", () => {
+      // The conversion above must not reach an inert plain object or an array;
+      // those are already fabric values and are walked, not converted.
+      const obj = withAliasBindings({ a: 1, b: "x" } as any) as any;
+      expect(obj).toEqual({ a: 1, b: "x" });
+      expect(obj.constructor).toBe(Object);
+
+      const arr = withAliasBindings([1, "x"] as any) as any;
+      expect(arr).toEqual([1, "x"]);
+      expect(Array.isArray(arr)).toBe(true);
     });
   });
 });

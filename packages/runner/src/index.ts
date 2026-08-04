@@ -1,4 +1,5 @@
 export { Runtime } from "./runtime.ts";
+export { normalizeSpaceHost } from "./space-host.ts";
 export type {
   ConsoleHandler,
   ConsoleHandlerOutput,
@@ -32,6 +33,7 @@ export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
 export type { NormalizedLink } from "./link-types.ts";
+export { encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export {
   createRef,
