@@ -1,3 +1,5 @@
+import { isPlainObject } from "@commonfabric/utils/types";
+
 /**
  * Reads the method by which a value produces its encodable form -- the form it
  * takes on the way to being encoded, which reaches storage without ever being
@@ -79,7 +81,7 @@ type OnCopy = (copy: unknown, original: unknown) => void;
  *
  * Keying on that name is what makes this walk's subject BUILDER ARTIFACTS
  * specifically, rather than everything the data model's duck-typed `toJSON`
- * protocol would honour. The narrower question is the intended one: a plain
+ * protocol would honor. The narrower question is the intended one: a plain
  * object that answers `toJSON` and was not built here is the conversion's to
  * interpret, and is left to it.
  *
@@ -138,16 +140,16 @@ function replace(
   // An array is answered by the array rule whatever it carries, so an array
   // is only ever descended into.
   const isArray = Array.isArray(value);
-  if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) {
+  if (!isArray && !isPlainObject(value, false)) {
     // Anything else -- a `Cell`, a `FabricInstance`, a `Date` -- is the
     // conversion's to interpret, and carries no builder artifact.
     //
-    // Deliberately NOT `isPlainObject()`, which also admits a null-prototype
-    // object. Such an object is not the walk's to rewrite; the conversion
-    // decides it. (It does not REFUSE it: `native-type-tags.ts` answers a
-    // null-prototype object `Object`, and upgrades it to `HasToJSON` when it
-    // carries a callable one.) The question here is narrower than that
-    // predicate's.
+    // A null-prototype object is excluded too -- hence the `false` argument
+    // to `isPlainObject()`. It is not a fabric record, so it is not the
+    // walk's to rewrite. That is not the same as the conversion refusing one:
+    // `native-type-tags.ts` answers it `Object`, and upgrades it to
+    // `HasToJSON` when it carries a callable one. Whether to accept it is the
+    // conversion's question, asked of the value as it stands.
     return value;
   }
 

@@ -1686,13 +1686,20 @@ export interface Module extends FabricExecPlainObject {
 }
 
 /**
- * The member `JSON.stringify()` consults. A builder FACTORY keeps it, because
- * a factory is what pattern source holds, and stringifying one is an idiom
- * that source uses -- there the name says exactly what it means. What it
- * answers is the same form `toEncodableForm` gives.
+ * The member `JSON.stringify()` consults -- that name and no other. A builder
+ * artifact carries it, module and factory alike, delegating to
+ * `toEncodableForm`.
  *
- * A module does not carry it: a module is internal, nothing stringifies one,
- * and for it the name would claim a relationship to JSON that does not exist.
+ * A factory because a factory is what pattern source holds, and stringifying
+ * one is an idiom that source uses. A module because `JSON.stringify` reaches
+ * one THROUGH A GRAPH: an internal pattern graph holds live modules, whose
+ * `implementation` is a function, and `JSON.stringify` drops a
+ * function-valued member without a word.
+ *
+ * Its return stays `unknown`, unlike its sibling below: this is a public
+ * protocol whose contract permits any return, and outside values (notably a
+ * `Cell`, which answers with a link or `null`) match this type without being
+ * builder artifacts at all.
  */
 export type toJSON = {
   toJSON(): unknown;
@@ -1703,9 +1710,14 @@ export type toJSON = {
  * encoded. Distinct from `toJSON` in saying nothing about JSON: what it
  * answers is a value the data model can represent, which reaches storage
  * without being stringified on the way.
+ *
+ * Always a RECORD. An artifact's encodable form is built by
+ * `moduleToEncodableForm` or `patternToJSON`, and both answer a record by
+ * construction -- there is no artifact whose serialized form is a primitive,
+ * an array, or `null`.
  */
 export type toEncodableForm = {
-  toEncodableForm(): unknown;
+  toEncodableForm(): Record<string, unknown>;
 };
 
 /**

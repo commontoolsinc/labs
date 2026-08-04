@@ -152,14 +152,29 @@ export function isFiniteNumber(value: unknown): boolean {
  * now, which is not the same as any statement about its type.
  *
  * @param value - The value to check
+ * @param allowNullPrototype - Whether a null-prototype object counts. Default
+ *   `true`, the looser shape question. Pass `false` to ask the narrower one --
+ *   "is this rooted at `Object.prototype`?" -- which is what a caller wants
+ *   when a null-prototype object is not merely a different shape but is
+ *   something it must not treat as a record.
  * @returns True if the value is a plain object
  */
-export function isPlainObject(value: ReadonlyRecord): boolean;
-export function isPlainObject(value: unknown): value is ReadonlyRecord;
-export function isPlainObject(value: unknown): boolean {
+export function isPlainObject(
+  value: ReadonlyRecord,
+  allowNullPrototype?: boolean,
+): boolean;
+export function isPlainObject(
+  value: unknown,
+  allowNullPrototype?: boolean,
+): value is ReadonlyRecord;
+export function isPlainObject(
+  value: unknown,
+  allowNullPrototype = true,
+): boolean {
   if (value === null || typeof value !== "object") return false;
   const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+  if (proto === Object.prototype) return true;
+  return allowNullPrototype && proto === null;
 }
 
 /**
