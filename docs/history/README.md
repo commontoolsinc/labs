@@ -87,6 +87,9 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
+  — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
+  pattern, August 2026.
 - [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
   — active-repository syntax inventory and `cf view` support snapshot, July
   2026.

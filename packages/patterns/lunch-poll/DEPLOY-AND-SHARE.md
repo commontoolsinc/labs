@@ -32,7 +32,7 @@ now an ordinary `PerSpace` cell — can all be copied to another piece via the C
 ## The live pieces
 
 Two hosts run the poll, at different paces. **These are deployment pointers, not
-stable identifiers — current as of 2026-08-03.** A piece is tied to one
+stable identifiers — current as of 2026-08-04.** A piece is tied to one
 space/server and can be reset, wedged, or lost; if one 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
@@ -60,15 +60,21 @@ piece:  fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
 url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
 ```
 
-Two things make this piece unlike the `rapids` one:
+Its deployed source is the mainline pattern, but this host is redeployed rarely,
+so expect it to lag this checkout. `cf piece inspect` reports the source ref it
+is actually on. Two things still make this piece unlike the `rapids` one:
 
-- **Its deployed source is a different lineage from this checkout.** It defines
-  `checkRestaurantHours`, `availabilityRefresh`, `availabilityLastRequestedAt`
-  and `restaurantSearchContext` inputs that the source here does not, and it
-  lacks `participantProfiles`. Deploying this checkout's `main.tsx` over it
-  would strand that restaurant-hours feature. Combined with the populated space,
-  that makes any update here rehearsal-grade — see
+- **Its space holds real data, so an update here is rehearsal-grade.** Rehearse
+  against a clone before any `setsrc` the compatibility checker rejects — see
   [`docs/development/space-clone-rehearsal.md`](../../../docs/development/space-clone-rehearsal.md).
+  Estuary serves production, so its whole-space dump endpoint is off and the
+  snapshot has to be taken on the host itself. The space DID is
+  `did:key:z6MkhAKxuP8cXuDNjyUJ2xgmjjgENQGm7zzo5Tg3V7vyYnzr`, and reaching the
+  host needs a key in the infra repository's `ssh_authorized_keys`.
+
+  ```bash
+  sqlite3 <store>/engine-v3/engine-v3/<did>.sqlite "VACUUM INTO '<destination>'"
+  ```
 - **Its space cannot be enumerated from a current checkout.** The stored
   home/registry pattern imports `safeDateNow`, which this API no longer exports,
   so `cf piece ls -s team-lunch` fails to compile it and exits non-zero with an
@@ -162,6 +168,17 @@ can shift the causal chain and orphan old data. Don't refactor the input
 interface casually against a piece you care about.
 
 ## Option B — copy the state into your own piece
+
+> **Note:** the copy loop below writes with `cf piece set --input`, which
+> validates the whole input object on every write. Every field fails on this
+> pattern with
+> `updated input does not match its schema: myName: value does not
+> match type string`,
+> including a write to `myName` itself. The pattern's `myName` is `PerUser`, and
+> the read path materializes it as `""` while the write path's validation does
+> not see a string there. Joining first does not change this. Seed a piece
+> through the pattern's own handlers instead — `joinAs`, then `addOption` for
+> each option.
 
 To get your **own** instance seeded with the current data (e.g. to experiment
 without touching the shared poll):
