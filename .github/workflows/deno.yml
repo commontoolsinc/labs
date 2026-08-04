@@ -56,6 +56,9 @@ jobs:
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
 
+      - name: 🩹 Check for unresolved merge-conflict markers
+        run: deno task check-conflict-markers
+
       - name: 🔎 Check for unused import map dependencies
         run: deno task check-unused-deps
 
