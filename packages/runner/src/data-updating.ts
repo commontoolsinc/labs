@@ -17,6 +17,7 @@ import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   CellImpl,
   isCell,
@@ -397,11 +398,17 @@ export function diffAndUpdate(
       ...allowMutableTransactionRead,
     },
   };
+  // A builder artifact -- a module, a handler, a pattern, the factory carrying
+  // a module's members -- has no fabric representation, so the runtime replaces
+  // it with its encodable form before the value reaches the data model. This is
+  // the raw write path, reached by `Cell.set()` and the collection operations;
+  // the pattern-driven paths (a run's result, its argument) do the same at
+  // their own boundaries.
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
-    newValue,
+    flattenBuilderArtifacts(newValue),
     context,
     readOptions,
     { seen: new Map(), nextAnchorId: anchorIds },

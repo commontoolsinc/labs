@@ -1,7 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -81,7 +84,7 @@ describe("result projection", () => {
       ({
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema: undefined,
-        result: { tag, when: { toJSON: () => "2020-01-01" } },
+        result: { tag, when: new Date("2020-01-01T00:00:00.000Z") },
         nodes: [],
       }) as unknown as Pattern;
 
@@ -107,7 +110,8 @@ describe("result projection", () => {
       const raw = runtime.getCell(space, "native-result", undefined)
         .getRaw() as { tag: number; when: unknown };
       expect(raw.tag).toBe(2);
-      expect(raw.when).toBe("2020-01-01");
+      expect(raw.when).toBeInstanceOf(FabricEpochNsec);
+      expect((raw.when as FabricEpochNsec).value).toBe(1577836800000000000n);
     } finally {
       await runtime.dispose();
       await storage.close();
