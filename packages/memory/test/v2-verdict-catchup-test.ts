@@ -638,6 +638,70 @@ Deno.test("memory v2 server: a throwing evaluation restores the consumed marker 
   );
 });
 
+Deno.test("memory v2 server: transact against a registry-unknown session fails closed", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-unknown-session",
+  });
+  const { server, space } = context;
+
+  // The registry-miss guard inside transact itself. A connection can hold
+  // a local handle for a session the registry has dropped (ACL
+  // self-removal — whose deferred revocation now also cleans up the local
+  // handle, which is why this guard needs its own pin).
+  const response = await server.transact({
+    type: "transact",
+    requestId: "unknown-session-tx",
+    space,
+    sessionId: "session:not-in-registry",
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "nobody" } },
+      }],
+    },
+  });
+  assertEquals(response.error?.name, "SessionError");
+  assertEquals(response.error?.message, "Unknown session for space");
+});
+
+Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recovery to the requeue", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-scheduled-flush-failure",
+  });
+  const { server, space, committerMessages } = context;
+
+  // The timer-driven wrapper has no caller to surface a failure to: it
+  // must swallow (warn) rather than leak an unhandled rejection, and rely
+  // on refreshLoop's requeue for recovery.
+  const originalFlush = server.flushSessions.bind(server);
+  let failed = false;
+  (server as unknown as { flushSessions: typeof originalFlush })
+    .flushSessions = () => {
+      if (!failed) {
+        failed = true;
+        return Promise.reject(new Error("synthetic scheduled-flush failure"));
+      }
+      return originalFlush();
+    };
+  await (server as unknown as { flushScheduledSessions(): Promise<void> })
+    .flushScheduledSessions();
+  assertEquals(committerMessages.length, 0);
+
+  // The batch was never consumed (the stub rejected before the pass); a
+  // real flush delivers the parked novelty.
+  await originalFlush([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  assertEquals(
+    (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
+    ["of:doc:b"],
+  );
+});
+
 Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
