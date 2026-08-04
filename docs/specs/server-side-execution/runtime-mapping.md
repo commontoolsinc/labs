@@ -83,7 +83,7 @@ Status legend:
 | 35 | Resumed-start machinery: per-doc rehydration snapshots, sync-holds, rehydration barrier | `runner.ts:3216-3395`, `scheduler/facade.ts:680-803`, barrier `scheduler/work-oracle.ts:79-86` | serving-loop §3b, §6 | CHANGED |
 | 36 | Runtime teardown ordering: settle pointer commits, updater dispose, scheduler dispose | `runtime.ts:1343-1424`, `runner.ts:3900-3924` | README §4 (teardown O(1) budget) | COVERED |
 
-### 1e. Results that are patterns (charm creation from computation)
+### 1e. Results that are patterns (piece creation from computation)
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
