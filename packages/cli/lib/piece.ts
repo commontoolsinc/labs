@@ -36,6 +36,7 @@ import {
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
+  type PatternCompatibilityReport,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -1281,6 +1282,40 @@ export async function setPiecePattern(
         ? { dangerouslyAllowIncompatibleSchema: true }
         : {}),
     },
+  );
+}
+
+/**
+ * Would `setPiecePattern` be accepted for this piece? Applies nothing.
+ *
+ * Same shape as `setPiecePattern` up to the point of the swap, so the verdict
+ * is about the source the user would actually apply — including its resolved
+ * imports and pinned program — rather than an approximation of it.
+ */
+export async function checkPiecePattern(
+  config: PieceConfig,
+  entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<PatternCompatibilityReport> {
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  return await piece.checkPattern(
+    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+      manager,
+      entry,
+    ),
   );
 }
 

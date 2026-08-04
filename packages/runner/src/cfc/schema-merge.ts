@@ -602,3 +602,49 @@ export const mergeCfcSchemaEnvelopes = (
   assertNoDivergentIfcBranches(candidate);
   return internSchema(mergeSchemaNode(existing, candidate, "", [], options));
 };
+
+/** Why a stored envelope and a candidate envelope cannot be merged. */
+export interface CfcSchemaMergeIssue {
+  /** The merge's own human-readable reason, verbatim. */
+  message: string;
+  /**
+   * True when the rejection is the additive-required migration class — an old
+   * document predating a now-required field that declares no default. This is
+   * the class the runnability backstop rolls forward on
+   * (see {@link CfcSchemaMigrationError}); everything else is a hard
+   * incompatibility that no roll-forward recovers.
+   */
+  migration: boolean;
+}
+
+/**
+ * Would {@link mergeCfcSchemaEnvelopes} accept this candidate over this stored
+ * envelope? `undefined` means yes.
+ *
+ * Why this exists: replacing a live piece's pattern source used to discover an
+ * unmergeable envelope only by attempting the swap and taking a low-level
+ * rejection from the setup commit. That is the failure `cf piece setsrc
+ * --check` is supposed to predict, so the preflight drives THIS seam — the
+ * same merge the commit runs, called in dry-run — rather than a second
+ * implementation of the rules that would drift out of agreement with
+ * enforcement and start green-lighting swaps the deploy then refuses.
+ *
+ * Pure: no transaction, no writes, because the merge itself is.
+ */
+export const cfcSchemaMergeIssue = (
+  existing: JSONSchema,
+  candidate: JSONSchema,
+): CfcSchemaMergeIssue | undefined => {
+  try {
+    mergeCfcSchemaEnvelopes(existing, candidate);
+    return undefined;
+  } catch (error) {
+    if (error instanceof CfcSchemaMigrationError) {
+      return { message: error.message, migration: true };
+    }
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      migration: false,
+    };
+  }
+};
