@@ -13,6 +13,22 @@ Common Fabric is a nascent distributed computing platform that provides both a
 runtime and storage layer. The design allows instrumentation of all information
 flow in the system, enabling safe & private collaboration at scale.
 
+All networked software today runs on one rule: hand your data to the software,
+and trust the software. This runtime inverts it. The software is untrusted, and
+safety attaches to the data — every datum carries its own policies, anything
+derived from it carries them too, and code that cannot prove it honors those
+policies does not compile.
+
+Three ways in, depending on how much you want:
+
+- [**Why**](docs/why.md) — what that rule has cost, and why it is worth
+  replacing. Prose, five minutes.
+- [**How it works**](docs/how.md) — the same argument as code: a real pattern,
+  what the compiler emits for it, where the runtime checks the result, and what
+  is not built yet. Every snippet is verbatim from a file in this repository.
+- [**The long form**](docs/inverting-the-physics-of-trust.md) — the physics,
+  the hardware, and the objections.
+
 ### Core Concepts
 
 **Patterns** are reactive programs that can be linked together to create data
