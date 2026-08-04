@@ -335,10 +335,14 @@ Two accommodations exist for adopted fixtures, both in the harness:
 The capture side is deliberately not a committed script: it compiles only
 against the old revision's APIs, so it is written per capture from the
 procedure in the history record for the first one
-(`../history/two-toolchain-vintage-rehearsal.md`). An adopted fixture's
-identity predates today's source by construction, so it reports as *changed*
-on every run, like a served route — the cost of a fixture that exercises the
-load path nothing regenerable can reach.
+(`../history/two-toolchain-vintage-rehearsal.md`). An adopted fixture is
+identity-compared like any repo-path target — it is not the served-route
+accounting case, which materializes unconditionally and is counted apart from
+`changed` — so it counts as *changed* and materializes on every run for as
+long as its recorded identity differs from today's, which for a
+filesystem-resolved old-toolchain capture is every run in practice. That
+standing count is the cost of a fixture that exercises the load path nothing
+regenerable can reach.
 
 ## Limits
 

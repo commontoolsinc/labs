@@ -468,8 +468,9 @@ export async function replayVintage(
         ...where,
         detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
           (carried.has(entry.space)
-            ? `has no pattern setup marker at ${entry.cellId} in ` +
-              `${entry.space}, so this fixture does not hold that root`
+            ? `carries neither a pattern identity nor a setup marker at ` +
+              `${entry.cellId} in ${entry.space}, so this fixture does not ` +
+              `hold that root`
             : `was materialized in ${entry.space}, which this fixture does ` +
               `not carry (it holds ${[...carried].sort().join(", ")})`) +
           ` — it was recorded but NOT validated. If the space is one the ` +

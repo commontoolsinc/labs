@@ -1207,13 +1207,16 @@ export function isPresentRootValue(value: unknown): boolean {
  * there. Measured: with a companion store truncated to zero bytes, a break that
  * the gate is built to catch replays with no failures at all.
  *
- * The evidence is the SETUP MARKER, not a value. The runner stamps
- * `patternSetupIdentity` under the same condition that reports an instantiation
- * to the capture observer (`runner.ts` — deliberately the same, so the store
- * cannot label roots the observer missed or vice versa), so every manifest
- * entry's cell carries one by construction. A value check would instead depend
- * on the pattern's result shape, and a root whose result is legitimately `{}`
- * would read as missing.
+ * The evidence is a RUNNER-WRITTEN MARKER, not a value. A value check would
+ * depend on the pattern's result shape, and a root whose result is
+ * legitimately `{}` would read as missing. For a NATIVE capture the marker is
+ * `patternSetupIdentity`: the runner stamps it under the same condition that
+ * reports an instantiation to the capture observer (`runner.ts` —
+ * deliberately the same, so the store cannot label roots the observer missed
+ * or vice versa), so every observer-recorded entry's cell carries one by
+ * construction. An ADOPTED fixture's manifest is written by
+ * `tasks/vintage-adopt.ts` instead of the observer, and its store may predate
+ * the setup marker entirely — its roots carry only `patternIdentity`.
  *
  * PRESENCE only — this does not check that the marker names the entry's own
  * identity and symbol. Deliberately: a root set up twice under different
@@ -1221,14 +1224,14 @@ export function isPresentRootValue(value: unknown): boolean {
  * reachable from a legitimate capture anyway, since the observer and the stamp
  * describe the same `resultCell`.
  *
- * EITHER marker satisfies presence. `patternSetupIdentity` (#4915) postdates
- * spaces the runner still rolls forward in production, whose roots carry only
- * `patternIdentity` — a fixture captured by an old toolchain (CT-1941) holds
- * exactly that shape, and refusing it would exclude the vintages this tier
- * exists to replay. The older marker is a weaker claim (pattern loaded, not
- * setup completed), but for THIS question — "was something really captured
- * here, or is this a valid empty database?" — either stamp is evidence only
- * the runner writes.
+ * EITHER marker satisfies presence, therefore. `patternSetupIdentity` (#4915)
+ * postdates spaces the runner still rolls forward in production, whose roots
+ * carry only `patternIdentity` — a fixture captured by an old toolchain
+ * (CT-1941) holds exactly that shape, and refusing it would exclude the
+ * vintages this tier exists to replay. The older marker is a weaker claim
+ * (pattern loaded, not setup completed), but for THIS question — "was
+ * something really captured here, or is this a valid empty database?" —
+ * either stamp is evidence only the runner writes.
  */
 export async function vintageHoldsRoot(
   vintage: VintageRuntime,
