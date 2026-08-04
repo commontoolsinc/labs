@@ -27,10 +27,11 @@ explores SCHEDULES. The model does — small configurations, exhaustive
 interleaving with fault injection — and it runs unattended (`deno task test`),
 so every future ruling batch can be re-verified mechanically.
 
-One test is a **characterization of open ledger item FP1**
-(`field-provenance.md` §6): it asserts the lost-append crash trace IS reachable.
-When the FP1 ruling lands a regeneration mechanism, model the mechanism and flip
-that test to assert the trace set is empty.
+One test began as a **characterization of ledger item FP1** (the lost-append
+crash trace, asserted reachable). FP1 RULED 2026-08-03 — durable append rows in
+the wave's own transaction, deleted on delivery-ack — and the test now asserts
+CLOSURE: no schedule loses an append, delivery stays exactly-once across
+crashes, and recovery re-sends pending rows.
 
 Deliberately NOT modeled (extend when a question needs them):
 scheduler/dirtiness internals, the basis index, CFC label ladders, scope

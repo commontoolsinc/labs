@@ -119,6 +119,10 @@ export interface SpaceState {
    * against (serving-loop §3d). */
   docHeads: Record<string, number>;
   derivations: DerivationSpec[];
+  /** FP1 (RULED): pending cross-space appends as DURABLE rows,
+   * written inside the wave's own transaction and deleted on
+   * delivery-ack — they survive a crash. */
+  outboundAppends: OutboxEntry[];
 }
 
 export interface OutboxEntry {
@@ -132,9 +136,12 @@ export interface OutboxEntry {
 
 export interface ServerState {
   alive: boolean;
-  /** process-local (serving-loop §5): a crash LOSES it — FP1. */
+  /** the EFFECT half of the outbox stays process-local (serving-loop
+   * §5 as ruled — crash recovery re-misses from memo keys); appends
+   * no longer live here (FP1 ruled: durable rows on SpaceState). */
   outbox: OutboxEntry[];
-  /** audit trail of entries destroyed by crashes (model-only). */
+  /** audit trail of append entries destroyed by crashes — with FP1
+   * ruled (durable rows) this MUST stay empty on every schedule. */
   lostAppends: OutboxEntry[];
   /** bumped per genuinely-new process (DR1: holder's process part). */
   processGen: number;
@@ -254,6 +261,7 @@ export function makeWorld(opts: {
       tenure: 1,
       docHeads: {},
       derivations: spec.derivations ?? [],
+      outboundAppends: [],
     };
     servers[id] = {
       alive: true,
@@ -667,7 +675,9 @@ function commitWave(w: World, space: SpaceId): void {
         acked: false,
       });
     }
-    srv.outbox.push(...c.cascadesCross.map((x) => clone(x)));
+    // FP1 (RULED): append entries are DURABLE rows written inside
+    // this very wave transaction — deleted only on delivery-ack
+    sp.outboundAppends.push(...c.cascadesCross.map((x) => clone(x)));
   }
   // W advances only at TRUE quiescence — an exhausted wave's commit
   // carries no watermark movement, and a requeued event holds W back
@@ -802,16 +812,21 @@ export function apply(w0: World, step: Step): World {
       break;
     }
     case "deliver": {
+      // FP1 (RULED): delivery reads the DURABLE rows; the shift is
+      // the delete-on-delivery-ack (a queue that empties)
       const srv = w.servers[step.space];
-      if (!srv.alive || srv.outbox.length === 0) break;
-      const entry = srv.outbox.shift()!;
+      const sp = w.spaces[step.space];
+      if (!srv.alive || sp.outboundAppends.length === 0) break;
+      const entry = sp.outboundAppends.shift()!;
       admitDelegatedAppend(w, entry);
       break;
     }
     case "crash": {
       const srv = w.servers[step.space];
       srv.alive = false;
-      srv.lostAppends.push(...srv.outbox); // process-local: LOST (FP1)
+      // FP1 (RULED): durable append rows SURVIVE — only the
+      // process-local effect half and the in-memory wave die
+      srv.lostAppends.push(...srv.outbox);
       srv.outbox = [];
       srv.pendingWave = null; // in-memory wave dies with the process
       break;

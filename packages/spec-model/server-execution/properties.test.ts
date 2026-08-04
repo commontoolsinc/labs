@@ -218,7 +218,7 @@ Deno.test("C2: identity crosses the boundary (LT2); session write lands in B und
   }
 });
 
-Deno.test("C2-FP1 (CHARACTERIZATION of the open gap): a crash between wave commit and delivery loses the append forever", () => {
+Deno.test("C2-FP1 (CLOSED — ruled 2026-08-03): durable append rows survive every crash; no schedule loses an append; delivery stays exactly-once", () => {
   const w0 = apply(c2World(), {
     kind: "fire",
     session: S1,
@@ -234,31 +234,43 @@ Deno.test("C2-FP1 (CHARACTERIZATION of the open gap): a crash between wave commi
   ];
   const { all } = explore(w0, menu, { maxSteps: 8 });
   noViolations(all);
-  // The gap: a REACHABLE state where the append is lost, B never saw
-  // it, and nothing can ever regenerate it — A's event is already
-  // consequenced (no wave re-emits), the outbox entry is gone, and
-  // no transition in the menu can recreate it. "Forever" is
-  // structural, so quantify over all reachable states, not terminal
-  // ones (the crash/recover toggle means lost states never
-  // terminate).
-  const lostForever = all.filter((w) =>
-    w.servers.A.lostAppends.length > 0 &&
-    w.spaces.B.streams.t1.entries.length === 0 &&
-    w.servers.A.outbox.length === 0 &&
-    w.spaces.A.streams.s1.entries.every((e) => e.consequenced)
-  );
-  assert(
-    lostForever.length > 0,
-    "FP1 is real: the lost-append state is reachable. When the FP1 " +
-      "ruling lands a regeneration mechanism, model it and flip this " +
-      "test to assert the set is EMPTY.",
-  );
-  // And on crash-free schedules, delivery is exactly-once:
+  // The FORMER gap (this test was its characterization): a crash
+  // between wave commit and delivery destroyed the process-local
+  // append. RULED closed: appends are durable rows in the wave's
+  // own transaction, deleted on delivery-ack. Now: NO reachable
+  // state has a lost append, and every state where A's event is
+  // consequenced still has the append either pending (durable) or
+  // delivered.
   for (const w of all) {
-    if (w.servers.A.lostAppends.length === 0) {
-      assert(w.spaces.B.streams.t1.entries.length <= 1, "never duplicated");
+    assertEquals(
+      w.servers.A.lostAppends.length,
+      0,
+      `an append was lost in trace ${w.trace.join(" ")}`,
+    );
+    if (
+      w.spaces.A.streams.s1.entries.length > 0 &&
+      w.spaces.A.streams.s1.entries.every((e) => e.consequenced)
+    ) {
+      assert(
+        w.spaces.A.outboundAppends.length > 0 ||
+          w.spaces.B.streams.t1.entries.length > 0,
+        "the append is either still pending (durable) or delivered",
+      );
     }
+    // and delivery stays exactly-once on EVERY schedule, crashes
+    // included (the eventId horizon dedupes redelivery)
+    assert(w.spaces.B.streams.t1.entries.length <= 1, "never duplicated");
   }
+  // non-vacuity: crash-then-recover-then-deliver actually delivers
+  let w = apply(w0, { kind: "wave", space: "A" });
+  w = apply(w, { kind: "crash", space: "A" });
+  w = apply(w, { kind: "recover", space: "A" });
+  w = apply(w, { kind: "deliver", space: "A" });
+  assertEquals(
+    w.spaces.B.streams.t1.entries.length,
+    1,
+    "recovery re-sends the durable row (serving-loop §6 step 5)",
+  );
 });
 
 Deno.test("C2-dedupe: at-least-once redelivery is idempotent at the target (events §4)", () => {
@@ -270,13 +282,13 @@ Deno.test("C2-dedupe: at-least-once redelivery is idempotent at the target (even
     stream: "s1",
   });
   w = apply(w, { kind: "wave", space: "A" });
-  const entry = structuredClone(w.servers.A.outbox[0]);
+  const entry = structuredClone(w.spaces.A.outboundAppends[0]);
   w = apply(w, { kind: "deliver", space: "A" });
-  w.servers.A.outbox.push(entry); // the retry
+  w.spaces.A.outboundAppends.push(entry); // the retry
   w = apply(w, { kind: "deliver", space: "A" });
   assertEquals(w.spaces.B.streams.t1.entries.length, 1, "deduped by eventId");
   w = apply(w, { kind: "wave", space: "B" });
-  w.servers.A.outbox.push(entry); // late retry, post-processing
+  w.spaces.A.outboundAppends.push(entry); // late retry, post-processing
   w = apply(w, { kind: "deliver", space: "A" });
   assertEquals(
     w.spaces.B.streams.t1.entries.length,

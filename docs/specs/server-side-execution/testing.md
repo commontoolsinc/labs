@@ -85,9 +85,9 @@ carriage, delegated stamping, split repetition, watermark
 idempotency, push filtering, the enact/ack window — by exhaustive
 small-configuration interleaving with fault injection, unattended
 (`deno task test`). It re-verifies each ruling batch mechanically,
-carries a CHARACTERIZATION test for open ledger item FP1 (the
-lost-append crash window — flips to a closure assertion when the
-ruling lands), and is the seed the `sx2-` conformance tests grow
+carried the FP1 characterization until its 2026-08-03 ruling and
+now asserts CLOSURE (durable append rows — no schedule loses an
+append), and is the seed the `sx2-` conformance tests grow
 from: a stage's semantics get modeled before its implementation
 exists, then the properties become the implementation's oracle.
 
