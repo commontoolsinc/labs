@@ -373,6 +373,12 @@ runs out even though nothing about the usage changed. How much of a grant is lef
 is not in the billing export: Google publishes it only in the console's billing
 credits page.
 
+A grant may also arrive in monthly tranches that land on a few days rather than
+spreading across the month. The rate window is a fortnight, so it either covers
+those days or it does not, and the projection steps up or down as they pass out
+of it. The month-to-date figure in the header carries whatever has landed so far
+and is the one to read when a tranche is due but has not arrived.
+
 ### `OPENAI_ADMIN_KEY`
 
 Powers the OpenAI share of **model spend**. Needs an organization **Admin** key —
