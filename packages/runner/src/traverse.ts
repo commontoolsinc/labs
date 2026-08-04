@@ -54,9 +54,6 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
-  ReaderError,
   ReadError,
   StorageTransactionStatus,
   WriteError,
@@ -1181,18 +1178,11 @@ export class ManagedStorageTransaction implements IStorageTransaction {
       { address: { ...address, path: [] } };
     return resolve(source, address);
   }
-  writer(_space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    throw new Error("Method not implemented.");
-  }
   write(
     _address: IMemorySpaceAddress,
     _value?: FabricValue,
   ): Result<IAttestation, WriterError | WriteError> {
     this.assertWritable("write()");
-    throw new Error("Method not implemented.");
-  }
-  reader(_space: MemorySpace): Result<ITransactionReader, ReaderError> {
     throw new Error("Method not implemented.");
   }
   abort(_reason?: unknown): Result<Unit, InactiveTransactionError> {

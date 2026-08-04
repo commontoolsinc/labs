@@ -292,9 +292,8 @@ Layer: client (sync-frame buffering while a transaction builds).
 Soundness direction: MAY buffer integration longer than necessary; MUST NOT
 let a transaction observe two prefixes.
 
-Checked by: chronicle re-validation tests; no dedicated checker (the
-durable-history oracle would surface a resulting incoherent acceptance as an
-INV-1 hit).
+Checked by: no dedicated checker (the durable-history oracle would surface a
+resulting incoherent acceptance as an INV-1 hit).
 
 ### INV-11 — Idempotent replay
 

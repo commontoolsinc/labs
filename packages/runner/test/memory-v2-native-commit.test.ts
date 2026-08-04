@@ -34,17 +34,11 @@ const captureNativeDrafts = () => {
       transaction: NativeStorageCommit,
       source?: unknown,
     ): Promise<Result<Unit, StorageTransactionRejected>>;
-    commit(
-      transaction: unknown,
-      source?: unknown,
-    ): Promise<Result<Unit, StorageTransactionRejected>>;
   };
   const originalCommitNative = replica.commitNative?.bind(replica);
   assertExists(originalCommitNative);
 
   const drafts: NativeStorageCommit[] = [];
-  replica.commit = () =>
-    Promise.reject(new Error("legacy commit path should not be used"));
   replica.commitNative = async (transaction, source) => {
     drafts.push(structuredClone(transaction));
     return await originalCommitNative(transaction, source);
