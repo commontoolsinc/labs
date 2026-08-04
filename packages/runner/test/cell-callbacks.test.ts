@@ -129,7 +129,7 @@ describe("Cell commit callbacks", () => {
     expect(callOrder).toEqual([1, 2]);
   });
 
-  it("should not call callback if transaction fails", () => {
+  it("should call callback when the transaction is aborted", () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-fail-test",
@@ -137,16 +137,18 @@ describe("Cell commit callbacks", () => {
       tx,
     );
 
-    let callbackCalled = false;
+    const statuses: string[] = [];
 
-    cell.set(42, () => {
-      callbackCalled = true;
+    cell.set(42, (settledTx) => {
+      statuses.push(settledTx.status().status);
     });
 
-    // Abort the transaction instead of committing
+    // An abort discards the staged writes exactly as a rejected commit does,
+    // and the callback exists to compensate for writes that did not become
+    // durable. It reports the same errored transaction either way.
     tx.abort("test abort");
 
-    expect(callbackCalled).toBe(false);
+    expect(statuses).toEqual(["error"]);
   });
 
   it("should call callback when commit returns an error", async () => {

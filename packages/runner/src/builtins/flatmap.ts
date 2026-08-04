@@ -38,6 +38,7 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { trackListSetupRollback } from "./list-element-rollback.ts";
 import {
   createResumeRepublisher,
   type ElementContribution,
@@ -181,6 +182,7 @@ export function flatMap(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    const rollback = trackListSetupRollback(tx, runtime, elementRuns);
     const elementAwaitSync = resumeBatchAwaitSync;
     // Identity-only list materialization (mirrors map.ts:163-188): read `op`
     // through the schema, but build element cells from the raw slot links
@@ -218,6 +220,10 @@ export function flatMap(
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
+      const previousResult = result;
+      rollback.resultReplaced(() => {
+        result = previousResult;
+      });
       const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
@@ -374,6 +380,7 @@ export function flatMap(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
+        const previousIndex = existing.lastIndex;
         if (argumentUsage.usesIndex && existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
@@ -387,6 +394,7 @@ export function flatMap(
           );
         }
         existing.lastIndex = i;
+        if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -407,7 +415,9 @@ export function flatMap(
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        const entry = { resultCell, lastIndex: i };
+        elementRuns.set(elementKey, entry);
+        rollback.created(elementKey, entry);
 
         // An element first seen after the resume batch cleared, while the space
         // may still be syncing: its inline op write rode on this reconcile's
