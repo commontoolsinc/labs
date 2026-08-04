@@ -204,7 +204,7 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
-| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1) | requester holds the live `execution_lease` for the space (the SAME one equality check) → the named instance is read. A non-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
+| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
 
 That is the ENTIRE admission surface — the last row is the one
 READ-side check; every row above it is commit admission. No scope
@@ -275,7 +275,14 @@ every instance, so it may NAME an instance to read. RATIFIED
 keys on both sides of the wire, while the client-facing protocol is
 untouched: a non-holder naming a `scope_key` is rejected (today the
 wire cannot even express one — the field is new), and client reads
-keep resolving from the session.
+keep resolving from the session. FP2 (RULED 2026-08-03) widens the
+holder condition to ANY live lease holder on the co-hosted memory
+server, so cross-space scoped reads (§2b's free read row) can name
+their foreign instance instead of silently resolving
+`user:<serviceDID>`. Anticipated hardening, OUT OF v2 SCOPE and
+named without design: grant-scoped foreign reads — admissibility
+derived from the piece's granted read authority rather than lease
+identity — alongside remote attestation.
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a
@@ -541,8 +548,9 @@ disabled (README §3.5).
   ledger LD5 ratified 2026-08-03 — the read half of §1's
   transaction identity model). That is the only read-side addition
   to the wire: one optional field on the read, admissible only for
-  the space's live lease holder. Reads that name nothing are
-  unchanged.
+  a live lease holder on the co-hosted memory server — its own
+  space's lease (FP2, ruled 2026-08-03). Reads that name nothing
+  are unchanged.
 - Basis-index rows (serving-loop.md §3b) ride INSIDE the derived
   commit's store TRANSACTION as engine table rows — sanctioned
   carriage, NOT metadata and NOT part of the commit representation:
@@ -550,12 +558,18 @@ disabled (README §3.5).
   admission never reads them, and the closed list above is not
   breached by them.
 - The OUTBOX's identity carriage (serving-loop.md §4–§5: the
-  result-cell address with its `scope_key`, plus the acting
-  identity, captured at the original run's seal) is likewise
+  result-cell address with its `scope_key`, the acting
+  identity, AND — FP6, ruled 2026-08-03 — the run's CFC label
+  basis, captured at the original run's seal) is likewise
   sanctioned NON-WIRE carriage: process-local, never a commit and
   never metadata — it exists so the completion commit can carry
-  §1's annotations without re-deriving them, and it does not
-  breach the closed list.
+  §1's annotations and request-derived labels without re-deriving
+  them, and it does not
+  breach the closed list. The DURABLE exception (FP1, ruled
+  2026-08-03): cross-space APPEND entries are engine-table rows
+  inside the emitting wave's store transaction, deleted on
+  delivery-ack — the basis-row carriage pattern; still never wire,
+  never metadata, never read at admission.
 - All metadata is small and fixed-shape, with one bounded carve-out:
   `consequenceOf` scales with the wave's INPUT (the events drained that
   wave), never with graph size. The v1 failure mode — 130 KB of

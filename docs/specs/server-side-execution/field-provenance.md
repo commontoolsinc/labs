@@ -170,25 +170,23 @@ ruling updates the affected reference chains in the same PR.
 Rulings needed; consolidated and deduped from the six clusters.
 FP1 and FP2 are the heavyweights.
 
-- **FP1 — lost outbox entries after a crash (B; P5).** The outbox
-  is process-local; a crash between wave commit and delivery of a
-  cross-space append or `.inSpace` provisioning entry loses it
-  with NO cited regeneration: memo-miss re-fire covers effectful
-  builtins only, the target-side reprocess rule covers arrived
-  events only, and the source handler never re-runs (its
-  `eventWatermark` already advanced). As written, a cross-space
-  consequence can vanish exactly-never-delivered. What re-derives
-  and re-sends it — and preserves the carried acting identity +
-  `capabilityRef` faithfully?
-- **FP2 — cross-space scoped reads (C; P3/P5; gates Phase 5).**
-  The `entity_scope_key` read row is lease-holder-only, and a home
-  SpaceServer is never the FOREIGN space's lease holder — so a
-  foreign scoped read has no way to name an instance and falls
-  into the silent-empty-instance trap the row exists to prevent,
-  and the basis `entity_scope_key` for foreign scoped inputs has
-  no cited population mechanism. Extend the read row (any live
-  lease holder on the co-hosted server? the piece's granted
-  authority?), or forbid foreign scoped reads?
+- **FP1 — lost outbox entries after a crash (B; P5) — RULED
+  2026-08-03: durable append rows.** Cross-space event appends are
+  engine-table rows written inside the emitting wave's own store
+  transaction (basis-row carriage pattern, protocol §7 sanction),
+  deleted on delivery-ack; activation re-sends pending rows;
+  `eventId` horizon dedupes. EFFECT requests stay process-local
+  (memo re-miss covers them); `.inSpace` provisioning needs
+  neither — it is foreign-first SEQUENCED at the commit step, not
+  outbox-carried (serving-loop §5, §6 step 5). Verified: the
+  model's C2-FP1 flipped from characterization to closure.
+- **FP2 — cross-space scoped reads (C; P3/P5) — RULED 2026-08-03:
+  the read row widens to ANY live lease holder on the co-hosted
+  memory server** (its own space's lease) — the read-side twin of
+  the inter-server trust ruling, closing the silent-empty-instance
+  trap cross-space and giving the basis `entity_scope_key` its
+  population path. Anticipated hardening, out of v2 scope, named
+  without design: grant-scoped foreign reads (protocol §2).
 - **FP3 — delegated-write target keying (C; P3).** What feeds
   `scope_key` resolution for the WRITTEN rows of a server-produced
   authored commit at its target (no session exists there)?
@@ -204,12 +202,16 @@ FP1 and FP2 are the heavyweights.
   names no mechanism). Name the consumer, or declare it inert and
   soften the "orders" language. Also state whether it crosses on
   delegation (candidate: no, per LT7's spirit).
-- **FP6 — CFC label carriage (C; P2/P4).** Post-commit: does a
-  later run reading a derived write re-seed its label ladder from
-  the write's carried provenance (cross-wave taint propagation),
-  or does nothing read it after the pre-commit gate? And the
-  effect-completion write bypasses sealing — the one cited CFC
-  moment — so by what mechanism is an external result labeled?
+- **FP6 — CFC label carriage (C; P2/P4) — RULED 2026-08-03, both
+  halves, no new mechanism:** the carried provenance's reader is
+  main's existing READ-TIME label derivation (a later run reading
+  the cell seeds its ladder from the cell's labels — the carriage
+  just makes that input available across waves; serving-loop §3c);
+  and the effect completion's labels derive from the REQUEST's
+  label basis, carried on the outbox entry with the identity
+  carriage — an external result inherits its request's
+  confidentiality, never default-unlabeled (serving-loop §4;
+  protocol §7).
 - **FP7 — `capabilityRef` origin (B).** Grant minting/acquisition
   is never stated. If it is the existing capability system,
   deliberately not re-litigated, say so the way the ACL rows say
