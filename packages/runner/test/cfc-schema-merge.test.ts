@@ -1,7 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchemaObj } from "../src/builder/types.ts";
-import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import {
+  cfcSchemaMergeIssue,
+  mergeCfcSchemaEnvelopes,
+} from "../src/cfc/schema-merge.ts";
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
 
 describe("mergeCfcSchemaEnvelopes", () => {
@@ -1147,5 +1150,51 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
       items: { type: "number" },
     } as const;
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+});
+
+// `cfcSchemaMergeIssue` is the dry-run seam over the SAME merge: `cf piece
+// setsrc --check` asks it whether a candidate envelope would be accepted
+// rather than attempting the swap and taking a low-level commit rejection.
+// What it must not do is reimplement the rules, so these cases pin that its
+// verdict is the merge's own — including the message, verbatim.
+describe("cfcSchemaMergeIssue", () => {
+  it("reports no issue when the merge succeeds", () => {
+    expect(cfcSchemaMergeIssue({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" } },
+    })).toBe(undefined);
+  });
+
+  it("discriminates the additive-required migration class", () => {
+    // The class the runnability backstop rolls forward on: an old document
+    // predating a now-required field that declares no default. A caller has to
+    // be able to tell it apart from a hard incompatibility, because only this
+    // one is recoverable.
+    const issue = cfcSchemaMergeIssue({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["b"],
+    });
+    expect(issue?.migration).toBe(true);
+    expect(issue?.message).toContain("needs a default");
+  });
+
+  it("reports a weakened ifc claim as a hard incompatibility", () => {
+    const issue = cfcSchemaMergeIssue({
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["x"] } } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["y"] } } },
+    });
+    expect(issue?.migration).toBe(false);
+    expect(issue?.message).toContain("confidentiality cannot be weakened");
   });
 });

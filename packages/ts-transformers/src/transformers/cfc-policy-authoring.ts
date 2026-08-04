@@ -821,7 +821,7 @@ export class CfcPolicyAuthoringTransformer extends Transformer {
         });
       }
     }
-    context.options.state?.recordPolicyManifests(
+    context.state.recordPolicyManifests(
       sourceFile.fileName,
       manifests,
     );

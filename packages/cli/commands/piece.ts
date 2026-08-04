@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import { VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
+  checkPiecePattern,
   type EntryConfig,
   executePieceCallable,
   formatViewTree,
@@ -33,6 +34,7 @@ import {
   stepPiece,
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
+import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
 import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
@@ -1031,9 +1033,26 @@ export const piece = new Command()
     "--dangerously-allow-incompatible-schema",
     "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
   )
+  .option(
+    "--check",
+    "Report whether the source could replace the piece's current one, without updating the piece. Exits non-zero when it could not.",
+  )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
+    if (options.check) {
+      // A refusal exits 1 from inside the check (plain stderr, no usage
+      // dump), so `--check` gates a deploy script as well as informing a
+      // person.
+      const { config, summary } = await checkPieceSourceFromCommand(
+        options,
+        mainPath,
+      );
+      render(summary);
+      hint(cliText(`NEXT STEPS:
+  → Apply it: cf piece setsrc --piece ${config.piece} ${mainPath} ...`));
+      return;
+    }
     const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
@@ -1894,6 +1913,56 @@ export async function searchPiecesFromCommand(
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */
 export interface SetPieceSourceCommandDependencies {
   setPiecePattern?: typeof setPiecePattern;
+}
+
+/** Injectable dependencies for testing `piece setsrc --check`. */
+export interface CheckPieceSourceCommandDependencies {
+  checkPiecePattern?: typeof checkPiecePattern;
+  /** `exitWithDataError`'s seam, so a test can observe the refusal. */
+  exit?: Parameters<typeof exitWithDataError>[1];
+}
+
+/**
+ * Run the `piece setsrc --check` preflight. Applies nothing.
+ *
+ * Deliberately parses the same options `setsrc` does, so the check is aimed at
+ * the piece and entry the apply would have used — a preflight against a
+ * different target is worse than none.
+ *
+ * The refusal is raised here rather than in the command's action so that the
+ * decision — including the non-zero exit that lets `--check` gate a deploy
+ * script — is reachable by a test. The action only renders what it returns.
+ */
+export async function checkPieceSourceFromCommand(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: CheckPieceSourceCommandDependencies = {},
+): Promise<{
+  config: PieceConfig;
+  report: PatternCompatibilityReport;
+  summary: string;
+}> {
+  const config = parsePieceOptions(options);
+  const report = await (deps.checkPiecePattern ?? checkPiecePattern)(
+    config,
+    localPatternEntry(mainPath, options),
+  );
+  if (!report.compatible) {
+    // A refusal is a data condition — this source and this piece's stored
+    // state don't fit — not an arg-parse failure, so it reports like the
+    // `piece get` / `piece link` data errors above: plain stderr and exit 1,
+    // never a Cliffy ValidationError, which would dump the usage screen over
+    // the verdict.
+    exitWithDataError({
+      message:
+        `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
+    }, deps.exit);
+  }
+  return {
+    config,
+    report,
+    summary: `${mainPath} can replace the source for piece ${config.piece}`,
+  };
 }
 
 /** Apply the parsed `piece setsrc` command while preserving its safety flag. */

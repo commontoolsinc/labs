@@ -3,7 +3,8 @@ import { replaceArtifacts } from "./encodable-form.ts";
 
 /**
  * Replaces every builder artifact reachable from `value` with its encodable
- * form, on the way into the data model.
+ * form, on the way into the data model. `replaceOther` extends that to values
+ * the walk does not descend into; see `ReplaceOther` in `encodable-form.ts`.
  *
  * The walk itself is `replaceArtifacts`; this names the one thing a storage
  * boundary adds to it -- carrying trust and the content-addressed entry ref
@@ -20,6 +21,9 @@ import { replaceArtifacts } from "./encodable-form.ts";
  * original. A copy of a trusted artifact being trusted is the property the
  * side tables exist to preserve; not carrying it was the bug.
  */
-export function flattenBuilderArtifacts<T>(value: T): T {
-  return replaceArtifacts(value, noteDerivedCopy);
+export function flattenBuilderArtifacts<T>(
+  value: T,
+  replaceOther?: (value: object | ((...args: never[]) => unknown)) => unknown,
+): T {
+  return replaceArtifacts(value, noteDerivedCopy, replaceOther);
 }

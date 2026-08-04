@@ -639,6 +639,23 @@ const TRAVERSE_DIAGNOSTICS: boolean = (() => {
   }
 })();
 
+let traverseDiagnosticsOverride: boolean | undefined;
+
+/**
+ * Sets doc-visit diagnostics for this process, above whatever
+ * `CF_TRAVERSE_DIAGNOSTICS` said. Passing `undefined` hands the decision back
+ * to the environment. A traversal reads the setting when it starts, so a
+ * change applies from the next traversal on.
+ */
+export function setTraverseDiagnostics(enabled: boolean | undefined): void {
+  traverseDiagnosticsOverride = enabled;
+}
+
+/** Whether doc-visit diagnostics are collected. */
+export function traverseDiagnosticsEnabled(): boolean {
+  return traverseDiagnosticsOverride ?? TRAVERSE_DIAGNOSTICS;
+}
+
 /**
  * Identity-memoized `ContextualFlowControl.resolveSchemaRefs()` with an
  * interned result. `$ref` resolution mints a fresh schema per call, which
@@ -2891,6 +2908,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
   // Track per-doc visit counts and unique paths
   private docVisits = new Map<string, number>();
   private uniquePaths = new Set<string>();
+  // Read once per traversal, so one traversal collects and reports the same
+  // way throughout.
+  private diagnostics = traverseDiagnosticsEnabled();
   private maxDepth = 0;
   private currentDepth = 0;
   // Memoization cache for traverseWithSchema: key → result
@@ -2962,6 +2982,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.getDocAtPathCalls = 0;
     this.docVisits.clear();
     this.uniquePaths.clear();
+    this.diagnostics = traverseDiagnosticsEnabled();
     this.maxDepth = 0;
     this.currentDepth = 0;
     this.schemaMemoHits = 0;
@@ -3038,7 +3059,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       `maxDepth=${this.maxDepth}`,
       `schemaMemo=${this.activeMemo.size}`,
       `schemaMemoHits=${this.schemaMemoHits}`,
-      TRAVERSE_DIAGNOSTICS
+      this.diagnostics
         ? `topDocs=${topDocs}`
         : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
     ]);
@@ -3135,7 +3156,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
     const docId = doc.address.id;
-    if (TRAVERSE_DIAGNOSTICS) {
+    if (this.diagnostics) {
       // Per-visit doc/path tracking for the slow-traverse log; the string
       // building is too hot to leave on by default (see TRAVERSE_DIAGNOSTICS).
       this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);

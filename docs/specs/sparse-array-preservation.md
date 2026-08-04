@@ -107,9 +107,8 @@ because their sparse support was part of the original design:
 
 - **`packages/data-model/src/native-conversion.ts`** —
   `shallowFabricFromNativeValue` and `fabricFromNativeValue` use `i in arr`
-  checks. An array returned from a `toJSON()` method gets the same care: the
-  result goes through `cloneHelper()`, which rebuilds it with
-  `new Array(length)` and copies only the indices that are present.
+  checks. Every accepted array goes through `cloneHelper()`, which rebuilds it
+  with `new Array(length)` and copies only the indices that are present.
 - **`packages/data-model/src/codec-json/JsonEncodingContext.ts`** — Encodes a
   run of holes as a single hole-tagged count; decoding rebuilds them as true
   holes.

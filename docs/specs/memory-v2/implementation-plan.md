@@ -27,7 +27,8 @@ Implemented on the current branch:
   `graph.query`, `session.watch.set`, `session.watch.add`, `session.ack`,
   `response`, and `session/effect`
 - session-scoped watch-union sync with catch-up frames, `removes`, and
-  conflict-time sync flushing
+  per-verdict catch-up markers with client-side verdict parking (conflicts
+  and accepts, CT-1927)
 - one-shot `graph.query` support for `branch` and `atSeq`
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected
@@ -127,8 +128,10 @@ memory route.
 - Recompute watch-union results per session and emit:
   - `upserts` for relevant current entity state
   - `removes` when an entity leaves the watch union
-- Flush already-committed relevant sync before returning `ConflictError`, so the
-  client can retry on fresh state.
+- Return transact verdicts inline; stage a `caughtUpLocalSeq` catch-up
+  obligation for accepts and conflict rejections (CT-1927), delivered by the
+  batched fan-out, so the CLIENT parks each verdict's state application
+  until the marker covers it.
 
 ## Phase 3: Client Rewrite
 

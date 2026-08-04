@@ -1,11 +1,7 @@
 import { Command } from "@cliffy/command";
 import { Table } from "@cliffy/table";
-import {
-  getAcl,
-  removeAclEntry,
-  setAclEntry,
-  SpaceConfig,
-} from "../lib/acl.ts";
+import { getAcl, removeAclEntry, setAclEntry } from "../lib/acl.ts";
+import { parseSpaceOptions } from "./piece.ts";
 import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
 import { isCapability } from "@commonfabric/memory";
@@ -95,39 +91,3 @@ export const acl = new Command()
     await removeAclEntry(config, did);
     render(`Removed ${did} from ACL`);
   });
-
-/**
- * Parse space-related options from command arguments
- */
-function parseSpaceOptions(
-  options: Record<string, string | undefined>,
-): SpaceConfig {
-  const apiUrl = options.apiUrl || Deno.env.get("CF_API_URL");
-  const identity = options.identity || Deno.env.get("CF_IDENTITY");
-  const space = options.space;
-
-  if (!apiUrl) {
-    render(
-      "Error: --api-url is required or set CF_API_URL environment variable",
-    );
-    Deno.exit(1);
-  }
-
-  if (!identity) {
-    render(
-      "Error: --identity is required or set CF_IDENTITY environment variable",
-    );
-    Deno.exit(1);
-  }
-
-  if (!space) {
-    render("Error: --space is required");
-    Deno.exit(1);
-  }
-
-  return {
-    apiUrl: new URL(apiUrl),
-    identityPath: identity,
-    space: space,
-  };
-}

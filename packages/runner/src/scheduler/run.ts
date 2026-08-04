@@ -14,6 +14,7 @@ import {
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
+import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -898,7 +899,9 @@ function recordOptionalActionRunDiagnostics(
       runIdempotencyRecheck(
         {
           idempotencyViolations: state.idempotencyViolations,
-          createTx: () => state.runtime.edit(),
+          // The recheck re-runs the action only to compare its writes with the
+          // run that already happened, then throws the transaction away.
+          createTx: () => createDuplicateWorkTransaction(state.runtime.edit()),
           invoke: (fn) => state.runtime.harness.invoke(fn),
           getActionId: state.getActionId,
           getActionTelemetryInfo: state.getActionTelemetryInfo,

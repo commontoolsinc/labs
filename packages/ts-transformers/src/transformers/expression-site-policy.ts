@@ -937,7 +937,7 @@ function arrayMethodCallbackValueResolvesToCollection(
     getTypeAtLocationWithFallback(
       expression,
       context.checker,
-      context.options.state?.typeRegistry,
+      context.state.typeRegistry,
       context.options.logger,
     ),
     context.checker,

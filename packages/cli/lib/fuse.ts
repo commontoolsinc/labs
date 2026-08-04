@@ -9,6 +9,12 @@ import {
   SEPARATOR,
 } from "@std/path";
 import { cliName } from "./cli-name.ts";
+import {
+  type FuseMountFlags,
+  type FuseSupervisorFlags,
+  mountFlagArgs,
+  supervisorFlagArgs,
+} from "./fuse-mount-flags.ts";
 
 export interface MountStateEntry {
   pid: number;
@@ -21,37 +27,17 @@ export interface MountStateEntry {
   logFile?: string;
 }
 
-export interface FuseChildDenoArgsOptions {
+export interface FuseChildDenoArgsOptions extends FuseMountFlags {
   modPath: string;
-  mountpoint: string;
-  apiUrl: string;
-  identity: string;
-  execCli: string;
-  logFile?: string;
-  spaces?: string[];
-  debug?: boolean;
-  allowOther?: boolean;
-  noattrcache?: boolean;
-  attrcacheTimeout?: string;
-  cfcMode?: string;
-  cfcAnnotations?: boolean;
-  cfcXattrNamespace?: string;
-  cfcWritebackXattrs?: boolean;
-  cfcWritebackState?: string;
-  dangerouslyAllowIncompatibleSchema?: boolean;
-  supervisorStatusPath?: string;
 }
 
 export interface BackgroundSupervisorDenoArgsOptions
-  extends Omit<FuseChildDenoArgsOptions, "modPath"> {
+  extends FuseSupervisorFlags {
   cliModPath: string;
-  statePath?: string;
 }
 
-export interface FuseBinaryArgsOptions
-  extends Omit<FuseChildDenoArgsOptions, "modPath"> {
+export interface FuseBinaryArgsOptions extends FuseSupervisorFlags {
   subcommand: "fuse-daemon" | "fuse-supervisor";
-  statePath?: string;
 }
 
 export async function canonicalizeMountLookupPath(
@@ -615,7 +601,7 @@ exec "${Deno.execPath()}" run --allow-net --allow-ffi --allow-read --allow-write
 export function buildFuseChildDenoArgs(
   opts: FuseChildDenoArgsOptions,
 ): string[] {
-  const args = [
+  return [
     "run",
     "--unstable-ffi",
     "--allow-ffi",
@@ -625,123 +611,38 @@ export function buildFuseChildDenoArgs(
     "--allow-net",
     opts.modPath,
     opts.mountpoint,
+    ...mountFlagArgs(opts),
   ];
-
-  if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
-  if (opts.identity) args.push("--identity", opts.identity);
-  if (opts.execCli) args.push("--exec-cli", opts.execCli);
-  if (opts.logFile) args.push("--log-file", opts.logFile);
-  if (opts.debug) args.push("--debug");
-  if (opts.allowOther) args.push("--allow-other");
-  if (opts.noattrcache) args.push("--noattrcache");
-  if (opts.attrcacheTimeout) {
-    args.push("--attrcache-timeout", opts.attrcacheTimeout);
-  }
-  if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
-  if (opts.cfcAnnotations) args.push("--cfc-annotations");
-  if (opts.cfcXattrNamespace) {
-    args.push("--cfc-xattr-namespace", opts.cfcXattrNamespace);
-  }
-  if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
-  if (opts.cfcWritebackState) {
-    args.push("--cfc-writeback-state", opts.cfcWritebackState);
-  }
-  if (opts.dangerouslyAllowIncompatibleSchema) {
-    args.push("--dangerously-allow-incompatible-schema");
-  }
-  if (opts.supervisorStatusPath) {
-    args.push("--supervisor-status", opts.supervisorStatusPath);
-  }
-  for (const space of opts.spaces ?? []) args.push("--space", space);
-
-  return args;
 }
 
 /**
  * Build the args for the compiled cf binary's direct FUSE entry points. The
  * compiled binary takes the mountpoint and mount flags directly, where a
- * deno invocation needs a script path and permission flags first.
+ * deno invocation needs a script path and permission flags first. Only the
+ * supervisor entry point takes the mount state file; the daemon never sees it.
  */
 export function buildFuseBinaryArgs(opts: FuseBinaryArgsOptions): string[] {
-  const args = [opts.subcommand, opts.mountpoint];
-
-  if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
-  if (opts.identity) args.push("--identity", opts.identity);
-  if (opts.debug) args.push("--debug");
-  if (opts.allowOther) args.push("--allow-other");
-  if (opts.noattrcache) args.push("--noattrcache");
-  if (opts.attrcacheTimeout) {
-    args.push("--attrcache-timeout", opts.attrcacheTimeout);
-  }
-  if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
-  if (opts.cfcAnnotations) args.push("--cfc-annotations");
-  if (opts.cfcXattrNamespace) {
-    args.push("--cfc-xattr-namespace", opts.cfcXattrNamespace);
-  }
-  if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
-  if (opts.cfcWritebackState) {
-    args.push("--cfc-writeback-state", opts.cfcWritebackState);
-  }
-  if (opts.dangerouslyAllowIncompatibleSchema) {
-    args.push("--dangerously-allow-incompatible-schema");
-  }
-  if (opts.execCli) args.push("--exec-cli", opts.execCli);
-  if (opts.logFile) args.push("--log-file", opts.logFile);
-  if (opts.statePath) args.push("--state-path", opts.statePath);
-  if (opts.supervisorStatusPath) {
-    args.push("--supervisor-status", opts.supervisorStatusPath);
-  }
-  for (const space of opts.spaces ?? []) args.push("--space", space);
-
-  return args;
+  return [
+    opts.subcommand,
+    opts.mountpoint,
+    ...(opts.subcommand === "fuse-supervisor"
+      ? supervisorFlagArgs(opts)
+      : mountFlagArgs(opts)),
+  ];
 }
 
 /** Build the deno subprocess args for running the non-FFI FUSE supervisor. */
 export function buildBackgroundSupervisorDenoArgs(
   opts: BackgroundSupervisorDenoArgsOptions,
 ): string[] {
-  const args = [
+  const permissions = ["--allow-run"];
+  if (opts.statePath) permissions.push(`--allow-write=${opts.statePath}`);
+
+  return [
     "run",
-    "--allow-run",
+    ...permissions,
     opts.cliModPath,
     opts.mountpoint,
+    ...supervisorFlagArgs(opts),
   ];
-
-  if (opts.statePath) {
-    args.splice(2, 0, `--allow-write=${opts.statePath}`);
-    args.push("--state-path", opts.statePath);
-  }
-
-  if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
-  if (opts.identity) args.push("--identity", opts.identity);
-  if (opts.execCli) args.push("--exec-cli", opts.execCli);
-  if (opts.logFile) args.push("--log-file", opts.logFile);
-  if (opts.debug) args.push("--debug");
-  if (opts.allowOther) args.push("--allow-other");
-  if (opts.noattrcache) args.push("--noattrcache");
-  if (opts.attrcacheTimeout) {
-    args.push("--attrcache-timeout", opts.attrcacheTimeout);
-  }
-  if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
-  if (opts.cfcAnnotations) args.push("--cfc-annotations");
-  if (opts.cfcXattrNamespace) {
-    args.push("--cfc-xattr-namespace", opts.cfcXattrNamespace);
-  }
-  if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
-  if (opts.cfcWritebackState) {
-    args.push("--cfc-writeback-state", opts.cfcWritebackState);
-  }
-  if (opts.dangerouslyAllowIncompatibleSchema) {
-    args.push("--dangerously-allow-incompatible-schema");
-  }
-  if (opts.supervisorStatusPath) {
-    args.push("--supervisor-status", opts.supervisorStatusPath);
-  }
-  for (const space of opts.spaces ?? []) args.push("--space", space);
-
-  return args;
-}
-
-export function buildDenoArgs(opts: FuseChildDenoArgsOptions): string[] {
-  return buildFuseChildDenoArgs(opts);
 }

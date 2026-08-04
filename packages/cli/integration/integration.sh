@@ -261,6 +261,29 @@ run_piece_values() {
       jq -r '.patternRef.identity'
   )
 
+  # The preflight answers the same question without touching the piece.
+  if cf piece setsrc --check $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
+    >"$WORK_DIR/incompatible-check.out" \
+    2>"$WORK_DIR/incompatible-check.err"; then
+    error "setsrc --check should fail for an incompatible source."
+  fi
+  if ! grep -q "cannot replace the source" "$WORK_DIR/incompatible-check.err"; then
+    error "setsrc --check did not report the verdict."
+  fi
+  if ! grep -q "not backward compatible" "$WORK_DIR/incompatible-check.err"; then
+    error "setsrc --check did not name the rule that refused it."
+  fi
+  if [ "$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )" != "$schema_identity_before" ]; then
+    error "setsrc --check changed the piece source."
+  fi
+  # A compatible source clears the same preflight, and still applies nothing.
+  cf piece setsrc --check $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_COMPATIBLE_PATTERN_SRC" >/dev/null
+
   if cf piece setsrc $SPACE_ARGS --piece "$schema_piece_id" \
     "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
     >"$WORK_DIR/incompatible-setsrc.out" \

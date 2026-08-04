@@ -15,6 +15,11 @@ export type SessionState = {
   trackedIds: Set<string>;
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
+  /** Set when delivery-state rollback re-inserted tombstone cache entries
+   * for a lost frame's removes: the incremental refresh path never emits
+   * removes, so the next sync must run a FULL watch evaluation to re-diff
+   * them out (CT-1927 review, round 7). Self-clearing. */
+  forceFullResync: boolean;
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
@@ -107,6 +112,7 @@ export class SessionRegistry {
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
+      forceFullResync: existing?.forceFullResync ?? false,
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,

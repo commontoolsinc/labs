@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path/from-file-url";
 
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -203,7 +204,7 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
 
     // Sanity: the row is live before the swap, so a failure below is the swap's
     // re-stage and not a mis-seeded fixture.
-    expect(JSON.stringify(managerCell.getAsQueryResult()))
+    expect(toCompactDebugString(managerCell.getAsQueryResult()))
       .not.toContain("No favorites yet.");
 
     // The swap. Identity is content-addressed, so v2 has to differ in SOURCE —
@@ -241,7 +242,7 @@ describe("a stored favorite row instantiates in favorites-manager", () => {
     expect(
       (managerCell.getAsQueryResult() as Record<string, unknown>)["$NAME"],
     ).toBe("Favorites Manager v2");
-    expect(JSON.stringify(managerCell.getAsQueryResult()))
+    expect(toCompactDebugString(managerCell.getAsQueryResult()))
       .not.toContain("No favorites yet.");
   });
 });

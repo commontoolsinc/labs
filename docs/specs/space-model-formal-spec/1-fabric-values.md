@@ -177,8 +177,7 @@ type FabricNativeObject =
   | Set<FabricValue | FabricNativeObject>
   | Date
   | RegExp
-  | Uint8Array
-  | { toJSON(): unknown }; // Legacy — see below.
+  | Uint8Array;
 ```
 
 The `FabricNativeObject` type exists solely at function parameter/return
@@ -186,15 +185,11 @@ boundaries — for example, `shallowFabricFromNativeValue()` accepts
 `FabricValue | FabricNativeObject` as input (Section 8). It is never a
 member of `FabricValue`.
 
-> **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
-> `FabricNativeObject` represents objects that provide a `toJSON()` method.
-> The conversion functions call `toJSON()` and process the
-> result (Section 8.2). Arrays are excluded: an array is decided by the array
-> rule of Section 1.5 whatever it carries, so one bearing a `toJSON` method is
-> rejected rather than converted. This variant is **legacy and marked for
-> removal** —
-> callers should migrate to the fabric protocol
-> (`FabricInstance` + `[CODEC]`). See Section 7.1 for migration guidance.
+Every arm names a specific native class. There is no duck-typed arm: a value
+becomes fabric-representable by being one of these, by implementing the fabric
+protocol (`FabricInstance` + `[CODEC]`), or not at all. In particular a
+`toJSON()` method carries no meaning here — it is an ordinary member, and a
+function-valued member is not representable.
 
 ### 1.3 Primitive Types
 
@@ -2950,21 +2945,16 @@ boundary-only serialization and the three-layer architecture:
 7. Update internal code to work with `FabricValue` types rather than JSON
    shapes or raw native objects.
 
-> **`toJSON()` compatibility and migration.** The conversion functions and their
-> variants currently honor `toJSON()` methods on objects that have them — if an
-> object has a `toJSON()` method and does not implement `FabricInstance`, the
-> conversion functions call `toJSON()` and process the result. Arrays are
-> outside this: an array is answered by the array rule of Section 1.5 whatever
-> it carries. An own `toJSON` is a named key, which that rule rejects; an
-> inherited one is not array content, and honoring it would mean a single
-> assignment to `Array.prototype.toJSON` could route every array in the process
-> through it. This preserves
-> backward compatibility with existing code. However, `toJSON()` support is
-> **marked for removal**: it eagerly converts to JSON-compatible shapes, which
-> is incompatible with late serialization. Implementors should migrate to the
-> fabric protocol (`FabricInstance` + `[CODEC]`) instead. Once all callers
-> have migrated, `toJSON()` support will be removed from the conversion
-> functions.
+> **`toJSON()` is not a conversion route.** The conversion functions give a
+> `toJSON()` method no standing: a value that is not a `FabricValue`, a
+> `FabricNativeObject`, or an accepted container does not become representable
+> by carrying one. An object bearing `toJSON` is read as the record it is, so
+> the method itself is an ordinary member — a function, which no record may
+> hold. Anything that needs a representation of its own implements the fabric
+> protocol (`FabricInstance` + `[CODEC]`); anything that a caller wants
+> serialized on its way in is that caller's to serialize before it reaches the
+> conversion. Honoring `toJSON()` would eagerly convert to JSON-compatible
+> shapes, which is incompatible with late serialization.
 
 ### 7.2 Unifying JSON Encoding
 
@@ -3125,8 +3115,8 @@ export function fabricFromNativeValue(
 > and a cross-realm array all reach array handling and are answered by the
 > array rule of Section 1.5, rather than being rejected as some unrecognized
 > class or routed elsewhere by something the array carries. Fallback paths
-> handle exotic Error subclasses (via `Error.isError()`), null-prototype
-> objects, and objects with `toJSON()` methods. Tagging a null-prototype
+> handle exotic Error subclasses (via `Error.isError()`) and null-prototype
+> objects. Tagging a null-prototype
 > object `"Object"` classifies more broadly than the type admits, for the same
 > reason the array tag does: it is what lets the object rule of Section 1.5
 > reject the value by name rather than as some unrecognized class.
@@ -3259,10 +3249,9 @@ if the value is:
   string). Unique symbols return `false`; see the Section 1.3 callout.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
-  `Uint8Array`, or a non-array object with a `toJSON()` method — legacy)
+  `Uint8Array`)
 - An array where every present element satisfies `isFabricCompatible()`, and
-  which the array rule of Section 1.5 accepts — a `toJSON` method does not
-  make an otherwise-rejected array compatible
+  which the array rule of Section 1.5 accepts
 - A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,

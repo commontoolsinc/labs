@@ -16,7 +16,6 @@ import {
 } from "../commands/fuse.ts";
 import {
   buildBackgroundSupervisorDenoArgs,
-  buildDenoArgs,
   buildFuseBinaryArgs,
   buildFuseChildDenoArgs,
   ensureExecShim,
@@ -38,12 +37,13 @@ import {
 import {
   buildFuseChildCommand,
   cleanupFuseChild,
-  fuseSupervisorOptions,
-  parseSupervisorArgs,
   recordFuseMountState,
   runFuseSupervisor,
-  supervisorHelp,
 } from "../lib/fuse-supervisor.ts";
+import {
+  parseSupervisorArgs,
+  supervisorHelp,
+} from "../lib/fuse-mount-flags.ts";
 import { writeFailedSupervisorStartupStatus } from "../../fuse/mod.ts";
 import { withEnv } from "./utils.ts";
 
@@ -1046,9 +1046,9 @@ describe("isAlive", () => {
   });
 });
 
-describe("buildDenoArgs", () => {
+describe("buildFuseChildDenoArgs", () => {
   it("builds minimal args", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/path/to/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1069,7 +1069,7 @@ describe("buildDenoArgs", () => {
   });
 
   it("includes api-url and identity when provided", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "http://localhost:8000",
@@ -1085,7 +1085,7 @@ describe("buildDenoArgs", () => {
   });
 
   it("omits api-url, identity, and exec-cli when empty", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1098,7 +1098,7 @@ describe("buildDenoArgs", () => {
   });
 
   it("passes CFC mount options through to the daemon", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1125,7 +1125,7 @@ describe("buildDenoArgs", () => {
   });
 
   it("passes noattrcache through to the daemon", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1138,7 +1138,7 @@ describe("buildDenoArgs", () => {
   });
 
   it("passes attrcache-timeout through to the daemon", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1155,7 +1155,7 @@ describe("buildDenoArgs", () => {
   it("forwards an attrcache-timeout of zero to the daemon", () => {
     // "0" selects untuned caching in the daemon and must survive every
     // forwarding layer even though the layers test the field for truthiness.
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1195,7 +1195,7 @@ describe("buildDenoArgs", () => {
   });
 
   it("omits NFS cache mount options when unset", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -1229,45 +1229,6 @@ describe("FUSE supervisor command construction", () => {
       new Error("status path unavailable"),
       () => Promise.reject(new Error("write failed")),
     )).resolves.toBeUndefined();
-  });
-
-  it("maps CLI options into the supervisor contract", () => {
-    expect(fuseSupervisorOptions({
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/id.key",
-      execCli: "/tmp/cf-exec",
-      logFile: "/tmp/cf-fuse.log",
-      space: ["home", "work"],
-      allowOther: true,
-      noattrcache: true,
-      attrcacheTimeout: "2",
-      cfcMode: "observe",
-      cfcAnnotations: true,
-      cfcXattrNamespace: "both",
-      cfcWritebackXattrs: true,
-      cfcWritebackState: "/tmp/cfc.json",
-      dangerouslyAllowIncompatibleSchema: true,
-      statePath: "/tmp/state.json",
-      supervisorStatus: "/tmp/status.json",
-    }, "/mnt")).toEqual({
-      mountpoint: "/mnt",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/id.key",
-      execCli: "/tmp/cf-exec",
-      logFile: "/tmp/cf-fuse.log",
-      spaces: ["home", "work"],
-      allowOther: true,
-      noattrcache: true,
-      attrcacheTimeout: "2",
-      cfcMode: "observe",
-      cfcAnnotations: true,
-      cfcXattrNamespace: "both",
-      cfcWritebackXattrs: true,
-      cfcWritebackState: "/tmp/cfc.json",
-      dangerouslyAllowIncompatibleSchema: true,
-      statePath: "/tmp/state.json",
-      supervisorStatusPath: "/tmp/status.json",
-    });
   });
 
   it("builds a background supervisor invocation that does not load libfuse", () => {
@@ -1783,6 +1744,53 @@ describe("parseSupervisorArgs", () => {
   it("rejects unknown options", () => {
     expect(() => parseSupervisorArgs(["/mnt", "--nosuchflag"]))
       .toThrow("Unknown fuse supervisor option: --nosuchflag");
+  });
+
+  it("rejects an argv that names no mountpoint", () => {
+    expect(() => parseSupervisorArgs(["--debug"]))
+      .toThrow("Missing mountpoint for fuse supervisor.");
+  });
+
+  it("round-trips every flag both supervisor argv builders emit", () => {
+    // The builders and this parser read one flag table, and this is the
+    // property that table exists for: a flag the command sets survives the hop
+    // into the supervisor whichever entrypoint runs it.
+    const flags = {
+      mountpoint: "/mnt",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      spaces: ["home", "work"],
+      debug: true,
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "0",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatusPath: "/tmp/state.json.child-status",
+    };
+
+    const cliModPath = "/repo/packages/cli/lib/fuse-supervisor.ts";
+    const denoArgs = buildBackgroundSupervisorDenoArgs({
+      cliModPath,
+      ...flags,
+    });
+    expect(
+      parseSupervisorArgs(denoArgs.slice(denoArgs.indexOf(cliModPath) + 1))
+        .options,
+    ).toEqual(flags);
+
+    const binaryArgs = buildFuseBinaryArgs({
+      subcommand: "fuse-supervisor",
+      ...flags,
+    });
+    expect(parseSupervisorArgs(binaryArgs.slice(1)).options).toEqual(flags);
   });
 
   it("reports help without requiring a mountpoint", () => {
@@ -2305,7 +2313,7 @@ describe("fuse unmount", () => {
 
 describe("debug flag forwarding", () => {
   it("survives every forwarding layer", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
@@ -2363,7 +2371,7 @@ describe("debug flag forwarding", () => {
   });
 
   it("omits --debug from every layer when unset", () => {
-    const args = buildDenoArgs({
+    const args = buildFuseChildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",

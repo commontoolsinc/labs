@@ -83,7 +83,26 @@ describe("getAsLink method", () => {
     expect(linkRefPayload(link).path).toEqual(["nested", "value"]);
   });
 
-  it("should return sigil format for both getAsLink and toJSON", () => {
+  it("should stringify as the link it names, nested or not", () => {
+    // `generateKey()` in `packages/html/src/worker/keying.ts` keys render nodes
+    // by stringifying them, so a cell inside one has to come out as its link
+    // for the key to be stable across renders. Without the member the
+    // stringify walks a cell's own members into the runtime and dies on the
+    // cycle -- which that function catches, silently keying by a fallback.
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "cell-json-print-test",
+      undefined,
+      tx,
+    );
+    cell.set({ value: 42 });
+
+    const link = cell.toSigilLinkOrNull();
+    expect(JSON.parse(JSON.stringify(cell))).toEqual(link);
+    expect(JSON.parse(JSON.stringify({ held: cell }))).toEqual({ held: link });
+  });
+
+  it("should return sigil format for both getAsLink and toSigilLinkOrNull", () => {
     const cell = runtime.getCell<{ value: number }>(
       space,
       "getAsLink-json-test",
@@ -93,19 +112,19 @@ describe("getAsLink method", () => {
     cell.set({ value: 42 });
 
     const link = cell.getAsLink();
-    const json = cell.toJSON();
+    const sigilLink = cell.toSigilLinkOrNull();
 
     // getAsLink returns sigil format
     expect(link).toHaveProperty("/");
     expect(linkRefPayload(link)).toBeDefined();
 
-    // toJSON now also returns sigil format (includes space for cross-space references)
-    expect(json).not.toBeNull();
-    const jsonPayload = linkRefPayload(json as SigilLink);
-    expect(jsonPayload.id).toBeDefined();
-    expect(jsonPayload.path).toEqual([]);
-    // Verify space is included for cross-space resolution
-    expect(jsonPayload.space).toEqual(space);
+    // So does the link a cell reaches storage as, space included so a
+    // cross-space reference resolves.
+    expect(sigilLink).not.toBeNull();
+    const payload = linkRefPayload(sigilLink as SigilLink);
+    expect(payload.id).toBeDefined();
+    expect(payload.path).toEqual([]);
+    expect(payload.space).toEqual(space);
   });
 
   it("should create relative links with base parameter - same document", () => {

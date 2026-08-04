@@ -243,7 +243,7 @@ function findCapabilitySummaryForParameter(
   const summary = options?.includeNestedCallbacks
     ? analyzeFunctionCapabilities(fn, {
       checker: options.checker,
-      typeRegistry: context?.options.state?.typeRegistry,
+      typeRegistry: context?.state.typeRegistry,
       includeNestedCallbacks: true,
       summaryCache: context
         ? capabilitySummaryMemoFor(context).nested
@@ -253,7 +253,7 @@ function findCapabilitySummaryForParameter(
     ? (context.lookupCapabilitySummary(fn) ??
       analyzeFunctionCapabilities(fn, {
         checker: context.checker,
-        typeRegistry: context.options.state?.typeRegistry,
+        typeRegistry: context.state.typeRegistry,
         summaryCache: capabilitySummaryMemoFor(context).fallback,
       }))
     : analyzeFunctionCapabilities(fn, {
@@ -330,7 +330,7 @@ function applyCapabilitySummaryToArgument(
     baseType = getTypeFromTypeNodeWithFallback(
       baseTypeNode,
       checker,
-      context?.options.state?.typeRegistry,
+      context?.state.typeRegistry,
     );
   }
 
@@ -390,7 +390,7 @@ function applyCapabilitySummaryToParameter(
     baseType = getTypeFromTypeNodeWithFallback(
       baseTypeNode,
       checker,
-      context?.options.state?.typeRegistry,
+      context?.state.typeRegistry,
     );
   }
 
@@ -559,7 +559,7 @@ function collectFunctionSchemaTypeNodes(
   const unwrappedReturnExpr = returnExpr
     ? unwrapExpression(returnExpr)
     : undefined;
-  const uiContractHint = context?.options.state?.schemaHints &&
+  const uiContractHint = context &&
       unwrappedReturnExpr &&
       ts.isObjectLiteralExpression(unwrappedReturnExpr)
     ? propagateUiContractHintsFromObjectLiteral(
@@ -1111,7 +1111,7 @@ function applyIdentityArrayItemSchemaHints(
   identityPaths: readonly (readonly string[])[],
   context: TransformationContext,
 ): void {
-  if (!context.options.state?.schemaHints || identityPaths.length === 0) return;
+  if (identityPaths.length === 0) return;
 
   const grouped = new Map<string, boolean>();
   for (const path of identityPaths) {
@@ -2009,7 +2009,7 @@ function propagateUiContractHintsFromObjectLiteral(
 ):
   | UiContractHint
   | undefined {
-  if (!context.options.state?.schemaHints || !resultNode) {
+  if (!resultNode) {
     return undefined;
   }
 
@@ -3039,7 +3039,7 @@ function handlePatternSchemaInjection(
 export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
-    const typeRegistry = context.options.state?.typeRegistry;
+    const typeRegistry = context.state.typeRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
       // Single idempotency guard: if SchemaInjection already finalized this
@@ -3405,9 +3405,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             context,
             {
               explicitArgumentTypeNode: argumentType,
-              explicitArgumentTypeValue: typeRegistry?.get(argumentType),
+              explicitArgumentTypeValue: typeRegistry.get(argumentType),
               explicitResultTypeNode: resultType,
-              explicitResultTypeValue: typeRegistry?.get(resultType),
+              explicitResultTypeValue: typeRegistry.get(resultType),
               applyExplicitArgumentCapabilitySummary: true,
             },
           );
@@ -3573,7 +3573,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               typeRegistry,
               firstArgument.arguments,
             );
-            if (narrowedArgumentTypeValue && typeRegistry) {
+            if (narrowedArgumentTypeValue) {
               typeRegistry.set(inputSchema, narrowedArgumentTypeValue);
             }
             // smr only (see prependSchemaArguments for the rationale).
@@ -3612,9 +3612,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             context,
             {
               explicitArgumentTypeNode: argumentType,
-              explicitArgumentTypeValue: typeRegistry?.get(argumentType),
+              explicitArgumentTypeValue: typeRegistry.get(argumentType),
               explicitResultTypeNode: resultType,
-              explicitResultTypeValue: typeRegistry?.get(resultType),
+              explicitResultTypeValue: typeRegistry.get(resultType),
             },
           );
           if (!resolved) {
@@ -3664,7 +3664,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 typeRegistry,
               ),
               explicitArgumentTypeNode: argumentType,
-              explicitArgumentTypeValue: typeRegistry?.get(argumentType),
+              explicitArgumentTypeValue: typeRegistry.get(argumentType),
             },
           );
           if (!resolved) {

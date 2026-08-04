@@ -200,7 +200,7 @@ Expected implementation files:
 - [ ] Register the codec in
   `packages/data-model/src/codec-json/createDefaultRegistry.ts`.
 - [ ] Route callable factories through codec lookup before the generic function
-  rejection and before legacy `toJSON()` conversion.
+  rejection.
 - [ ] Include callable factories in JSON encoder cycle tracking.
 - [ ] Reject arbitrary functions, copied brand symbols, malformed state,
   unknown kinds, extra fields, and cyclic state.
@@ -221,9 +221,8 @@ Expected implementation and test files:
 ### WP1.3 — Make every Fabric operation see the same factory state
 
 - [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
-  factories are recognized through `tryFactoryState()` before legacy function
-  `toJSON()` and unbranded functions remain invalid. Codec dispatch remains the
-  serialization layer's job.
+  factories are recognized through `tryFactoryState()`, and unbranded functions
+  remain invalid. Codec dispatch remains the serialization layer's job.
 - [ ] Update `packages/data-model/src/type-check.ts` and compatibility guards so
   `FabricFactory` is the only valid function-shaped Fabric value.
 - [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
@@ -985,8 +984,10 @@ alone authorizes deleting readers for durable values.
 - [ ] Leave module/handler `$implRef` descriptor reconstruction intact unless a
   separately scoped migration proves all of its non-factory users have moved;
   first-class factories alone do not authorize its removal.
-- [ ] Remove factory-function `toJSON()` compatibility only after every Fabric
-  boundary uses registered codec dispatch.
+- [ ] Remove the runtime's artifact walk
+  (`packages/runner/src/encodable-form.ts`) and the `toEncodableForm()` /
+  `toJSON()` members it reads only after every Fabric boundary uses registered
+  codec dispatch.
 - [ ] Keep negative fixtures that prove deleted writers/readers stay deleted.
 
 ### WP5.3 — Update live documentation and archive the plan

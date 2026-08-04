@@ -54,7 +54,7 @@ describe("current-behavior spec stays in sync with canonical constants", () => {
       [...CFC_TRANSFORMER_STAGE_NAMES],
       [
         "docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md §3",
-        "no longer matches CFC_TRANSFORMER_STAGE_SPECS (src/cf-pipeline.ts).",
+        "no longer matches CFC_TRANSFORMER_STAGES (src/cf-pipeline.ts).",
         "The spec is descriptive: update its §3 ordered list to the constant's",
         "current names and order, and describe the behavioral reason for the",
         "change in the surrounding prose.",

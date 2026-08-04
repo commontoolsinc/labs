@@ -192,7 +192,7 @@ describe("encodable-form", () => {
         // optimization, and skipping it is a loud rejection.
         const value = { tools: { send: { handler: artifact({ ok: true }) } } };
         expect(() => fabricFromNativeValue(value))
-          .toThrow(/function per se/);
+          .toThrow(/Not representable as a `FabricValue`: function/);
       });
     });
 
@@ -298,11 +298,17 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ toEncodableForm: () => ({}) })).toBe(true);
     });
 
-    it("returns true for a value carrying only `toJSON`", () => {
-      // A `Cell` answers only this name -- it is how a cell becomes a link --
-      // and a cell is not a builder artifact. Dropping the fallback would stop
-      // every such value producing a form at all.
-      expect(hasEncodableForm({ toJSON: () => ({}) })).toBe(true);
+    it("returns true for a value carrying only `toSigilLinkOrNull`", () => {
+      // A `Cell` answers this name -- the link is what stands in for a cell on
+      // the way to storage -- and a cell is not a builder artifact.
+      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(true);
+    });
+
+    it("returns false for a value carrying only `toJSON`", () => {
+      // The JSON protocol's name gets no standing here. A cell carries it too,
+      // for `JSON.stringify`, and reading storage's answer off it would mean
+      // every value bearing the protocol's member answered as well.
+      expect(hasEncodableForm({ toJSON: () => ({}) })).toBe(false);
     });
 
     it("returns true for an INHERITED member", () => {
@@ -327,7 +333,8 @@ describe("encodable-form", () => {
     });
 
     it("returns false for a non-callable member of either name", () => {
-      expect(hasEncodableForm({ toEncodableForm: 1, toJSON: 2 })).toBe(false);
+      expect(hasEncodableForm({ toEncodableForm: 1, toSigilLinkOrNull: 2 }))
+        .toBe(false);
     });
 
     it("returns false for `null` and for a primitive", () => {
@@ -344,16 +351,15 @@ describe("encodable-form", () => {
         .toEqual({ a: 1 });
     });
 
-    it("falls back to `toJSON` when that is the only name", () => {
-      expect(encodableFormOf({ toJSON: () => ({ b: 2 }) })).toEqual({ b: 2 });
+    it("falls back to `toSigilLinkOrNull` when that is the only name", () => {
+      expect(encodableFormOf({ toSigilLinkOrNull: () => ({ b: 2 }) }))
+        .toEqual({ b: 2 });
     });
 
     it("prefers `toEncodableForm` when a value carries both", () => {
-      // A builder artifact carries both, and `toJSON` merely delegates. The
-      // order is what makes the runtime ask by the name that means it.
       const value = {
         toEncodableForm: () => ({ preferred: true }),
-        toJSON: () => ({ preferred: false }),
+        toSigilLinkOrNull: () => ({ preferred: false }),
       };
       expect(encodableFormOf(value)).toEqual({ preferred: true });
     });

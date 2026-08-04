@@ -118,8 +118,8 @@ function isPartOfOptionalChainCallee(
     ts.isCallChain(parent);
 }
 
-// A getter and a `toJSON()` member run when the pattern result is stored;
-// a method, setter, or function-valued property is a function value the data
+// A getter runs when the pattern result is stored; a method, setter,
+// function-valued property, or `toJSON()` member is a function value the data
 // model cannot store. The fix advice leads with the option that fits the kind:
 // a plain property or computed() field for a value, a module-scope handler() or
 // lift() for behavior.
@@ -754,8 +754,9 @@ export class PatternContextValidationTransformer
    * reactive data model cannot store. The whole member is rejected regardless
    * of its body, so reads laundered through destructuring, spread, computed
    * member names, or parameter defaults are covered too. A `toJSON` member is
-   * the one exception: it is storable (the data model converts a toJSON-bearing
-   * object), so it is reported only when its body reads a reactive value.
+   * the one exception, reported only when its body reads a reactive value; the
+   * data model stores no such member either way, so one that reads nothing
+   * reactive passes here and is refused at the write boundary instead.
    * Members inside a compute wrapper (computed()/lift()/handler()/action()) and
    * object literals outside pattern/render context are left alone. Class members
    * are out of scope for this rule (the gate requires an object-literal parent);
@@ -897,12 +898,12 @@ export class PatternContextValidationTransformer
   }
 
   /**
-   * Narrow, toJSON-only body check. A `toJSON` member is the one function shape
-   * the data model can store: it converts a toJSON-bearing object via toJSON()
-   * rather than throwing. So a `toJSON` that reads no reactive value is storable
-   * and allowed; one that reads a reactive value captured from the enclosing
-   * pattern still freezes a snapshot at store time and is reported. This is the
-   * single exception to the rule's body-agnostic stance, scoped to toJSON.
+   * Narrow, toJSON-only body check. A `toJSON` that reads a reactive value
+   * captured from the enclosing pattern freezes a snapshot at store time and is
+   * reported here; one that reads nothing reactive is not, and is refused at
+   * the write boundary instead, `toJSON` being an ordinary function-valued
+   * member as far as the data model is concerned. This is the single exception
+   * to the rule's body-agnostic stance, scoped to toJSON.
    */
   private memberBodyReadsReactiveValue(
     fn:
