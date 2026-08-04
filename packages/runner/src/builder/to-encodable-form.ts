@@ -421,29 +421,19 @@ export function patternToEncodableForm(pattern: Pattern) {
     ...(programIdentity ? { program: programIdentity } : {}),
   };
   if (internalGraphSerialization) return graph;
-  // JSON boundary (cell writes, JSON.stringify): REFS-ONLY (design §7,
+  // JSON boundary (cell writes, `JSON.stringify`): REFS-ONLY (design §7,
   // identity E4). The ref is content-derived, so identical bytes re-emit the
-  // identical ref across sessions. Schemas ride along so consumers can read
-  // them without resolving (llm-dialog tool schemas). Rehydration goes by
-  // identity: the session-lifetime artifact index covers every module
-  // evaluated in the reading session (any authored op, by construction), and
-  // async readers fall back to the storage-backed `loadPatternByIdentity` —
-  // compiled artifacts persist in-space as an expected part of compilation.
-  // A pattern with NO entry ref (manually constructed / dynamic) still
-  // serializes its full graph: nothing could ever resolve its ref. That graph
-  // holds LIVE modules -- `withAliasBindings` builds a node by copying
-  // its module member by member -- so the artifacts in it are replaced here,
-  // by the same walk the storage boundary uses. The walk looks for the
-  // artifact rather than for the positions one may occupy, because an op nests
-  // inside itself: a module can sit under a node's `inputs`, at any depth.
+  // identical ref across sessions. Schemas ride along so consumers read them
+  // without resolving. Rehydration is by identity: the session-lifetime
+  // artifact index, or `loadPatternByIdentity` for an async reader.
   //
-  // Serializing HERE rather than at conversion time moves when a module reads
-  // ambient state: `moduleToEncodableForm` consults `getTopFrame()` to decide
-  // `$implRef`. That is safe because a frame INHERITS its parent's runtime
-  // (`builder/pattern.ts` -- `runtime ?? parent?.runtime`), so `frame.runtime`
-  // cannot differ between the two moments along one stack. A caller that
-  // captured this graph and converted it later, under a different runtime,
-  // would break that; none does.
+  // A pattern with NO entry ref serializes its full graph instead, since
+  // nothing could resolve its ref. That graph holds LIVE modules, so the walk
+  // replaces its artifacts here.
+  //
+  // `moduleToEncodableForm` reads `getTopFrame()` to decide `$implRef`. A
+  // frame inherits its parent's runtime (`builder/pattern.ts`), so
+  // `frame.runtime` is the same at every point along one stack.
   const entryRef = getArtifactEntryRef(pattern);
   return entryRef
     ? {
