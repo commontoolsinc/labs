@@ -11,7 +11,7 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
 import type {
-  IStorageProviderWithReplica,
+  IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import {
@@ -29,7 +29,7 @@ const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   send(
     batch: { uri: URI; value: EntityDocument | undefined }[],
