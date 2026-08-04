@@ -5377,6 +5377,23 @@ export class Runner {
     // including a sub-graph under a node's `inputs` -- is serialized before it
     // is hashed. `hashOf` refuses a live function where `JSON.stringify`
     // silently dropped one, so an unflattened value would throw here.
+    //
+    // That refusal is a NEW failure mode on this path, stated rather than
+    // buried: a value the data model rejects used to degrade to a cache miss
+    // (a redundant re-setup) and now throws. This is the SECOND line of
+    // defence, not the first -- `normalizeSandboxResult`, called on every
+    // route to this function, already refuses a bare function at any depth
+    // and says so better than a hash would. That gate lives in another file,
+    // so it is named here: the two are coupled, and weakening it would make
+    // this line the one that reports the problem.
+    //
+    // The keys also differ in kind, not just in reliability: a content hash
+    // is insensitive to key order where `JSON.stringify` is not, so
+    // same-content-different-order now reads as unchanged. That direction is
+    // right (a skipped redundant setup, never a missed one), and no case is
+    // known where the order actually varies -- `patternToJSON` builds from a
+    // fixed literal and `...rest` inherits a module's own stable order. So:
+    // robustness, not a live fix.
     const resultPatternKey = hashStringOf(
       flattenBuilderArtifacts(resultPattern),
     );
@@ -6326,11 +6343,12 @@ export class Runner {
 
     // The input bindings are about to cross into the data model, and a
     // pattern author can bind a builder artifact (a handler, a pattern) as an
-    // ordinary input value at any depth. Replace each with its serialized form
-    // on the way, so what crosses is representable. Flattening here rather
-    // than alongside the `op` substitution above keeps it clear of
+    // ordinary input value at any depth. Each is replaced with its serialized
+    // form on the way, so what crosses is representable -- by the walk INSIDE
+    // `getImmutableCell`, not by a call here. That it happens there and not
+    // alongside the `op` substitution above is what keeps it clear of
     // `findAllWriteRedirectCells`, which walks the same bindings for a
-    // different purpose and should see them as bound.
+    // different purpose and must see them as bound.
     const inputsCell = this.runtime.getImmutableCell(
       resultCell.space,
       mappedInputBindings,

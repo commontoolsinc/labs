@@ -606,6 +606,14 @@ export function patternToJSON(pattern: Pattern) {
   // module can occupy was tried and was wrong twice: a module reached through
   // a node's `inputs` (an op, which nests inside itself) is not somewhere a
   // hand-written traversal thinks to look.
+  //
+  // Serializing HERE rather than at conversion time moves when a module reads
+  // ambient state: `moduleToEncodableForm` consults `getTopFrame()` to decide
+  // `$implRef`. That is safe because a frame INHERITS its parent's runtime
+  // (`builder/pattern.ts` -- `runtime ?? parent?.runtime`), so `frame.runtime`
+  // cannot differ between the two moments along one stack. A caller that
+  // captured this graph and converted it later, under a different runtime,
+  // would break that; none does.
   const entryRef = getArtifactEntryRef(pattern);
   return entryRef
     ? {

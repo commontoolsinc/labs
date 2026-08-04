@@ -64,7 +64,7 @@ const IN_PROGRESS = Symbol("IN_PROGRESS");
  * does not travel with the bytes. Trust and the content-addressed entry ref
  * live in identity-keyed side tables, which is exactly that.
  */
-export type OnCopy = (copy: unknown, original: unknown) => void;
+type OnCopy = (copy: unknown, original: unknown) => void;
 
 /**
  * Replaces every builder artifact reachable from `value` with its encodable
@@ -143,9 +143,11 @@ function replace(
     // conversion's to interpret, and carries no builder artifact.
     //
     // Deliberately NOT `isPlainObject()`, which also admits a null-prototype
-    // object. Such an object is not a fabric record, so descending into one
-    // would be looking for artifacts somewhere the conversion is going to
-    // refuse regardless. The question here is narrower than that predicate's.
+    // object. Such an object is not the walk's to rewrite; the conversion
+    // decides it. (It does not REFUSE it: `native-type-tags.ts` answers a
+    // null-prototype object `Object`, and upgrades it to `HasToJSON` when it
+    // carries a callable one.) The question here is narrower than that
+    // predicate's.
     return value;
   }
 

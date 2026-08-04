@@ -504,3 +504,27 @@ A suite that does not move is not evidence that nothing moved.
 - Note the object that is RETURNED, not one built along the way. The first
   attempt at that fix registered a value the following statement discarded, so
   it read as fixed and changed nothing.
+- Bytes-identical failed **three separate times** on this work, which makes it
+  a category rather than an anecdote. A byte comparison agreed while: a copy
+  skipped its derivation note; serialization moved to a different actor
+  (data-model's duck-typed arm answers `toJSON` too, so the same bytes come
+  out whether or not the walk did the work); and an internal graph lost every
+  module's body, because that branch was never the one the encoded-form probe
+  measured. Each time the bytes were RIGHT and the question was wrong.
+- The instrument that answers those is a **survivor hunt**: apply the
+  transformation, then search the result for anything that should no longer be
+  there -- a serializer member, a live function, an unregistered copy. It asks
+  about the output's structure rather than its encoding, which is what a byte
+  comparison structurally cannot do. Run it against the baseline too: a
+  survivor hunt that finds nothing in both trees is measuring nothing.
+- Prose that names a function's output without naming WHICH BRANCH produced it
+  is how a true measurement licenses a false conclusion. `patternToJSON` has a
+  storage-boundary branch that the walk flattens and an internal branch that it
+  deliberately does not; "live functions in an emitted graph: 7691 -> none" is
+  true of the first and says nothing about the second. The claim was accurate
+  and the sentence was not.
+- A guard belongs where the shape it guards actually occurs. Two obvious homes
+  for the internal-graph assertion could not host it: both fixtures' modules
+  carry a STRING implementation, so serializing and dropping-functions coincide
+  on them and the test passes either way. Check that a proposed guard can fail
+  before believing it guards anything.
