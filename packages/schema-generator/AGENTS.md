@@ -2,7 +2,7 @@
 
 Converts TypeScript types to Common Fabric JSON Schemas (2020-12 dialect + repo
 extensions). Consumed at compile time by `packages/ts-transformers`
-(SchemaGeneratorTransformer → `createSchemaTransformerV2`); also the repo's
+(SchemaGeneratorTransformer constructs a `SchemaGenerator`); also the repo's
 wrapper-type vocabulary oracle — ts-transformers imports `cell-brand`,
 `wrapper-names`, `type-traversal`, `property-name`, `property-optionality` via
 subpath exports. Entry point is `src/index.ts` (not `mod.ts`).

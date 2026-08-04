@@ -1,6 +1,5 @@
 import ts from "typescript";
 import { type TransformationContext } from "../../core/mod.ts";
-import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyArrayMethodCall,
   isFunctionLikeExpression,
@@ -10,49 +9,41 @@ import { shouldTransformArrayMethod } from "./array-method-policy.ts";
 import { transformArrayMethodCallback } from "./array-method-transform.ts";
 import { rewriteArrayMethodCallbackExpressionSites } from "../../transformers/expression-site-lowering.ts";
 
-export class ArrayMethodStrategy implements ClosureTransformationStrategy {
-  canTransform(
-    node: ts.Node,
-    _context: TransformationContext,
-  ): boolean {
-    if (
-      !ts.isCallExpression(node) ||
-      !ts.isPropertyAccessExpression(node.expression)
-    ) {
-      return false;
-    }
-
-    const arrayMethodInfo = classifyArrayMethodCall(node);
-    return !!arrayMethodInfo && !arrayMethodInfo.lowered;
-  }
-
-  // Caller must pass a call expression.
-  transform(
-    node: ts.Node,
-    context: TransformationContext,
-    visitor: ts.Visitor,
-  ): ts.Node | undefined {
-    if (!ts.isCallExpression(node)) {
-      throw new Error(
-        "ArrayMethodStrategy.transform requires a call expression",
-      );
-    }
-
-    const callback = node.arguments[0];
-    if (callback && isFunctionLikeExpression(callback)) {
-      assertValidSyntheticComputeOwnedArrayMethodContext(
-        node,
-        context.getReactiveContext(node),
-        context,
-      );
-      if (shouldTransformArrayMethod(node, context)) {
-        return transformArrayMethodCallback(node, callback, context, visitor, {
-          rewriteTransformedBody: rewriteArrayMethodCallbackExpressionSites,
-        });
-      }
-    }
+/**
+ * Rewrite the callback of a not-yet-lowered reactive array method call.
+ * Returns undefined for any other node.
+ */
+export function transformArrayMethodCall(
+  node: ts.Node,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.Node | undefined {
+  if (
+    !ts.isCallExpression(node) ||
+    !ts.isPropertyAccessExpression(node.expression)
+  ) {
     return undefined;
   }
+
+  const arrayMethodInfo = classifyArrayMethodCall(node);
+  if (!arrayMethodInfo || arrayMethodInfo.lowered) {
+    return undefined;
+  }
+
+  const callback = node.arguments[0];
+  if (callback && isFunctionLikeExpression(callback)) {
+    assertValidSyntheticComputeOwnedArrayMethodContext(
+      node,
+      context.getReactiveContext(node),
+      context,
+    );
+    if (shouldTransformArrayMethod(node, context)) {
+      return transformArrayMethodCallback(node, callback, context, visitor, {
+        rewriteTransformedBody: rewriteArrayMethodCallbackExpressionSites,
+      });
+    }
+  }
+  return undefined;
 }
 
 function getNodeSnippet(

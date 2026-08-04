@@ -19,7 +19,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { createSchemaTransformerV2 } from "../src/plugin.ts";
+import { SchemaGenerator } from "../src/schema-generator.ts";
 import {
   batchTypeCheckFixtures,
   getTypeFromCode,
@@ -170,7 +170,7 @@ defineFixtureSuite<SchemaResult, string>({
 async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
   const code = await Deno.readTextFile(inputPath);
   const { type, checker, typeNode } = await getTypeFromCode(code, TYPE_NAME);
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
   const normalized = normalizeSchema(
     transformer.generateSchema(type, checker, typeNode),
   );

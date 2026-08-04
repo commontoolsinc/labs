@@ -29,7 +29,6 @@ import {
   SchemaObjectTraverser,
   type TraversalContext,
 } from "../../src/traverse.ts";
-import { ContextualFlowControl } from "../../src/cfc.ts";
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
 import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
@@ -232,7 +231,6 @@ function wrapTxWithReadLog(
 function makeContext(includeMeta: boolean): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker(),
-    new ContextualFlowControl(),
     new MapSetStringToPathSelectors(true),
     includeMeta,
   );

@@ -1646,7 +1646,6 @@ export class StorageManager implements IStorageManager {
       value,
       base,
       schema,
-      new ContextualFlowControl(),
       promises,
       new Set(),
     );
@@ -1659,7 +1658,6 @@ export class StorageManager implements IStorageManager {
     value: unknown,
     base: NormalizedLink,
     schema: JSONSchema | undefined,
-    cfc: ContextualFlowControl,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
   ): void {
@@ -1696,13 +1694,12 @@ export class StorageManager implements IStorageManager {
       for (let i = 0; i < value.length; i++) {
         const item = value[i];
         const itemSchema = schema
-          ? cfc.getSchemaAtPath(schema, [String(i)])
+          ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
           : undefined;
         this.collectLinkedCellSyncs(
           item,
           base,
           itemSchema,
-          cfc,
           promises,
           seen,
         );
@@ -1719,13 +1716,12 @@ export class StorageManager implements IStorageManager {
           continue;
         }
         const childSchema = schema
-          ? cfc.getSchemaAtPath(schema, [key])
+          ? ContextualFlowControl.getSchemaAtPath(schema, [key])
           : undefined;
         this.collectLinkedCellSyncs(
           child,
           base,
           childSchema,
-          cfc,
           promises,
           seen,
         );
@@ -2678,7 +2674,6 @@ class SpaceReplica implements ISpaceReplica {
       entries: normalizedEntries,
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
-    const cfc = new ContextualFlowControl();
     // Entries covered by an already-registered selector are not re-fetched,
     // but the covering watch may still be IN FLIGHT. A sync's contract is
     // "resolved means the data is locally available", so collect the covering
@@ -2697,7 +2692,6 @@ class SpaceReplica implements ISpaceReplica {
         .getSupersetSelector(
           baseAddress,
           selector,
-          cfc,
         );
       if (superset !== undefined && supersetPromise !== undefined) {
         coveredInFlight.push(supersetPromise);

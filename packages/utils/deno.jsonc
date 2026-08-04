@@ -18,6 +18,7 @@
     "./async-local-store": "./src/async-local-store.ts",
     "./base64url": "./src/base64url.ts",
     "./bigint": "./src/bigint.ts",
+    "./build-info": "./src/build-info.ts",
     "./cache": "./src/cache.ts",
     "./deep-equal": "./src/deep-equal.ts",
     "./hashtags": "./src/hashtags.ts",

@@ -9,43 +9,16 @@
 // explicit toolshed override if present, otherwise the source-run COMMIT_SHA
 // fallback, so `/api/meta` presents the same field as a compiled binary.
 
+import {
+  type BuildInfo,
+  normalize,
+  readBuildInfoFrom,
+} from "@commonfabric/utils/build-info";
 import env from "@/env.ts";
 
+export { type BuildInfo, normalize, readBuildInfoFrom };
+
 const COMPILED_PATH = new URL("../COMPILED", import.meta.url);
-
-export interface BuildInfo {
-  commitSha: string | null;
-  builtAt: string | null;
-}
-
-export function normalize(s: string | null | undefined): string | null {
-  const trimmed = s?.trim();
-  return trimmed ? trimmed : null;
-}
-
-export function readBuildInfoFrom(path: URL | string): BuildInfo {
-  let raw: string;
-  try {
-    raw = Deno.readTextFileSync(path);
-  } catch {
-    return { commitSha: null, builtAt: null };
-  }
-  if (!raw.trim()) return { commitSha: null, builtAt: null };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { commitSha: null, builtAt: null };
-  }
-  if (typeof parsed !== "object" || parsed === null) {
-    return { commitSha: null, builtAt: null };
-  }
-  const obj = parsed as Partial<BuildInfo>;
-  return {
-    commitSha: normalize(obj.commitSha),
-    builtAt: normalize(obj.builtAt),
-  };
-}
 
 export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
 

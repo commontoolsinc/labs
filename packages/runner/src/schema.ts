@@ -740,7 +740,10 @@ export function processDefaultValue(
     // Process properties defined in both the schema and default value
     if (resolvedSchema?.properties) {
       for (const key of Object.keys(resolvedSchema.properties)) {
-        const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
+        const rawPropSchema = ContextualFlowControl.schemaAtPath(
+          resolvedSchema,
+          [key],
+        );
         const propSchema =
           (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
             ? ContextualFlowControl.resolveSchemaRefs(

@@ -169,6 +169,12 @@ If you are developing runtime code, read the following documentation:
   layers. Its neighbour `mergeable-collection-writes.md` covers why the
   mergeable ops exist and what they do to conflict detection; read it before
   changing how a handler writes to a list
+- `docs/development/data-uri-identifiers.md` - `data:` cell identifiers, which
+  carry their own frozen value instead of naming a document in a space: how one
+  is minted and read, why there are two tests for them (a broad one asking
+  whether a document exists at all, and a narrow one asking whether a payload is
+  this codebase's to decode), and why such an address is read-only. Read it
+  before touching a branch that tests for a `data:` identifier
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every
