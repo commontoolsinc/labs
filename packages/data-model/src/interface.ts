@@ -226,18 +226,6 @@ export type MutableFabricValueLayer =
  * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
  * inside `FabricValue`.
  *
- * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to fabric form via their `toJSON()` method. This is a
- * `toJSON()`-based conversion path, included here so the
- * `isFabricCompatible()` type predicate
- * (`value is FabricValue | FabricNativeObject`) remains sound.
- *
- * Arrays are the exception the arm cannot state structurally: an array is
- * decided by the array rule whatever it carries, so one bearing a `toJSON`
- * method is rejected rather than converted, even though it satisfies this
- * arm's shape. A type cannot say "any object with `toJSON()` except an
- * array", so the carve-out lives here in prose.
- *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
  */
@@ -247,8 +235,7 @@ export type FabricNativeObject =
   | Set<unknown>
   | Date
   | RegExp
-  | Uint8Array
-  | { toJSON(): unknown };
+  | Uint8Array;
 
 /**
  * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values

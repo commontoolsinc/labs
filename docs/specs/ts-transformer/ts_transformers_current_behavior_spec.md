@@ -454,13 +454,15 @@ Diagnostics emitted in all modes:
     runs once when the result is stored and freezes its return to a snapshot; a
     method, setter, or function-valued property is a function value the
     reactive data model cannot store (it throws
-    ``Not representable as a `FabricValue`: function per se``)
+    ``Not representable as a `FabricValue`: function``)
   - exempt: members inside compute wrappers (computed/lift/handler/action),
     object literals outside pattern/render context, JSX event handlers,
     array-method/render callbacks, and a `toJSON` member that reads no reactive
-    value (a toJSON-bearing object is storable — the data model converts it via
-    `toJSON()`); class members are covered separately by
+    value; class members are covered separately by
     `pattern-context:function-creation`
+  - the `toJSON` exemption admits a member the data model will not store: the
+    conversion reads `toJSON` as the ordinary function-valued member it is and
+    refuses it, so such a pattern compiles here and throws at its first write
 - **Error** `pattern-context:builder-placement`
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`

@@ -178,8 +178,10 @@ Regardless of cell type, all cells share:
 - `schema` — optional type information
 - `getAsLink()` — serialization to `SigilLink`
 
-The `toJSON()` method exists but is only called via generic duck-typed
-serialization patterns, not cell-specific code.
+The `toJSON()` method exists so a cell answers the JSON protocol's name; the
+runtime reads it through `hasEncodableForm()` / `encodableFormOf()`
+(`packages/runner/src/encodable-form.ts`), which is how a cell becomes a link
+on the way to storage. The data model gives the name no standing of its own.
 
 ---
 

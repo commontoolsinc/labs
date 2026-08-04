@@ -209,10 +209,10 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("should call toJSON() on plain objects during set", () => {
+  it("should reject plain objects carrying a toJSON method during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should call toJSON() on plain objects during set",
+      "should reject plain objects carrying a toJSON method during set",
       undefined,
       tx,
     );
@@ -222,11 +222,12 @@ describe("Cell", () => {
         return { exposed: true };
       },
     };
-    c.set({ data: objWithToJSON });
 
-    const result = c.get() as { data: unknown } | undefined;
-    // toJSON() should have been called, so we get { exposed: true } not { secret, toJSON }
-    expect(result?.data).toEqual({ exposed: true });
+    // `toJSON` is not a serializer the write path recognizes, so the method is
+    // read as the member it is: a function, which no stored record may hold.
+    expect(() => c.set({ data: objWithToJSON })).toThrow(
+      "Not representable as a `FabricValue`: function",
+    );
   });
 
   it("should preserve sparse arrays during set", () => {

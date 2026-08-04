@@ -239,7 +239,7 @@ export function moduleToEncodableForm(module: Module) {
   // `json-member.ts`), and the handler ergonomics
   // (`mod.with(...)`/`mod.bind(...)`). None is part of the serialized
   // contract; left in, each would surface as a "not representable as a
-  // `FabricValue`: function per se" rejection, so they are destructured out
+  // `FabricValue`: function" rejection, so they are destructured out
   // here. `to-encodable-form.test.ts` asserts the whole resulting key set, an extra
   // member being a changed content-derived id for every value that carries a
   // module.

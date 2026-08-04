@@ -89,8 +89,9 @@ These types cannot be stored directly:
 
 - `symbol` — only registry-interned symbols are storable; unique symbols
   throw (see Symbols below)
-- `function` — throws error unless it has a `toJSON()` method
-- Class instances — throws error unless they have `toJSON()` or special handling
+- `function` — throws
+- Class instances — throw unless the class has special handling (a recognized
+  native class, or the fabric protocol)
 
 #### Symbols
 
