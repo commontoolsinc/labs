@@ -97,7 +97,7 @@ export const prodErrors: Tile = {
     // prefers SIGNOZ_UI_URL and only falls back to SIGNOZ_URL when it's public https.
     const service = serviceName(ctx.env);
     const uiBase = ctx.env("SIGNOZ_UI_URL") ?? (base.startsWith("https://") ? base : undefined);
-    const drill = uiBase ? { href: `${uiBase.replace(/\/$/, "")}/logs`, hint: "logs ↗" } : {};
+    const drill = uiBase ? { href: `${uiBase.replace(/\/$/, "")}/logs/logs-explorer`, hint: "logs ↗" } : {};
 
     let trend: { total: Map<number, number>; err: Map<number, number> };
     try {
