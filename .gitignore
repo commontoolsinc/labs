@@ -51,3 +51,9 @@ CLAUDE.local.md
 
 # Temp dir created by docs/check.ts while type-checking doc code blocks
 docs/.doccheck*
+
+# Temp deno configs written at the repo root by `runDenoCheckWithTemporaryConfig`
+# (packages/test-support/src/isolated-deno.ts). It removes each one in a
+# `finally`, so these survive only when a run is interrupted -- at which point
+# `git add -A` will happily commit one, and `deno fmt --check` then rejects it.
+.deno.standard-decorators.*.json
