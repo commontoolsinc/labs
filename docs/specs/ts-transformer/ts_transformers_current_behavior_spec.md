@@ -440,22 +440,17 @@ Diagnostics emitted in all modes:
     arrow/function expression (including inside JSX data positions, and when
     the function is wrapped in transparent expressions — parentheses, `as`,
     `satisfies`, `!`, `<T>`)
-  - rejected regardless of the body, because the reactive-read lowering pass
-    does not descend into function bodies; the sole exception is a `toJSON`
-    member, which is reported only when its body reads a reactive value
-  - the message names the mechanism per kind: a getter or `toJSON()` member
-    runs once when the result is stored and freezes its return to a snapshot; a
-    method, setter, or function-valued property is a function value the
-    reactive data model cannot store (it throws
-    ``Not representable as a `FabricValue`: function``)
+  - rejected regardless of the body, and with no exception by member name,
+    because the reactive-read lowering pass does not descend into function
+    bodies
+  - the message names the mechanism per kind: a getter runs once when the
+    result is stored and freezes its return to a snapshot; a method, setter, or
+    function-valued property is a function value the reactive data model cannot
+    store (it throws ``Not representable as a `FabricValue`: function``)
   - exempt: members inside compute wrappers (computed/lift/handler/action),
-    object literals outside pattern/render context, JSX event handlers,
-    array-method/render callbacks, and a `toJSON` member that reads no reactive
-    value; class members are covered separately by
+    object literals outside pattern/render context, JSX event handlers, and
+    array-method/render callbacks; class members are covered separately by
     `pattern-context:function-creation`
-  - the `toJSON` exemption admits a member the data model will not store: the
-    conversion reads `toJSON` as the ordinary function-valued member it is and
-    refuses it, so such a pattern compiles here and throws at its first write
 - **Error** `pattern-context:builder-placement`
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
