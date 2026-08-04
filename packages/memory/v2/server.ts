@@ -3016,7 +3016,22 @@ export class Server {
       ids.push(toDirtyKey(upsert.id, declaredScope(upsert.scope)));
     }
     for (const remove of sync.removes) {
-      ids.push(toDirtyKey(remove.id, declaredScope(remove.scope)));
+      // The remove's cache entry died when the frame was built; re-insert a
+      // tombstone claiming the client still holds the doc, and force the
+      // next sync through a FULL evaluation — the incremental path never
+      // emits removes, so only a full re-diff (tombstone present, entity
+      // absent) regenerates the removal for the client.
+      const scope = declaredScope(remove.scope);
+      session.entities.set(cacheKeyForEntity(remove.branch, remove.id, scope), {
+        branch: remove.branch,
+        id: remove.id,
+        scope,
+        seq: 0,
+        deleted: true,
+      });
+      session.trackedIds.add(toDirtyKey(remove.id, scope));
+      session.forceFullResync = true;
+      ids.push(toDirtyKey(remove.id, scope));
     }
     if (sync.caughtUpLocalSeq !== undefined) {
       // The marker was consumed into `caughtUpLocalSeq` when the frame was
@@ -3054,6 +3069,15 @@ export class Server {
     // dirty-batch requeue (CT-1927 review, round 6).
     const preCallCaughtUp = session.caughtUpLocalSeq;
     const preCallPending = session.pendingCaughtUpLocalSeq;
+    const preCallForceFullResync = session.forceFullResync;
+    if (session.forceFullResync) {
+      // Rollback re-inserted tombstones for a lost frame's removes; only a
+      // full evaluation re-diffs them out. Self-clearing (restored by the
+      // catch below if evaluation throws).
+      session.forceFullResync = false;
+      dirtyIds = undefined;
+      dirtyOrigins = undefined;
+    }
     return tracer.startActiveSpan(
       "memory.subscriber.sync",
       async (span): Promise<SessionEffectMessage | null> => {
@@ -3071,6 +3095,7 @@ export class Server {
             pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
           const finishCatchUp = async (
             sync: SessionSync,
+            candidateTrackedIds?: ReadonlySet<string>,
           ): Promise<SessionEffectMessage> => {
             if (hasPendingCatchUp) {
               session.caughtUpLocalSeq = Math.max(
@@ -3087,6 +3112,7 @@ export class Server {
               sessionId,
               sync,
               options,
+              candidateTrackedIds,
             );
             return {
               type: "session/effect",
@@ -3217,6 +3243,15 @@ export class Server {
                 );
               }
             };
+            // The frame-under-construction's watch scope: committed tracked
+            // ids plus this batch's — observation attachment must scope
+            // against THIS set, not the yet-uncommitted session state.
+            const candidateTrackedIds = new Set(session.trackedIds);
+            for (const [, entry] of updates) {
+              candidateTrackedIds.add(
+                toDirtyKey(entry.id, declaredScope(entry.scope)),
+              );
+            }
             const toSeq = Engine.serverSeq(engine);
             if (upserts.length === 0) {
               // The watched set was re-evaluated current as of toSeq even though it
@@ -3240,7 +3275,7 @@ export class Server {
                 left.id.localeCompare(right.id)
               ),
               removes: [],
-            });
+            }, candidateTrackedIds);
             commitEntities();
             session.lastSyncedSeq = toSeq;
             return message;
@@ -3265,17 +3300,18 @@ export class Server {
           // frame is built, so a throw leaves the diff recomputable. The
           // empty-sync branch commits first — its frame carries no doc
           // novelty, and the marker counters are restored by the catch.
+          const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           const commitWatchState = () => {
             session.graphs = graphs;
             session.entities = entities;
-            session.trackedIds = trackedIdsFromEntries(entities.values());
+            session.trackedIds = evaluatedTrackedIds;
             session.lastSyncedSeq = serverSeq;
           };
           if (isEmptySync(sync)) {
             commitWatchState();
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
-          const message = await finishCatchUp(sync);
+          const message = await finishCatchUp(sync, evaluatedTrackedIds);
           commitWatchState();
           return message;
         } catch (error) {
@@ -3290,6 +3326,8 @@ export class Server {
             session.pendingCaughtUpLocalSeq,
             preCallPending,
           );
+          session.forceFullResync = session.forceFullResync ||
+            preCallForceFullResync;
           throw error;
         } finally {
           span.end();
@@ -3311,6 +3349,7 @@ export class Server {
     sessionId: string,
     sync: SessionSync,
     options?: { adoptionObservations?: boolean },
+    candidateTrackedIds?: ReadonlySet<string>,
   ): Promise<void> {
     if (
       options?.adoptionObservations !== true ||
@@ -3329,7 +3368,13 @@ export class Server {
       // inside the watch boundary that scopes every other byte of this push.
       const session = this.#sessions.get(space, sessionId);
       if (session === null) return;
-      const trackedIds = session.trackedIds;
+      // The session cache commits only after the frame is built, so during
+      // catch-up construction `session.trackedIds` is the PREVIOUS watch
+      // scope. The caller passes the candidate set for the frame being
+      // built; scoping against the stale set would drop rows for newly
+      // reached entities or admit rows for entities leaving the watch
+      // (CT-1927 review, round 7).
+      const trackedIds = candidateTrackedIds ?? session.trackedIds;
       const adoptionSurfaceTracked = (
         observation: Engine.SchedulerActionObservation,
       ): boolean =>

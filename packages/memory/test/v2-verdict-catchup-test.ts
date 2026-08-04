@@ -538,16 +538,19 @@ Deno.test("memory v2 server: a failed send rolls back delivery state; the next f
   );
   assertEquals(committerMessages.length, 0);
 
-  // Guard edges: rolling back for a vanished session is a no-op (its cache
-  // died with it), and a lost frame's REMOVES re-dirty their ids — the
-  // cache entry is already gone, so re-dirtying is all a rollback can do
-  // for them (watch-shrink removes heal at full re-evaluation).
+  // Rolling back for a vanished session is a no-op (its cache died with
+  // it).
   server.rollbackUndeliveredSync(space, "session:gone", {
     type: "session/effect",
     space,
     sessionId: "session:gone",
     effect: { type: "sync", fromSeq: 0, toSeq: 1, upserts: [], removes: [] },
   });
+
+  // A lost frame's REMOVES must reach the client too: rollback re-inserts
+  // a tombstone cache entry and forces the next sync through a FULL
+  // evaluation — the incremental path never emits removes — so the re-diff
+  // (tombstone present, entity absent) regenerates the removal.
   server.rollbackUndeliveredSync(space, committerSessionId, {
     type: "session/effect",
     space,
@@ -561,6 +564,11 @@ Deno.test("memory v2 server: a failed send rolls back delivery state; the next f
     },
   });
   await server.flushSessions([space]);
+  const removeEffect = assertEffect(shiftMessage(committerMessages));
+  assertEquals(
+    (removeEffect.effect as SessionSync).removes.map((remove) => remove.id),
+    ["of:doc:zz"],
+  );
   assertEquals(committerMessages.length, 0);
 });
 
