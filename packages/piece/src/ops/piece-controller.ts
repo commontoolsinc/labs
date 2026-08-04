@@ -227,10 +227,29 @@ export interface PreparedPieceSourceChange {
   };
 }
 
-interface PieceSourceCompatibilityIssues {
+export interface PieceSourceCompatibilityIssues {
   schema?: string;
   argument?: string;
   retainedLinks?: string;
+}
+
+/**
+ * The verdict `checkPattern()` returns: can this source replace the piece's
+ * current one, and if not, every reason at once.
+ *
+ * "Every reason at once" is the point. Applying a source that cannot migrate
+ * the piece's documents surfaces whichever low-level rejection happens to fire
+ * first — a schema-subset assertion, a retained-link proof, or an argument
+ * validation failure at the setup-commit boundary — so a caller fixes one and
+ * meets the next. The same review runs here and on the apply path, so a
+ * refusal names what a preflight would have named.
+ */
+export interface PatternCompatibilityReport {
+  compatible: boolean;
+  issues: PieceSourceCompatibilityIssues;
+  /** Every issue joined, or `undefined` when compatible. */
+  message?: string;
+  candidate: { identity: string; symbol: string };
 }
 
 export type PieceSourceActionResult =
@@ -3200,6 +3219,45 @@ export class PieceController<T = unknown> {
     }
   }
 
+  /**
+   * Would `setPattern(program)` be accepted? Answers without applying anything.
+   *
+   * Drives the SAME review the apply path runs — no second copy of the rules,
+   * because a preflight that reimplements them drifts and starts lying. It
+   * compiles the candidate (which the runtime caches, so the subsequent apply
+   * does not pay for it twice) and reads the piece's argument; it opens no
+   * transaction and writes nothing.
+   */
+  async checkPattern(
+    program: RuntimeProgram,
+  ): Promise<PatternCompatibilityReport> {
+    const { pattern: previousPattern, ref: previousRef } = await this
+      .#loadCurrentPattern();
+    const candidate = await compileProgram(this.#manager, program, {
+      previousEntryIdentity: previousRef.identity,
+    });
+    const candidateRef = this.#manager.runtime.patternManager
+      .getArtifactEntryRef(candidate);
+    if (candidateRef === undefined) {
+      throw new Error("the candidate source has no pattern identity");
+    }
+    const review = await pieceSourceCompatibilityReview(
+      previousPattern,
+      candidate,
+      this.#cell,
+      this.#manager,
+    );
+    const compatible = !hasPieceSourceCompatibilityIssues(review.issues);
+    return {
+      compatible,
+      issues: review.issues,
+      candidate: candidateRef,
+      ...(compatible
+        ? {}
+        : { message: pieceSourceCompatibilityMessage(review.issues) }),
+    };
+  }
+
   async setPattern(
     program: RuntimeProgram,
     options?: {
@@ -3233,7 +3291,19 @@ export class PieceController<T = unknown> {
             : {},
         );
         if (!options?.dangerouslyAllowIncompatibleSchema) {
-          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+          // The same review `checkPattern()` runs, so a refusal here names
+          // every reason rather than whichever assertion happened to fire
+          // first. The execute-time validators below still enforce
+          // independently — this decides the MESSAGE, not the outcome.
+          const review = await pieceSourceCompatibilityReview(
+            previousPattern,
+            pattern,
+            this.#cell,
+            this.#manager,
+          );
+          if (hasPieceSourceCompatibilityIssues(review.issues)) {
+            throw new Error(pieceSourceCompatibilityMessage(review.issues));
+          }
         }
         transition = pieceSourceTransition(
           expected,

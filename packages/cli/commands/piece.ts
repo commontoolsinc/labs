@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import { VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
+  checkPiecePattern,
   type EntryConfig,
   executePieceCallable,
   formatViewTree,
@@ -33,6 +34,7 @@ import {
   stepPiece,
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
+import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
 import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
@@ -1031,9 +1033,31 @@ export const piece = new Command()
     "--dangerously-allow-incompatible-schema",
     "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
   )
+  .option(
+    "--check",
+    "Report whether the source could replace the piece's current one, and change nothing.",
+  )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
+    if (options.check) {
+      const { config, report } = await checkPieceSourceFromCommand(
+        options,
+        mainPath,
+      );
+      if (report.compatible) {
+        render(`${mainPath} can replace the source for piece ${config.piece}`);
+        hint(cliText(`NEXT STEPS:
+  → Apply it: cf piece setsrc --piece ${config.piece} ${mainPath} ...`));
+        return;
+      }
+      // Non-zero exit: `--check` is meant to gate a deploy script, so the
+      // verdict has to be readable by `if` as well as by a person.
+      throw new ValidationError(
+        `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
+        { exitCode: 1 },
+      );
+    }
     const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
@@ -1894,6 +1918,31 @@ export async function searchPiecesFromCommand(
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */
 export interface SetPieceSourceCommandDependencies {
   setPiecePattern?: typeof setPiecePattern;
+}
+
+/** Injectable dependencies for testing `piece setsrc --check`. */
+export interface CheckPieceSourceCommandDependencies {
+  checkPiecePattern?: typeof checkPiecePattern;
+}
+
+/**
+ * Run the `piece setsrc --check` preflight. Applies nothing.
+ *
+ * Deliberately parses the same options `setsrc` does, so the check is aimed at
+ * the piece and entry the apply would have used — a preflight against a
+ * different target is worse than none.
+ */
+export async function checkPieceSourceFromCommand(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: CheckPieceSourceCommandDependencies = {},
+): Promise<{ config: PieceConfig; report: PatternCompatibilityReport }> {
+  const config = parsePieceOptions(options);
+  const report = await (deps.checkPiecePattern ?? checkPiecePattern)(
+    config,
+    localPatternEntry(mainPath, options),
+  );
+  return { config, report };
 }
 
 /** Apply the parsed `piece setsrc` command while preserving its safety flag. */

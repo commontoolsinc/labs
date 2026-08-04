@@ -38,6 +38,7 @@ import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import { toCell } from "../../runner/src/back-to-cell.ts";
 import {
+  checkPieceSourceFromCommand,
   formatPatternIdentity,
   formatPatternRef,
   localPatternEntry,
@@ -1438,6 +1439,46 @@ describe("cli piece parsing", () => {
         rootPath: "/repo",
       },
       options: { dangerouslyAllowIncompatibleSchema: true },
+    });
+  });
+
+  it("aims the setsrc preflight at the same piece and entry the apply would use", async () => {
+    // A preflight that resolves a different target than the apply is worse
+    // than none, so the check parses the same options and hands the same entry
+    // down. It must also apply nothing — no `setPiecePattern` here at all.
+    let checked: unknown;
+    const { config, report } = await checkPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+        mainExport: "named",
+        repository: "https://github.com/commontoolsinc/labs",
+        root: "/repo",
+      },
+      "/repo/pattern.tsx",
+      {
+        checkPiecePattern: (config, entry) => {
+          checked = { config, entry };
+          return Promise.resolve({
+            compatible: true,
+            issues: {},
+            candidate: { identity: "A".repeat(43), symbol: "default" },
+          });
+        },
+      },
+    );
+
+    expect(report.compatible).toBe(true);
+    expect(checked).toEqual({
+      config,
+      entry: {
+        mainPath: "/repo/pattern.tsx",
+        mainExport: "named",
+        repository: "https://github.com/commontoolsinc/labs",
+        rootPath: "/repo",
+      },
     });
   });
 
