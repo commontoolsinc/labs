@@ -1,4 +1,6 @@
-import { assert, assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { assert } from "@std/assert";
 import { join } from "@std/path";
 import { conflictMarkerAt, main, scan } from "./check-conflict-markers.ts";
 
@@ -12,7 +14,7 @@ const ANCESTOR = "|||||||";
 const CLOSE = ">>>>>>>";
 const SEPARATOR = "=======";
 
-/** Makes a git repo with one tracked file, and returns its root. */
+/** Helper for the tests below, which makes a git repo holding one tracked file. */
 async function fixtureRepo(contents: string): Promise<string> {
   const root = await Deno.makeTempDir({ prefix: "check-conflict-markers-" });
   const run = async (...args: string[]) => {
@@ -33,7 +35,7 @@ async function fixtureRepo(contents: string): Promise<string> {
   return root;
 }
 
-/** Runs `body` with console output captured. */
+/** Helper for the tests below, which runs `body` with console output captured. */
 async function captureConsole(
   body: () => Promise<void>,
 ): Promise<{ out: string; err: string }> {
@@ -52,85 +54,106 @@ async function captureConsole(
   return { out: out.join("\n"), err: err.join("\n") };
 }
 
-Deno.test("conflictMarkerAt: flags each marker git writes", () => {
-  assertEquals(conflictMarkerAt(`${OPEN} HEAD`), OPEN);
-  assertEquals(conflictMarkerAt(`${CLOSE} some/branch`), CLOSE);
-  assertEquals(
-    conflictMarkerAt(`${ANCESTOR} merged common ancestors`),
-    ANCESTOR,
-  );
-  // Git writes a label, but a bare marker is still one.
-  assertEquals(conflictMarkerAt(OPEN), OPEN);
-});
-
-Deno.test("conflictMarkerAt: leaves a setext heading underline alone", () => {
-  // Seven equals signs underline a Markdown heading. Flagging those would make
-  // the check something people route around, so the separator is not a marker
-  // here -- a real conflict always brings an opener and a closer too.
-  assertEquals(conflictMarkerAt(SEPARATOR), undefined);
-  assertEquals(conflictMarkerAt("=".repeat(40)), undefined);
-});
-
-Deno.test("conflictMarkerAt: ignores a marker not at column 0", () => {
-  assertEquals(conflictMarkerAt("<<<<"), undefined);
-  // A longer run is a rule or an ASCII box, not a marker.
-  assertEquals(conflictMarkerAt(`${OPEN}<`), undefined);
-  // Git never indents a marker, nor buries one mid-line.
-  assertEquals(conflictMarkerAt(`  ${OPEN} HEAD`), undefined);
-  assertEquals(conflictMarkerAt(`text ${OPEN} HEAD`), undefined);
-  assertEquals(conflictMarkerAt(""), undefined);
-});
-
-Deno.test("scan: reports a marker with its file and line", async () => {
-  const root = await fixtureRepo(
-    ["intact", `${OPEN} HEAD`, "ours", SEPARATOR, "theirs", `${CLOSE} other`]
-      .join("\n"),
-  );
-  try {
-    const violations = await scan(root);
-    assertEquals(violations.map((v) => v.line), [2, 6]);
-    assertEquals(violations.map((v) => v.marker), [OPEN, CLOSE]);
-    assertEquals(violations[0].file, "subject.md");
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
-
-Deno.test("scan: passes a file that merely mentions the shapes", async () => {
-  const root = await fixtureRepo(
-    ["A heading", SEPARATOR, "", "and a rule:", "-".repeat(40), ""].join("\n"),
-  );
-  try {
-    assertEquals(await scan(root), []);
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
-
-Deno.test("main: fails and names the file", async () => {
-  const root = await fixtureRepo(`${OPEN} HEAD`);
-  try {
-    let code = 0;
-    const { err } = await captureConsole(async () => {
-      code = await main(root);
+describe("check-conflict-markers", () => {
+  describe("conflictMarkerAt()", () => {
+    it("returns the marker for each form git writes", () => {
+      expect(conflictMarkerAt(`${OPEN} HEAD`)).toBe(OPEN);
+      expect(conflictMarkerAt(`${CLOSE} some/branch`)).toBe(CLOSE);
+      expect(conflictMarkerAt(`${ANCESTOR} merged common ancestors`))
+        .toBe(ANCESTOR);
     });
-    assertEquals(code, 1);
-    assert(err.includes("subject.md:1"), err);
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
 
-Deno.test("main: succeeds on a clean tree", async () => {
-  const root = await fixtureRepo("nothing to see");
-  try {
-    let code = 1;
-    const { out } = await captureConsole(async () => {
-      code = await main(root);
+    it("returns the marker for a bare one, with no label after it", () => {
+      expect(conflictMarkerAt(OPEN)).toBe(OPEN);
     });
-    assertEquals(code, 0);
-    assert(out.includes("No unresolved merge-conflict markers"), out);
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
+
+    it("returns `undefined` for a setext heading underline", () => {
+      // Seven equals signs underline a Markdown heading. Flagging those would
+      // make the check something people route around, so the separator is not
+      // a marker here -- a real conflict brings an opener and a closer too.
+      expect(conflictMarkerAt(SEPARATOR)).toBe(undefined);
+      expect(conflictMarkerAt("=".repeat(40))).toBe(undefined);
+    });
+
+    it("returns `undefined` for a run that is not exactly seven long", () => {
+      expect(conflictMarkerAt("<<<<")).toBe(undefined);
+      // A longer run is a rule or an ASCII box, not a marker.
+      expect(conflictMarkerAt(`${OPEN}<`)).toBe(undefined);
+    });
+
+    it("returns `undefined` for a marker away from column 0", () => {
+      // Git never indents a marker, nor buries one mid-line.
+      expect(conflictMarkerAt(`  ${OPEN} HEAD`)).toBe(undefined);
+      expect(conflictMarkerAt(`text ${OPEN} HEAD`)).toBe(undefined);
+    });
+
+    it("returns `undefined` for an empty line", () => {
+      expect(conflictMarkerAt("")).toBe(undefined);
+    });
+  });
+
+  describe("scan()", () => {
+    it("reports each marker with its file and line", async () => {
+      const root = await fixtureRepo(
+        [
+          "intact",
+          `${OPEN} HEAD`,
+          "ours",
+          SEPARATOR,
+          "theirs",
+          `${CLOSE} other`,
+        ].join("\n"),
+      );
+      try {
+        expect(await scan(root)).toEqual([
+          { file: "subject.md", line: 2, marker: OPEN },
+          { file: "subject.md", line: 6, marker: CLOSE },
+        ]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("reports nothing for a file that merely mentions the shapes", async () => {
+      const root = await fixtureRepo(
+        ["A heading", SEPARATOR, "", "and a rule:", "-".repeat(40), ""]
+          .join("\n"),
+      );
+      try {
+        expect(await scan(root)).toEqual([]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+  });
+
+  describe("main()", () => {
+    it("returns 1 and names the file when a marker is present", async () => {
+      const root = await fixtureRepo(`${OPEN} HEAD`);
+      try {
+        let code = 0;
+        const { err } = await captureConsole(async () => {
+          code = await main(root);
+        });
+        expect(code).toBe(1);
+        expect(err).toContain("subject.md:1");
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("returns 0 for a clean tree", async () => {
+      const root = await fixtureRepo("nothing to see");
+      try {
+        let code = 1;
+        const { out } = await captureConsole(async () => {
+          code = await main(root);
+        });
+        expect(code).toBe(0);
+        expect(out).toContain("No unresolved merge-conflict markers");
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+  });
 });
