@@ -591,7 +591,6 @@ Deno.test("pattern with an inferred any/unknown result reports pattern:any-resul
     "export default pattern((s: { x: number }) => s as any);",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   assert(
@@ -732,7 +731,6 @@ Deno.test("pattern with an inferred unknown output field reports pattern-result:
     "export default pattern((s: { x: number }) => ({ out: opaque() }));",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   const paths = diagnostics.filter((d) =>
@@ -967,7 +965,6 @@ Deno.test("pattern result reports a nested unknown output field with a dotted pa
     "export default pattern((s: { x: number }) => ({ nested: { deep: op() } }));",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   const d = diagnostics.find((d) => d.type === "pattern-result:unknown-type");
@@ -984,7 +981,6 @@ Deno.test("pattern result reports an unknown array element with an array path su
     "export default pattern((s: { x: number }) => ({ items: [op()] }));",
   ].join("\n");
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   const d = diagnostics.find((d) => d.type === "pattern-result:unknown-type");
