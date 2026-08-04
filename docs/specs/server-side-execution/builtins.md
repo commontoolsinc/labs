@@ -57,7 +57,7 @@ rule); streaming partial commits.
 
 ## 3. Compile / instantiate — server-side, sandboxed
 
-`compile-and-run`: compiles + instantiates patterns (charm creation),
+`compile-and-run`: compiles + instantiates patterns (piece creation),
 including when invoked from a handler's consequences. Runs in the
 SpaceServer's runtime; compilation itself already happens server-side in
 toolshed — reuse that path. Async work stays on the post-commit outbox
