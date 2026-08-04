@@ -34,7 +34,7 @@ was last checked against the code.
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-execution v2, plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phase 1 in progress: stage A landed (flag, commit `class` metadata, CI arms, `stream-data` disable), off by default |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phase 1 in progress: stage A landed (flag, commit `class` metadata, CI arms, `stream-data` disable), off by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -378,8 +378,9 @@ propagate](#how-flags-propagate).
   server under the flag, so the value lives beside the memory protocol flags.
   It is not a handshake capability — admission enforcement is server-local and
   nothing about it is negotiated per connection.
-- **Added by.** Bernhard Seefeld, server-execution v2 Phase 1 stage A
-  ([`docs/plans/server-execution-v2.md`](../plans/server-execution-v2.md);
+- **Added by.** Bernhard Seefeld, in server-execution v2 Phase 1 stage A
+  (#5339;
+  [`docs/plans/server-execution-v2.md`](../plans/server-execution-v2.md);
   spec:
   [`docs/specs/server-side-execution/`](../specs/server-side-execution/README.md)).
 - **Purpose.** The single flag of server-execution v2 — servers do all the
