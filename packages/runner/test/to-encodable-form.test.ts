@@ -13,7 +13,7 @@ import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   moduleToEncodableForm,
   withAliasBindings,
-} from "../src/builder/json-utils.ts";
+} from "../src/builder/to-encodable-form.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -23,7 +23,7 @@ import { Engine } from "../src/harness/engine.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("json-utils", () => {
+describe("to-encodable-form", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 

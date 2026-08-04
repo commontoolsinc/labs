@@ -50,7 +50,7 @@ const { pattern, pushFrame, popFrame } = await import(
   `${R}/builder/pattern.ts`
 );
 const { lift } = await import(`${R}/builder/module.ts`);
-const ju: any = await import(`${R}/builder/json-utils.ts`);
+const ju: any = await import(`${R}/builder/to-encodable-form.ts`);
 const md: any = await import(`${R}/builder/pattern-metadata.ts`);
 const { fabricFromNativeValue } = await import(
   "@commonfabric/data-model/fabric-value"

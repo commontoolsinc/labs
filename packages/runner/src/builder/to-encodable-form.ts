@@ -5,19 +5,11 @@ import {
   FabricPrimitive,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  emptySchemaObject,
-  schemaForValueType,
-  schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
   type FabricExecValue,
   type FactoryInput,
   isPattern,
-  type JSONSchema,
-  type JSONValue,
   type Module,
   type Pattern,
   type Reactive,
@@ -31,8 +23,7 @@ import {
   noteDerivedCopy,
 } from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
-import { Runtime } from "../runtime.ts";
-import { isAliasBinding, isCellLink, parseLink } from "../link-utils.ts";
+import { isAliasBinding } from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,

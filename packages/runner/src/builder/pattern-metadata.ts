@@ -83,7 +83,7 @@ export function brandTrustedPattern<T>(value: T): T {
 // Derivation tracking: `copy → root original`. Replaces the former
 // `unsafe_originalPattern` symbol backref. Registered ONLY by trusted-builder
 // copy sites (`noteDerivedCopy` callers: build-time graph serialization in
-// json-utils, traversal copies in traverse-utils, binding copies in
+// to-encodable-form, traversal copies in traverse-utils, binding copies in
 // pattern-binding, and the `asScope`/`inSpace` factory derivations in
 // builder/pattern.ts — the latter reachable from authored pattern code, which
 // is sound because both objects are builder-minted and already branded) —

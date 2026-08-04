@@ -214,8 +214,8 @@ or stops needing identity-carry, the symbols die with it.)
 
 | # | Copy site | What it does | Verdict |
 |---|---|---|---|
-| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `withAliasBindings` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
-| C2 | `moduleToJSON` pattern-type implementation (`json-utils.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
+| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `withAliasBindings` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`to-encodable-form.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
+| C2 | `moduleToJSON` pattern-type implementation (`to-encodable-form.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
 | C3 | `traverseValue` (`traverse-utils.ts:54`): copies during build traversal (`collectCellsAndNodes`, `node-utils` connect) | Preserves the backref so a traversal copy still resolves `getArtifactEntryRef` | **Copy stays; backref replaced** by side-table registration at the same line. |
 | C4 | `unwrapOneLevelAndBindToDoc` (`pattern-binding.ts:333–340`): instantiation-time rebinding copies | Propagates backref + the `verifiedLoadId` side-table entry to the bound copy | **Copy stays; backref replaced** by side-table registration; the `verifiedLoadId` propagation is deleted outright (CFC identity no longer flows through loadIds — § CFC). |
 | C5 | `unsafe_noteParentOnPatterns` (`pattern-binding.ts:346–358`): writes `unsafe_parentPattern` | Nothing reads it | **Delete now.** Independent of the rest of this design. |
@@ -345,7 +345,7 @@ per surrounding file set; `moduleIdentity` is stable for byte-identical code.
 
 Consequences:
 - `verifiedLoadId` threading through frames / `JavaScriptNodeContext` /
-  `json-utils` (`frame.verifiedLoadId` in `moduleToJSON`'s
+  `to-encodable-form` (`frame.verifiedLoadId` in `moduleToJSON`'s
   `admittedImplementation` probe) is deleted. `setVerifiedLoadId` /
   `getVerifiedLoadId` side tables and `seedVerifiedLoadIds` /
   `annotateVerifiedPatterns` walks are deleted (their job — marking which load
@@ -473,7 +473,7 @@ tolerate a miss. E4 (same day) removed that blocker and completed the flip:
   `test/pre-e3-pattern-value-canary.test.ts` alongside the refs-only
   vintage's two resolution paths.
 - The internal/boundary split is structural: `serializePatternGraph()`
-  (json-utils) serializes the full graph under an internal-serialization
+  (to-encodable-form) serializes the full graph under an internal-serialization
   context that suppresses `$patternRef`; `withAliasBindings` (the
   builder-time node serializer) routes pattern values through it, so
   `Pattern.nodes` stays a bare-graph in-memory representation.
@@ -543,7 +543,7 @@ canary test compiling+resolving with `$implRef` stripped.
   `setVerifiedFunctionRegistrar` ambient in `function-hardening.ts`.
 - `builder/types.ts`: `unsafe_originalPattern`, `unsafe_parentPattern`, their
   `Pattern` declarations and `index.ts` exports.
-- `json-utils.ts`: backref write (line ~183), `admittedImplementation` probe,
+- `to-encodable-form.ts`: backref write (line ~183), `admittedImplementation` probe,
   the "must carry implementationRef" throw; `moduleToJSON` emits `$implRef`.
 - `traverse-utils.ts` / `pattern-binding.ts`: backref/`verifiedLoadId`
   propagation → `noteDerivedCopy`; `unsafe_noteParentOnPatterns` deleted.

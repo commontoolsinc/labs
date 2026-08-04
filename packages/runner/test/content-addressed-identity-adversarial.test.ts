@@ -812,7 +812,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       // moduleToEncodableForm is reached via the builder; call the same path the real
       // module uses. We re-import it lazily to avoid widening the import surface.
       const { moduleToEncodableForm } = await import(
-        "../src/builder/json-utils.ts"
+        "../src/builder/to-encodable-form.ts"
       );
       const json = moduleToEncodableForm(
         dynModule as unknown as Module,

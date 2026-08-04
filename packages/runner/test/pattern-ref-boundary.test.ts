@@ -10,7 +10,7 @@ import {
   patternToEncodableForm,
   serializePatternGraph,
   withAliasBindings,
-} from "../src/builder/json-utils.ts";
+} from "../src/builder/to-encodable-form.ts";
 import {
   resolveOpPattern,
   resolveStoredPattern,
