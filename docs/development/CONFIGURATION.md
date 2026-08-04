@@ -154,7 +154,7 @@ export CF_IDENTITY=./claude.key
 `"implicit trust"` is a shared, publicly-derivable identity — never use it
 against a shared or remote server (everyone who derives it becomes the same
 principal). For a personal or unique identity, use `id new`. See
-[`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
+[`docs/features/shared-identity.md`](../features/shared-identity.md) for the
 browser-import flow.
 
 ---
@@ -166,7 +166,7 @@ The toolshed-embedded memory service has two modes:
 | Var | Default | Notes |
 |---|---|---|
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
-| `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database. Used for clusterduck clustering. Validated as an absolute path. |
+| `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
@@ -230,7 +230,7 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 Set `COMMIT_SHA` to the Labs revision that describes a source checkout when you
 want source-run metadata to match compiled-binary metadata. A parent start
 script can export it once so toolshed and shell diagnostics describe the same
-checkout. It is descriptive metadata, not update authorization; only stamp a
+checkout; `scripts/start-local-dev.sh` defaults it to the checkout's HEAD. It is descriptive metadata, not update authorization; only stamp a
 revision that actually describes the launched sources. The explicit
 toolshed-only `TOOLSHED_GIT_SHA` override remains highest priority.
 
@@ -239,6 +239,29 @@ cache (always on under an enforcing CFC mode; see
 `packages/runner/src/compilation-cache/cell-cache.ts`). The former
 `COMPILATION_CACHE_*` env vars configured an earlier whole-bundle cache and no
 longer exist.
+
+---
+
+## Runner diagnostics
+
+Environment toggles read by `packages/runner` when it starts. None of them
+change what a traversal computes; they decide what it records about itself.
+All are off by default, and each is read once, so a process picks up a change
+to the environment only on restart.
+
+A test therefore cannot switch one on by setting the variable. For doc-visit
+diagnostics, call `setTraverseDiagnostics(true)` from
+`packages/runner/src/traverse.ts`, which overrides the variable for the process
+and is read again at the start of every traversal; pass `undefined` to hand the
+decision back to the environment. For captures, construct a
+`TraverseCaptureRecorder` directly, as `traverse-replay.test.ts` does — the
+variables only decide whether the module installs one of its own on startup.
+
+| Var | Default | Notes |
+|---|---|---|
+| `CF_TRAVERSE_DIAGNOSTICS` | _(unset)_ | Set to exactly `1` to count, for each traversal, how many times it visited each doc and how many distinct doc-and-path pairs it reached. Only the slow-traverse warning reads those counts. Without this, that warning reports `uniqueDocs=0`, `uniquePaths=0`, and `topDocs=n/a`. It is off by default because the tracking builds a string and touches a `Map` and a `Set` on every schema visit, which is measurable on large traversals. |
+| `CF_TRAVERSE_CAPTURE` | _(unset)_ | Path to write a traverse fixture to. Every `SchemaObjectTraverser.traverse()` call is recorded in order, along with the value of each doc it visited, and written to that path periodically and on unload. `packages/runner/test/traverse-replay/replay.ts` replays a fixture against a read-only transaction; `packages/runner/src/traverse-recorder.ts` documents the fidelity limits, of which the important one is that a doc written during the run replays with its earliest captured value. |
+| `CF_TRAVERSE_CAPTURE_MAX` | `20000` | How many invocations one capture records before it stops. Anything that is not a finite number above zero falls back to the default. Read only when `CF_TRAVERSE_CAPTURE` is set. |
 
 ---
 
@@ -300,6 +323,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
+| `CF_SKIP_VERSION_CHECK` | _(unset)_ | Set to any non-empty value to skip the cf ↔ server version check. By default, server-touching commands compare this cf's commit (baked build metadata, or the checkout's HEAD for source runs) with the server's self-reported commit — the `gitSha` riding the `/_health` response the health check already fetches (same value as `/api/meta`) — and warn on stderr when they differ. Source runs grade the warning by git ancestry: cf newer than the server is the normal local-dev case and gets a compact heads-up; cf **older** than the server gets the loud OUTDATED warning; diverged or unorderable pairs (including all compiled binaries, which carry no history) get the undirected wording. |
 | `CF_CLI_INTEGRATION_USE_LOCAL` | _(unset)_ | Used by integration tests to dispatch through local source rather than a built binary. |
 | `CF_LABS_ROOT` | _(unset)_ | Read by `bin/cf` only. Selects which labs checkout answers, overriding the nearest one walking up from the cwd. Must be a checkout (a directory with `packages/cli/launcher.ts`) or `bin/cf` exits 2. Chooses the CLI, not the working directory. |
 
@@ -395,7 +419,6 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 |---|---|
 | `dev` | Build against the cloud toolshed at `toolshed.saga-castor.ts.net`. Use this for shell-only work. |
 | `dev-local` | Build against `http://localhost:$TOOLSHED_PORT`. **Use this for local dev** — `dev` points at the cloud backend. |
-| `dev-clusterduck` | Build against the clusterduck instance (`localhost:7001`). |
 | `build` / `production` | Optimized build (`production` sets `PRODUCTION=1`). |
 | `serve` | Serve pre-built `dist/` on `0.0.0.0:9099`. |
 | `test`, `integration` | Test suites. |

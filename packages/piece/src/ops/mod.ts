@@ -1,11 +1,13 @@
 export { PiecesController } from "./pieces-controller.ts";
 export { ACLManager } from "./acl-manager.ts";
 export {
+  type PatternCompatibilityReport,
   PieceController,
   type PiecePatternRef,
   type PiecePatternSourceRef,
   type PieceSourceAction,
   type PieceSourceActionResult,
+  type PieceSourceCompatibilityIssues,
   type PreparedPieceSourceChange,
 } from "./piece-controller.ts";
 export {

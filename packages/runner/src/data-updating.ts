@@ -17,6 +17,7 @@ import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   CellImpl,
   isCell,
@@ -51,6 +52,7 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
+import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
@@ -336,6 +338,16 @@ function declaredCellScope(
   return isCellScope(cap) ? cap : undefined;
 }
 
+export type DiffAndUpdateOptions = IReadOptions & {
+  /**
+   * Marks every schema-bearing document produced by this traversal as a
+   * generated output. This must propagate through collection entries anchored
+   * as entity documents: they are separate storage targets, so an output
+   * marker on the containing document cannot cover them.
+   */
+  schemaRole?: "output";
+};
+
 /**
  * Mutable state threaded through a single `normalizeAndDiff()` walk.
  */
@@ -375,10 +387,10 @@ export function diffAndUpdate(
   link: NormalizedFullLink,
   newValue: unknown,
   context?: unknown,
-  options?: IReadOptions,
+  options?: DiffAndUpdateOptions,
   anchorIds?: () => string | number,
 ): boolean {
-  const readOptions: IReadOptions = {
+  const readOptions: DiffAndUpdateOptions = {
     ...options,
     meta: {
       ...options?.meta,
@@ -386,11 +398,17 @@ export function diffAndUpdate(
       ...allowMutableTransactionRead,
     },
   };
+  // A builder artifact -- a module, a handler, a pattern, the factory carrying
+  // a module's members -- has no fabric representation, so the runtime replaces
+  // it with its encodable form before the value reaches the data model. This is
+  // the raw write path, reached by `Cell.set()` and the collection operations;
+  // the pattern-driven paths (a run's result, its argument) do the same at
+  // their own boundaries.
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
-    newValue,
+    flattenBuilderArtifacts(newValue),
     context,
     readOptions,
     { seen: new Map(), nextAnchorId: anchorIds },
@@ -439,7 +457,7 @@ function anchorValueAsEntity(
   registerKey: unknown,
   idSeed: string | number,
   context: unknown,
-  options: IReadOptions | undefined,
+  options: DiffAndUpdateOptions | undefined,
   state: DiffWalkState,
 ): ChangeSet {
   let path = link.path;
@@ -472,9 +490,16 @@ function anchorValueAsEntity(
 
   state.seen.set(registerKey, newEntryLink);
 
-  // When a child value becomes its own entity document, carry the child
-  // schema over so CFC metadata can be prepared for that new document too.
-  recordRelevantSchemaWritePolicyInput(tx, newEntryLink, newEntryLink.schema);
+  // This helper handles both creation and later writes to an anchored entity.
+  // Carry the child schema on every visit so CFC can merge the candidate
+  // envelope — including generated-output provenance — against an existing
+  // long-lived document.
+  recordRelevantSchemaWritePolicyInput(
+    tx,
+    newEntryLink,
+    newEntryLink.schema,
+    options?.schemaRole,
+  );
 
   return [
     // If it wasn't already, set the current value to be a doc link to this doc
@@ -528,7 +553,7 @@ export function normalizeAndDiff(
   link: NormalizedFullLink,
   newValue: unknown,
   context?: unknown,
-  options?: IReadOptions,
+  options?: DiffAndUpdateOptions,
   state: DiffWalkState = { seen: new Map() },
   precomputedCurrent: unknown = NO_PRECOMPUTED,
   // Whether the PARENT object's schema lists this slot in `required`
@@ -765,7 +790,7 @@ export function normalizeAndDiff(
         try {
           tx.writeValueOrThrow(
             seedTarget,
-            fabricFromNativeValue(seedDefault) as FabricValue,
+            fabricFromNativeValue(seedDefault),
           );
           // The marker is what authorizes the write above past an
           // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
@@ -824,9 +849,14 @@ export function normalizeAndDiff(
   // deliberately does not carry over: inlined content in an array slot stores
   // inline, exactly as the annotation scheme (which never looked behind
   // links) stored it.
-  if (
-    isCellLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")
-  ) {
+  //
+  // The re-entry hands on what `findAndInlineDataUriLinks` produced, so the
+  // check accepts exactly the media type that call inlines: this codec's
+  // own. A `data:` URI of any other media type stores as an ordinary link.
+  const newValueLinkId = isCellLink(newValue)
+    ? parseLink(newValue, link).id
+    : undefined;
+  if (newValueLinkId !== undefined && isFabricDataUri(newValueLinkId)) {
     return normalizeAndDiff(
       runtime,
       tx,
@@ -1115,7 +1145,7 @@ export function normalizeAndDiff(
   // NOTHING -- returned here without descending. This is load-bearing for
   // the mergeable collection ops (`push`/`addUnique`) twice over: their
   // array read is excluded from the commit's conflict set (see
-  // docs/development/mergeable-collection-writes.md), which is only safe
+  // docs/features/mergeable-collection-writes.md), which is only safe
   // while the op emits no writes below the tail, so (1) the element itself
   // must not be re-anchored or rewritten, and (2) it must not be DESCENDED
   // either -- descending would register its interior objects in
@@ -1205,7 +1235,7 @@ export function normalizeAndDiff(
       Array.isArray(currentValue) && newValue.length > currentValue.length
     ) {
       const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema)
+        ? ContextualFlowControl.lubSchema(link.schema)
         : undefined;
       const lengthSchema = (lub !== undefined)
         ? { type: "number", ifc: { confidentiality: lub } } as JSONSchema
@@ -1233,7 +1263,9 @@ export function normalizeAndDiff(
           location: {
             ...link,
             path: [...link.path, i.toString()],
-            schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
+            schema: ContextualFlowControl.getSchemaAtPath(link.schema, [
+              i.toString(),
+            ]),
           },
           value: undefined,
           delete: true,
@@ -1242,7 +1274,7 @@ export function normalizeAndDiff(
       }
 
       // hole→value or value→value: recurse normally
-      const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [
+      const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
         i.toString(),
       ]);
 
@@ -1285,7 +1317,7 @@ export function normalizeAndDiff(
     if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema)
+        ? ContextualFlowControl.lubSchema(link.schema)
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
@@ -1305,7 +1337,9 @@ export function normalizeAndDiff(
           location: {
             ...link,
             path: [...link.path, i.toString()],
-            schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
+            schema: ContextualFlowControl.getSchemaAtPath(link.schema, [
+              i.toString(),
+            ]),
           },
           value: undefined,
           delete: true,
@@ -1368,7 +1402,7 @@ export function normalizeAndDiff(
     // instances short-circuit by identity.
     changes.push({
       location: link,
-      value: fabricFromNativeValue(newValue) as FabricValue,
+      value: fabricFromNativeValue(newValue),
     });
     return changes;
   }
@@ -1435,7 +1469,9 @@ export function normalizeAndDiff(
         return `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`;
       });
 
-      const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+      const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
+        key,
+      ]);
 
       // An explicit `undefined` for a key the current object doesn't have is
       // a real change — the slot becomes present-but-undefined — but the
@@ -1482,7 +1518,9 @@ export function normalizeAndDiff(
     if (isRecord(schemaProperties)) {
       for (const key in schemaProperties) {
         if (key in newValue) continue;
-        const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+        const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
+          key,
+        ]);
         const childScope = declaredCellScope(childSchema);
         if (
           childScope === undefined ||

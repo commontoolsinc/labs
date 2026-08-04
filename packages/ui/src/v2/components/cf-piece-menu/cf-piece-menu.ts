@@ -184,7 +184,7 @@ export function payloadHint(action: PieceAction): string | undefined {
  *
  * A host that wants a different menu for a piece cancels the
  * `cf-piece-context-menu` announcement and shows its own; see
- * `docs/development/HOST_EMBEDDING.md`.
+ * `docs/features/host-embedding.md`.
  */
 export class CFPieceMenu extends BaseElement {
   static override styles = css`
@@ -1058,7 +1058,8 @@ export class CFPieceMenu extends BaseElement {
         class="backdrop"
         @click="${() => this.close()}"
         @contextmenu="${this._onBackdropContextMenu}"
-      ></div>
+      >
+      </div>
       <div class="menu" role="menu" style="left: ${left}px; top: ${top}px">
         <div class="menu-title">Piece ${this.cell!.id()}</div>
         ${entries.map((entry) =>

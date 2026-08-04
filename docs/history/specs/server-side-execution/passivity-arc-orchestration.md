@@ -1,0 +1,2197 @@
+---
+status: historical
+created: 2026-07-28
+archived: 2026-08-02
+superseded-by: docs/specs/server-side-execution/README.md
+reason: "Learning-run artifact of the first server-primary implementation (the learning-run orchestration log and standing-knowledge record); the arc was concluded 2026-08-02 in favor of a rebuild from an updated spec."
+---
+
+# Server-primary passivity arc — build & orchestration plan
+
+> ## READ THIS FIRST — owner, 2026-07-29
+>
+> **The claim thing needs to go. The server always needs to do the work.**
+>
+> **We run all scopes on the server.** A rank changing is not a reason to
+> decline — "the rank changed" is an observation, never a refusal. If you find
+> yourself making two rank computations agree so a claim key matches, stop:
+> you are preserving the mechanism that is supposed to disappear.
+>
+> **Child sub-patterns must run on the server too. Punting to the client is
+> NOT an option** — nothing else runs them.
+>
+> Every claim-arbitration failure class (`claim-key-mismatch`,
+> `claim-authority-lost`, `claim-context-mismatch`, the R7 floor decline) is
+> scaffolding for the mixed-ownership era. Do not build machinery that makes
+> those declines *more correct*. Build toward not needing them.
+>
+> **Scope is DISCOVERED by running, not declared before it** (owner's
+> inversion, and it is the design direction for `map`): rather than determine
+> the required scope up front and run per principal/session, **run it as ONE
+> principal/session and see what scope the result comes back at.** If it comes
+> back at a broader scope, that is a win — the result is shared and the others
+> need no run of their own. Only a genuinely narrow result requires per-
+> principal runs. This is the same principle `scoped-cell-instances.md` already
+> applies to write surfaces (output scope is discovered per transaction, not
+> declared statically), carried over to scheduling.
+>
+> ### THE ROOT CAUSE OF THIS ARC'S FAILURE MODES — owner, 2026-08-01
+>
+> Read this before the survival test; it is the general form and the survival
+> test is one consequence of it.
+>
+> > **The recurring problem in this arc is that we tried to partially move to
+> > the server and invented all kinds of things to support that, when the
+> > easier solution would have been to move all at once. All the rank stuff is
+> > to a large degree that.**
+>
+> **When a decision looks like "how do we make the mixed state coherent", the
+> answer is almost always "move all of it".** Machinery whose only job is to
+> keep a half-migrated system consistent has no referent once the migration
+> completes — so building it is work you will delete, and worse, it becomes
+> load-bearing while it exists and then resists deletion.
+>
+> Everything this arc has fought is that pattern: claim arbitration (deciding
+> per action which side runs it), the rank staging dials, the
+> `legacy-background` exclusion protocol (interlocking two executors), the
+> proposed "supersession" rule, and the fan-out scheduler Correction 2
+> refused. **Six fail-opens and four failed deletion routes, one explanation.**
+>
+> The diagnostic: if a mechanism would be meaningless in a world where the
+> server runs everything, it is migration scaffolding. Do not make it more
+> correct. Do not extend it to a new case. Ask what deletes it.
+>
+> ### D13 — owner, 2026-08-01: what the remaining work IS
+>
+> Four rulings, and two of them change what a task means rather than just
+> answering it.
+>
+> **The gate is a SIMPLICITY target, not a performance one.**
+>
+> > *"We should run it all on the server. That's less a performance claim than a
+> > simplicity claim. So part of the task is to understand the exact reason
+> > here. If it could run on the server and we just have a complex decision
+> > logic in the way, fix it and simplify. Need really good reasons for the rest
+> > to remain."*
+>
+> So every unserved candidate is one of exactly two things, and the work is to
+> say which: **(a)** it could run on the server and partial-migration decision
+> logic is in the way — then delete the logic, or **(b)** there is a real
+> reason — then it must be stated and it must be good. "It doesn't serve" is
+> not a finding; the REASON is the finding. Note this is the same mechanism as
+> the ROOT CAUSE above: the decision logic in the way IS the machinery partial
+> migration generated.
+>
+> **Partial flag states are a DEBUGGING BASE, not just a liability.**
+>
+> > *"Still the goal, but since partial states work that's an excellent
+> > debugging base. So maybe the next step here is to debug until full states
+> > work, then collapse the flag?"*
+>
+> Measured 2026-08-01: `user-lane-gate` and `session-lane-gate` pass at their
+> partial configurations. That makes the ladder a **bisection instrument** —
+> when the all-on configuration breaks, walk the dials up one at a time and the
+> first one that reddens names the cause. Collapse to one flag comes AFTER full
+> states work, not before; collapsing now would destroy the tool needed to get
+> there.
+>
+> **Do NOT merge yet, and the reason is worth holding.**
+>
+> > *"Not yet. Soon, but I want to see everything working and be sure that's the
+> > right approach. We had so many detours that I'm not sure it is vs a clean
+> > rebuild after all the lessons learned."*
+>
+> A clean rebuild is a live option. **That makes the LESSONS the durable asset,
+> not the diff** — this file, the ROOT CAUSE, the survival test, §2's traps, and
+> the measured negative results are what survive either path. Keep writing them
+> down at the standard that assumes the code might not survive.
+>
+> The four deletion items (`claim-not-live`'s `assertedLane` leg, the firewall
+> on-switch, the exclusion protocol, the claimed-arm dirt-clear) are DEFERRED by
+> the same ruling: they are migration-scaffolding archaeology, and the question
+> answers itself far more cheaply once flags-on actually ships.
+>
+> ### THE SURVIVAL TEST — apply it before starting ANY item
+>
+> Owner, 2026-07-29: *"we keep falling back playing whack-a-mole with the
+> claim mechanism when we know we'll eventually delete that entire
+> mechanism."* That is an accurate description of most of 2026-07-29's work,
+> and the top box alone did not prevent it. So:
+>
+> **Before taking an item, ask: does this fix survive the deletion of claim
+> arbitration?** If no, do not do it unless it unblocks something that does —
+> and say which.
+>
+> Two kinds of machinery are tangled together here, and only one is going:
+>
+> | | goes with the claim mechanism | survives it |
+> | --- | --- | --- |
+> | what it is | deciding WHETHER to claim, and arbitrating between two executors | bounding what a run may WRITE, and who may read it |
+> | examples | claim keys, claim-key-mismatch, claim-authority-lost, claim-context-mismatch, lease fences, the durable context floor as a claim GATE, candidate/claim-ready/settle | the §4 widening pair, lane scope admission, write envelopes, cross-principal leak prevention, `broad-lane-value-write` |
+> | why | there is nothing to arbitrate once the server owns the space's closure | a cross-principal leak is wrong no matter WHO runs the action — C1 established the §4 pair is a base-runtime rule that predates lanes entirely |
+>
+> **HOW THE TEST GETS MISAPPLIED — one measured example.** Being *in* the
+> claim/candidate pipeline is not evidence of being arbitration. The
+> orchestrator read `candidateLaneKeys`' rank filter as arbitration polish
+> and specified its deletion as slice 2; measurement refuted it (scope doc,
+> Correction 3). The filter decides **which lane may own a write**, so it is
+> write bounding and it survives — deleting it merely moved the rejection
+> from a cheap pre-commit decline to the engine's exact-lane fence, turning
+> 5 unserved / 28 committed into 75 unserved + 14 firewall rejects / 15
+> committed.
+>
+> **Ask what the thing DECIDES, not where it lives.** Deciding *whether to
+> claim* goes; deciding *what a run may write* stays.
+>
+> Scored against this test, 2026-07-29 was mixed: the sqlite acting-context
+> seam, the provenance envelope rule, the ×12 §4 acceptance, the
+> `pieceCreatedCallback` deletion, the `compileAndRun` outbox move and the
+> `navigateTo` seam all **survive**. The `map` chase — R7's floor consult, the
+> durable-floor sentinel, the CA9 question, the router `commitLane` residual —
+> is **arbitration polish**. Its lasting value is the lessons (do not record
+> per-run state as static; a counter that cannot NAME its offender is a dead
+> end), not the fixes.
+>
+> **Corollary, and it is uncomfortable:** part of what wave G built may be
+> scaffolding too. A descriptor serves two purposes — deciding claimability
+> (goes) and bounding writes (stays). Do not assume a descriptor is durable
+> just because it was hard to get right.
+>
+> ### THE TERMINAL CONDITION — how you know the gap is actually closed
+>
+> `externalSinkDisposition` (`storage/extended-storage-transaction.ts:369-379`)
+> suppresses a CLIENT's egress **only when a server effect claim exists**;
+> absent one it pins `executionEffectAuthority = "client"` and returns
+> `"allow"`. So today, for every action in the never-claimed set, **the client
+> performs the egress** — which makes D9's "control authority and quota on the
+> server" claim-conditional rather than actual.
+>
+> The end state is **categorical**: a client never runs an egress effect, full
+> stop. `allow` becomes the exception a server-side executor earns.
+>
+> That flip is also the **acceptance test for coverage**: it fails open today
+> because an unclaimed effect must still happen. If you can flip the default to
+> `suppress` and nothing breaks, the serving gap is closed by definition. Do
+> not flip it before then — silent missing side effects are worse than
+> duplicated ones.
+>
+> **THE OPERATIONAL TARGET, owner 2026-07-29: refusals to commit must reach
+> ZERO.** *"What we'll see are refusals to commit and we need to get those to
+> 0."* This follows from the deletion scope's load-bearing fact — the executor
+> already RUNS the whole demanded closure, so the gap was never in producing
+> results, only in **admitting** them. Every refusal is therefore work the
+> server already did and then threw away.
+>
+> Concretely, drive to zero across all arms:
+> `candidateUnservedByCode` + `actionFirewallRejects` + `commit-rejected:*`
+> (the corrected gate, [client-passivity §5h.5](client-passivity.md)).
+>
+> **MEASURED 2026-07-29 — the two are DISJOINT, and I had claimed otherwise.**
+> I wrote that "zero refusals is what makes the flip safe — the flip is the
+> acceptance test, this is the thing being tested." A throwaway trial of the
+> flip refutes it: **the gate did not move by a single digit** under the flip
+> (flipped = control = baseline in every arm, identical composition), because
+> the probes that produce the gate **contain no pattern effects at all.** The
+> gate measures COMPUTATION ADMISSION; the flip acts on EFFECT DISPATCH. They
+> are different surfaces, and driving one to zero says nothing about the other.
+>
+> So the terminal condition needs **its own instrument**: a gate probe that
+> actually contains a pattern effect. Until that exists, "refusals → 0" is a
+> real target but it is not evidence about egress.
+>
+> **AND THE FLIP IS NOT A ONE-LINER.** `externalSinkDisposition`
+> (`storage/extended-storage-transaction.ts:366-372`) short-circuits only on
+> `configured === "suppress"`; a configured `"allow"` falls through to the same
+> default the flip changes. **The SERVER's permission to egress rides on that
+> default** — so flipping it kills the executor's egress too (measured: 1 → 0
+> releases at `executor-shadow-sink.test.ts:95`). Making "the server earned
+> `allow`" expressible is a prerequisite, not a detail.
+>
+> Trial results, for scale: runner 1346 passed / **29 failed (123 steps)**,
+> memory 840/0, integration probes green in both arms. **Zero executor, claim,
+> pool, lease, routing or servability failures — and zero rendering effects
+> broke.** Every failure is one shape: a post-commit effect never ran, so the
+> result cell stayed `pending`. **The claim/executor machinery is not what
+> stands between here and the terminal condition.**
+>
+> What does: making "the server earned allow" expressible; two R5 rows
+> (`streamData` and `sqliteQuery` are absent from
+> `SERVER_EXECUTABLE_BUILTIN_IDS` — only `sqliteDatabase` joined, and to the
+> COMPUTATION list); `wish`'s egress, which bypasses the gate entirely
+> (`wish.ts:1266`) so the flip cannot make the categorical statement true; and
+> a gate probe containing a pattern effect.
+>
+> Full rationale: decision **D11** in
+> [`client-passivity.md`](client-passivity.md) §6b, §5h.4.
+
+**Live plan.** The orchestration companion to this directory's design docs
+([`README.md`](README.md) — the original spec), the phase plan
+([`implementation-plan.md`](implementation-plan.md)), the lattice register
+([`context-lattice-execution.md`](context-lattice-execution.md)) and the
+current arc's plan+evidence log
+([`client-passivity.md`](client-passivity.md), whose §0 is START-HERE).
+Those say WHAT and WHY; this says WHO BUILDS IT AND IN WHAT ORDER. Keep §1
+accurate as work lands; archive to `docs/history/` per
+[`docs/README.md`](../../../README.md) when the arc completes.
+
+**Goal of the arc (owner, 2026-07-28):** everything reactive runs on the
+server. Client-side execution of reactive functions becomes *purely
+speculative* — the client may compute for its own rendering but never commits
+anything except handler/event-driven writes. Design rationale, including the
+three motivations that make this worth its cost, is
+[README §1 / §4 Q3](README.md) and decisions
+D8–D10 in [client-passivity §7](client-passivity.md).
+
+**Why this file exists.** The arc is months of work across many context
+windows. This file is the orchestration script: it carries the state, the
+hard-won knowledge that is expensive to rediscover, and a pre-written
+delegation prompt per work item so a fresh context can drive the whole thing
+without re-deriving any of it.
+
+---
+
+## 0. If you are resuming — do exactly this
+
+1. Read **§1 State** (short). It names the next wave.
+2. Read **§2 Standing knowledge** (short). It is the stuff that costs hours to
+   rediscover and minutes to read.
+3. Read **§3 Rules of engagement** — specifically which items must NOT be
+   delegated.
+4. For the next wave's items: dispatch each item's **verbatim prompt** from §4
+   as a subagent, in parallel where the item says `parallel: yes`.
+5. As each returns: run the item's **Verify** line YOURSELF. Do not accept a
+   subagent's claim of success — run the command. (Agents in this repo have
+   reported green while leaving a gate red.)
+6. Commit per item (not per wave), update §1, push.
+7. When a wave's gate in §5 is met, move to the next wave.
+
+**Do not** start a wave whose §5 gate is unmet, and do not batch several items
+into one commit — per-item commits are what make a partially-complete wave
+resumable.
+
+---
+
+## 1. State
+
+**Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
+
+> ## "BOTH BRANCHES ARE GREEN" WAS WRONG — CORRECTED 2026-08-01
+>
+> The green claim repeated throughout this arc — runner 1557/0, memory 905/0,
+> toolshed 103/0, data-model 47/0 — covers **local unit batteries only**. Per
+> §2.3, `deno task test` does not run `packages/patterns/integration`, and
+> nobody ever ran that suite as a battery on either branch. CI does run it.
+>
+> **CI, adjacent, same workflow:**
+>
+> | commit | success | failure | cancelled | skipped |
+> | --- | --- | --- | --- | --- |
+> | merge base `f25518c1f` | **27** | **0** | 0 | 3 |
+> | fat `44b46ad02` (flags OFF) | 17 | **4** | 4 | 5 |
+> | thin `48d5ced18` (flags ON) | — | — | — | **never ran** |
+>
+> Eight failing *jobs* on the fat branch: `Check` (docs code blocks),
+> `Test (1/6)`, `Pattern Update Compatibility` (1/4 and 4/4),
+> `Pattern Unit Tests (1/5)`, `Pattern Integration Tests` (3/4 and 4/4),
+> `Status`.
+>
+> **Not all flakes.** `Test (1/6)` is `ts-transformers` with two **fixture
+> output mismatches** (`optional-method-calls`, `map generic type parameter`) —
+> deterministic golden-file diffs, which cannot be blamed on load. Of the two
+> integration failures, `server-execution-cross-space-gate` is the documented
+> §2.4 flake, but `server-execution-lunch-poll-placement-gate` (C2.10) failed
+> its settlement tail with `{committed: 0, noOp: 92, unserved: 0}` alongside
+> `crashes: 1` and `abruptStops: 1` — a serving failure, not a barrier blip.
+>
+> **This settles the sanity check that the timing analysis was meant to run.**
+> The fat branch with flags OFF is supposed to be "today's behaviour exactly".
+> It is not: the merge base is CI-clean and the fat branch is CI-red. The two
+> arms are distinguishable on **correctness**, so comparing their **latency**
+> answers nothing. Timing is premature until the fat branch is green.
+>
+> **The thin branch has never been through CI at all** — no PR, no run. Its
+> only evidence is the same local unit batteries.
+
+> ## THE FLIP IS LANDED — `b46e9b7e0`, 2026-07-31 — AND GATED, 2026-08-01
+>
+> `externalSinkDisposition` defaults to **`"suppress"`**. A client never runs an
+> egress effect; `allow` is the exception a server-side executor EARNS by
+> declaring `"server-executor"`, and `executor/executor-worker.ts` is the one
+> site in the repo that does (grep-verified; no preset can spell it).
+>
+> ### EXACTLY TWO CONFIGURATIONS AND NO HYBRID — owner ruling, 2026-08-01
+>
+> The flip as landed made the client-passivity half **unconditional**, which
+> broke the flag-off configuration: a client suppressed every egress effect and
+> **no executor existed to perform it** — the silently-missing side effect this
+> box calls strictly worse than duplication. `serverPrimaryExecution` now
+> selects between two complete postures, and both defaults move together:
+>
+> | flag | `externalSinkDisposition` default | who egresses |
+> | --- | --- | --- |
+> | ON | `"suppress"` | the executor, which declares `"server-executor"` |
+> | OFF / absent | `"claim-conditional"` | the client, exactly as before this arc |
+>
+> Gated at the two sites that had it unconditional: `runner/src/runtime.ts`'s
+> constructor default and `toolshed/runtime-options.ts`'s declaration.
+> `executor-worker.ts` is untouched — it declares explicitly, and an explicit
+> declaration beats the default in **both** arms, which is also why the ~37
+> harnesses that declare `"server-executor"` are unaffected.
+>
+> **The reason the halves cannot be separated** is `addExecutionDemand`
+> (`runner.ts:3382`): it returns early unless the flag is on, so in the flag-off
+> arm there is provably nobody else to run a suppressed effect.
+>
+> **Measured, not asserted** — `runner/test/runtime-sink-disposition-arms.test.ts`
+> pins the disposition **the gate returns** and whether the sink was actually
+> RELEASED, per arm. Against the ungated default the flag-off arms read
+> `resolved: "suppress", gate: "suppress", releases: 0`; gated they read
+> `resolved: "claim-conditional", gate: "allow", authority: "client",
+> releases: 1`. Same measurement at the toolshed layer, on the real webhook
+> topology, in `webhooks.egress-authority.test.ts`'s production test.
+>
+
+> **The acceptance measurement**, from the webhook gate probe — a real pool
+> driving a real executor Worker:
+>
+> ```
+> executorBrokerEgress=[<one url>]  actingLanes=["space"]  apiServerEgress=[]
+> candidateUnservedByCode={}  actionFirewallRejects=0
+> settlementsCommitted=2      settlementsUnserved=0
+> ```
+>
+> Exactly one egress, performed by the EXECUTOR, none by the client-side
+> runtime, with the corrected gate at zero in all three arms. Runner 1379/0
+> (identical to the pre-flip baseline), memory 845/0, toolshed 67/0.
+>
+> **THE 32 WERE NEVER A SERVING GAP, and this corrects `ab948050b`'s trial.**
+> The flipped arm failed 32 tests before the harnesses were fixed; every one was
+> an effect-builtin test whose runtime was a bare
+> `new Runtime({apiUrl, storageManager})` with no declared posture. The trial's
+> 29 had the **same 123-step signature**, so that set was ALWAYS harness
+> configuration. Its conclusion — "a post-commit effect never ran" — was
+> accurate and incomplete: it never ran because nobody had told those runtimes
+> they were allowed to run it. **Do not cite the 29 as evidence of unserved
+> work.**
+>
+> **What the flip did NOT require**, which is the arc's own summary: no change
+> to claim arbitration, the pool, the lease, routing, or servability. The
+> machinery this arc spent months on was not what stood between here and the
+> end — recorded in the top box since `ab948050b` and now confirmed at the
+> close.
+
+**Last landed:** `ce20e0956` — the flip GATED on
+`serverPrimaryExecution`; two configurations, no hybrid (see the box above).
+Before it: `b46e9b7e0` — the flip. Before that: `9c9513317` deleted
+`background-piece-service` (D12) and `f945d1ed0` disabled it under the flag;
+`e519ec83e` routed toolshed's webhook egress through the executor and added the
+gate probe (item 4); item 3 closed as a definition fix.
+
+Earlier, most recent first: `64d9d76e5` §2.11, any process that writes to a
+stream cell is a pattern runtime; `f2bf77cd8` **D12** — background-piece-service
+is SUNSET by this arc, toolshed routes through the executor;
+`2e42bb62d` `sqliteQuery` joins `SERVER_EXECUTABLE_BUILTIN_IDS` and
+`streamData` is REFUSED with evidence (item 2 closed); `cb59829f9` the
+stop-hook prompt clause;
+`925f0c090` **the lane IS the write firewall's on-switch** — the one mechanism
+behind four failed deletion routes, and the most load-bearing finding of
+2026-07-30; `c874c591a` the unclaimed unserved-marker dirtiness carrier;
+`b198544af` "the server earned `allow`" made expressible by DELETING `"allow"`
+from the policy vocabulary (terminal-condition item 1 closed); `e32a46e26`
+three claim-shaped lease fences deleted. **Keep this line current — it is the
+resume pointer, and it has rotted three times. Edit it by hand; a `sed` on this
+line broke the file once.**
+
+**WHAT 2026-07-30 ACTUALLY ESTABLISHED, in one line:** every landed change that
+day was a DELETION where the plan specified a build — remove `"allow"` from the
+vocabulary; carry dirtiness instead of authorising a lane; refuse `streamData`
+instead of forcing it in. Treat "the plan says build X" as weak evidence that
+X is needed.
+
+**ALL OF §2b IS LANDED (2026-07-29).** Every survivor of the survival test now
+has a claim-free carrier, and the lease holds the single-executor guarantee in
+its own right. **The fence deletions are unblocked.**
+
+| §2b row | landed as |
+| --- | --- |
+| write firewall off `provenance` | `5aa63e6d3` (+ batch-path hole closed in `1ac795d52`) |
+| acting lane for scope resolution | `768aab2dc` (slice 1) |
+| write re-resolution + lane liveness | `1ac795d52` — a UNION query, not the swap §2b described |
+| §4 pair emission | `7b932b6f3` — `actingRank ?? contextRank`, a strict superset |
+| overlay drop | `2d5eac421` — family-keyed; fixed a live flicker at HEAD |
+| pool sponsor re-anchor | `8de47f7e3` — lease-level authority loss |
+| single-executor guarantee | `63a5a32ca` — lease promoted, `lease-unbounded-commit` added |
+
+**THE LESSON FROM §2b, and apply it to whatever the scope doc says next:
+FOUR of its seven rows carried a FAIL-OPEN in the paper design**, plus §1d
+misclassified `lease-stale` as deletable when the promotion depends on it.
+§2b was an excellent map of WHAT to move and an unreliable guide to HOW,
+failing consistently toward silence. Every one was caught the same way — by
+measuring **what the change stops rejecting**, not what it starts doing.
+Treat every remaining row as guilty until measured.
+
+Also: §2a shipped a superset proof over CALL SITES that missed a path which
+never populated the new required input, silently unguarding batched commits.
+**A superset argument over call sites is not enough when the new precondition
+has its own population path.**
+
+**Next up, as of `2e42bb62d`.** The fence deletions are DONE except
+`claim-not-live`, which is measured-and-blocked (see its box below — do not
+try a fifth lane-string variant). **Do NOT delete `lease-stale`,
+`leaseOwnerMatches` or `leaseGeneration`** — they are carriers, not
+arbitration.
+
+Terminal-condition items 1 and 2 are CLOSED. Remaining, in the order they
+unblock each other:
+
+1. ~~`wish`'s egress bypasses the gate~~ — **CLOSED as a definition fix**; see
+   item 3 above. **ALL FOUR TERMINAL-CONDITION ITEMS ARE NOW CLOSED.**
+2. ~~A gate probe containing a pattern effect~~ — **DONE `e519ec83e`.** Use it:
+   it is the only instrument that reads the corrected gate and an egress count
+   off the same run, so it is how the flip gets measured.
+3. ~~`background-piece-service` SUNSET~~ — **DONE `9c9513317`** (disabled
+   `f945d1ed0`, deleted `9c9513317`, −6754 lines).
+4. ~~THEN the flip~~ — **DONE `b46e9b7e0`.** See the box at the top of §1.
+
+**THE ARC'S TERMINAL CONDITION IS MET.** What remains below is real work, but
+none of it gates the categorical statement — that statement is now true and
+pinned.
+
+**With item 3 closed as a definition fix, only the BPS sunset stands between
+here and the flip.**
+
+Also open, none on the critical path:
+
+- The **claimed-arm unserved dirt-clear** (§1's `claim-not-live` box) — becomes
+  a live liveness hole under blanket ownership.
+- **Decoupling the write firewall's on-switch from lane presence** — what would
+  unblock `claim-not-live`'s `assertedLane` leg.
+- **EXECUTOR HARDENING, a separate line from the flip.** Item 3's ruling
+  surfaced two real defects that are *not* the terminal condition, and this
+  distinction is the point — do not let them back onto the flip's critical path:
+  1. **`wish`'s destination-fixedness is ASSERTED, never ENFORCED.** The whole
+     ruling rests on the URL being three module-level constants pointing at our
+     own API; nothing in the type system or runtime holds it there. The fix is a
+     **deletion** — remove `HttpProgramResolver`'s default `fetchImpl` so a
+     resolver cannot silently acquire network reach — but it touches four
+     packages and does not serve item 3. Its own slice.
+  2. **The executor's `denyExternalBuiltinFetch` is not categorical either.**
+     This is what the owner's "load from disk server-side" fix actually buys —
+     it removes the EXECUTOR's egress, not the client's, so it belongs here and
+     not on the terminal-condition list. **It does not close item 3 and never
+     could**: the client has no disk and must keep fetching the sidecar to
+     render `wish`'s `[UI]`. Feasible (the Worker inherits read permission and
+     `packages/patterns` is `--include`d in the binary), with one trap: content
+     identity folds in each module's authored NAME, and `HttpProgramResolver`
+     names modules by URL pathname — a naïve `FileSystemProgramResolver` would
+     name main `/system/suggestion.tsx` and silently desync the compile cache
+     and version gate. Identity parity is the load-bearing assertion.
+
+**Deliberately stopped, not finished:** the `map` chase is closed as
+arbitration polish — one router residual from served, and that residual does
+not survive the deletion.
+
+The work is now the deletion itself: **replace per-action claim arbitration
+with blanket server ownership of a space's demanded closure.** Under that model
+there is nothing to arbitrate, so the whole
+candidate→claim-ready→claim→settle→fence pipeline has no referent, and
+`map`'s four events disappear rather than being fixed.
+
+Sequence: (1) scope what blanket ownership means concretely and what it deletes;
+(2) close whatever coverage it genuinely needs — noting that "coverage" changes
+meaning, since classification exists to decide *whether to claim*; (3) the
+categorical egress flip as the acceptance test.
+
+Measure throughout with the CORRECTED gate in
+[client-passivity §5h.5](client-passivity.md) — `candidateUnservedByCode`
+**plus** `actionFirewallRejects` **plus** `commit-rejected:*`, quoted beside
+`settlementsCommitted`. The old gate counted only unattempted work and scored a
+tightening as a regression.
+
+> **REORDERED 2026-07-29 by owner ruling D11** (client-passivity §6b).
+> The claim mechanism is **transitional scaffolding**, not the end state.
+> The server should end up running every derived computation, at which
+> point there is nothing to arbitrate. **Closing the serving gap is now
+> the highest priority**, and suppression machinery is machinery we will
+> delete — so build as little of it as possible.
+
+| Wave | What | Status |
+| --- | --- | --- |
+| A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** |
+| A5 | sqlite lane-scoped read seam (D2 narrowed to reads) | **DONE** — writes stay client-primary |
+| B | measurement | **DONE ×2** — zero after A; **×12 cleared** after the scope fix |
+| C | C1 ruled SURVIVES; C2 negotiates end to end | **DONE** |
+| P2x | the ×12 — diagnosed AND fixed | **DONE** — first never-claimed reduction |
+| **G** | **CLOSE THE SERVING GAP** — every derived computation runs server-side | **IN PROGRESS, HIGHEST PRIORITY** — see the table below |
+| D | P3 passivity mechanism | **DEFERRED** — designed ([`wave-d-passivity-mechanism.md`](wave-d-passivity-mechanism.md)) but premised on claims persisting; D11 supersedes its Q1/Q2/Q3. Revisit only if G stalls |
+| E/F | P5 passive delivery + warm spaces; P6 acceptance | after G |
+
+**Already landed this arc (for context, do not redo):**
+
+- `565a06916` CA4 audit + two rank-dial probes + §5g memo.
+- `3d659cb14` group-chat SERVED in the gate topology; three-arm ladder;
+  `non-space-read-scope` 33 events / 19 offenders → 1 → 0.
+- `9caf341e2` R7 diagnosis.
+- `dbb5fc86c` R7 fix — issuance-side context-floor consult; fences 2 → 0 → 0.
+- `91434cc6d` spec motivations + R5 worklist.
+- `b058731e1` this orchestration plan.
+
+**Wave G — the serving gap, as measured today.** This is the worklist.
+Everything here is a reason some derived computation cannot run on the
+server; closing them all is what makes the claim mechanism unnecessary.
+
+| Blocker | Status | Note |
+| --- | --- | --- |
+| `wish` | **DONE** `b3304e771` | Owner accepted the egress (idempotent GET of our own API). W2.15a descriptor; classifies claim-ready. A4's pins updated, not deleted |
+| `llmDialog` | **DONE** `b3304e771` | Effect route. Turn starts from DOCUMENT state, so a client handler's append is an ordinary doc change. Four-doc surface (A3 said three — verify, don't trust) |
+| `sqliteDatabase` | **DONE** `adf1e3dfe` + `5fea987a5` | Owner from the acting lane via the read-only `actingExecutionLane`; then its descriptor, once a minted-document declaration was made to implicitly cover the provenance meta paths `["result"]`/`["pattern"]` (`provenanceMetaWriteEnvelopes` in `scheduler/run.ts`). That rule generalizes to every computation-shaped minter. Materializer route declined — it changes scheduling, not just the write surface |
+| `navigateTo` | **RATIFIED, BLOCKED** | [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates 1 and 2 ruled: interim scope is "all sessions of the issuing principal", and the design splits at a seam — decision server-side, actuation a client rendering effect, the message IS the seam. **§8: gate 4 FIRED.** `addExecutionDemand` had one call site (in `start()`) at the time, and the commit-gated deferred navigate root reaches `startWithTx` instead, so its piece is never demanded and cannot be claimed at session rank. Blocking question: does demand closure-growth cover a deferred root? **STALE 2026-07-31 — there are now TWO call sites**: `runner.ts` `start()`, and `publishDeferredRootExecutionDemand`, which this row's own fix added. Anyone reading "one call site" as current will mis-trace demand. |
+| `compileAndRun` | **UNBLOCKED** `5f5d3ffe0`; servability in flight | Owner ruled the `manager.add([piece])` coupling out entirely and `pieceCreatedCallback` was deleted (12 sites). The ruling was sharper than it looked: `PieceManager.add` never pushed to `allPieces` — it pulls the default pattern's `addPiece` STREAM and sends, so the callback was already on the sanctioned route and only the CALLER was wrong. One accepted behavior delta: `fetchAndRunPattern` outputs no longer auto-register, so they leave the backlinks index and `getPieces()`; that capability moves to the pattern author's `addPiece` send. **Three earlier readings of this row were wrong** — "unbounded async writes" (`llm` is async and serves; `sqliteQuery` writes post-commit through a gate), then "same problem as navigateTo" (the callbacks differ in kind — owner caught it), then "move the registration server-side" (owner: delete it). Open: whether it needs a descriptor, and whether `runSynced`'s spawned-pattern writes are attributed to it or to the spawned actions |
+| `map` — `claim-key-mismatch` ×2, `claim-authority-lost` ×2 | **NOT SERVED. One question away** | Two independent causes were found and one is fixed. FIXED (`3a48d6731`): child sub-pattern actions could never be scoped candidates because scoped candidacy was piece-filtered against demand ROOTS — now rolled up to the root's closure, which nearly doubled committed settlements (session arm 15 → 28). REMAINING: `map`'s durable floor is `session` while the executor classifies it `user`, and **CA9's rank filter forbids a user-rank action from candidating at a session lane**, so no session proposal is possible. **The single open question: is CA9's thrash finding still real, given CA3 admits a user-rank action's READS on a session lane?** Do NOT answer it by reconciling the two rank computations so a claim key matches — see the box at the top of this file. The rank oscillates because the "static" summary folds each run's observed read log (`scheduler/run.ts:1428-1436`); per §5h.4 that is an observation, and scope is discovered by running |
+| `malformed-output-surface` ×1, `non-space-read-scope` ×1 | **CLOSED** `cf09a186b` | **NOT cross-space** — my C3.6 attribution here was wrong, inferred from the sibling code name `foreign-read-access-denied` without checking. Both observations measure `foreignSpaceReads: 0` in a single-space fixture. They survived a wave undiagnosed because `recordExecutionCandidateUnserved` dedupes offenders by implementation fingerprint and cannot NAME them; the probe now records derivation keys. `non-space-read-scope` ×1 is correct behavior (a session-scoped read is admissible only at session lane rank). `malformed-output-surface` ×1 was the `c2cc3891e` relabel left half-applied — a rescue branch gated `laneRank === "space"`, so a SESSION twin outside a user lane's chain fell through to a shape complaint for a rank-admission fact. Label-only fix; user arm goes `{malformed:1, non-space-read:1}` → `{non-space-read:2}`, same total |
+| `dynamic-sqlite-operation` | **NOT A BLOCKER** | Handler-only, so inside the goal per D2-as-amended |
+| `event-handler` | **NOT A BLOCKER** | Client-inherent; P5 sends the EVENT instead of the commit |
+
+**Known-open — CURRENT as of `e32a46e26` (2026-07-29). Closed items are
+removed, not archived here; §6's Log is the history. This list has rotted
+three times — prune it, do not append to it.**
+
+**The measured distance to the TERMINAL CONDITION** (from the throwaway flip
+trial; details in the top box). Under a categorical client-egress flip:
+runner 1346 passed / 29 failed (123 steps), memory 840/0, integration probes
+green — with **zero executor, claim, pool, lease, routing or servability
+failures, and zero rendering effects broken.** Every failure is one shape: a
+post-commit effect never ran, so the result cell stayed `pending`. **The
+arbitration machinery is NOT what stands between here and the end.** Four
+things do:
+
+1. ~~**Make "the server earned `allow`" expressible.**~~ **CLOSED `b198544af`.**
+   Not by adding a way to say `allow` — that was the trap, since short-
+   circuiting a configured `"allow"` bypasses the claim-observer stand-down and
+   every client held `"allow"` by default, i.e. double egress. `"allow"` LEFT
+   the policy vocabulary (`"suppress" | "server-executor" | "claim-conditional"`)
+   and survives only as the gate's ANSWER, so the trap is un-spellable rather
+   than documented. The flip's site is now `runtime.ts`'s
+   `?? "claim-conditional"`, marked in a comment.
+2. ~~**Two R5 rows.**~~ **CLOSED `2e42bb62d`.** `sqliteQuery` joined (its
+   server-side work was a READ the executor could already do — no broker was
+   ever missing). `streamData` REFUSED: unbrokered egress to an AUTHOR-SUPPLIED
+   url, plus a contract that is the exact negation of the broker's deliberate
+   bounded/buffered invariant. Serving it needs a streaming broker seam, not an
+   allowlist edit.
+3. ~~**`wish`'s egress bypasses the gate entirely.**~~ **CLOSED 2026-07-31 as a
+   DEFINITION fix — the item was a category error, and this is the whole of it.**
+
+   The item said "the flip cannot make the categorical statement true even once
+   it works." That is **true of the sentence and false of the property the
+   sentence was trying to name.** The property is *"no pattern-authored side
+   effect dispatches from a client"*, and `wish`'s sidecar load does not violate
+   it.
+
+   **Definition, and it is now load-bearing for the flip's acceptance: an
+   "egress effect" is a POST-COMMIT SINK-REQUEST DISPATCH. Module resolution is
+   excluded by construction.** The grounds:
+
+   - **The gate is structurally an at-most-once post-commit dispatcher.** Every
+     consult site reaches it through `enqueueSinkRequestPostCommitEffect`, whose
+     contract is: record a CFC policy input, then either suppress or enqueue an
+     effect that runs after the commit and **writes its result into a cell**.
+     Suppression is coherent ONLY because the result arrives by settlement.
+   - **`wish` has no such shape.** Its sidecar cache produces a compiled
+     `Pattern` **object in a module-level JS closure** and immediately runs it.
+     No settlement can deliver a live JS object to another process. So
+     suppressing it would not defer the work to the claim holder — **it would
+     make the run impossible.** That is the fail-toward-silence this arc has now
+     caught five times, and it would have been introduced deliberately.
+   - **The repo already ruled this in code.** `compile-and-run.ts` omits both
+     the policy input and the gate, on the recorded ground that "there is no
+     external sink here, only local compilation and a nested pattern run."
+     Fetching the source for that compilation is the same activity one step
+     earlier; item 3 would have had to overturn that ruling.
+   - **The owner's own fix confirms the category.** "Load from disk
+     server-side" is not "route it through the broker". *A thing you fix by
+     replacing it with a file read was never an effect* — it was a module-
+     resolution strategy that happened to pick HTTP as its transport.
+   - All three things the gate exists for are absent: no quota (owner-ruled),
+     no authority (an unauthenticated GET of our own static route carries no
+     principal), no double-dispatch consequence (idempotent GET of static
+     source, N>1 indistinguishable from N=1 to any observer).
+
+   **The right classification is NOT "pattern loading".** It is *who supplies
+   the destination, and can the result be delivered by settlement*. On that
+   axis `fetchProgram` (author-supplied URL, result lands in a cell, carries
+   `reopenClaimedWork` for the suppressed-shadow case) is correctly GATED and
+   `wish` (three module-level constants, result is a live JS object) is
+   correctly NOT — they are opposite sides of a real line, not an
+   inconsistency. `ensurePieceRunning` is in neither, being storage-backed
+   (§2.11).
+
+   **The client keeps loading its sidecar after the flip, and should.** The arc
+   permits a client to compute for its own rendering, and `wish`'s `[UI]` needs
+   the pattern in the client's own memory. Consistent with the flip trial's
+   measured **zero rendering effects broken**. Note `headless` is an
+   AUTHOR-SUPPLIED INPUT, not a runtime mode, so "just run wish headless on the
+   server" was never available.
+
+   **Two real defects survive this ruling; neither is the terminal condition.**
+   See the executor-hardening entries below.
+4. ~~**A gate probe containing a pattern effect.**~~ **CLOSED `e519ec83e`** —
+   `packages/patterns/integration/server-execution-webhook-egress-gate.test.ts`.
+   The webhook topology WAS the missing instrument: a real pool, a real
+   executor Worker, a real pattern effect. Measured at close —
+   `executorBrokerEgress=[<downstream>] actingLanes=["space"] apiServerEgress=[]`,
+   with `candidateUnservedByCode={} actionFirewallRejects=0
+   settlementsCommitted=2 settlementsUnserved=0`. **Exactly one egress, on the
+   executor, none from the API server** — zero would be the silent-deletion
+   failure, two would be double dispatch, and the identity is host-derived from
+   the claim so it says WHO. It prints the corrected gate beside the egress
+   counts on purpose: this is the first place in the arc where both can be read
+   off ONE run, which is what makes it an instrument for the terminal condition
+   rather than only a regression test.
+5. **NEW, and not in the original four: the toolshed / background-piece-service
+   population — RULED, see D12.** Three server runtimes that are not the
+   executor egress on the CLIENT default today, so the flip silences them.
+
+### D12 — owner ruling, 2026-07-31: the non-executor server runtimes
+
+Asked because the terminal flip silences three runtimes the four-item list
+never named. Both halves ruled at once:
+
+> **`background-piece-service` can be SUNSET once we've built this** — "it's a
+> runtime that runs pieces on the server by pretending to be a client" — **so
+> deprecate it as part of this arc.**
+>
+> **For toolshed, route that through the executor now.**
+
+**The BPS half is a new ARC GOAL, not a chore, and it is the first
+DELETION-of-a-whole-component the arc has earned.** Read the owner's
+description again: *a runtime that runs pieces on the server by pretending to
+be a client.* That is a precise statement of the thing D11 abolishes. BPS is
+not a casualty of the flip — it is a **pre-existing workaround for the serving
+gap**, and closing the gap is what makes it redundant. Its existence has been
+evidence for the arc all along.
+
+Consequences, and get the sequencing right:
+
+- **Sunset comes BEFORE the flip, not after.** The owner said "once we've
+  built this", and the flip IS the terminal condition — the last step. So the
+  order is: close the serving gap → migrate BPS's work onto the executor →
+  sunset BPS → flip. BPS must keep working until it is retired; do not silence
+  it early and call that the sunset.
+- **Do not give BPS `"server-executor"` authority as a stopgap.** That would
+  re-authorise a runtime we have just decided to delete, and it is exactly the
+  fail-open the `b198544af` investigation flagged: a silenced deploy gives a
+  well-meaning fix its motive. If BPS breaks before its sunset, fix the
+  sequencing, not the authority.
+- **The executor-only-preset idea (`b198544af`'s deferred §5.2) is now MOOT.**
+  Its whole purpose was to stop these three re-authorising themselves. With one
+  routed through the executor and one deleted, `executor-worker.ts` stays the
+  single declaring site by outcome. Do not build the preset.
+- **BPS is a servability oracle while it lasts.** Every piece it runs today is
+  a piece the executor must be able to run tomorrow. Its workload is a
+  ready-made coverage list for the serving gap — mine it before deleting it.
+
+**`claim-not-live` is the last claim-shaped fence, and it is LOAD-BEARING.**
+Kept in `e32a46e26` after measurement: deleting it lets an unprivileged client
+forging an `executionClaimAssertion` that names ANOTHER PRINCIPAL'S user lane
+commit into that principal's instance. **Its own slice; do not fold it in.**
+
+> **CORRECTED 2026-07-30 — the box above blocked two legs on each other, and
+> they are different sizes.** It said the `unservedAttempt` leg "has no carrier
+> at all" and that deleting it needs "a LANE ASSERTION authorised as such".
+> That is right for the FIRST site (`engine.ts` `admitExecutionCommitLanes`,
+> the forged-lane hole) and wrong for the second
+> (`acceptedSchedulerObservation`). **The `unservedAttempt` leg needs no lane
+> authorization at all** — an unserved marker grants no authority, and every
+> leg of it is self-depriving or self-penalizing: it authors no provenance and
+> no input basis, persists nothing, marks nothing clean, widens no scope, and
+> forces STRICTER read validation. What it needs is a **dirtiness carrier**,
+> which is a different and much smaller thing. Split them; do not block the
+> small one on the large one.
+>
+> **The measured fail-open, quantified.** Dropping the throw does not make an
+> unclaimed marker behave like the claimed unserved path — it makes it behave
+> like an ORDINARY client observation, whose dirt-clear is *unbounded*:
+> `coveredThroughSeq` falls to `Number.MAX_SAFE_INTEGER` (`engine.ts`
+> `upsertSchedulerObservationTransaction`), clearing all dirt at any seq,
+> consuming every cause row and NULLing `unknown_reason`. That is strictly
+> worse than the claimed path, not equal to it. The carrier's job is to make
+> an unserved attempt cover NOTHING (`coveredThroughSeq = 0`, which clears
+> nothing by construction — every dirty mark is provably ≥ 1, enforced by
+> `assertSchedulerActionCauseSeq`).
+>
+> **Two fences must be UN-GATED in the same change, and this is the
+> security-relevant part.** `unserved-marker-with-operations` and the
+> `merge-commit` reject both sit inside `if (boundedActionRun)`, which requires
+> `actingLane !== undefined`. A plain client commit carries no acting context,
+> so neither fires — today `claim-not-live` catches all of it, and after the
+> deletion nothing does. Un-gating them is what makes the "self-depriving"
+> argument true rather than merely usually-true.
+>
+> **A LATENT BUG the investigation surfaced, and it is the arc's problem.** The
+> CLAIMED unserved path *also* clears dirt (up to the input basis) for a run
+> that produced nothing. It is invisible today only because the unserved
+> settlement feeds back to the client, which drops its overlay with
+> `dirtyProducer: true` and re-runs. **Under blanket ownership there is no
+> client re-run and no settlement, so this becomes a live liveness hole.** The
+> correct rule for both arms is "an unserved attempt covers nothing"; no test
+> pins the claimed arm's coverage value, so changing both is available and is a
+> measurable A/B rather than a guess.
+>
+> **`settlementsUnserved` DIES SILENTLY unless the change carries it.** It is
+> claim-gated (via `actionAttempts`), and under blanket ownership every
+> unserved attempt is unclaimed — so the counter reads zero while the thing
+> keeps happening, which is this arc's own named instrument defect. Surface
+> `unservedDiagnosticCode` on `AppliedSchedulerObservationResult` and count it
+> where `schedulerObservationResults` is already read. Prefer a SEPARATE
+> `unservedObservations` counter during the transition, so the crossing reads
+> as one number migrating into another rather than as a drop. This arc's
+> instruments consume `settlementsUnserved` directly
+> (`server-execution-measurement.ts`, `server-primary-rollout-profile.test.ts`,
+> `server-execution-lunch-poll-placement-gate.test.ts`).
+
+**THE ASSERTED-LANE LEG IS A SEQUENCING PROBLEM, NOT A CARRIER PROBLEM —
+measured 2026-07-30, adjacent pair.** The whole forgery hole is ONE line,
+`engine.ts` `admitExecutionCommitLanes`: `options.actingContext ?? assertedLane`.
+The first operand is host-validated (`#actingReadScopeContext` requires a
+lease-bound executor session AND a live lane grant); the second is read
+unvalidated straight off the wire. Deleting the fallback does not need a new
+authorization check at all — it makes the leak **structurally unreachable**,
+because `scopePrincipal = actingPrincipal ?? principal` then sends a forged
+write to the FORGER'S OWN instance. Measured on the pinned probe: control
+lands `{"value":7}` at bob, hypothesis arm lands it at alice. A deletion, which
+the survival test favours over a re-carry.
+
+**But the fallback population is NOT empty, and that is the whole cost.**
+Instrumented at the server seam over the full runner suite: **114/114** uses
+are `lane=space`, because `commitActingContext` (`runner/src/storage/v2.ts`)
+deliberately sends nothing for the space lane ("stay byte-identical"). So the
+space-rank executor's lane reaches the engine ONLY through the unvalidated
+path. Deleting the fallback first costs **83 memory failures and 16 runner
+failures** — every one a `lease-unbounded-commit` or `commit-rejected:*`
+refusal, i.e. the exact arm the operational target drives to zero. **Nothing
+fails open in the runner arm; every failure is a refusal.** The deletion is
+right in direction and wrong in sequencing.
+
+**THAT SEQUENCE IS DEAD. DO NOT RETRY IT — both variants livelock the runner
+suite, measured 2026-07-30.** The plan was: make the client name the space lane,
+then delete the fallback. Two attempts:
+
+| variant | memory | runner | failure shape |
+| --- | --- | --- | --- |
+| broad — `?? "space"` on every commit | — | hangs | refused-and-retried |
+| narrow — executor replica only (`#shadowWrites` / `#actionTransactionRouter`) | 845/0 unchanged; egress e2e 2/2 | never completes (killed at 25 min) | **accepted-and-no-op forever** |
+
+**The two failures are different, and the narrow one is the informative one.**
+The broad variant named a lane for the entire ordinary-client population,
+turning the write firewall on for a population that has never been subject to
+it — `firewalledActionRun` requires only `actingLane !== undefined`. **That is
+itself a fact worth holding: the write firewall has NEVER run on the space
+lane, for the executor or anyone.** `#localSeqLanes` never stores `"space"`
+(every write site guards `if (lane !== "space")`), so at `commitActingContext`
+"the executor ran at space rank" and "an ordinary client commit with no lane"
+are the SAME ABSENCE and cannot be told apart there.
+
+The narrow variant is not a firewall problem at all. Across 324,910 lines of
+the livelock region there is not one `ExecutionActionFirewallError`,
+`ExecutionLeaseFenceError`, `ProtocolError`, `lease-unbounded-commit`, any
+`claim-*`/`lane-*` code, or even `conflict`. It is **242,226 successful
+`transact ack`s all pinned at `seq=3`, interleaved with 81,125 `dirty=0`
+waves** — commits accepted, server sequence never advancing, nothing ever
+dirty. A CONVERGENCE failure, not a refusal. **The mechanism is not pinned and
+was deliberately not guessed at**; the obvious candidate (the observation
+recorded under a context key the reader does not look up) is not directly
+supported, since `executionContextKey` resolves from the effective context
+floor and scope context, not from `actingLane`.
+
+Also established, independent of the mechanism: **the narrow predicate is
+broader than the 114.** `#actionTransactionRouter !== undefined` fires for
+EVERY commit that replica makes, but the 114 are only the subset carrying an
+`executionClaimAssertion` — and the same router builds `action-run`
+observations with `executionClaimAssertion: undefined` explicitly. Those
+resolve `lane = undefined` today and `"space"` under the predicate: a
+population that has never named a lane.
+
+**AND THE RESTRICTION FAILS OPEN OVER THE WIRE — measured, route closed.**
+
+```ts
+// Shown for illustration only.
+// TRIED AND REVERTED. Do not re-propose without reading the paragraph below.
+const lane = options.actingContext ??
+  (assertedLane === "space" ? "space" : undefined);
+```
+
+It does close the leak (red→green on a real loopback: the forged write lands at
+bob before and at alice after) and the runner suite stays 1377/0. But memory
+goes 845/0 → **800/45**, and **two of those 45 are wire-reachable fail-opens**,
+measured on a real Server/Client loopback rather than inferred: the identical
+commit goes from `REFUSED ExecutionActionFirewallError: non-lane-scope` at
+baseline to `APPLIED status=kept` at the sponsor's context under the
+restriction. Five of the 45 are wire-path, not in-process. 44 of 45 would be
+mechanically fixable by passing `actingContext`, but **the two fail-open
+fixtures must NOT be "fixed" that way — they are the only detectors of the
+hole.**
+
+### THE ONE MECHANISM BEHIND ALL FOUR FAILURES — read this before trying a fifth route
+
+Every route tried today fails for the same reason, and it is not about lane
+resolution at all:
+
+> **`actingLane !== undefined` IS THE WRITE FIREWALL'S ON-SWITCH.**
+> `firewalledActionRun` tests nothing else. So `assertedLane` — the unvalidated
+> wire field — is what TURNS THE WRITE FIREWALL ON for scoped commits. It is not
+> merely resolving a lane; it is admitting a population INTO the firewall.
+
+That single fact explains all four measurements:
+
+| route | what it does to the on-switch | measured |
+| --- | --- | --- |
+| delete the fallback outright | firewall OFF for space-rank executor commits, which then fail the lease's bounded-run requirement | 83 memory + 16 runner, all refusals |
+| client names space, broad | firewall ON for the entire ordinary-client population, never subject to it before | livelock, refused-and-retried |
+| client names space, narrow | firewall ON for the executor's space commits | livelock, accepted-and-no-op |
+| restrict the fallback to `"space"` | firewall **OFF** for scoped-asserting commits — so a write the firewall used to reject now applies | **wire-reachable fail-open** |
+
+**So `claim-not-live` is not guarding a lane. It is standing in for the write
+firewall on a population the firewall cannot otherwise reach**, and any change
+that moves the on-switch moves a whole population in or out of enforcement at
+once. That is why every route costs something real, and why four independent
+attempts failed in four different ways.
+
+**The leg is therefore MEASURED-AND-BLOCKED, not abandoned.** Do not try a
+fifth variant of "which lane string reaches the engine". The next move is one
+of these two, and both are bigger than a one-line change:
+
+1. **Decouple the firewall's on-switch from lane presence** — let a commit that
+   ASSERTS a scoped lane be firewalled even when it resolves no lane. That
+   attacks the actual coupling instead of shuffling which population is inside
+   it, and it would make the restriction safe.
+2. **Understand the narrow-variant livelock** (accepted-and-no-op, `seq` pinned,
+   mechanism unpinned) — that is the only route where the executor's own
+   population was correct and something else broke.
+
+Until one of those lands, `claim-not-live` stays. It has now held for a measured
+reason four times over, which is a stronger position than it started the day in.
+
+The leak is exclusively about SCOPED lanes. `"space"` has no acting principal
+and `admitExecutionCommitLanes` returns early for it before the claim loop, so
+the space half of the fallback resolves no identity and decides nothing —
+`scopePrincipal` stays the committing principal either way. A forged
+`user:<bob>` or `session:…` assertion resolves `lane = undefined` and the write
+lands at the FORGER: the same structural closure the full deletion measured,
+with no client change, no sequencing, and the space-rank population byte-
+identical. The surviving space half is inert, and can be deleted later if the
+livelock is ever understood. (An exact-mirror alternative — name `"space"` iff
+the commit carries a space-lane assertion, passing the commit into
+`commitActingContext` — was also suggested and is strictly more work for the
+same result.)
+
+Site 1's `claim-not-live` becomes unreachable via the fallback under this
+restriction, but do NOT delete it in the same change: it is also the only thing
+fencing the forged-`"space"` assertion below.
+
+**§2.1's "the executor sends nothing for the space lane" is load-bearing in a
+way that file cannot show.** It reads as byte-identity preservation; it is also
+what makes the entire space-rank executor population depend on the fallback for
+its FIREWALL. That coupling is invisible from either file alone, and it is what
+turned a "transitional fallback" into a live dependency.
+
+**TWO FAIL-OPENS SURVIVE THE DELETION, and neither is new — `claim-not-live` is
+simply the only thing standing in front of them today.** Both need their own
+answer; neither was solved by the authorization rule either.
+
+- **The forged `"space"` assertion.** Site 1 returns early for `"space"`, so
+  only site 2's `claim-not-live` fences it. **Measured over the real wire** with
+  both throws removed: the commit APPLIES. No cross-principal escalation (the
+  write is space-scoped, where the client already holds WRITE) and provenance is
+  still not minted, so the pinned test's titular property survives. What is lost
+  is the REFUSAL — and with it the guarantee that a scheduler observation
+  claiming to be a served action run came from the executor.
+- **The foreign-session-id lane, `session:<self>:<sid>` where `<sid>` is a
+  session the committer does not own.** Nothing at the engine validates the
+  session-id segment against the committing session: session-id binding is
+  checked at server grant-open and on the read path, and **there is no
+  commit-path equivalent.** This is CA8's cross-session confidentiality trap.
+  Hypothesis B closes it for the wire (no lane resolves from an assertion, and
+  `actingContext` demands a lease-bound session with a live grant) — but it
+  stays open for any path that supplies `actingContext` directly.
+
+**One green pin the ORIGINAL authorization rule would have broken**, worth
+knowing if anyone revives it: `v2-execution-acting-context-test.ts` "an acting
+context resolves the commit's scope with no claim at all" commits at another
+principal's lane with no lease and no claims, and its comment calls it "slice
+1's load-bearing new capability … the shape that has to survive when claims are
+deleted outright." It is an in-process `Engine.applyCommit` affordance, not
+reachable over the wire. Hypothesis B leaves it untouched; the rule rejected it.
+
+**Other open items:**
+
+- **Cross-space reads must be supported** (owner). Not yet exercised by any
+  fixture; the user-arm residual that looked like this turned out to be the
+  §4 relabel left half-applied (`cf09a186b`), so this is genuinely untested
+  rather than partly done.
+- **CP6's refutation is re-opened.** `llmDialog`'s KIND is now known to be
+  effect and it runs server-side (`b3304e771`); whether it performs *double*
+  egress was never re-measured after the kind changed. Needs a measurement.
+- **Two-hop redirect, space → session via a user scope** (owner follow-up).
+  The intermediate user-scoped doc may stay user-scoped for some principals
+  and narrow for others, so a single redirect is not obviously convergent; the
+  safe form is space → user → session, needed only when the path went through
+  a user scope. See `claim-deletion-scope.md` header, Correction 1b.
+- **`map` is one router residual from served** — deliberately NOT finished,
+  because that residual is arbitration polish that does not survive the
+  deletion. Do not resume it as a target.
+- **Two instrument defects**, both found by downstream surprise rather than by
+  the instruments failing: the C1.9 client-side `session.transact` commit tap
+  read ZERO derived wire writes on a run where the server attributed those
+  exact revisions to those sessions (C1.9 criterion (b) and C2.9 §7(b) both
+  rest on it); and `recordExecutionCandidateUnserved` counts offenders by
+  fingerprint and cannot NAME them, which hid the `map` residual for a full
+  wave. **A counter that can read zero when the thing happened is worse than
+  no counter.**
+- ~~**`data-model`'s `FabricError` codec test fails at MAIN** (`aac9bd3dc`) and
+  is the only battery failure.~~ **CLOSED by the 2026-07-31 `origin/main`
+  merge**: `packages/data-model` runs 47 passed / 0 failed on the merged tree.
+  It was never environmental and never arc work — it was a real main-side
+  defect that main has since fixed (the data-model work between `ed46f266e`
+  and `f25518c1f`, whose tip is "an array is answered by the array rule, and
+  nothing else"). The lesson stands with its label corrected: "it passed here
+  earlier the same day" is not evidence of an environmental cause.
+
+---
+
+## 2. Standing knowledge — do not rediscover
+
+Everything here was paid for once. Subagent prompts in §4 tell the agent to
+read this section; keep it accurate.
+
+### 2.1 Getting the executor to actually serve
+
+The `SharedExecutionPool` **does not wake an executor that is already live** —
+`#acceptAcceptedCommit` in `packages/runner/src/executor/shared-execution-pool.ts`
+returns early on `slot.executor !== null`. Its wake path exists to start or
+unpark a Worker, never to drive one. And `set-demand` only *enqueues* the
+structural swap; activation completion is observable **only** through
+`settle()`.
+
+A fixture that starts a pool and then drives clients gets a live Worker
+holding its lanes and running nothing (`schedulerRuns: 0`). Drive the Worker's
+`settle()` / `wake()` / `settle()` fixpoint explicitly. Worked examples:
+`packages/runner/test/server-execution-rollout-products.test.ts` and
+`packages/patterns/integration/server-execution-group-chat-user-rank-probe.test.ts`.
+
+### 2.2 CFC patterns in loopback fixtures
+
+- Loopback gate clients need a `trustSnapshotProvider` on the Runtime, or the
+  first commit fails `cfc-relevant-transaction-not-prepared`. The harness's
+  `openGateClient` does **not** supply one — see `openProbeClient` in the
+  group-chat probe for the shape.
+- Trusted handlers (group-chat `saveProfile`, `sendTrustedMessage`,
+  `addTrustedRoom`) require a DOM-provenance event marked with
+  `markRendererTrustedEvent` from `@commonfabric/runner/cfc`. Without it the
+  writes are **silently dropped** with a warning and the fixture measures an
+  unused piece. Copy `trustedEvent(surface, action)` from the group-chat probe.
+- A session bound to the executor lease (`bindExecutionSession`) may not emit
+  unclaimed observations. Use a second, unbound client for anything that must
+  look like an ordinary client run.
+
+### 2.3 Test topology
+
+- `deno task test` (root) iterates workspace packages. It **does not** run
+  `packages/patterns/integration` — that is
+  `deno task integration` → `./integration/*.test.ts` with `--trace-leaks`.
+- `packages/runner`'s `test` task runs `test/*.test.ts`, so runner probes DO
+  ride the root battery.
+- Every Worker-spawning test must run inside `withExecutorTeardownBarrier`
+  (FW7) or `--trace-leaks` sanitizers flake at teardown.
+- `docs/` is excluded from `deno fmt` (see root `deno.jsonc` `fmt.exclude`) —
+  hand-wrap markdown at ~72 chars to match.
+
+### 2.4 Known flaky gate — do not chase
+
+`packages/patterns/integration/server-execution-cross-space-gate.test.ts`
+fails its 60s `waitForCondition` barrier intermittently under load.
+**Measured 3/6 failures at clean HEAD with zero local changes.** If it fails,
+re-run it before believing it; it deserves its own barrier fix, which is not
+part of this arc.
+
+### 2.4c Second known flaky gate: `iframe-sandbox` — and a trap in diagnosing it
+
+`packages/iframe-sandbox` runs its tests in a real browser
+(`deno-web-test` → `vendor-astral` → Chrome). Under load it fails with
+`RetryError: Retrying exceeded the maxAttempts (5)` caused by
+`TimeoutError` inside `Page.evaluate`. Measured 2026-07-29: **failed
+twice at load 26 and 60, passed at load 86**, then passed in BOTH arms of
+an adjacent A/B at load 32-48. It is load-sensitive, not change-sensitive.
+
+**The trap, which the orchestrator fell into and should not be repeated.**
+`iframe-sandbox` DOES import from `runner`
+(`src/ipc.ts:1`, `type JSONSchema`), so when a runner-only change set is
+in the tree it is entirely plausible that a runner edit broke it. Two
+dirty failures and one clean pass — at a HIGHER load than the failures —
+looked like proof of causation, and it was not. The clean-pass-at-higher-
+load reasoning felt rigorous and was still wrong, because the runs were
+not adjacent.
+
+**§2.5's "compare arms only in adjacent pairs" is the rule that catches
+this.** Run dirty and clean back to back in one load window before
+attributing anything. Doing that here refuted the causation claim
+outright.
+
+### 2.4f Third timeout-barrier gate: `executor-scoped-egress-e2e` — and what is NOT yet excluded
+
+`packages/runner/test/executor-scoped-egress-e2e.test.ts` races a pending
+promise against a **30 s timeout** (`timeoutMs = 30_000`,
+`Promise.race([pending, timeout])` at `:137-152`). Same family as §2.4's
+cross-space gate and §2.4c's `iframe-sandbox`: it can breach the barrier
+under the battery's 37-package concurrency while passing alone.
+
+Measured 2026-07-29: its two C2.8 e2e cases **failed inside a battery run**
+(in which `iframe-sandbox` also failed) and then **passed 4/4 in isolation at
+loads 188-225** — far above the load at which the battery failed. Failure
+mode is `AssertionError: no broker egress`, with the event log showing the
+claim set and the settlement committed, i.e. the wait expired rather than the
+mechanism breaking.
+
+**What is NOT established, and must not be glossed:** nobody has run the
+battery at a BASELINE commit under comparable contention. So "my changes did
+not slow this path enough to breach a 30 s barrier" is untested. The
+provenance-envelope expansion (`5fea987a5`) adds two envelope entries per
+minted document to every computation descriptor — if that lands on a hot
+path, a timing regression is a live hypothesis, not a dismissed one.
+
+**Do not conclude non-causation from isolation passes alone.** That is the
+inverse of the §2.4c error and equally unsound: isolation removes the very
+contention that produces the failure. The discriminating experiment is a
+battery at baseline versus a battery at HEAD, **adjacent**, on a quiet box.
+
+### 2.4d `deno task test` can exit 0 on a RED battery
+
+Measured 2026-07-29: the root battery printed `One or more tests failed.`
+/ `Failed packages: - iframe-sandbox` and the harness still reported exit
+code 0. **Never trust the exit code alone.** Grep the captured output for
+`All tests passing!` and for `One or more tests failed`, and count
+`(ok)` lines against the expected package count (37 at the time of
+writing). A red battery reporting success is exactly how a broken change
+reaches a push.
+
+### 2.4e The pre-commit hook also validates the wrong worktree — and MUTATES it
+
+Same root cause as §2.5c's stop hook, but this one **blocks commits**.
+`.claude/scripts/pre-commit.ts` runs fmt/lint/check against
+`$CLAUDE_PROJECT_DIR` — the session's cwd checkout — not the worktree being
+committed to. Measured 2026-07-29: it blocked a commit to this branch over
+the `require-await` error at `executor/executor-worker.ts:1072` **on branch
+`claude/fervent-bhabha-c8678b`**, which `a34c15fd2` fixed here long ago.
+
+Worse: it runs `deno fmt`, not `deno fmt --check`, so it has been **silently
+reformatting that other checkout** — 11 files of pure line-rewrapping churn
+accumulated there this session, which subagents had earlier reported clean.
+
+**Workaround, owner-authorised 2026-07-29:** commit with `--no-verify` and
+say so in the commit message. Verify fmt/lint/check yourself in the correct
+worktree first — `--no-verify` skips a real gate, so replace it, do not
+merely bypass it.
+
+**The real fix is to scope the hook to the worktree being committed to**,
+which also stops it writing to a checkout nobody is working in. Not this
+arc's work, but worth doing: any CI relying on it inherits both defects.
+
+### 2.4b The fmt/lint gate — measured on BOTH sides, attribution settled
+
+Measured by the orchestrator in detached worktrees with empty `git status`:
+
+| | `deno fmt --check` | `deno lint` |
+| --- | --- | --- |
+| main `aac9bd3dc` | 26 unformatted / 2128 files | **clean** |
+| branch `b058731e1` | 22 unformatted / 3735 files | **1 problem** |
+
+**The lint error was ARC DEBT, and is now FIXED** (`a34c15fd2`). main is
+lint-clean; `require-await` at
+`packages/runner/src/executor/executor-worker.ts:1071` arrived on this branch
+with `d28092a64`. The `async` keyword is load-bearing — `enqueue<T>` requires
+`() => Promise<T>` — so the fix was a `// deno-lint-ignore require-await`
+carrying a reason, NOT deleting the keyword. Note the directive must sit on
+the line IMMEDIATELY before the code: a multi-line explanation above it breaks
+the suppression and adds an unused-directive error, taking the count 1 → 2.
+
+Both gates are green on this branch as of `57e625424`. **A new fmt/lint
+failure is now yours** — but re-check your own files individually before
+believing the stop hook, which runs repo-wide and can transiently catch
+another agent's in-flight write.
+
+**The fmt drift is on both sides and they are different sets.** All 22 on the
+branch are in branch-modified files, so the arc introduced those; main
+separately carries 26 of its own. Two distinct cleanups; do not conflate them,
+and do not let "main is dirty too" excuse the branch's 22.
+
+**Do not run repo-wide `deno fmt` mid-wave** — it rewrites files other agents
+have open, which is the whole-file-clobber hazard §3 warns about. Take the
+branch's fmt cleanup as its own commit on a quiet tree (all agents reported),
+and keep it separate from any behavioral commit so the mechanical reformat
+stays reviewable.
+
+**Beware the dirty-tree reading.** Mid-wave, two of the 22
+(`packages/runner/src/runner.ts`,
+`packages/runner/test/executor-action-router.test.ts`) sit in the working set,
+so it looks like the agents caused it. They did not — every subagent in this
+wave independently checked and reported this correctly.
+
+### 2.5 Measurement discipline (mandatory — see client-passivity §0)
+
+Fresh store per run (`rm -rf packages/toolshed/cache` after stopping the
+offset-750 servers); kill leftover `ms-playwright` browsers; record load
+average; full-capture harness output (never `tail`); curl
+`/api/health/stats` in the same command right after the harness exits;
+compare arms only in **adjacent pairs**; real-Worker e2e one file per `deno`
+invocation; engagement counters on every number or it reads "not engaged".
+
+**Load matters.** This box has run at load 18–34 during this arc. Counts and
+set relations are load-insensitive; latencies are not. Do not quote a latency
+taken above load ~5.
+
+### 2.5b Two traps that silently return the wrong answer
+
+- **`grep` treats `packages/memory/v2/engine.ts` as BINARY** and prints
+  nothing rather than erroring. Plain `grep -c sqlite engine.ts` returns
+  empty; `grep -ac` returns 18. Use `grep -a` on that file or you will
+  conclude, wrongly, that the biggest file in the memory layer has no
+  handling for whatever you searched. (Found by A5, reproduced by the
+  orchestrator.)
+- **`git add docs/` is too broad while agents are running.** It sweeps
+  concurrent agents' doc edits into an unrelated commit — this happened to
+  `0ad293c2b`, which silently carries C2's `EXPERIMENTAL_OPTIONS.md` work
+  under a commit message about something else. Stage explicit paths.
+
+### 2.5c The stop hook validates the WRONG worktree — warn every subagent
+
+Measured across all six subagents in this arc: **every one of them** burned
+significant effort investigating a stop-hook failure it did not cause.
+
+`.claude/scripts/subagent-stop.ts` runs `deno fmt --check` / `deno lint` /
+`deno task check` against **the session's cwd checkout**, not the worktree the
+subagent was assigned. In this arc that is
+`/Users/berni/labs/.claude/worktrees/fervent-bhabha-c8678b` (branch
+`claude/fervent-bhabha-c8678b`, HEAD `81662f0b5`, clean tree) rather than
+`/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`. Its
+type errors — `actionId` missing on `watchReactiveActionCommit` in
+`scheduler-cfc-trigger-reads.test.ts` and `scheduler-retries.test.ts` — were
+fixed on the arc branch long ago and persist on that one.
+
+It also runs repo-wide, so mid-wave it additionally catches sibling agents'
+in-flight writes.
+
+**Put this in every subagent prompt:** the stop hook's verdict is not a gate
+for work in `.agents/worktrees/`; check your own changed files individually
+(`deno fmt --check <files>`, `deno lint <files>`, `deno check <files>`) and
+believe that instead. Without the warning each agent spends tokens
+re-deriving it, and one of them may "fix" a file it does not own.
+
+**UPDATED 2026-07-30, and the warning above was NOT enough.** Five more
+subagents hit it that day — every one of them carrying the §2 pointer, and
+several carrying the warning verbatim — and each still spent a full closing
+round re-deriving the same three complaints, at roughly 100-250k tokens per
+agent. Reading it is not sufficient; the hook fires at STOP time, after the
+agent has reported, so it reads as a fresh failure demanding action. **Use the
+literal §3 prompt clause instead**, which pre-authorises the dismissal rather
+than describing it.
+
+**The three complaints, each fully attributed as of 2026-07-30**, so nobody
+diagnoses them a seventh time:
+
+| complaint | actual cause |
+| --- | --- |
+| "Type check failed" | **NOT a type error any more.** `tasks/check.sh` aborts on a version gate: `ERROR: Deno version is 2.9.4, expected >= 2.8.0 and < 2.9.0`. `mise.toml` pins `deno = "2.8.1"`, no mise-managed deno is installed, and the PATH deno is 2.9.4 — so **no type checking runs at all**, in either worktree. The `actionId`/`watchReactiveActionCommit` errors this section used to name are no longer what fires. An agent that trusts the hook and greps for TS errors finds none and then hunts a non-existent problem. |
+| "Formatting issues found" | 43 unformatted files in the OTHER checkout (`packages/memory`, `shell`, `ui`, `toolshed`, `ts-transformers`, `rfcs/`, `skills/`). Zero in `packages/runner`. Compounded by §2.4e — that checkout's pre-commit hook runs bare `deno fmt`, so its drift keeps growing. |
+| "Lint errors found" | Exactly one: `require-await` at `packages/runner/src/executor/executor-worker.ts:1072` on that branch. Arrived with `d28092a64`, fixed on the arc branch by `a34c15fd2` (the reasoned `// deno-lint-ignore require-await` pin). That branch never received it. |
+
+**None of the three is ever caused by arc work in `.agents/worktrees/`.** If a
+future agent's own changed files are individually clean, the hook is telling it
+about a checkout nobody is working in.
+
+### 2.5c-BASELINE First real flag-on measurement: the server runner is competitive
+
+Measured 2026-08-02 through `deno task integration --port-offset=750 patterns
+counter`, arms **alternating within each rep** so load drift hits both equally.
+Merge base `f25518c1f` (client executes) vs thin `9cf0cb305` (flags ON, server
+executes). `counter.test.ts` is byte-identical on both (§2.5e).
+
+Live reactive update — the round trip that matters:
+
+| | samples (ms) | median | spread |
+| --- | --- | --- | --- |
+| flags OFF | 279, 306, 318, 326 | **~312** | 47 |
+| flags ON | 292, 296, 339, 545 | **~317** | **253** |
+
+**8/8 runs green on both arms**, all three steps each.
+
+**What this establishes:** server-side execution is *not* an order of
+magnitude slower — medians are within 5 ms of each other. The "maybe it's
+really slow" hypothesis is refuted for this path. Page-refresh step and total
+wall time are likewise a wash (~890-1000 ms; 4-5 s).
+
+**What it does NOT establish:** whether flags-on has a genuinely worse tail.
+The single 545 ms sample is the only thing suggesting it, n=4 per arm, and
+load ran 11-15 throughout — above §2.5's ceiling for trusting a latency
+difference. Treat the tail as *worth re-measuring on a quiet box*, not as a
+finding.
+
+**Scope limits, stated so nobody over-reads the table:** `counter.test.ts` is
+the simplest case in the suite (one piece, one cell), both ends are localhost
+so a real deployment adds network RTT, and this says nothing about breadth —
+how many other tests survive flags-on is a separate and currently unanswered
+question.
+
+### 2.5c-SUITE Suite context costs 34x more than the flag does
+
+Measured 2026-08-02 on a genuinely quiet box (load 4.0-6.0), arms adjacent per
+test, each test run **isolated** (own server pair) via
+`deno task integration --port-offset=750 patterns <name>`. All 10 runs green.
+
+| test | main | flags ON | identical workload? |
+| --- | --- | --- | --- |
+| `cf-checkbox` | 4 s | 4 s | **yes** |
+| `cfc-group-chat-demo-multi-runtime` | 10 s | **7 s** | **yes** |
+| `default-app` | 10 s | 14 s | no (+162/−27) |
+| `lunch-poll-vote` | 10 s | 15 s | no (+8) |
+| `cfc-group-chat-demo-two-browsers` | 7 s | 8 s | no (+55) |
+
+**On the two byte-identical comparators there is no flag penalty** — one is a
+wash, the other is *faster* under flags-on. The +4/+5 s on the modified tests
+is not interpretable as runtime: those files carry the arc's own
+instrumentation. Note these are 7-15 s tests of which ~4 s is fixed server
+startup, so the variable part is 3-11 s and single-run deltas of 3-5 s in
+*both directions* are inside the noise band. Do not read a winner out of this
+table; read "no measurable penalty".
+
+**The finding is elsewhere, and it is large.** `cf-checkbox` takes **4 s
+isolated** and **138 s inside the full 336-testcase patterns suite** — same
+code, same arm, **34x**. That is far outside any noise band and it is not the
+flag, because isolated main and isolated flags-on agree exactly.
+
+So the open question is **does a space degrade as it accumulates?** The suite
+runs 80+ files against one toolshed, accumulating spaces, pieces and
+documents. If that degradation is arm-independent it is a harness artifact and
+fresh stores per file fix it. If it is worse under flags-on it is a real
+design finding — server-side execution slowing as spaces grow is something a
+rebuild must design for, not discover in production.
+
+**Discriminating experiment (not yet run):** the full patterns suite on the
+merge base, and compare `cf-checkbox`'s *in-suite* time across arms. Isolated
+numbers cannot answer it.
+
+### 2.5c-COST The measured shape of the flags-on cost (n=3-4 per cell, loads 4-8)
+
+Three-way decomposition on `lunch-poll-vote` (two browsers, shared option):
+the merge-base file run against BOTH runtimes, plus the arc's instrumented
+file, all isolated via `deno task integration --port-offset=750`. Wall times
+were stable to ±1s across reps in every cell.
+
+| | mainbase runtime | thin runtime (instr. file) | thin runtime (merge-base file) |
+| --- | --- | --- | --- |
+| reactive steps (StepTimer) | 2.1 s | 3.2 s | 4.9 s |
+| in-test teardown (`it()` − steps) | 2.9 s | 6.8 s | **8.1 s** |
+| deploy + hooks (`describe` − `it()`) | 5.0 s | 6.0 s | 7.0 s |
+| wall | 10 s | 15-16 s | 19-21 s |
+
+Per-step, the reactive delta concentrates entirely in cross-user propagation:
+
+| step | mainbase | thin (mb file) |
+| --- | --- | --- |
+| option A propagates to both | 92 ms | 1171 ms |
+| both cast green concurrently | 294 ms | 1821 ms |
+| navigate/login, name fill, tally checks | ≈equal | ≈equal |
+
+**Findings, in design order:**
+
+1. **Cross-user reactive propagation is 4-6x slower under flags-on** —
+   ~100-300 ms → ~500-1800 ms. The single-user counter probe (§2.5c-BASELINE)
+   showed no delta because one client's round trip hides it; the SECOND
+   browser's view pays it in full. For the speculate-locally design this is
+   the number that matters: local echo covers the actor, so the whole
+   user-visible cost of server-primary execution lands on the *other*
+   observers. The rebuild's server→client push path must be designed against
+   this number, and 1-1.8 s is not acceptable as a steady state.
+2. **In-test teardown nearly triples** (2.9 s → 8.1 s) — logout/idle-wait
+   while a piece is rendered. Echoes blocker #40's family: shutdown now waits
+   on something the server owns. Not user-facing, but it will tax every CI
+   run and every session close.
+3. **The arc's own measurement instrumentation SPEEDS UP flags-on runs**
+   (15-16 s instrumented vs 19-21 s clean, same runtime): the
+   `beginServerExecutionMeasurement` diagnostics read appears to warm the
+   executor path that the clean run pays for mid-test. Corollary: every
+   arc-instrumented timing this session UNDERSTATES the flags-on cost, and
+   any future A/B must use uninstrumented workloads on both arms.
+4. **`cfc-group-chat-demo-multi-runtime` (byte-identical, n=3-4/arm):
+   mainbase 6 s steady / thin 7-8 s** — consistent with the propagation tax
+   at smaller interaction counts. `cf-checkbox` shows exactly 0 delta (4 s =
+   4 s x4), because it is startup-dominated with one trivial cell.
+
+Still open, unchanged by this: the §2.5c-SUITE 34x suite-context blowup, which
+is orthogonal (it appears on identical code at identical flags).
+
+### 2.5c-STORM The propagation slowdown, root-caused and PROVEN 2026-08-02
+
+The §2.5c-COST 4-6x cross-user propagation slowdown is **observation
+persistence flooding the commit stream**. Traced end-to-end and then proven by
+ablation.
+
+**The trace (uninstrumented lunch-poll on thin, /api/health/stats sampled at
+~200 ms):**
+
+- The executor itself is FAST: the whole reactive workload — 59 scheduler
+  runs, 29 shadow + 26 authoritative transactions, 26 claims — completes in
+  **~700 ms**.
+- But the run generates **595 accepted-commit notifications** (~10 logical
+  writes → ~60x amplification), and after the votes land the pool keeps
+  receiving them at **~50/s for 12+ seconds** — through the entire teardown.
+  70% are suppressed as unrelated; they still cost index decisions, WAL
+  writes, and subscription pushes to both browsers.
+- The store shows what they are. Thin space file: **~80 MB** per run;
+  **72% is scheduler-observation persistence** (`scheduler_observation` +
+  `_snapshot` + `_replay`). 542 commits vs mainbase's 150; mainbase's
+  observation tables are **empty** (0 rows). Server-side sessions wrote 71%
+  of the commits — the server talking to itself.
+- One replay row for a single `cf:builtin/map` run: **158 KB** — `reads`:
+  130 KB (714 links serialized individually), `actualChangedWrites` 20 KB,
+  plus a SECOND copy of the read set inside `completeActionScopeSummary`
+  (the certificate). §2.4f predicted exactly this ("provenance-envelope
+  expansion … timing regression is a live hypothesis") and nobody tested it.
+
+**The ablation (server-primary ON, `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false`):**
+
+| step | mainbase | flags-on | flags-on, persistence OFF |
+| --- | --- | --- | --- |
+| option A propagates | 92 ms | 767-1171 ms | **399 ms** |
+| both cast green | 294 ms | 797-1821 ms | **453 ms** |
+| `it()` wall | 5 s | 10-13 s | **7 s** |
+
+All green — the persistence is NOT load-bearing for this path. The storm
+owned 50-75% of the propagation delta and most of the teardown delta (#43:
+same mechanism — the idle/drain path was digesting the firehose).
+
+**Attribution of blame, carefully:** `persistentSchedulerState` itself is
+pre-arc (#3646) and innocent at handler frequency with small records —
+mainbase has it on and persists nothing here. The arc turned it into the
+claims/admission EVIDENCE LOG: every derived run on the server durably
+records its full read/write link sets plus a certificate copy, at executor
+frequency. The scaffolding is not merely conceptually in the hot path — it is
+byte-for-byte the majority of all data the system moves.
+
+**Residual after ablation:** ~150-350 ms over mainbase per cross-user step —
+the honest cost of the extra hop (executor compute + commit + push) with
+shadow/claim machinery still on. This is the number the rebuild's push path
+starts from, before deleting shadow runs and claim round trips.
+
+**Also explains (hypothesis, one experiment short of proven):** the
+§2.5c-SUITE 34x — stores PERSIST across `deno task integration` invocations
+(stop/start does not wipe `cache/`), grow ~0.5 GB per heavy run under
+flags-on, and the engine indexes/fans out every commit against every active
+lane. `cf-checkbox` in-suite runs behind 80+ files of accumulated stores and
+subscriptions.
+
+### 2.5d-PRE Do not hand-roll an integration harness — `deno task integration` exists
+
+**Read this before §2.5d, §2.5e and §2.5f: those three were written while
+hand-rolling a harness that should never have been written.** The repo already
+has the correct entry point, and §2.5's own phrase "the offset-750 servers"
+was always referring to it:
+
+```
+deno task integration --port-offset=750 patterns counter
+```
+
+`tasks/integration.ts` → `scripts/start-local-dev.sh` starts **both** servers on
+offset ports and wires storage correctly (`start-local-dev.sh:107-108`):
+
+```
+TOOLSHED_API_URL=${API_URL:-"http://localhost:$TOOLSHED_PORT"}
+TOOLSHED_MEMORY_URL=${MEMORY_URL:-"$TOOLSHED_API_URL"}
+```
+
+A hand-rolled `deno run index.ts --port=NNNN` gets **two** things wrong that
+this handles:
+
+1. **`MEMORY_URL` defaults to `http://localhost:8000`**
+   (`packages/toolshed/env.ts:147`). On this box that is the loom primary
+   instance, so a server "isolated" on port 8751 still sends every storage
+   write to another tenant's memory endpoint. Isolating the API port isolates
+   nothing. In CI the default is harmless because toolshed *is* the thing on
+   8000 — it points at itself.
+2. **No shell.** Integration tests load a frontend; `FRONTEND_URL` defaults to
+   `API_URL`. A toolshed with no shell dev server has no page to serve.
+
+**Measured 2026-08-02, and this is the whole point:** `counter.test.ts` under
+the hand-rolled harness failed a 60 s barrier and then hung 47 minutes, on
+*every* branch including the CI-clean merge base — which looked exactly like
+"local integration is broken in this environment" and produced a whole §2.5f
+about harness timeouts. Through `deno task integration` the same test passes
+**1/1 in 5 s**, individual steps ~900 ms.
+
+Nothing measured through the hand-rolled harness means anything. The lesson
+generalises past this arc: **when a repo ships a task for the thing you are
+about to script, the gap between it and your script is a bug you are
+choosing to own.**
+
+### 2.5d Port 8000 belongs to the loom primary — never measure against it
+
+Measured 2026-08-01: a toolshed has been listening on `127.0.0.1:8000` since
+11:30 that day, with cwd
+`/Users/berni/looms/primary/vendor/labs/packages/toolshed`. It is the **loom
+primary instance**, not this arc's.
+
+`packages/integration/env.ts` defaults `API_URL` to `http://localhost:8000`.
+So an integration run launched with no `API_URL` does not fail — it silently
+drives someone else's primary server, which both corrupts that instance's
+store and measures a machine under a foreign workload. This is exactly the
+"never target a production/primary instance" rule, and the default makes
+violating it the *path of least effort*.
+
+**Always pass an explicit arm-private `API_URL`.** The arc's convention is an
+offset port per arm — 8751/8752/8753 for mainbase/fat/thin.
+
+### 2.5e Arms are only comparable where the WORKLOAD is byte-identical
+
+The obvious three-arm design — run the same four integration tests on
+mainbase, fat and thin — is **invalid for the mainbase↔fat pair on most
+tests**, because the arc edited the tests themselves. Measured
+`f25518c1f` (merge base) vs `44b46ad02` (fat):
+
+| workload | mainbase↔fat | fat↔thin |
+| --- | --- | --- |
+| `default-app.test.ts` | **+162/−27** | identical |
+| `cfc-group-chat-demo-two-browsers.test.ts` | **+55/−0** | identical |
+| `lunch-poll-vote.test.ts` | **+8/−0** | identical |
+| `cfc-group-chat-demo-multi-runtime.test.ts` | identical | identical |
+
+The arc added 20 files to `integration/` and wired
+`server-execution-measurement.ts` (751 lines, **absent on mainbase**) into
+several existing tests. A mainbase↔fat wall-clock delta on `default-app`
+therefore measures *a bigger test*, not a slower runtime.
+
+**Consequences for any future A/B here:**
+
+- **fat↔thin is clean on all four**, because thin touches only five
+  `integration/` files and none of them are workloads. This is the pair that
+  answers "what does turning the dials on cost".
+- **mainbase↔fat needs a comparator whose file is byte-identical.** 35 of
+  mainbase's integration tests qualify, including
+  `cfc-group-chat-demo-multi-runtime`, `cfc-group-chat-demo`, `home-profile`,
+  `counter`, `chatbot`. Use those for the "flags-off is a no-op" sanity check.
+- **`origin/main` is the wrong arm-1 anyway.** It has moved past the merge
+  base (`dd63b3d25` vs `f25518c1f`), and three of the four commits it gained
+  touch per-value hot paths — `data-model/src/value-clone.ts`,
+  `runner/src/sandbox/plain-data.ts`,
+  `runner/src/sandbox/result-normalization.ts`. Comparing fat to current main
+  conflates the arc with main's own drift. **Use the merge base.**
+
+### 2.5f A measurement harness must be able to give up
+
+Measured 2026-08-01, the hard way. A first-cut runner invoked
+`deno test` with no timeout. `counter.test.ts` on the thin arm failed case 1 on
+a 60 s barrier and then **hung for 47 minutes on case 2 with its browser
+already dead** (zero `headless_shell` processes alive). Because the invocation
+was unbounded:
+
+- the run never wrote its result row, so the results file stayed empty and
+  looked like "still starting" rather than "wedged";
+- a chained follow-on job that waited for the arm's port to clear
+  **deadlocked behind it**, so nothing after it ran either;
+- ~50 minutes of wall time produced exactly one datum, and that datum was
+  `t_test = 2861.99s`, which is not a latency.
+
+**Requirements this imposes on any runner here:**
+
+1. **Hard cap every invocation** (`timeout --kill-after=30 <cap>`), and record
+   rc 124 as its own outcome — a timeout is a *category*, never a number that
+   goes in a latency column.
+2. **Never chain on an unbounded wait.** "Wait for the port to clear" inherits
+   the hang. Bound it or poll with a deadline.
+3. **Gate on load, and be willing to measure nothing.** A runner that waits
+   for load < 5 and *exits* when the box never goes quiet is correct; one that
+   measures anyway is worse than useless, because its numbers look like data.
+4. **Validity before timing.** Run a cheap identical-on-all-arms test first and
+   stop if any arm fails. You cannot time an arm that does not work, and
+   discovering that after a three-hour matrix wastes the whole matrix.
+
+**And the local integration setup could not run these tests at all.** With the
+cap in place, `counter.test.ts` hit `TIMEOUT_300s` on the **merge base** —
+the CI-clean commit — so the hang is not an arc property, it is this
+environment. Load went **4.96 → 48.60 during that single run**. Nothing about
+local integration latency on this box is worth measuring until that is
+understood; CI runs the same suite on a dedicated 4-vCPU runner against a
+prebuilt toolshed binary, and is the better instrument for correctness.
+
+### 2.5g This box is SHARED — do not pkill by pattern
+
+§2.5 says "kill leftover `ms-playwright` browsers". Taken literally that is
+`pkill -f headless_shell`, and on this box it would kill the **loom primary
+instance's** browsers mid-test (§2.5d — it runs its own suites from
+`/Users/berni/looms/primary/vendor/labs`).
+
+Snapshot the browser PIDs before the run and kill only the difference
+afterwards. The same caution applies to any `pkill`, `killall`, or
+`lsof`-driven cleanup written for a single-tenant assumption: check what else
+matches before the pattern goes live.
+
+### 2.6 Comparing action ids across arms
+
+Action ids read `cf:module/<hash>:<lift>:<instance>`; the trailing instance
+segment is minted per Runtime, so raw ids are **not** comparable between two
+arms that each build a Runtime. Normalize to the derivation key
+(first three colon-segments). See `derivationKey` in
+`packages/runner/test/server-execution-group-chat-rank-probe.test.ts`. Getting
+this wrong makes every cross-arm set relation vacuously zero.
+
+### 2.7 The R5 mechanism (how a builtin becomes server-executable)
+
+1. `packages/runner/src/builtins/server-execution.ts` —
+   `SERVER_EXECUTABLE_BUILTIN_IDS` is the exact allowlist of effect builtins
+   the server may execute. Membership is what earns the `:server-v1`
+   implementation fingerprint (`serverBuiltinImplementationHash`).
+2. `packages/runner/src/runner.ts:~5134` stamps that fingerprint; a canonical
+   builtin outside the set instead gets `builtinImplementationHash` (`:v1`)
+   and then rejects until a descriptor exists. **Which rejection depends on
+   the KIND, and this doc named only one arm until 2026-07-29:** a
+   *computation* rejects `incomplete-static-surface`; an *effect* with no
+   assembled summary rejects **`unknown-effect-surface`**
+   (`scheduler/servability.ts:382-388`). Grepping for the computation code
+   while chasing an effect row finds nothing and reads as "not classified at
+   all". (Caught by the navigateTo design.)
+3. `packages/runner/src/runner.ts:~5244` mints the
+   `ServerBuiltinActionDescriptor` **generically** from `serverBuiltinId` —
+   so adding an id to the allowlist gives it a descriptor automatically from
+   `inputCells` / `schedulingWrites` / `serverBuiltinRuntimeWrites`.
+4. Computation builtins use the parallel
+   `SERVER_COMPUTATION_BUILTIN_IDS` / `ServerBuiltinComputationDescriptor`
+   (currently `ifElse`, `when`, `unless`) and the
+   `serverBuiltinComputation` branch at the same site.
+5. Kind pins live in `packages/runner/test/builtin-effect-registry.test.ts`
+   (static, no Runtime): a builtin performing egress must register
+   `isEffect: true` and appear in its id list.
+6. **A builtin's registration is not its kind.** `runner.ts:5304` resolves
+   `module.isEffect ?? builtinIsEffect` — the FACTORY's return wins over
+   `index.ts`. `llmDialog` (`llm-dialog.ts:3219`) and `navigateTo`
+   (`navigate-to.ts:121`) both `return { ..., isEffect: true }`, so they are
+   **effect** nodes at runtime no matter what `addModuleByRef` says.
+   Consequence for W2.15: never give them a computation descriptor —
+   `serverBuiltinComputationScopeSummary` returns undefined unless
+   `observation.actionKind === "computation"`, so the descriptor would mint
+   and then never assemble. Pinned by "builtins whose factory declares
+   isEffect are effect nodes regardless of the registration source" in the
+   same file.
+
+**CORRECTION (2026-07-28, A3).** An earlier revision of this plan asserted
+"`llmDialog` is CONFIRMED a computation — CP6's egress claim was REFUTED."
+**That was wrong**, and it came from a test comment that was itself wrong: the
+"llmDialog stays a computation" assertion only regex-parses `index.ts`
+registrations, so it is green while the effective kind is the opposite. This
+is the exact failure mode §0 step 5 warns about — a green test asserting a
+false thing — so it is worth remembering that it occurred inside this arc's
+own standing knowledge. **CP6's refutation is re-opened and is owner-gated:**
+the claim was that `llmDialog` performs no direct egress. Its *kind* is now
+known to be effect; whether it performs *double* egress is a separate
+question that nobody has re-measured.
+
+### 2.8 The `llm` hole — CLOSED by wave A1; this section is history
+
+**Superseded 2026-07-29.** At HEAD `llm.ts:812` passes
+`serverBuiltinId: "llm"`, `"llm"` is in `LLMServerBuiltinId`
+(`builtins/llm-client-options.ts:8-12`) and in
+`SERVER_EXECUTABLE_BUILTIN_IDS`. Wave A1 (`cfa827f82`) closed it. The text
+below described the hole as OPEN for a day after it was fixed — the eleventh
+stale self-assertion this arc has caught, and the second inside its own
+planning docs. Kept for the mechanism it explains, not as a live gap.
+
+### 2.8 (historical) The `llm` hole as originally diagnosed
+
+- `packages/runner/src/builtins/llm.ts:68` `llmClientOptions(runtime, space,
+  serverBuiltinId?: "generateText" | "generateObject")`.
+- Line ~79: when running server-side (`runtime.hasServerBuiltinFetch()`) and
+  `serverBuiltinId === undefined`, it **throws**
+  `"unsupported LLM builtin has no server broker route"`.
+- The shared tool loop is `executeWithToolsLoop` (`llm.ts:377`), whose
+  `serverBuiltinId` param is declared at `:391` with the same narrow union.
+- `generateText` passes `serverBuiltinId: "generateText"` at `llm.ts:1183`.
+- **The `llm` builtin's own call at `llm.ts:810` passes nothing** — that is the
+  hole. `llm` is registered `isEffect: true`
+  (`packages/runner/src/builtins/index.ts:73`) and already listed in the
+  registry test's `OTHER_EFFECT_IDS`, but it is absent from
+  `SERVER_EXECUTABLE_BUILTIN_IDS`.
+- The broker route itself is `runtime.fetchBuiltin(serverBuiltinId, path, url,
+  init)` (`packages/runner/src/runtime.ts:2074`), reached through
+  `createInternalLLMBrokerRequestOptions`. Test scaffolding for it:
+  `packages/runner/test/runtime-host-for-space.test.ts:123`
+  (`describe("Runtime.fetchBuiltin")`).
+
+### 2.9 R7 (landed — context for anyone touching claim issuance)
+
+Claim rank and the engine's effective context are computed by two different
+functions; only the engine's saw the durable, monotonic
+`scheduler_context_floor`, which an ordinary **unclaimed client run** can pin
+to `user`/`session`. The host now consults it at issuance
+(`#assertExecutionClaimContextFloorAdmits`, `packages/memory/v2/server.ts`) and
+declines a claim broader than the floor. The engine fence remains the backstop
+for the issuance→commit race. Full write-up: client-passivity §5g.
+
+**Relevance to the arc:** this class of bug is a *transition artifact*. It
+exists only because two executors write the same durable state. Expect more of
+them while both sides run, and expect them to disappear at P3 — that is an
+argument for crossing rather than lingering.
+
+### 2.11 ANY process that writes to a stream cell is a pattern runtime
+
+Measured 2026-07-31 while routing toolshed through the executor, and it
+generalises well beyond toolshed — this is the most reusable finding of that
+investigation.
+
+`ensurePieceRunning` (`packages/runner/src/ensure-piece-running.ts`) is a
+**client-authority execution entry point reachable from a plain stream write.**
+The chain: a `Cell.send` is a `Cell.set`; the commit queues a scheduler event;
+if no local handler is registered, the scheduler calls `ensurePieceRunning`,
+which **loads the user's pattern and calls `runtime.start()`** — instantiating
+that piece's entire reactive graph, effect builtins included, inside the calling
+process.
+
+> **CORRECTED 2026-07-31 — this section first said the load was an HTTP fetch
+> from `patternApiUrl`. It is not.** `loadPatternByIdentity`'s whole ladder is
+> STORAGE-backed: compiled-closure docs → verified source docs → `cf:` fabric
+> imports, all from the memory space. No HTTP anywhere. The conclusion below is
+> unaffected — and the correction makes it STRONGER, because the process needs
+> no pattern-API access at all: **write access to the space is sufficient to
+> become a pattern runtime.** The wrong mechanism also mattered downstream: it
+> made `wish`'s HTTP sidecar load look like an instance of the same class, and
+> it is not (see item 3's ruling in §1).
+
+Consequences that are easy to miss:
+
+- **A process does not have to think it is a pattern runtime to be one.**
+  Toolshed's docblock said it "only executes patterns for webhook deliveries";
+  the route claim was accurate but the implication was wrong in KIND. One
+  delivery starts the whole graph, and `start` is idempotent with nothing
+  stopping it — so the piece stays live for the process lifetime and thereafter
+  reacts to **every** subsequent storage change in its closure, including
+  unrelated writes the process makes for other reasons. Such a process
+  accumulates live pieces.
+- **The local start IS the demand publication**, so "just stop running it
+  locally" is a trap that fails toward silence — see the `claim-conditional`
+  seam note in §1's D12 entry.
+- When auditing which processes the egress flip affects, **do not look for
+  effect-builtin calls.** Look for stream writes. Toolshed calls no effect
+  builtin anywhere; it egresses because it starts other people's patterns.
+
+### 2.10 The unserved-attempt marker — four facts that cost hours
+
+Found 2026-07-30 while designing the `claim-not-live` carrier. None of this is
+inferable from the fence site.
+
+1. **The unclaimed router path emits NO marker at all today.**
+   `action-transaction-router.ts`'s three `unservedRoute` call sites are ALL
+   inside `liveClaim !== undefined` branches; the unclaimed arms instead call
+   `reportUnservable(...)` and return `local` (executor-shadow). So an
+   unclaimed unservable run leaves no wire trace — the diagnostic goes
+   out-of-band. **This changes how the pinned blocker test reads:** its
+   scenario is currently unreachable from the product and only reachable from
+   a hand-built or hostile client, which is exactly why the fence looked
+   load-bearing.
+2. **Producer P2 goes live the instant the engine fence is deleted, with no
+   runner change.** `storage/v2.ts`'s firewall-rejection → canonical-unserved
+   re-commit is gated only on `route !== undefined` and is claim-blind. It
+   inherits the original observation wholesale (a spread), so it emits an
+   unclaimed marker the moment the original stops carrying an assertion.
+   **The carrier must therefore land in the SAME commit as the deletion** —
+   there is no window in which the fence is gone and no marker arrives.
+3. **`server.ts` fences a bound executor session's unassertioned action-run
+   observation with a `ProtocolError` BEFORE the engine sees it** ("bound
+   executor action is missing an execution claim incarnation"). Under blanket
+   ownership that is the ACTUAL blocker on the executor emitting unclaimed
+   markers — not `claim-not-live`. §2.2's fixture bullet names the symptom
+   but not the site or this consequence.
+4. **`recordExecutionCandidateUnserved` is a completely independent channel**
+   — in-process executor diagnostics, never the wire, no relation to
+   `executionUnservedAttempt`. The corrected §5h.5 gate's
+   `candidateUnservedByCode` arm therefore survives this deletion untouched.
+   Do not "unify" it with the observation path, and note `unservedDiagnosticCode`
+   has an unrelated namesake in `server-builtin-channel.ts` (a broker RPC error
+   envelope) — also not the same thing.
+
+### 2.12 An async builtin must PUBLISH its own result — a wake will not come
+
+Found 2026-07-31 diagnosing two of main's `fetch-claim-takeover` cases red
+after the merge. The failure looked like a bad conflict resolution in the
+fetch builtins and was not: main's `fetch-program.ts` dropped in wholesale
+fails identically.
+
+**The arc's source-action propagation makes a continuation's commit the
+action's OWN commit, for the scheduler.** The post-commit outbox flushes each
+effect inside `runWithTransactionSourceAction(tx.sourceAction, …)`, and every
+`Runtime.edit()` underneath inherits it (`runtime.ts`, and
+`compile-and-run.ts` documents why: without it the writes are unattributable
+and no executor claim can cover them). So the transaction an async builtin's
+network result lands in carries the action as its `sourceAction`, and
+`processStorageNotification` classifies the change `skip-own-commit-source`
+(scheduler-v2 P5). **Measured: the writeback commits, the notification
+matches the trigger index, the action is never re-run.**
+
+Consequence for anyone writing or reviewing an async builtin: **the result
+must be written to the output cells by the continuation itself.** Every other
+one already does — `fetch.ts`'s `startFetch` takes `pending`/`result`/`error`
+and writes them; so do `llm`, `llmDialog`, `compileAndRun`, `sqliteQuery`.
+`fetchProgram` was the sole holdout (it wrote only its durable cache and let
+the action's next run project it), which is why it stranded `pending: true`
+with no result and no error, forever.
+
+**Do NOT fix this in the scheduler.** Exempting continuation transactions
+from P5 (flag the inherited lineage, require the un-flagged form to suppress)
+restores the pre-arc wake and fixes fetchProgram — and was measured to break
+four arc tests, because it also adds a redundant post-writeback re-run and an
+empty commit to every claimed builtin run: `runtime-host-for-space`'s llm
+broker case reads the LAST matching observation and gets the empty one, and
+both C2.8 lane e2e cases breach their barrier. Adjacent A/B, same three files:
+16/0 clean, 4 failed with the scheduler change.
+
+---
+
+## 3. Rules of engagement
+
+### Delegate (subagent)
+
+- Well-scoped builds with a named acceptance test.
+- Investigations with one specific question and a written deliverable.
+- Test authoring against an existing fixture family.
+
+Use `general-purpose` unless the item says otherwise. Dispatch items marked
+`parallel: yes` in a single message with multiple tool calls.
+
+**Cap: at most THREE subagents in flight at once** (owner, 2026-07-28) — the
+5-hour quota is a real budget and a wide fan-out burns it. `parallel: yes`
+means "may run alongside others", not "dispatch all of them now". When a wave
+has more than three parallel items, dispatch the highest crossing-weight three
+(CP10) and hold the rest until a slot frees. A second reason to prefer three:
+every parallel item shares one worktree, so each extra agent adds edit-collision
+and test-interference risk on the shared registry files.
+
+**When parallel items share a file** (wave A: `server-execution.ts`, and the
+zero-verdict pin in `server-execution-product-fixtures.test.ts`), add to each
+prompt: use anchored `Edit`s and never whole-file `Write`s on a shared file;
+never `git checkout`/`stash`/`commit`; keep test runs narrow; and check
+`git diff --stat` before chasing a failure that looks unrelated. Without that
+clause the likeliest wave failure is not a bad build — it is one agent
+debugging another's half-applied edit.
+
+### Do NOT delegate — do these yourself
+
+- **Measurement runs.** The protocol in §2.5 is easy to violate and a violated
+  run produces confident wrong numbers. Every number that reaches a spec is
+  taken by the orchestrator.
+- **Owner-gated decisions** (anything the plan marks owner-gated; the D-series
+  in client-passivity §7).
+- **Commits, commit messages, pushes.** The narrative is the deliverable.
+- **Accepting a result.** Always run the Verify line yourself.
+- **Spec edits to `docs/specs/server-side-execution/*`.** Subagents may draft
+  into a scratch file; the orchestrator lands the wording.
+
+### Subagent prompt contract
+
+Every prompt in §4 already contains this; keep it if you write new ones:
+
+> Repo: LABS, worktree `/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`,
+> branch `codex/server-execution-w1-2-shared-pool`.
+> READ FIRST: `docs/specs/server-side-execution/passivity-arc-orchestration.md` §2 (standing
+> knowledge) — it will save you hours.
+> Do NOT commit, do NOT push, do NOT edit anything under
+> `docs/specs/server-side-execution/`. Report: files changed, the exact test
+> command that proves it, and anything you found that contradicts §2.
+>
+> **STOP-HOOK CLAUSE — include this verbatim; describing the defect is not
+> enough, it has to pre-authorise the dismissal.** When you finish, a stop hook
+> will report fmt / lint / type-check failures. **They are not yours and you
+> must not investigate them.** The hook validates the session's cwd checkout,
+> not this worktree (§2.5c), and all three of its complaints are already fully
+> attributed there: the type-check leg is a Deno VERSION GATE that runs no type
+> checking at all, the fmt leg is 43 files in a checkout nobody is working in,
+> and the lint leg is one `require-await` already fixed on this branch. Verify
+> your OWN changed files (`deno fmt --check <files>`, `deno lint <files>`,
+> `deno check <files>`); if those are clean you are done. **Do not re-derive the
+> attribution, do not write it up, and never edit or format the other
+> checkout.** Six agents have now spent a full closing round each on this.
+
+---
+
+## 4. Work items
+
+### Wave A — R5/R13 effect rows
+
+Priority is **crossing-weighted per CP10**: a mid-chain unservable strands
+everything downstream, so it outranks a leaf with higher raw incidence.
+Register row: `docs/specs/server-side-execution/context-lattice-execution.md`
+§8 R5 / R13.
+
+---
+
+#### A1 — `llm` effect broker · parallel: yes
+
+**Goal.** `llm` becomes server-executable, like `generateText` already is.
+
+**Verify (run yourself):**
+```bash
+deno test -A packages/runner/test/builtin-effect-registry.test.ts packages/runner/test/builtin-implementation-hash.test.ts packages/runner/test/runtime-host-for-space.test.ts
+```
+
+**Prompt:**
+
+> Repo: LABS, worktree `/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`,
+> branch `codex/server-execution-w1-2-shared-pool`.
+> READ FIRST: `docs/specs/server-side-execution/passivity-arc-orchestration.md` §2 — especially §2.7
+> (how a builtin becomes server-executable) and §2.8 (this exact hole, already
+> diagnosed; the line numbers are current).
+>
+> TASK: give the `llm` builtin a server broker route, exactly as `generateText`
+> has one. The diagnosis in §2.8 is complete — you should not need to
+> rediscover it. Expected shape: add `"llm"` to `SERVER_EXECUTABLE_BUILTIN_IDS`;
+> widen the `serverBuiltinId` unions in `llmClientOptions` and
+> `executeWithToolsLoop`; pass `serverBuiltinId: "llm"` at the `llm` builtin's
+> `executeWithToolsLoop` call (`llm.ts:~810`). VERIFY rather than assume that
+> the generically-minted descriptor (§2.7 item 3) covers what `llm` mints at
+> runtime — check `serverBuiltinRuntimeWrites` against the cells `llm` actually
+> creates, and say so explicitly in your report either way.
+>
+> RED-FIRST: before changing behavior, add a test that fails for the right
+> reason. Put the identity pin in
+> `packages/runner/test/builtin-implementation-hash.test.ts` and the routing
+> behavior in `packages/runner/test/runtime-host-for-space.test.ts` (there is a
+> `describe("Runtime.fetchBuiltin")` block at :123 to model on). Show me the
+> red output in your report, then the green.
+>
+> Do NOT commit, do NOT push, do NOT edit anything under
+> `docs/specs/server-side-execution/`. Report: files changed, the exact test
+> command that proves it, whether the descriptor genuinely covers `llm`'s
+> runtime writes, and anything contradicting §2.
+
+---
+
+#### A2 — `sqliteQuery` effect broker · parallel: yes
+
+**Goal.** `sqliteQuery` becomes server-executable. Unlike `llm` this is
+**not** fetch-shaped, so §2.7's allowlist move alone will not be enough —
+expect real broker work.
+
+**Verify (run yourself):**
+```bash
+deno test -A packages/runner/test/builtin-effect-registry.test.ts && deno test -A --filter sqlite packages/runner/test/
+```
+
+**Prompt:**
+
+> Repo: LABS, worktree `/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`,
+> branch `codex/server-execution-w1-2-shared-pool`.
+> READ FIRST: `docs/specs/server-side-execution/passivity-arc-orchestration.md` §2 (especially §2.7),
+> then decision **D2** in `docs/specs/server-side-execution/client-passivity.md`
+> §7, then the R5 row in `context-lattice-execution.md` §8.
+>
+> TASK: design and implement the server-side broker path for the `sqliteQuery`
+> effect builtin (`packages/runner/src/builtins/sqlite-builtins.ts`, registered
+> at `builtins/index.ts:~94`). START BY REPORTING THE DESIGN before you build:
+> `sqliteQuery` is not fetch-shaped, so the existing
+> `ServerBuiltinFetchBroker` seam
+> (`packages/runner/src/executor/server-builtin-transport.ts`) may not fit. Say
+> plainly whether it fits, and if not, what the minimal new seam is. If the
+> honest answer is "this needs the D2 served-commit path first" (item A5), say
+> that and stop — a correct scoping answer is a good outcome for this task.
+>
+> If it does fit: implement red-first with tests, following §2.7.
+>
+> Do NOT commit, do NOT push, do NOT edit anything under
+> `docs/specs/server-side-execution/`. Report: the design call and its
+> rationale, files changed, the exact test command, and anything contradicting §2.
+
+---
+
+#### A3 — W2.15 descriptors for five computation builtins · parallel: yes
+
+**Goal.** `llmDialog`, `compileAndRun`, `sqliteDatabase`, `navigateTo`,
+`inspectConfLabel` get W2.15-shape computation descriptors so they stop
+rejecting `incomplete-static-surface`.
+
+**Note:** `llmDialog` is **confirmed a computation** — CP6's egress claim was
+REFUTED; it orchestrates effect-classified `llm` nodes with no direct egress.
+Do not "fix" it into an effect.
+
+**Verify (run yourself):**
+```bash
+deno test -A packages/runner/test/server-execution-product-fixtures.test.ts packages/runner/test/builtin-effect-registry.test.ts
+```
+
+**Prompt:**
+
+> Repo: LABS, worktree `/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`,
+> branch `codex/server-execution-w1-2-shared-pool`.
+> READ FIRST: `docs/specs/server-side-execution/passivity-arc-orchestration.md` §2 (especially §2.7
+> item 4 — the computation-descriptor seam), then the W2.15 material referenced
+> from the R5 row in `docs/specs/server-side-execution/context-lattice-execution.md` §8.
+>
+> TASK: add W2.15-shape computation descriptors for `llmDialog`,
+> `compileAndRun`, `sqliteDatabase`, `navigateTo`, `inspectConfLabel`. The
+> existing exact registry is `SERVER_COMPUTATION_BUILTIN_IDS` in
+> `packages/runner/src/builtins/server-execution.ts` (`ifElse`, `when`,
+> `unless`) — read the docblock there; it is explicit that the registry is
+> deliberately exact and that envelope-shaped builtins are a different design.
+> For EACH of the five, verify against the builtin source what it actually
+> reads and writes, and only add it if its surface genuinely is
+> "reads its inputs, writes exactly its direct output(s)". If one of them is
+> envelope-shaped or otherwise does not fit, LEAVE IT OUT and report why —
+> a partial, correct result beats five wrong entries.
+>
+> `llmDialog` is CONFIRMED a computation (CP6's egress claim was refuted); do
+> not reclassify it.
+>
+> Red-first with tests. Do NOT commit, do NOT push, do NOT edit anything under
+> `docs/specs/server-side-execution/`. Report: which of the five you added,
+> which you left out and why, files changed, the exact test command, and
+> anything contradicting §2.
+
+---
+
+#### A4 — R13 `wish` descriptor · parallel: yes
+
+**Goal.** `wish` gets a descriptor. Its shape is decided by the resolver
+contract (plan W2.15b). Measured ×4 in the flagship fixture — a real hole.
+
+**Verify (run yourself):**
+```bash
+deno test -A packages/runner/test/server-execution-product-fixtures.test.ts
+```
+
+**Prompt:**
+
+> Repo: LABS, worktree `/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`,
+> branch `codex/server-execution-w1-2-shared-pool`.
+> READ FIRST: `docs/specs/server-side-execution/passivity-arc-orchestration.md` §2 (especially §2.7),
+> then the **R13** row in `docs/specs/server-side-execution/context-lattice-execution.md`
+> §8, then `packages/runner/src/builtins/wish.ts`.
+>
+> TASK: `wish` has static builtin identity but no descriptor, so it classifies
+> `incomplete-static-surface`. Determine its resolver contract from the source
+> and give it a descriptor of the right shape. Note that
+> `packages/runner/test/server-execution-product-fixtures.test.ts` currently
+> carries an explicit exemption for `impl:cf:builtin/wish:v1` in its
+> zero-verdict pin — when `wish` gets a real descriptor that exemption should
+> narrow or go away, and that is the natural red-first signal for this task.
+>
+> If the resolver contract turns out NOT to have a bounded static surface, say
+> so plainly with evidence rather than inventing one — "wish needs a different
+> mechanism, here is why" is a good outcome.
+>
+> Do NOT commit, do NOT push, do NOT edit anything under
+> `docs/specs/server-side-execution/`. Report: the contract you found, what you
+> built (or why you did not), files changed, the exact test command, and
+> anything contradicting §2.
+
+---
+
+#### A5 — served sqlite-op commit path (D2) · parallel: no (after A2)
+
+**Goal.** Routing-layer lane-scope admission + row-label re-derivation, per
+**D2**. D2 says BUILD it: the permanent-ruling alternative was rejected
+because CP21 shows the required static detectability is structurally absent
+(dynamic sqlite ops ride arbitrary callers' commits).
+
+**Verify:** to be set from A2's design report.
+
+**Prompt:** compose after A2 reports — its design call determines the shape.
+Carry forward: the D2 rationale, `packages/runner/src/builtins/sqlite/`, and
+whatever seam A2 identified.
+
+---
+
+### Wave B — measurement (orchestrator only, NOT delegated)
+
+**B1.** Re-run the three-arm ladder probe and record the delta wave A bought.
+
+```bash
+deno test -A packages/patterns/integration/server-execution-group-chat-user-rank-probe.test.ts
+```
+
+Read `unservedByCode` / `offendersByCode` per arm. Expect the effect rows to
+move `broker-required` classes; `dynamic-write-outside-static-surface` should
+be unchanged (it is not an effect row). Record in client-passivity §5g.
+
+Also re-run the classification probe:
+```bash
+deno test -A packages/runner/test/server-execution-group-chat-rank-probe.test.ts
+```
+
+**Gate:** numbers recorded in the spec before wave C proceeds past C1.
+
+---
+
+### Wave C — P3 preconditions
+
+#### C1 — Does P3 delete the §4 widening artifact? · parallel: yes (can start now)
+
+**Goal.** Decide whether `dynamic-write-outside-static-surface` (×12, 1
+offender, survives both scoped ranks) is worth diagnosing, or whether a
+passive client removes the requirement entirely. This is a **paper
+investigation**, ~1 hour, and it reorders the plan if the answer is "deleted".
+
+**Verify:** the deliverable is a written argument with code citations; the
+orchestrator reads and rules.
+
+**Prompt:**
+
+> Repo: LABS, worktree `/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`,
+> branch `codex/server-execution-w1-2-shared-pool`.
+> READ FIRST: `docs/specs/server-side-execution/passivity-arc-orchestration.md` §2, then
+> `docs/specs/server-side-execution/client-passivity.md` §5g (the whole
+> section), then the §4 output-widening pair contract — start at
+> `laneBroadScopeNamingWriteViolation` in
+> `packages/runner/src/scheduler/servability.ts:~727` and its engine twin
+> `assertLaneBroadScopeNamingWrite` in `packages/memory/v2/`, plus
+> `packages/memory/v2/scope-naming-link.ts`.
+>
+> QUESTION, and it is the only one: the §4 widening pair exists so that a
+> CLIENT reading a scoped-lane write sees a correct self-scoping redirect. If
+> the client becomes purely speculative — it still computes for rendering but
+> NEVER commits reactive results — does that requirement still exist? Answer
+> with code citations, not intuition. Specifically: enumerate who READS the
+> broad instance today and why, and for each reader say whether a passive
+> client still needs it.
+>
+> Deliverable: a written argument in
+> `/private/tmp/claude-501/.../scratchpad/c1-widening-under-passivity.md`
+> (create the directory if needed; do NOT write into docs/). State a verdict:
+> DELETED / NARROWED / SURVIVES, with the reasoning that would let someone
+> disagree with you.
+>
+> Do NOT commit, do NOT push, do NOT change any source. Report the verdict and
+> the strongest counter-argument to it.
+
+---
+
+#### C2 — Client-side `context-lattice-claims-v1` negotiation · parallel: no (after C1)
+
+**Goal.** The binding blocker from the CA4 audit: the browser client has no way
+to negotiate the subcapability, and the principal-wide cohort gate therefore
+makes user lanes un-openable in exactly the deployments worth measuring. This
+is what unblocks the two-browser payoff surface.
+
+**Precedent and template:**
+`packages/patterns/integration/server-execution-f5-env-bridge-gate.test.ts` —
+the F5 gate exists because the *identical* miswire already happened once (env
+dials never reached the advertisement in realm-separated deployments). Build
+this the same way: red-first, asserting the subcapability negotiates END TO
+END from the dials alone.
+
+**Prompt:** compose after C1; scope depends on whether the §4 artifact is being
+carried forward.
+
+---
+
+### Waves D–F — sketch only (specify when C completes)
+
+- **D · P3 passivity mechanism.** Per-session subcap, passive-mode demand
+  producer, dynamic-reactivation contract, effect-attempt journal. THIS is
+  where single-user boot shifts and multi-user actually gets faster. Design
+  doc first (delegate the draft, orchestrator rules on it), then build.
+  Watch: D5 hold-never-flicker is the user-visible risk surface.
+- **E · P5 passive delivery + warm spaces.** Demote-never-retire, D3
+  push-then-catch-up boot seed. Makes the persistent-page premise true for
+  real returning users; kills the cold-start cliff jointly with the §5d
+  serving-path work.
+- **F · P6 acceptance.** Three-way at protocol n; fully-engaged ≤ flag-off on
+  interaction AND boot; engagement by counters; cold row published alongside.
+  Non-negotiable by this plan's own language (see D7).
+
+**Standing constraint for D/E:** D10 sets the bar at *fast first paint with
+gaps*, not zero-execution first paint. Speculation is for interaction latency
+and nothing else; it is never load-bearing for convergence.
+
+---
+
+## 5. Phase gates
+
+| Gate | Condition |
+| --- | --- |
+| A→B | All A items landed or explicitly scoped out with a recorded reason. Full battery green. |
+| B→C | Post-A numbers recorded in client-passivity §5g. |
+| C→D | C1 verdict ruled by the owner-facing memo; C2 negotiating end to end under a red-first gate. |
+| D→E | Client stops running standing work for claimed actions, with counters proving it. |
+| E→F | Cold-start cliff measured, not asserted. |
+| F | P6 bar: fully-engaged ≤ flag-off on interaction AND boot, at protocol n, k∈{3,10}. If it fails → D7 says ESCALATE TO OQ5, do not ratify non-parity. |
+
+---
+
+## 6. Log
+
+Append one line per landed item: date, item, commit, one-sentence outcome.
+
+- 2026-07-28 — plan created (`docs/specs/server-side-execution/passivity-arc-orchestration.md`);
+  wave A next, A1 pre-diagnosed in §2.8.
+- 2026-07-28 — A1 `cfa827f82`: `llm` gets the server broker route; all three
+  LLM builtins share it.
+- 2026-07-28 — A2 `8cb00bbf8`: fetch broker refused as a misfit;
+  `sqliteQuery`'s post-commit effect now routes through the sink-request
+  suppression gate. Not blocked on D2; rest folds into A5.
+- 2026-07-28 — A3 `f221411df`: `inspectConfLabel` added, 4 of 5 refused with
+  evidence. Found a green test asserting a false thing; CP6 re-opened.
+- 2026-07-28 — A4 `a69aec5f9`: `wish` refused a descriptor (its surface is
+  misleadingly narrow) and the block is pinned. Found an egress-denial bypass.
+- 2026-07-28 — arc debt `a34c15fd2` (lint pin) + `57e625424` (fmt 21 files);
+  A→B gate's lint and format halves now met.
+- 2026-07-28 — C1 ruled **SURVIVES**; the ×12 is unblocked as P2 work and the
+  question's framing was wrong at the source. Full ruling: client-passivity §5h.
+- 2026-07-28 — wave B measured: **zero movement**, every counter reproducing
+  the pre-A baseline. The plan's own prediction ("expect the effect rows to
+  move broker-required classes") was WRONG — group-chat exercises none of the
+  four builtins wave A touched. Lesson for future waves: check that the
+  measurement instrument can see the thing being built BEFORE promising a
+  buy. Full numbers: client-passivity §5h.
+- 2026-07-28 — A5 `57dd8da7f`: sqlite.query joins the acting-context seam. A
+  lease-bound executor was opening the WRONG principal's cell-db (a cell-db is
+  a file, so the scope context is the file selector and nothing downstream
+  catches a bad resolution). Deliberately did NOT register the id — that one
+  line alone would have served a user-scoped query reading the wrong file.
+- 2026-07-28 — C2 `256e73799`: `context-lattice-claims-v1` negotiates end to
+  end from the dials alone. The CA4 binding blocker is gone; a deployment can
+  now flip the rank dials. Retired the harness hatch it stomped.
+- 2026-07-28 — D2 narrowed to reads by owner ruling (`04836c65f`); sqlite
+  writes stay client-primary and that is INSIDE the goal, since every
+  `db.exec` site is in a handler and handlers are client-inherent by §1.
+- 2026-07-28 — **`8e1cb7d99`: the ×12 cleared.** Owner ruled the fail-closed
+  comment stale; scoped auxiliary result-instance LINKS are now accepted
+  (values still rejected — the carve-out held under live measurement).
+  `dynamic-write-outside-static-surface` 12 → absent,
+  `malformed-scope-naming-link` 12 → 0, user candidates 17 → 29, session
+  unserved inventory 16 events → 4. **The first measured reduction in the
+  never-claimed set.** Lesson: a limitation recorded in a source comment as
+  "accepted" had propagated into this plan as permanent, and was neither.
+
+- 2026-07-29 — D11 reorders the arc: claims are scaffolding, close the
+  serving gap first. Wave G opens.
+- 2026-07-29 — navigateTo designed (`5fc2dd0f0`). A broadcast is
+  structurally unreachable; the interim under-delivers. `compileAndRun` folded
+  in — its real blocker was `pieceCreatedCallback`, not the async writes
+  earlier recorded.
+- 2026-07-29 — `adf1e3dfe` sqliteDatabase owner from the acting lane;
+  `b3304e771` wish + llmDialog server-side. **A narrow verify line let a red
+  gate through**: llmDialog's allowlist addition broke the "registry is exact"
+  pin, the agent reported green, and only a sibling agent's broader run caught
+  it. When an item touches a registry, verify the registry's OWN pin too.
+- 2026-07-29 — `cf09a186b` the user arm's last residual closed. **NOT
+  cross-space** — that attribution was the orchestrator's, inferred from a
+  neighbouring code name without checking. The real cause was the `c2cc3891e`
+  §4-pair relabel left half-applied at user rank. Lesson: two diagnostics
+  sharing a neighbourhood in the source is not evidence they share a cause.
+- 2026-07-29 — **counters that count but cannot NAME are a diagnosis dead
+  end.** `recordExecutionCandidateUnserved` dedupes offenders by
+  implementation fingerprint, which is why "1 offender" survived a full wave
+  unidentified. The probe now records derivation keys. When adding a
+  candidate-diagnostic counter, record something that identifies the offender.
+- 2026-07-29 — navigateTo gate 4 FIRED before any build:
+  `addExecutionDemand` had one call site (inside `start()`), and the
+  commit-gated deferred navigate root reaches `startWithTx` instead — so its
+  piece is never demanded and can never be claimed at session rank. Open
+  question: does demand closure-growth cover a deferred root? See
+  [`navigate-to-server-side.md`](navigate-to-server-side.md) §8.
+  **This log entry is a point-in-time record and its "one call site" is now
+  STALE — the fix it led to added a second (`publishDeferredRootExecutionDemand`).
+  Left as written, per the log's purpose; the correction lives in §4's row.**

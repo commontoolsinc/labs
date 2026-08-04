@@ -838,8 +838,8 @@ This spec supplies the stable implementation identity that
 - Verification: [`verifyCompiledModuleBody`][c8] and [`verifyModuleGraph`][c8],
   over the shared [`classifyModuleItems`][c9] core.
 - SES lockdown and source-map registration: [`ensureSESInitialized`][c10],
-  [`SESRuntime.loadSourceMapLazy`][c10]; the shared invoke isolate the harness
-  calls into is [`SESRuntime.getIsolate`][c10].
+  [`SESRuntime.loadSourceMapLazy`][c10]; the error-mapping entry point the
+  harness invokes pattern functions through is [`SESRuntime.exec`][c10].
 - Debug-only source annotation: [`annotateFunctionDebugMetadata`][c11] via
   [`getExternalSourceLocation`][c11].
 - Scheduler fingerprints: [`schedulerImplementationFingerprint`][c12] and

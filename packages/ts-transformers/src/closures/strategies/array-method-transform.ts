@@ -23,7 +23,7 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { buildCaptureParamsObject } from "../utils/capture-scaffold.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import { createArrayMethodCallbackSchema } from "../utils/schema-factory.ts";
 import {
   analyzeElementBinding,
   rewriteCallbackBody,
@@ -192,30 +192,28 @@ function createPatternCallWithParams(
   const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
   context.markAsArrayMethodCallback(newCallback);
 
-  const schemaFactory = new SchemaFactory(context);
-  const callbackParamTypeNode = schemaFactory.createArrayMethodCallbackSchema(
+  const callbackParamTypeNode = createArrayMethodCallbackSchema(
     methodCall,
     elemParam,
     indexParam,
     arrayParam,
     filteredCaptureTree,
+    context,
   );
 
   const { checker } = context;
-  const typeRegistry = context.options.state?.typeRegistry;
+  const typeRegistry = context.state.typeRegistry;
   let resultTypeNode: ts.TypeNode | undefined;
 
   if (callback.type) {
     resultTypeNode = callback.type;
-    if (typeRegistry) {
-      const type = getTypeAtLocationWithFallback(
-        callback.type,
-        checker,
-        typeRegistry,
-      );
-      if (type) {
-        typeRegistry.set(callback.type, type);
-      }
+    const type = getTypeAtLocationWithFallback(
+      callback.type,
+      checker,
+      typeRegistry,
+    );
+    if (type) {
+      typeRegistry.set(callback.type, type);
     }
   } else {
     const signature = checker.getSignatureFromDeclaration(callback);
@@ -304,10 +302,8 @@ function createPatternCallWithParams(
     methodCall,
   );
 
-  if (typeRegistry) {
-    const mapResultType = context.checker.getTypeAtLocation(methodCall);
-    registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
-  }
+  const mapResultType = context.checker.getTypeAtLocation(methodCall);
+  registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
 
   return mapWithPatternCall;
 }

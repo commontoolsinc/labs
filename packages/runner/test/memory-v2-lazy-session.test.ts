@@ -326,7 +326,7 @@ describe("Memory v2 entity identifier capabilities", () => {
     });
 
     try {
-      expect(provider.getReplica()).toBe(space);
+      expect(provider.replica.did()).toBe(space);
       expect(await provider.listEntityIds!()).toBeUndefined();
       expect(await provider.listEntityIdPage!()).toBeUndefined();
       expect(await provider.entityIdExists!("of:fid1:missing-capability"))

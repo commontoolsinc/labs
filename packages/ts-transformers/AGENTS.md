@@ -2,7 +2,7 @@
 
 TypeScript AST transformer pipeline that compiles the CTS dialect (natural
 TS/JSX pattern source) into explicit, schema-annotated reactive form for the
-Common Fabric runtime. 23 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
+Common Fabric runtime. 24 ordered stages (`CFC_TRANSFORMER_STAGES`,
 `src/cf-pipeline.ts`): validation → JSX routing → lift/closure lowering → schema
 injection → builder hoisting + `__cfReg` registration → schema generation →
 module-scope hardening.
@@ -61,8 +61,8 @@ the spec). `docs/common/` is author-facing teaching material, lowest authority.
   raw visitor silently misses JSX subtrees.
 - The module-scope stages' emitted shapes (`__cf_data` wrapping, hardening
   helpers, the single trailing `__cfReg`) are pattern-matched by the runner's
-  sandbox verifier (`@commonfabric/utils/sandbox-contract.ts`). Changing what
-  they emit is a cross-package contract change — module loading breaks until the
+  sandbox verifier (`@commonfabric/utils/sandbox-contract`). Changing what they
+  emit is a cross-package contract change — module loading breaks until the
   verifier agrees.
 - Emitted synthetic identifiers use the `__cf` prefix (`__cfLift_1`,
   `__cf_pattern_input`); `__`-prefixed params are skipped by shrink validation.

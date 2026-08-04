@@ -13,8 +13,9 @@ import {
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,
-  isDataUri,
+  hasDataUriScheme,
   isDataUriMediaType,
+  isFabricDataUri,
   valueFromDataUri,
   valueFromDataUriPayloadText,
 } from "@/data-uri-codec.ts";
@@ -29,9 +30,21 @@ describe("data-uri-codec", () => {
     });
 
     it("recognizes only this codec's `data:` URIs", () => {
-      expect(isDataUri(dataUriFromValue({ a: 1 }))).toBe(true);
-      expect(isDataUri("data:image/png;base64,aGVsbG8")).toBe(false);
-      expect(isDataUri("of:xyz")).toBe(false);
+      expect(isFabricDataUri(dataUriFromValue({ a: 1 }))).toBe(true);
+      expect(isFabricDataUri("data:image/png;base64,aGVsbG8")).toBe(false);
+      expect(isFabricDataUri("of:xyz")).toBe(false);
+    });
+
+    it("recognizes a `data:` URI of any media type", () => {
+      expect(hasDataUriScheme(dataUriFromValue({ a: 1 }))).toBe(true);
+      expect(hasDataUriScheme("data:image/png;base64,aGVsbG8")).toBe(true);
+      expect(hasDataUriScheme("data:,")).toBe(true);
+      expect(hasDataUriScheme("of:xyz")).toBe(false);
+      expect(hasDataUriScheme("computed:fid1:xyz")).toBe(false);
+      expect(hasDataUriScheme("")).toBe(false);
+      // The scheme has to be at the start and has to end at the colon.
+      expect(hasDataUriScheme("user:data:123")).toBe(false);
+      expect(hasDataUriScheme("data-user:1")).toBe(false);
     });
   });
 

@@ -11,7 +11,7 @@ import type { CellScope } from "../builder/types.ts";
  * presenter's payload — which is what makes the mark honest: the mint derives
  * only from this metadata, touching zero attacker bytes (the split-mint).
  *
- * See docs/development/proposals/vouched-ingest-channel-mint-design.md.
+ * See docs/features/vouched-ingest-channel-mint.md.
  */
 export type CfcExternalIngestMeta = {
   /** The ingest channel (its dedicated space DID). */

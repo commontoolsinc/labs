@@ -37,8 +37,11 @@ import {
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
+  cfcSchemaMergeIssue,
+  loadStoredCfcEnvelope,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
+  storedSchemaCoversCandidateEnvelope,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { pieceId, PieceManager } from "../manager.ts";
@@ -227,10 +230,48 @@ export interface PreparedPieceSourceChange {
   };
 }
 
-interface PieceSourceCompatibilityIssues {
+export interface PieceSourceCompatibilityIssues {
   schema?: string;
   argument?: string;
   retainedLinks?: string;
+  /**
+   * The CFC schema envelope stored on the piece's argument document cannot
+   * merge with the candidate's argument schema — or cannot be read at all.
+   * Distinct from `schema` and `argument`, which reason about DECLARED types:
+   * this one reasons about what is physically at rest.
+   */
+  cfc?: string;
+}
+
+/**
+ * The verdict `checkPattern()` returns: can this source replace the piece's
+ * current one, and if not, every reason at once.
+ *
+ * "Every reason at once" is the point. Applying a source that cannot migrate
+ * the piece's documents surfaces whichever low-level rejection happens to fire
+ * first — a schema-subset assertion, a retained-link proof, an argument
+ * validation failure, or a CFC schema-envelope rejection at the setup-commit
+ * boundary — so a caller fixes one and meets the next.
+ *
+ * Every verdict here comes from driving the REAL rule in dry-run, never a
+ * restatement of it: a preflight that reimplements the rules drifts from
+ * enforcement and starts lying. It agrees with the apply path on the VERDICT
+ * and the CAUSE. Not on identical prose — `setPattern` reports in
+ * enforcement's own words, and making the strings match would mean running
+ * this review ahead of the swap, which changes what `setPattern` accepts
+ * (see the comment there, and `test/setsrc-cold-argument.test.ts`).
+ *
+ * It is a point-in-time answer. The piece's argument, its current source, or
+ * the candidate file can all move between the check and a later apply, so a
+ * clear verdict is not a promise about a future `setPattern` — the apply path
+ * revalidates independently, which is what keeps that fail-safe.
+ */
+export interface PatternCompatibilityReport {
+  compatible: boolean;
+  issues: PieceSourceCompatibilityIssues;
+  /** Every issue joined, or `undefined` when compatible. */
+  message?: string;
+  candidate: { identity: string; symbol: string };
 }
 
 export type PieceSourceActionResult =
@@ -1029,9 +1070,8 @@ export function assertWritablePiecePath(
       // ordinary write validator below still handles parent correlations, so
       // use CFC's conservative path projection when exact link localization
       // deliberately fails closed for a correlated schema.
-      const cfc = new ContextualFlowControl();
       contracts = localizedContracts.map((contract) => {
-        const child = cfc.schemaAtPath(contract.schema, [
+        const child = ContextualFlowControl.schemaAtPath(contract.schema, [
           String(path[index]!),
         ]);
         return {
@@ -2481,7 +2521,7 @@ class PiecePropIo implements PieceCellIo {
         const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
         const writeSchema = writePath.length === 0
           ? schema
-          : manager.runtime.cfc.schemaAtPath(
+          : ContextualFlowControl.schemaAtPath(
             schema,
             writePath.map((segment) => String(segment)),
           );
@@ -3201,6 +3241,51 @@ export class PieceController<T = unknown> {
     }
   }
 
+  /**
+   * Would `setPattern(program)` be accepted? Answers without changing the piece.
+   *
+   * Drives the SAME review the apply path runs — no second copy of the rules,
+   * because a preflight that reimplements them drifts and starts lying.
+   *
+   * It is not, however, a pure read. Compiling the candidate goes through
+   * `compileAndSavePattern`, which writes the compiled module set and its
+   * source docs into the space's content-addressed store (CT-1623) — the same
+   * write the apply would do, idempotent, and attached to nothing. What it
+   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
+   * source transition, no revision. So a refused check leaves the piece
+   * running exactly what it was running, which is the guarantee a caller
+   * actually needs; it does not leave the space byte-identical.
+   */
+  async checkPattern(
+    program: RuntimeProgram,
+  ): Promise<PatternCompatibilityReport> {
+    const { pattern: previousPattern, ref: previousRef } = await this
+      .#loadCurrentPattern();
+    const candidate = await compileProgram(this.#manager, program, {
+      previousEntryIdentity: previousRef.identity,
+    });
+    const candidateRef = this.#manager.runtime.patternManager
+      .getArtifactEntryRef(candidate);
+    if (candidateRef === undefined) {
+      throw new Error("the candidate source has no pattern identity");
+    }
+    const review = await pieceSourceCompatibilityReview(
+      previousPattern,
+      candidate,
+      this.#cell,
+      this.#manager,
+    );
+    const compatible = !hasPieceSourceCompatibilityIssues(review.issues);
+    return {
+      compatible,
+      issues: review.issues,
+      candidate: candidateRef,
+      ...(compatible
+        ? {}
+        : { message: pieceSourceCompatibilityMessage(review.issues) }),
+    };
+  }
+
   async setPattern(
     program: RuntimeProgram,
     options?: {
@@ -3233,6 +3318,22 @@ export class PieceController<T = unknown> {
             ? { previousEntryIdentity: previousRef.identity }
             : {},
         );
+        // Enforcement is this assertion plus the execute-time validators
+        // below, and it must stay that way. Do not move the aggregate
+        // compatibility review (`pieceSourceCompatibilityReview`, what
+        // `checkPattern` runs) in front of it.
+        //
+        // An earlier revision of this PR did, to name every refusal reason at
+        // once, and it silently changed what `setPattern` ACCEPTS: the review
+        // materializes and validates the stored argument, so when the whole
+        // argument document is cold — a nested piece whose host has not synced
+        // yet — it validates `undefined` and refuses, where Runner
+        // deliberately defers and preserves the bytes (CT-1917).
+        // `test/setsrc-cold-argument.test.ts` pins that; it fails with
+        // "value does not match type object" if the review moves here.
+        //
+        // Callers who want every reason at once run `checkPattern()`, which is
+        // exactly what `--check` is for.
         if (!options?.dangerouslyAllowIncompatibleSchema) {
           assertPatternSchemasBackwardCompatible(previousPattern, pattern);
         }
@@ -3549,10 +3650,88 @@ async function pieceSourceCompatibilityReview(
       ? error.message
       : String(error);
   }
+
+  const cfc = pieceSourceCfcEnvelopeIssue(argumentCell, candidate, manager);
+  if (cfc !== undefined) issues.cfc = cfc;
+
   return {
     argumentEvidence: pieceSourceArgumentEvidence(argumentCell, manager),
     issues,
   };
+}
+
+/**
+ * Would the setup commit's CFC schema-envelope merge accept this candidate
+ * over what the piece's argument document already stores?
+ *
+ * Why this is its own rule rather than a case of the three above: those all
+ * reason about DECLARED types — the previous and candidate patterns' argument
+ * and result schemas, and the stored argument VALUE against them. The CFC
+ * envelope is neither. It is the schema the document was last committed under,
+ * accumulated across every write that ever touched it, and it can carry claims
+ * no pattern declares (a later write that strengthened a confidentiality label
+ * widens it in place). So a piece whose pattern pointer has run ahead of its
+ * stored envelope — the partially-migrated case this command exists to catch —
+ * passes all three type-level checks and still takes `CFC enforcement rejected
+ * commit` at the setup boundary. Reporting `compatible: true` there is worse
+ * than having no preflight at all, because the verdict is what gates a deploy.
+ *
+ * The merge is driven for real, in dry-run, through the same
+ * `mergeCfcSchemaEnvelopes` (and the same stored-covers-candidate fast path)
+ * the commit runs, so the two cannot disagree about what merges.
+ *
+ * Scope, deliberately: the ARGUMENT document only. The piece's own document —
+ * the result — merges at commit time under `generatedOutputPaths`, the set of
+ * paths the running module materializes in that same transaction, which
+ * exempts them from the additive-required rule. Those paths are a property of
+ * the module's actual output bindings and are not knowable without executing
+ * it, so a preflight that merged the result envelope without them would refuse
+ * the ordinary, accepted case of a candidate that adds a generated result field
+ * (see `packages/piece/test/state-continuity.test.ts`). An argument is an
+ * input: nothing generates it, so its merge is faithful here.
+ */
+function pieceSourceCfcEnvelopeIssue(
+  argumentCell: Cell<unknown>,
+  candidate: Pattern,
+  manager: PieceManager,
+): string | undefined {
+  const link = argumentCell.getAsNormalizedFullLink();
+  // `readTx()` cannot write, so the dry run stays a dry run.
+  const stored = loadStoredCfcEnvelope(manager.runtime.readTx(), {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+  });
+  if (stored.status === "none") {
+    // No stored envelope means the merge never runs for this document at
+    // commit time, so there is genuinely nothing for it to reject. (Documents
+    // only acquire one once a write carries an IFC claim.)
+    return undefined;
+  }
+  if (stored.status === "unreadable") {
+    // The commit path records this same load failure as a rejection reason and
+    // refuses the write. Skipping it here — the tempting reading, since we
+    // cannot evaluate the merge — is precisely how a check green-lights an
+    // update the deploy then refuses, so it is a blocker instead.
+    return `the CFC schema envelope stored for this piece's argument ` +
+      `document could not be read (${stored.reason}); applying a source ` +
+      `would be rejected over the same failure`;
+  }
+  // The commit takes the stored envelope unchanged when it already covers the
+  // candidate's, so a preflight that skipped this fast path would manufacture
+  // rejections the real update does not make.
+  if (
+    storedSchemaCoversCandidateEnvelope(stored.schema, candidate.argumentSchema)
+  ) {
+    return undefined;
+  }
+  const issue = cfcSchemaMergeIssue(stored.schema, candidate.argumentSchema);
+  if (issue === undefined) return undefined;
+  return issue.migration
+    ? `the argument document stored for this piece predates the candidate's ` +
+      `schema and cannot migrate to it: ${issue.message}`
+    : `the candidate's argument schema does not merge with the CFC schema ` +
+      `envelope stored for this piece: ${issue.message}`;
 }
 
 function hasPieceSourceCompatibilityIssues(
@@ -3560,7 +3739,8 @@ function hasPieceSourceCompatibilityIssues(
 ): boolean {
   return issues.schema !== undefined ||
     issues.argument !== undefined ||
-    issues.retainedLinks !== undefined;
+    issues.retainedLinks !== undefined ||
+    issues.cfc !== undefined;
 }
 
 function assertPieceSourceArgumentUsable(
@@ -3574,7 +3754,7 @@ function assertPieceSourceArgumentUsable(
 function pieceSourceCompatibilityMessage(
   issues: PieceSourceCompatibilityIssues,
 ): string {
-  return [issues.schema, issues.argument, issues.retainedLinks]
+  return [issues.schema, issues.argument, issues.retainedLinks, issues.cfc]
     .filter((message): message is string => message !== undefined)
     .join("\n");
 }

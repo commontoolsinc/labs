@@ -1,0 +1,445 @@
+import { isRecord } from "@commonfabric/utils/types";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  shallowFabricFromNativeValue,
+} from "@commonfabric/data-model/fabric-value";
+import { type AliasBinding } from "../sigil-types.ts";
+import {
+  type FabricExecValue,
+  type FactoryInput,
+  isPattern,
+  type Module,
+  type Pattern,
+  type Reactive,
+  type toEncodableForm,
+  type toJSON,
+} from "./types.ts";
+import { getTopFrame } from "./pattern.ts";
+import {
+  getArtifactEntryRef,
+  getPatternProgram,
+  noteDerivedCopy,
+} from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
+import { isAliasBinding } from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { isCell } from "../cell.ts";
+import {
+  encodableFormOf,
+  hasEncodableForm,
+  replaceArtifacts,
+} from "../encodable-form.ts";
+
+export type CellAliasResolver = (
+  cell: Reactive<any>,
+  path: readonly PropertyKey[],
+  ignoreSelfAliases: boolean,
+) => AliasBinding | null | undefined;
+
+/**
+ * The refusal a `FabricInstance` gets from the binding walks: it is a container
+ * reached by its codec contents rather than by property name, and nothing here
+ * can do that yet.
+ *
+ * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+ * point this becomes a walk rather than a refusal. See "Flag-gated tripwires"
+ * in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ */
+function refuseFabricInstance(value: FabricInstance): Error {
+  return new Error(
+    `Cannot yet handle \`${value.constructor.name}\` (a \`FabricInstance\`) ` +
+      "in a pattern binding.",
+  );
+}
+
+export function withAliasBindings(
+  value: FactoryInput<any>,
+  resolveCellAlias?: CellAliasResolver,
+  ignoreSelfAliases: boolean = false,
+  path: readonly PropertyKey[] = [],
+  seen?: WeakMap<object, number>,
+): FabricExecValue {
+  // Turn strongly typed builder values into the serialized binding structure:
+  // cell references become `$alias` records, and data leaves come through as
+  // the fabric values they are.
+
+  // Convert regular cells and results from Cell.get() to opaque refs
+  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
+
+  if (isCell(value)) {
+    const { external, frame } = value.export();
+
+    // If this is an external reference, just copy the reference as is.
+    if (external) return external as FabricExecValue;
+
+    // Verify that opaque refs are not in a parent frame
+    if (frame !== getTopFrame()) {
+      throw new Error(
+        `Cell with parent cell not found in current frame. Likely a closure that should have been transformed.`,
+      );
+    }
+
+    // Otherwise it's an internal reference. Ask the pattern builder how this
+    // cell should be represented in the serialized pattern.
+    const alias = resolveCellAlias?.(
+      value as Reactive<any>,
+      path,
+      ignoreSelfAliases,
+    );
+    if (alias === null) return undefined;
+    if (alias !== undefined) return alias as unknown as FabricExecValue;
+    throw new Error(`Cell not found in pattern aliases`);
+  }
+
+  // If we encounter a link, it's from a nested pattern.
+  if (isAliasBinding(value)) {
+    const alias = (value as AliasBinding).$alias;
+    // If this was a shadow ref, i.e. a nested pattern, see whether we're now at
+    // the level that it should be resolved to the actual cell.
+    if (alias.partialCause !== undefined) {
+      return {
+        $alias: {
+          partialCause: alias.partialCause,
+          defer: (alias.defer ?? 0) + 1,
+          path: alias.path,
+          ...(alias.scope !== undefined && { scope: alias.scope }),
+          ...(alias.schema !== undefined && { schema: alias.schema }),
+        },
+      } satisfies AliasBinding;
+    } else if (!("cell" in alias) || typeof (alias.cell) === "string") {
+      // If we encounter an existing alias and it isn't an absolute reference
+      // with a cell id, then increase the nesting level. (Named-cell aliases
+      // carry no scope; only partialCause aliases do.)
+      return {
+        $alias: {
+          cell: alias.cell,
+          defer: (alias.defer ?? 0) + 1,
+          path: alias.path,
+          ...(alias.schema !== undefined && { schema: alias.schema }),
+        },
+      } satisfies AliasBinding;
+    } else {
+      throw new Error(`Invalid alias cell`);
+    }
+  }
+
+  // If this is an array, process each element recursively.
+  if (Array.isArray(value)) {
+    return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
+      withAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
+        ...path,
+        i,
+      ], seen)
+    );
+  }
+
+  // A `FabricPrimitive` is an atomic value whose state lives in private fields
+  // (zero enumerable own-props), so the `for...in` copy below would flatten it
+  // to `{}`. It leaves whole, and it leaves FIRST: it is also a record, so an
+  // `isRecord()` test would otherwise claim it.
+  if (value instanceof FabricPrimitive) return value;
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // `for...in` copy would rebuild it from zero enumerable own properties as
+  // `{}`. It refuses instead of doing that quietly.
+  if (value instanceof FabricInstance) throw refuseFabricInstance(value);
+
+  // What remains that is an object, is not a pattern, and is not a plain
+  // object is either a native carrying a canonical fabric form (a
+  // `Uint8Array`, a `Date`) or something not representable at all. Hand it to
+  // the sanctioned conversion, which mints the fabric form or rejects.
+  //
+  // The INERT plain-object test is what keeps this function's output vetted,
+  // and it is not interchangeable with a plain-object test. An inert plain
+  // object is a container already known good, so it skips the conversion and
+  // is walked in place -- no clone allocated only to be dropped when the
+  // `for...in` below rebuilds it. Every other record goes to the conversion
+  // and is converted or REJECTED there.
+  //
+  // A plain object that is not inert must be among the rejected. Excluding it
+  // here instead would launder it exactly as a native would be laundered: the
+  // `for...in` rebuild silently drops a symbol key and a non-enumerable
+  // property, EVALUATES an accessor into a data property, and reparents a
+  // null-prototype object -- each producing a plain object that satisfies
+  // `isFabricValue()` while meaning something else. Nothing downstream can
+  // catch it, because what it produces is genuinely valid.
+  if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
+    value = shallowFabricFromNativeValue(value);
+    // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
+    // an `Error` a `FabricError`.
+    if (value instanceof FabricPrimitive) return value;
+    if (value instanceof FabricInstance) throw refuseFabricInstance(value);
+  }
+
+  // If this is an object or a pattern, process each key recursively.
+  if (isRecord(value) || isPattern(value)) {
+    // Guard against circular object references (e.g. schema objects with
+    // shared identity between $defs and sibling properties).
+    if (!seen) seen = new WeakMap();
+    // Circularity is keyed on object identity, and identity can CHANGE on the
+    // way here: the conversion above hands back a different object when it
+    // clones in order to freeze. So both identities are marked -- the value as
+    // received and the value as converted -- and a cycle pointing at either is
+    // caught. Keying only the converted object would let a cycle back to the
+    // original recurse undetected until the stack dies.
+    const depth = seen.get(value as object) ?? 0;
+    if (depth > 0) return {}; // Actually circular
+    seen.set(value as object, depth + 1);
+
+    // If this is a pattern, serialize it through the INTERNAL graph
+    // serializer (its toJSON under the internal-serialization context): this
+    // function builds the in-memory node representation, so embedded
+    // sub-pattern graphs must stay bare — no boundary `$patternRef`.
+    const valueToProcess = (isPattern(value) && hasEncodableForm(value))
+      ? serializePatternGraph(value as unknown as Pattern) as Record<
+        string,
+        any
+      >
+      : (value as Record<string, any>);
+
+    const result: any = {};
+    for (const key in valueToProcess as any) {
+      const boundValue = withAliasBindings(
+        valueToProcess[key],
+        resolveCellAlias,
+        ignoreSelfAliases,
+        [...path, key],
+        seen,
+      );
+      if (boundValue !== undefined) {
+        result[key] = boundValue;
+      }
+    }
+
+    // Restore depth so shared references can be re-serialized
+    seen.set(value as object, depth);
+
+    // Register the copy's derivation link so trust and the content-addressed
+    // entry ref carry to the serialized copy (side table; symbol keys would be
+    // dropped by JSON anyway).
+    if (isPattern(value)) noteDerivedCopy(result, value);
+
+    return result;
+  }
+
+  return value;
+}
+
+export function moduleToEncodableForm(module: Module) {
+  const frame = getTopFrame();
+  // Destructure-and-drop the runtime-only members a module carries for the
+  // builder's own use: its serializer under BOTH the names it answers to
+  // (`toEncodableForm`, and `toJSON` for the JSON protocol -- see
+  // `json-member.ts`), and the handler ergonomics
+  // (`mod.with(...)`/`mod.bind(...)`). None is part of the serialized
+  // contract; left in, each would surface as a "not representable as a
+  // `FabricValue`: function" rejection, so they are destructured out
+  // here. `to-encodable-form.test.ts` asserts the whole resulting key set, an extra
+  // member being a changed content-derived id for every value that carries a
+  // module.
+  const {
+    implementation: _implementation,
+    toEncodableForm: _toEncodableForm,
+    toJSON: _toJSON,
+    with: _with,
+    bind: _bind,
+    ...rest
+  } = module as Module & toEncodableForm & Partial<toJSON> & {
+    with?: unknown;
+    bind?: unknown;
+  };
+  let implementation = module.implementation;
+
+  // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
+  //
+  // Problem: When a subpattern is passed to .map(), the pattern's implementation
+  // was being stringified (e.g., "(inputs2) => { ... }") instead of preserving
+  // the actual pattern structure. This caused "Invalid pattern" errors at runtime
+  // because isPattern() check failed on the string.
+  //
+  // Why this helps: Using withAliasBindings ensures nested $alias bindings
+  // get their nesting level incremented properly. Without this, aliases could be
+  // bound to a specific doc too early, causing handlers to point at stale docs
+  // when the pattern is later executed in a different context.
+  //
+  // We don't fully understand why the original code stringified pattern functions,
+  // but this defensive change ensures patterns passed as values (like to map())
+  // retain their structure and alias metadata.
+  if (
+    module.type === "pattern" && implementation && isPattern(implementation)
+  ) {
+    implementation = withAliasBindings(
+      implementation as unknown as FactoryInput<any>,
+    ) as unknown as Pattern;
+    return {
+      ...rest,
+      implementation,
+    };
+  }
+
+  if (typeof implementation === "function") {
+    // Content-addressed reference: when the implementation function has
+    // module-scope provenance (recorded by the module indexing during a
+    // verified evaluation — `toJSON` runs at cell-write time,
+    // post-evaluation), serialize its `{ identity, symbol }` so a rehydrated
+    // module resolves by identity. Host-trusted functions carry the same
+    // shape through their minted pseudo-module entry ref (identity E5,
+    // design §5) — closure-bearing, so by-identity resolution is their only
+    // rehydration. Everything else (test-built, never verified) keeps its
+    // stringified body below for the SES fallback.
+    const provenance = module.type === "javascript"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    // The entry-ref fallback (host pseudo-modules) is REGISTRY-scoped, unlike
+    // provenance (process-global, content-derived): emit it only when the
+    // serializing frame's OWN engine resolves the ref to this very function —
+    // a host trust grant in another runtime of the same process proves
+    // nothing here (Codex/cubic P1 on the E5 PR).
+    const entryRefCandidate =
+      provenance?.symbol === undefined && module.type === "javascript"
+        ? getArtifactEntryRef(implementation)
+        : undefined;
+    const entryRefValue = entryRefCandidate !== undefined &&
+        frame?.runtime?.harness?.getVerifiedImplementation?.(
+            entryRefCandidate.identity,
+            entryRefCandidate.symbol,
+          ) === implementation
+      ? entryRefCandidate
+      : undefined;
+    const implRefValue = (provenance?.symbol
+      ? { identity: provenance.identity, symbol: provenance.symbol }
+      : undefined) ?? entryRefValue;
+    const implRef = implRefValue ? { $implRef: implRefValue } : {};
+    const preview = (implementation as { preview?: string }).preview ??
+      implementation.toString().slice(0, 200);
+    const location = (implementation as { src?: string }).src;
+    // Omit the stringified body only when the implementation is resolvable on
+    // load BY THE RUNTIME THAT WILL READ IT: its engine's content-addressed
+    // implementation index admits the `$implRef`. Provenance is
+    // process-global, so a `$implRef` being PRESENT does not by itself prove
+    // the reading runtime can resolve it: a pattern compiled by a standalone
+    // Engine and registered on another runtime carries `$implRef`, but that
+    // runtime's engine never verified-evaluated the module, so it must keep
+    // the stringified body as the fallback or reload throws. The engine index
+    // — unlike the bounded artifact index — never evicts within a session.
+    const implRefResolvable = implRefValue !== undefined &&
+      typeof frame?.runtime?.harness?.getVerifiedImplementation?.(
+          implRefValue.identity,
+          implRefValue.symbol,
+        ) === "function";
+    return {
+      ...rest,
+      ...implRef,
+      ...(module.type === "javascript" && !implRefResolvable
+        ? {
+          implementation: Function.prototype.toString.call(implementation),
+        }
+        : {}),
+      ...(preview ? { preview } : {}),
+      ...(location ? { location } : {}),
+    };
+  }
+
+  return {
+    ...rest,
+    ...(implementation !== undefined ? { implementation } : {}),
+  };
+}
+
+// Ambient context: true while serializing the runtime-INTERNAL graph
+// representation (builder-time node serialization via
+// `withAliasBindings`, and through it the `$opFallback` eviction
+// fallback graphs). The storage boundary (`Pattern.toEncodableForm()`, reached
+// by the runtime's artifact walk on the way into a cell write) adds
+// the content-addressed `$patternRef` on top of the graph; internal
+// serialization must NOT, or in-memory `Pattern.nodes` would grow refs for
+// any sub-pattern whose module is already indexed (e.g. builder calls inside
+// a running action referencing an imported, already-evaluated pattern) and
+// the eviction fallback would silently become a ref (design §7's $opFallback
+// trap). Synchronous push/pop — serialization never awaits.
+let internalGraphSerialization = false;
+
+/**
+ * Serialize a pattern's full node-graph — the runtime-internal representation
+ * (design §7: the graph is internal; the boundary speaks refs-first). Used by
+ * `withAliasBindings` (builder-time node serialization, which the
+ * `$opFallback` graphs descend from) and debug tooling.
+ *
+ * Asks the pattern for its own encodable form rather than calling
+ * `patternToEncodableForm` directly: a factory's closure deliberately serializes the
+ * ROOT factory (which carries `.program`, set after construction — see
+ * builder/pattern.ts), so the indirection is load-bearing.
+ */
+export function serializePatternGraph(
+  pattern: Pattern,
+): Record<string, unknown> {
+  const previous = internalGraphSerialization;
+  internalGraphSerialization = true;
+  try {
+    return (hasEncodableForm(pattern)
+      ? encodableFormOf(pattern)
+      : patternToEncodableForm(pattern)) as Record<string, unknown>;
+  } finally {
+    internalGraphSerialization = previous;
+  }
+}
+
+export function patternToEncodableForm(pattern: Pattern) {
+  // Serialize only the STABLE program identity ({main, mainExport}), never the
+  // authored `files`. The `files` array serializes non-canonically (two
+  // encodings -> two content ids), so embedding it dragged a session-varying
+  // blob into every serialized pattern and thrashed link ids / re-ran actions
+  // on reload. {main, mainExport} are deterministic strings, so they reload
+  // stably; they are kept because consumers read them (e.g. the CLI
+  // `dev --pattern-json` output asserts `program.mainExport`). The full
+  // program-with-files is recovered from the `pattern:<identity>` source docs
+  // (the single durable source — written by every cold compile);
+  // sub-patterns are referenced by {identity, symbol} on the ESM path.
+  const program = getPatternProgram(pattern);
+  const programIdentity = program
+    ? {
+      main: program.main,
+      ...(program.mainExport !== undefined
+        ? { mainExport: program.mainExport }
+        : {}),
+    }
+    : undefined;
+  const graph = {
+    argumentSchema: pattern.argumentSchema,
+    resultSchema: pattern.resultSchema,
+    ...(pattern.derivedInternalCells
+      ? { derivedInternalCells: pattern.derivedInternalCells }
+      : {}),
+    result: pattern.result,
+    nodes: pattern.nodes,
+    ...(programIdentity ? { program: programIdentity } : {}),
+  };
+  if (internalGraphSerialization) return graph;
+  // JSON boundary (cell writes, `JSON.stringify`): REFS-ONLY (design §7,
+  // identity E4). The ref is content-derived, so identical bytes re-emit the
+  // identical ref across sessions. Schemas ride along so consumers read them
+  // without resolving. Rehydration is by identity: the session-lifetime
+  // artifact index, or `loadPatternByIdentity` for an async reader.
+  //
+  // A pattern with NO entry ref serializes its full graph instead, since
+  // nothing could resolve its ref. That graph holds LIVE modules, so the walk
+  // replaces its artifacts here.
+  //
+  // `moduleToEncodableForm` reads `getTopFrame()` to decide `$implRef`. A
+  // frame inherits its parent's runtime (`builder/pattern.ts`), so
+  // `frame.runtime` is the same at every point along one stack.
+  const entryRef = getArtifactEntryRef(pattern);
+  return entryRef
+    ? {
+      $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
+      argumentSchema: pattern.argumentSchema,
+      resultSchema: pattern.resultSchema,
+    }
+    : replaceArtifacts(graph, noteDerivedCopy);
+}

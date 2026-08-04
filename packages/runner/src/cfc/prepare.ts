@@ -814,11 +814,36 @@ const storedMetadataFor = (
 /**
  * This returns a map whose values are always interned schemas.
  */
+const generatedOutputPathsByTarget = (
+  inputs: readonly WritePolicyInput[],
+): Map<string, readonly (readonly string[])[]> => {
+  const result = new Map<string, readonly (readonly string[])[]>();
+  for (const input of inputs) {
+    if (
+      input.kind !== "schema" || input.schema === undefined ||
+      input.schemaRole !== "output"
+    ) {
+      continue;
+    }
+    const key = targetKey(input.target);
+    const path = canonicalizeLogicalPath(input.target.path);
+    const existing = result.get(key) ?? [];
+    if (!existing.some((candidate) => arraysEqual(candidate, path))) {
+      result.set(key, [...existing, path]);
+    }
+  }
+  return result;
+};
+
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
+  generatedOutputPaths: ReadonlyMap<
+    string,
+    readonly (readonly string[])[]
+  >,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -841,7 +866,9 @@ const candidateSchemasByTarget = (
         ? internSchema(candidate)
         : schemasEqualIgnoringWriterStamp(existing, candidate)
         ? existing
-        : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
+        : mergeCfcSchemaEnvelopes(existing, candidate, {
+          generatedOutputPaths: generatedOutputPaths.get(key),
+        }), // Guaranteed interned.
     );
   }
   return result;
@@ -2719,7 +2746,7 @@ const writeInstallsInitialSchemaDefault = (
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
     valueEqual(
       writeValueForTarget(tx, pathTarget),
-      schema.default as FabricValue,
+      schema.default,
     );
 };
 
@@ -4518,7 +4545,7 @@ const ensureSchemaDocument = (
   }, {
     // System-owned canonical schema document. This is intentionally outside the
     // phase-1 value-surface attempted-target model.
-    value: schema as unknown as FabricValue,
+    value: schema,
   });
 };
 
@@ -4553,6 +4580,73 @@ export const loadSchemaDocument = (
     );
   }
   return schema;
+};
+
+/**
+ * The stored CFC schema envelope at rest for one document, as the commit path
+ * sees it.
+ *
+ * Why one function: this is the gatherer BOTH the real commit path (the merge
+ * loop in `prepareBoundaryCommit` below) and the `cf piece setsrc --check`
+ * preflight call, so the two cannot disagree about what a document carries or
+ * about what counts as a failure. The failure taxonomy is part of the
+ * contract:
+ *
+ * - `none` — the document stores no CFC metadata, so the envelope merge never
+ *   runs for it at commit time and there is genuinely nothing to reject.
+ * - `loaded` — the metadata's `schemaHash` resolved to a content-verified
+ *   schema document; `metadata` rides along for callers (the commit path) that
+ *   also need the stored label map.
+ * - `unreadable` — metadata EXISTS but its envelope cannot be loaded (missing
+ *   cid document, content-hash mismatch). The commit path records `reason` and
+ *   rejects the write in enforcing modes, so a preflight must report it as a
+ *   blocker and never as "nothing stored" — treating it as absent is exactly
+ *   how a check green-lights an update the real commit then refuses.
+ *
+ * A metadata READ failure (the transaction itself erroring) still propagates:
+ * that is an operational failure of the caller's transaction, not a property
+ * of the document, and both paths fail loudly on it today.
+ */
+export type StoredCfcEnvelope =
+  | { readonly status: "none" }
+  | {
+    readonly status: "loaded";
+    readonly schema: JSONSchema;
+    readonly metadata: CfcMetadata;
+  }
+  | { readonly status: "unreadable"; readonly reason: string };
+
+export const loadStoredCfcEnvelope = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope?: Parameters<typeof normalizeCellScope>[0];
+  },
+  type: MediaType = "application/json",
+): StoredCfcEnvelope => {
+  const metadata = storedMetadataFor(
+    tx,
+    target.space,
+    target.id as URI,
+    normalizeCellScope(target.scope),
+    type,
+  );
+  if (metadata === undefined) return { status: "none" };
+  try {
+    return {
+      status: "loaded",
+      schema: loadSchemaDocument(tx, target.space, metadata.schemaHash),
+      metadata,
+    };
+  } catch (error) {
+    return {
+      status: "unreadable",
+      reason: error instanceof Error
+        ? error.message
+        : `schema load failed for ${target.id}`,
+    };
+  }
 };
 
 // Union of confidentiality (and integrity) atoms across every non-internal labeled read in the
@@ -5160,9 +5254,13 @@ export const prepareBoundaryCommit = (
     // recorded input is registered in this map, so a missing key cannot occur
     // for a real input; an unattributed write must fail closed.
     state.writePolicyInputIdentities.get(input);
+  const generatedOutputPaths = generatedOutputPathsByTarget(
+    state.writePolicyInputs,
+  );
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
+    generatedOutputPaths,
   );
   const writeAuthorIdentities = writePolicyIdentitiesByTarget(
     state.writePolicyInputs,
@@ -5361,41 +5459,39 @@ export const prepareBoundaryCommit = (
       if (flowJoinIsCrossSpace) crossSpaceEligible?.add(entry);
       return entry;
     };
-    const existing = storedMetadataFor(
-      tx,
-      space,
-      id,
-      scope,
-      "application/json",
-    );
+    // ONE gatherer decides what this document stores — the same function the
+    // `setsrc --check` preflight calls — so the commit path and the preflight
+    // cannot drift apart on whether an unreadable envelope counts as "nothing
+    // stored". `unreadable` records the load failure as a rejection reason
+    // exactly as the inline catches here always did.
+    const stored = loadStoredCfcEnvelope(tx, { space, id, scope });
+    if (stored.status === "unreadable") {
+      reasons.push(stored.reason);
+      continue;
+    }
+    const existing = stored.status === "loaded" ? stored.metadata : undefined;
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
-    if (existing !== undefined && undefinedCandidate) {
+    if (stored.status === "loaded" && undefinedCandidate) {
+      storedSchema = stored.schema;
+      mergedSchema = storedSchema;
+    } else if (stored.status === "loaded") {
+      storedSchema = stored.schema;
       try {
-        storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = storedSchema;
-      } catch (error) {
-        reasons.push(
-          error instanceof Error
-            ? error.message
-            : `schema load failed for ${id}`,
-        );
-        continue;
-      }
-    } else if (existing !== undefined) {
-      try {
-        storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
         mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
           ? storedSchema
-          : mergeCfcSchemaEnvelopes(storedSchema, schema);
+          : mergeCfcSchemaEnvelopes(storedSchema, schema, {
+            generatedOutputPaths: generatedOutputPaths.get(key),
+          });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
         // token so the default-root runnability backstop can key on THIS class
         // (recoverable by rolling forward) and leave every other CFC rejection
         // fail-closed. Only the recorded reason is tagged; the human-readable
-        // message is preserved verbatim after the token. A plain schema-load or
-        // other merge failure records its bare message as before.
+        // message is preserved verbatim after the token. Schema-LOAD failures
+        // are handled above by the shared gatherer and record their bare
+        // message as before.
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
@@ -5415,6 +5511,7 @@ export const prepareBoundaryCommit = (
         : mergeCfcSchemaEnvelopes(
           schema,
           storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
+          { generatedOutputPaths: generatedOutputPaths.get(key) },
         )
       : schema;
 
@@ -6551,7 +6648,7 @@ export const prepareBoundaryCommit = (
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive
       // attempted-target tracking of this internal metadata update.
-    }, metadata as unknown as FabricValue);
+    }, metadata);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

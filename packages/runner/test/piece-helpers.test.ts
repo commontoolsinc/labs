@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   getResultCellWithSourceSchema,
+  isLegacyPieceRegistryRoot,
   parseCellPath,
   resolveCellPath,
 } from "../src/piece-helpers.ts";
@@ -271,5 +272,87 @@ describe("getResultCellWithSourceSchema", () => {
     const annotated = getResultCellWithSourceSchema(explicitCell);
 
     assertEquals(annotated.getAsNormalizedFullLink().schema, explicitSchema);
+  });
+});
+
+describe("isLegacyPieceRegistryRoot", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  const HOST = "http://toolshed.test";
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(HOST), storageManager });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  // A root in the shape the predicate looks for: the retired `allPieces` field
+  // with its `addPiece` stream, and no `pieceRegistry`.
+  async function legacyShapedRoot(patternSource?: unknown) {
+    const root = runtime.getCell<Record<string, unknown>>(
+      space,
+      `legacy-registry-root-${crypto.randomUUID()}`,
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      const withTx = root.withTx(tx);
+      withTx.set({
+        allPieces: [],
+        addPiece: { $stream: true },
+      } as unknown as Record<string, unknown>);
+      withTx.setMetaRaw("patternIdentity", {
+        identity: "fid1:whatever",
+        symbol: "default",
+      });
+      if (patternSource !== undefined) {
+        withTx.setMetaRaw("patternSource", patternSource as never);
+      }
+    });
+    assertEquals(error, undefined);
+    return root;
+  }
+
+  it("accepts every spelling of the official default-app source", async () => {
+    // The three that name the same file: the ref a root is stamped with today,
+    // the rooted route path, and the absolute href a recorded source
+    // transition rewrites that path into against the space's own host.
+    for (
+      const source of [
+        undefined,
+        "system:system/default-app.tsx",
+        "/api/patterns/system/default-app.tsx",
+        `${HOST}/api/patterns/system/default-app.tsx`,
+      ]
+    ) {
+      assertEquals(
+        isLegacyPieceRegistryRoot(await legacyShapedRoot(source)),
+        true,
+        `expected ${String(source)} to qualify`,
+      );
+    }
+  });
+
+  it("refuses a root tracking anything else", async () => {
+    // Another host's copy is a different source, not another spelling — and a
+    // custom pattern is exactly what the predicate exists to exclude.
+    for (
+      const source of [
+        "system:custom/my-app.tsx",
+        "/api/patterns/custom/my-app.tsx",
+        "http://elsewhere.test/api/patterns/system/default-app.tsx",
+        "cf:published-pattern",
+        42,
+      ]
+    ) {
+      assertEquals(
+        isLegacyPieceRegistryRoot(await legacyShapedRoot(source)),
+        false,
+        `expected ${String(source)} to be refused`,
+      );
+    }
   });
 });

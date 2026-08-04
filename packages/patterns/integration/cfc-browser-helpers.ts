@@ -148,10 +148,14 @@ const viewSettledReady = (): boolean =>
     commonfabric?: { viewSettled?: () => Promise<void> };
   }).commonfabric?.viewSettled === "function";
 
-// Fill the input behind `selector`, then report whether the value took. Mirrors
-// the prior poll predicate: a not-yet-ready field (absent, hidden, disabled,
-// read-only) reports false without dispatching anything, so a re-check on the
-// next DOM mutation retries the fill; a ready field is filled once and verified.
+// Settle the view, then fill the input behind `selector` and report whether the
+// value took. The settle drives the page rather than watching it: asking the
+// worker whether it is idle queues runnable pull work that nothing else would
+// start, so a field that only the page's own pending work renders arrives on a
+// settling check and not on one that reads the DOM alone. A not-yet-ready field
+// (absent, hidden, disabled, read-only) reports false without dispatching
+// anything, so a re-check on the next DOM mutation retries the fill; a ready
+// field is filled once and verified.
 //
 // Each invocation keeps a progress ledger on `globalThis.__cfFillDiag`
 // (per selector): which phase it reached and when. waitForCondition never
@@ -177,7 +181,7 @@ const fillAndVerify = async (
   }).__cfFillDiag ??= {});
   const diag: FillDiag = {
     attempts: (registry[selector]?.attempts ?? 0) + 1,
-    phase: "collecting",
+    phase: "settling",
     phaseAt: Date.now(),
     startedAt: Date.now(),
   };
@@ -186,6 +190,18 @@ const fillAndVerify = async (
     diag.phase = name;
     diag.phaseAt = Date.now();
   };
+
+  // The ledger is written above this point so that a page which never exposes
+  // `viewSettled` names that in the failure probe.
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) {
+    phase("no-settle");
+    return false;
+  }
+  await settle();
+  phase("settled");
 
   const element = probe.collect(selector)[0];
   if (!element) {
@@ -245,7 +261,23 @@ const fillAndVerify = async (
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
 
-  diag.lastInputValue = input.value;
+  // A commit that re-renders the host replaces the control. The input this fill
+  // typed into is then detached and still holds the typed text, so resolve the
+  // selector again and require the same nodes before reading the value off it.
+  // A replaced control reports false, and the next page pulse fills the control
+  // that took its place.
+  const liveElement = probe.collect(selector)[0];
+  const liveInput = liveElement instanceof HTMLInputElement
+    ? liveElement
+    : liveElement?.shadowRoot?.querySelector("input");
+  diag.lastInputValue = liveInput instanceof HTMLInputElement
+    ? liveInput.value
+    : undefined;
+  if (liveElement !== element || liveInput !== input) {
+    phase("target-replaced");
+    return false;
+  }
+
   const verified = input.value === nextValue;
   phase(verified ? "verified" : "value-mismatch");
   return verified;
@@ -860,6 +892,70 @@ export async function clickNthCfButton(
   await clickMarked(page, token);
 }
 
+// Hold until the element carrying the click mark `selector` has a settled
+// layout box: rendered — laid out, not display:none or visibility:hidden — with
+// an unchanged bounding rect across two consecutive animation frames. Between
+// marking a control and dispatching its trusted click, the surface it sits in
+// can still be settling: a join card's profile surface toggles display through
+// its entrance, and a re-render can relayout the region. The box the click
+// measures a few round trips after the mark may therefore have moved or gone,
+// and `DOM.getBoxModel` returns nothing for an element with no box — which the
+// click reports as "Unable to get stable box model to click on". Waiting here
+// for the box to stop shifting means the click measures a box that is present
+// and where it was. The wait drives itself off the frame signal and drops its
+// baseline whenever the box disappears, so a control hidden partway through is
+// picked up once it returns rather than clicked mid-shift; the stuck-condition
+// net in `waitForCondition` bounds a box that never settles.
+const clickTargetBoxStable = async (
+  probe: ProbeApi,
+  selector: string,
+): Promise<boolean> => {
+  const measure = ():
+    | { x: number; y: number; width: number; height: number }
+    | null => {
+    const target = probe.collect(selector)[0] as HTMLElement | undefined;
+    if (!target || !probe.isRendered(target)) return null;
+    const { x, y, width, height } = target.getBoundingClientRect();
+    return { x, y, width, height };
+  };
+  const nextFrame = (): Promise<void> =>
+    new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+  let previous = measure();
+  await nextFrame();
+  let current = measure();
+  while (
+    previous === null || current === null ||
+    previous.x !== current.x || previous.y !== current.y ||
+    previous.width !== current.width || previous.height !== current.height
+  ) {
+    previous = current;
+    await nextFrame();
+    current = measure();
+  }
+  return true;
+};
+
+// Hold until the marked control at `selector` has a settled layout box — see
+// `clickTargetBoxStable` — so the trusted click that follows measures a box
+// that is present and unmoving. Shared by every helper whose click routes
+// through `clickMarked`.
+async function waitForStableClickTarget(
+  page: Page,
+  selector: string,
+): Promise<void> {
+  try {
+    await waitForCondition(page, clickTargetBoxStable, { args: [selector] });
+  } catch (cause) {
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Marked click target ${selector} never presented a stable box. ` +
+        `Last probe: ${toIndentedDebugString(probe)}`,
+      { cause },
+    );
+  }
+}
+
 /**
  * Resolve the element whose click marks contain `token` and click it, then
  * clear that mark.
@@ -872,13 +968,16 @@ export async function clickMarked(
   page: Page,
   token: string,
 ): Promise<void> {
+  const markSelector = `[${CLICK_TARGET_ATTR}~="${token}"]`;
   try {
-    const clickTarget = await page.waitForSelector(
-      `[${CLICK_TARGET_ATTR}~="${token}"]`,
-      {
-        strategy: "pierce",
-      },
-    );
+    const clickTarget = await page.waitForSelector(markSelector, {
+      strategy: "pierce",
+    });
+    // The mark resolves the target the instant it is laid out, but the click
+    // measures its box a few round trips later. Hold until that box has stopped
+    // shifting, so the click does not race a surface that is still settling and
+    // fail to get a stable box model.
+    await waitForStableClickTarget(page, markSelector);
     await clickTarget.click();
   } finally {
     await clearClickMark(page, token).catch(() => {});

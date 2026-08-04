@@ -8,6 +8,7 @@ import {
   getPieceSourceRevisions,
   parseLink,
   resolveEntryIdentity,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -17,10 +18,18 @@ import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { PieceManager } from "../src/manager.ts";
 import {
-  DEFAULT_APP_PATTERN_URL,
-  HOME_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
+  HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The routes those refs resolve to. A system pattern is still SERVED at, and
+// its modules still NAMED by, the route path; the `system:` ref is what a
+// piece stores as provenance.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
+const HOME_PATTERN_PATH = resolveSystemPatternSource(HOME_PATTERN_SOURCE)!;
 
 const signer = await Identity.fromPassphrase("check update default pattern");
 
@@ -48,14 +57,10 @@ const SOURCE_V3_HANDLER = [
   "",
 ].join("\n");
 
-// The estuary brick, distilled to two home-shaped patterns that differ by ONE
-// thing: whether the required `favorites` output field carries a default. Both
-// carry a handler (its `{ "$stream": true }` markers are missing on an aged
-// doc → the "Handler used as lift" cold start that gets us into the repair).
-//
-// OLD: `favorites` is required with NO default. Run over a favorites-less
-// vintage doc, its own setup repair is REJECTED by the CFC additive-required
-// migration ("favorites needs a default") — loadable, but not runnable.
+// Two home-shaped pattern identities for exercising roll-forward orchestration.
+// The rejected repair below is injected with the production migration token;
+// these output shapes do not themselves cause it. A generated required result
+// is compatible because setup materializes it.
 const SOURCE_HOME_OLD_REQUIRED = [
   "import { Writable, handler, pattern } from 'commonfabric';",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
@@ -71,8 +76,8 @@ const SOURCE_HOME_OLD_REQUIRED = [
   "",
 ].join("\n");
 
-// OFFICIAL: identical, except `favorites` rides `Default<[]>` (post-fix
-// home.tsx). Migrates the same aged doc cleanly, so the roll-forward heals.
+// The roll-forward target differs by a schema default, giving the tests a
+// distinct compiled identity that materializes the reused document cleanly.
 const SOURCE_HOME_OFFICIAL_DEFAULTED = [
   "import { Default, Writable, handler, pattern } from 'commonfabric';",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
@@ -123,17 +128,14 @@ const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 // A same-host custom-app path, as home config would supply via
 // `defaultAppUrl` (a published custom app, NOT a system pattern).
 const CUSTOM_APP_URL = "/api/patterns/custom/my-app.tsx";
-const TEST_TOOLSHED_URL = "http://toolshed.test";
-
-function absoluteSourceUrl(path: string): string {
-  return new URL(path, TEST_TOOLSHED_URL).href;
-}
+// What a root configured with that URL stores: the ref naming the same file.
+const CUSTOM_APP_SOURCE = "system:custom/my-app.tsx";
 
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(
   source: string,
   imports: Record<string, string> = {},
-  entry = DEFAULT_APP_PATTERN_URL,
+  entry = DEFAULT_APP_PATTERN_PATH,
 ): Promise<string> {
   return resolveEntryIdentity(
     entry,
@@ -193,8 +195,8 @@ function installFetchStub(): StubControls {
     });
 
     if (
-      url.pathname === DEFAULT_APP_PATTERN_URL ||
-      url.pathname === HOME_PATTERN_URL
+      url.pathname === DEFAULT_APP_PATTERN_PATH ||
+      url.pathname === HOME_PATTERN_PATH
     ) {
       if (url.searchParams.has("identity")) {
         identityFetchCount++;
@@ -438,11 +440,11 @@ describe("checkAndUpdateDefaultPattern", () => {
     ).toEqual([
       {
         operation: "baseline",
-        origin: absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+        origin: DEFAULT_APP_PATTERN_SOURCE,
       },
       {
         operation: "origin-update",
-        origin: absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+        origin: DEFAULT_APP_PATTERN_SOURCE,
       },
     ]);
   });
@@ -476,8 +478,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_V2);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V2 }],
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: SOURCE_V2 }],
       },
       { space: manager.getSpace() },
     );
@@ -533,9 +535,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(argumentSourceV2);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
+        main: DEFAULT_APP_PATTERN_PATH,
         files: [{
-          name: DEFAULT_APP_PATTERN_URL,
+          name: DEFAULT_APP_PATTERN_PATH,
           contents: argumentSourceV2,
         }],
       },
@@ -603,9 +605,9 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     const alternatePattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
+        main: DEFAULT_APP_PATTERN_PATH,
         mainExport: "alternate",
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: source }],
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: source }],
       },
       { space: manager.getSpace() },
     );
@@ -1050,12 +1052,12 @@ describe("checkAndUpdateDefaultPattern", () => {
       }),
     ).toEqual([
       {
-        path: DEFAULT_APP_PATTERN_URL,
+        path: DEFAULT_APP_PATTERN_PATH,
         identity: true,
         cache: "no-cache",
       },
       {
-        path: DEFAULT_APP_PATTERN_URL,
+        path: DEFAULT_APP_PATTERN_PATH,
         identity: false,
         cache: "no-cache",
       },
@@ -1164,7 +1166,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     const root = (await manager.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBe(
-      absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+      DEFAULT_APP_PATTERN_SOURCE,
     );
     expect(getPatternIdentityRef(root)?.identity).toBe(
       await identityForSource(SOURCE_V1),
@@ -1229,7 +1231,9 @@ describe("checkAndUpdateDefaultPattern", () => {
         "repaired-provenance",
       );
       expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 1);
-      expect(getPatternSource(piece.getCell())).toBe(DEFAULT_APP_PATTERN_URL);
+      expect(getPatternSource(piece.getCell())).toBe(
+        DEFAULT_APP_PATTERN_SOURCE,
+      );
     } finally {
       runtime.patternManager.loadPatternByIdentity = originalLoad;
     }
@@ -1380,8 +1384,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.recreateDefaultPattern({
       customProgram: {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: SOURCE_V1 }],
       },
     });
     const oldRef = getPatternIdentityRef(piece.getCell())!;
@@ -1413,7 +1417,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
       const unchanged = (await manager.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(unchanged)).toEqual(oldRef);
-      expect(getPatternSource(unchanged)).toBe(DEFAULT_APP_PATTERN_URL);
+      expect(getPatternSource(unchanged)).toBe(DEFAULT_APP_PATTERN_SOURCE);
       expect(stub.identityFetches()).toBe(1);
     } finally {
       runtime.patternManager.compilePattern = originalCompile;
@@ -1512,8 +1516,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     const root = (await manager.getDefaultPattern(false))!;
     expect(JSON.stringify(root.getAsLink())).toBe(rootLinkBefore);
     const idV2 = getPatternIdentityRef(root)?.identity;
-    // The home root compiles at HOME_PATTERN_URL — identity includes the entry.
-    expect(idV2).toBe(await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL));
+    // The home root compiles at HOME_PATTERN_PATH — identity includes the entry.
+    expect(idV2).toBe(
+      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_PATH),
+    );
     expect(idV2).not.toBe(idV1);
   });
 
@@ -1573,10 +1579,10 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     const after = (await manager.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_PATH),
     );
     // Provenance back-filled: the root now tracks the official URL.
-    expect(getPatternSource(after)).toBe(absoluteSourceUrl(HOME_PATTERN_URL));
+    expect(getPatternSource(after)).toBe(HOME_PATTERN_SOURCE);
     // The displaced ref is the only record of the replaced sourceless root.
     const displaced = (after as unknown as {
       getMetaRaw: (key: string) => unknown;
@@ -1625,7 +1631,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const after = (await manager.getDefaultPattern(true))!;
     await runtime.idle();
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_PATH),
     );
     expect(after.key("count").get()).toBe(0);
   });
@@ -1700,7 +1706,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     // Re-resolve: the controller's cell is a pre-heal transaction view.
     const after = (await manager.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_PATH),
     );
     // Functional pin: the pattern body ran its setup (count materialized)…
     expect(after.key("count").get()).toBe(0);
@@ -1734,7 +1740,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const targetId = await identityForSource(
       SOURCE_V3_HANDLER,
       {},
-      HOME_PATTERN_URL,
+      HOME_PATTERN_PATH,
     );
     // Model the already-committed swap: identity points at the CURRENT
     // official pattern, doc still set up for SOURCE_V1 (marker-less for V3).
@@ -1761,15 +1767,12 @@ describe("checkAndUpdateDefaultPattern", () => {
   });
 
   it("heals a root whose pinned pattern fails CFC migration by rolling forward to official", async () => {
-    // The estuary brick, faithfully: a home root pinned to an OLD home.tsx
-    // whose required `favorites` predates its `Default<>`. The doc was
-    // materialized by a favorites-less vintage, so the pinned pattern's OWN
-    // setup repair is REJECTED by the CFC additive-required migration ("needs a
-    // default") — it loads but cannot run. Enforce-on (the default here; the
-    // rejecting layer is the whole point of this test, so it must not be off).
-    // The runnability backstop must roll the root forward to the CURRENT
-    // official home.tsx and materialize THAT: the once-fatal field present, the
-    // handler stream live end to end.
+    // A pinned pattern is loadable, but its setup repair reports the
+    // machine-tagged CFC schema-migration rejection injected below. Enforce-on
+    // is the default here because the rejecting layer is the point of the
+    // orchestration test. The runnability backstop must roll the root forward
+    // to the current official identity and materialize it, including a live
+    // handler stream.
     await setupHome({ systemPatternAutoUpdate: true });
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
 
@@ -1783,11 +1786,11 @@ describe("checkAndUpdateDefaultPattern", () => {
     const root = (await manager.getDefaultPattern(false))!;
     await manager.stopPiece(root);
 
-    // 2. Compile OLD so its identity is loadable in-session, then pin the root
-    //    to it (sourceless) — the pre-fix required-favorites home.tsx.
+    // 2. Compile the migration-rejected fixture so its identity is loadable
+    //    in-session, then pin the root to it without source state.
     stub.setSource(SOURCE_HOME_OLD_REQUIRED);
     const oldResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const oldPattern = await runtime.patternManager.compilePattern(
       { ...oldResolved, mainExport: "default" },
@@ -1811,13 +1814,13 @@ describe("checkAndUpdateDefaultPattern", () => {
       ),
     ).resolves.toBeDefined();
 
-    // 3. Toolshed now serves OFFICIAL (favorites rides Default<[]>). Take its
-    //    expected identity the SAME way the heal does — the compiled artifact
-    //    ref, not a source hash — so the assertion also proves the roll-forward
-    //    compiled THIS source, not a stale-cached one.
+    // 3. Toolshed now serves the roll-forward target. Take its expected
+    //    identity the SAME way the heal does — the compiled artifact ref, not a
+    //    source hash — so the assertion also proves the roll-forward compiled
+    //    THIS source, not a stale-cached one.
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...officialResolved, mainExport: "default" },
@@ -1835,8 +1838,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     //    must heal the reused doc. The rejection message mirrors the live
     //    "CFC enforcement rejected commit" wrapper (see the runner + #4936's
     //    schema-merge tests) so the gate's predicate is exercised as shipped.
-    //    A genuine additive-required rejection over a CFC-relevant home root is
-    //    covered directly by cfc-additive-default-preserves-old-doc.test.ts;
+    //    A genuine required-field rejection for unclassified CFC document data
+    //    is covered directly by cfc-additive-default-preserves-old-doc.test.ts;
     //    here we pin the ORCHESTRATION the piece controller adds on top.
     const rt = runtime as unknown as {
       runSynced: (...args: unknown[]) => Promise<unknown>;
@@ -1874,7 +1877,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const after = (await manager.getDefaultPattern(false))!;
     // Rolled forward to the official identity, official provenance stamped…
     expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
-    expect(getPatternSource(after)).toBe(absoluteSourceUrl(HOME_PATTERN_URL));
+    expect(getPatternSource(after)).toBe(HOME_PATTERN_SOURCE);
     // …recording the displaced pinned pattern for recovery.
     const displaced = (after as unknown as {
       getMetaRaw: (k: string) => unknown;
@@ -1897,16 +1900,16 @@ describe("checkAndUpdateDefaultPattern", () => {
     // pin is the whole point, so a cache-stale compile would defeat it.
     const homeSourceFetches = stub.requestedFetches().filter((f) => {
       const u = new URL(f.href);
-      return u.pathname === HOME_PATTERN_URL && !u.searchParams.has("identity");
+      return u.pathname === HOME_PATTERN_PATH &&
+        !u.searchParams.has("identity");
     });
     expect(homeSourceFetches.some((f) => f.cache === "no-cache")).toBe(true);
   });
 
-  // Shared estuary scaffolding for the roll-forward edge cases below: age a
-  // home doc with a favorites-less vintage, then pin the (stopped) root
-  // sourceless to an OLD required-favorites home.tsx that loads but cannot
-  // migrate the aged doc. Returns the pinned OLD ref and the OFFICIAL identity
-  // a successful roll-forward should reach. Mirrors the happy-path test above.
+  // Shared scaffolding for the roll-forward edge cases below: age a home doc,
+  // then pin the stopped root sourceless to the identity whose repair each case
+  // will reject explicitly. Returns that ref and the distinct official identity
+  // a successful roll-forward should reach.
   const pinOldRequiredHome = async () => {
     await setupHome({ systemPatternAutoUpdate: true });
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
@@ -1921,7 +1924,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     stub.setSource(SOURCE_HOME_OLD_REQUIRED);
     const oldResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const oldPattern = await runtime.patternManager.compilePattern(
       { ...oldResolved, mainExport: "default" },
@@ -1940,7 +1943,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     // the heal does, so `officialId` is exactly the roll-forward's target.
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...officialResolved, mainExport: "default" },
@@ -2026,7 +2029,7 @@ describe("checkAndUpdateDefaultPattern", () => {
   it("stays fail-closed when the repair fails with a CFC rejection that is NOT a schema migration", async () => {
     // The negative twin of the roll-forward test: a repair rejection that
     // carries the `CFC enforcement rejected commit` PREFIX but is NOT the
-    // additive-required migration class (here: a prepared-digest race). Those
+    // schema-migration class (here: a prepared-digest race). Those
     // reflect ordering/policy/provenance faults, not "the pinned pattern is
     // wrong", so the backstop must NOT repoint the root. The bare-prefix
     // predicate this replaces would have wrongly rolled forward here.
@@ -2112,7 +2115,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     // A distinct, loadable identity for the "concurrent heal" to install.
     stub.setSource(SOURCE_V3_HANDLER);
     const otherResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const otherPattern = await runtime.patternManager.compilePattern(
       { ...otherResolved, mainExport: "default" },
@@ -2231,7 +2234,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     await manager.stopPiece(root);
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...officialResolved, mainExport: "default" },
@@ -2286,7 +2289,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     // they share one identity and differ only by symbol.
     stub.setSource(SOURCE_HOME_TWO_EXPORT);
     const resolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const legacyPattern = await runtime.patternManager.compilePattern(
       { ...resolved, mainExport: "legacyHome" },
@@ -2456,8 +2459,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_V3_HANDLER);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: HOME_PATTERN_URL,
-        files: [{ name: HOME_PATTERN_URL, contents: SOURCE_V3_HANDLER }],
+        main: HOME_PATTERN_PATH,
+        files: [{ name: HOME_PATTERN_PATH, contents: SOURCE_V3_HANDLER }],
       },
       { space: manager.getSpace() },
     );
@@ -2494,7 +2497,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     await runtime.idle();
     const after = (await manager.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_PATH),
     );
     expect(after.key("count").get()).toBe(0);
     (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
@@ -2522,7 +2525,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const targetId = await identityForSource(
       SOURCE_V3_HANDLER,
       {},
-      HOME_PATTERN_URL,
+      HOME_PATTERN_PATH,
     );
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
@@ -2624,7 +2627,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternSource(after)).toBe(
-      absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+      DEFAULT_APP_PATTERN_SOURCE,
     );
     const displaced = (after as unknown as {
       getMetaRaw: (key: string) => unknown;
@@ -2694,7 +2697,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       await setup({ systemPatternAutoUpdate: true });
       await controller.recreateDefaultPattern();
       const root = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_URL);
+      expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_SOURCE);
 
       // The stamp is the point: it makes the recreated root eligible for
       // auto-update. A newer toolshed identity must roll it forward instead
@@ -2731,9 +2734,11 @@ describe("checkAndUpdateDefaultPattern", () => {
       stub.setCustomSource(customV1);
       await controller.recreateDefaultPattern();
       const root = (await manager.getDefaultPattern(false))!;
-      // patternSource freezes the exact source selected at birth — the
-      // configured custom path, not the default-app fallback.
-      expect(getPatternSource(root)).toBe(CUSTOM_APP_URL);
+      // patternSource freezes the source selected at birth — the configured
+      // custom app, not the default-app fallback. The authored URL is
+      // canonicalized to the ref naming the same file, so the root is born
+      // with the provenance it keeps rather than waiting on a migration.
+      expect(getPatternSource(root)).toBe(CUSTOM_APP_SOURCE);
       expect(getPatternIdentityRef(root)?.identity).toBe(
         await identityForSource(customV1, {}, CUSTOM_APP_URL),
       );
@@ -2747,9 +2752,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
       await runtime.idle();
       const updated = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(updated)).toBe(
-        absoluteSourceUrl(CUSTOM_APP_URL),
-      );
+      expect(getPatternSource(updated)).toBe(CUSTOM_APP_SOURCE);
       expect(getPatternIdentityRef(updated)?.identity).toBe(
         await identityForSource(customV2, {}, CUSTOM_APP_URL),
       );
@@ -2760,7 +2763,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
       await controller.recreateDefaultPattern();
       const root = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(root)).toBe(HOME_PATTERN_URL);
+      expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
     });
   });
 });

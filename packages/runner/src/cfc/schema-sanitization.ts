@@ -19,6 +19,7 @@ import {
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
   cfcSchemaChildRoot,
+  isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -508,6 +509,38 @@ const typeMatches = (
       return !rejectUnknownType;
   }
 };
+
+/**
+ * Whether `key` is an OPTIONAL property holding `undefined` that THIS caller
+ * has asked to read as absent rather than measure.
+ *
+ * Gated on the option, and off by default, because `undefined` is a value in
+ * this system rather than a hole: the codec stores its presence as
+ * `{"/Undefined@1": null}`, `type: "undefined"` is a type this validator
+ * supports, and `pull-materialization.test.ts` pins both halves ("does not hide
+ * present explicit undefined behind an optional alias", "retains explicit
+ * undefined at an optional derived Cell root"). A caller writing `undefined`
+ * where a number is declared has made a mistake worth rejecting while they can
+ * still see it.
+ *
+ * The stored-argument check a pattern update runs asks a different question,
+ * which is why it opts in — see `optionalUndefinedIsAbsent`.
+ *
+ * REQUIRED properties are never absent under this rule, and that carve-out is
+ * load-bearing rather than cautious: a required property declared
+ * `type: "undefined"` holds undefined legitimately and must still be measured
+ * to be ACCEPTED. A required property of any other type holding undefined keeps
+ * failing on its type, which is the right answer by a different route.
+ */
+const isAbsentOptional = (
+  value: FabricPlainObject,
+  key: string,
+  requiredKeys: ReadonlySet<string>,
+  options: SchemaValidationOptions,
+): boolean =>
+  options.optionalUndefinedIsAbsent === true &&
+  (value as Record<string, unknown>)[key] === undefined &&
+  !requiredKeys.has(key);
 
 const schemaValueEqual = (left: unknown, right: unknown): boolean => {
   try {
@@ -1079,6 +1112,7 @@ interface SchemaValidationOptions {
     schema: JSONSchema,
     fullSchema: JSONSchema,
   ) => boolean;
+  optionalUndefinedIsAbsent?: boolean;
 }
 
 export interface SchemaValueValidationOptions {
@@ -1092,6 +1126,32 @@ export interface SchemaValueValidationOptions {
     schema: JSONSchema,
     fullSchema: JSONSchema,
   ) => boolean;
+  /**
+   * Read an OPTIONAL property whose value is `undefined` as absent instead of
+   * measuring it against the property's declared type.
+   *
+   * OFF by default, and deliberately: `undefined` is a value here, not a hole.
+   * The codec stores its presence (`{"/Undefined@1": null}`),
+   * `type: "undefined"` is a type this validator supports, and a caller writing
+   * `undefined` where a number is declared has made a mistake worth rejecting
+   * while they can still see it -- `pull-materialization.test.ts` pins that with
+   * "does not hide present explicit undefined behind an optional alias" and
+   * "retains explicit undefined at an optional derived Cell root".
+   *
+   * ON for one caller: the STORED-ARGUMENT check a pattern update runs. That
+   * asks a different question -- "can this version read the document already
+   * there" -- and answers it with a refusal that is PERMANENT
+   * (`isStoredArgumentSchemaRefusal` in `../runner.ts`: the same identity
+   * refuses identically, so a root pinned to a version whose schema cannot read
+   * its own document never opens again). A key holding `undefined` carries no
+   * data, and a handler mints one without meaning to: measured,
+   * `packages/patterns/topics/topic.tsx` does `comments.push({ author, ... })`
+   * with no author whenever `addComment` gets no `agentName`, and
+   * `lunch-poll/main.tsx` does the same with `imageUrl`. Refusing those
+   * documents forever is the wrong trade; rejecting a bad write now is the
+   * right one.
+   */
+  optionalUndefinedIsAbsent?: boolean;
 }
 
 const SANITIZATION_VALIDATION: SchemaValidationOptions = {
@@ -1202,6 +1262,201 @@ const unmarkSchemaValueActive = (
   );
 };
 
+const isSchemaObject = (
+  schema: JSONSchema | undefined,
+): schema is Record<string, unknown> =>
+  typeof schema === "object" && schema !== null && !Array.isArray(schema);
+
+/**
+ * Follow `$ref` chains to the schema they name, so a `default` behind one is
+ * still seen. Resolution is the canonical resolver's, not a private pointer
+ * parser: each hop goes through `resolveCfcSchemaRef` (which decodes JSON
+ * Pointer escapes, so `#/$defs/A~1B` names the `"A/B"` definition, and
+ * resolves the embedded-schema URIs) against the scope `cfcSchemaChildRoot`
+ * assigns — a subtree with its own `$defs` opens a new scope, exactly the
+ * root tracking `resolveCfcSchemaRefRoot` applies. A hand-rolled regex here
+ * previously disagreed with that resolver on escaped names and nested
+ * scopes, so this gate refused payloads the runtime's own materialization
+ * accepts.
+ *
+ * Chains are followed to their end; anything the canonical resolver does not
+ * resolve (a remote non-embedded ref, a `definitions` pointer — hoisting
+ * emits `$defs` only, so the runtime cannot resolve those either — a missing
+ * entry, a cycle) yields the last schema reached rather than failing. For
+ * the gates built on this, unresolvable keeps the field required, so the
+ * call is refused and the invocation id survives for a corrected retry.
+ */
+export function localRefTarget(
+  schema: JSONSchema,
+  root: JSONSchema,
+): JSONSchema {
+  let current = schema;
+  let currentRoot = cfcSchemaChildRoot(schema, root);
+  const seenRefs = new Map<JSONSchema, Set<string>>();
+  while (isSchemaObject(current) && typeof current.$ref === "string") {
+    const ref = current.$ref;
+    let refsForRoot = seenRefs.get(currentRoot);
+    if (refsForRoot?.has(ref)) return current;
+    if (!refsForRoot) {
+      refsForRoot = new Set();
+      seenRefs.set(currentRoot, refsForRoot);
+    }
+    refsForRoot.add(ref);
+    const next = resolveCfcSchemaRef(currentRoot, ref);
+    if (next === undefined) return current;
+    currentRoot = cfcSchemaChildRoot(
+      next,
+      isEmbeddedCfcSchemaRef(ref) ? next : currentRoot,
+    );
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * A copy of `schema` whose `required` lists omit properties that carry their
+ * own `default`.
+ *
+ * The runtime injects a property's default when the payload leaves it out (the
+ * schema read path in runner `schema.ts`), so such a property is satisfiable
+ * without the caller supplying it. Validating against the unrelaxed schema
+ * would reject payloads the verb would have accepted.
+ *
+ * This is honest only for a payload that is PRESENT (measured 2026-07-30,
+ * recorded on #5147): `SchemaObjectTraverser.traverseObjectWithSchema` (runner
+ * `traverse.ts`) fills each missing defaulted property of a present object
+ * before checking `required`, while a wholly absent event bypasses the object
+ * branch entirely — the handler sees `undefined` and no default is ever
+ * conjured. The CLI's absent-payload gate therefore normalizes an absent
+ * payload to `{}` before consulting this relaxation; absence is never excused
+ * by it.
+ *
+ * What this relaxation does NOT check — the boundary, named so nobody assumes
+ * it: only `required` lists are rewritten. Every other validation
+ * `validateSchemaValue` applies runs against the original schema text —
+ * `additionalProperties`, `patternProperties`, `minProperties` and the other
+ * object/array/string/number constraints, `const`/`enum`, `not` and
+ * `if`/`then`/`else`, and `oneOf` exclusivity. None of them is re-judged as
+ * if the runtime's defaults had already been filled in, so a schema that
+ * leans on a defaulted property through one of them (say `minProperties: 1`
+ * over a single all-defaulted property, or an `if` conditioned on it) can
+ * refuse a payload the runtime would have completed from defaults — a
+ * refused-but-valid call, the conservative side of this gate.
+ *
+ * `seen` both memoizes and breaks reference cycles: the relaxed copy is
+ * registered before its children are filled in, so a schema that reaches
+ * itself resolves to the copy already under construction. The memo is keyed
+ * by schema object identity alone — cycle-breaking requires registering
+ * before the scope of every reaching path is known — so a schema OBJECT
+ * shared verbatim across two different definition scopes relaxes in the
+ * scope that reaches it first. Generated schemas do not share fragment
+ * objects across scopes, so this stays theoretical.
+ *
+ * Scope discipline: a subtree that declares its own `$defs` opens a new
+ * local-ref scope (`cfcSchemaChildRoot`) — the same per-hop root tracking
+ * `localRefTarget` applies. Every ref consulted for a `default` and every
+ * recursion below resolves in the CURRENT schema's scope, so a property
+ * `$ref` beneath a nested object's own `$defs` finds that pool, not the
+ * document root's (which may not name the definition — or worse, name a
+ * decoy without the default, leaving the property required and refusing a
+ * payload the runtime materializes).
+ */
+export function relaxDefaultedRequired(
+  schema: JSONSchema,
+  root: JSONSchema,
+  seen: Map<object, JSONSchema>,
+): JSONSchema {
+  if (!isSchemaObject(schema)) return schema;
+  const cached = seen.get(schema);
+  if (cached !== undefined) return cached;
+
+  const relaxed: Record<string, unknown> = { ...schema };
+  seen.set(schema, relaxed as JSONSchema);
+
+  const scopeRoot = cfcSchemaChildRoot(schema, root);
+
+  const properties = schema.properties;
+  if (isSchemaObject(properties)) {
+    const defaulted = new Set<string>();
+    const next: Record<string, JSONSchema> = {};
+    for (
+      const [key, propSchema] of Object.entries(
+        properties as Record<string, JSONSchema>,
+      )
+    ) {
+      const target = localRefTarget(propSchema, scopeRoot);
+      // A property counts as defaulted only when the runtime would inject
+      // its default on read: a `default` on the property schema itself is
+      // read directly (ref-site siblings included — the default-injection
+      // read in runner `schema.ts` consults `propSchema.default` without
+      // resolving the ref), and a `default` on a fully RESOLVED chain end is
+      // materialized through the resolved view. A default stranded on an
+      // unresolvable chain's last reachable wrapper is neither: the runtime
+      // cannot resolve past it, so crediting it would admit `{}` and spend
+      // the invocation id on a handling missing the field. An unresolvable
+      // chain keeps the field required (fail-closed), matching
+      // `localRefTarget`'s contract for the gates.
+      const chainEndResolved = isSchemaObject(target) &&
+        typeof target.$ref !== "string";
+      if (
+        (isSchemaObject(propSchema) && propSchema.default !== undefined) ||
+        (chainEndResolved && target.default !== undefined)
+      ) {
+        defaulted.add(key);
+      }
+      next[key] = relaxDefaultedRequired(propSchema, scopeRoot, seen);
+    }
+    relaxed.properties = next;
+    if (Array.isArray(schema.required)) {
+      relaxed.required = (schema.required as string[]).filter(
+        (key) => !defaulted.has(key),
+      );
+    }
+  }
+
+  // `items` is a single schema here; the validator rejects the legacy tuple
+  // form of `items` outright ("schema must be an object or boolean"). Tuples
+  // are `prefixItems`, whose slot schemas get the same treatment — a present
+  // tuple-slot object is materialized like any present object.
+  if (schema.items !== undefined) {
+    relaxed.items = relaxDefaultedRequired(
+      schema.items as JSONSchema,
+      scopeRoot,
+      seen,
+    );
+  }
+  if (Array.isArray(schema.prefixItems)) {
+    relaxed.prefixItems = (schema.prefixItems as JSONSchema[]).map((entry) =>
+      relaxDefaultedRequired(entry, scopeRoot, seen)
+    );
+  }
+
+  const fields = schema as Record<string, unknown>;
+  for (const combinator of ["anyOf", "oneOf", "allOf"]) {
+    const branches = fields[combinator];
+    if (Array.isArray(branches)) {
+      relaxed[combinator] = (branches as JSONSchema[]).map((entry) =>
+        relaxDefaultedRequired(entry, scopeRoot, seen)
+      );
+    }
+  }
+
+  for (const pool of ["$defs", "definitions"]) {
+    const defs = fields[pool];
+    if (isSchemaObject(defs as JSONSchema)) {
+      const next: Record<string, JSONSchema> = {};
+      for (
+        const [key, entry] of Object.entries(defs as Record<string, JSONSchema>)
+      ) {
+        next[key] = relaxDefaultedRequired(entry, scopeRoot, seen);
+      }
+      relaxed[pool] = next;
+    }
+  }
+
+  return relaxed as JSONSchema;
+}
+
 export const validateSchemaValue = (
   schema: JSONSchema,
   value: unknown,
@@ -1275,12 +1530,29 @@ const validateAgainstSchemaInternal = (
     }
 
     if (Array.isArray(schema.allOf)) {
+      // `optionalUndefinedIsAbsent` is dropped for the branches. It decides
+      // "optional" from the `required` array on the node doing the check, and
+      // `allOf` is precisely the combinator that can put `required` on one node
+      // and `properties` on another — `{allOf: [{required: ["x"]}, {properties:
+      // {x: {type: "string"}}}]}` would then see `x` as optional in the branch
+      // that types it and skip the check, accepting `{x: undefined}` against a
+      // required string. Measured, and reported by review on #5251.
+      //
+      // Dropped rather than plumbed: requiredness would have to be accumulated
+      // conjunctively down the recursion, and nothing needs it. The generator
+      // emits no `allOf` at all (zero occurrences in `packages/schema-generator`
+      // and in every committed pattern baseline), so no pattern argument schema
+      // — the only place this option is enabled — can reach the branch. Strict
+      // is the safe direction for a shape that does not occur.
+      const branchOptions = options.optionalUndefinedIsAbsent === true
+        ? { ...options, optionalUndefinedIsAbsent: false }
+        : options;
       for (const branch of schema.allOf) {
         const failure = validateAgainstSchemaInternal(
           branch,
           value,
           schemaRoot,
-          options,
+          branchOptions,
           context,
         );
         if (failure !== undefined) return failure;
@@ -1366,13 +1638,22 @@ const validateAgainstSchemaInternal = (
     }
 
     if (isFabricPlainObjectValue(value)) {
-      for (const key of schema.required ?? []) {
+      const requiredKeys = new Set(schema.required ?? []);
+      // REQUIRED keeps asking only whether the key is there. A schema may
+      // declare `type: "undefined"`, and a required property of that type
+      // holds undefined legitimately — so whether undefined belongs at a key
+      // is the property schema's question, answered just below, not this
+      // loop's.
+      for (const key of requiredKeys) {
         if (!Object.hasOwn(value, key)) {
           return mismatch(`missing required property ${key}`);
         }
       }
       for (const [key, child] of Object.entries(schema.properties ?? {})) {
-        if (Object.hasOwn(value, key)) {
+        if (
+          Object.hasOwn(value, key) &&
+          !isAbsentOptional(value, key, requiredKeys, options)
+        ) {
           const failure = validateAgainstSchemaInternal(
             child,
             value[key],

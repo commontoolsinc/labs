@@ -1,4 +1,5 @@
 import { FabricPrimitive } from "@/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
  * Well-known symbol seeding `BaseFabricPrimitive`'s symbol-keyed member set.
@@ -30,6 +31,23 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
   //
   // Instance members
   //
+
+  /**
+   * Custom inspector, so that a `console.log()` or a debugger shows what this
+   * value IS. The default rendering is `{}`: state lives in private fields,
+   * which have no enumerable own properties for an inspector to find.
+   *
+   * Delegates to the canonical debug renderer rather than formatting here, so
+   * that this surface improves whenever that one does -- including the state
+   * rendering its own `TODO` describes, currently elided as `(...)`.
+   *
+   * Duplicated on `BaseFabricInstance`, unavoidably. There is no shared base class
+   * below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
+   * runtime-import-free abstract contract, so it cannot reach `value-debug`.
+   */
+  [Symbol.for("Deno.customInspect")](): string {
+    return toCompactDebugString(this);
+  }
 
   /**
    * Placeholder seed member (a throwing stub). Its only purpose today is to

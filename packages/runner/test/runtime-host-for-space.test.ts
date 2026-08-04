@@ -62,9 +62,61 @@ describe("Runtime.registerSpaceHost", () => {
       await runtime.dispose();
     }
   });
+
+  it("rejects non-HTTP hints before forwarding them to storage", async () => {
+    const storageVerdicts: Array<[string, string]> = [];
+    const storageManager = Object.assign(
+      StorageManager.emulate({ as: signer }),
+      {
+        registerSpaceHost(space: string, host: string) {
+          storageVerdicts.push([space, host]);
+          return true;
+        },
+      },
+    );
+    const runtime = new Runtime({
+      apiUrl: new URL("http://host-a.test/"),
+      storageManager,
+    });
+    try {
+      for (
+        const host of [
+          "ws://host-b.test",
+          "wss://host-b.test",
+          "ftp://host-b.test",
+        ]
+      ) {
+        expect(() => runtime.registerSpaceHost(spaceB, host))
+          .toThrow(`Invalid host for space ${spaceB}`);
+      }
+      expect(storageVerdicts).toEqual([]);
+
+      expect(runtime.registerSpaceHost(spaceB, "https://host-b.test"))
+        .toBe(true);
+      expect(storageVerdicts).toEqual([
+        [spaceB, "https://host-b.test/"],
+      ]);
+      expect(runtime.mappedHostFor(spaceB)).toBe("https://host-b.test/");
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });
 
 describe("Runtime.hostForSpace", () => {
+  it("rejects seeded hosts that cannot serve HTTP requests", () => {
+    for (
+      const host of [
+        "ws://host-b.test",
+        "wss://host-b.test",
+        "ftp://host-b.test",
+      ]
+    ) {
+      expect(() => makeRuntime({ [spaceB]: host }))
+        .toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+    }
+  });
+
   it("resolves mapped spaces to their host and others to apiUrl", async () => {
     const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
     try {
@@ -96,6 +148,110 @@ describe("Runtime.hostForSpace", () => {
         "http://host-a.test/_health",
         "http://host-b.test/_health",
       ]);
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck captures the default host's gitSha header; other hosts don't overwrite it", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const sha = String(input).startsWith("http://host-a.test")
+        ? "  abc123  "
+        : "not-the-default-host";
+      return Promise.resolve(
+        new Response("ok", {
+          status: 200,
+          headers: { "x-cf-git-sha": sha },
+        }),
+      );
+    }) as typeof fetch;
+    const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
+    try {
+      expect(runtime.serverGitSha).toBe(null);
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("abc123");
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck reports null gitSha without the header, and resets a stale capture", async () => {
+    const realFetch = globalThis.fetch;
+    let headers: Record<string, string> = { "x-cf-git-sha": "abc123" };
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response("ok", { status: 200, headers }),
+      )) as typeof fetch;
+    const runtime = makeRuntime();
+    try {
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("abc123");
+      // An older server without the header must reset the capture.
+      headers = {};
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe(null);
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck completes at headers-arrival: an open body stream cannot gate it", async () => {
+    const realFetch = globalThis.fetch;
+    // A 200 whose body stream never closes. The capture reads only headers,
+    // so health must resolve; awaiting the body would hang forever.
+    const openBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"OK"'));
+        // never closed
+      },
+    });
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(openBody, {
+          status: 200,
+          headers: { "x-cf-git-sha": "abc123" },
+        }),
+      )) as typeof fetch;
+    const runtime = makeRuntime();
+    try {
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("abc123");
+    } finally {
+      globalThis.fetch = realFetch;
+      await openBody.cancel();
+      await runtime.dispose();
+    }
+  });
+
+  it("an overdue earlier healthCheck cannot overwrite a newer call's capture", async () => {
+    const realFetch = globalThis.fetch;
+    const gate: Array<(res: Response) => void> = [];
+    const responseWith = (sha: string) =>
+      new Response("ok", { status: 200, headers: { "x-cf-git-sha": sha } });
+    let call = 0;
+    globalThis.fetch = (() => {
+      call++;
+      if (call === 1) {
+        // First call's response is withheld until released below.
+        return new Promise<Response>((resolve) => {
+          gate.push(resolve);
+        });
+      }
+      return Promise.resolve(responseWith("second"));
+    }) as typeof fetch;
+    const runtime = makeRuntime();
+    try {
+      const first = runtime.healthCheck();
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("second");
+      gate[0]!(responseWith("first"));
+      expect(await first).toBe(true);
+      // The stale response arrived last but belongs to a superseded call.
+      expect(runtime.serverGitSha).toBe("second");
     } finally {
       globalThis.fetch = realFetch;
       await runtime.dispose();

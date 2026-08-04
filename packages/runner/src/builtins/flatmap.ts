@@ -38,7 +38,11 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
-import { createResumeRepublisher } from "./resume-republish.ts";
+import { trackListSetupRollback } from "./list-element-rollback.ts";
+import {
+  createResumeRepublisher,
+  type ElementContribution,
+} from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
 import {
   linkResolutionProbe,
@@ -49,6 +53,21 @@ import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
+
+// Rebuild the flattened list from the per-element results: spread an array
+// result one level deep, push a defined scalar directly, and treat an undefined
+// result as still streaming in. forEach over the array skips holes, so sparse
+// per-element results densify here. See resume-republish.ts for the convergence
+// machinery.
+export const flatMapContribution: ElementContribution = (
+  elemResult,
+  _inputElement,
+  out,
+) => {
+  if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
+  else if (elemResult !== undefined) out.push(elemResult);
+  else return "pending";
+};
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -109,11 +128,6 @@ export function flatMap(
     logger,
   });
 
-  // Rebuild the flattened list from the per-element results: spread an array
-  // result one level deep, push a defined scalar directly, and treat an undefined
-  // result as still streaming in. forEach over the array skips holes, so sparse
-  // per-element results densify here. See resume-republish.ts for the convergence
-  // machinery.
   const { awaitPendingThenRepublish } = createResumeRepublisher({
     runtime,
     logger,
@@ -124,11 +138,7 @@ export function flatMap(
     elementRuns,
     aggregateNoun: "flatMap result",
     elementNoun: "result",
-    contribute: (elemResult, _inputElement, out) => {
-      if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
-      else if (elemResult !== undefined) out.push(elemResult);
-      else return "pending";
-    },
+    contribute: flatMapContribution,
   });
 
   // Hold the durable list while the input list itself confirms. On a resume
@@ -172,6 +182,7 @@ export function flatMap(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    const rollback = trackListSetupRollback(tx, runtime, elementRuns);
     const elementAwaitSync = resumeBatchAwaitSync;
     // Identity-only list materialization (mirrors map.ts:163-188): read `op`
     // through the schema, but build element cells from the raw slot links
@@ -194,13 +205,13 @@ export function flatMap(
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
+        const slotLink = listElementLink(listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const argumentUsage = inferListOpArgumentUsage(opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
       ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
@@ -209,6 +220,10 @@ export function flatMap(
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
+      const previousResult = result;
+      rollback.resultReplaced(() => {
+        result = previousResult;
+      });
       const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
@@ -224,12 +239,16 @@ export function flatMap(
         resultSchema,
         tx,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
+      const boundResult = scopedCell(runtime, tx, baseResult, outputScope);
       // Link this cell to the parent cell
-      setResultCell(result, parentCell);
+      setResultCell(boundResult, parentCell);
       // Link the new result cells to the pattern cell too
-      setPatternCell(result, parentCell.key("pattern"));
-      sendResult(tx, result);
+      setPatternCell(boundResult, parentCell.key("pattern"));
+      sendResult(tx, boundResult);
+      // The container outlives this reconcile's transaction; a cell bound to
+      // it would pin the settled transaction and its journal for the life of
+      // the coordinator. Rebind per use instead.
+      result = boundResult.withTx();
     }
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
@@ -365,6 +384,7 @@ export function flatMap(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
+        const previousIndex = existing.lastIndex;
         if (argumentUsage.usesIndex && existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
@@ -378,13 +398,19 @@ export function flatMap(
           );
         }
         existing.lastIndex = i;
+        if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
       } else {
-        const resultCell = runtime.getCell(
+        const boundResultCell = runtime.getCell(
           parentCell.space,
           { flatMap: result, elementKey },
           undefined,
           tx,
         );
+        // The stored cell outlives this reconcile's transaction: it lives in
+        // `elementRuns` and in the cancel closure below, both of which last as
+        // long as the coordinator. A cell bound to the transaction would pin
+        // the settled transaction, its journal, and everything it read.
+        const resultCell = boundResultCell.withTx();
         runtime.runner.run(
           tx,
           opPattern,
@@ -396,9 +422,11 @@ export function flatMap(
           },
         );
         // Link the new result cells to the pattern cell too
-        setPatternCell(resultCell, parentCell.key("pattern"));
+        setPatternCell(boundResultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        const entry = { resultCell, lastIndex: i };
+        elementRuns.set(elementKey, entry);
+        rollback.created(elementKey, entry);
 
         // An element first seen after the resume batch cleared, while the space
         // may still be syncing: its inline op write rode on this reconcile's

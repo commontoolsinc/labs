@@ -179,10 +179,13 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
 /**
  * Object/record of fabric values.
  *
- * Note: `.__proto__` and `constructor()` properties are not currently guarded
- * against at the type level or at runtime in clone/conversion internals.
- * If prototype pollution becomes a concern, add boundary validation where
- * values enter the fabric system (e.g., `fabricFromNativeValue()`).
+ * The names `__proto__` and `constructor` are refused at the boundaries where
+ * values enter or leave storage, so no `FabricPlainObject` carries one. The
+ * type cannot say as much -- a string index signature admits every string --
+ * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
+ * loops are unguarded and rely on it: they rebuild records by assignment,
+ * which for `__proto__` would repoint the copy's prototype rather than
+ * creating a property.
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
@@ -223,12 +226,6 @@ export type MutableFabricValueLayer =
  * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
  * inside `FabricValue`.
  *
- * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to fabric form via their `toJSON()` method. This is a
- * `toJSON()`-based conversion path, included here so the
- * `isFabricCompatible()` type predicate
- * (`value is FabricValue | FabricNativeObject`) remains sound.
- *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
  */
@@ -238,8 +235,7 @@ export type FabricNativeObject =
   | Set<unknown>
   | Date
   | RegExp
-  | Uint8Array
-  | { toJSON(): unknown };
+  | Uint8Array;
 
 /**
  * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values

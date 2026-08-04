@@ -178,26 +178,4 @@ describe("cell-map", () => {
       expect(retrievedCell.equals(c)).toBe(true);
     });
   });
-
-  describe("cells as JSON", () => {
-    it("should serialize the entity ID", () => {
-      const c = runtime.getCell<{ value: number }>(
-        space,
-        "test-json",
-        undefined,
-        tx,
-      );
-      c.set({ value: 42 });
-
-      // toJSON returns sigil format with space for cross-space resolution
-      const json = JSON.parse(JSON.stringify(c));
-      expect(json["/"]).toBeDefined();
-      expect(json["/"][LINK_V1_TAG]).toBeDefined();
-      expect(json["/"][LINK_V1_TAG].id).toContain(
-        entityRefToString(c.entityId),
-      );
-      expect(json["/"][LINK_V1_TAG].path).toEqual([]);
-      expect(json["/"][LINK_V1_TAG].space).toEqual(space);
-    });
-  });
 });

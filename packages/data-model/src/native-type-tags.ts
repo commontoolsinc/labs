@@ -15,9 +15,6 @@ import { FabricInstance } from "./interface.ts";
  * - **System-defined value types**: classes defined by this system that
  *   behave like primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
- *
- * Additionally, `HasToJSON` is a synthetic tag for values whose class provides
- * a `toJSON()` method but isn't otherwise recognized.
  */
 export const NATIVE_TAGS = Object.freeze(
   {
@@ -31,7 +28,6 @@ export const NATIVE_TAGS = Object.freeze(
     RegExp: "RegExp",
     EpochNsec: "EpochNsec",
     EpochDays: "EpochDays",
-    HasToJSON: "HasToJSON",
     Hash: "Hash",
     FabricBytes: "FabricBytes",
     FabricRegExp: "FabricRegExp",
@@ -64,8 +60,7 @@ export function isNativeError(value: unknown): value is Error {
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the
- * constructor's prototype to catch exotic `Error` subclasses, and checks for
- * `toJSON()` on the prototype for unrecognized classes. (Note:
+ * constructor's prototype to catch exotic `Error` subclasses. (Note:
  * `Error.isError()` doesn't work on prototype objects -- it only recognizes
  * actual `Error` instances, not the prototype chain -- so we use `instanceof`.)
  */
@@ -118,14 +113,6 @@ export function tagFromNativeClass(
       ) {
         return NATIVE_TAGS.Error;
       }
-      // Unrecognized class whose prototype has a toJSON() method.
-      if (
-        constructorFn.prototype !== null &&
-        constructorFn.prototype !== undefined &&
-        hasToJSON(constructorFn.prototype as object)
-      ) {
-        return NATIVE_TAGS.HasToJSON;
-      }
       return null;
   }
 }
@@ -135,71 +122,59 @@ export function tagFromNativeClass(
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`,
- * which matches `Error` subclasses via `prototype instanceof Error`). Falls
- * back to native error detection and `Array.isArray()` for values whose
- * constructor is unreachable -- a severed prototype, or another realm -- and
- * to a prototype check for null-prototype objects.
+ * An array answers `Array` before anything else is consulted.
+ * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
+ * severed prototype, so every array reaches array handling and is answered by
+ * the array rule, which alone decides what an array may be.
  *
- * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
- * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
- * `HasToJSON`. Dedicated types (`Error`, `Date`, `Map`, etc.) and `HasToJSON` from
- * `tagFromNativeClass()` are returned as-is.
+ * Otherwise dispatches via the value's constructor (O(1) switch in
+ * `tagFromNativeClass`, which matches `Error` subclasses via
+ * `prototype instanceof Error`), falling back to native error detection for
+ * values whose constructor is unreachable -- a severed prototype, or another
+ * realm -- and to a prototype check for null-prototype objects.
  */
 export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (value === null || typeof value !== "object") {
     return NATIVE_TAGS.Primitive;
   }
-  // Guard: null-prototype objects or exotic objects may not have a function
-  // constructor.
-  const ctor = value.constructor;
-  let tag: NativeTag | null = null;
+
+  // Arrays first, and unconditionally: see above.
+  if (Array.isArray(value)) {
+    return NATIVE_TAGS.Array;
+  }
+
+  // The constructor is read from the PROTOTYPE, not from the value. What is
+  // being asked is which class the value is an instance of, and that is a fact
+  // about its prototype; an own `constructor` property is ordinary data that
+  // happens to share the name, and must not decide the value's type. Reading
+  // it off the value would let `{constructor: Error}` -- a plain record --
+  // answer `Error` and be silently rebuilt as one.
+  //
+  // Guard: a null-prototype object has no constructor to find, and an exotic
+  // one may not have a callable one.
+  const proto = Object.getPrototypeOf(value);
+  const ctor = proto === null ? undefined : proto.constructor;
 
   if (typeof ctor === "function") {
-    tag = tagFromNativeClass(ctor);
+    const tag = tagFromNativeClass(ctor);
+    if (tag !== null) return tag;
   }
 
-  // `tagFromNativeClass()` handles dedicated types (`Error`, `Date`, `Map`, etc.) and
-  // returns `HasToJSON` for classes whose prototype has `toJSON()`. For those,
-  // return immediately -- no instance-level override needed.
-  if (
-    tag !== null && tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.Array
-  ) {
-    return tag;
-  }
+  // Fallbacks for values whose constructor wasn't recognized.
 
-  // Fallbacks for values whose constructor wasn't recognized (tag === null).
-  if (tag === null) {
-    // `Error`s with no reachable constructor -- e.g. one whose prototype has
-    // been severed, or one from another realm. An ordinary subclass (including
-    // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
-    // `prototype instanceof Error`.
-    if (isNativeError(value)) return NATIVE_TAGS.Error;
+  // `Error`s with no reachable constructor -- e.g. one whose prototype has
+  // been severed, or one from another realm. An ordinary subclass (including
+  // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
+  // `prototype instanceof Error`.
+  if (isNativeError(value)) return NATIVE_TAGS.Error;
 
-    // `FabricInstance` values (object-like protocol types).
-    if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
+  // `FabricInstance` values (object-like protocol types).
+  if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
-    // Cross-realm arrays may have a different constructor.
-    if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
+  // Null-prototype objects (`Object.create(null)`), which have no constructor
+  // to have been recognized. Answered `Object` so the object rule decides them
+  // by name, the same way an indirect array is answered `Array`.
+  if (proto === null) return NATIVE_TAGS.Object;
 
-    // Null-prototype objects (`Object.create(null)`).
-    if (tag === null) {
-      const proto = Object.getPrototypeOf(value);
-      if (proto === null) tag = NATIVE_TAGS.Object;
-    }
-  }
-
-  // For `Object`, `Array`, and still-null tags: a per-instance `toJSON()` method
-  // overrides to `HasToJSON`. This catches plain objects with `toJSON()` as an own
-  // property, arrays with `toJSON()` added, and unrecognized class instances
-  // whose prototype wasn't caught by `tagFromNativeClass()`.
-  if (hasToJSON(value)) return NATIVE_TAGS.HasToJSON;
-
-  return tag;
-}
-
-/** Checks whether a value has a callable `toJSON()` method. */
-function hasToJSON(value: object): boolean {
-  return "toJSON" in value &&
-    typeof (value as { toJSON: unknown }).toJSON === "function";
+  return null;
 }

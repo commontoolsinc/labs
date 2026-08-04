@@ -1,5 +1,4 @@
 export type {
-  Compiler,
   JsScript,
   Program,
   ProgramResolver,

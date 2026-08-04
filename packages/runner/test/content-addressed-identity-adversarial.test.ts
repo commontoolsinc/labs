@@ -786,7 +786,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
 
     it("a dynamic artifact (no symbol) serializes without $implRef", async () => {
-      // moduleToJSON only emits $implRef when provenance.symbol is present, so a
+      // moduleToEncodableForm only emits $implRef when provenance.symbol is present, so a
       // dynamic (symbol-less) artifact never gets a serialized, reload-resolvable
       // reference — confirming in-session-only authority on the serialization seam.
       const pattern = await setup();
@@ -807,16 +807,20 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         type: "javascript" as const,
         implementation: dyn,
         implementationRef: "dyn-ref",
-        toJSON: undefined as unknown,
+        toEncodableForm: undefined as unknown,
       };
-      // moduleToJSON is reached via the builder; call the same path the real
+      // moduleToEncodableForm is reached via the builder; call the same path the real
       // module uses. We re-import it lazily to avoid widening the import surface.
-      const { moduleToJSON } = await import("../src/builder/json-utils.ts");
-      const json = moduleToJSON(dynModule as unknown as Module) as Record<
+      const { moduleToEncodableForm } = await import(
+        "../src/builder/to-encodable-form.ts"
+      );
+      const encodable = moduleToEncodableForm(
+        dynModule as unknown as Module,
+      ) as Record<
         string,
         unknown
       >;
-      expect(json.$implRef).toBeUndefined();
+      expect(encodable.$implRef).toBeUndefined();
     });
   });
 

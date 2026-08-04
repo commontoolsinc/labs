@@ -1,62 +1,14 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
-import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { detectCallKind, registerSyntheticCallType } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import {
+  createActionEventSchema,
+  createHandlerEventSchema,
+  createHandlerStateSchema,
+} from "../utils/schema-factory.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
-
-/**
- * ActionStrategy transforms action() calls to handler() calls with explicit closures.
- *
- * This is to handler as computed is to lift:
- * - Input: action(() => count.set(count.get() + 1))
- * - Output: handler((_, { count }) => count.set(count.get() + 1))({ count })
- *
- * The action callback takes zero or one parameters (optional event) and closes
- * over scope variables. The transformer extracts these closures and makes them
- * explicit as handler params.
- *
- * Examples:
- * - action(() => doSomething())           → no event, schema is false
- * - action((e) => doSomething(e.target))  → has event, schema is inferred
- *
- * ## Limitation: Arrow Functions Only
- *
- * Currently only arrow functions are supported, not function expressions.
- * This matches the behavior of HandlerStrategy for JSX event handlers.
- *
- * Supported:     action(() => count.set(count.get() + 1))
- * NOT supported: action(function() { count.set(count.get() + 1) })
- *
- * To support function expressions in the future:
- * 1. Update PatternBuilder.buildHandlerCallback to accept FunctionExpression
- *    (currently typed as ArrowFunction only)
- * 2. Update this strategy to use isFunctionLikeExpression instead of unwrapArrowFunction
- * 3. Potentially update HandlerStrategy for consistency
- * 4. Add test cases for function expression callbacks
- */
-export class ActionStrategy implements ClosureTransformationStrategy {
-  canTransform(
-    node: ts.Node,
-    context: TransformationContext,
-  ): boolean {
-    return ts.isCallExpression(node) && isActionCall(node, context);
-  }
-
-  // Caller must pass a call expression.
-  transform(
-    node: ts.Node,
-    context: TransformationContext,
-    visitor: ts.Visitor,
-  ): ts.Node | undefined {
-    if (!ts.isCallExpression(node)) {
-      throw new Error("ActionStrategy.transform requires a call expression");
-    }
-    return transformActionCall(node, context, visitor);
-  }
-}
 
 /**
  * Check if a call expression is an action() call from commonfabric
@@ -73,7 +25,8 @@ function isActionCall(
  * Extract the callback function from an action call.
  * Action has one signature: action(callback)
  *
- * Note: Only arrow functions are supported (see class doc for limitation details).
+ * Note: Only arrow functions are supported (see the transform's doc comment
+ * for limitation details).
  */
 function extractActionCallback(
   actionCall: ts.CallExpression,
@@ -91,15 +44,46 @@ function extractActionCallback(
 }
 
 /**
- * Transform an action call to a handler call with explicit closures.
- * Converts: action(() => count.set(count.get() + 1))
- * To: handler((_, { count }) => count.set(count.get() + 1))({ count })
+ * Transform an action() call to a handler() call with explicit closures.
+ * Returns undefined for any other node.
+ *
+ * This is to handler as computed is to lift:
+ * - Input: action(() => count.set(count.get() + 1))
+ * - Output: handler((_, { count }) => count.set(count.get() + 1))({ count })
+ *
+ * The action callback takes zero or one parameters (optional event) and closes
+ * over scope variables. The transformer extracts these closures and makes them
+ * explicit as handler params.
+ *
+ * Examples:
+ * - action(() => doSomething())           → no event, schema is false
+ * - action((e) => doSomething(e.target))  → has event, schema is inferred
+ *
+ * ## Limitation: Arrow Functions Only
+ *
+ * Currently only arrow functions are supported, not function expressions.
+ * This matches the behavior of the JSX event handler transform.
+ *
+ * Supported:     action(() => count.set(count.get() + 1))
+ * NOT supported: action(function() { count.set(count.get() + 1) })
+ *
+ * To support function expressions in the future:
+ * 1. Update PatternBuilder.buildHandlerCallback to accept FunctionExpression
+ *    (currently typed as ArrowFunction only)
+ * 2. Update this transform to use isFunctionLikeExpression instead of
+ *    unwrapArrowFunction
+ * 3. Potentially update the JSX event handler transform for consistency
+ * 4. Add test cases for function expression callbacks
  */
-function transformActionCall(
-  actionCall: ts.CallExpression,
+export function transformActionCall(
+  node: ts.Node,
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression | undefined {
+  if (!ts.isCallExpression(node) || !isActionCall(node, context)) {
+    return undefined;
+  }
+  const actionCall = node;
   const { checker } = context;
 
   // Extract callback
@@ -126,20 +110,18 @@ function transformActionCall(
     ? eventParam.name.text
     : "_";
 
-  // Build type information for handler params using SchemaFactory
-  const schemaFactory = new SchemaFactory(context);
-
   // For action, event parameter is optional:
   // - action(() => ...) → event schema is `false` (never type)
   // - action((e) => ...) → event schema is inferred from the parameter
   const eventTypeNode = callback.parameters.length > 0
-    ? schemaFactory.createHandlerEventSchema(callback)
-    : schemaFactory.createActionEventSchema();
+    ? createHandlerEventSchema(callback, context)
+    : createActionEventSchema(context);
 
   // State schema is based on captures
-  const stateTypeNode = schemaFactory.createHandlerStateSchema(
+  const stateTypeNode = createHandlerStateSchema(
     captureTree,
     undefined, // no explicit state parameter in action
+    context,
   );
 
   const finalCall = buildCapturedHandlerClosureCall(
@@ -165,17 +147,15 @@ function transformActionCall(
   // Note: The action call has type `ModuleFactory<T, Stream<void>>`, but the finalCall
   // is `handler(...)({...})` which CALLS the factory. We need the return type of that call,
   // which is `Reactive<Stream<void>>`.
-  const typeRegistry = context.options.state?.typeRegistry;
-  if (typeRegistry) {
-    // Get the type of the original action call (ModuleFactory<T, Stream<void>>)
-    const actionType = checker.getTypeAtLocation(actionCall);
-    // Get the call signature to find what type is returned when calling the factory
-    const callSignatures = actionType.getCallSignatures();
-    if (callSignatures.length > 0) {
-      const callReturnType = callSignatures[0]!.getReturnType();
-      // This should be Reactive<Stream<void>> - the type of calling handler(...)({...})
-      registerSyntheticCallType(finalCall, callReturnType, typeRegistry);
-    }
+  const typeRegistry = context.state.typeRegistry;
+  // Get the type of the original action call (ModuleFactory<T, Stream<void>>)
+  const actionType = checker.getTypeAtLocation(actionCall);
+  // Get the call signature to find what type is returned when calling the factory
+  const callSignatures = actionType.getCallSignatures();
+  if (callSignatures.length > 0) {
+    const callReturnType = callSignatures[0]!.getReturnType();
+    // This should be Reactive<Stream<void>> - the type of calling handler(...)({...})
+    registerSyntheticCallType(finalCall, callReturnType, typeRegistry);
   }
 
   return finalCall;

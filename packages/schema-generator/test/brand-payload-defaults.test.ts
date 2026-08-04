@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../src/plugin.ts";
+import { SchemaGenerator } from "../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "./utils.ts";
 
 // The DEFAULT_MARKER brand payload carries V (the default VALUE's type) — see
@@ -17,7 +17,7 @@ const DEFAULT_PRELUDE = `
 `;
 
 describe("brand-payload default recovery (expanded Default<T, V>)", () => {
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
 
   it("recovers string literal defaults from the payload", async () => {
     const code = `${DEFAULT_PRELUDE}
@@ -128,7 +128,7 @@ const FAITHFUL_PRELUDE = `
 `;
 
 describe("brand-payload recovery on the expanded path (no typeNode)", () => {
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
 
   async function schemaOfPropertyType(
     body: string,
@@ -204,7 +204,7 @@ describe("brand-payload recovery on the expanded path (no typeNode)", () => {
 // state: that a shadowed global is NOT folded, which is an assertion about what
 // does not happen.
 describe("defaults recovered from a `typeof CONST` initializer", () => {
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
 
   async function defaultOfX(declarations: string): Promise<unknown> {
     const { type, checker } = await getTypeFromCode(

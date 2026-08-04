@@ -49,7 +49,6 @@ import {
 } from "../ast/mod.ts";
 import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 import {
-  addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
@@ -89,7 +88,6 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
 
 type ObjectMemberKind =
   | "getter"
-  | "toJSON"
   | "method"
   | "setter"
   | "function-property";
@@ -118,9 +116,8 @@ function isPartOfOptionalChainCallee(
     ts.isCallChain(parent);
 }
 
-// A getter and a `toJSON()` member run when the pattern result is stored;
-// a method, setter, or function-valued property is a function value the data
-// model cannot store. The fix advice leads with the option that fits the kind:
+// A getter runs when the pattern result is stored; a method, setter, or
+// function-valued property is a function value the data model cannot store. The fix advice leads with the option that fits the kind:
 // a plain property or computed() field for a value, a module-scope handler() or
 // lift() for behavior.
 function objectMemberMessage(kind: ObjectMemberKind): string {
@@ -130,12 +127,6 @@ function objectMemberMessage(kind: ObjectMemberKind): string {
         `evaluated when the pattern result is stored, so a reactive value it ` +
         `reads is captured as a one-time snapshot and stops tracking updates. ` +
         `Expose the value as a plain property or a computed(() => ...) field.`;
-    case "toJSON":
-      return `A toJSON() member on an object literal in pattern or render ` +
-        `context runs when the pattern result is stored, so a reactive value ` +
-        `it reads is captured as a one-time snapshot and stops tracking ` +
-        `updates. Build the serialized shape from plain properties or ` +
-        `computed(() => ...) fields.`;
     case "setter":
       return `A setter on an object literal in pattern or render context is a ` +
         `function value, which the reactive data model cannot store. Move this ` +
@@ -670,13 +661,7 @@ export class PatternContextValidationTransformer
     // rejected even inside JSX, where the expression-site lowering does not
     // descend into it either.
     if (this.isObjectLiteralPropertyValueFunction(node)) {
-      const kind = this.propertyValueFunctionKind(node);
-      if (
-        kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)
-      ) {
-        return;
-      }
-      this.reportObjectMember(node, kind, context);
+      this.reportObjectMember(node, "function-property", context);
       return;
     }
 
@@ -749,14 +734,12 @@ export class PatternContextValidationTransformer
    * Validates object-literal methods, getters, and setters created in pattern
    * or render context. The reactive-read lowering pass stops at every function
    * boundary, so a reactive read inside such a body is never tracked. At result
-   * serialization a getter (or `toJSON`) runs once and freezes whatever it
-   * returns to a snapshot, while a method or setter is a function value the
-   * reactive data model cannot store. The whole member is rejected regardless
+   * serialization a getter runs once and freezes whatever it returns to a
+   * snapshot, while a method or setter is a function value the reactive data
+   * model cannot store. The whole member is rejected regardless
    * of its body, so reads laundered through destructuring, spread, computed
-   * member names, or parameter defaults are covered too. A `toJSON` member is
-   * the one exception: it is storable (the data model converts a toJSON-bearing
-   * object), so it is reported only when its body reads a reactive value.
-   * Members inside a compute wrapper (computed()/lift()/handler()/action()) and
+   * member names, or parameter defaults are covered too. Members inside a
+   * compute wrapper (computed()/lift()/handler()/action()) and
    * object literals outside pattern/render context are left alone. Class members
    * are out of scope for this rule (the gate requires an object-literal parent);
    * a pattern-body class is rejected by the class-creation rule instead. The
@@ -776,13 +759,7 @@ export class PatternContextValidationTransformer
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
-    const kind = this.objectMemberKind(node);
-    if (
-      kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)
-    ) {
-      return;
-    }
-    this.reportObjectMember(node.name, kind, context);
+    this.reportObjectMember(node.name, this.objectMemberKind(node), context);
   }
 
   private objectMemberKind(
@@ -793,9 +770,7 @@ export class PatternContextValidationTransformer
   ): ObjectMemberKind {
     if (ts.isGetAccessorDeclaration(node)) return "getter";
     if (ts.isSetAccessorDeclaration(node)) return "setter";
-    return this.getStaticMemberName(node.name) === "toJSON"
-      ? "toJSON"
-      : "method";
+    return "method";
   }
 
   private getStaticMemberName(name: ts.PropertyName): string | undefined {
@@ -825,19 +800,6 @@ export class PatternContextValidationTransformer
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
   ): boolean {
     return !!this.getObjectLiteralFunctionPropertyAssignment(node);
-  }
-
-  // A `toJSON` property is invoked at store time like a `toJSON()` method, so
-  // it shares the serialization-snapshot mechanism rather than the
-  // unstorable-function one.
-  private propertyValueFunctionKind(
-    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-  ): ObjectMemberKind {
-    const property = this.getObjectLiteralFunctionPropertyAssignment(node);
-    if (property && this.getStaticMemberName(property.name) === "toJSON") {
-      return "toJSON";
-    }
-    return "function-property";
   }
 
   /**
@@ -894,131 +856,6 @@ export class PatternContextValidationTransformer
       message: objectMemberMessage(kind),
       node: reportNode,
     });
-  }
-
-  /**
-   * Narrow, toJSON-only body check. A `toJSON` member is the one function shape
-   * the data model can store: it converts a toJSON-bearing object via toJSON()
-   * rather than throwing. So a `toJSON` that reads no reactive value is storable
-   * and allowed; one that reads a reactive value captured from the enclosing
-   * pattern still freezes a snapshot at store time and is reported. This is the
-   * single exception to the rule's body-agnostic stance, scoped to toJSON.
-   */
-  private memberBodyReadsReactiveValue(
-    fn:
-      | ts.MethodDeclaration
-      | ts.GetAccessorDeclaration
-      | ts.SetAccessorDeclaration
-      | ts.ArrowFunction
-      | ts.FunctionExpression
-      | ts.FunctionDeclaration,
-    context: TransformationContext,
-  ): boolean {
-    const body = fn.body;
-    if (!body) return false;
-
-    // Collect every enclosing function up to the outermost, innermost first.
-    // The outermost is the pattern (or render) body, whose parameters are the
-    // reactive inputs. A toJSON nested in a callback still captures those outer
-    // inputs, so its reads of them count.
-    const enclosing: ts.FunctionLikeDeclaration[] = [];
-    let cursor: ts.Node | undefined = fn.parent;
-    while (cursor) {
-      if (ts.isFunctionLike(cursor)) {
-        enclosing.push(cursor as ts.FunctionLikeDeclaration);
-      }
-      cursor = cursor.parent;
-    }
-    if (enclosing.length === 0) return false;
-
-    // Reactive roots are matched by symbol, not by name, so a member parameter
-    // that shadows an input name is not mistaken for the reactive input. Seed
-    // the symbols with the outermost (pattern) inputs, then add locals
-    // initialized from a reactive value (a reactive-origin call, or a value
-    // rebound from an input or earlier reactive local — so reads laundered
-    // through `const { auth } = props` or `const a = value` count). A nested
-    // callback's own parameter is not seeded, so reading a plain element of a
-    // non-reactive array is not flagged.
-    const reactiveRootSymbols = new Set<ts.Symbol>();
-    const outermost = enclosing[enclosing.length - 1]!;
-    for (const parameter of outermost.parameters) {
-      addBindingTargetSymbols(
-        parameter.name,
-        reactiveRootSymbols,
-        context.checker,
-      );
-    }
-    for (let i = enclosing.length - 1; i >= 0; i--) {
-      const scopeBody = enclosing[i]!.body;
-      if (!scopeBody) continue;
-      const scan = (current: ts.Node): void => {
-        if (current !== scopeBody && ts.isFunctionLike(current)) return;
-        if (
-          ts.isVariableDeclaration(current) &&
-          current.initializer &&
-          isOpaqueSourceExpression(
-            current.initializer,
-            EMPTY_OPAQUE_ROOTS,
-            reactiveRootSymbols,
-            context,
-          )
-        ) {
-          addBindingTargetSymbols(
-            current.name,
-            reactiveRootSymbols,
-            context.checker,
-          );
-        }
-        ts.forEachChild(current, scan);
-      };
-      scan(scopeBody);
-    }
-    if (reactiveRootSymbols.size === 0) {
-      return false;
-    }
-
-    const readsOpaqueSource = (node: ts.Expression): boolean =>
-      isOpaqueSourceExpression(
-        node,
-        EMPTY_OPAQUE_ROOTS,
-        reactiveRootSymbols,
-        context,
-      );
-
-    let found = false;
-    const visit = (current: ts.Node): void => {
-      if (found) return;
-      if (current !== body && ts.isFunctionLike(current)) return;
-      if (
-        (ts.isPropertyAccessExpression(current) ||
-          ts.isElementAccessExpression(current)) &&
-        isTopmostMemberAccess(current) &&
-        readsOpaqueSource(current)
-      ) {
-        found = true;
-        return;
-      }
-      if (
-        ts.isIdentifier(current) &&
-        !this.isMemberAccessBase(current) &&
-        readsOpaqueSource(current)
-      ) {
-        found = true;
-        return;
-      }
-      if (ts.isCallExpression(current) && readsOpaqueSource(current)) {
-        found = true;
-        return;
-      }
-      ts.forEachChild(current, visit);
-    };
-    visit(body);
-    // A reactive read in a parameter default runs when the member is called
-    // with no argument, so it counts too.
-    for (const parameter of fn.parameters) {
-      if (parameter.initializer) visit(parameter.initializer);
-    }
-    return found;
   }
 
   /**

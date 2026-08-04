@@ -64,7 +64,12 @@ what this looks like when it bites.
   argument, or schema-derived flags after `--`. Empty stdin fails loudly.
 - A `piece get` path that doesn't resolve is a data error: one-line message on
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
-  (missing source/target piece or path) reports the same way.
+  (missing source/target piece or path) reports the same way. So does a
+  `piece get` path that lands on a handler verb: reading a stream refuses — read
+  data, call verbs. A root verb's refusal points at `cf piece call`; a nested
+  verb is not directly callable, so it points at reading the parent object or
+  `cf piece verbs`. The verb's parent object still reads, and tool bindings read
+  as data.
 
 ## Environment Setup
 
@@ -98,7 +103,7 @@ equivalent inline value.
 Note: `id derive` (passphrase) and `id from-mnemonic` (BIP-39 phrase) use
 different derivations and produce different DIDs from the same text. Use
 `from-mnemonic` to match browser mnemonic login; see
-`docs/development/SHARED_IDENTITY.md`.
+`docs/features/shared-identity.md`.
 
 Redirecting stdout (as above) is safe through any invocation path: the
 `deno task` echo and all Deno/CLI diagnostics go to stderr, so
@@ -116,7 +121,7 @@ piece should still load and unscoped/`PerSpace` data should remain visible, but
 `PerUser`, `PerSession`, favorites, drafts, and home-space state may look empty
 or default. For identity-sensitive local work, use one key everywhere — generate
 it with `id new` and import the CLI PKCS8/PEM key in the browser via
-`Import CLI Key`. See `docs/development/SHARED_IDENTITY.md`.
+`Import CLI Key`. See `docs/features/shared-identity.md`.
 
 **Experimental flags** must be set as env vars on both servers AND CLI commands.
 See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
@@ -132,6 +137,8 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
 | Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
 | Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
+| Project fields     | `deno task cf piece get --piece ID items --schema id,title ...`                                      |
 | Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
 | Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
@@ -224,6 +231,29 @@ echo '{"name": "John"}' | deno task cf piece set ... user
 
 `piece get` and `wish` always print JSON. Both accept a redundant `--json` so
 callers can request the format explicitly.
+
+`piece get --filter` accepts a jq-inspired predicate over array items: paths,
+JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
+`null` are falsey; stored `undefined` is treated like a missing value and is
+also falsey. Non-array inputs are rejected. `--schema` projects output from a
+comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
+fields apply per item for arrays, while JSON Schema describes the whole output.
+In an array-item projection, a typed scalar leaf that does not match stored data
+is omitted rather than reported as an error; prefer `true` leaves unless type
+filtering is intentional. Concise dotted paths follow declared source schemas
+through nested arrays: `comments.body` selects `body` from every comment and
+drops its siblings. Source-declared nullable items and properties remain null.
+If a present source cannot materialize the transform, the command exits nonzero
+with an explicit "not JSON null" error; an absent optional source retains the
+ordinary successful `null` response. If the source schema does not identify a
+nested container, concise projection still applies its field mask across
+encountered arrays to prevent sibling disclosure; use an explicit schema for a
+fixed output contract. The two flags compose as filter-then-project. Both run
+through runtime filter/map/lift nodes, which construct projected values from
+source-schema-selected reads, so CFC behavior is the same as a computed pattern
+expression. Source schema metadata is authoritative; projection schemas cannot
+supply `ifc`, `asCell`, `scope`, or `default`. See `packages/cli/README.md` for
+the exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

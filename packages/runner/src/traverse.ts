@@ -54,9 +54,6 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
-  ReaderError,
   ReadError,
   StorageTransactionStatus,
   WriteError,
@@ -228,7 +225,6 @@ function narrowAndCombineSelectorForLink(
   selector: SchemaPathSelector,
   targetPath: readonly string[],
   linkSchema: JSONSchema | undefined,
-  cfc: ContextualFlowControl,
 ): SchemaPathSelector {
   const key = isMemoizableSchemaInput(selector.schema) &&
       isMemoizableSchemaInput(linkSchema)
@@ -240,7 +236,7 @@ function narrowAndCombineSelectorForLink(
     const cached = _linkHopSelectorCache.get(key);
     if (cached !== undefined) return cached;
   }
-  const narrowed = narrowSchema(docPath, selector, targetPath, cfc);
+  const narrowed = narrowSchema(docPath, selector, targetPath);
   // A link schema describes the value at the link's target path. If the
   // selector continues below the source link, narrow the link schema by that
   // source-relative suffix before combining it with the selector schema.
@@ -255,7 +251,7 @@ function narrowAndCombineSelectorForLink(
     // Match resolveLink(): if the link schema does not describe the remaining
     // path (for example, an array's synthetic `length` property), the link
     // stops contributing a schema rather than rejecting the traversal.
-    ? cfc.getSchemaAtPath(linkSchema, linkSchemaPath)
+    ? ContextualFlowControl.getSchemaAtPath(linkSchema, linkSchemaPath)
     : linkSchema;
   narrowed.schema = combineOptionalSchema(
     narrowed.schema,
@@ -272,7 +268,7 @@ function narrowAndCombineSelectorForLink(
 }
 
 /**
- * Memoized, canonicalizing wrapper around `cfc.schemaAtPath()` for the hot
+ * Memoized, canonicalizing wrapper around `ContextualFlowControl.schemaAtPath()` for the hot
  * traversal seams (object properties, array items). The core method now
  * symbolically memoizes its common boolean-default derivations; this seam also
  * covers the marker-object variant used below, which is intentionally outside
@@ -301,21 +297,20 @@ const _schemaAtPathCache = new WeakMap<
 >();
 
 function schemaAtPathCanonical(
-  cfc: ContextualFlowControl,
   schema: JSONSchema,
   path: readonly string[],
   markers = false,
 ): JSONSchema {
   const compute = () =>
     markers
-      ? cfc.schemaAtPath(
+      ? ContextualFlowControl.schemaAtPath(
         schema,
         path,
         undefined,
         EMPTY_PROPERTIES_MARKER,
         MISSING_PROPERTY_MARKER,
       )
-      : cfc.schemaAtPath(schema, path);
+      : ContextualFlowControl.schemaAtPath(schema, path);
   if (typeof schema === "boolean" || !isMemoizableSchemaInput(schema)) {
     return compute();
   }
@@ -643,6 +638,23 @@ const TRAVERSE_DIAGNOSTICS: boolean = (() => {
     return false;
   }
 })();
+
+let traverseDiagnosticsOverride: boolean | undefined;
+
+/**
+ * Sets doc-visit diagnostics for this process, above whatever
+ * `CF_TRAVERSE_DIAGNOSTICS` said. Passing `undefined` hands the decision back
+ * to the environment. A traversal reads the setting when it starts, so a
+ * change applies from the next traversal on.
+ */
+export function setTraverseDiagnostics(enabled: boolean | undefined): void {
+  traverseDiagnosticsOverride = enabled;
+}
+
+/** Whether doc-visit diagnostics are collected. */
+export function traverseDiagnosticsEnabled(): boolean {
+  return traverseDiagnosticsOverride ?? TRAVERSE_DIAGNOSTICS;
+}
 
 /**
  * Identity-memoized `ContextualFlowControl.resolveSchemaRefs()` with an
@@ -1065,7 +1077,6 @@ export type PointerCycleTracker = CompoundCycleTracker<
 
 export type TraversalContext = {
   tracker: PointerCycleTracker;
-  cfc: ContextualFlowControl;
   schemaTracker: MapSet<string, SchemaPathSelector>;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
@@ -1086,7 +1097,6 @@ export type TraversalContext = {
 
 export function createTraversalContext(
   tracker: PointerCycleTracker,
-  cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
@@ -1097,7 +1107,6 @@ export function createTraversalContext(
 ): TraversalContext {
   return {
     tracker,
-    cfc,
     schemaTracker,
     includeMeta,
     metaDocsVisited,
@@ -1120,7 +1129,6 @@ export function createDefaultTraversalContext(
       FabricValue,
       JSONSchema | undefined
     >(),
-    new ContextualFlowControl(),
     schemaTracker,
     includeMeta,
     metaDocsVisited,
@@ -1187,18 +1195,11 @@ export class ManagedStorageTransaction implements IStorageTransaction {
       { address: { ...address, path: [] } };
     return resolve(source, address);
   }
-  writer(_space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    throw new Error("Method not implemented.");
-  }
   write(
     _address: IMemorySpaceAddress,
     _value?: FabricValue,
   ): Result<IAttestation, WriterError | WriteError> {
     this.assertWritable("write()");
-    throw new Error("Method not implemented.");
-  }
-  reader(_space: MemorySpace): Result<ITransactionReader, ReaderError> {
     throw new Error("Method not implemented.");
   }
   abort(_reason?: unknown): Result<Unit, InactiveTransactionError> {
@@ -1405,10 +1406,6 @@ export abstract class BaseObjectTraverser {
     return this.context.schemaTracker;
   }
 
-  protected get cfc(): ContextualFlowControl {
-    return this.context.cfc;
-  }
-
   protected get traverseCells(): boolean {
     return this.context.includeMeta;
   }
@@ -1515,7 +1512,7 @@ export abstract class BaseObjectTraverser {
         const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
         // transforms in this system, e.g. toJSON and shallowFabricFromNativeValue)
-        newValue[index] = v === undefined ? null : v as FabricValue;
+        newValue[index] = v === undefined ? null : v;
       });
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true);
@@ -1685,7 +1682,6 @@ export abstract class BaseObjectTraverser {
       selector,
       ["value", ...(link.path as readonly string[])],
       link.schema,
-      this.cfc,
     );
 
     return schemaTrackerCoversSelector(
@@ -1870,7 +1866,7 @@ export function getAtPath(
           ...curDoc.address,
           path: appendToPath(curDoc.address.path, part),
         },
-        value: cursorObj[part] as FabricValue,
+        value: cursorObj[part],
       };
       tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else {
@@ -2056,7 +2052,6 @@ function followPointer(
       selector,
       target.path,
       link.schema,
-      context.cfc,
     );
   }
   // Check to see if we've already included this link with this schema context
@@ -2338,7 +2333,6 @@ function traverseMetaLinkedDoc(
       FabricValue,
       JSONSchema | undefined
     >(),
-    context.cfc,
     context.schemaTracker,
     context.includeMeta,
     context.metaDocsVisited,
@@ -2355,7 +2349,7 @@ function traverseMetaLinkedDoc(
       ...doc.address,
       path: ["value"],
     },
-    value: fullDoc.value as FabricValue,
+    value: fullDoc.value,
   });
 }
 
@@ -2766,7 +2760,6 @@ function narrowSchema(
   docPath: readonly string[],
   selector: SchemaPathSelector,
   targetPath: readonly string[],
-  cfc: ContextualFlowControl,
 ): SchemaPathSelector {
   let pathIndex = 0;
   while (pathIndex < docPath.length && pathIndex < selector.path.length) {
@@ -2784,7 +2777,10 @@ function narrowSchema(
     // we've reached the end of our selector path, but still have parts in our doc path, so narrow the schema
     // Some of the schema may have been applicable to other parts of the doc, but we only want to use the
     // portion that will apply to the next doc.
-    const schema = cfc.schemaAtPath(selector.schema!, docPath.slice(pathIndex));
+    const schema = ContextualFlowControl.schemaAtPath(
+      selector.schema!,
+      docPath.slice(pathIndex),
+    );
     return { path: [...targetPath], schema };
   } else {
     // We've reached the end of the doc path, but may still have stuff in our
@@ -2912,6 +2908,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
   // Track per-doc visit counts and unique paths
   private docVisits = new Map<string, number>();
   private uniquePaths = new Set<string>();
+  // Read once per traversal, so one traversal collects and reports the same
+  // way throughout.
+  private diagnostics = traverseDiagnosticsEnabled();
   private maxDepth = 0;
   private currentDepth = 0;
   // Memoization cache for traverseWithSchema: key → result
@@ -2983,6 +2982,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.getDocAtPathCalls = 0;
     this.docVisits.clear();
     this.uniquePaths.clear();
+    this.diagnostics = traverseDiagnosticsEnabled();
     this.maxDepth = 0;
     this.currentDepth = 0;
     this.schemaMemoHits = 0;
@@ -3059,7 +3059,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       `maxDepth=${this.maxDepth}`,
       `schemaMemo=${this.activeMemo.size}`,
       `schemaMemoHits=${this.schemaMemoHits}`,
-      TRAVERSE_DIAGNOSTICS
+      this.diagnostics
         ? `topDocs=${topDocs}`
         : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
     ]);
@@ -3156,7 +3156,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
     const docId = doc.address.id;
-    if (TRAVERSE_DIAGNOSTICS) {
+    if (this.diagnostics) {
       // Per-visit doc/path tracking for the slow-traverse log; the string
       // building is too hot to leave on by default (see TRAVERSE_DIAGNOSTICS).
       this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
@@ -3249,7 +3249,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             }
           }
           const merged = this.objectCreator.mergeMatches(
-            matches as FabricValue[],
+            matches,
             resolved,
           );
           if (matches.length > 0) {
@@ -3322,7 +3322,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           }
         }
         const merged = this.objectCreator.mergeMatches(
-          matches as FabricValue[],
+          matches,
           resolved,
         );
         if (matches.length > 0) {
@@ -3422,7 +3422,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         }
         if (allOf.length > 0) {
           const merged = this.objectCreator.mergeMatches(
-            matches as FabricValue[],
+            matches,
             resolved,
           );
           return {
@@ -3602,7 +3602,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return {
         ok: this.objectCreator.createObject(
           newLink,
-          newValue as FabricValue,
+          newValue,
         ),
       };
     }
@@ -3778,7 +3778,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     return {
       ok: this.createPlainSchemaObject(
         newLink,
-        newValue as FabricValue,
+        newValue,
       ),
     };
   }
@@ -3970,7 +3970,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     let valid = true;
     docArray.forEach((item, index) => {
       const itemSchema = directItems ??
-        schemaAtPathCanonical(this.cfc, schema, [index.toString()]);
+        schemaAtPathCanonical(schema, [index.toString()]);
       const batchIndex = preparedPlainLinkIndex++;
       const preparedSourceAddress = preparedPlainLinks
         ?.sourceAddresses[batchIndex];
@@ -4230,7 +4230,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // We'll use marker schemas to detect some places where we want special
       // schema behavior
       const propSchema = directProperties?.[propKey] ??
-        schemaAtPathCanonical(this.cfc, schema, [propKey], true);
+        schemaAtPathCanonical(schema, [propKey], true);
       // Normally, if additionalProperties is not specified, it would
       // default to true. However, if we provided the `properties` field, we
       // treat this specially, and don't invalidate the object, but also don't
@@ -4297,7 +4297,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         if (propKey in filteredObj) {
           continue;
         }
-        const subSchema = this.cfc.getSchemaAtPath(schema, [propKey]);
+        const subSchema = ContextualFlowControl.getSchemaAtPath(schema, [
+          propKey,
+        ]);
         if (!isRecord(subSchema)) {
           continue;
         }

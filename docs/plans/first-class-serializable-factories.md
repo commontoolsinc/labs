@@ -200,7 +200,7 @@ Expected implementation files:
 - [ ] Register the codec in
   `packages/data-model/src/codec-json/createDefaultRegistry.ts`.
 - [ ] Route callable factories through codec lookup before the generic function
-  rejection and before legacy `toJSON()` conversion.
+  rejection.
 - [ ] Include callable factories in JSON encoder cycle tracking.
 - [ ] Reject arbitrary functions, copied brand symbols, malformed state,
   unknown kinds, extra fields, and cyclic state.
@@ -221,9 +221,8 @@ Expected implementation and test files:
 ### WP1.3 — Make every Fabric operation see the same factory state
 
 - [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
-  factories are recognized through `tryFactoryState()` before legacy function
-  `toJSON()` and unbranded functions remain invalid. Codec dispatch remains the
-  serialization layer's job.
+  factories are recognized through `tryFactoryState()`, and unbranded functions
+  remain invalid. Codec dispatch remains the serialization layer's job.
 - [ ] Update `packages/data-model/src/type-check.ts` and compatibility guards so
   `FabricFactory` is the only valid function-shaped Fabric value.
 - [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
@@ -268,7 +267,7 @@ but equal decoded shells, pre-seal failure, and arbitrary-function rejection.
   `contextSchema` and `eventSchema` before the internal `$ctx`/`$event` schema
   combination.
 - [ ] Populate state from the complete builder descriptor, never from
-  `moduleToJSON(...).$implRef`.
+  `moduleToEncodableForm(...).$implRef`.
 - [ ] Reuse or generalize the derivation/root tracking in
   `packages/runner/src/builder/pattern-metadata.ts` so `asScope()`, `inSpace()`,
   later `.curry()`, and traversal copies share one root token and late ref.
@@ -300,7 +299,7 @@ Focused tests:
   supplies alias mapping and derived-callable construction but does not define
   a second state view.
 - [ ] Integrate it into `packages/runner/src/builder/traverse-utils.ts` and
-  `packages/runner/src/builder/json-utils.ts` before generic function handling.
+  `packages/runner/src/builder/to-encodable-form.ts` before generic function handling.
 - [ ] Preserve live, pre-ref factory state during internal graph serialization;
   sealing belongs at a later durable Fabric boundary, after artifact indexing.
 - [ ] Convert captured Cells/Reactives to aliases inside factory state.
@@ -985,8 +984,10 @@ alone authorizes deleting readers for durable values.
 - [ ] Leave module/handler `$implRef` descriptor reconstruction intact unless a
   separately scoped migration proves all of its non-factory users have moved;
   first-class factories alone do not authorize its removal.
-- [ ] Remove factory-function `toJSON()` compatibility only after every Fabric
-  boundary uses registered codec dispatch.
+- [ ] Remove the runtime's artifact walk
+  (`packages/runner/src/encodable-form.ts`) and the `toEncodableForm()` /
+  `toJSON()` members it reads only after every Fabric boundary uses registered
+  codec dispatch.
 - [ ] Keep negative fixtures that prove deleted writers/readers stay deleted.
 
 ### WP5.3 — Update live documentation and archive the plan

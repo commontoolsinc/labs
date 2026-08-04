@@ -216,13 +216,16 @@ export function cloneHelper(
       if (canReturnAsIs(value)) return value;
       const obj = value as object;
       if (deep) seen = trackForCircularity(obj, seen);
-      // Preserve null prototypes (e.g. `Object.create(null)`).
-      const proto = Object.getPrototypeOf(obj);
-      const copy = Object.create(proto) as Record<string, FabricValue>;
+      // A clone is built in the shape a fabric record has, the same way the
+      // array case above builds a fresh `Array`. Valid input is already
+      // `Object.prototype`-rooted, so this changes nothing for it; input that
+      // reached here carrying some other prototype leaves canonical rather
+      // than propagating a shape no fabric value has.
+      const copy = {} as Record<string, FabricValue>;
       if (deep) {
         for (const [key, val] of Object.entries(obj)) {
           copy[key] = cloneHelper(
-            val as FabricValue,
+            val,
             frozen,
             deep,
             force,
@@ -536,7 +539,7 @@ export function cloneForMutation<T extends FabricValue>(
     // `FabricInstance`s this is a `cloneIfNecessary(_, { frozen: false,
     // deep: false, force })` call; under `force: false` and an
     // already-mutable input it short-circuits to identity.
-    const thawed = cloneIfNecessary(next as FabricValue, cloneOpts);
+    const thawed = cloneIfNecessary(next, cloneOpts);
     if (thawed !== next) {
       (current as Record<string, FabricValue>)[key] = thawed;
     }
@@ -688,7 +691,7 @@ export function cloneWithoutValueAtPath(
   );
   const lastKey = path[path.length - 1]!;
   if (Array.isArray(pathValue)) {
-    (pathValue as FabricValue[]).splice(Number(lastKey), 1);
+    pathValue.splice(Number(lastKey), 1);
   } else {
     delete (pathValue as Record<string, FabricValue>)[lastKey];
   }

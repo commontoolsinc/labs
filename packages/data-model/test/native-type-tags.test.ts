@@ -122,37 +122,67 @@ describe("native-type-tags", () => {
       }
     });
 
-    it("returns `HasToJSON` tag for plain objects with `toJSON()`", () => {
-      const obj = { toJSON: () => "converted" };
-      expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.HasToJSON);
+    it("returns `null` for class instances", () => {
+      class Custom {}
+      expect(tagFromNativeValue(new Custom())).toBe(null);
     });
 
-    it("returns `HasToJSON` tag for arrays with `toJSON()`", () => {
-      const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
-      arr.toJSON = () => "custom array";
-      expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.HasToJSON);
+    it("returns `Primitive` for functions", () => {
+      expect(tagFromNativeValue(() => {})).toBe(NATIVE_TAGS.Primitive);
     });
 
-    it("returns `HasToJSON` tag for class instances with `toJSON()`", () => {
-      class Custom {
-        toJSON() {
-          return { x: 1 };
+    // `toJSON` is an ordinary property name here, with no say in what a value
+    // is. These pin that at each of the shapes it can be carried on, because a
+    // classifier that consulted it would let one assignment --
+    // `Array.prototype.toJSON`, an own key on a record -- redirect values
+    // wholesale.
+    describe("`toJSON()` is intentionally not supported", () => {
+      it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
+        expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(
+          NATIVE_TAGS.Object,
+        );
+      });
+
+      it("returns `Array` tag for an array carrying an own `toJSON()`", () => {
+        const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+        arr.toJSON = () => "custom array";
+        expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.Array);
+      });
+
+      it("returns `Array` tag despite an inherited `toJSON()`", () => {
+        const proto = Array.prototype as unknown as Record<string, unknown>;
+        try {
+          proto.toJSON = () => "hijacked";
+          const arr = [1, 2];
+          expect(Object.hasOwn(arr, "toJSON")).toBe(false);
+          expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.Array);
+        } finally {
+          delete proto.toJSON;
         }
-      }
-      expect(tagFromNativeValue(new Custom())).toBe(NATIVE_TAGS.HasToJSON);
-    });
+      });
 
-    it("returns `Date` tag for `Date` (not `HasToJSON` despite `Date.toJSON`)", () => {
-      expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
-    });
+      it("returns `Array` tag for an `Array` subclass carrying `toJSON()`", () => {
+        class ProtoJson extends Array {
+          toJSON(): unknown[] {
+            return [7, 8];
+          }
+        }
+        expect(tagFromNativeValue(new ProtoJson())).toBe(NATIVE_TAGS.Array);
+      });
 
-    // Functions are non-objects and return Primitive from tagFromNativeValue.
-    // In practice, functions with toJSON() are handled separately in
-    // the conversion path, not via tagFromNativeValue.
-    it("returns `Primitive` for functions (even with `toJSON`)", () => {
-      const fn = () => {};
-      (fn as unknown as { toJSON: () => string }).toJSON = () => "converted";
-      expect(tagFromNativeValue(fn)).toBe(NATIVE_TAGS.Primitive);
+      it("returns `null` for a class instance carrying `toJSON()`", () => {
+        class Custom {
+          toJSON() {
+            return { x: 1 };
+          }
+        }
+        expect(tagFromNativeValue(new Custom())).toBe(null);
+      });
+
+      it("returns `Primitive` for a function carrying `toJSON()`", () => {
+        const fn = Object.assign(() => {}, { toJSON: () => "converted" });
+        expect(tagFromNativeValue(fn)).toBe(NATIVE_TAGS.Primitive);
+      });
     });
   });
 
@@ -197,32 +227,34 @@ describe("native-type-tags", () => {
       expect(tagFromNativeClass(Promise)).toBe(null);
     });
 
-    it("returns `HasToJSON` for class with `toJSON` on prototype", () => {
-      class WithToJSON {
-        toJSON() {
-          return { x: 1 };
-        }
-      }
-      expect(tagFromNativeClass(WithToJSON)).toBe(NATIVE_TAGS.HasToJSON);
-    });
-
-    it("returns `HasToJSON` for subclass inheriting `toJSON`", () => {
-      class Base {
-        toJSON() {
-          return "base";
-        }
-      }
-      class Sub extends Base {}
-      expect(tagFromNativeClass(Sub)).toBe(NATIVE_TAGS.HasToJSON);
-    });
-
-    it("returns `Date` tag for `Date` (not `HasToJSON` despite `Date.prototype.toJSON`)", () => {
-      expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
-    });
-
-    it("returns `null` for class without `toJSON`", () => {
+    it("returns `null` for a plain class", () => {
       class Plain {}
       expect(tagFromNativeClass(Plain)).toBe(null);
+    });
+
+    describe("`toJSON()` is intentionally not supported", () => {
+      it("returns `null` for a class with `toJSON` on its prototype", () => {
+        class WithToJSON {
+          toJSON() {
+            return { x: 1 };
+          }
+        }
+        expect(tagFromNativeClass(WithToJSON)).toBe(null);
+      });
+
+      it("returns `null` for a subclass inheriting `toJSON`", () => {
+        class Base {
+          toJSON() {
+            return "base";
+          }
+        }
+        class Sub extends Base {}
+        expect(tagFromNativeClass(Sub)).toBe(null);
+      });
+
+      it("returns `Date` tag for `Date`, whose `toJSON` is not consulted", () => {
+        expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
+      });
     });
   });
 });

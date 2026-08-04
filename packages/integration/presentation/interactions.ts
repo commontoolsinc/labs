@@ -6,16 +6,30 @@ import type { PresentationConfig } from "./config.ts";
 
 const controllers = new WeakMap<Page, PresentationInteractions>();
 
-const cfInputIsFillable = (
+// Settle the view, then report whether `selector` resolves to a fillable input.
+// The settle drives the page rather than watching it: asking the worker whether
+// it is idle queues runnable pull work that nothing else would start, so a
+// control that only the page's own pending work renders arrives on a settling
+// check and not on one that reads the DOM alone.
+//
+// Rendered, not on-screen: the fill scrolls the control into view once this
+// resolves, so its viewport position here does not bear on whether it can be
+// filled.
+const settledCfInputIsFillable = async (
   probe: ProbeApi,
   selector: string,
-): boolean => {
+): Promise<boolean> => {
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
   const element = probe.collect(selector)[0];
   if (!element) return false;
   const input = element instanceof HTMLInputElement
     ? element
     : element.shadowRoot?.querySelector("input");
-  return input instanceof HTMLInputElement && probe.isVisible(input) &&
+  return input instanceof HTMLInputElement && probe.isRendered(input) &&
     !input.disabled && !input.readOnly;
 };
 
@@ -83,6 +97,12 @@ export class PresentationInteractions {
     selector: string,
     value: string,
   ): Promise<void> {
+    // Settle before resolving the handle. A pierce-strategy wait is driven by
+    // DOM events and carries no bound of its own, so it would sit forever on a
+    // control that only the page's pending work renders.
+    await waitForCondition(this.#page, settledCfInputIsFillable, {
+      args: [selector],
+    });
     const host = await this.#page.waitForSelector(selector, {
       strategy: "pierce",
     });
@@ -91,9 +111,6 @@ export class PresentationInteractions {
         ? element
         : element.shadowRoot?.querySelector("input");
       input?.scrollIntoView({ block: "center", inline: "center" });
-    });
-    await waitForCondition(this.#page, cfInputIsFillable, {
-      args: [selector],
     });
     await this.#moveCursorToElement(host);
     const focused = await host.evaluate((element: Element) => {
@@ -121,12 +138,12 @@ export class PresentationInteractions {
       throw new Error(`"${selector}" did not resolve to a fillable input`);
     }
     await this.#page.keyboard.type(value);
-    const committed = await host.evaluate(
+    const outcome = await host.evaluate(
       async (element: Element, value: string) => {
         const input = element instanceof HTMLInputElement
           ? element
           : element.shadowRoot?.querySelector("input");
-        if (!(input instanceof HTMLInputElement)) return false;
+        if (!(input instanceof HTMLInputElement)) return "replaced";
         input.dispatchEvent(
           new Event("change", { bubbles: true, composed: true }),
         );
@@ -143,11 +160,25 @@ export class PresentationInteractions {
         await new Promise((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(resolve))
         );
-        return input.value === value;
+        // A commit that re-renders the host replaces the control. The input this
+        // fill typed into is then detached and still holds the typed text, so
+        // resolve it again and require the same node before reading the value
+        // off it.
+        const liveInput = element instanceof HTMLInputElement
+          ? element
+          : element.shadowRoot?.querySelector("input");
+        if (!element.isConnected || liveInput !== input) return "replaced";
+        return input.value === value ? "committed" : "value-mismatch";
       },
       { args: [value] },
     );
-    if (!committed) {
+    if (outcome === "replaced") {
+      throw new Error(
+        `the control behind "${selector}" was replaced while committing ` +
+          `"${value}"`,
+      );
+    }
+    if (outcome !== "committed") {
       throw new Error(
         `presentation typing did not commit "${value}" to "${selector}"`,
       );

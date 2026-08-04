@@ -224,7 +224,7 @@ export type JoinEvent = Record<PropertyKey, never>;
 // of the list from conflict detection, which is what makes disjoint appends
 // merge, and pairing it with a dedup read of the same list is what the
 // mergeable-push diagnostic reports (see
-// docs/development/migrating-collection-writes.md). The keyed `elementById` +
+// docs/features/migrating-collection-writes.md). The keyed `elementById` +
 // `addUnique` form does not apply here — it needs a key derived from the
 // element, and pattern code cannot read a profile cell's link. Two viewers
 // joining at once therefore conflict and the loser retries, which is what makes

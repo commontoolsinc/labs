@@ -3,8 +3,8 @@ import { basename, resolve } from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 import {
   buildBackgroundSupervisorDenoArgs,
-  buildDenoArgs,
   buildFuseBinaryArgs,
+  buildFuseChildDenoArgs,
   defaultStateDir,
   ensureExecShim,
   fuseMod,
@@ -399,7 +399,7 @@ export const fuse = new Command()
       });
     } else {
       spawnCmd = "deno";
-      spawnArgs = buildDenoArgs({
+      spawnArgs = buildFuseChildDenoArgs({
         modPath: fuseMod(import.meta.url),
         ...mountFlags,
       });

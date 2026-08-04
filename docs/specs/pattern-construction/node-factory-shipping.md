@@ -79,17 +79,20 @@ protocol. An inline pattern closes over the values to bind, and the resulting
 All three factory kinds are already callable function objects with useful
 descriptor state:
 
-- `PatternFactory.toJSON()` emits `$patternRef`, `argumentSchema`, and
+- `PatternFactory.toEncodableForm()` emits `$patternRef`, `argumentSchema`, and
   `resultSchema` at the storage boundary.
-- `ModuleFactory.toJSON()` and `HandlerFactory.toJSON()` emit module
-  descriptors, using `$implRef` for addressable JavaScript implementations.
+- `ModuleFactory.toEncodableForm()` and `HandlerFactory.toEncodableForm()` emit
+  module descriptors, using `$implRef` for addressable JavaScript
+  implementations.
 - `asScope()` and `PatternFactory.inSpace()` return derived callable factories.
 - verified exports and `__cfReg` values already enter the generic artifact
   index, regardless of factory kind.
 
-The existing `toJSON()` path is a one-way conversion. Native conversion calls
-`toJSON()` on a function and replaces the function with inert plain data.
-Generic reads do not recreate a callable factory. Pattern-valued list builtins
+The existing `toEncodableForm()` path is a one-way conversion. The runtime's
+artifact walk (`packages/runner/src/encodable-form.ts`) replaces each factory
+with inert plain data before the value reaches the data model, which has no
+route to a function of its own. Generic reads do not recreate a callable
+factory. Pattern-valued list builtins
 and LLM tools compensate with bespoke `$patternRef` handling.
 
 Serialization alone also does not make a symbolic factory callable. Pattern
@@ -389,7 +392,7 @@ deep-frozenness; the side-table state is not canonical until sealing succeeds.
 
 `FactoryStateV1.ref` always names the complete builder factory artifact, as
 returned by `getArtifactEntryRef(factory)` through its root token. It is never
-copied from `moduleToJSON(...).$implRef`: that legacy ref names an
+copied from `moduleToEncodableForm(...).$implRef`: that legacy ref names an
 implementation-resolution record and may not recover the factory descriptor or
 methods.
 

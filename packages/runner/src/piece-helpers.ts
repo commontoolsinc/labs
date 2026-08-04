@@ -9,7 +9,12 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
+import {
+  normalizePatternSource,
+  systemPatternSource,
+} from "./pattern-source-scheme.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import type { MemorySpace } from "./storage/interface.ts";
@@ -278,14 +283,19 @@ export function getResultCellWithSourceSchema<T = unknown>(
   if (link.schema === undefined) {
     const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
     if (resultSchema !== undefined) {
-      const schema = cell.runtime.cfc.schemaAtPath(resultSchema, link.path);
+      const schema = ContextualFlowControl.schemaAtPath(
+        resultSchema,
+        link.path,
+      );
       return cell.asSchema<T>(schema);
     }
   }
   return cell;
 }
 
-const DEFAULT_APP_PATTERN_SOURCE = "/api/patterns/system/default-app.tsx";
+const DEFAULT_APP_PATTERN_SOURCE = systemPatternSource(
+  "system/default-app.tsx",
+);
 
 /**
  * Identifies a persisted default-app-shaped root that still exposes its piece
@@ -302,7 +312,14 @@ export function isLegacyPieceRegistryRoot(
     typeof patternIdentity.identity !== "string" ||
     typeof patternIdentity.symbol !== "string" ||
     (patternSource !== undefined &&
-      patternSource !== DEFAULT_APP_PATTERN_SOURCE)
+      (typeof patternSource !== "string" ||
+        // Compare in canonical form: a root that tracks the official default
+        // app is the same root whether it was stamped with the `system:` ref
+        // or with either pre-scheme spelling of that route.
+        normalizePatternSource(
+            patternSource,
+            root.runtime.hostForSpace(root.space),
+          ) !== DEFAULT_APP_PATTERN_SOURCE))
   ) {
     return false;
   }

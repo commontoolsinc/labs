@@ -32,7 +32,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | `non-idempotent raw:map` or `Reactive graph did not settle ... Actions: raw:map` | Mapped render body is doing work during render, often an event prop invoking `.send()` immediately | Inspect `.map()` JSX for `onClick={stream.send(...)}` or other render-time writes ([gotchas/immediate-event-invocation](gotchas/immediate-event-invocation.md)) |
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "Class creation is not allowed in pattern context" | Class declared/expressed inside pattern body | Move class to module scope; a method reading a captured reactive value sees a stale snapshot ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
-| "A method/getter/setter/function-valued property ... on an object literal in pattern or render context ..." (`pattern-context:object-member`) | A function-valued member on an object literal that becomes pattern result data | A getter or `toJSON()` freezes a snapshot when the result is stored; a method, setter, or function property is a value the reactive data model cannot store. Use a plain property or `computed(() => ...)` field for a value, or a module-scope `handler()`/`lift()` for behavior ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
+| "A method/getter/setter/function-valued property ... on an object literal in pattern or render context ..." (`pattern-context:object-member`) | A function-valued member on an object literal that becomes pattern result data | A getter freezes a snapshot when the result is stored; a method, setter, or function property (`toJSON` included) is a value the reactive data model cannot store. Use a plain property or `computed(() => ...)` field for a value, or a module-scope `handler()`/`lift()` for behavior ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
 | Selection overwrites item data, `.set()` changes wrong value | Storing Cell reference directly | Box the reference: `{ item }` instead of `item` ([gotchas/cell-reference-overwrite](gotchas/cell-reference-overwrite.md)) |
@@ -76,34 +76,6 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 - [Browser UI Stale After a Handler Write](gotchas/browser-stale-ui.md) - Inspect actual cell state before assuming the write failed
 - [A Field Typed `unknown` Reads Back as Undefined](gotchas/unknown-typed-field-reads-undefined.md) - The reading operand's schema decides what materializes; naming the field is what makes the read follow the link
 
-### Compatibility entry points
-
-These short documents preserve older links and direct readers to the current
-guide:
-
-- [`computed-cell-object-object.md`](gotchas/computed-cell-object-object.md)
-  redirects to the object-interpolation entry in the quick gotchas.
-- [`filter-map-find-not-a-function.md`](gotchas/filter-map-find-not-a-function.md)
-  redirects to the collection-method entry in the quick gotchas.
-- [`get-is-not-a-function.md`](gotchas/get-is-not-a-function.md) redirects to
-  the reactive-value access entry in the quick gotchas.
-- [`handler-binding-error.md`](gotchas/handler-binding-error.md) redirects to
-  the handler-binding entry in the quick gotchas.
-- [`ifelse-composed-pattern-cells.md`](gotchas/ifelse-composed-pattern-cells.md)
-  redirects to the composed-pattern-cell entry in the quick gotchas.
-- [`lift-returns-stale-data.md`](gotchas/lift-returns-stale-data.md) redirects
-  to the stale or empty `lift()` entry in the quick gotchas.
-- [`onclick-inside-computed.md`](gotchas/onclick-inside-computed.md) redirects
-  to the event-handler placement entry in the quick gotchas.
-- [`stream-subscribe-dont-exist.md`](gotchas/stream-subscribe-dont-exist.md)
-  redirects to the stream-subscription entry in the quick gotchas.
-- [`logger-system.md`](logger-system.md) points to the browser-console and
-  runtime-logger guides that replaced it.
-- [`performance.md`](performance.md) redirects to the performance entries in
-  the quick gotchas.
-- [`type-errors.md`](type-errors.md) redirects to the binding and writable-array
-  entries in the quick gotchas.
-
 ### Error Categories
 
 - [Quick Gotchas](gotchas/quick.md) - Type binding mistakes, Writable arrays, and other short gotchas
@@ -115,7 +87,9 @@ guide:
 
 - [Console Commands](console-commands.md) - `globalThis.commonfabric.*` browser console reference
   - Starts with common tasks: read piece data, dump the rendered VDOM, diagnose
-    churn, find dead handlers, watch values, agent-browser recipes
+    churn, find dead handlers, watch values, agent-browser recipes — including
+    why a sub-pattern's cell can read `undefined` at an `of:` id while its value
+    lives at the `computed:` id of the same hash
   - Reference tail covers logger counts/timing/baselines/flags and worker traces
 - **Server-side write trace** — set `CF_DEBUG_MEMORY_WRITES=1` on the toolshed to
   log every memory write as `[memwrite] c=<conn> op=… id=… scope=… vhash=…`,
@@ -126,7 +100,7 @@ guide:
   See
   [`memwrite-trace.ts`](../../../packages/toolshed/routes/storage/memory/memwrite-trace.ts).
 - [VDOM Debug Helpers](vdom-debug.md) - `commonfabric.vdom.*` VDOM tree inspection
-- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
+- [Logger Internals](../../features/logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
 
 ### Diagnosis
 

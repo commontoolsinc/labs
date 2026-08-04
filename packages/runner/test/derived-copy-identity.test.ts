@@ -64,6 +64,31 @@ describe("noteDerivedCopy trust carry", () => {
     noteDerivedCopy(copy, original);
     expect(isTrustedPattern(copy)).toBe(false);
   });
+
+  it("records nothing when either side cannot be a key", () => {
+    // Derivation is tracked in identity-keyed tables, so a value with no
+    // identity -- a primitive, `null` -- has nowhere to be recorded. The
+    // guard exists so callers may pass whatever they replaced without
+    // checking first.
+    const original = brandTrustedPattern(patternShape());
+    expect(() => noteDerivedCopy("not-an-object", original)).not.toThrow();
+    expect(() => noteDerivedCopy(null, original)).not.toThrow();
+    expect(() => noteDerivedCopy(patternShape(), 7)).not.toThrow();
+
+    const copy = patternShape();
+    noteDerivedCopy(copy, undefined);
+    expect(resolveOriginal(copy)).toBe(copy);
+    expect(isTrustedPattern(copy)).toBe(false);
+  });
+
+  it("records nothing for a value derived from itself", () => {
+    // A walk answers an unchanged subtree by identity, so a caller can reach
+    // here with one object for both sides. Recording that would make the
+    // value its own ancestor.
+    const value = brandTrustedPattern(patternShape());
+    noteDerivedCopy(value, value);
+    expect(resolveOriginal(value)).toBe(value);
+  });
 });
 
 describe("entry-ref resolution through copies", () => {

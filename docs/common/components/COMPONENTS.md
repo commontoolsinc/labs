@@ -473,7 +473,7 @@ value inside a piece rather than a whole piece.
 
 Before opening, `cf-render` announces the click as `cf-piece-context-menu`; a host
 can cancel that event to show its own menu for the piece instead. The seam is
-written up in [HOST_EMBEDDING.md §3a](../../development/HOST_EMBEDDING.md).
+written up in [host-embedding.md §3a](../../features/host-embedding.md).
 
 ---
 

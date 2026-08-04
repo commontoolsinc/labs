@@ -1,63 +1,29 @@
-import { createSession, isDID, Session } from "@commonfabric/identity";
-import { loadIdentity } from "./identity.ts";
-import {
-  ACLManager,
-  experimentalOptionsFromEnv,
-  Runtime,
-  runtimePresets,
-} from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { ACLManager } from "@commonfabric/runner";
 import {
   ACL,
   ACLUser,
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
+import { loadManager, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
-export interface SpaceConfig {
-  apiUrl: URL;
-  identityPath: string;
-  space: string;
-}
-
-// Create an identity and session from configuration.
-async function loadSession(config: SpaceConfig): Promise<Session> {
-  const identity = await loadIdentity(config.identityPath);
-  return isDID(config.space)
-    ? createSession({
-      identity,
-      spaceDid: config.space,
-    })
-    : createSession({
-      identity,
-      spaceName: config.space,
-    });
-}
-
-// Creates a Runtime instance for ACL operations
-export async function createRuntime(
+// Open the space and hand an ACLManager to `run`. The ACL document is
+// addressed by the space DID and read through the ACLManager, so the space
+// cell's contents are never needed here and their sync is deferred.
+async function withAcl<T>(
   config: SpaceConfig,
-  session: Session,
-): Promise<Runtime> {
-  // Shared first-party posture for client runtimes against a deployed API
-  // (CT-1814).
-  const runtime = new Runtime(runtimePresets.remoteClient({
-    apiUrl: config.apiUrl,
-    storageManager: StorageManager.open({
-      as: session.as,
-      memoryHost: new URL(config.apiUrl),
-      spaceIdentity: session.spaceIdentity,
-    }),
-    experimental: experimentalOptionsFromEnv(Deno.env.get),
-  }));
-
-  if (!(await runtime.healthCheck())) {
-    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
-  }
-
-  await runtime.storageManager.synced();
-  return runtime;
+  run: (acl: ACLManager) => Promise<T>,
+): Promise<T> {
+  const manager = await loadManager({ ...config, deferSpaceCellSync: true });
+  await using runtime = manager.runtime;
+  const space = manager.getSpace();
+  const result = await run(new ACLManager(runtime, space));
+  // Checked AFTER the ACL access, which is what pulls the space and records any
+  // denial. A denied write already rejects above; this also fails a read that
+  // otherwise collapses to a silent "no ACL".
+  throwOnSpaceAuthorizationError(runtime.storageManager, space);
+  return result;
 }
 
 // Add or update an ACL entry for a DID
@@ -67,14 +33,7 @@ export async function setAclEntry(
   capability: Capability,
 ): Promise<void> {
   const userDid = userToACLUser(user);
-  const session = await loadSession(config);
-  await using runtime = await createRuntime(config, session);
-  const aclManager = new ACLManager(runtime, session.space);
-  await aclManager.set(userDid, capability);
-  // Checked AFTER the ACL access, which is what pulls the space and records any
-  // denial. A denied write already rejects above; this also fails a read that
-  // otherwise collapses to a silent "no ACL".
-  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
+  await withAcl(config, (acl) => acl.set(userDid, capability));
 }
 
 // Remove an ACL entry for a DID
@@ -83,23 +42,14 @@ export async function removeAclEntry(
   user: string,
 ): Promise<void> {
   const userDid = userToACLUser(user);
-  const session = await loadSession(config);
-  await using runtime = await createRuntime(config, session);
-  const aclManager = new ACLManager(runtime, session.space);
-  await aclManager.remove(userDid);
-  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
+  await withAcl(config, (acl) => acl.remove(userDid));
 }
 
 // Get the current ACL for a space
 export async function getAcl(
   config: SpaceConfig,
 ): Promise<ACL | null> {
-  const session = await loadSession(config);
-  await using runtime = await createRuntime(config, session);
-  const aclManager = new ACLManager(runtime, session.space);
-  const acl = await aclManager.get();
-  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
-  return acl;
+  return await withAcl(config, (acl) => acl.get());
 }
 
 // Use "ANYONE" on the command line to map to "*"

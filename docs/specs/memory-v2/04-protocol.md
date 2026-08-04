@@ -53,6 +53,7 @@ The client MUST declare its protocol version in the first WebSocket message:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
     "entityIdLookup": true
@@ -70,6 +71,7 @@ If the server accepts the protocol, it returns:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
     "entityIdLookup": true
@@ -141,8 +143,7 @@ connection.
 in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
 when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
-shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
-and does not enable the v2 encoding.
+shape.
 
 `entityIdListing` advertises support for `entity-id.list`. It defaults to
 `false` when absent. A client must not send the request unless the server
@@ -153,6 +154,13 @@ advertises the capability.
 `entity-id.exists`. Both default to `false` when absent. A client connected to
 an older server may make the historical unpaginated list request, but must not
 send continuation fields or an existence request.
+
+`verdictCatchUpMarkers` advertises that the server stages a `caughtUpLocalSeq`
+catch-up obligation for accepts and conflict rejections, delivered on the
+batched fan-out (section 4.11.2). It is build-inherent (always advertised by
+this build) and defaults to `false` when absent: against an older server that
+stamps markers only for conflicts, the client applies verdicts immediately
+instead of parking them.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -201,6 +209,11 @@ interface SessionOpenResult {
   sessionId: SessionId;
   sessionToken: string;
   serverSeq: number;
+  // Highest of the session's own localSeqs whose verdicts are decided and
+  // reflected in delivered/served state (SESSION localSeq space, not server
+  // seqs). Lets a resuming client re-anchor its catch-up point without
+  // waiting for a frame. See section 4.11.2 for the stamping contract.
+  caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: {
@@ -246,7 +259,7 @@ Rules:
   challenge; a stale signed `exp`) and every transport-level disconnect still
   retry, so a transient blip or a fresh-challenge race heals. A permanent
   protocol-flag mismatch at `hello` ends the whole connection the same way. See
-  [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
+  [`../../features/authorization-failure-surfacing.md`](../../features/authorization-failure-surfacing.md)
   for how the client, the runner storage layer, and the CLI act on this
   classification end to end.
 
@@ -347,6 +360,13 @@ interface SessionSync {
   type: "sync";
   fromSeq: number;
   toSeq: number;
+  // Outcome marker (SESSION localSeq space): every verdict of the receiving
+  // session's commits through this localSeq is decided, and this frame
+  // reflects those outcomes for the docs it covers (section 4.11.2).
+  // Releases the client's read-repair gate and applies parked accepts —
+  // the promotion of accepted-but-unpromoted commits from pending overlay
+  // to confirmed mirror.
+  caughtUpLocalSeq?: number;
   upserts: Array<{
     branch: BranchId;
     id: EntityId;
@@ -970,15 +990,43 @@ Clients MUST:
 The server processes writes serially within a branch, or with equivalent
 serializable isolation.
 
-For live sync:
+For live sync, transact verdicts return INLINE and the fan-out stays
+batched: N commits can apply against one watch-union recompute, which is
+where the subscription pipeline's throughput comes from. The ordering
+contract is enforced through the catch-up marker and CLIENT-side verdict
+parking instead of server-side response queuing (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
-- before returning `ConflictError`, the server MUST first flush any already
-  committed relevant changes that would otherwise leave the client's subscribed
-  view stale
-- the server SHOULD carry dirty-document information through this flush so it
-  only recomputes affected watch unions
+- for every accept and every `ConflictError` rejection, the server MUST
+  stage a catch-up obligation for the committing session, and the next
+  frame the batched fan-out sends that session MUST carry
+  `caughtUpLocalSeq` at or above the verdict's localSeq — an
+  otherwise-empty frame when nothing the session watches is dirty. Other
+  rejection kinds (protocol, authorization, apply errors) carry no marker
+  obligation; the client applies them immediately
+- the marker means "every verdict of yours through this localSeq is
+  decided, and this frame reflects those outcomes for the docs it covers."
+  The session's own ACCEPTED writes are echo-suppressed from frames
+  (dirty-origin tracking): the parked verdict carries their truth (with the
+  post-apply `document` on patch revisions where provided, §4.3.1).
+  REJECTED commits' docs are staged origin-less, so repair frames DO cover
+  them.
+- the CLIENT MUST NOT apply a verdict's state effects ahead of the marker
+  that covers it: an accept's promotion (pending overlay to confirmed
+  mirror, removing the pending local copy) is PARKED until
+  `caughtUpLocalSeq` reaches its localSeq, so promotion extrapolates over a
+  base reflecting the foreign novelty the accept was applied on top of; a
+  conflict rejection's drop/revert is held by the read-repair gate
+  (`finalizeRejection`, with a timeout backstop for lost connections).
+  Visible state is unaffected by parking — the pending overlay already
+  shows the write.
+
+The server advertises this contract with the build-inherent
+`verdictCatchUpMarkers` protocol flag. A client that sees it absent (an
+older server that stamps markers only for conflicts) applies verdicts
+immediately, as before; a client with no active sync consumer (no watch
+view — so no frame stream to order against) also applies immediately.
 
 ## 4.12 Mapping from Current Implementation
 

@@ -1,5 +1,5 @@
 // Probe + regression for the residual profile-append-during-rehydration loss
-// (docs/development/mergeable-collection-writes.md "Residual" section), distilled
+// (docs/features/mergeable-collection-writes.md "Residual" section), distilled
 // to the essential runtime mechanism and made deterministic:
 //
 //   A single event handler that, in ONE multi-space transaction, mergeable-appends

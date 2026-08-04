@@ -57,14 +57,20 @@ authoritative statement of these rules.
 
 #### Objects
 
-- Plain objects only (no class instances)
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself, so class instances and null-prototype objects alike cause rejection
 - Keys must be strings; symbol keys cause rejection as non-fabric
 - Every property must be an enumerable *data* property; accessor-backed
   (getter and/or setter) and non-enumerable properties cause rejection as
   non-fabric
+- The names `__proto__` and `constructor` cause rejection in the JavaScript
+  implementation. This is a reservation of that implementation — one name its
+  copy loops cannot rebuild, one that its other boundaries already refuse —
+  rather than a rule of the model; see Section 1.5 of
+  `space-model-formal-spec/1-fabric-values.md`
 - Values must be valid fabric values
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- Reconstruction produces regular plain objects, which is the only object
+  shape a fabric value has
 
 ### Special Values
 
@@ -83,8 +89,9 @@ These types cannot be stored directly:
 
 - `symbol` — only registry-interned symbols are storable; unique symbols
   throw (see Symbols below)
-- `function` — throws error unless it has a `toJSON()` method
-- Class instances — throws error unless they have `toJSON()` or special handling
+- `function` — throws
+- Class instances — throw unless the class has special handling (a recognized
+  native class, or the fabric protocol)
 
 #### Symbols
 
@@ -459,8 +466,8 @@ The system aims for an **immutable-forward** design:
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects
+- Reconstruction always produces regular plain objects, that being the only
+  object shape a fabric value has
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.

@@ -177,8 +177,7 @@ type FabricNativeObject =
   | Set<FabricValue | FabricNativeObject>
   | Date
   | RegExp
-  | Uint8Array
-  | { toJSON(): unknown }; // Legacy — see below.
+  | Uint8Array;
 ```
 
 The `FabricNativeObject` type exists solely at function parameter/return
@@ -186,12 +185,11 @@ boundaries — for example, `shallowFabricFromNativeValue()` accepts
 `FabricValue | FabricNativeObject` as input (Section 8). It is never a
 member of `FabricValue`.
 
-> **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
-> `FabricNativeObject` represents objects that provide a `toJSON()` method.
-> The conversion functions call `toJSON()` and process the
-> result (Section 8.2). This variant is **legacy and marked for removal** —
-> callers should migrate to the fabric protocol
-> (`FabricInstance` + `[CODEC]`). See Section 7.1 for migration guidance.
+Every arm names a specific native class. There is no duck-typed arm: a value
+becomes fabric-representable by being one of these, by implementing the fabric
+protocol (`FabricInstance` + `[CODEC]`), or not at all. In particular a
+`toJSON()` method carries no meaning here — it is an ordinary member, and a
+function-valued member is not representable.
 
 ### 1.3 Primitive Types
 
@@ -1183,6 +1181,15 @@ Section 4.5.
 ### 1.5 Recursive Containers
 
 **Arrays:**
+- Direct `Array` instances only: the prototype must be `Array.prototype`
+  itself. An `Array` subclass instance, an array whose prototype has been
+  severed or replaced, and an array from another realm all cause rejection,
+  because an array's prototype has no representation as array content, so
+  accepting one could only mean dropping it silently. A subclass prototype is
+  live code besides — an overridden `Symbol.iterator`, say, makes iteration
+  answer differently than the indices do, and freezing the array does not
+  change that. Plain objects are governed by the same principle; see the
+  object rule below.
 - May be dense or sparse
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
@@ -1218,7 +1225,12 @@ Section 4.5.
 > `3-json-encoding.md` for the specific JSON encoding and examples.
 
 **Objects:**
-- Plain objects only (class instances must implement the fabric protocol)
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself. A class instance must implement the fabric protocol, and a
+  null-prototype object causes rejection, for the reason arrays give above — a
+  prototype has no representation as object content, so accepting one could
+  only mean dropping it silently. A record therefore has exactly one shape,
+  the one the natural syntax produces
 - Keys must be strings; symbol-keyed *properties* cause rejection (this
   is distinct from symbol *values*, which are admitted per Section 1.2
   with the runtime restriction in Section 1.3)
@@ -1229,8 +1241,43 @@ Section 4.5.
   name-driven copying or serialization
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- **Host restriction, not a model rule:** the property names `__proto__` and
+  `constructor` cause rejection in the JavaScript implementation. See the
+  callout below
+- Reconstruction produces regular plain objects, which is the only object
+  shape a fabric value has
+
+> **Property names this implementation reserves.** A fabric record's keys are
+> strings, and the model attaches no meaning to any particular one: a property
+> name is data. Two names are nonetheless refused by the JavaScript
+> implementation, `__proto__` and `constructor`, for two different reasons —
+> neither of which is a limit of the language, and both of which are removable.
+>
+> `__proto__` cannot be rebuilt by the copying this implementation performs.
+> Records are reconstructed at each boundary — conversion, cloning, decoding —
+> by assignment (`target[key] = value`) and `Object.assign()`, and for this name
+> both reach `Object.prototype`'s accessor rather than creating a property: the
+> value is dropped, and the copy's prototype is repointed as well when that
+> value is an object or `null`. Mechanisms that carry the name faithfully do
+> exist — spread, `Object.fromEntries()`, `Object.defineProperty()`, and
+> `JSON.parse()` — so what stands in the way is the copy loops, not JavaScript.
+>
+> `constructor` copies faithfully. It is reserved because other boundaries in
+> this implementation already refuse it: the projection to native values drops
+> it, and `FabricError` throws on it. Admitting it here would mean accepting a
+> key that a later boundary discards without saying so.
+>
+> The boundary refuses such a record rather than corrupting it in transit
+> ("death before confusion"), and a decoder that meets one reports a
+> `ProblematicValue` rather than reconstructing something the bytes do not say.
+>
+> **This reservation belongs to the implementation, not to the model.** A host
+> that does not route property assignment through a prototype chain — Rust,
+> Swift, C++, Python, and most others — reserves no names at all and must not
+> adopt this rule. Even here it is not permanent: rebuilding the copy loops on
+> a faithful mechanism, and revisiting the boundaries that filter these names,
+> would retire it. It is expressed as a check separate from the inertness rules
+> so that it can be removed as a unit when that happens.
 
 ### 1.6 Circular References and Shared References
 
@@ -1838,8 +1885,8 @@ The system follows an **immutable-forward** design:
   boundary, not of whether type-tag reconstruction occurred.
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects.
+- Reconstruction always produces regular plain objects, that being the only
+  object shape a fabric value has.
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
@@ -2898,16 +2945,16 @@ boundary-only serialization and the three-layer architecture:
 7. Update internal code to work with `FabricValue` types rather than JSON
    shapes or raw native objects.
 
-> **`toJSON()` compatibility and migration.** The conversion functions and their
-> variants currently honor `toJSON()` methods on objects that have them — if an
-> object has a `toJSON()` method and does not implement `FabricInstance`, the
-> conversion functions call `toJSON()` and process the result. This preserves
-> backward compatibility with existing code. However, `toJSON()` support is
-> **marked for removal**: it eagerly converts to JSON-compatible shapes, which
-> is incompatible with late serialization. Implementors should migrate to the
-> fabric protocol (`FabricInstance` + `[CODEC]`) instead. Once all callers
-> have migrated, `toJSON()` support will be removed from the conversion
-> functions.
+> **`toJSON()` is not a conversion route.** The conversion functions give a
+> `toJSON()` method no standing: a value that is not a `FabricValue`, a
+> `FabricNativeObject`, or an accepted container does not become representable
+> by carrying one. An object bearing `toJSON` is read as the record it is, so
+> the method itself is an ordinary member — a function, which no record may
+> hold. Anything that needs a representation of its own implements the fabric
+> protocol (`FabricInstance` + `[CODEC]`); anything that a caller wants
+> serialized on its way in is that caller's to serialize before it reaches the
+> conversion. Honoring `toJSON()` would eagerly convert to JSON-compatible
+> shapes, which is incompatible with late serialization.
 
 ### 7.2 Unifying JSON Encoding
 
@@ -3062,10 +3109,17 @@ export function fabricFromNativeValue(
 > single constructor lookup that returns a tag string (e.g., `"Error"`,
 > `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
 > `"FabricInstance"`). The conversion function then switches on the tag to
-> route to the appropriate wrapping logic. Fallback paths handle exotic Error
-> subclasses (via `Error.isError()`), cross-realm arrays (via
-> `Array.isArray()`), null-prototype objects, and objects with `toJSON()`
-> methods.
+> route to the appropriate wrapping logic. An array is the exception to the
+> constructor lookup: `Array.isArray()` is consulted first and answers
+> `"Array"` unconditionally, so a subclass instance, a severed-prototype array,
+> and a cross-realm array all reach array handling and are answered by the
+> array rule of Section 1.5, rather than being rejected as some unrecognized
+> class or routed elsewhere by something the array carries. Fallback paths
+> handle exotic Error subclasses (via `Error.isError()`) and null-prototype
+> objects. Tagging a null-prototype
+> object `"Object"` classifies more broadly than the type admits, for the same
+> reason the array tag does: it is what lets the object rule of Section 1.5
+> reject the value by name rather than as some unrecognized class.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in
@@ -3195,8 +3249,9 @@ if the value is:
   string). Unique symbols return `false`; see the Section 1.3 callout.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
-  `Uint8Array`, or an object with a `toJSON()` method — legacy)
-- An array where every present element satisfies `isFabricCompatible()`
+  `Uint8Array`)
+- An array where every present element satisfies `isFabricCompatible()`, and
+  which the array rule of Section 1.5 accepts
 - A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,

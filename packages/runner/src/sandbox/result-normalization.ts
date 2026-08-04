@@ -3,6 +3,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { hasEncodableForm } from "../encodable-form.ts";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -35,17 +36,13 @@ const regexpFlagsGetter = Object.getOwnPropertyDescriptor(
   "flags",
 )!.get!;
 
-const hasToJSON = (value: object): boolean =>
-  "toJSON" in value &&
-  typeof (value as { toJSON?: unknown }).toJSON === "function";
-
 /**
  * SES compartments share the host's hardened `Object.prototype` identity.
  * Deliberately do not infer a foreign `Object.prototype` from a null-rooted
  * parent: custom instance prototypes can be null-rooted too.
  */
 function isPlainResultObject(value: object): boolean {
-  if (hasToJSON(value)) return false;
+  if (hasEncodableForm(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === null || proto === Object.prototype;
 }
@@ -181,12 +178,16 @@ function adaptSandboxResult(
   const existing = adapted.get(value);
   if (existing !== undefined) return existing;
 
+  // This boundary answers in canonical shapes: a fresh `Array` for anything
+  // array-shaped, and an `Object.prototype`-rooted record for anything else.
+  // A prototype is not part of what a value says as data, and a fabric value
+  // has exactly one shape for a record, so a pattern that builds a result with
+  // `Object.create(null)` or `Object.groupBy()` has it re-rooted here rather
+  // than carried across only to be rejected downstream.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)
-    : Object.create(
-      Object.getPrototypeOf(value) === null ? null : Object.prototype,
-    );
+    : {};
   adapted.set(value, copy);
 
   for (const [key, child] of Object.entries(value)) {
@@ -229,6 +230,11 @@ function prepareActionResultValidation(
   const existing = prepared.get(value);
   if (existing !== undefined) return existing;
 
+  // Copying the prototype is safe because this runs on the output of
+  // `adaptSandboxResult()`, which has already re-rooted every record -- so the
+  // prototype in hand is `Object.prototype`. Anything that ran this pass
+  // first, on a value straight from the sandbox, would propagate a prototype
+  // no fabric record has.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)

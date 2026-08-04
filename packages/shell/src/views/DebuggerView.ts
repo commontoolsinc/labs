@@ -32,8 +32,6 @@ export const TOPIC_HIERARCHY = {
     subtopics: {
       push: { label: "Push", pattern: "storage.push" },
       pull: { label: "Pull", pattern: "storage.pull" },
-      connection: { label: "Connection", pattern: "storage.connection" },
-      subscription: { label: "Subscriptions", pattern: "storage.subscription" },
     },
   },
   cells: {
@@ -60,8 +58,7 @@ export type SubtopicKey<T extends TopicKey> =
  * - Event expansion for detailed inspection
  * - Performance metrics and statistics
  *
- * Features a resizable drawer interface similar to the Inspector
- * but focused on telemetry events rather than storage operations.
+ * Presented as a resizable drawer.
  */
 export class XDebuggerView extends LitElement {
   static override styles = css`
@@ -1650,6 +1647,7 @@ export class XDebuggerView extends LitElement {
 
     if (keys.length === 0) {
       return html`
+
       `;
     }
 
@@ -1659,6 +1657,7 @@ export class XDebuggerView extends LitElement {
           const stats = timingData[key];
           if (!stats.cdf || stats.cdf.length === 0) {
             return html`
+
             `;
           }
 
@@ -1786,6 +1785,7 @@ export class XDebuggerView extends LitElement {
 
     if (cdf.length === 0) {
       return html`
+
       `;
     }
 

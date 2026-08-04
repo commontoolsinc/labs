@@ -48,17 +48,77 @@ set or copy them into agent mutations.
 
 ## Reading Topics
 
-Read the board's topic references from its input cell, then address a topic by
-the canonical fid published in the board's `crossrefs` result:
+The current pattern exports `index` — a compact discovery result whose rows
+carry scalar summaries plus title-only sibling references, so one read surveys
+the whole board without expanding any topic:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step
+deno task cf piece get --url "$TOPICS_BOARD_URL" index --step
+```
+
+A deployed board can run an older pattern without `index` — the read above
+erroring on an unknown path is the tell. Survey such a board through the durable
+`topics` input instead, projected immediately: an unprojected row follows the
+linked Topic and can include its body, comments, handlers, and reference graph.
+
+```bash
+deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+  --filter '.title != null' \
+  --schema title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+```
+
+The title predicate keeps discovery output uniformly object-shaped by omitting
+valid null rows. Concise projection itself preserves nullable rows and follows
+declared nested arrays without exposing sibling fields.
+
+`--filter` is useful for exact field and range searches. It runs before
+`--schema`, so a predicate can inspect a field that the result omits:
+
+```bash
+# Find one Topic by exact title.
+deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+  --filter '.title == "<exact title>"' \
+  --schema title,lastActivityAt,commentCount
+
+# Find Topics active at or after an epoch-millisecond threshold.
+deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+  --filter '.lastActivityAt >= 1785074400000' \
+  --schema title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+
+# Combine predicates for a narrower field search.
+deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+  --filter '.createdBy.name == "<name>" and .commentCount > 0' \
+  --schema title,lastActivityAt,commentCount
+```
+
+Filtering preserves board order; it does not sort by activity. The predicate
+language supports paths, JSON literals, comparisons, boolean operators, and
+parentheses, but not substring, regex, sorting, or arbitrary jq programs. Use
+exact known fields or numeric ranges to shrink the corpus, then inspect the
+small result. Always combine a Topic-list filter with `--schema`; filter alone
+returns every property of each match.
+
+Address a selected Topic by the canonical fid published in the board's
+`crossrefs` result. Filter and project that computed index too:
+
+```bash
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
+  --filter '.topic.title == "<exact title>"' \
+  --schema fid,topic.title,topic.lastActivityAt,topic.commentCount
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
 deno task cf piece get --url "$TOPIC_URL" title --input
 deno task cf piece get --url "$TOPIC_URL" body --input
-deno task cf piece get --url "$TOPIC_URL" comments --input
-deno task cf piece get --url "$TOPIC_URL" links --input
+deno task cf piece get --url "$TOPIC_URL" comments --input \
+  --schema sentAt,author.kind,author.name,authorName,body
+deno task cf piece get --url "$TOPIC_URL" links --input \
+  --schema kind,url,label,addedAt,addedBy.kind,addedBy.name
+
+# Search within a selected Topic's arrays.
+deno task cf piece get --url "$TOPIC_URL" comments --input \
+  --filter '.author.name == "<agent>" or .authorName == "<legacy name>"' \
+  --schema sentAt,author.kind,author.name,authorName,body
+deno task cf piece get --url "$TOPIC_URL" links --input \
+  --filter '.kind == "pr"' --schema kind,url,label,addedAt
 ```
 
 Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
@@ -66,7 +126,10 @@ the intermediate wrapper link stored in the board's topics array. Read the
 existing topic's input before changing it, especially its full body, comments,
 and links. Input reads are durable and do not need `--step`; use `--step` on
 result reads that must be current. If `topics --input` is non-empty but
-`crossrefs --step` is empty or fails, do not infer that the board is empty.
+`crossrefs --step` is empty or fails, do not infer that the board is empty. The
+non-null rows from a compact `topics --input` search remain valid evidence, but
+the search does not expose a canonical Topic fid, so report the crossref
+materialization blocker rather than guessing an address.
 
 ## Creating and updating
 
@@ -76,12 +139,18 @@ directly:
 ```bash
 deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic \
   '{"title":"<title>","agentName":"<agent name>"}'
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
+  --filter '.topic.title == "<exact title>"' --schema fid,topic.title
 ```
 
-Find the new topic's canonical fid in `crossrefs` before applying further
-changes. All handler arguments are JSON; encode multiline Markdown rather than
-passing an unescaped string.
+`addTopic` returns the topic it created, so a board running this source hands
+back the new topic on the call itself. The board's deployed pattern can be older
+than this source, and an older `addTopic` returns nothing; `crossrefs` above
+remains the path that works either way, and `cf piece verbs` reports the
+deployed pattern's source identity when you need to know which you are talking
+to. Find the new topic's canonical fid before applying further changes. All
+handler arguments are JSON; encode multiline Markdown rather than passing an
+unescaped string.
 
 ```bash
 deno task cf piece call --url "$TOPIC_URL" setBody \
@@ -92,6 +161,13 @@ deno task cf piece call --url "$TOPIC_URL" addLink \
   '{"kind":"pr","url":"<PR URL>","label":"<PR label>","agentName":"<agent name>"}'
 deno task cf piece get --url "$TOPIC_URL" commentCount --step
 ```
+
+Each of these three returns the record it wrote — the appended comment or link,
+or the persisted body plus its attribution — which spares the verification read
+above. That result rides `plainResultReceipts`
+(`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` until the flag's default flips); the
+write happens either way, so treat an absent result as "not enabled here", never
+as "the mutation did not land".
 
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,
@@ -128,11 +204,17 @@ verification succeeded.
 
 ## Troubleshooting
 
-- If initial CLI synchronization times out, no piece read or mutation ran. Retry
-  once; if it repeats, report the deployment or authorization blocker.
+- If initial CLI synchronization times out, no piece read or mutation ran.
+  Report the blocker; rerun only after Tailnet/API reachability or identity
+  authorization has been re-established.
 - If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
   do not call the board empty. Preserve the input evidence and report the
   result-materialization failure.
+- A compact transformed read of a present source exits nonzero when its value
+  cannot materialize and explicitly says the failure is not JSON `null`. A
+  printed `null` is a valid projected null or an absent optional source, not an
+  empty array or proof of no matches; use `--filter '.title != null'` when null
+  Topic rows are irrelevant.
 - Do not substitute `piece ls` for the board's topic list. Pieces created inside
   handlers can be absent from that listing; `crossrefs --step` is the canonical
   fid index, with `topics --input` as the durable fallback.

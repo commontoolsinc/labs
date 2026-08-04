@@ -86,6 +86,22 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 3 (`toJSON` is an ordinary member name)
+
+`pattern-context:object-member` treats `toJSON` like any other member. A
+`toJSON()` method or `toJSON:` function-valued property on an object literal in
+pattern or render context is reported, whatever its body reads.
+
+The rule previously exempted a `toJSON` member whose body read nothing
+reactive, on the grounds that such an object was storable — the data model
+converted a `toJSON`-bearing object by calling the method. It no longer does:
+the conversion reads `toJSON` as the ordinary function-valued member it is, and
+a record may hold no function. So the exemption admitted a member that compiles
+and throws at its first write, and the body check it rested on
+(`memberBodyReadsReactiveValue`) is gone with it.
+
+This narrows the accepted language. Nothing in the corpus used the exemption.
+
 ### Addendum 2 (2026-07-10 phase-4 verification findings)
 
 Language deltas found by adversarial verification of the target-language

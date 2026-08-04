@@ -41,6 +41,7 @@ import type {
   SqliteOperation,
 } from "@commonfabric/memory/v2";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
+import { TransactionAborted } from "./transaction-errors.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -1678,7 +1679,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // as inexpensive defense-in-depth against accidental deeper mutation of
         // the shared input.
         valueObj = shallowMutableClone(
-          currentValue as FabricValue,
+          currentValue,
         ) as MutableFabricPlainObjectLayer;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
@@ -1700,7 +1701,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           nextValue[key] =
             (isNextKeyArrayIndex ? [] : {}) as FabricPlainObject;
       }
-      nextValue[lastKey] = value as FabricValue;
+      nextValue[lastKey] = value;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       if (writeResultRetry.error) {
@@ -1786,7 +1787,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
-    return this.tx.abort(reason);
+    const result = this.tx.abort(reason);
+    // An abort is a terminal outcome, and it discards the staged writes the
+    // same way a rejected commit does. Settle callbacks compensate for writes
+    // that did not become durable, so they run here as well.
+    if (!result.error) {
+      this.runCommitCallbacks({ error: TransactionAborted(reason) });
+    }
+    return result;
   }
 
   private runCommitCallbacks(result: Result<Unit, CommitError>): void {
@@ -1803,6 +1811,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         logger.error("storage-error", "Error in commit callback:", error);
       }
     }
+    // A settled transaction dispatches its callbacks exactly once. Holding
+    // them afterwards makes any reference to the transaction retain every
+    // callback's closure, and through those closures the cells and registries
+    // of the action that committed it.
+    this.commitCallbacks.clear();
   }
 
   private clearPostCommitOutbox(): void {
@@ -1923,15 +1936,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // that promise always resolves, even if the commit fails, in which case it
     // passes an error message as result. An exception here would be an internal
     // error that should propagate.
-    promise.then((result) => {
-      this.runCommitCallbacks(result);
-    }).catch((error) => {
-      logger.error(
-        "storage-error",
-        "Transaction commit promise rejected:",
-        error,
-      );
-    });
+    promise.then(
+      (result) => {
+        this.runCommitCallbacks(result);
+      },
+      (reason) => {
+        const error: CommitError = {
+          name: "StorageTransactionAborted",
+          message: "Transaction commit promise rejected",
+          reason,
+        };
+        this.statusOverride = {
+          status: "error",
+          journal: this.tx.journal,
+          error,
+        };
+        this.clearPostCommitOutbox();
+        this.runCommitCallbacks({ error });
+        logger.error(
+          "storage-error",
+          "Transaction commit promise rejected:",
+          reason,
+        );
+      },
+    );
 
     const result = await promise;
     if (result.ok && !readOnly) {
@@ -1991,6 +2019,14 @@ export interface TransactionWrapperOptions {
    * wrapped transaction.
    */
   childCellTx?: IExtendedStorageTransaction;
+
+  /**
+   * If true, drops settle callbacks instead of registering them. For work that
+   * duplicates what another transaction already carries: the state such a
+   * callback would compensate for belongs to the original, so this transaction
+   * has nothing to take back when it ends.
+   */
+  discardSettleCallbacks?: boolean;
 }
 
 /**
@@ -2362,8 +2398,25 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void {
+    if (this.options.discardSettleCallbacks === true) return;
     return this.wrapped.addCommitCallback(callback);
   }
+}
+
+/**
+ * Create a transaction wrapper for work that re-runs what another transaction
+ * already carries, so the two can be compared, and is discarded afterwards.
+ *
+ * The re-run registers the same settle callbacks the original did. Those
+ * callbacks undo in-memory state on the way to a transaction that did not
+ * become durable, and here the state belongs to the original run, which has
+ * already committed it — so this wrapper drops them rather than letting the
+ * discard tear down live state the original owns.
+ */
+export function createDuplicateWorkTransaction(
+  tx: IExtendedStorageTransaction,
+): TransactionWrapper {
+  return new TransactionWrapper(tx, { discardSettleCallbacks: true });
 }
 
 /**

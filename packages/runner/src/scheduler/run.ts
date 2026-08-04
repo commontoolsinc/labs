@@ -14,6 +14,7 @@ import {
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
+import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -118,8 +119,8 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
-}): void {
-  state.commitPromise.then(async ({ error }) => {
+}): Promise<void> {
+  const handleResult = async (error: unknown): Promise<void> => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
@@ -251,10 +252,17 @@ export function watchReactiveActionCommit(state: {
       // WATCH(scheduler-v2): exhausted retries can leave a piece registered
       // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
-  }).catch((error) => {
+  };
+  return state.commitPromise.then(
+    ({ error }) => handleResult(error),
+    (reason) =>
+      handleResult(
+        reason || new Error("Storage commit promise rejected without a reason"),
+      ),
+  ).catch((error) => {
     logger.error(
       "schedule-error",
-      "Commit promise rejected in finalizeAction:",
+      "Commit result handling failed in finalizeAction:",
       error,
     );
   });
@@ -891,7 +899,9 @@ function recordOptionalActionRunDiagnostics(
       runIdempotencyRecheck(
         {
           idempotencyViolations: state.idempotencyViolations,
-          createTx: () => state.runtime.edit(),
+          // The recheck re-runs the action only to compare its writes with the
+          // run that already happened, then throws the transaction away.
+          createTx: () => createDuplicateWorkTransaction(state.runtime.edit()),
           invoke: (fn) => state.runtime.harness.invoke(fn),
           getActionId: state.getActionId,
           getActionTelemetryInfo: state.getActionTelemetryInfo,

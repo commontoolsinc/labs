@@ -9,7 +9,6 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   type SessionFactory,
   setConflictAdmissionEnabled,
-  setConflictAdmissionMode,
   StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -132,11 +131,9 @@ const syntheticConflict = (
   name: "ConflictError",
   message: "synthetic conflict",
   transaction: {
-    iss: space,
-    cmd: "/memory/transact",
-    sub: space,
-    args: { changes: {} },
-    prf: [],
+    localSeq: 0,
+    reads: { confirmed: [], pending: [] },
+    operations: [],
   },
   conflict: {
     space,
@@ -696,144 +693,6 @@ describe("Memory v2 storage notifications", () => {
     expect(called).toBe(1);
   });
 
-  it("hold-mode local check flags only provably-stale confirmed reads", async () => {
-    const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      commitReadsStaleLocally: (commit: unknown) => boolean;
-    };
-    const uri = `of:hold-check-${Date.now()}` as URI;
-
-    // Establish a confirmed record with seq > 0.
-    await remoteSession.transact({
-      localSeq: remoteLocalSeq++,
-      reads: { confirmed: [], pending: [] },
-      operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-    });
-    await provider.sync(uri);
-
-    const read = (seq: number) => ({
-      reads: { confirmed: [{ id: uri, path: [], seq }], pending: [] },
-      operations: [],
-    });
-    // seq 0 is below the confirmed base -> provably stale.
-    expect(replica.commitReadsStaleLocally(read(0))).toBe(true);
-    // a seq at/above the confirmed base -> not provably stale, so it is sent.
-    expect(replica.commitReadsStaleLocally(read(Number.MAX_SAFE_INTEGER))).toBe(
-      false,
-    );
-  });
-
-  it("hold mode reverts a held commit only when its read is actually stale", async () => {
-    setConflictAdmissionMode("hold");
-    try {
-      const provider = storageManager.open(space);
-      const replica = provider.replica as typeof provider.replica & {
-        commitNative: (
-          transaction: unknown,
-          source?: unknown,
-        ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
-        recordStaleFloor: (commit: unknown, localSeq: number) => void;
-        noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
-      };
-      const uri = `of:hold-revert-${Date.now()}` as URI;
-
-      await remoteSession.transact({
-        localSeq: remoteLocalSeq++,
-        reads: { confirmed: [], pending: [] },
-        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-      });
-      await provider.sync(uri);
-
-      // Floor uri so a new commit reading it is held until caughtUpLocalSeq>=5.
-      replica.recordStaleFloor({
-        localSeq: 5,
-        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
-        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-      }, 5);
-
-      const commitPromise = replica.commitNative({
-        operations: [{
-          op: "set",
-          id: uri,
-          type: "application/json",
-          value: { value: { v: 2 } },
-        }],
-      }, staleReadSource(uri, 0));
-
-      // Held: not sent, not settled, until we observe the catch-up seq.
-      let settled = false;
-      void commitPromise.then(() => {
-        settled = true;
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      replica.noteCaughtUpLocalSeq(5);
-      const result = await commitPromise;
-      // Read seq 0 is below the confirmed base, so the local check reverts it
-      // (instead of sending a doomed commit).
-      expect(result.ok).toBeFalsy();
-      expect(result.error?.name).toBe("ConflictError");
-    } finally {
-      setConflictAdmissionMode(undefined);
-    }
-  });
-
-  it("public close settles a commit held by conflict admission", async () => {
-    setConflictAdmissionMode("hold");
-    try {
-      const provider = storageManager.open(space);
-      const replica = provider.replica as typeof provider.replica & {
-        commitNative: (
-          transaction: unknown,
-          source?: unknown,
-        ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
-        recordStaleFloor: (commit: unknown, localSeq: number) => void;
-      };
-      const uri = `of:hold-close-${Date.now()}` as URI;
-
-      replica.recordStaleFloor({
-        localSeq: 5,
-        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
-        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-      }, 5);
-
-      const commitPromise = replica.commitNative({
-        operations: [{
-          op: "set",
-          id: uri,
-          type: "application/json",
-          value: { value: { v: 2 } },
-        }],
-      }, staleReadSource(uri, 0));
-
-      let settled = false;
-      void commitPromise.then(() => {
-        settled = true;
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      const closeAndCommit = Promise.all([
-        storageManager.close(),
-        commitPromise,
-      ]);
-      const [, result] = await Promise.race([
-        closeAndCommit,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("close timed out")), 250)
-        ),
-      ]);
-
-      expect(result.ok).toBeFalsy();
-      expect(result.error?.name).toBe("ConflictError");
-    } finally {
-      setConflictAdmissionMode(undefined);
-    }
-  });
-
   it("closes a watch refresh view that resolves after replica close", async () => {
     const sync: SessionSync = {
       type: "sync",
@@ -846,8 +705,16 @@ describe("Memory v2 storage notifications", () => {
     const client = {
       close: () => Promise.resolve(),
     } as unknown as MemoryV2Client.Client;
+    const watchStarted = Promise.withResolvers<void>();
+    const watchResponse = Promise.withResolvers<{
+      view: MemoryV2Client.WatchView;
+      sync: SessionSync;
+    }>();
     const session = {
-      watchAddSync: () => Promise.resolve({ view, sync }),
+      watchAddSync: () => {
+        watchStarted.resolve();
+        return watchResponse.promise;
+      },
     } as unknown as MemoryV2Client.SpaceSession;
     const sessionFactory: SessionFactory = {
       create: () => Promise.resolve({ client, session }),
@@ -861,11 +728,14 @@ describe("Memory v2 storage notifications", () => {
     const provider = testStorageManager.open(space);
     const replica = provider.replica as unknown as WatchRefreshHarness;
 
-    replica.closeNow();
-    const result = await replica.refreshWatchSet([[
+    const refresh = replica.refreshWatchSet([[
       { id: "of:late-refresh" as URI, type: "application/json" as MIME },
       { path: [], schema: false },
     ]]);
+    await watchStarted.promise;
+    replica.closeNow();
+    watchResponse.resolve({ view, sync });
+    const result = await refresh;
 
     expect(result.error?.message).toBe("memory replica closed");
     expect((await view.subscribeSync().next()).done).toBe(true);

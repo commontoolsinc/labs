@@ -153,7 +153,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
             `Hash: expected object state, got ${typeof state}`,
           );
         }
-        const { tag, hash } = state as Record<string, unknown>;
+        const { tag, hash } = state;
         if (typeof tag !== "string" || typeof hash !== "string") {
           return new ProblematicValue(
             typeTag,

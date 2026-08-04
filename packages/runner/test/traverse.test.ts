@@ -27,6 +27,7 @@ import {
   PointerCycleTracker,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
+  setTraverseDiagnostics,
   type TraversalContext,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
@@ -34,7 +35,6 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
-import { ContextualFlowControl } from "@commonfabric/runner";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
@@ -685,9 +685,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -695,7 +694,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -748,9 +747,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -758,7 +756,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -812,9 +810,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -822,7 +819,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -887,9 +884,8 @@ describe("getAtPath array index validation", () => {
       FabricValue,
       JSONSchema | undefined
     >();
-    const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSetStringToPathSelectors(true);
-    const context = createTraversalContext(tracker, cfc, schemaTracker);
+    const context = createTraversalContext(tracker, schemaTracker);
 
     const doc: IMemorySpaceValueAttestation = {
       address: {
@@ -1368,7 +1364,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // receives that self-contained schema and must resolve the $ref before
     // deciding whether undefined is a valid substitute.
     const docValue = ["hello", true];
-    const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+    const { store, docUri, type } = makeArrayDoc(docValue);
 
     const schema = {
       type: "array",
@@ -1386,7 +1382,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
           type,
           path: ["value"],
         },
-        value: docValue as FabricValue[],
+        value: docValue,
       });
 
     // After fix: $ref is resolved to { type: "string" }, which does not allow
@@ -4217,6 +4213,13 @@ describe("MapSet size and totalValues", () => {
 
     expect(mapSet.size).toBe(2);
     expect(mapSet.totalValues).toBe(3);
+    expect(mapSet.get("a")).toEqual(new Set(["one", "two"]));
+    expect(mapSet.get("absent")).toBeUndefined();
+
+    // Emptying a key drops the key, so both counts fall.
+    mapSet.deleteValue("b", "three");
+    expect(mapSet.size).toBe(1);
+    expect(mapSet.totalValues).toBe(2);
   });
 
   it("counts keys and values in the hash-dedup mode", () => {
@@ -4233,6 +4236,11 @@ describe("MapSet size and totalValues", () => {
 
     expect(mapSet.size).toBe(2);
     expect(mapSet.totalValues).toBe(3);
+
+    // Dropping a key takes the values it held with it.
+    mapSet.delete("a");
+    expect(mapSet.size).toBe(1);
+    expect(mapSet.totalValues).toBe(1);
   });
 });
 
@@ -4353,5 +4361,100 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
     // without a test noticing.
     expect(traverseWithElapsed(100).warnings).toEqual([]);
     expect(traverseWithElapsed(101).warnings.length).toBe(1);
+  });
+
+  // Runs a slow traversal over a container that links into `targetCount`
+  // separate docs, linking target `i` exactly `i + 1` times, so every target
+  // ends with a different visit count. Ids are long enough to be truncated in
+  // the report.
+  function traverseLinkingIntoManyDocs(targetCount: number): string[] {
+    const docUri = "of:slow-traverse-many-container" as URI;
+    const targetUri = (i: number) =>
+      `of:slow-traverse-linked-document-${i}` as URI;
+    const properties: Record<string, JSONSchema> = {};
+    const docValue: Record<string, FabricValue> = {};
+    for (let i = 0; i < targetCount; i++) {
+      for (let link = 0; link <= i; link++) {
+        docValue[`p${i}_${link}`] = {
+          "/": { [LINK_V1_TAG]: { id: targetUri(i), path: ["name"] } },
+        };
+        properties[`p${i}_${link}`] = { type: "string" };
+      }
+    }
+
+    let now = 1000;
+    const store = new ClockAdvancingStore(() => {
+      now += 150;
+    });
+    for (let i = 0; i < targetCount; i++) {
+      const of = targetUri(i) as Entity;
+      store.set(`${of}/${type}`, {
+        the: type,
+        of,
+        is: { value: { name: `name-${i}` } },
+        cause: hashOf({ the: type, of }),
+        since: 1,
+      });
+    }
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docUri as Entity }),
+      since: 2,
+    });
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: { type: "object", properties },
+    });
+    const doc: IMemorySpaceValueAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    const warnings: string[] = [];
+    const savedWarn = console.warn;
+    const savedNow = performance.now;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    Reflect.set(performance, "now", () => now);
+    setTraverseDiagnostics(true);
+    try {
+      traverser.traverse(doc);
+    } finally {
+      setTraverseDiagnostics(undefined);
+      Reflect.set(performance, "now", savedNow);
+      console.warn = savedWarn;
+    }
+    return warnings;
+  }
+
+  it("names the five most-visited docs when diagnostics are on", () => {
+    const warnings = traverseLinkingIntoManyDocs(6);
+
+    expect(warnings.length).toBe(1);
+    // Six targets plus the container were visited, and all seven are counted.
+    expect(warnings[0]).toContain("uniqueDocs=7");
+
+    const listed = /topDocs=(.*)$/.exec(warnings[0])![1].trim().split(" ");
+    // Seven docs were visited and five are named: the field is capped.
+    expect(listed.length).toBe(5);
+    // Each entry is an id cut to its first 20 characters, then its count.
+    for (const entry of listed) {
+      expect(entry).toMatch(/^.{20}\.\.=\d+$/);
+    }
+    // Most-visited first. Target `i` was linked `i + 1` times, so the two
+    // least-visited targets are the ones the cap dropped.
+    const counts = listed.map((entry) => Number(entry.split("=")[1]));
+    expect(counts).toEqual([...counts].sort((a, b) => b - a));
+    expect(counts).not.toContain(1);
+    expect(counts).not.toContain(2);
+  });
+
+  it("collects nothing when diagnostics are off", () => {
+    // The default, and what every job that measures coverage runs under.
+    expect(traverseWithElapsed(150).warnings[0]).toContain("uniqueDocs=0");
   });
 });

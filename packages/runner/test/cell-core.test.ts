@@ -7,7 +7,6 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { FabricValue } from "@commonfabric/api";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
@@ -191,7 +190,7 @@ describe("Cell", () => {
     );
     parent.setRawUntyped({
       slot: target.getAsWriteRedirectLink(),
-    } as unknown as FabricValue);
+    });
 
     // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
     // into `FabricError`) through the redirect must land at the target,
@@ -210,10 +209,10 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("should call toJSON() on plain objects during set", () => {
+  it("should reject plain objects carrying a toJSON method during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should call toJSON() on plain objects during set",
+      "should reject plain objects carrying a toJSON method during set",
       undefined,
       tx,
     );
@@ -223,11 +222,12 @@ describe("Cell", () => {
         return { exposed: true };
       },
     };
-    c.set({ data: objWithToJSON });
 
-    const result = c.get() as { data: unknown } | undefined;
-    // toJSON() should have been called, so we get { exposed: true } not { secret, toJSON }
-    expect(result?.data).toEqual({ exposed: true });
+    // `toJSON` is not a serializer the write path recognizes, so the method is
+    // read as the member it is: a function, which no stored record may hold.
+    expect(() => c.set({ data: objWithToJSON })).toThrow(
+      "Not representable as a `FabricValue`: function",
+    );
   });
 
   it("should preserve sparse arrays during set", () => {
@@ -310,20 +310,22 @@ describe("Cell", () => {
     expect(result.length).toBe(4);
   });
 
-  it("should call toJSON() on arrays with toJSON method during set", () => {
+  it("should reject arrays carrying a toJSON method during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should call toJSON() on arrays with toJSON method during set",
+      "should reject arrays carrying a toJSON method during set",
       undefined,
       tx,
     );
     const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
     arrWithToJSON.toJSON = () => "custom-array-value";
-    c.set({ arr: arrWithToJSON });
 
-    const result = c.get() as { arr: unknown } | undefined;
-    // toJSON() should have been called
-    expect(result?.arr).toBe("custom-array-value");
+    // An array is answered by the array rule whatever it carries, and `toJSON`
+    // is a named own property, which that rule rejects. Converting by it would
+    // mean storing an array by the very property that disqualifies it.
+    expect(() => c.set({ arr: arrWithToJSON })).toThrow(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
   });
 
   it("should create a proxy for the cell", () => {
@@ -859,7 +861,7 @@ describe("Cell utility functions", () => {
       // Write a sigil link via setRawUntyped — this would not type-check
       // with setRaw because a link object is not assignable to string.
       const link = target.getAsWriteRedirectLink();
-      cell.setRawUntyped(link as FabricValue);
+      cell.setRawUntyped(link);
 
       // The raw untyped read should return the link structure.
       const raw = cell.getRawUntyped();
@@ -922,7 +924,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped([1, 2, 3] as FabricValue);
+      cell.setRawUntyped([1, 2, 3]);
       expect(cell.getRawUntyped()).toEqual([1, 2, 3]);
     });
 
@@ -933,7 +935,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped({ a: { b: { c: 42 } } } as FabricValue);
+      cell.setRawUntyped({ a: { b: { c: 42 } } });
       const raw = cell.getRawUntyped() as { a: { b: { c: number } } };
       expect(raw.a.b.c).toBe(42);
     });
@@ -946,7 +948,7 @@ describe("Cell utility functions", () => {
         tx,
       );
       cell.set(10);
-      cell.setRawUntyped(null as FabricValue);
+      cell.setRawUntyped(null);
       expect(cell.getRawUntyped()).toBe(null);
     });
 
@@ -957,7 +959,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped([] as FabricValue);
+      cell.setRawUntyped([]);
       expect(cell.getRawUntyped()).toEqual([]);
     });
 
@@ -966,7 +968,7 @@ describe("Cell utility functions", () => {
         space,
         "setRawUntyped no tx",
       );
-      expect(() => cell.setRawUntyped(42 as FabricValue)).toThrow(
+      expect(() => cell.setRawUntyped(42)).toThrow(
         "Transaction required",
       );
     });
@@ -1067,7 +1069,7 @@ describe("Cell raw methods: frozen-or-not", () => {
       undefined,
       tx,
     );
-    cell.setRawUntyped([10, 20, 30] as FabricValue);
+    cell.setRawUntyped([10, 20, 30]);
     const raw = cell.getRawUntyped();
     expect(raw).toEqual([10, 20, 30]);
     expect(Object.isFrozen(raw)).toBe(true);
@@ -1080,7 +1082,7 @@ describe("Cell raw methods: frozen-or-not", () => {
       undefined,
       tx,
     );
-    cell.setRawUntyped({ a: { b: [1, 2] } } as FabricValue);
+    cell.setRawUntyped({ a: { b: [1, 2] } });
     const raw = cell.getRawUntyped() as { a: { b: readonly number[] } };
     expect(raw.a.b).toEqual([1, 2]);
     expect(Object.isFrozen(raw)).toBe(true);
@@ -1096,7 +1098,7 @@ describe("Cell raw methods: frozen-or-not", () => {
       tx,
     );
     cell.set(5);
-    cell.setRawUntyped(null as FabricValue);
+    cell.setRawUntyped(null);
     expect(cell.getRawUntyped()).toBe(null);
   });
 
@@ -1214,7 +1216,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 //
 // Historical context: these tests were authored alongside the deletion of
 // two defensive `JSON.parse` blocks that previously existed in
-// `runner/src/storage/transaction.ts` (in `read()`) and `runner/src/cell.ts`
+// the storage transaction read path and `runner/src/cell.ts`
 // (in the old source metadata path). Both blocks guarded a parse with the same shape —
 // `typeof value === "string" && value.startsWith('{"/":')` — and were
 // originally added (PRs #1472, #1562) to handle string-form values

@@ -1262,11 +1262,6 @@ describe("data-updating", () => {
         cell.set([new Date(1234)]);
         cell.addUnique(new Date(1234));
         expect((cell.getRaw() as unknown[]).length).toBe(1);
-
-        // A toJSON-backed candidate likewise matches its normalized form.
-        cell.set(["hello"]);
-        cell.addUnique({ toJSON: () => "hello" });
-        expect((cell.getRaw() as unknown[]).length).toBe(1);
       } finally {
         popFrame(frame);
       }

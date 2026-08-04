@@ -163,4 +163,4 @@ await commonfabric.vdom.dump(document.querySelector('#my-container'))
 ## See Also
 
 - [Console Commands](console-commands.md) — full `commonfabric.*` reference
-- [Logger Internals](../logger-internals.md) — creating loggers, timing API
+- [Logger Internals](../../features/logger-internals.md) — creating loggers, timing API
