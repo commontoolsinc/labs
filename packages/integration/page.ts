@@ -340,7 +340,11 @@ export class Page extends EventTarget {
     await this.afterNavigation?.();
   }
 
-  // Passthru of `@astral/astral`'s `Page#waitForSelector`
+  // Passthru of `@astral/astral`'s `Page#waitForSelector`.
+  //
+  // With `strategy: "pierce"` the wait is driven by page events and takes no
+  // timeout, and it resolves against the same elements `$` with that strategy
+  // returns: light-DOM elements and elements inside open shadow roots alike.
   async waitForSelector(
     selector: string,
     options?: WaitForSelectorOptions & SelectorOptions,

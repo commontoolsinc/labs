@@ -234,6 +234,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [2026-08-lunch-poll-join-name-fill-timeout.md](development/debugging/2026-08-lunch-poll-join-name-fill-timeout.md)
+  — why the lunch poll's intermittent `#lp-join-name` fill timeout is not a
+  fill-helper problem: the field never renders because the "Continue as guest"
+  handler's write does not reach the rendered view, and settling the view before
+  the fill does not change it. Includes a local reproduction, August 2026.
 - [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
   — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
