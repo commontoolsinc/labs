@@ -2,13 +2,15 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { conflictMarkerAt, main, scan } from "./check-conflict-markers.ts";
 
-// Built rather than written out, for the reason given in the checker: a quoted
-// run in an indented expression is harmless, but a multi-line template literal
-// would put one at column 0 and trip the check this file defines.
-const OPEN = "<".repeat(7);
-const ANCESTOR = "|".repeat(7);
-const CLOSE = ">".repeat(7);
-const SEPARATOR = "=".repeat(7);
+// Written out, not built. Detection is anchored at column 0, so these are inert
+// where they sit -- and that is the point: this file is tracked, so the
+// repo-wide check scans it on every run and passes. The check's own source is
+// therefore a standing fixture proving it does not flag a marker that is not at
+// the start of a line. The one rule is that no line here may BEGIN with one.
+const OPEN = "<<<<<<<";
+const ANCESTOR = "|||||||";
+const CLOSE = ">>>>>>>";
+const SEPARATOR = "=======";
 
 /** Makes a git repo with one tracked file, and returns its root. */
 async function fixtureRepo(contents: string): Promise<string> {
@@ -70,7 +72,7 @@ Deno.test("conflictMarkerAt: leaves a setext heading underline alone", () => {
 });
 
 Deno.test("conflictMarkerAt: ignores a marker not at column 0", () => {
-  assertEquals(conflictMarkerAt("<".repeat(4)), undefined);
+  assertEquals(conflictMarkerAt("<<<<"), undefined);
   // A longer run is a rule or an ASCII box, not a marker.
   assertEquals(conflictMarkerAt(`${OPEN}<`), undefined);
   // Git never indents a marker, nor buries one mid-line.

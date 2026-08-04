@@ -21,29 +21,20 @@ import { dirname, fromFileUrl } from "@std/path";
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 /**
- * How many repeats of a marker character git writes.
- */
-const MARKER_LENGTH = 7;
-
-/**
- * The characters git repeats to open a conflict hunk, to separate the common
- * ancestor under `diff3`, and to close the hunk.
+ * The markers git writes: the opener, the `diff3` common-ancestor separator,
+ * and the closer.
  *
- * Built rather than written out. Detection is anchored at column 0, so a marker
- * quoted inside an indented expression is harmless -- but a multi-line template
- * literal puts its interior lines at column 0, which is exactly how one would
- * write a realistic fixture in the test next door. Constructing the runs keeps
- * this file and its test from ever tripping the check they define.
+ * Written out rather than built. Detection is anchored at column 0, so these
+ * are inert where they sit -- and this file being tracked and scanned by its
+ * own check is a standing demonstration of exactly that. The one rule is that
+ * no line here may BEGIN with one, which the check itself enforces.
  *
- * The `=======` separator is deliberately NOT among them: seven equals signs are
- * also how Markdown underlines a setext heading, and flagging those would make
- * the check something people route around.
+ * The `=======` separator is deliberately absent: seven equals signs are also
+ * how Markdown underlines a setext heading, and a check that fails on those is
+ * one people learn to route around. A real conflict brings an opener and a
+ * closer anyway.
  */
-const MARKER_CHARACTERS = ["<", "|", ">"] as const;
-
-const MARKERS: readonly string[] = MARKER_CHARACTERS.map((character) =>
-  character.repeat(MARKER_LENGTH)
-);
+const MARKERS: readonly string[] = ["<<<<<<<", "|||||||", ">>>>>>>"];
 
 /**
  * Returns the conflict marker a line begins with, or `undefined`.
