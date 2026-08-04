@@ -4379,7 +4379,7 @@ class SpaceReplica implements ISpaceReplica {
 
   // The marker channel died (the subscribed view closed): apply everything
   // parked immediately — the legacy verdict-time semantics — so promotions
-  // (and synced()) never wait on frames that can no longer arrive.
+  // never wait on frames that can no longer arrive.
   private applyParkedAcceptsNow(): void {
     if (this.#parkedAccepts.size === 0) {
       return;

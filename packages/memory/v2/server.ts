@@ -521,15 +521,11 @@ class Connection {
       this.#receiving = current.then(() => undefined, () => undefined);
       return await current;
     } finally {
-      this.releasePendingReceive();
-    }
-  }
-
-  private releasePendingReceive(): void {
-    this.#pendingReceives = Math.max(0, this.#pendingReceives - 1);
-    if (this.#pendingReceives === 0) {
-      this.#receiveIdle?.resolve();
-      this.#receiveIdle = null;
+      this.#pendingReceives = Math.max(0, this.#pendingReceives - 1);
+      if (this.#pendingReceives === 0) {
+        this.#receiveIdle?.resolve();
+        this.#receiveIdle = null;
+      }
     }
   }
 
@@ -1444,7 +1440,7 @@ export class Server {
       },
     });
     // Dirty BEFORE the side-effect await, matching the transact path
-    // (CT-1927): a concurrent commit's pre-verdict flush must see this
+    // (CT-1927): a batch pass running during the await must see this
     // durable write.
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     await this.runPostCommitSchedulerSideEffects(
@@ -2220,11 +2216,10 @@ export class Server {
             }
           }
           // Mark dirty IMMEDIATELY after the durable apply, before the first
-          // await (CT-1927 review, B3): during the scheduler side-effect
-          // await below, a concurrent connection's commit runs its own
-          // pre-verdict flush, and that flush must see this durable write's
-          // dirty ids — otherwise its verdict outruns earlier watched
-          // novelty, the exact ordering this feature exists to eliminate.
+          // await (CT-1927): a batch pass running during the scheduler
+          // side-effect await below must see this durable write's dirty
+          // ids — otherwise a frame whose marker claims to reflect decided
+          // outcomes could miss earlier durable watched novelty.
           this.markSpaceDirty(
             message.space,
             message.commit.operations
@@ -3658,10 +3653,10 @@ export class Server {
           // Requeue the consumed batch (CT-1927): the dirty state was taken
           // before fan-out, so a failure here would otherwise orphan it —
           // no later refresh fires unless another write happens, and the
-          // pre-verdict flush's "batched refresh recovers" contract would
-          // be false. Merge UNDER anything that accrued meanwhile (newer
-          // provenance wins), reschedule, and rethrow so callers see the
-          // failure.
+          // batched refresh is the delivery path the staged catch-up
+          // markers rely on. Merge UNDER anything that accrued meanwhile
+          // (newer provenance wins), reschedule, and rethrow so callers
+          // see the failure.
           this.#dirtySpaces.add(space);
           if (dirtyIds !== undefined) {
             let current = this.#dirtyDocsBySpace.get(space);
