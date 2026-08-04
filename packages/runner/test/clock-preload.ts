@@ -16,11 +16,18 @@ installFakeClock({
   // Test files kept on the real clock for now. These should be converted to use
   // a fake clock. // TODO: convert these tests to a fake clock
   realClockFiles: [
-    // The sibling resume test: its reload storage manager holds each per-element
-    // child document back by a real delay to open the resume window it observes,
-    // and the resuming runtime's pull/idle machinery blocks on those deliveries.
-    // Under the fake clock the delay is a frozen test-file timer that pull/idle
-    // wait on, so the resume deadlocks; the real clock delivers them as intended.
+    // Holds the resume's per-element documents in the transport so the
+    // coordinator reconciles while they are absent. A commit carrying a read of
+    // a withheld document is rejected as stale, and the catch-up the rejection
+    // waits on cannot arrive while the hold is on, so the retry cycle repeats;
+    // real time paces it until the test releases the hold, but auto-advance
+    // fires each cycle's timer as soon as it is armed and the loop allocates
+    // until the process runs out of heap. Same shape as the retry loop recorded
+    // for `list-resume-container-defer` in
+    // `docs/development/waiting-in-tests-rationale.md`, and the reason that
+    // suite's holds are bounded. This one's hold spans a reconcile, which is the state it
+    // exists to observe, so it needs the real clock. The test itself waits on
+    // transport edges, never on a delay.
     "list-resume-preserve",
   ],
 });

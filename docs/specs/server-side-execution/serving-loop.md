@@ -784,7 +784,9 @@ code, the survival test was skipped — reject the diff:
 `claim`, `candidate`, `settlement`, `fence`, `rank`, `contextKey`,
 `completeSchedulerScopeSummary`, `completeActionScopeSummary`,
 `scopeSummary`, `evidence`, `observationReplay`, `shadowRun`,
-`admissionCertificate`.
+`admissionCertificate`, `lease_generation`, `fencingToken` (§2's
+FORBIDDEN lease shapes, greppable — DR1's per-process holder is the
+fence; a reappearing generation/token field is v1 revival).
 
 Scope: the tripwires bind NEW v2 code. Main still carries a
 `completeSchedulerScopeSummary` / `completeActionScopeSummary`

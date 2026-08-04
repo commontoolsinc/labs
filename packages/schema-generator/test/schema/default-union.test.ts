@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("Schema: Default in unions", () => {
@@ -15,7 +15,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const title = result.properties?.title as any;
@@ -41,7 +41,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const title = result.properties?.title as any;
@@ -70,7 +70,7 @@ describe("Schema: Default in unions", () => {
       "X",
     );
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const title = result.properties?.title as any;
@@ -103,7 +103,7 @@ describe("Schema: Default in unions", () => {
       "X",
     );
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const title = result.properties?.title as any;
@@ -121,7 +121,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.anyOf).toEqual(expect.arrayContaining([
@@ -146,7 +146,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     // Comparable items must be preserved on the (sole) array schema.
@@ -174,7 +174,7 @@ describe("Schema: Default in unions", () => {
     const code = `type T = string[] | [];`;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
     expect((result as any).default).toBeUndefined();
   });
@@ -186,7 +186,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.type).toBe("array");
@@ -204,7 +204,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.$ref).toBe("#/$defs/Config");
@@ -227,7 +227,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.$ref).toBe("#/$defs/Config");
@@ -248,7 +248,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.$ref).toBe("#/$defs/Config");
@@ -265,7 +265,7 @@ describe("Schema: Default in unions", () => {
       type T = Config | Default<{ theme: "dark" }>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "Default object union member is not assignable",
@@ -284,7 +284,7 @@ describe("Schema: Default in unions", () => {
       type T = Config | Default<{ profile: { name: "Ada" } }>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "Default object union member is not assignable",
@@ -310,7 +310,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.$ref).toBe("#/$defs/Config");
@@ -345,7 +345,7 @@ describe("Schema: Default in unions", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+      new SchemaGenerator().generateSchema(type, checker, typeNode),
     );
 
     expect(result.anyOf).toEqual(expect.arrayContaining([
@@ -373,7 +373,7 @@ describe("Schema: Default in unions", () => {
       type T = Config | DeepDefault<{ typo: "x" }>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       'DeepDefault key "typo" does not exist',
@@ -395,7 +395,7 @@ describe("Schema: Default in unions", () => {
       }>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       'DeepDefault key "profile.typo" does not exist',
@@ -408,7 +408,7 @@ describe("Schema: Default in unions", () => {
       type T = string | DeepDefault<{ theme: "dark" }>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "DeepDefault must be unioned with an object type",
@@ -422,7 +422,7 @@ describe("Schema: Default in unions", () => {
       type T = string | Default<U>;
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
 
     expect(() => gen.generateSchema(type, checker, typeNode)).toThrow(
       "Default<undefined> is unsupported",

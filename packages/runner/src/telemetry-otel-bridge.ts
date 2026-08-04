@@ -182,15 +182,6 @@ export function createRuntimeTelemetryOtelBridge(
     unit: "ms",
     description: "Storage push/pull duration",
   });
-  const storageConnection = meter.createCounter(
-    "ct.storage.connection.updates",
-    {
-      description: "Storage connection status transitions",
-    },
-  );
-  const subscriptions = meter.createUpDownCounter("ct.storage.subscriptions", {
-    description: "Active storage subscriptions",
-  });
 
   // --- In-flight storage spans, keyed by the marker `id` ---------------------
   type OpenOp = { span: Span; startMs: number };
@@ -379,21 +370,6 @@ export function createRuntimeTelemetryOtelBridge(
         break;
       case "storage.pull.error":
         endStorageOp(marker.id, "pull", marker.error);
-        break;
-      case "storage.connection.update":
-        storageConnection.add(
-          1,
-          mattrs({
-            "ct.connection.status": marker.status,
-            "ct.connection.attempt": marker.attempt,
-          }),
-        );
-        break;
-      case "storage.subscription.add":
-        subscriptions.add(1, mattrs());
-        break;
-      case "storage.subscription.remove":
-        subscriptions.add(-1, mattrs());
         break;
       case "scheduler.dependencies.update":
         // Dependency-graph churn is high-volume and mainly of interest to the

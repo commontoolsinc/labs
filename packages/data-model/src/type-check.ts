@@ -163,9 +163,8 @@ export function isFabricValue(value: unknown): value is FabricValue {
       // see `unsafeObjectKeyIn()`.
       if (!isInertPlainObject(item)) return false;
       if (unsafeObjectKeyIn(item) !== undefined) return false;
-      const record = item as Record<string, unknown>;
-      for (const key of Object.keys(record)) {
-        if (!check(record[key])) return false;
+      for (const key of Object.keys(item)) {
+        if (!check(item[key])) return false;
       }
       return true;
     } else {

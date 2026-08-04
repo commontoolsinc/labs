@@ -298,6 +298,27 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     }
   });
 
+  it("refuses a caller-supplied result instead of silently overwriting it", async () => {
+    // handleInvoke injects its result cell only when the input carries no
+    // `result` of its own; a caller's `result` flows through UNMARKED, and
+    // the tool handler's closed event schema (additionalProperties: false,
+    // no `result` declared) refuses the undeclared field at dispatch —
+    // never silently replaced by the injected cell, which would discard
+    // caller data before the closed-world gate could see it.
+    const t = await setupSendMail("disabled", false);
+    try {
+      await t.sendCall({
+        recipient: "carol@example.org",
+        subject: "hello",
+        body: "text",
+        result: "caller-forged",
+      });
+      expect(await t.sentEmails()).toEqual([]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
   it("allows a by-reference recipient carrying the required integrity", async () => {
     // The legitimate path (plan D2 / spec test-plan item 2): the model passes
     // the recipient BY REFERENCE — a `{"@link": …}` object naming a cell whose

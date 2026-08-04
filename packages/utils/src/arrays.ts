@@ -103,9 +103,23 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * regards to what `Proxy`s actually do), _and_ by making this assumption, this
  * function avoids having to inspect _every_ key.
  *
+ * This is a structural predicate, so it narrows in one direction only, and is
+ * overloaded accordingly; the header of the `types` module gives the full
+ * account. The short of it: a `false` result reports that index-only-ness could
+ * not be established, which is weaker than the negation, and TypeScript's
+ * `false`-branch narrowing is subtraction and so cannot express the difference.
+ * The first overload keeps callers who already hold an array type out of that
+ * subtraction entirely.
+ *
  * @param array The value to check.
  * @returns `true` if the array has only index properties, `false` otherwise.
  */
+export function isArrayWithOnlyIndexProperties(
+  array: readonly unknown[],
+): boolean;
+export function isArrayWithOnlyIndexProperties(
+  array: unknown,
+): array is readonly unknown[];
 export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
   // `Array.isArray()` sees through a `Proxy` to its target, so a proxied array
   // is still recognized as one here.
@@ -151,9 +165,21 @@ export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
  * question forwards to the target, and a trap that answers otherwise is the
  * proxy's own bug to own.
  *
+ * Inertness is a property of the array at the moment of the check, not of its
+ * type: an index can be redefined as an accessor, or a named property added, at
+ * any later point. So this predicate narrows only to `readonly unknown[]` --
+ * true of the value forever after -- and never to anything asserting the
+ * inertness itself, and it narrows in one direction only. A `false` result
+ * means inertness was not established, which is weaker than its negation, and
+ * `false`-branch narrowing is subtraction, which cannot express that. Hence the
+ * overload pair, which keeps a caller already holding an array type out of the
+ * subtraction; the header of the `types` module gives the full account.
+ *
  * @param array The value to check.
  * @returns `true` if the array is an inert array, `false` otherwise.
  */
+export function isInertArray(array: readonly unknown[]): boolean;
+export function isInertArray(array: unknown): array is readonly unknown[];
 export function isInertArray(array: unknown): boolean {
   // `Array.isArray()` sees through a `Proxy` to its target, so a proxied array
   // is still recognized as one here, and -- absent a `getPrototypeOf()` trap --

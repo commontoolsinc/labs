@@ -111,7 +111,7 @@ try {
       type: WorkerIPCMessageType.Initialize,
       data: {
         did: identity.did(),
-        toolshedUrl: "memory://worker-handler-test",
+        toolshedUrl: "https://background-piece-service.invalid",
         rawIdentity: identity.serialize(),
       },
     },

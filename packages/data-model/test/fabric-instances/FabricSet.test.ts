@@ -55,7 +55,7 @@ describe("FabricSet", () => {
         expect(result).not.toBe(fs);
         expect(result).toBeInstanceOf(Set);
         expect(result).not.toBeInstanceOf(FrozenSet);
-        expect(result.has(1 as FabricValue)).toBe(true);
+        expect(result.has(1)).toBe(true);
       });
     });
 

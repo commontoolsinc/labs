@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Boolean literals", () => {
@@ -13,7 +13,7 @@ describe("Schema: Boolean literals", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "BooleanLiterals");
-    const transformer = createSchemaTransformerV2();
+    const transformer = new SchemaGenerator();
     const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
     const alwaysTrue = schema.properties?.alwaysTrue as any;
@@ -35,7 +35,7 @@ describe("Schema: Boolean literals", () => {
       trueCode,
       "AlwaysTrue",
     );
-    const transformer = createSchemaTransformerV2();
+    const transformer = new SchemaGenerator();
     const trueSchema = asObjectSchema(
       transformer.generateSchema(trueType, checker),
     );

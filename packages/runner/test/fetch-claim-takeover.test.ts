@@ -18,7 +18,7 @@
 // pattern stops, the staleness branch that decides a takeover, a resolution
 // that fails, and an empty URL.
 //
-// docs/development/fetch-request-deadlines.md carries the reasoning.
+// docs/features/fetch-request-deadlines.md carries the reasoning.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

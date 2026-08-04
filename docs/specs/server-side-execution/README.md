@@ -29,6 +29,7 @@ domain:
 | [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |
 | [`scenario-traces.md`](scenario-traces.md) | VERIFICATION INSTRUMENT (non-normative): twelve canonical end-to-end journeys traced cell by cell with citations; gaps/flags/contradictions feed the rulings ledger; re-run after every ruling batch | all |
 | [`field-provenance.md`](field-provenance.md) | VERIFICATION INSTRUMENT (non-normative): per-field producer→carrier→consumer→retirement chains, closure-checked across six path families — the bottom-up complement to the traces | all |
+| [`verification-coverage.md`](verification-coverage.md) | VERIFICATION REGISTER (non-normative): every binding rule mapped to the instrument that checks it, or to an adjudicated reason none does; the owed list with phase triggers; the stopping criterion for spec-time verification | all |
 | [`runtime-mapping.md`](runtime-mapping.md) | today's runtime, behavior by behavior → its v2 placement, statused COVERED/CHANGED/GAP | all |
 
 Each detail doc opens with **Anchors** — module paths verified on main

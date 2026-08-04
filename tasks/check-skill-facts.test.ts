@@ -341,7 +341,7 @@ Deno.test("main reports success and returns 0 on a clean repo", async () => {
       code = await main(root);
     });
     assertEquals(code, 0);
-    assert(out.includes("Skill facts OK (1 docs under skills/)"));
+    assert(out.includes("Agent-facing facts OK (1 documents)"));
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -496,20 +496,108 @@ Deno.test("the script runs as a command over the real repo", async () => {
   });
   const stderr = new TextDecoder().decode(output.stderr);
   assertEquals(output.code, 0, `check-skill-facts exited non-zero:\n${stderr}`);
-  assert(new TextDecoder().decode(output.stdout).includes("Skill facts OK"));
+  assert(
+    new TextDecoder().decode(output.stdout).includes("Agent-facing facts OK"),
+  );
 });
 
-// Runs against the real repository: every fact every skill cites must resolve.
-Deno.test("every skill's cited paths and specifiers resolve", async () => {
+// Runs against the real repository: every fact every covered document cites
+// must resolve.
+Deno.test("every cited path and specifier resolves", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);
-  assert(docs.length > 0, "found no markdown under skills/");
+  assert(docs.length > 0, "found no covered markdown");
   const drift = collectDrift(docs, tree, await readWorkspaceExports(root));
   assertEquals(
     drift.map((d) => `${d.file}:${d.line} ${d.message}`),
     [],
-    "A skill cites a path or specifier that no longer resolves. Skills are live " +
-      "documentation: fix the skill to name the current location.",
+    "A skill, an AGENTS.md, or a rule cites a path or specifier that no longer " +
+      "resolves. These are live documentation: fix the document to name the " +
+      "current location.",
   );
+});
+
+// The three kinds of document this covers are named by different conventions,
+// so each is pinned: a rename that drops one from the scan would otherwise be
+// invisible.
+Deno.test("the scan covers skills, AGENTS.md guides, and rules", async () => {
+  const root = fromFileUrl(new URL("..", import.meta.url));
+  const tree = await readTree(root);
+  const paths = new Set((await readSkillDocs(root, tree)).map((d) => d.path));
+  assert(paths.has("skills/README.md"), "skills/ not scanned");
+  assert(paths.has("AGENTS.md"), "the root AGENTS.md is not scanned");
+  assert(
+    paths.has("packages/ts-transformers/AGENTS.md"),
+    "a package AGENTS.md is not scanned",
+  );
+  assert(
+    paths.has(".claude/rules/tests.md"),
+    ".claude/rules/ is not scanned",
+  );
+  // A CLAUDE.md is one `@AGENTS.md` import, with nothing backticked to check.
+  assert(!paths.has("CLAUDE.md"), "CLAUDE.md should not be scanned");
+});
+
+Deno.test("a rule resolves its citations against the repo root", async () => {
+  // A rule lives in .claude/rules/, which holds no code, so every path it names
+  // is repo-relative. Both cases are pinned here because skillDirOf hands the
+  // resolver ".claude/rules" as the doc's own directory.
+  const root = await fixtureRepo({
+    "deno.jsonc": '{ "workspace": [] }',
+    "packages/ui/src/index.ts": "",
+    ".claude/rules/demo.md": "Read `packages/ui/src/index.ts`.\n",
+  });
+  try {
+    const tree = await readTree(root);
+    const docs = await readSkillDocs(root, tree);
+    assertEquals(docs.map((d) => d.path), [".claude/rules/demo.md"]);
+    assertEquals(collectDrift(docs, tree, new Map()), []);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("a package AGENTS.md resolves paths inside its own package", async () => {
+  // packages/shell/AGENTS.md cites `shared/app/state.ts`, meaning the file in
+  // that package. The same token cited by a package that has a `shared/` of its
+  // own, without that file in it, is drift.
+  const root = await fixtureRepo({
+    "deno.jsonc": '{ "workspace": [] }',
+    "packages/shell/shared/app/state.ts": "",
+    "packages/shell/AGENTS.md": "State is `shared/app/state.ts`.\n",
+    "packages/other/shared/mod.ts": "",
+    "packages/other/AGENTS.md": "State is `shared/app/state.ts`.\n",
+  });
+  try {
+    const tree = await readTree(root);
+    const drift = collectDrift(
+      await readSkillDocs(root, tree),
+      tree,
+      new Map(),
+    );
+    assertEquals(drift.map((d) => d.file), ["packages/other/AGENTS.md"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("a relative citation with no matching directory is left alone", async () => {
+  // The conservative half of the heuristic, which the widened scan leans on
+  // more than the skills-only one did: a backticked token whose first segment
+  // names no real directory is prose or a shell fragment, not a path, so it is
+  // skipped rather than reported. Without this, every `src/index.ts` written as
+  // an illustration would fail the build.
+  const root = await fixtureRepo({
+    "deno.jsonc": '{ "workspace": [] }',
+    "packages/other/mod.ts": "",
+    "packages/other/AGENTS.md": "Entry point is `src/index.ts`.\n",
+  });
+  try {
+    const tree = await readTree(root);
+    const docs = await readSkillDocs(root, tree);
+    assertEquals(collectDrift(docs, tree, new Map()), []);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
 });

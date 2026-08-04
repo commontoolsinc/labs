@@ -1,10 +1,11 @@
 # Deploying a commit
 
-A commit reaches a host by way of the bastion. The deploy jobs in CI open an
-SSH connection to the bastion and run one command there, `/opt/cf/deploy.sh`,
-passing the environment to deploy and the commit to deploy to it. That script
-does the rest: it deploys the binaries that CI already built and uploaded for
-that commit.
+A commit reaches a server host by way of the bastion. The deploy jobs in CI
+open an SSH connection to the bastion and run one command there,
+`/opt/cf/deploy.sh`, passing the environment to deploy and the commit to deploy
+to it. That script does the rest: it deploys the binaries that CI already built
+and uploaded for that commit. The shell is a static site rather than a server,
+and reaches its bucket another way; "The staging shell" below covers it.
 
 Three jobs do this:
 
@@ -51,3 +52,29 @@ a mismatch fails on the pull request instead.
 Changing the argument list therefore takes a change in each repository, in
 order: land the infra change, apply the bastion playbook so the host has the
 new script, then change the call sites here.
+
+## The staging shell
+
+The `deploy-shell-staging` job in `.github/workflows/deno.yml` publishes the
+shell on every push to `main`. It does not touch the bastion: it builds
+`packages/shell` and copies the result into the `staging-commontools-dev`
+bucket, which is served at <https://staging.commontools.dev/>. Each build also
+lands under `builds/<commit>/` so a page that is already open keeps the exact
+module graph it started with.
+
+The shell has to be told which toolshed to talk to, because it is served from a
+different origin than the API it calls. The `STAGING_SHELL_API_URL` variable
+carries that host, and the build substitutes it into the bundle. It is a
+variable rather than a secret: the value ends up in a bundle that anyone can
+read, so hiding it from review buys nothing and costs the ability to see what
+staging points at. The host it names is the one `deploy-rapids` keeps current.
+
+Publishing is not the same as working, and this job cannot tell the difference
+by uploading alone — it makes no request to the API it just configured. So it
+checks three things instead. An unset variable fails the job before the build,
+because a shell built with no API host falls back to its own origin, and that
+origin serves static assets and no API. The built bundle must then contain the
+host that was passed in. Finally the scripts are read back out of the bucket
+and checked again, so a green job means the objects being served name the host
+they should. That last read goes to the bucket rather than to the site's
+address, because the CDN may still be serving the previous build.

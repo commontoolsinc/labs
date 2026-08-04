@@ -71,10 +71,10 @@ What we hold:
    we have not built. A space still has a host that enforces access and
    can revoke a participant mid-session
    (`#revokeDeauthorizedSessions`, `packages/memory/v2/server.ts`), and
-   there is no delegation yet — `Delegation = never` in
-   `packages/memory/interface.ts`, with a comment saying what it is
-   meant to become. The landlord is smaller than it was. It is not
-   gone.
+   there is no delegation yet — access is granted directly, one
+   participant at a time, through a space's access-control list
+   (`packages/memory/acl.ts`), with no way to pass authority on. The
+   landlord is smaller than it was. It is not gone.
 5. The other unfinished parts, plainly: the checker refuses a commit
    that crosses a boundary it was told about, which is the third of
    four rungs (`enforce-explicit`); the viral part — labels propagating

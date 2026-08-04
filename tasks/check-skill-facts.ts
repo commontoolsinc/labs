@@ -1,12 +1,19 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
 //
-// Deterministic "tripwire" for the repo-local skills under skills/: a cheap,
-// instant, zero-token CI gate that fails when a fact a skill cites stops
-// resolving against the tree.
+// Deterministic "tripwire" for the documents an agent is handed rather than
+// goes looking for — the repo-local skills under skills/, the agent guides
+// named AGENTS.md, and the path-scoped rules under .claude/rules/. It is a
+// cheap, instant, zero-token CI gate that fails when a fact one of them cites
+// stops resolving against the tree.
 //
-// It checks two kinds of citation across every markdown file under skills/, and
-// deliberately hardcodes no fact list (that would just re-introduce the rot it
-// guards — the facts are derived from the skill text itself):
+// These documents are summaries: they name a path or a symbol instead of
+// restating what is there, which is what keeps them short enough to be worth
+// loading. That only works while the names are right, and nothing about
+// renaming a file tells you that a summary somewhere named it.
+//
+// It checks two kinds of citation, and deliberately hardcodes no fact list
+// (that would just re-introduce the rot it guards — the facts are derived from
+// the document text itself):
 //
 //   1. Every `@commonfabric/...` import specifier resolves. A bare package
 //      reference needs a root (".") export; a subpath needs that subpath in the
@@ -352,12 +359,21 @@ export async function readWorkspaceExports(
   return exportsByName;
 }
 
-/** Reads every markdown file under skills/ that is part of the tree. */
+/**
+ * The documents this check covers: everything under skills/, every AGENTS.md
+ * at any depth, and the path-scoped rules under .claude/rules/. CLAUDE.md files
+ * are excluded because each is a single `@AGENTS.md` import, and an import is
+ * not written in backticks so there would be nothing here to check.
+ */
+const COVERED_RE =
+  /^(?:skills\/.*\.md|(?:.*\/)?AGENTS\.md|\.claude\/rules\/.*\.md)$/;
+
+/** Reads every covered markdown file that is part of the tree. */
 export async function readSkillDocs(
   root: string,
   tree: Tree,
 ): Promise<SkillDoc[]> {
-  const paths = tree.filesMatching(/^skills\/.*\.md$/);
+  const paths = tree.filesMatching(COVERED_RE);
   return await Promise.all(paths.map(async (path) => ({
     path,
     text: await Deno.readTextFile(`${root}/${path}`),
@@ -365,16 +381,16 @@ export async function readSkillDocs(
 }
 
 function reportDrift(drift: Drift[]): void {
-  console.error("\nSkill facts that no longer resolve:\n");
+  console.error("\nAgent-facing facts that no longer resolve:\n");
   for (const { file, line, message } of drift) {
     console.error(`  ${file}:${line}  ${message}`);
   }
   console.error(
     [
       "",
-      "Skills are live documentation (skills/README.md): a citation that stops",
-      "resolving is a reader sent somewhere that isn't there. Fix the skill to",
-      "name the current path or specifier.",
+      "Skills, AGENTS.md guides, and the rules under .claude/rules/ are live",
+      "documentation: a citation that stops resolving is a reader sent somewhere",
+      "that isn't there. Fix the document to name the current path or specifier.",
       "",
       "A path cited as an illustration rather than a real location should say so",
       "with a placeholder — `packages/<pkg>/mod.ts`, `cf-{name}/cf-{name}.ts`,",
@@ -395,7 +411,7 @@ export async function main(root: string = REPO_ROOT): Promise<number> {
     reportDrift(drift);
     return 1;
   }
-  console.log(`Skill facts OK (${docs.length} docs under skills/).`);
+  console.log(`Agent-facing facts OK (${docs.length} documents).`);
   return 0;
 }
 

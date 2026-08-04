@@ -464,7 +464,7 @@ type Wrapper = {
   });
 
   describe("built-in mappings", () => {
-    it("formats Date as string with date-time format without hoisting", async () => {
+    it("formats Date as an object without hoisting", async () => {
       const generator = new SchemaGenerator();
       const code = `
 interface HasDate {
@@ -479,10 +479,9 @@ interface HasDate {
         | undefined;
 
       expect(objectSchema.$defs).toBeUndefined();
-      expect(props?.createdAt).toEqual({
-        type: "string",
-        format: "date-time",
-      });
+      // A `Date` is stored as a `FabricEpochNsec`, an object at the fabric
+      // boundary. Read through `{ type: "string" }` it projects to `undefined`.
+      expect(props?.createdAt).toEqual({ type: "object" });
     });
 
     it("formats URL as string with uri format without hoisting", async () => {
@@ -582,7 +581,7 @@ declare interface URL {
       });
     });
 
-    it("formats Uint8Array as permissive true schema", async () => {
+    it("formats Uint8Array as an object", async () => {
       const generator = new SchemaGenerator();
       const code = `
 interface BinaryHolder {
@@ -597,7 +596,8 @@ interface BinaryHolder {
         | undefined;
 
       expect(objectSchema.$defs).toBeUndefined();
-      expect(props?.data).toBe(true);
+      // Stored as a `FabricBytes`, so an object -- not "anything goes".
+      expect(props?.data).toEqual({ type: "object" });
     });
 
     it("formats ArrayBuffer as permissive true schema", async () => {

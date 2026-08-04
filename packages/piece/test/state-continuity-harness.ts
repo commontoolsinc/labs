@@ -10,14 +10,12 @@
  * becomes unreachable. No contract comparison can see that, and nothing
  * throws — only replaying a real prior state catches it.
  *
- * The other class this replays, the CFC additive-required migration refusing a
- * setup commit for a required field with no default (the 2026-07-22 estuary
- * brick), is already covered twice over — by Tier 1's schema check and by
- * `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`, which
- * drives the same rejection over a legacy root. It is replayed here for the
- * PIPELINE rather than the guard: proving capture → snapshot → reopen →
- * materialize end to end needs a class whose correct outcome is already known
- * independently, or a green run would only be evidence about itself.
+ * It also replays additive required OUTPUT evolution. That class is compatible:
+ * the candidate pattern generates the new result during setup, so Tier 1
+ * accepts the result contract and the runner's role-aware CFC merge accepts the
+ * generated write over the legacy root. The replay pins that behavior through
+ * capture → snapshot → reopen → materialize rather than only at either isolated
+ * schema boundary.
  *
  * The state is captured as a **SQLite space store**, not a bespoke JSON dump.
  * A space is one SQLite file, `snapshotSpaceStore` already writes a

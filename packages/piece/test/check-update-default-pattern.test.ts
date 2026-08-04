@@ -57,14 +57,10 @@ const SOURCE_V3_HANDLER = [
   "",
 ].join("\n");
 
-// The estuary brick, distilled to two home-shaped patterns that differ by ONE
-// thing: whether the required `favorites` output field carries a default. Both
-// carry a handler (its `{ "$stream": true }` markers are missing on an aged
-// doc → the "Handler used as lift" cold start that gets us into the repair).
-//
-// OLD: `favorites` is required with NO default. Run over a favorites-less
-// vintage doc, its own setup repair is REJECTED by the CFC additive-required
-// migration ("favorites needs a default") — loadable, but not runnable.
+// Two home-shaped pattern identities for exercising roll-forward orchestration.
+// The rejected repair below is injected with the production migration token;
+// these output shapes do not themselves cause it. A generated required result
+// is compatible because setup materializes it.
 const SOURCE_HOME_OLD_REQUIRED = [
   "import { Writable, handler, pattern } from 'commonfabric';",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
@@ -80,8 +76,8 @@ const SOURCE_HOME_OLD_REQUIRED = [
   "",
 ].join("\n");
 
-// OFFICIAL: identical, except `favorites` rides `Default<[]>` (post-fix
-// home.tsx). Migrates the same aged doc cleanly, so the roll-forward heals.
+// The roll-forward target differs by a schema default, giving the tests a
+// distinct compiled identity that materializes the reused document cleanly.
 const SOURCE_HOME_OFFICIAL_DEFAULTED = [
   "import { Default, Writable, handler, pattern } from 'commonfabric';",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
@@ -1771,15 +1767,12 @@ describe("checkAndUpdateDefaultPattern", () => {
   });
 
   it("heals a root whose pinned pattern fails CFC migration by rolling forward to official", async () => {
-    // The estuary brick, faithfully: a home root pinned to an OLD home.tsx
-    // whose required `favorites` predates its `Default<>`. The doc was
-    // materialized by a favorites-less vintage, so the pinned pattern's OWN
-    // setup repair is REJECTED by the CFC additive-required migration ("needs a
-    // default") — it loads but cannot run. Enforce-on (the default here; the
-    // rejecting layer is the whole point of this test, so it must not be off).
-    // The runnability backstop must roll the root forward to the CURRENT
-    // official home.tsx and materialize THAT: the once-fatal field present, the
-    // handler stream live end to end.
+    // A pinned pattern is loadable, but its setup repair reports the
+    // machine-tagged CFC schema-migration rejection injected below. Enforce-on
+    // is the default here because the rejecting layer is the point of the
+    // orchestration test. The runnability backstop must roll the root forward
+    // to the current official identity and materialize it, including a live
+    // handler stream.
     await setupHome({ systemPatternAutoUpdate: true });
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
 
@@ -1793,8 +1786,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     const root = (await manager.getDefaultPattern(false))!;
     await manager.stopPiece(root);
 
-    // 2. Compile OLD so its identity is loadable in-session, then pin the root
-    //    to it (sourceless) — the pre-fix required-favorites home.tsx.
+    // 2. Compile the migration-rejected fixture so its identity is loadable
+    //    in-session, then pin the root to it without source state.
     stub.setSource(SOURCE_HOME_OLD_REQUIRED);
     const oldResolved = await runtime.harness.resolve(
       new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
@@ -1821,10 +1814,10 @@ describe("checkAndUpdateDefaultPattern", () => {
       ),
     ).resolves.toBeDefined();
 
-    // 3. Toolshed now serves OFFICIAL (favorites rides Default<[]>). Take its
-    //    expected identity the SAME way the heal does — the compiled artifact
-    //    ref, not a source hash — so the assertion also proves the roll-forward
-    //    compiled THIS source, not a stale-cached one.
+    // 3. Toolshed now serves the roll-forward target. Take its expected
+    //    identity the SAME way the heal does — the compiled artifact ref, not a
+    //    source hash — so the assertion also proves the roll-forward compiled
+    //    THIS source, not a stale-cached one.
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
       new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
@@ -1845,8 +1838,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     //    must heal the reused doc. The rejection message mirrors the live
     //    "CFC enforcement rejected commit" wrapper (see the runner + #4936's
     //    schema-merge tests) so the gate's predicate is exercised as shipped.
-    //    A genuine additive-required rejection over a CFC-relevant home root is
-    //    covered directly by cfc-additive-default-preserves-old-doc.test.ts;
+    //    A genuine required-field rejection for unclassified CFC document data
+    //    is covered directly by cfc-additive-default-preserves-old-doc.test.ts;
     //    here we pin the ORCHESTRATION the piece controller adds on top.
     const rt = runtime as unknown as {
       runSynced: (...args: unknown[]) => Promise<unknown>;
@@ -1913,11 +1906,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(homeSourceFetches.some((f) => f.cache === "no-cache")).toBe(true);
   });
 
-  // Shared estuary scaffolding for the roll-forward edge cases below: age a
-  // home doc with a favorites-less vintage, then pin the (stopped) root
-  // sourceless to an OLD required-favorites home.tsx that loads but cannot
-  // migrate the aged doc. Returns the pinned OLD ref and the OFFICIAL identity
-  // a successful roll-forward should reach. Mirrors the happy-path test above.
+  // Shared scaffolding for the roll-forward edge cases below: age a home doc,
+  // then pin the stopped root sourceless to the identity whose repair each case
+  // will reject explicitly. Returns that ref and the distinct official identity
+  // a successful roll-forward should reach.
   const pinOldRequiredHome = async () => {
     await setupHome({ systemPatternAutoUpdate: true });
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
@@ -2037,7 +2029,7 @@ describe("checkAndUpdateDefaultPattern", () => {
   it("stays fail-closed when the repair fails with a CFC rejection that is NOT a schema migration", async () => {
     // The negative twin of the roll-forward test: a repair rejection that
     // carries the `CFC enforcement rejected commit` PREFIX but is NOT the
-    // additive-required migration class (here: a prepared-digest race). Those
+    // schema-migration class (here: a prepared-digest race). Those
     // reflect ordering/policy/provenance faults, not "the pinned pattern is
     // wrong", so the backstop must NOT repoint the root. The bare-prefix
     // predicate this replaces would have wrongly rolled forward here.

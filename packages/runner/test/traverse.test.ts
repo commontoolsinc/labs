@@ -34,7 +34,6 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
-import { ContextualFlowControl } from "@commonfabric/runner";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
@@ -685,9 +684,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -695,7 +693,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -748,9 +746,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -758,7 +755,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -812,9 +809,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -822,7 +818,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -887,9 +883,8 @@ describe("getAtPath array index validation", () => {
       FabricValue,
       JSONSchema | undefined
     >();
-    const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSetStringToPathSelectors(true);
-    const context = createTraversalContext(tracker, cfc, schemaTracker);
+    const context = createTraversalContext(tracker, schemaTracker);
 
     const doc: IMemorySpaceValueAttestation = {
       address: {
@@ -1368,7 +1363,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // receives that self-contained schema and must resolve the $ref before
     // deciding whether undefined is a valid substitute.
     const docValue = ["hello", true];
-    const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+    const { store, docUri, type } = makeArrayDoc(docValue);
 
     const schema = {
       type: "array",
@@ -1386,7 +1381,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
           type,
           path: ["value"],
         },
-        value: docValue as FabricValue[],
+        value: docValue,
       });
 
     // After fix: $ref is resolved to { type: "string" }, which does not allow

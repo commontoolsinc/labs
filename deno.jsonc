@@ -45,6 +45,7 @@
     "check": "./tasks/check.sh",
     "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
     "check-no-waitfor": "deno run --allow-read ./tasks/check-no-waitfor.ts",
+    "check-conflict-markers": "deno run --allow-read --allow-run=git ./tasks/check-conflict-markers.ts",
     "check-unused-deps": "deno run --allow-read --allow-run=git ./tasks/check-unused-deps.ts",
     "check-deno-pins": "deno run --allow-read ./tasks/check-deno-pins.ts",
     "check-single-copy-deps": "deno run --allow-read ./tasks/check-single-copy-deps.ts",
@@ -53,6 +54,8 @@
     "pattern-vintage": "deno run -A ./tasks/pattern-vintage.ts",
     "check-baselines-append-only": "deno run --allow-read --allow-run=git ./tasks/check-baselines-append-only.ts",
     "check-skill-facts": "deno run --allow-read --allow-run=git ./tasks/check-skill-facts.ts",
+    // Reports the docs/ link graph; --allow-write serves its --out flag.
+    "docs-links": "deno run --allow-read --allow-write ./scripts/docs-links.ts",
     "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",

@@ -110,7 +110,6 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   getSupersetSelector(
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
-    cfc: ContextualFlowControl,
   ): [SchemaPathSelector?, Promise<T>?] {
     const selectorRefs = this.refTracker.get(toKey(address));
     const noMatch: [SchemaPathSelector?, Promise<T>?] = [undefined, undefined];
@@ -145,7 +144,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         const subPath = newAddress.path.slice(existingAddress.path.length);
         // Tracked schemas are interned (deep-frozen), so this derivation hits
         // cfc.schemaAtPath's identity-keyed memo.
-        const subSchema = cfc.schemaAtPath(
+        const subSchema = ContextualFlowControl.schemaAtPath(
           existingSchema,
           subPath,
           undefined,

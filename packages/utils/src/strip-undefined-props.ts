@@ -23,9 +23,7 @@ export function stripUndefinedProps(
     // rather than triggering the prototype setter on `out` (which would
     // pollute the prototype chain of the returned object).
     Object.defineProperty(out, key, {
-      value: isPlainObject(val)
-        ? stripUndefinedProps(val as Record<string, unknown>)
-        : val,
+      value: isPlainObject(val) ? stripUndefinedProps(val) : val,
       enumerable: true,
       configurable: true,
       writable: true,

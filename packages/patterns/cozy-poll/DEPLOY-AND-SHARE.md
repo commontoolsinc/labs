@@ -93,7 +93,7 @@ consequences trip everyone up:
    browser (a different passphrase/passkey DID), the browser's `myName` is empty
    — it shows you the join card and won't treat you as host. To act as the same
    person in both, import your CLI key into the browser (`Import CLI Key`); see
-   [`docs/development/SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
+   [`docs/features/shared-identity.md`](../../../docs/features/shared-identity.md).
    Verify with `cf id did "$CF_IDENTITY"` and the browser's `shell.identity`
    log.
 

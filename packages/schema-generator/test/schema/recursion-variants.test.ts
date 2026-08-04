@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Recursion variants", () => {
@@ -9,7 +9,7 @@ describe("Schema: Recursion variants", () => {
       interface Node { value: number; next?: Node; }
     `;
     const { type, checker } = await getTypeFromCode(code, "Node");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     expect(result.$ref).toBe("#/$defs/Node");
     const defs = result.$defs as Record<string, any>;
@@ -26,7 +26,7 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "Node");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     expect(s.$ref).toBe("#/$defs/Node");
     const d = s.$defs as any;
@@ -43,7 +43,7 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     expect(s.$ref).toBe("#/$defs/A");
     const defs = s.$defs as any;
@@ -59,7 +59,7 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     expect(s.$ref).toBe("#/$defs/A");
     const defs = s.$defs as any;

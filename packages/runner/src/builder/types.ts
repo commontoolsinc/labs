@@ -24,6 +24,7 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
+  FabricExecValue,
   FactoryInput,
   FetchBinaryFunction,
   FetchJsonFunction,
@@ -158,6 +159,7 @@ export type {
   Stream,
   StripCell,
   StripDefaultBrand,
+  toEncodableForm,
   toJSON,
   ToSchemaFunction,
   UiActionProps,
@@ -256,8 +258,8 @@ export function isModule(value: unknown): value is Module {
 export type Node = {
   description?: string;
   module: Module; // TODO(seefeld): Add `Alias` here once supported
-  inputs: JSONValue;
-  outputs: JSONValue;
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
 };
 
 export type DerivedInternalCellDescriptor = {
@@ -279,7 +281,7 @@ declare module "@commonfabric/api" {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     derivedInternalCells?: DerivedInternalCellDescriptor[];
-    result: JSONValue;
+    result: FabricExecValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source) and the derivation link to a
     // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so

@@ -1685,8 +1685,46 @@ export interface Module extends FabricExecPlainObject {
   defaultScope?: CellScope;
 }
 
+/**
+ * The member `JSON.stringify()` consults -- that name and no other. A builder
+ * artifact carries it, module and factory alike, delegating to
+ * `toEncodableForm`.
+ *
+ * A factory because a factory is what pattern source holds, and stringifying
+ * one is an idiom that source uses. A module because `JSON.stringify` reaches
+ * one THROUGH A GRAPH: an internal pattern graph holds live modules, whose
+ * `implementation` is a function, and `JSON.stringify` drops a
+ * function-valued member without a word.
+ *
+ * Its return stays `unknown`, unlike its sibling below: this is a public
+ * protocol whose contract permits any return, and outside values (notably a
+ * `Cell`, which answers with a link or `null`) match this type without being
+ * builder artifacts at all.
+ */
 export type toJSON = {
   toJSON(): unknown;
+};
+
+/**
+ * The member by which a builder artifact produces the form in which it gets
+ * encoded. Distinct from `toJSON` in saying nothing about JSON: what it
+ * answers is a value the data model can represent, which reaches storage
+ * without being stringified on the way.
+ *
+ * Always a RECORD. An artifact's encodable form is built by
+ * `moduleToEncodableForm` or `patternToEncodableForm`, and both answer a record by
+ * construction -- there is no artifact whose serialized form is a primitive,
+ * an array, or `null`.
+ *
+ * Its members are {@link FabricExecValue}, NOT {@link FabricValue}: a form can
+ * still hold live functions. A module whose implementation is a nested pattern
+ * with no entry ref answers with that pattern's graph embedded, and such a
+ * graph holds live modules. That is precisely why the artifact walk descends
+ * into what this returns rather than treating it as finished -- typing it as
+ * durable would assert the very thing the walk cannot assume.
+ */
+export type toEncodableForm = {
+  toEncodableForm(): Record<string, FabricExecValue>;
 };
 
 /**
@@ -1708,6 +1746,7 @@ export type NodeFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & (Module | Handler | Pattern)
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): NodeFactory<T, R>;
   };
@@ -1716,6 +1755,7 @@ export type PatternFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Pattern
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): PatternFactory<T, R>;
     inSpace(space?: string | AnyCell<unknown>): PatternFactory<T, R>;
@@ -1725,6 +1765,7 @@ export type ModuleFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Module
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
@@ -1732,7 +1773,8 @@ export type ModuleFactory<T, R> =
 export type HandlerFactory<E, T, R = void> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
   & Handler<E, T, R>
-  & toJSON;
+  & toJSON
+  & toEncodableForm;
 
 // JSON types
 

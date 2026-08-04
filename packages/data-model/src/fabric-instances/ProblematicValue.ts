@@ -47,7 +47,7 @@ export class ProblematicValue extends ExplicitTagValue {
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     subFreeze(this.state);
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**
