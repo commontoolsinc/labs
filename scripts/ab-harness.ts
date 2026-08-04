@@ -66,6 +66,14 @@ try {
   flatten = (await import(`${R}/storage-preflight.ts`)).flattenBuilderArtifacts;
 } catch { /* baseline */ }
 
+/**
+ * A pattern's serializer, under whichever name the tree spells it. The two
+ * checkouts this runs against may disagree, and asking by one name would report
+ * a failure in whichever tree uses the other.
+ */
+const patternForm = (pattern: unknown): unknown =>
+  (ju.patternToEncodableForm ?? ju.patternToJSON)(pattern as any);
+
 const say = (k: string, v: unknown) => console.log(`${k}: ${v}`);
 const encoded = (v: unknown) => {
   try {
@@ -93,7 +101,7 @@ const Top = pattern(({ n }: any) => ({
 }));
 
 // A REAL pattern, compiled from repo source by a standalone Engine: no entry
-// ref, so `patternToJSON` takes the GRAPH branch, and its nodes carry
+// ref, so the pattern serializer takes the GRAPH branch, and its nodes carry
 // artifacts in positions a hand-built fixture does not have (`inputs.op`).
 // A synthetic fixture cannot exhibit what it has no shape for; every claim
 // below is made against this one.
@@ -109,11 +117,11 @@ const Real: any = (await engine.compileAndEvaluateModules(realProgram)).main
   ?.default;
 
 if (want.has("encoded")) {
-  say("encoded/refless-graph", encoded(flatten(ju.patternToJSON(Top as any))));
+  say("encoded/refless-graph", encoded(flatten(patternForm(Top as any))));
   say("encoded/refless-factory", encoded(flatten(Top)));
-  say("encoded/refless-graph-raw", encoded(ju.patternToJSON(Top as any)));
-  say("encoded/depth1-graph", encoded(flatten(ju.patternToJSON(Leaf as any))));
-  say("encoded/real-graph", encoded(flatten(ju.patternToJSON(Real))));
+  say("encoded/refless-graph-raw", encoded(patternForm(Top as any)));
+  say("encoded/depth1-graph", encoded(flatten(patternForm(Leaf as any))));
+  say("encoded/real-graph", encoded(flatten(patternForm(Real))));
   say("encoded/real-factory", encoded(flatten(Real)));
 }
 
@@ -136,7 +144,7 @@ if (want.has("liveness")) {
     }
     return acc;
   };
-  const live = scan((ju.patternToJSON(Top as any) as any).nodes, 1, []);
+  const live = scan((patternForm(Top as any) as any).nodes, 1, []);
   say("liveness/synthetic-boundary", live.length ? live.join(",") : "none");
 
   // Position-agnostic: any function anywhere in the emitted form is something
@@ -164,8 +172,8 @@ if (want.has("liveness")) {
   };
   for (
     const [label, value] of [
-      ["real-boundary", ju.patternToJSON(Real)],
-      ["real-boundary-flattened", flatten(ju.patternToJSON(Real))],
+      ["real-boundary", patternForm(Real)],
+      ["real-boundary-flattened", flatten(patternForm(Real))],
     ] as const
   ) {
     const found = shapes(value);
@@ -194,7 +202,7 @@ if (want.has("provenance")) {
         ` trustedArtifact=${md.isTrustedBuilderArtifact(v)}` +
         ` derives=${md.resolveOriginal(v) !== v}`,
     );
-  const boundary: any = ju.patternToJSON(Top as any);
+  const boundary: any = patternForm(Top as any);
   ask("live-factory", Top);
   ask("flattened-factory", flatten(Top));
   ask("boundary-graph", boundary);
@@ -202,7 +210,7 @@ if (want.has("provenance")) {
   ask("live-node0-subgraph", (Top as any).nodes?.[0]?.module?.implementation);
   ask("boundary-node0-module", boundary.nodes?.[0]?.module);
   ask("boundary-node0-subgraph", boundary.nodes?.[0]?.module?.implementation);
-  const realBoundary: any = ju.patternToJSON(Real);
+  const realBoundary: any = patternForm(Real);
   ask("real-boundary-node0-module", realBoundary.nodes?.[0]?.module);
   ask(
     "real-boundary-node0-subgraph",
