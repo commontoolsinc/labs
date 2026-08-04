@@ -67,17 +67,26 @@ const DAY = 86_400_000;
 const TABLE = "billing-proj.billing.gcp_billing_export_v1_XXXX";
 
 // One row per day, in the shape the query returns: the day, its cost before
-// credits, the credit that came off it (negative, as the export records it), and
-// the seconds-epoch time the export last added to that day. These fixtures export
-// each day eight hours in, so every day but the newest has a later day written
-// after it, which is what marks a day finished.
-const exportedAt = (day: string) => (Date.parse(`${day}T08:00:00Z`) / 1000);
+// credits, the credit that came off it (negative, as the export records it), the
+// billable time the export has recorded for it, and the seconds-epoch time the
+// export last added a material batch to it.
+//
+// The billable time a fleet books in a full day. A day holding a small part of
+// this is one the export has yet to fill in.
+const FULL_DAY = 400 * 86_400;
+// A day the export is partway through. Well under half of a full day, which is
+// the share the tile reads as unfinished.
+const PART_DAY = FULL_DAY / 4;
+// These fixtures have the export finish each day eight hours after the day ends,
+// so that is the settling time the tile measures from them.
+const settledAt = (day: string) => Date.parse(`${day}T00:00:00Z`) / 1000 + 32 * 3600;
 
 function dailyRows(
   first: string,
   last: string,
   amount: (day: string) => number,
   credit: (day: string) => number = () => 0,
+  metered: (day: string) => number = () => FULL_DAY,
 ): string[][] {
   const rows: string[][] = [];
   for (
@@ -90,7 +99,8 @@ function dailyRows(
       day,
       String(amount(day)),
       String(credit(day)),
-      String(exportedAt(day)),
+      String(metered(day)),
+      String(settledAt(day)),
     ]);
   }
   return rows;
@@ -104,6 +114,7 @@ const earlyMonthRows = (credit: (day: string) => number = () => 0) =>
     "2026-01-10",
     (day) => day === "2026-01-10" ? 5 : day.startsWith("2026-01") ? 20 : 10,
     credit,
+    (day) => day === "2026-01-10" ? PART_DAY : FULL_DAY,
   );
 
 Deno.test(
@@ -188,7 +199,18 @@ Deno.test(
       sql,
       "DATE(usage_start_time) <= CURRENT_DATE()",
     );
-    assertStringIncludes(sql, "GROUP BY day ORDER BY day");
+    assertStringIncludes(sql, "ORDER BY money.day");
+    // Billable time and export progress, which mark a day as finished. Both read
+    // usage alone: invoice adjustments carry none and land weeks late.
+    assertStringIncludes(
+      sql,
+      "SUM(IF(usage.unit = 'seconds', usage.amount, 0)) AS metered",
+    );
+    assertStringIncludes(sql, "cost_type = 'regular'");
+    assertStringIncludes(
+      sql,
+      "MAX(IF(metered >= 0.01 * day_metered, export_time, NULL))",
+    );
   },
 );
 
@@ -263,7 +285,13 @@ Deno.test(
             "2025-12-31",
             () => 10,
           ),
-          ["2026-01-01", "7", "0", String(exportedAt("2026-01-01"))],
+          [
+            "2026-01-01",
+            "7",
+            "0",
+            String(PART_DAY),
+            String(settledAt("2026-01-01")),
+          ],
         ],
       ),
       () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
@@ -338,10 +366,11 @@ Deno.test(
     const { result } = await withFetch(
       bigQueryStub([
         ...dailyRows("2026-01-01", "2026-01-07", () => 20),
-        // The export's newest write touched both of these days, so it has
-        // finished neither, and each holds part of a day's cost so far.
-        ["2026-01-08", "5", "0", String(exportedAt("2026-01-10"))],
-        ["2026-01-09", "5", "0", String(exportedAt("2026-01-10"))],
+        // The export has each of these days a quarter written, so it has
+        // finished neither, and each holds part of a day's cost so far. It has
+        // had long enough with both, which on its own would pass them.
+        ["2026-01-08", "5", "0", String(PART_DAY), String(settledAt("2026-01-08"))],
+        ["2026-01-09", "5", "0", String(PART_DAY), String(settledAt("2026-01-09"))],
       ]),
       () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
     );
@@ -354,6 +383,60 @@ Deno.test(
       '<span class="hmtd">$150 MTD</span>',
     );
     assertEquals(result.duration, 7 * DAY);
+  },
+);
+
+Deno.test(
+  "cloud spend: a full day the export has not had long enough with waits",
+  async () => {
+    // Every day here holds a full day's billable time, so how much of each day
+    // the export has accounted for says nothing. What separates them is that
+    // this export takes a day and a half to finish with a day, which it has had
+    // for 2026-01-07 and has not had for the two days after it.
+    const slow = (day: string) => String(Date.parse(`${day}T00:00:00Z`) / 1000 + 60 * 3600);
+    const { result } = await withFetch(
+      bigQueryStub(
+        dailyRows("2026-01-01", "2026-01-09", () => 20)
+          .map((row) => [...row.slice(0, 4), slow(row[0])]),
+      ),
+      () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
+    );
+
+    // Seven days at $20 rate the month at $620, and all nine days count towards
+    // the month-to-date total. Rating every day the export has touched would
+    // read the same $620 off days two of which are not all there.
+    assertEquals(result.value, "~$620/mo");
+    assertEquals(result.aside, '<span class="hmtd">$180 MTD</span>');
+    assertEquals(result.duration, 7 * DAY);
+  },
+);
+
+Deno.test(
+  "cloud spend: a fleet that shrinks for good stops reading as unfinished",
+  async () => {
+    // Two thirds of the fleet goes away on 2026-01-05 and never comes back.
+    // That day holds a third of the billable time of the day before it, which
+    // is what a day the export is still writing looks like, so it cannot end
+    // the rate window. Every day after it stands against the new level, so the
+    // window still reaches 2026-01-09 and the tile rates the month on the fleet
+    // it has now, rather than stalling on one that is not coming back.
+    const { result } = await withFetch(
+      bigQueryStub(
+        dailyRows(
+          "2026-01-01",
+          "2026-01-10",
+          (day) => day >= "2026-01-05" ? 6 : 20,
+          () => 0,
+          (day) => day >= "2026-01-05" ? FULL_DAY / 3 : FULL_DAY,
+        ),
+      ),
+      () => gcpSpend.collect(ctx({ GCP_BILLING_TABLE: TABLE })),
+    );
+
+    // Four days at $20 and five at $6 rate the month: $110 / 9 * 31 = $379.
+    assertEquals(result.value, "~$379/mo");
+    assertEquals(result.aside, '<span class="hmtd">$116 MTD</span>');
+    assertEquals(result.duration, 9 * DAY);
   },
 );
 
@@ -375,15 +458,17 @@ Deno.test(
   async () => {
     for (
       const rows of [
-        [["2026-01-09", "not-a-number", "0", "1767000000"]],
-        [["not-a-day", "10", "0", "1767000000"]],
-        [["2026-99-99", "10", "0", "1767000000"]],
-        [["2026-01-11", "10", "0", "1767000000"]],
-        [["2026-01-09", null, "0", "1767000000"]],
-        [["2026-01-09", "10", "not-a-number", "1767000000"]],
-        [["2026-01-09", "10", null, "1767000000"]],
-        [["2026-01-09", "10", "0", "not-a-number"]],
-        [["2026-01-09", "10", "0", null]],
+        [["2026-01-09", "not-a-number", "0", "86400", "1767000000"]],
+        [["not-a-day", "10", "0", "86400", "1767000000"]],
+        [["2026-99-99", "10", "0", "86400", "1767000000"]],
+        [["2026-01-11", "10", "0", "86400", "1767000000"]],
+        [["2026-01-09", null, "0", "86400", "1767000000"]],
+        [["2026-01-09", "10", "not-a-number", "86400", "1767000000"]],
+        [["2026-01-09", "10", null, "86400", "1767000000"]],
+        [["2026-01-09", "10", "0", "not-a-number", "1767000000"]],
+        [["2026-01-09", "10", "0", null, "1767000000"]],
+        [["2026-01-09", "10", "0", "86400", "not-a-number"]],
+        [["2026-01-09", "10", "0", "86400", null]],
       ] as (string | null)[][][]
     ) {
       const { result } = await withFetch(
