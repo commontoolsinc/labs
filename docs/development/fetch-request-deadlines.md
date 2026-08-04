@@ -11,7 +11,8 @@ survivable._
 ## The question
 
 [Retiring the LLM Tool-Call
-Deadline](proposals/retiring-llm-tool-call-deadlines.md) removed a deadline that
+Deadline](../history/development/proposals/retiring-llm-tool-call-deadlines.md)
+removed a deadline that
 bounded how long a local computation was allowed to take, and kept one that
 bounded how long to keep believing a different replica was still working. It
 left the two deadlines in the fetch builtins undecided, on the grounds that a

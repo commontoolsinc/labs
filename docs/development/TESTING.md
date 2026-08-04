@@ -157,6 +157,12 @@ run directory.
   the event-driven primitives, the `check-no-waitfor` CI guard that keeps new
   polling `waitFor` out of the integration suites, and the deliberate exceptions
   where a bounded poll is the honest observation — read it before adding a poll.
+- [waiting-in-tests-rationale.md](waiting-in-tests-rationale.md) — the analysis
+  and case studies behind that guidance: the full argument against bounded
+  timeouts, the sizing of the deno-web-test backstop, retired real-clock
+  exemptions, the FUSE exec suite's design, and the production waits that apply
+  the same principle. Not needed to write a test; read it before changing the
+  wait machinery itself.
 - [COVERAGE.md](COVERAGE.md) — how CI measures coverage. It explains the two
   mechanisms (Deno's V8 coverage for runtime code, and transformer-based
   coverage for authored patterns) and how both feed the coverage-debt gate.
