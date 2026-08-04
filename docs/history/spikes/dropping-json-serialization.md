@@ -283,7 +283,7 @@ branch (FD2) where it succeeded on the baseline.
 Re-verified at the branch's final state, after the replacement moved from the
 individual call sites into `Runtime.getImmutableCell`: still byte-identical.
 That move was the kind of change -- same bytes, different moment -- this branch
-has shown can shift behaviour while every byte comparison reports identical, so
+has shown can shift behavior while every byte comparison reports identical, so
 it was re-run rather than assumed.
 
 Scope not yet covered by that probe: handler modules carrying
@@ -495,7 +495,7 @@ A suite that does not move is not evidence that nothing moved.
   preflight being load-bearing reached a commit message. The same mistake, in a
   probe rather than a test, produced two false "verified" claims -- see
   Finding 6.
-- Bytes-identical is not behaviour-identical. Trust and the content-addressed
+- Bytes-identical is not behavior-identical. Trust and the content-addressed
   entry ref live in identity-keyed `WeakMap`s, so they do not travel with the
   encoded form. A copy that skips `noteDerivedCopy` is a trust dead end that no
   byte comparison can see; two were introduced here and neither showed up in
