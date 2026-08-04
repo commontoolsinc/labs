@@ -264,6 +264,17 @@ describe("cf piece get transforms", () => {
     ).toThrow("Could not resolve source schema reference for --schema");
   });
 
+  it("treats an explicit root type as authoritative over combinators", () => {
+    expect(schemaMayBeArray({
+      type: "object",
+      anyOf: [{ type: "array" }],
+    })).toBe(false);
+    expect(schemaMayBeArray({
+      type: "object",
+      allOf: [{ type: "array" }],
+    })).toBe(false);
+  });
+
   it("classifies only unambiguous declared root shapes", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.allOf = [cyclic];
@@ -303,6 +314,7 @@ describe("cf piece get transforms", () => {
     };
 
     expect(schemaRootKind(broken)).toBe("unknown");
+    expect(schemaRootKind({ ...broken, type: "array" })).toBe("unknown");
     expect(selectSourceSchema(broken, mask)).toBe(broken);
   });
 
@@ -1617,6 +1629,23 @@ describe("cf piece get transforms", () => {
     await expect(derivePieceGetValue(runtime, space, source, {
       filter: parsePieceGetFilter(".id == 1"),
     })).rejects.toThrow("--filter can only be applied to an array");
+  });
+
+  it("treats an unset declared array as empty for filtering", async () => {
+    const tx = runtime.edit();
+    const unsetSource = runtime.getCell(
+      space,
+      "declared-array-unset-filter-source",
+      { type: "array", items: { type: "object" } },
+      tx,
+    );
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await derivePieceGetValue(runtime, space, unsetSource, {
+        filter: parsePieceGetFilter("true"),
+      }),
+    ).toEqual([]);
   });
 
   it("reports schema/value root mismatches with CLI-level errors", async () => {

@@ -704,6 +704,9 @@ function walkSchemaRoot<T>(
   ancestors.add(schema);
   const documentRoot = schema.$defs !== undefined ? schema : root;
   try {
+    // A reference is the source shape for this heuristic. Resolve it before
+    // inspecting sibling keywords so a broken reference cannot lend false
+    // shape authority through, for example, a sibling `type`.
     if (schema.$ref !== undefined) {
       try {
         return walkSchemaRoot(
@@ -721,6 +724,9 @@ function walkSchemaRoot<T>(
     }
 
     const types = schemaTypes(schema);
+    // An explicit `type` is the authoritative root-shape signal here.
+    // Combinators are conjunctive with it, so contradictory branch types
+    // cannot expand the root shapes it declares.
     if (types.length > 0) return behavior.fromTypes(types);
 
     const alternatives = [...schema.anyOf ?? [], ...schema.oneOf ?? []];
@@ -1512,6 +1518,11 @@ export async function derivePieceGetValue(
     const outputValue = outputCell.get();
     const recorded = errors.slice(errorCountBefore);
     if (recorded.length > 0) {
+      // Translate the array-shape errors emitted by the runner filter/map
+      // builtins into CLI-level messages. Keep these matches in sync with
+      // packages/runner/src/builtins/{filter,map}.ts; the mismatch regression
+      // test in piece-get-transform.test.ts guards this package-boundary
+      // coupling.
       if (
         transform.filter !== undefined &&
         recorded.some((error) =>
