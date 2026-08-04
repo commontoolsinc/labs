@@ -224,6 +224,37 @@ const assertReasoningEffortSupported = (
   }
 };
 
+/**
+ * Fraction of the usable input budget at which server-side compaction fires.
+ *
+ * Chosen as a guard rather than an optimisation: compacting costs extra on the
+ * turn that does it, so firing early taxes short runs to benefit long ones. At
+ * 75% it stays dormant for ordinary runs and engages once a built-up context
+ * (large system prompt, preloaded skills, accumulated documents) approaches
+ * the wall.
+ */
+export const COMPACT_THRESHOLD_FRACTION = 0.75;
+
+/**
+ * Derives the compaction threshold from the model's *input* budget.
+ *
+ * Deliberately not a fraction of `contextWindow`: the registry reports that as
+ * input + output, and on the 400k models 75% of it is 300,000 against a hard
+ * 272,000 input ceiling — a threshold past a wall the request can never reach,
+ * so the guard would never fire in exactly the case it exists for.
+ */
+export const compactThresholdForBudget = (
+  contextWindow: number | undefined,
+  maxOutputTokens: number | undefined,
+): number | undefined => {
+  if (contextWindow === undefined || maxOutputTokens === undefined) {
+    return undefined;
+  }
+  const inputBudget = contextWindow - maxOutputTokens;
+  if (!Number.isFinite(inputBudget) || inputBudget <= 0) return undefined;
+  return Math.floor(inputBudget * COMPACT_THRESHOLD_FRACTION);
+};
+
 const toModelAttempt = (
   attempt: OpenAIChatCompletionAttemptDiagnostic,
 ): HarnessModelAttemptDiagnostic => ({
@@ -234,8 +265,25 @@ const toModelAttempt = (
 
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
+  /**
+   * Input budgets by model id, populated by `listModels()`. Compaction is a
+   * guard, so an unknown budget simply means no threshold is sent rather than
+   * a per-turn registry fetch on the hot path.
+   */
+  readonly #compactThresholds = new Map<string, number>();
 
   constructor(readonly gatewayClient: OpenAICompatibleGatewayClient) {}
+
+  #resolveCompactThreshold(
+    request: HarnessModelTurnRequest,
+  ): number | undefined {
+    if (request.compactThreshold !== undefined) {
+      return request.compactThreshold > 0
+        ? request.compactThreshold
+        : undefined;
+    }
+    return this.#compactThresholds.get(request.model);
+  }
 
   async complete(
     request: HarnessModelTurnRequest,
@@ -306,6 +354,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       "drop",
     );
     const tools = toResponsesTools(request.tools);
+    const compactThreshold = this.#resolveCompactThreshold(request);
     const payload: OpenAIResponsesRequest = {
       model: request.model,
       store: false,
@@ -327,6 +376,14 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       prompt_cache_key: providerRunAffinityKey(
         request.cacheAffinityKey ?? request.runId,
       ),
+      ...(compactThreshold !== undefined
+        ? {
+          context_management: [{
+            type: "compaction" as const,
+            compact_threshold: compactThreshold,
+          }],
+        }
+        : {}),
       ...(request.promptCacheMode !== undefined
         ? {
           prompt_cache_options: {
@@ -373,20 +430,36 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     const json = await response.json() as {
       data?: Array<{ id?: unknown; capabilities?: Record<string, unknown> }>;
     };
-    return (json.data ?? []).flatMap((item) =>
-      typeof item.id === "string"
-        ? [{
-          id: item.id,
-          displayName: item.id,
-          inputModalities: item.capabilities?.images === true
-            ? ["text", "image"]
-            : ["text"],
-          supportedReasoningEfforts: item.id.startsWith("gpt-5.6")
-            ? GPT_5_6_REASONING_EFFORTS
-            : [],
-          supportsParallelToolCalls: false,
-        }]
-        : []
-    );
+    return (json.data ?? []).flatMap((item) => {
+      if (typeof item.id !== "string") return [];
+      const contextWindow = typeof item.capabilities?.contextWindow === "number"
+        ? item.capabilities.contextWindow
+        : undefined;
+      const maxOutputTokens =
+        typeof item.capabilities?.maxOutputTokens === "number"
+          ? item.capabilities.maxOutputTokens
+          : undefined;
+      // Cache the derived threshold so `complete()` needs no registry fetch.
+      const threshold = compactThresholdForBudget(
+        contextWindow,
+        maxOutputTokens,
+      );
+      if (threshold !== undefined) {
+        this.#compactThresholds.set(item.id, threshold);
+      }
+      return [{
+        id: item.id,
+        displayName: item.id,
+        inputModalities: item.capabilities?.images === true
+          ? ["text", "image"]
+          : ["text"],
+        supportedReasoningEfforts: item.id.startsWith("gpt-5.6")
+          ? GPT_5_6_REASONING_EFFORTS
+          : [],
+        supportsParallelToolCalls: false,
+        ...(contextWindow !== undefined ? { contextWindow } : {}),
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      }];
+    });
   }
 }

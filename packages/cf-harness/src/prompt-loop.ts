@@ -129,6 +129,7 @@ export interface CreateHarnessPromptLoopOptions
   cacheAffinityKey?: string;
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+  compactThreshold?: number;
 }
 
 export interface RunHarnessPromptOptions {
@@ -1655,6 +1656,7 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
+  readonly #compactThreshold?: number;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -1735,6 +1737,7 @@ export class CfHarnessPromptLoop {
     this.#cacheAffinityKey = options.cacheAffinityKey;
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#compactThreshold = options.compactThreshold;
   }
 
   /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
@@ -1970,6 +1973,9 @@ export class CfHarnessPromptLoop {
             : {}),
           ...(this.#reasoningEffort !== undefined
             ? { reasoningEffort: this.#reasoningEffort }
+            : {}),
+          ...(this.#compactThreshold !== undefined
+            ? { compactThreshold: this.#compactThreshold }
             : {}),
           signal: options.signal,
           onAttempt: recordModelAttempt,
