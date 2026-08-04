@@ -2,6 +2,7 @@ import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
 } from "@commonfabric/llm/types";
+import { LLMRequestError } from "./errors.ts";
 import { findModel } from "./models.ts";
 import {
   generateObject as generateObjectCore,
@@ -21,11 +22,25 @@ export async function generateObject(
       string,
       unknown
     >;
-    const modelConfig = findModel(
-      params.model ?? DEFAULT_GENERATE_OBJECT_MODELS,
-    );
+    const modelName = params.model ?? DEFAULT_GENERATE_OBJECT_MODELS;
+    const modelConfig = findModel(modelName);
+    if (!modelConfig) {
+      throw new LLMRequestError(`Unsupported model: ${modelName}`);
+    }
     const ajv = new Ajv({ allErrors: true, strict: false });
-    const validator = ajv.compile(providerSchema);
+    // The schema comes from the caller, and Ajv rejects one it cannot compile:
+    // an unknown type, a reference to nothing, a keyword given the wrong shape.
+    let validator;
+    try {
+      validator = ajv.compile(providerSchema);
+    } catch (error) {
+      throw new LLMRequestError(
+        `Schema cannot be compiled: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
 
     const activeSpan = trace.getActiveSpan();
     const spanId = activeSpan?.spanContext().spanId;
@@ -74,6 +89,10 @@ export async function generateObject(
         },
       }),
       maxOutputTokens: params.maxTokens,
+      // The AI SDK otherwise sleeps and sends the request again twice before
+      // reporting a failure, and reports it wrapped in an error that carries
+      // no status. One attempt leaves the decision to retry with the caller.
+      maxRetries: 0,
       // Registering a telemetry integration turns span collection on for every
       // AI SDK call. This route has never emitted AI SDK spans, so it opts out.
       telemetry: { isEnabled: false },

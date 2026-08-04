@@ -1,4 +1,12 @@
-import { jsonSchema, ModelMessage, stepCountIs, streamText, tool } from "ai";
+import {
+  type FinishReason,
+  jsonSchema,
+  type LanguageModelUsage,
+  ModelMessage,
+  stepCountIs,
+  streamText,
+  tool,
+} from "ai";
 import { trace } from "@opentelemetry/api";
 import {
   type LLMNativeModelToolId,
@@ -6,6 +14,11 @@ import {
   type LLMRequest,
 } from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
+import {
+  LLMRequestError,
+  LLMUpstreamError,
+  upstreamStatusOf,
+} from "./errors.ts";
 import { findModel, type ModelConfig } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
 import {
@@ -149,19 +162,101 @@ export function applyNativeModelTools(
   };
   for (const toolId of nativeModelToolIds) {
     if (tools[toolId] !== undefined) {
-      throw new Error(
+      throw new LLMRequestError(
         `Native model tool '${toolId}' conflicts with an existing tool definition`,
       );
     }
     const factory = modelConfig.nativeModelToolFactories?.[toolId];
     if (factory === undefined) {
-      throw new Error(
+      throw new LLMRequestError(
         `Native model tool '${toolId}' is not supported by model '${modelConfig.name}'`,
       );
     }
     tools[toolId] = factory();
   }
   streamParams.tools = tools;
+}
+
+// A description ends up in an HTTP response body as well as in the log, so
+// cap it. A provider states a failure in a few hundred characters, but a proxy
+// in front of one can answer with a whole HTML page.
+const MAX_ERROR_DESCRIPTION_CHARS = 1000;
+
+function truncateDescription(text: string): string {
+  return text.length > MAX_ERROR_DESCRIPTION_CHARS
+    ? `${text.slice(0, MAX_ERROR_DESCRIPTION_CHARS)}… (truncated)`
+    : text;
+}
+
+/**
+ * Renders a failure the AI SDK recorded as one line of text. An HTTP status
+ * separates a request the provider turned down from a rate limit or an
+ * outage. The provider's response body is left out: it reaches the log
+ * through the cause of the error this description goes into.
+ */
+function describeStreamError(error: unknown): string {
+  if (typeof error !== "object" || error === null) {
+    return truncateDescription(String(error));
+  }
+  if (!(error instanceof Error)) {
+    // A provider can report a failure as a plain object lifted out of the
+    // response rather than as an error.
+    try {
+      return truncateDescription(JSON.stringify(error));
+    } catch {
+      return truncateDescription(String(error));
+    }
+  }
+  const { statusCode } = error as { statusCode?: unknown };
+  const status = typeof statusCode === "number"
+    ? `; HTTP status ${statusCode}`
+    : "";
+  return `${error.name}: ${truncateDescription(error.message)}${status}`;
+}
+
+/**
+ * Wraps a recorded stream failure for the caller to throw. The description
+ * goes in the message because the message is all that reaches the client:
+ * `llm.handlers.ts` puts it in the response body and drops the cause. The
+ * cause carries the provider's own error, whose fields the log records.
+ */
+function streamFailureError(failure: unknown, modelName: string): Error {
+  return new LLMUpstreamError(
+    `LLM request to ${modelName} failed: ${describeStreamError(failure)}`,
+    { cause: failure, upstreamStatus: upstreamStatusOf(failure) },
+  );
+}
+
+// Reasons a response holds no text that say what the caller asked for rather
+// than that the provider failed: an output budget spent before the first
+// token, a turn the model answered with tool calls, a filter that refused the
+// content. This route returns text alone, so a turn of tool calls arrives here
+// as an empty response.
+const CALLER_OWNED_FINISH_REASONS: ReadonlySet<FinishReason> = new Set(
+  ["length", "tool-calls", "content-filter"],
+);
+
+/**
+ * Describes a response that carried neither text nor a failure. The finish
+ * reason says where it came from and the token counts show whether the model
+ * wrote anything at all.
+ */
+async function emptyResponseError(
+  llmStream: {
+    finishReason: PromiseLike<FinishReason>;
+    totalUsage: PromiseLike<LanguageModelUsage>;
+  },
+  modelName: string,
+): Promise<Error> {
+  const finishReason = await llmStream.finishReason;
+  const usage = await llmStream.totalUsage;
+  const message = `No text in the response from ${modelName} ` +
+    `(finish reason: ${finishReason}, ` +
+    `input tokens: ${usage.inputTokens ?? "unknown"}, ` +
+    `output tokens: ${usage.outputTokens ?? "unknown"})`;
+  return CALLER_OWNED_FINISH_REASONS.has(finishReason)
+    ? new LLMRequestError(message)
+    : new LLMUpstreamError(message);
 }
 
 async function readNativeModelToolResults(
@@ -200,12 +295,14 @@ export async function generateText(
   const modelConfig = findModel(params.model!);
   if (!modelConfig) {
     console.error("Unsupported model:", params.model);
-    throw new Error(`Unsupported model: ${params.model}`);
+    throw new LLMRequestError(`Unsupported model: ${params.model}`);
   }
 
   // Groq models don't support streaming in JSON mode
   if (params.mode && params.stream && params.model?.startsWith("groq:")) {
-    throw new Error("Groq models don't support streaming in JSON mode");
+    throw new LLMRequestError(
+      "Groq models don't support streaming in JSON mode",
+    );
   }
 
   // Since our BuiltInLLMMessage types are now aligned with Vercel AI SDK, no conversion needed
@@ -219,6 +316,12 @@ export async function generateText(
     abortSignal: params.abortSignal,
     telemetry: { isEnabled: true },
     maxOutputTokens: params.maxTokens,
+    // The AI SDK otherwise sleeps and sends the request again twice before
+    // reporting a failure, holding the caller's connection open meanwhile and
+    // replacing the provider's answer with a wrapper that carries no status.
+    // One attempt, reported as it happened, leaves the decision to retry with
+    // the caller, who now has a status to make it on.
+    maxRetries: 0,
     stopWhen: stepCountIs(8), // TODO(bf): low limit to prevent runaway process
   };
 
@@ -298,6 +401,19 @@ export async function generateText(
   streamParams.runtimeContext = runtimeContext;
   streamParams.telemetry = { isEnabled: true, includeRuntimeContext };
 
+  // Anything that goes wrong once the request is under way — a provider
+  // rejecting it, a rate limit, a connection dropping mid-response, a stream
+  // that ends without a finish chunk — reaches the caller as an `error` part
+  // inside the stream instead of as a rejection. Both `textStream` and the
+  // parts of `fullStream` read below drop those parts, so record the first
+  // one here. Both paths then fail on it, including when text had already
+  // arrived: a response cut short is reported rather than passed off as a
+  // whole one.
+  let streamFailure: unknown;
+  streamParams.onError = ({ error }) => {
+    streamFailure ??= error;
+  };
+
   // This is where the LLM API call is made
   const llmStream = await streamText(streamParams);
 
@@ -325,8 +441,12 @@ export async function generateText(
       result += delta;
     }
 
+    if (streamFailure !== undefined) {
+      throw streamFailureError(streamFailure, modelConfig.name);
+    }
+
     if (!result) {
-      throw new Error("No response from LLM");
+      throw await emptyResponseError(llmStream, modelConfig.name);
     }
 
     // Clean up JSON responses when mode is enabled
@@ -433,6 +553,12 @@ export async function generateText(
               ),
             );
           }
+        }
+
+        // Check before reading `finishReason`, which reports a failed stream
+        // as a generic "no output generated" rejection that has lost the cause.
+        if (streamFailure !== undefined) {
+          throw streamFailureError(streamFailure, modelConfig.name);
         }
 
         // Only add stop token if not in JSON mode to avoid breaking JSON structure
