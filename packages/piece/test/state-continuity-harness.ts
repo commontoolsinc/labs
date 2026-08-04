@@ -48,6 +48,7 @@ import {
 import {
   type Cell,
   CHIP_UI,
+  getPatternIdentityRef,
   getPatternSetupIdentityRef,
   isCell,
   isStream,
@@ -1219,6 +1220,15 @@ export function isPresentRootValue(value: unknown): boolean {
  * identities in one capture would then false-red, and correspondence is not
  * reachable from a legitimate capture anyway, since the observer and the stamp
  * describe the same `resultCell`.
+ *
+ * EITHER marker satisfies presence. `patternSetupIdentity` (#4915) postdates
+ * spaces the runner still rolls forward in production, whose roots carry only
+ * `patternIdentity` — a fixture captured by an old toolchain (CT-1941) holds
+ * exactly that shape, and refusing it would exclude the vintages this tier
+ * exists to replay. The older marker is a weaker claim (pattern loaded, not
+ * setup completed), but for THIS question — "was something really captured
+ * here, or is this a valid empty database?" — either stamp is evidence only
+ * the runner writes.
  */
 export async function vintageHoldsRoot(
   vintage: VintageRuntime,
@@ -1233,7 +1243,8 @@ export async function vintageHoldsRoot(
   );
   try {
     await cell.sync();
-    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined;
+    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined ||
+      getPatternIdentityRef(cell as Cell<unknown>) !== undefined;
   } catch {
     // An absent doc surfaces as a throw rather than `undefined`, and for this
     // question the two are the same answer: nothing was captured here.
