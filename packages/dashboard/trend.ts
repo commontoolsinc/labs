@@ -4,6 +4,17 @@ const DAY_MS = 86_400_000;
 const MIN_TREND_DAYS = 7;
 const UP_PCT = 0.05;
 const RAPID_PCT = 0.20;
+// Samples the level fit reads, after grouping. Bounds the change-point search,
+// which is quadratic in the sample count.
+const LEVEL_SAMPLE_CAP = 64;
+// Samples either side of a change point, so each level rests on three or more.
+const MIN_SEGMENT = 3;
+// How far apart two neighbouring levels must sit, in standard errors of their
+// difference, for the boundary between them to count as a change point.
+const CHANGE_POINT_SIGMAS = 4;
+// How much smaller the straight line's total deviation must be for it to
+// describe the series instead of the levels.
+const LINE_PREFERENCE_MARGIN = 0.1;
 
 const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -21,34 +32,147 @@ export function distinctTrendDays(times: number[], values: number[]): number {
   return days.size;
 }
 
-// Overall trend as the fractional change of a robust fit across the displayed
-// range (+0.2 means the fit ends 20% higher than it starts).
-//
-// Sub-daily samples become one median value per calendar day. The fit is the
-// median of every pairwise log slope between those daily values, projected over
-// the complete day span. `times` must be ascending.
-export function trendPct(times: number[], values: number[]): number {
-  const byDay = new Map<number, number[]>();
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] <= 0) continue;
-    const day = Math.floor(times[i] / DAY_MS);
-    const samples = byDay.get(day);
-    if (samples) samples.push(values[i]);
-    else byDay.set(day, [values[i]]);
+// Groups the samples into at most `LEVEL_SAMPLE_CAP` equal-sized runs and takes
+// each run's median. Grouping by count rather than by clock keeps every group
+// carrying the same weight however unevenly the samples arrive.
+function groupedSamples(values: number[]): number[] {
+  if (values.length <= LEVEL_SAMPLE_CAP) return values;
+  const grouped: number[] = [];
+  for (let group = 0; group < LEVEL_SAMPLE_CAP; group++) {
+    const from = Math.round(group * values.length / LEVEL_SAMPLE_CAP);
+    const to = Math.round((group + 1) * values.length / LEVEL_SAMPLE_CAP);
+    if (to > from) grouped.push(median(values.slice(from, to)));
   }
-  const days = [...byDay.keys()].sort((a, b) => a - b);
-  if (days.length < MIN_TREND_DAYS) return 0;
-  const daily = days.map((day) => median(byDay.get(day)!));
-  const slopes: number[] = [];
-  for (let i = 0; i < days.length; i++) {
-    for (let j = i + 1; j < days.length; j++) {
-      slopes.push(
-        (Math.log(daily[j]) - Math.log(daily[i])) / (days[j] - days[i]),
-      );
+  return grouped;
+}
+
+// The typical size of a sample-to-sample move, read from the differences
+// between neighbours. A level change contributes one difference however large
+// it is, so the median of them describes the noise around the levels.
+function noiseScale(logs: number[]): number {
+  if (logs.length < 2) return 0;
+  const steps: number[] = [];
+  for (let i = 1; i < logs.length; i++) {
+    steps.push(Math.abs(logs[i] - logs[i - 1]));
+  }
+  return 1.4826 * median(steps) / Math.SQRT2;
+}
+
+function insertSorted(sorted: number[], value: number): void {
+  let low = 0, high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (sorted[mid] < value) low = mid + 1;
+    else high = mid;
+  }
+  sorted.splice(low, 0, value);
+}
+
+function medianOfSorted(sorted: number[]): number {
+  const middle = sorted.length >> 1;
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+// Splits `[from, to)` at the boundary whose two sides sit furthest apart, then
+// splits each side the same way, collecting the boundaries into `into`. A
+// boundary counts only when the gap between the two medians clears
+// `CHANGE_POINT_SIGMAS` standard errors, so noise alone does not produce one.
+function collectChangePoints(
+  logs: number[],
+  scale: number,
+  from: number,
+  to: number,
+  into: number[],
+): void {
+  const length = to - from;
+  if (length < 2 * MIN_SEGMENT) return;
+  const leftMedians: number[] = new Array(length + 1).fill(0);
+  const left: number[] = [];
+  for (let taken = 0; taken < length; taken++) {
+    insertSorted(left, logs[from + taken]);
+    leftMedians[taken + 1] = medianOfSorted(left);
+  }
+  const rightMedians: number[] = new Array(length + 1).fill(0);
+  const right: number[] = [];
+  for (let taken = length - 1; taken >= 0; taken--) {
+    insertSorted(right, logs[from + taken]);
+    rightMedians[taken] = medianOfSorted(right);
+  }
+  let bestSplit = -1;
+  let bestGap = 0;
+  for (let split = MIN_SEGMENT; split <= length - MIN_SEGMENT; split++) {
+    const gap = Math.abs(rightMedians[split] - leftMedians[split]);
+    const floor = CHANGE_POINT_SIGMAS * scale *
+      Math.sqrt(1 / split + 1 / (length - split));
+    if (gap > floor && gap > bestGap) {
+      bestGap = gap;
+      bestSplit = from + split;
     }
   }
+  if (bestSplit < 0) return;
+  into.push(bestSplit);
+  collectChangePoints(logs, scale, from, bestSplit, into);
+  collectChangePoints(logs, scale, bestSplit, to, into);
+}
+
+// The median of every pairwise slope between samples, by position in the
+// series.
+function medianSlope(logs: number[]): number {
+  const slopes: number[] = [];
+  for (let i = 0; i < logs.length; i++) {
+    for (let j = i + 1; j < logs.length; j++) {
+      slopes.push((logs[j] - logs[i]) / (j - i));
+    }
+  }
+  return slopes.length ? median(slopes) : 0;
+}
+
+// Overall change as the fractional difference between the start and the end of
+// a robust fit (+0.2 means the fit ends 20% higher than it starts).
+//
+// Two fits describe the series and the closer one answers. The first is a set
+// of flat levels meeting at change points, which is the shape a series takes
+// when something lands and shifts it. The second is a straight line through the
+// median pairwise slope, which is the shape a series takes when it drifts. Each
+// reports the difference between its own value at the last sample and at the
+// first, so a shift reads at its true size wherever in the window it sits.
+//
+// Sub-zero values are not timings and take no part. Fewer than
+// `MIN_TREND_DAYS` distinct days reads flat. `times` must be ascending.
+export function trendPct(times: number[], values: number[]): number {
+  if (distinctTrendDays(times, values) < MIN_TREND_DAYS) return 0;
+  const logs = groupedSamples(values.filter((value) => value > 0))
+    .map((value) => Math.log(value));
+  if (logs.length < 2) return 0;
+  // A scale of zero means most neighbours agree exactly. The search then treats
+  // any daylight between two levels as real, and still asks for `MIN_SEGMENT`
+  // samples either side of the boundary, so a single stray sample is not one.
+  const scale = noiseScale(logs);
+  const changePoints: number[] = [];
+  collectChangePoints(logs, scale, 0, logs.length, changePoints);
+  // The search reports each boundary as it splits, which is widest-gap first.
+  changePoints.sort((a, b) => a - b);
+  const edges = [0, ...changePoints, logs.length];
+  const levels = edges.slice(0, -1).map((start, index) =>
+    median(logs.slice(start, edges[index + 1]))
+  );
+  let levelDeviation = 0;
+  for (let edge = 0; edge < levels.length; edge++) {
+    for (let i = edges[edge]; i < edges[edge + 1]; i++) {
+      levelDeviation += Math.abs(logs[i] - levels[edge]);
+    }
+  }
+  const slope = medianSlope(logs);
+  const intercept = median(logs.map((log, index) => log - slope * index));
+  let lineDeviation = 0;
+  for (let i = 0; i < logs.length; i++) {
+    lineDeviation += Math.abs(logs[i] - (intercept + slope * i));
+  }
+  const byLine = lineDeviation < levelDeviation * (1 - LINE_PREFERENCE_MARGIN);
   return Math.expm1(
-    median(slopes) * (days[days.length - 1] - days[0]),
+    byLine ? slope * (logs.length - 1) : levels[levels.length - 1] - levels[0],
   );
 }
 

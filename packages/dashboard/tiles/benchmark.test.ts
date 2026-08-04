@@ -2816,9 +2816,10 @@ Deno.test("benchmark: trend classification — flat or falling good, a rise warn
   assertEquals(st([100, 120, 140, 160, 180, 200, 240]), "bad");
 });
 
-Deno.test("benchmark: a whole day's samples collapse to that day's median before the trend is taken", () => {
+Deno.test("benchmark: a lone spike is not a level, so the trend stays flat", () => {
   // Seven days, three samples each, all at 100 apart from one spike of 10000 in
-  // the middle of day 3. The day's median is still 100, so the trend stays flat.
+  // the middle of day 3. One sample cannot carry a level of its own, so the
+  // series reads as the single level it is.
   const times: number[] = [], values: number[] = [];
   for (let d = 0; d < 7; d++) {
     for (let s = 0; s < 3; s++) {
@@ -2829,6 +2830,81 @@ Deno.test("benchmark: a whole day's samples collapse to that day's median before
   assertEquals(trendPct(times, values), 0);
   // Values at or below zero are not timings and are left out entirely.
   assertEquals(trendPct([...times, 7 * DAY], [...values, 0]), 0);
+});
+
+// Twenty-one samples spread over seven days, stepping from `before` to `after`
+// at `at`, each nudged by a fixed amount that repeats without a pattern the fit
+// can follow. The nudge keeps the samples from agreeing exactly, so the trend
+// runs its change-point search rather than reading the two ends directly.
+function steppedSeries(
+  at: number,
+  before: number,
+  after: number,
+): { times: number[]; values: number[] } {
+  const times: number[] = [], values: number[] = [];
+  for (let i = 0; i < 21; i++) {
+    times.push(Math.floor(i / 3) * DAY + (i % 3) * HOUR);
+    values.push((i < at ? before : after) * (1 + ((i * 7919) % 13 - 6) / 1000));
+  }
+  return { times, values };
+}
+
+Deno.test("benchmark: the same rise reads the same wherever it falls in the window", () => {
+  // The old fit ran a line through the samples and reported its rise across the
+  // window, so a step read large in the middle and almost vanished at either
+  // end. The size of the step is what it is wherever it landed.
+  for (const at of [3, 6, 10, 15, 18]) {
+    const { times, values } = steppedSeries(at, 100, 105);
+    const pct = trendPct(times, values);
+    assert(
+      Math.abs(pct - 0.05) < 0.01,
+      `a 5% step at sample ${at} read as ${(pct * 100).toFixed(1)}%`,
+    );
+    assertEquals(trendStatus(pct), "warn");
+  }
+});
+
+Deno.test("benchmark: a rise in the newest samples is reported at its full size", () => {
+  // The freshest regression is the one worth catching soonest, and it has the
+  // fewest samples behind it.
+  const { times, values } = steppedSeries(18, 100, 130);
+  const pct = trendPct(times, values);
+  assert(
+    Math.abs(pct - 0.30) < 0.02,
+    `a 30% step in the last three samples read as ${(pct * 100).toFixed(1)}%`,
+  );
+  assertEquals(trendStatus(pct), "bad");
+});
+
+Deno.test("benchmark: a fall reads as a fall of its own size", () => {
+  const { times, values } = steppedSeries(10, 125, 100);
+  const pct = trendPct(times, values);
+  assert(
+    Math.abs(pct + 0.20) < 0.01,
+    `a 20% drop read as ${(pct * 100).toFixed(1)}%`,
+  );
+  assertEquals(trendStatus(pct), "good");
+});
+
+Deno.test("benchmark: a series that only wobbles reads flat", () => {
+  const { times, values } = steppedSeries(21, 100, 100);
+  assertEquals(trendPct(times, values), 0);
+  assertEquals(trendStatus(trendPct(times, values)), "good");
+});
+
+Deno.test("benchmark: a steady climb reads as the whole of its rise", () => {
+  // No step to find, so the straight line describes the series and answers with
+  // its rise from the first sample to the last.
+  const times: number[] = [], values: number[] = [];
+  for (let i = 0; i < 21; i++) {
+    times.push(Math.floor(i / 3) * DAY + (i % 3) * HOUR);
+    values.push(100 * Math.pow(1.30, i / 20));
+  }
+  const pct = trendPct(times, values);
+  assert(
+    Math.abs(pct - 0.30) < 0.02,
+    `a 30% climb read as ${(pct * 100).toFixed(1)}%`,
+  );
 });
 
 Deno.test("benchmark: fewer than a week of days claims no trend", () => {

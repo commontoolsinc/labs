@@ -542,14 +542,24 @@ Notes:
   CPU's line. Any sample isolated by those breaks appears as a point. A CPU
   with one sample also appears as a point until another sample can form a line.
   A large rise reads as a fold multiplier (`▲44×`) once it passes 4x. This
-  avoids a long percentage. The trend is a robust
-  **daily-median Theil–Sen** fit: the sub-daily samples are first collapsed to one
-  median per calendar day, then the trend is the median of the pairwise log-slopes
-  between days, projected across the day span. The daily median absorbs within-day
-  spikes, the median-of-slopes tolerates roughly a third of the days being outliers,
-  and working per calendar day (not per sample or per millisecond) keeps it
-  time-aware without letting two noisy runs a few hours apart blow up the slope —
-  which is what naive per-millisecond weighting does. With fewer than 7 distinct
+  avoids a long percentage. The trend is the difference between the start and
+  the end of whichever of **two robust fits** describes the samples more
+  closely, measured on the samples themselves rather than extended past them.
+  The first fit is a run of **flat levels meeting at change points**, which is
+  the shape a series takes when a change lands and shifts it. Levels are
+  medians, so a lone spike moves none of them, and a boundary counts as a change
+  point only when the two levels either side sit more than 4 standard errors of
+  their difference apart, with at least 3 samples supporting each — so noise
+  produces no levels, and one stray sample is not a level. The second fit is a
+  **straight line** through the median of the pairwise log-slopes, which is the
+  shape a series takes when it drifts, and it answers when its total deviation
+  is at least a tenth smaller. Reporting the difference across the fit rather
+  than a slope extended over the window means a shift reads at its true size
+  wherever in the window it sits: a shift in the newest samples is the one worth
+  catching soonest, and a slope through it would report a fraction of it. The
+  samples are first grouped into at most 64 equal-sized runs, each replaced by
+  its median, which bounds the change-point search and gives every group the
+  same weight however unevenly the runs arrive. With fewer than 7 distinct
   days in the window the trend is marked new: there is too little data to claim one.
   The window is capped by the 90-day artifact retention, so it shows at most ~45
   days and only as far back as the job has run.
