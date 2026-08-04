@@ -200,8 +200,8 @@ or Unclaimed (genesis).
 | Signer                | `Signer` interface                               | memory  |
 | Authorization         | Signed session open (`v2/session-open-auth.ts`)  | memory  |
 | Address tracking      | `IMemoryAddress` (`{id, type, path}`)            | runner  |
-| Read/Write tracking   | `Activity` type in `ITransactionJournal`         | runner  |
-| Transaction           | `IStorageTransaction` with `Journal`/`Chronicle` | runner  |
+| Read/Write tracking   | `Activity` type; `getReadActivities()`           | runner  |
+| Transaction           | `IStorageTransaction` (`V2StorageTransaction`)   | runner  |
 | Labels                | `Labels` type with `classification` (coarse)     | runner  |
 | Genesis cause         | `refer({the, of})` - hash of unclaimed state     | memory  |
 

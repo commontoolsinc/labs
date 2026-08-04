@@ -35,8 +35,6 @@ import type {
   IStorageTransaction,
   IStorageTransactionInconsistent,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
   ITransactionWriteRequest,
   IWriteAttempt,
   IWriteOptions,
@@ -44,7 +42,6 @@ import type {
   MemorySpace,
   NativeStorageCommit,
   NativeStorageCommitOperation,
-  ReaderError,
   ReadError,
   Result,
   StorageTransactionFailed,
@@ -70,12 +67,12 @@ import {
   getValueTypeName,
   isContainerValue,
 } from "./transaction/mutable-path-write.ts";
-import { ReadOnlyAddressError } from "./transaction/chronicle.ts";
 import {
+  ReadOnlyAddressError,
   TransactionAborted,
   TransactionCompleteError,
   WriteIsolationError,
-} from "./transaction.ts";
+} from "./transaction-errors.ts";
 import {
   ignoreReadForCommit,
   isMutableTransactionReadAllowed,
@@ -143,8 +140,6 @@ type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 type SpaceBranch = {
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
-  reader?: ITransactionReader;
-  writer?: ITransactionWriter;
 };
 
 type ReadyState = {
@@ -842,34 +837,6 @@ class V2TransactionJournal implements ITransactionJournal {
   }
 }
 
-class V2Reader implements ITransactionReader {
-  constructor(
-    protected readonly tx: V2StorageTransaction,
-    private readonly space: MemorySpace,
-  ) {}
-
-  did(): MemorySpace {
-    return this.space;
-  }
-
-  read(
-    address: IMemoryAddress,
-    options?: IReadOptions,
-  ): Result<IAttestation, ReadError> {
-    return this.tx.read({ ...address, space: this.space }, options);
-  }
-}
-
-class V2Writer extends V2Reader implements ITransactionWriter {
-  write(
-    address: IMemoryAddress,
-    value?: FabricValue,
-    options?: IWriteOptions,
-  ): Result<IAttestation, WriteError> {
-    return this.tx.writeWithinSpace(this.did(), address, value, options);
-  }
-}
-
 export class V2StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
   immediate?: boolean;
@@ -1306,31 +1273,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    const ready = this.editable();
-    if (ready.error) {
-      return { error: ready.error };
-    }
-    const branch = this.branch(space);
-    branch.reader ??= new V2Reader(this, space);
-    return { ok: branch.reader };
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    const ready = this.editable();
-    if (ready.error) {
-      return { error: ready.error };
-    }
-    const claim = this.claimWriteSpace(space);
-    if (claim.error) {
-      return { error: claim.error };
-    }
-    const branch = this.branch(space);
-    branch.writer ??= new V2Writer(this, space);
-    return { ok: branch.writer };
-  }
-
   /**
    * Records `space` as a write target. Without the multi-space opt-in, rejects a
    * second space with a write-isolation error (preserving the default
@@ -1566,7 +1508,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return flushRun();
   }
 
-  writeWithinSpace(
+  private writeWithinSpace(
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,

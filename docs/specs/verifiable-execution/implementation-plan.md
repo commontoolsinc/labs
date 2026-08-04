@@ -38,7 +38,7 @@ See the [verifiable-execution document map](README.md) for the spec index.
 ### 1.3 Transaction System
 
 - [x] Storage transactions (`IStorageTransaction`)
-- [x] Read/write tracking via `Journal` and `Chronicle`
+- [x] Read/write tracking in `V2StorageTransaction`
 - [x] Activity recording (`Activity` type with read/write variants)
 - [x] Path-level addressing (`IMemoryAddress` with `{id, type, path}`)
 - [x] Consistency checking via attestations
@@ -97,7 +97,7 @@ reading ANY part of X - too coarse for efficient scheduling.
 **Files to modify:**
 
 - `packages/runner/src/scheduler/` - staleness tracking and comparison
-- `packages/runner/src/storage/transaction.ts` - expose `since` with reads
+- `packages/runner/src/storage/v2-transaction.ts` - expose `since` with reads
 
 ---
 
@@ -109,8 +109,13 @@ scheduling.
 
 ### 2.1 Address-Level Activity in Receipts
 
-Currently, the `Journal` tracks activities with `IMemoryAddress` including
-paths, but this is not persisted in the commit structure.
+`V2StorageTransaction` tracks read and write activity with `IMemoryAddress`
+including paths, but this is not persisted in the commit structure. The
+transaction exposes that activity through `getReadActivities()`,
+`getReactivityLog()`, and `getWriteDetails()`. Its journal does not: the
+`activity()` member of `ITransactionJournal` is unimplemented on
+`V2TransactionJournal` and throws, so serialization work starts by giving it
+an implementation.
 
 **Required changes:**
 
@@ -139,7 +144,8 @@ interface CommitData {
 - `packages/memory/v2.ts` - extend the committed shape carried over the wire
 - `packages/memory/commit.ts` - serialize activity in `create()`
 - `packages/runner/src/storage/interface.ts` - activity export
-- `packages/runner/src/storage/transaction/journal.ts` - activity serialization
+- `packages/runner/src/storage/v2-transaction.ts` - activity serialization in
+  `V2TransactionJournal`
 
 ### 2.2 Code Bundle References
 
@@ -164,7 +170,7 @@ interface ComputationContext {
 **Files to modify:**
 
 - `packages/memory/interface.ts` - add computation context types
-- `packages/runner/src/storage/transaction.ts` - capture code context
+- `packages/runner/src/storage/v2-transaction.ts` - capture code context
 - `packages/runner/src/runtime/` - pass code identity to transactions
 
 ### 2.3 Input Provenance References
@@ -190,7 +196,7 @@ interface ProvenanceData {
 **Files to modify:**
 
 - `packages/memory/interface.ts` - provenance types
-- `packages/runner/src/storage/transaction/chronicle.ts` - track input sources
+- `packages/runner/src/storage/v2-transaction.ts` - track input sources
 
 ### 2.4 Receipt Serialization
 
@@ -280,7 +286,7 @@ interface CommitLogEntry {
 - `packages/memory/v2.ts` - `ClientCommit`, `CommitLogEntry` types
 - `packages/memory/commit.ts` - commit processing with validation
 - `packages/memory/space.ts` - commit log storage with original + resolution
-- `packages/runner/src/storage/transaction.ts` - client-side commit building
+- `packages/runner/src/storage/v2-transaction.ts` - client-side commit building
 
 ---
 
@@ -438,9 +444,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 | Fact operations | `packages/memory/fact.ts` |
 | Merkle hashing | `packages/data-model/value-hash.ts` |
 | Transaction interface | `packages/runner/src/storage/interface.ts` |
-| Transaction impl | `packages/runner/src/storage/transaction.ts` |
-| Journal | `packages/runner/src/storage/transaction/journal.ts` |
-| Chronicle | `packages/runner/src/storage/transaction/chronicle.ts` |
+| Transaction impl | `packages/runner/src/storage/v2-transaction.ts` |
 | Address operations | `packages/runner/src/storage/transaction/address.ts` |
 | Attestation | `packages/runner/src/storage/transaction/attestation.ts` |
 | ACL | `packages/memory/acl.ts`, `packages/memory/access.ts` |

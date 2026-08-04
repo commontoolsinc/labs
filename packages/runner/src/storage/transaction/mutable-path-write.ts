@@ -1,7 +1,6 @@
 /**
- * Mutate-in-place write primitives shared between `v2-transaction.ts` and
- * `chronicle.ts`. Both layers want the same "shallow-thaw the spine,
- * create missing intermediates, mutate the leaf in place" behavior.
+ * Mutate-in-place write primitives for `v2-transaction.ts`: shallow-thaw the
+ * spine, create missing intermediates, mutate the leaf in place.
  *
  * The hot path is `applyMutablePathWrite()`. Sibling helpers
  * (`isContainerValue`, `getValueTypeName`, `applyArrayLengthWrite`) are

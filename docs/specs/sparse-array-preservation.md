@@ -147,16 +147,6 @@ The leaf write itself is one of:
   `applyArrayLengthWrite`) -- JS `length=` truncates the tail, leaving
   holes within the new bound intact.
 
-### Chronicle (`packages/runner/src/storage/transaction/chronicle.ts`)
-
-The working-copy management used by Chronicle (commit-time conflict
-detection) routes its writes through the same
-`applyMutablePathWrite()` helper as the v2-transaction hot write path
-(see above), via a thin `applyWriteToAttestation()` wrapper that maps
-between Chronicle's `IAttestation`-shaped inputs and
-`applyMutablePathWrite`'s `FabricValue`-rooted form. Sparse-array
-handling is therefore identical between the two layers.
-
 ### Cell write path (`packages/runner/src/data-updating.ts`)
 
 Objects in arrays are anchored into entity documents inside
