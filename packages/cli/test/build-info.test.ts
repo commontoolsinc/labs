@@ -1,6 +1,10 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
 import { join } from "@std/path";
-import { gitShaForCliLibDir, resolveCliGitSha } from "../lib/build-info.ts";
+import {
+  gitShaForCliLibDir,
+  relateShasIn,
+  resolveCliGitSha,
+} from "../lib/build-info.ts";
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const { success, stdout, stderr } = await new Deno.Command("git", {
@@ -93,6 +97,65 @@ Deno.test("gitShaForCliLibDir", async (t) => {
     );
   } finally {
     await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("relateShasIn", async (t) => {
+  const repo = await Deno.makeTempDir({ prefix: "build-info-relate-" });
+  try {
+    // main: A -> B (HEAD); branch "other": A -> C.
+    await Deno.writeTextFile(join(repo, "f"), "a\n");
+    await git(repo, "init");
+    await git(repo, "add", ".");
+    await git(repo, "commit", "-m", "A");
+    const shaA = await git(repo, "rev-parse", "HEAD");
+    await Deno.writeTextFile(join(repo, "f"), "b\n");
+    await git(repo, "commit", "-am", "B");
+    const shaB = await git(repo, "rev-parse", "HEAD");
+    await git(repo, "checkout", "-b", "other", shaA);
+    await Deno.writeTextFile(join(repo, "f"), "c\n");
+    await git(repo, "commit", "-am", "C");
+    const shaC = await git(repo, "rev-parse", "HEAD");
+    await git(repo, "checkout", "-");
+
+    await t.step("server behind cf: cli-ahead with a distance", async () => {
+      assertEquals(await relateShasIn(repo, shaB, shaA), {
+        kind: "cli-ahead",
+        serverBehindBy: 1,
+      });
+    });
+
+    await t.step("server ahead of cf: cli-behind", async () => {
+      assertEquals(await relateShasIn(repo, shaA, shaB), {
+        kind: "cli-behind",
+      });
+    });
+
+    await t.step("sibling branches: diverged", async () => {
+      assertEquals(await relateShasIn(repo, shaB, shaC), {
+        kind: "diverged",
+      });
+    });
+
+    await t.step("a commit the history has never seen: unknown", async () => {
+      assertEquals(
+        await relateShasIn(repo, shaB, "deadbeef".repeat(5)),
+        { kind: "unknown" },
+      );
+    });
+
+    await t.step("a directory outside any repository: unknown", async () => {
+      const bare = await Deno.makeTempDir({ prefix: "build-info-bare-" });
+      try {
+        assertEquals(await relateShasIn(bare, shaB, shaA), {
+          kind: "unknown",
+        });
+      } finally {
+        await Deno.remove(bare, { recursive: true });
+      }
+    });
+  } finally {
+    await Deno.remove(repo, { recursive: true });
   }
 });
 

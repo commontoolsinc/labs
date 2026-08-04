@@ -56,14 +56,111 @@ export async function gitShaForCliLibDir(dir: string): Promise<string | null> {
   }
 }
 
+/** What this cf invocation knows about its own version: its commit, and —
+ * for source runs — the checkout directory whose git history can order that
+ * commit against a server's (compiled binaries carry no history, so their
+ * mismatches cannot be ordered). */
+export interface CliVersion {
+  sha: string | null;
+  checkoutDir: string | null;
+}
+
 /**
  * The commit this cf invocation is running: the baked build marker for
  * compiled binaries, the checkout's HEAD for source runs, else null. A
  * compiled binary built without COMMIT_SHA stays unknown rather than
  * guessing from the build machine's checkout.
  */
+export async function resolveCliVersion(): Promise<CliVersion> {
+  if (Deno.build.standalone) {
+    return { sha: buildInfo.commitSha, checkoutDir: null };
+  }
+  if (!import.meta.url.startsWith("file://")) {
+    return { sha: null, checkoutDir: null };
+  }
+  const dir = dirname(fromFileUrl(import.meta.url));
+  const sha = await gitShaForCliLibDir(dir);
+  return { sha, checkoutDir: sha === null ? null : dir };
+}
+
 export async function resolveCliGitSha(): Promise<string | null> {
-  if (Deno.build.standalone) return buildInfo.commitSha;
-  if (!import.meta.url.startsWith("file://")) return null;
-  return await gitShaForCliLibDir(dirname(fromFileUrl(import.meta.url)));
+  return (await resolveCliVersion()).sha;
+}
+
+/** How two differing commits relate in a checkout's history. `cli-ahead` and
+ * `cli-behind` are proven by ancestry; `diverged` means both commits are
+ * known but neither contains the other; `unknown` means the history cannot
+ * order them (server commit never fetched, shallow clone, git failure). */
+export type ShaRelation =
+  | { kind: "cli-ahead"; serverBehindBy: number | null }
+  | { kind: "cli-behind" }
+  | { kind: "diverged" }
+  | { kind: "unknown" };
+
+/** git merge-base --is-ancestor: true/false when git can answer, null when
+ * it cannot (unknown commit, no repository, no run permission). */
+async function isAncestor(
+  dir: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean | null> {
+  try {
+    const { code } = await new Deno.Command("git", {
+      args: ["merge-base", "--is-ancestor", ancestor, descendant],
+      cwd: dir,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    if (code === 0) return true;
+    if (code === 1) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Commits reachable from `descendant` but not `ancestor`, or null when git
+ * cannot count them. */
+async function countBehind(
+  dir: string,
+  ancestor: string,
+  descendant: string,
+): Promise<number | null> {
+  try {
+    const { success, stdout } = await new Deno.Command("git", {
+      args: ["rev-list", "--count", `${ancestor}..${descendant}`],
+      cwd: dir,
+      stdout: "piped",
+      stderr: "null",
+    }).output();
+    if (!success) return null;
+    const count = Number(new TextDecoder().decode(stdout).trim());
+    return Number.isFinite(count) ? count : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Order a (cf, server) commit pair using `dir`'s git history. Only called on
+ * a proven mismatch, so at most three local git invocations, and only for
+ * source runs — the callers of a compiled binary pass no checkout and get
+ * `unknown`.
+ */
+export async function relateShasIn(
+  dir: string,
+  cliSha: string,
+  serverSha: string,
+): Promise<ShaRelation> {
+  const serverIsAncestor = await isAncestor(dir, serverSha, cliSha);
+  if (serverIsAncestor === null) return { kind: "unknown" };
+  if (serverIsAncestor) {
+    return {
+      kind: "cli-ahead",
+      serverBehindBy: await countBehind(dir, serverSha, cliSha),
+    };
+  }
+  const cliIsAncestor = await isAncestor(dir, cliSha, serverSha);
+  if (cliIsAncestor === null) return { kind: "unknown" };
+  return cliIsAncestor ? { kind: "cli-behind" } : { kind: "diverged" };
 }
