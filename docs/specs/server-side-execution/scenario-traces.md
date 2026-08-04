@@ -365,11 +365,12 @@ which per §1 rule 5 IS the answer (the question's wording invited
 the over-report); T9.Q1's counter mismatch and T11.Q1's missing
 `actingSession` were CONTRADICTIONS with a determined direction and
 are FIXED in the docs alongside this fold; T11.Q7 reconciled
-(hook notifies, ACTIVE criteria decide — serving-loop §1). Open
-GAP/FLAG findings are ledger items **LT1–LT9** (§5). Answers below
+(hook notifies, ACTIVE criteria decide — serving-loop §1). The
+run's findings became ledger items **LT1–LT9** (§6) — **all RULED
+2026-08-03, same day**, folded into the governing docs in one
+batch; the affected cells below carry the ruled answers. Answers
 are compressed to essence + citations; a re-run diffs against
-these, and a GAP cell is a legitimate reference state until its
-ruling lands.
+these.
 
 ### T1 (COMPLETE)
 - Q1: `authored`; envelope = S1's session (U1+S1). [protocol §1, §2]
@@ -403,28 +404,26 @@ ruling lands.
 - Q5: no — logical write = authored commit EXCLUDING effect-channel
   acks. [serving-loop §3; testing §4]
 - Q6: on resubscribe the client sees unacked intents and enacts;
-  nonces make re-enactment detectable. [protocol §5] **FLAG → LT8**:
-  the only stated home for "already-enacted nonce" is the overlay,
-  which is process-memory and reload-wiped [speculation §1, §2] — the
-  reload × optimistic-enactment composition has no stated
-  reload-surviving record.
+  nonces make re-enactment detectable. (LT8 RULED 2026-08-03: the
+  reload × optimistic window MAY re-enact — the record is the
+  reload-wiped overlay — accepted for reversible effects, which
+  every shipped kind is.) [protocol §5; speculation §1, §2]
 - Q7: allowed; overlay records the nonce under `origin:
   intent(eventId)`; retires on the consequenced push; divergence =
   silent value replacement. [protocol §5; speculation §1, §2, §4]
 
 ### T3 (GAPS(3))
 - Q1: `firedAt = {user:U1, session:S1}` INHERITED from H1's acting
-  identity. [events §2; protocol §2] **GAP → LT7**: `clientSeq` for a
-  server-originated event is unstated.
+  identity. [events §2; protocol §2] (LT7 RULED 2026-08-03: no
+  `clientSeq` on server-originated events; stream seq orders.)
 - Q2: eventId minted fresh per handler attempt; sound because only
   the committing attempt's cascades escape the wave. [events §4]
-- Q3: **GAP → LT1** (the flagship): no passage states how a
-  same-space server-emitted append gets durable carriage — events §2
-  gives only the cross-space (outbox) rule; serving-loop §1's plane
-  (a) lists only the wave's derived commit + the outbox's authored
-  commits; protocol §2's only server-produced authored row is the
-  outbox row; and a sealed-write reading would bypass event-append
-  admission (eventId CAS, stamping) entirely.
+- Q3: (LT1 RULED 2026-08-03) the entry rides as a WRITE within the
+  wave's own derived commit — eventId + inherited firedAt at write
+  level, no separate admission (the lease check admits; one trust
+  environment), idempotency via `eventWatermark`; never blocks the
+  wave (same-space = own store; cross-space emissions go to the
+  outbox post-commit). [events §1, §2; protocol §2, §7]
 - Q4: U1/S1 — the event's (inherited) actor. [scopes §5; protocol §2]
 - Q5: `session:U1:S1` — consequences land in the acting principal's
   instances. [scopes §5; scopes §Anchors]
@@ -435,8 +434,10 @@ ruling lands.
   protocol §7]
 - Q8: the wave commit carries `consequenceOf: [E1, E2]`; stream 1's
   `eventWatermark` advances in it. [serving-loop §3; events §4]
-  **GAP** (inherits LT1): stream 2's advance needs E2 to have a
-  stream seq.
+  (LT1 RULED: stream 2's entry, consequences, and watermark advance
+  ride the same wave commit when processed same-wave; a
+  budget-exhausted wave leaves the entry as durable input under the
+  seq > `eventWatermark` reprocess rule. [events §2])
 
 ### T4 (GAPS(5))
 - Q1: outbox entry = acting identity (U1+S1) + `capabilityRef` +
@@ -445,28 +446,34 @@ ruling lands.
 - Q2: `authored`; checks: metadata carries acting identity +
   capabilityRef → grant validated (never impersonation) → `firedAt`
   stamps from validated identity → CAS/eventId horizon. [protocol §2,
-  §2b; events §4] **GAP → LT5**: the ENVELOPE identity of a
-  server-produced authored commit is never stated (rows 1–2 and
-  derived each state theirs).
+  §2b; events §4] (LT5 RULED 2026-08-03: the envelope is the
+  producing SpaceServer's SERVICE identity — same envelope model as
+  its derived commits; admissibility from the grant, never the
+  envelope.)
 - Q3: `{user:U1, session:S1}` from the carried delegation; envelope
   stamping would have produced `user:<serviceDID>` — the
-  silent-empty-instance trap. [protocol §2; events §2] (clientSeq →
-  LT7.)
-- Q4: `session:U1:S1` in B's store per the rule [scopes §5] —
-  **GAP → LT2**: whether S1 is a meaningful, GC-able session
-  identifier IN SPACE B is unstated (sessions are described only at
-  client connect; B never authenticated S1).
+  silent-empty-instance trap. [protocol §2; events §2] (clientSeq:
+  none — LT7.)
+- Q4: `session:U1:S1` in B's store per the rule [scopes §5]. (LT2
+  RULED 2026-08-03: `sessionId` is CLIENT-GLOBAL — the key is
+  well-formed in ANY space; foreign servers accept the carried pair
+  under the inter-server trust ruling (future: remote attestation);
+  retirement sweeps every space's instances. [protocol §5, §2;
+  scopes §3])
 - Q5: B's effects doc, S1's instance, in B's wave commit [builtins
-  §4; protocol §5] — **GAP → LT3**: no stated subscription carries
-  B's intent to S1's client (protocol §5 has "its own effects doc"
-  with no space qualifier; the cross-space wake is server-side only).
+  §4; protocol §5]. (LT3 RULED 2026-08-03: cross-space navigateTo
+  is DEFERRED — the intent write requires the acting session
+  CONNECTED to the computing space; a cross-space chain computing
+  navigateTo is the runtime error. Future direction recorded:
+  client-vended stream target, reversing the flow. [builtins §4])
 - Q6: eventId uniqueness above B's `eventWatermark` at admission;
   post-horizon duplicates skip as `skippedIdempotent`. [protocol §2,
   §2b; events §4]
-- Q7: **GAP → LT4**: failure semantics for a REJECTED cross-space
-  append are unstated — §2b's failure rule covers only `.inSpace`
-  provisioning, and A's wave (with E1's watermark advance) commits
-  BEFORE the outbox attempts delivery.
+- Q7: (LT4 RULED 2026-08-03) transport failures retry
+  (at-least-once); a DETERMINISTIC admission rejection does not —
+  it surfaces as a failure notice on the SOURCE event's stream
+  entry in A per the error-is-the-consequence shape; E1's own
+  committed consequences stand. [protocol §2b; events §5]
 - Q8: nothing cross-space is atomic; defined semantics = outbox
   retry + eventId dedupe + target `eventWatermark` exactly-once.
   [protocol §2b]
@@ -478,10 +485,11 @@ ruling lands.
 - Q2: (b) carries acting user U1, session stays `"server"`; user
   write now succeeds; session write and navigateTo still ERROR.
   [events §2; scopes §5; protocol §2]
-- Q3: (c) **GAP → LT6**: inheritance is stated for HANDLER runs;
-  the derivation carve-out covers only the acting-USER dimension —
-  whether a session-demanded derivation's emitted event carries S1
-  is unstated. Not extrapolated, per protocol.
+- Q3: (c) (LT6 RULED 2026-08-03: inheritance is UNIFORM across run
+  kinds) a session-demanded derivation's emitted event carries
+  `{user:U1, session:S1}` — the chain is session-bearing; only
+  space-/user-instance runs and timers emit sessionless.
+  [events §2; scopes §5]
 - Q4: error at RUN time (runtime check, not admission/seal); recorded
   via events §5's handler-error surface, watermark advances past it.
   [events §2, §5; builtins §4]
@@ -529,9 +537,9 @@ ruling lands.
 
 ### T8 (GAPS(1))
 - Q1: client-side unacked `authored` event appends, in fired order.
-  [events §5; speculation §5] **GAP → LT9**: the queue's durability
-  across a reload while offline is unstated (speculation §1's
-  memory-only rule covers the OVERLAY, a different structure).
+  [events §5; speculation §5] (LT9 RULED 2026-08-03: the queue is
+  DURABLE client-side, same persistence class as `sessionId` — a
+  reload while offline preserves it.)
 - Q2: discharge in fired order (RULED). [events §5; speculation §5]
 - Q3: DROP — "a doc the handler must write was deleted meanwhile"
   meets the unrunnable predicate verbatim; a raced consequence
@@ -633,46 +641,48 @@ governing docs. A ruling that changes a detail doc updates the
 affected reference answers in the SAME PR (README's
 docs-move-together rule applies to this file too).
 
-## 6. Open items from run 2026-08-03 (LT1–LT9)
+## 6. Run 2026-08-03 items (LT1–LT9) — ALL RULED same day
 
-Rulings needed; each names its trace cell. LT1 is the heavyweight.
+Each names its trace cell; rulings folded into the governing docs
+in the same batch, and the §4 reference cells carry the ruled
+answers.
 
-- **LT1 — same-space cascade carriage (T3.Q3, T3.Q8). Blocks
-  Phase 3.** How does a server-emitted same-space append (a handler
-  cascade's `stream.send()`) get its durable stream entry — which
-  commit, what class, produced by whom, carrying which of
-  `eventId`/`firedAt` — and how does its stream's `eventWatermark`
-  advance? Every stated carriage path excludes it, and a
-  sealed-write reading bypasses event-append admission entirely.
-- **LT2 — session identity across spaces (T4.Q4).** Is `sessionId`
-  space-scoped or client-global? Is `session:<U1>:<S1>` a sound,
-  GC-able instance in a space S1 never opened a connection to?
-- **LT3 — cross-space effect delivery (T4.Q5).** By what
-  subscription does S1's client (connected to A) learn of a
-  navigateTo intent written in B's effects instance? Without an
-  answer, cross-space navigateTo computes an intent nobody enacts.
-- **LT4 — rejected cross-space append (T4.Q7).** Failure semantics
-  when B's admission rejects the capability grant: retry forever,
-  surface where, and does A ever learn? (`.inSpace` has a rule;
-  plain appends do not — and A's wave commits BEFORE delivery.)
-- **LT5 — server-produced authored envelope (T4.Q2).** State the
-  envelope identity of the outbox's authored commits (rows 1–2 and
-  `derived` each state theirs; this row does not).
-- **LT6 — inheritance's session dimension for derivation runs
-  (T5.Q3).** Does a SESSION-demanded derivation's emitted event
-  carry the demanding session (making the chain session-bearing),
-  or is a derivation-emitted event categorically sessionless? The
-  inheritance rule names handler runs; the derivation carve-out
-  covers only the acting-user dimension.
-- **LT7 — `clientSeq` for server-originated events (T3.Q1,
-  T4.Q3).** Present at all? Derived from what? (Defined only as
-  client-minted, ordering one session's own appends.)
-- **LT8 — enacted-nonce record across reload (T2.Q6).** Optimistic
-  enactment + reload before ack: the only stated home for "already
-  enacted" is the reload-wiped overlay, yet §5 promises nonces make
-  re-enactment detectable. Name the reload-surviving record (or
-  rule the double-enactment acceptable for reversible effects).
-- **LT9 — offline event queue durability (T8.Q1).** Do queued
-  unacked event appends survive a client reload while offline? The
-  overlay's memory-only rule covers a different structure; losing
-  the queue loses user actions silently.
+- **LT1 (T3.Q3/Q8; was blocking Phase 3) — RULED: wave-carried.**
+  The same-space server-emitted append's durable entry is a WRITE
+  within the wave's own derived commit — `eventId` + inherited
+  `firedAt` at write level, admitted by the lease check (one trust
+  environment), deduped by `eventWatermark`; never blocks the wave
+  (events.md §2; protocol.md §2, §7; events.md §1's definition
+  narrows to client-fired + delegated appends).
+- **LT2 (T4.Q4) — RULED: `sessionId` is CLIENT-GLOBAL.** The same
+  value identifies the session in every space; foreign servers
+  accept the carried (principal, session) pair as if written
+  directly — inter-server trust is assumed, hardening via remote
+  attestation anticipated; retirement sweeps all spaces
+  (protocol.md §5, §2; scopes.md §3).
+- **LT3 (T4.Q5) — RULED: cross-space navigateTo DEFERRED.** The
+  intent write requires the acting session CONNECTED to the
+  computing space (no connection = no delivery channel); in
+  practice the producing handler is an immediate click consequence,
+  so the CONTEXT is same-space even when the TARGET is a foreign
+  link. Future direction recorded: the client VENDS its own stream
+  target, reversing the flow (builtins.md §4).
+- **LT4 (T4.Q7) — RULED:** transport failures retry; a
+  deterministic admission rejection does not — it surfaces as a
+  failure notice on the source event's stream entry
+  (error-is-the-consequence; protocol.md §2b).
+- **LT5 (T4.Q2) — RULED:** the outbox commit's envelope is the
+  producing SpaceServer's SERVICE identity; admissibility from the
+  validated grant, never the envelope (protocol.md §2).
+- **LT6 (T5.Q3) — RULED: inheritance is UNIFORM across run
+  kinds.** A demanded derivation run's identity inherits into its
+  emitted events exactly as a handler run's does; session-demanded
+  runs emit session-bearing events (events.md §2; scopes.md §5).
+- **LT7 (T3.Q1, T4.Q3) — RULED:** server-originated events carry
+  no `clientSeq`; stream seq orders them (events.md §2).
+- **LT8 (T2.Q6) — RULED: accepted.** The reload ×
+  optimistic-enactment window may re-enact a nonce; acceptable for
+  reversible effects, which every shipped kind is (protocol.md §5).
+- **LT9 (T8.Q1) — RULED:** the offline event queue is DURABLE
+  client-side, same persistence class as `sessionId` (events.md
+  §5).

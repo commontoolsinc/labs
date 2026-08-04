@@ -192,7 +192,11 @@ The lifecycle IS the client-effect doc's, not a mirror of it
 instance keyed by `scope_key`, not a path convention). A session is
 minted at connect, persists across reloads, and retires explicitly
 on logout or by TTL; a retired session's scoped instances retire
-with it, its effects instance among them. **ONE retirement rule for
+with it, its effects instance among them. Sessions are
+CLIENT-GLOBAL (protocol.md §5, LT2 — one `sessionId` across every
+space it touches), so retirement sweeps the session's instances in
+EVERY space holding one; the §8-item-2 GC design must reach them
+all. **ONE retirement rule for
 both** — because there are not two mechanisms to reconcile, only
 one kind of session-scoped instance.
 
@@ -229,14 +233,18 @@ SpaceServer-ambient identity (protocol.md §1/§7;
 runtime-mapping.md N57).
 
 **Consequence events INHERIT the actor (owner, 2026-08-03).** An
-event emitted by a handler run carries that run's acting identity —
-events run as the session they originated from — so a chain rooted
+event emitted by ANY run carries that run's acting identity —
+events run as the session they originated from — uniformly across
+run kinds (LT6, RULED 2026-08-03): a handler run's event actor, or
+a demanded derivation run's demand-supplied instance identity. So a
+chain rooted
 in a client event preserves the ROOT (user, session) across
 cascades and across spaces (events.md §2; protocol.md §2/§2b
 carriage), and session-scoped consequences land in the ORIGINATING
 session's instances, navigateTo's intent above all (builtins.md
 §4). "Sessionless" below therefore means an event with NO acting
-session anywhere in its chain — a derivation's send, a timer — not
+session anywhere in its chain — a space- or user-instance
+derivation's send, a timer — not
 merely one fired server-side.
 
 **A sessionless actor has no session instance.** A sessionless

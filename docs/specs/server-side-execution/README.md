@@ -191,9 +191,10 @@ substrate.
   home runtime the same way a home commit does. Per-reader clearance
   (sqlite row admissibility, CFC labels) is enforced where the read is
   served. v1's cross-space claims and cohort fences delete; what remains
-  is subscription plus an authority check. Writes LEAVE a space only as
-  events (protocol.md §2b) — derived commits never target foreign
-  spaces.
+  is subscription plus an authority check. Writes LEAVE a space only
+  through the two sanctioned crossings — event appends and the
+  `.inSpace` provisioning split (protocol.md §2b) — and derived
+  commits never target foreign spaces.
 - Recovery: on restart, re-derive from current cell state (with
   memoized-effect reuse per §2). No observation replay.
 

@@ -227,10 +227,22 @@ its navigateTo intents land in the session that actually acted.
 `firedAt.session = "server"`. The carriage is admissible on the
 same one-trust-environment footing as §1's derived annotations —
 the producer is a lease-holding SpaceServer on the same co-hosted
-memory server. Stamping from the
+memory server, and the delegating commit's own ENVELOPE identity
+is that SpaceServer's service identity (LT5, RULED 2026-08-03) —
+the same envelope model as its derived commits; admissibility
+comes from the validated grant, never the envelope. The trust
+footing is RULED explicitly (owner, 2026-08-03): servers trust
+each other's carried actor claims — for writes and events alike —
+as if the principal and session had written directly; hardening
+that trust (remote attestation) is anticipated future work.
+Stamping from the
 outbox's own envelope would instead run the target handler as
 `user:<serviceDID>`, the silent-empty-instance trap this section
-exists to prevent.
+exists to prevent. A server-emitted SAME-SPACE event needs no
+stamping row at all: the SpaceServer writes the inherited
+`firedAt` into the derived-carried entry itself (events.md §2's
+same-space carriage — LT1), producer and admitter being one trust
+environment (§1).
 This PRESERVES a guarantee the store gives today rather than adding
 one: `resolveScopeKey` binds scope to the authenticated session
 (scopes.md §7 M3), so cross-principal scoped writes are impossible on
@@ -298,7 +310,14 @@ admission
 validates that grant (§2) — delegation, never impersonation — and
 stamps `firedAt` from the carried actor, so the event RUNS AS THE
 SESSION IT ORIGINATED FROM even across the space boundary. The
-target's SpaceServer processes it like any event. This matches the
+target's SpaceServer processes it like any event.
+Rejection at the target (LT4, RULED 2026-08-03): the outbox's
+at-least-once retry covers TRANSPORT failures only; a
+DETERMINISTIC admission rejection — an invalid capability grant —
+is not retried. It surfaces in the SOURCE space per events.md §5's
+error-is-the-consequence shape: a failure notice on the source
+event's stream entry, written by the source SpaceServer in a later
+wave; the source event's own already-committed consequences stand. This matches the
 codebase's own convention — patterns already mutate cross-space through
 exported streams — and it is now the rule, not a style: a server action
 tx that opens a foreign-space writer is a runtime error naming this
@@ -441,10 +460,20 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   optimistically from speculation, then reconcile by nonce — navigation
   is reversible). Reload between intent and ack: on resubscribe the
   client sees unacked intents and enacts them; nonces make re-enactment
-  detectable.
+  detectable. The reload × optimistic-enactment window MAY re-enact
+  a nonce — the enacted-nonce record lives in the reload-wiped
+  overlay — and that is ACCEPTED for reversible effects, which
+  every shipped kind is (LT8, RULED 2026-08-03).
 - Session lifecycle: `sessionId` is minted at client connect, persisted
   client-side across reloads, and retired explicitly on logout or by
-  TTL. Effects docs are session-lifetime: a dead session's unacked
+  TTL. `sessionId` is CLIENT-GLOBAL (LT2, RULED 2026-08-03): one
+  value identifies the session in every space it touches, so
+  `session:<principal>:<sessionId>` is a well-formed instance key
+  in ANY space — a foreign server accepts the carried pair as if
+  the principal and session had written directly (§2's trust
+  ruling). Retirement applies across every space holding the
+  session's instances (scopes.md §3; the §8-item-2 GC design must
+  reach them all). Effects docs are session-lifetime: a dead session's unacked
   intents retire with its effects doc — which, being a session-scoped
   instance, is retired by the SAME session-data GC as every other
   session instance (scopes.md §3, §8 item 2). One mechanism, as
@@ -489,7 +518,12 @@ disabled (README §3.5).
   it from the authenticated envelope — §2). events.md §1 states the
   same classification; if the two ever disagree, this section and
   events.md §1 are the pair to reconcile, and neither is a payload
-  claim.
+  claim. For server-emitted SAME-SPACE events (events.md §2's
+  same-space carriage — LT1) the pair rides instead as WRITE-LEVEL
+  fields on the stream entry inside the derived commit — sanctioned
+  carriage like the basis rows: admission never reads them there
+  (the lease check admits the commit), and the closed metadata list
+  is not breached.
 - **A read may name an `entity_scope_key`** (S1, §2's read row;
   ledger LD5 ratified 2026-08-03 — the read half of §1's
   transaction identity model). That is the only read-side addition

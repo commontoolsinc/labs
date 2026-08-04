@@ -37,6 +37,12 @@ An event is an **authored append to a stream document**:
 Admission (protocol.md §2): append authority on the stream doc + CAS.
 Nothing about the event says or implies "I ran something."
 
+The "authored append" definition covers CLIENT-fired and DELEGATED
+(cross-space) events. A server-emitted SAME-SPACE event has the
+identical shape and fields but different carriage: it rides as a
+stream-entry WRITE within the wave's own derived commit — §2's
+same-space carriage rule (LT1, RULED 2026-08-03).
+
 **Field provenance, normatively (T1 + S6).** `eventId` and `firedAt`
 are ENVELOPE fields for admission, not payload — admission reads
 both (protocol.md §2, §7). `firedAt` is **server-stamped**: the
@@ -83,18 +89,46 @@ handler fires
   or a served computation, piece-to-piece) enter at "enqueue" and
   are otherwise identical — one path, two producers — but their
   ACTOR is INHERITED, never blanked (owner, 2026-08-03): **an event
-  emitted by a handler run carries that run's acting identity —
-  events run as the session they originated from.** A cascade
+  emitted by ANY run carries that run's acting identity — events
+  run as the session they originated from.** Uniform across run
+  kinds (LT6, RULED 2026-08-03): a handler run's emitted event
+  carries the event actor the handler ran as; a DEMANDED derivation
+  run's emitted event carries the demand-supplied instance identity
+  — a session-instance run's event is session-bearing
+  (`firedAt = {user, session}`), a user-instance run's carries the
+  user with `session = "server"`, a space-scope run's carries
+  neither. A cascade
   rooted in a client event therefore preserves the ROOT
   (user, session) hop by hop, so session-scoped consequences land
   in the ORIGINATING session's instances (scopes.md §5) —
   navigateTo above all, whose intent must address the session that
   actually acted (builtins.md §4). Only an event with NO acting
-  session anywhere in its chain — a derivation's `stream.send()`, a
-  timer — enters with `firedAt.session = "server"` (carrying an
-  acting user only if its emitting run had one). When the target
+  session anywhere in its chain — a space- or user-instance
+  derivation's `stream.send()`, a
+  timer — enters with `firedAt.session = "server"`. Server-
+  originated events carry NO `clientSeq` (LT7, RULED 2026-08-03):
+  `clientSeq` orders one CLIENT session's own appends and nothing
+  else; server-emitted entries are ordered by stream seq alone.
+  **Same-space carriage (LT1, RULED 2026-08-03).** A server-emitted
+  append whose target stream lives in the SAME space gets its
+  durable stream entry as a WRITE WITHIN the wave's own derived
+  commit — never a separate commit, never the outbox. The entry
+  carries `eventId` and the inherited `firedAt` as WRITE-LEVEL
+  fields (protocol.md §7 sanctions the carriage); there is no
+  separate event-append admission — the derived commit's lease
+  check admits it, and the stamp needs no validation because the
+  stamping party and the admitting party are one trust environment
+  (protocol.md §1). Idempotency is the stream's `eventWatermark`
+  exactly as for client events: an entry processed in its own wave
+  commits together with its consequences and the watermark advance;
+  an entry a budget-exhausted wave could not process commits as
+  durable input and reprocesses under the seq > `eventWatermark`
+  rule (§4, §5). NOTHING here blocks the wave: the same-space entry
+  is a write into the space's OWN store, and a cross-space emission
+  is handed to the OUTBOX post-commit (serving-loop.md §3) — the
+  loop never awaits another space, connected or not. When the target
   stream lives in ANOTHER space, the append travels via the outbox as an
-  authored commit — the only cross-space mutation (protocol.md §2b)
+  authored commit (protocol.md §2b)
   — and the acting identity travels WITH it as validated commit
   metadata, so inheritance crosses spaces too (protocol.md §2's
   delegated-append stamping).
@@ -192,7 +226,11 @@ handler-run provenance records.
   the consequence — else a poison event wedges the stream), push.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
-  in fired order. A discharged event whose PRECONDITIONS are gone is
+  in fired order. The queue is DURABLE client-side, in the same
+  persistence class as `sessionId` (protocol.md §5) — a reload
+  while offline preserves it; losing queued user actions to a
+  reload is not permitted (LT9, RULED 2026-08-03). A discharged
+  event whose PRECONDITIONS are gone is
   DROPPED — no consequences commit — and the client MUST be signaled
   so the UI can react.
 

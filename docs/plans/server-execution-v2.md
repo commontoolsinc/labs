@@ -100,7 +100,13 @@ Tasks:
       cite-or-GAP / flag-don't-fix protocol with owner-tier
       adjudication. STANDING RULE: re-run affected traces after
       every ruling batch that edits a detail doc; unexplained
-      reference-answer drift is a finding.
+      reference-answer drift is a finding. First run's LT1–LT9 all
+      RULED 2026-08-03 (scenario-traces.md §6): same-space cascade
+      appends are wave-carried write-level entries (unblocks
+      Phase 3's spec side); sessions client-global under
+      inter-server trust; cross-space navigateTo deferred with the
+      client-vended-stream future note; inheritance uniform across
+      run kinds; plus the LT4/5/7/8/9 one-liners.
 - [ ] Audit what server-execution surface, if any, exists on main
       (executor remnants, stats routes, doc references) and record it in
       this plan.

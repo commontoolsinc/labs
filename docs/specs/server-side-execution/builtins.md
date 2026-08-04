@@ -111,6 +111,21 @@ client to enact — both are the SAME runtime
 ERROR: navigateTo MUST be reachable only from the consequences of a
 client-fired event. Enforce with a runtime check, not a type dance.
 
+**Cross-space navigateTo is DEFERRED (LT3, RULED 2026-08-03).** The
+intent write additionally requires the acting session to be a
+CONNECTED session of the COMPUTING space: sessions are valid across
+spaces (protocol.md §5, LT2), but a space the client holds no
+connection to has no channel to deliver the intent on — it would
+compute an intent nobody enacts. A cross-space chain that computes
+navigateTo is therefore the same runtime error, naming this
+section. In practice this bites rarely: the navigateTo-producing
+handler is an immediate consequence of a click, so the CONTEXT is
+same-space even when the navigation TARGET is a cross-space link.
+Anticipated redesign, out of v2 scope, recorded so the deferral has
+a direction (owner, 2026-08-03): the client VENDS its own stream
+target for effects — reversing the flow, the client's connected
+stream is passed to other spaces, which then append intents to it.
+
 ## 5. Deferred / excluded
 
 - `stream-data`: disabled under the flag (owner, 2026-08-02 — unused;
