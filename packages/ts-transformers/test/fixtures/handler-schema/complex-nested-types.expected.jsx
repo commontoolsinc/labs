@@ -49,7 +49,8 @@ const userHandler = handler({
             "enum": ["create", "update", "delete"]
         }
     },
-    required: ["user", "action"]
+    required: ["user", "action"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -109,7 +110,8 @@ const _updateTags = handler({
             required: ["tags"]
         }
     },
-    required: ["detail"]
+    required: ["detail"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

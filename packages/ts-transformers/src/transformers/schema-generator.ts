@@ -5,11 +5,13 @@ import {
   TransformationContext,
 } from "../core/mod.ts";
 import {
+  closeVerbEventRoot,
   type SchemaGenerationOptions,
   SchemaGenerator,
 } from "@commonfabric/schema-generator";
 import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
 import {
+  detectCallKind,
   getNodeText,
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,
@@ -40,7 +42,34 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
       };
     };
 
+    // First toSchema argument of every handler-family call: the verb's EVENT
+    // schema, whose generated root gets closed-world stamping (design rule 1;
+    // the update-gate transition is legal via the verb-event-role rule,
+    // #5302). Membership is the provenance: only transformer-injected
+    // toSchema calls land here, so a hand-authored schema literal in the
+    // same position stays author-owned.
+    const verbEventSchemaCalls = new Set<ts.Node>();
+    const collectVerbEventSchemaCall = (node: ts.Node): void => {
+      if (!ts.isCallExpression(node) || node.arguments.length < 1) return;
+      const callee = node.expression;
+      const isHelperHandler = ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === CF_HELPERS_IDENTIFIER &&
+        callee.name.text === "handler";
+      const isBuilderHandler = !isHelperHandler &&
+        (() => {
+          const kind = detectCallKind(node, checker);
+          return kind?.kind === "builder" && kind.builderName === "handler";
+        })();
+      if (!isHelperHandler && !isBuilderHandler) return;
+      const eventArg = node.arguments[0];
+      if (eventArg && isToSchemaNode(eventArg)) {
+        verbEventSchemaCalls.add(eventArg);
+      }
+    };
+
     const visit: ts.Visitor = (node) => {
+      collectVerbEventSchemaCall(node);
       if (isToSchemaNode(node)) {
         const typeArg = node.typeArguments[0]!;
         const typeArguments = ts.isTypeReferenceNode(typeArg)
@@ -156,9 +185,18 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         }
         finalSchema = resolvePolicyOfMarkers(finalSchema, context, node);
-        const emittedSchema = typeof finalSchema === "boolean"
+        let emittedSchema = typeof finalSchema === "boolean"
           ? finalSchema
           : { ...(finalSchema as Record<string, unknown>), ...optionsObj };
+        // A handler-family call's first schema is the verb's EVENT: close its
+        // root. Applied after the author-options spread so an explicit
+        // additionalProperties always wins (closeVerbEventRoot never
+        // overwrites a declared keyword, here or on a $ref'd def).
+        if (verbEventSchemaCalls.has(node)) {
+          emittedSchema = closeVerbEventRoot(emittedSchema) as
+            | boolean
+            | Record<string, unknown>;
+        }
         const schemaAst = createSchemaAst(emittedSchema, context.factory);
 
         // Wrap in `as const satisfies JSONSchema` so that schema-inference

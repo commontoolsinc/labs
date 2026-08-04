@@ -24,7 +24,8 @@ const myHandler = handler({
             type: "number"
         }
     },
-    required: ["increment"]
+    required: ["increment"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

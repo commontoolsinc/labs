@@ -106,7 +106,8 @@ const __cfHandler_2 = __cfHelpers.handler({
             type: "string"
         }
     },
-    required: ["label"]
+    required: ["label"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

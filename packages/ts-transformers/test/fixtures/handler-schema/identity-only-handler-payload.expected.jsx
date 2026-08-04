@@ -25,7 +25,8 @@ const addPiece = handler({
             asCell: ["comparable"]
         }
     },
-    required: ["piece"]
+    required: ["piece"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -56,7 +57,8 @@ const trackRecent = handler({
             asCell: ["comparable"]
         }
     },
-    required: ["piece"]
+    required: ["piece"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

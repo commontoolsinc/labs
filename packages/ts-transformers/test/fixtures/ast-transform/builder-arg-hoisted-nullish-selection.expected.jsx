@@ -21,7 +21,8 @@ const join = handler({
             type: "string"
         }
     },
-    required: ["name"]
+    required: ["name"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -127,7 +128,8 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
                 }
             },
             required: ["name"],
-            asCell: ["stream"]
+            asCell: ["stream"],
+            additionalProperties: false
         }
     },
     required: ["boundJoin"]

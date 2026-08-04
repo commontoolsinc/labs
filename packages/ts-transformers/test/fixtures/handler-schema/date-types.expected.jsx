@@ -24,7 +24,8 @@ const timedHandler = handler({
             type: "object"
         }
     },
-    required: ["timestamp"]
+    required: ["timestamp"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

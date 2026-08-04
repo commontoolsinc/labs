@@ -18,6 +18,7 @@ import type {
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { closeVerbEventRoot } from "../event-closure.ts";
 import {
   detectWrapperViaNode,
   extractDefaultBrandPayloadValue,
@@ -653,10 +654,19 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (typeof innerSchema === "boolean") {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
-      return this.applyWrapperSemantics(
-        innerSchema as MutableJSONSchemaObj,
-        "Stream",
-      );
+      // The stream's own schema is what a caller SENDS — the verb's EVENT.
+      // Close its root (design rule 1: an undeclared field is a typed
+      // rejection at dispatch, never silently stripped). Position-scoped:
+      // a $ref root gains the keyword beside the reference, so the shared
+      // def stays open at data-position use sites. See closeVerbEventRoot
+      // for the guards (author index signatures, unions, never).
+      return closeVerbEventRoot(
+        this.applyWrapperSemantics(
+          innerSchema as MutableJSONSchemaObj,
+          "Stream",
+        ),
+        context.definitions,
+      ) as MutableJSONSchema;
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics

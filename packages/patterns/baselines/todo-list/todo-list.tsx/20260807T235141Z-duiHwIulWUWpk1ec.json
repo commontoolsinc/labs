@@ -1,0 +1,146 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "TodoItem": {
+        "properties": {
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "done"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TodoItem"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "todo-list/todo-list.tsx",
+  "resultSchema": {
+    "$defs": {
+      "TodoItem": {
+        "properties": {
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "done"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addItem": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "archiveCompleted": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "unknown"
+      },
+      "itemCount": {
+        "type": "number"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/TodoItem"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "items": {
+          "properties": {
+            "$NAME": {
+              "type": "string"
+            },
+            "$UI": {
+              "$ref": "https://commonfabric.org/schemas/vnode.json"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "summary",
+            "$NAME",
+            "$UI"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "removeItem": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/TodoItem"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "type": "object"
+      },
+      "summary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "items",
+      "mentionable",
+      "itemCount",
+      "summary",
+      "addItem",
+      "removeItem",
+      "archiveCompleted",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

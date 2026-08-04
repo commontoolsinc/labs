@@ -26,7 +26,8 @@ const __cfHandler_1 = __cfHelpers.handler({
             required: ["value"]
         }
     },
-    required: ["detail"]
+    required: ["detail"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
