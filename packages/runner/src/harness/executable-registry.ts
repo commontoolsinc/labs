@@ -76,7 +76,7 @@ export class ExecutableRegistry {
   /**
    * Trust a host-provided value: walk it, and register every reachable
    * function as a symbol of a freshly minted `host:<n>` pseudo-module —
-   * `{ identity, symbol }` entry ref stamped (so `moduleToJSON` emits a
+   * `{ identity, symbol }` entry ref stamped (so `moduleToEncodableForm` emits a
    * normal `$implRef`, body omitted) and the implementation admitted into the
    * session-lifetime index above (so the `$implRef` resolves through the same
    * arm as every verified module).

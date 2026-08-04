@@ -5,7 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { serializePatternGraph } from "../src/builder/json-utils.ts";
+import { serializePatternGraph } from "../src/builder/to-encodable-form.ts";
 import { resolveStoredPattern } from "../src/builtins/op-pattern-ref.ts";
 
 /**

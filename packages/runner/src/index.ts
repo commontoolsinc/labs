@@ -253,7 +253,7 @@ export type {
 } from "./telemetry-otel-bridge.ts";
 
 // Utility functions (split from utils.ts)
-export { createJsonSchema } from "./builder/json-utils.ts";
+export { createJsonSchema } from "./builder/create-json-schema.ts";
 export { deepEqual } from "@commonfabric/utils/deep-equal";
 export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
 export { schemaToTypeString } from "./schema-format.ts";
