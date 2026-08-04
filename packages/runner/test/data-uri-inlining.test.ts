@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -241,6 +243,100 @@ describe("data URI inlining", () => {
       expect(findAndInlineDataUriLinks(42)).toBe(42);
       expect(findAndInlineDataUriLinks(true)).toBe(true);
       expect(findAndInlineDataUriLinks(null)).toBe(null);
+    });
+
+    it("keeps a fabric instance whose own property holds a link intact", () => {
+      const dataURI = dataUriFromValueWithResolvedLinks("inline me");
+      const causeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: [],
+          },
+        },
+      };
+      // `cause` is an enumerable own property of the error, and here it holds
+      // a link that inlines.
+      const error = new FabricError({
+        type: "Error",
+        message: "boom",
+        stack: undefined,
+        cause: causeLink,
+      });
+      const value = { error, sibling: causeLink };
+
+      const result = findAndInlineDataUriLinks(value);
+      expect(result).not.toBe(value);
+      expect(result.sibling).toBe("inline me");
+      expect(result.error).toBe(error);
+      expect(result.error.cause).toBe(causeLink);
+    });
+
+    it("keeps a fabric primitive intact when a sibling inlines", () => {
+      const dataURI = dataUriFromValueWithResolvedLinks("inline me");
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const value = {
+        bytes,
+        sibling: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: dataURI,
+              path: [],
+            },
+          },
+        },
+      };
+
+      const result = findAndInlineDataUriLinks(value);
+      expect(result.sibling).toBe("inline me");
+      expect(result.bytes).toBe(bytes);
+    });
+
+    it("resolves a path continuing into a fabric instance to undefined", () => {
+      const error = new FabricError({
+        type: "Error",
+        message: "boom",
+        stack: undefined,
+        cause: undefined,
+      });
+      const dataURI = dataUriFromValueWithResolvedLinks({ error });
+
+      // `message` is an own property of the decoded instance and `deepClone`
+      // is inherited from its prototype. Neither is addressable content.
+      for (const segment of ["message", "deepClone"]) {
+        const link = {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: dataURI,
+              path: ["error", segment],
+            },
+          },
+        };
+
+        expect(findAndInlineDataUriLinks(link)).toBe(undefined);
+      }
+    });
+
+    it("returns a fabric instance addressed by the whole payload path", () => {
+      const error = new FabricError({
+        type: "Error",
+        message: "boom",
+        stack: undefined,
+        cause: undefined,
+      });
+      const dataURI = dataUriFromValueWithResolvedLinks({ nested: { error } });
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: ["nested", "error"],
+          },
+        },
+      };
+
+      const result = findAndInlineDataUriLinks(link);
+      expect(result).toBeInstanceOf(FabricError);
+      expect(result.message).toBe("boom");
     });
 
     it("should deeply traverse nested structures", () => {
