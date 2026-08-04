@@ -229,10 +229,7 @@ export type {
 } from "./prepare.ts";
 export { readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
-export type {
-  CfcSchemaMergeIssue,
-  MergeCfcSchemaEnvelopeOptions,
-} from "./schema-merge.ts";
+export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,

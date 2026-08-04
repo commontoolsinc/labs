@@ -1197,19 +1197,4 @@ describe("cfcSchemaMergeIssue", () => {
     expect(issue?.migration).toBe(false);
     expect(issue?.message).toContain("confidentiality cannot be weakened");
   });
-
-  it("passes generated-output paths through to the merge", () => {
-    // Same additive-required shape as above, but declared a generated output:
-    // the module materializes it in the same transaction, so there is no older
-    // value to preserve and the merge accepts it. The preflight has to see the
-    // same answer the commit does, options included.
-    expect(cfcSchemaMergeIssue({
-      type: "object",
-      properties: { a: { type: "string" } },
-    }, {
-      type: "object",
-      properties: { a: { type: "string" }, b: { type: "string" } },
-      required: ["b"],
-    }, { generatedOutputPaths: [[]] })).toBe(undefined);
-  });
 });

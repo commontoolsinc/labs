@@ -634,10 +634,9 @@ export interface CfcSchemaMergeIssue {
 export const cfcSchemaMergeIssue = (
   existing: JSONSchema,
   candidate: JSONSchema,
-  options: MergeCfcSchemaEnvelopeOptions = {},
 ): CfcSchemaMergeIssue | undefined => {
   try {
-    mergeCfcSchemaEnvelopes(existing, candidate, options);
+    mergeCfcSchemaEnvelopes(existing, candidate);
     return undefined;
   } catch (error) {
     if (error instanceof CfcSchemaMigrationError) {
