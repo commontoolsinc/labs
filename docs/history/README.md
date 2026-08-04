@@ -224,6 +224,10 @@ One line per archived document; each document's header carries the fuller
   — transformer design records.
 - [MIGRATION_SUMMARY.md](packages/ui/src/v2/MIGRATION_SUMMARY.md) — the ui v2
   migration.
+- [CELL_CONTROLLER_DESIGN.md](packages/ui/src/v2/core/CELL_CONTROLLER_DESIGN.md)
+  — the pitch for the ui v2 CellController, July 2025. The controller shipped;
+  the transaction strategies, change grouping, batching, validation and
+  undo/redo it proposes did not.
 - [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
   DocImpl-era storage-unification plan, superseded by the v2 stack.
 - [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)
