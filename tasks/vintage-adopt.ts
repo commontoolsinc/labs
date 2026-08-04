@@ -138,6 +138,17 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
   // replay cannot address must never reach the store-writing steps.
   const key = mappedRepoKey(main, roots);
   const childKeys = children.map((child) => mappedRepoKey(child.main, roots));
+  // One manifest entry per cell. The replay's materialize/accounting loop
+  // deliberately iterates every entry, so a duplicated cell would inflate
+  // `targets`/`changed`/`updated` — and paired with two different mains it
+  // would apply two programs to one root and credit both keys.
+  const seenCellIds = new Set<string>();
+  for (const child of children) {
+    if (seenCellIds.has(child.cellId)) {
+      throw new Error(`duplicate child cell id ${child.cellId}`);
+    }
+    seenCellIds.add(child.cellId);
+  }
   const candidate: VintageManifestEntry = {
     identity: expectedIdentity,
     symbol: "default",
@@ -180,6 +191,12 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
         `stored identity ${ref.identity} != expected ${expectedIdentity}`,
       );
     }
+    if (seenCellIds.has(String(link.id))) {
+      throw new Error(
+        `the entry root ${link.id} is also listed as a child — one manifest ` +
+          `entry per cell`,
+      );
+    }
 
     // Each child root, addressed by the id the capture minted. The stored
     // `patternIdentity` supplies its identity and symbol — a cell without one
@@ -219,7 +236,9 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
 
     // Today's source must resolve and compile for EVERY recorded main — the
     // replay's first two moves per target, run here so a fixture cannot be
-    // pinned pointing at a source that is already missing or broken.
+    // pinned pointing at a source that is already missing or broken. The
+    // compiled entry ref is kept per key for the symbol check below.
+    const refByKey = new Map<string, { identity: string; symbol: string }>();
     for (const entryKey of new Set([key, ...childKeys])) {
       const source = `${roots.patternsRoot}/${entryKey}`;
       let program;
@@ -232,15 +251,24 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
           `today's source ${source} does not resolve: ${error}`,
         );
       }
+      let compiled;
       try {
-        await vintage.runtime.patternManager.compilePattern(program as never, {
-          space: vintage.space as never,
-        });
+        compiled = await vintage.runtime.patternManager.compilePattern(
+          program as never,
+          { space: vintage.space as never },
+        );
       } catch (error) {
         throw new Error(
           `today's source ${source} does not compile: ${error}`,
         );
       }
+      const compiledRef = vintage.runtime.patternManager.getArtifactEntryRef(
+        compiled,
+      );
+      if (compiledRef === undefined) {
+        throw new Error(`today's source ${source} has no artifact entry ref`);
+      }
+      refByKey.set(entryKey, compiledRef);
     }
 
     const entry: VintageManifestEntry = {
@@ -250,6 +278,34 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
       cellId: String(link.id),
       space: vintage.space,
     };
+    // Every recorded symbol must resolve in today's module, by the SAME rule
+    // the materializer applies (`materializeOnCell`): the compiled entry's own
+    // symbol, or a named artifact under the compiled identity. A stored root
+    // can legitimately name a non-entry artifact (a named export, a
+    // transformer hoist), and if today's module dropped that symbol the replay
+    // refuses the entry — so the adopt must refuse it first.
+    const allEntries: [VintageManifestEntry, string][] = [
+      [entry, key],
+      ...childEntries.map((childEntry, index) =>
+        [childEntry, childKeys[index]] as [VintageManifestEntry, string]
+      ),
+    ];
+    for (const [recorded, entryKey] of allEntries) {
+      const compiledRef = refByKey.get(entryKey)!;
+      if (
+        recorded.symbol !== compiledRef.symbol &&
+        vintage.runtime.patternManager.artifactFromIdentitySync(
+            compiledRef.identity,
+            recorded.symbol,
+          ) === undefined
+      ) {
+        throw new Error(
+          `today's ${recorded.main} defines no "${recorded.symbol}" — the ` +
+            `stored root names an artifact this version does not have, so ` +
+            `the replay would refuse it`,
+        );
+      }
+    }
     await writeVintageManifest(vintage, [entry, ...childEntries]);
     const back = await readVintageManifest(vintage);
     log(`manifest readback: ${JSON.stringify(back)}`);

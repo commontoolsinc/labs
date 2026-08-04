@@ -188,12 +188,13 @@ export interface VintageOutcome {
  * would capture a new generation on every single run, forever.
  *
  * An ADOPTED old-toolchain fixture (`tasks/vintage-adopt.ts`) is the same
- * hazard from the opposite side: it IS identity-compared, and its recorded
- * identity can never equal today's, so it reports `changed > 0` on every run
- * forever. It reads as stale here by design — the rule holds because the
- * key's NATIVE fixtures are what satisfy currency. A test key whose only
- * fixtures were adopted would trigger a capture on every `--capture-changed`
- * run; today every adopted fixture shares its key with a native one.
+ * hazard from the opposite side: it IS identity-compared, so it reports
+ * `changed > 0` for as long as its recorded identity differs from today's —
+ * which for a committed old-toolchain capture is every run in practice. It
+ * reads as stale here by design — the rule holds because the key's NATIVE
+ * fixtures are what satisfy currency. A test key whose only fixtures were
+ * adopted would trigger a capture on every `--capture-changed` run; today
+ * every adopted fixture shares its key with a native one.
  */
 export function staleTestKeys(
   outcomes: readonly VintageOutcome[],

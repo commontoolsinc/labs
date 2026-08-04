@@ -66,18 +66,48 @@ const CHILD_CAUSE = "adopt-child-root";
  * matter to what is under test. */
 const CHILD = SUBJECT.replace("['kept']", "['child-kept']");
 
+const NAMED_KEY = "adopt-named.tsx";
+const NAMED_CAUSE = "adopt-named-root";
+
+/** A module contributing TWO artifacts, whose named one a capture can record
+ * — the shape a real stored root takes when it names a non-entry artifact. */
+const NAMED = [
+  "import { Writable, pattern } from 'commonfabric';",
+  "export const Extra = pattern<Record<string, never>, { items: Writable<string[]> }>(() => {",
+  "  const items = new Writable<string[]>(['extra']).for('items');",
+  "  return { items };",
+  "});",
+  "export default pattern<Record<string, never>, { items: Writable<string[]> }>(() => {",
+  "  const items = new Writable<string[]>(['main']).for('items');",
+  "  return { items };",
+  "});",
+  "",
+].join("\n");
+
+/** The same module after today dropped the named export. */
+const NAMED_WITHOUT_EXTRA = [
+  "import { Writable, pattern } from 'commonfabric';",
+  "export default pattern<Record<string, never>, { items: Writable<string[]> }>(() => {",
+  "  const items = new Writable<string[]>(['main']).for('items');",
+  "  return { items };",
+  "});",
+  "",
+].join("\n");
+
 describe("vintage adopt", () => {
   let dir = "";
   let roots: AdoptRoots;
   let snapshotPath = "";
   let identity = "";
   let childCellId = "";
+  let namedCellId = "";
 
   beforeEach(async () => {
     dir = await Deno.makeTempDir({ prefix: "vintage-adopt-test-" });
     await Deno.mkdir(`${dir}/patterns`, { recursive: true });
     await Deno.writeTextFile(`${dir}/patterns/${KEY}`, SUBJECT);
     await Deno.writeTextFile(`${dir}/patterns/${CHILD_KEY}`, CHILD);
+    await Deno.writeTextFile(`${dir}/patterns/${NAMED_KEY}`, NAMED);
     roots = {
       repoRoot: dir,
       patternsRoot: `${dir}/patterns`,
@@ -129,6 +159,31 @@ describe("vintage adopt", () => {
         (capture.runtime.getCell(
           capture.space as never,
           CHILD_CAUSE,
+          undefined as never,
+        ) as { getAsNormalizedFullLink(): { id: string } })
+          .getAsNormalizedFullLink().id,
+      );
+
+      // A root recorded under a NAMED artifact, for the dropped-symbol case.
+      const namedProgram = await capture.runtime.harness.resolve(
+        new FileSystemProgramResolver(`${dir}/patterns/${NAMED_KEY}`, dir),
+      );
+      const namedOutcome = await materializeOnCell(
+        capture,
+        namedProgram as never,
+        (v, resultSchema) =>
+          v.runtime.getCell(
+            v.space as never,
+            NAMED_CAUSE,
+            resultSchema as never,
+          ),
+        { symbol: "Extra" },
+      );
+      expect(namedOutcome.error).toBeUndefined();
+      namedCellId = String(
+        (capture.runtime.getCell(
+          capture.space as never,
+          NAMED_CAUSE,
           undefined as never,
         ) as { getAsNormalizedFullLink(): { id: string } })
           .getAsNormalizedFullLink().id,
@@ -210,6 +265,74 @@ describe("vintage adopt", () => {
         }],
       }),
     ).rejects.toThrow("carries no patternIdentity");
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
+  });
+
+  it("refuses a stored symbol today's module dropped", async () => {
+    // A stored root can legitimately name a non-entry artifact. If today's
+    // module no longer defines that symbol, the replay refuses the entry
+    // (materializeOnCell fails closed) — so the adopt must refuse it first,
+    // by the same selection rule.
+    await Deno.writeTextFile(
+      `${dir}/patterns/${NAMED_KEY}`,
+      NAMED_WITHOUT_EXTRA,
+    );
+    await expect(
+      adopt({
+        children: [{ cellId: namedCellId, main: `/patterns/${NAMED_KEY}` }],
+      }),
+    ).rejects.toThrow('defines no "Extra"');
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
+  });
+
+  it("adopts a stored NAMED symbol today's module still defines", async () => {
+    // The positive half of the symbol rule: a recorded non-entry artifact
+    // that still resolves adopts and replays as a target.
+    await adopt({
+      children: [{ cellId: namedCellId, main: `/patterns/${NAMED_KEY}` }],
+    });
+    const report = await replayAll(roots);
+    expect(report.failures).toEqual([]);
+    expect(report.targets).toBe(2);
+  });
+
+  it("refuses a duplicated child cell, writing nothing", async () => {
+    // The replay's materialize/accounting loop iterates every manifest entry,
+    // so a duplicated cell would inflate targets/changed/updated — and with
+    // two different mains would apply two programs to one root.
+    const child = { cellId: childCellId, main: `/patterns/${CHILD_KEY}` };
+    await expect(adopt({ children: [child, { ...child }] })).rejects.toThrow(
+      "duplicate child cell id",
+    );
+    expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
+  });
+
+  it("refuses the entry root listed as a child", async () => {
+    // Derive the root's id the same way the adopter does, then hand it back
+    // as a child: one cell must never be two manifest entries.
+    const probe = await openFileBackedRuntime(
+      signer,
+      await Deno.makeTempDir({ prefix: "adopt-root-id-" }),
+      snapshotPath,
+    );
+    let rootId = "";
+    try {
+      const root = probe.runtime.getCell(
+        probe.space as never,
+        CAUSE,
+        undefined as never,
+      ) as {
+        sync(): Promise<unknown>;
+        getAsNormalizedFullLink(): { id: string };
+      };
+      await root.sync();
+      rootId = String(root.getAsNormalizedFullLink().id);
+    } finally {
+      await probe.dispose();
+    }
+    await expect(
+      adopt({ children: [{ cellId: rootId, main: `/patterns/${CHILD_KEY}` }] }),
+    ).rejects.toThrow("is also listed as a child");
     expect(await collectVintages(roots.vintagesRoot)).toHaveLength(0);
   });
 
