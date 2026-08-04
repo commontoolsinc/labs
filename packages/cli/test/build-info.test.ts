@@ -131,11 +131,31 @@ Deno.test("relateShasIn", async (t) => {
       });
     });
 
-    await t.step("sibling branches: diverged", async () => {
-      assertEquals(await relateShasIn(repo, shaB, shaC), {
-        kind: "diverged",
-      });
-    });
+    await t.step(
+      "sibling branches with a provable base: diverged",
+      async () => {
+        assertEquals(await relateShasIn(repo, shaB, shaC), {
+          kind: "diverged",
+        });
+      },
+    );
+
+    await t.step(
+      "no provable common base (disjoint roots): unknown, not diverged",
+      async () => {
+        // An orphan branch models the shallow/disjoint-history case: both
+        // commits exist, both ancestry probes answer "no", but the graph
+        // cannot prove they truly diverged — merge-base has no answer.
+        await git(repo, "checkout", "--orphan", "rootless");
+        await Deno.writeTextFile(join(repo, "f"), "d\n");
+        await git(repo, "add", ".");
+        await git(repo, "commit", "-m", "D");
+        const shaD = await git(repo, "rev-parse", "HEAD");
+        assertEquals(await relateShasIn(repo, shaB, shaD), {
+          kind: "unknown",
+        });
+      },
+    );
 
     await t.step("a commit the history has never seen: unknown", async () => {
       assertEquals(

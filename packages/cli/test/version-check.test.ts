@@ -40,7 +40,7 @@ Deno.test("versionMismatchWarning", async (t) => {
     assert(warning !== null);
     assertStringIncludes(warning, "newer than the server");
     assertStringIncludes(warning, "7 commit(s) behind");
-    assertStringIncludes(warning, "Usually fine");
+    assertStringIncludes(warning, "redeploy");
     assert(!warning.includes("OUTDATED"));
   });
 

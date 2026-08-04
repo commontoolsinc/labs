@@ -2,12 +2,14 @@
 //
 // The join key is the git commit SHA — the only version identity this repo
 // deploys by. The server reports its commit on its `/_health` response (and
-// `/api/meta`); the runtime captures it during the health check it already
-// performs, so learning the server side costs no request of its own and can
-// never gate a command on extra network work. This cf invocation resolves
-// its own commit via `lib/build-info.ts` (baked metadata or local git — no
-// network). Either side being unknown (old server, no git, no baked marker)
-// skips silently — absence of metadata is not evidence of a mismatch.
+// `/api/meta`); the runtime captures it from that response's header during
+// the health check it already performs, so learning the server side costs
+// no request of its own and completes exactly when the health probe does —
+// no body read that a stalled stream could hold open. This cf invocation
+// resolves its own commit via `lib/build-info.ts` (baked metadata or local
+// git — no network). Either side being unknown (old server, no git, no
+// baked marker) skips silently — absence of metadata is not evidence of a
+// mismatch.
 //
 // A mismatch is not one problem but two, with different severities. In local
 // development it is completely normal for cf to be NEWER than the server it
@@ -73,8 +75,9 @@ export function versionMismatchWarning(
         : "behind";
       return `⚠️  cf is newer than the server at ${origin} — the server ` +
         `(${serverSha}) is ${behind} this cf (${cliSha}).\n` +
-        `    Usually fine; restart or redeploy the server to match, or ` +
-        SILENCE_HINT;
+        `    Commands may fail where cf relies on newer behavior; restart ` +
+        `or redeploy the\n` +
+        `    server to match, or ` + SILENCE_HINT;
     }
     case "cli-behind":
       return `⚠️  This cf is OUTDATED: the server at ${origin} runs a ` +

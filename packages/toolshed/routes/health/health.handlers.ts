@@ -48,12 +48,19 @@ export const LLMHealthResponseSchema = z.object({
 });
 export type LLMHealthResponse = z.infer<typeof LLMHealthResponseSchema>;
 
+/** Header carrying the same commit as the body's `gitSha`. Clients that only
+ * need liveness + version (the cf CLI) read this instead of the body, so
+ * their health probe completes at headers-arrival — a stalled or truncated
+ * body cannot delay them. */
+export const GIT_SHA_HEADER = "x-cf-git-sha";
+
 export const index: AppRouteHandler<IndexRoute> = (c) => {
   const response: HealthResponse = {
     status: "OK",
     timestamp: Date.now(),
     gitSha: GIT_SHA,
   };
+  if (GIT_SHA !== null) c.header(GIT_SHA_HEADER, GIT_SHA);
   return c.json(response, HttpStatusCodes.OK);
 };
 

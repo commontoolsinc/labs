@@ -154,13 +154,18 @@ describe("Runtime.hostForSpace", () => {
     }
   });
 
-  it("healthCheck captures the default host's gitSha; other hosts don't overwrite it", async () => {
+  it("healthCheck captures the default host's gitSha header; other hosts don't overwrite it", async () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = ((input: RequestInfo | URL) => {
-      const body = String(input).startsWith("http://host-a.test")
-        ? JSON.stringify({ status: "OK", gitSha: "  abc123  " })
-        : JSON.stringify({ status: "OK", gitSha: "not-the-default-host" });
-      return Promise.resolve(new Response(body, { status: 200 }));
+      const sha = String(input).startsWith("http://host-a.test")
+        ? "  abc123  "
+        : "not-the-default-host";
+      return Promise.resolve(
+        new Response("ok", {
+          status: 200,
+          headers: { "x-cf-git-sha": sha },
+        }),
+      );
     }) as typeof fetch;
     const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
     try {
@@ -173,24 +178,80 @@ describe("Runtime.hostForSpace", () => {
     }
   });
 
-  it("healthCheck reports null gitSha for non-JSON or field-less bodies, and resets a stale capture", async () => {
+  it("healthCheck reports null gitSha without the header, and resets a stale capture", async () => {
     const realFetch = globalThis.fetch;
-    let body = JSON.stringify({ status: "OK", gitSha: "abc123" });
-    globalThis.fetch =
-      (() =>
-        Promise.resolve(new Response(body, { status: 200 }))) as typeof fetch;
+    let headers: Record<string, string> = { "x-cf-git-sha": "abc123" };
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response("ok", { status: 200, headers }),
+      )) as typeof fetch;
     const runtime = makeRuntime();
     try {
       expect(await runtime.healthCheck()).toBe(true);
       expect(runtime.serverGitSha).toBe("abc123");
-      // An older server answering plain text must reset the capture.
-      body = "ok";
+      // An older server without the header must reset the capture.
+      headers = {};
       expect(await runtime.healthCheck()).toBe(true);
       expect(runtime.serverGitSha).toBe(null);
-      // A JSON body without the field stays null too.
-      body = JSON.stringify({ status: "OK" });
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck completes at headers-arrival: an open body stream cannot gate it", async () => {
+    const realFetch = globalThis.fetch;
+    // A 200 whose body stream never closes. The capture reads only headers,
+    // so health must resolve; awaiting the body would hang forever.
+    const openBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"OK"'));
+        // never closed
+      },
+    });
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(openBody, {
+          status: 200,
+          headers: { "x-cf-git-sha": "abc123" },
+        }),
+      )) as typeof fetch;
+    const runtime = makeRuntime();
+    try {
       expect(await runtime.healthCheck()).toBe(true);
-      expect(runtime.serverGitSha).toBe(null);
+      expect(runtime.serverGitSha).toBe("abc123");
+    } finally {
+      globalThis.fetch = realFetch;
+      await openBody.cancel();
+      await runtime.dispose();
+    }
+  });
+
+  it("an overdue earlier healthCheck cannot overwrite a newer call's capture", async () => {
+    const realFetch = globalThis.fetch;
+    const gate: Array<(res: Response) => void> = [];
+    const responseWith = (sha: string) =>
+      new Response("ok", { status: 200, headers: { "x-cf-git-sha": sha } });
+    let call = 0;
+    globalThis.fetch = (() => {
+      call++;
+      if (call === 1) {
+        // First call's response is withheld until released below.
+        return new Promise<Response>((resolve) => {
+          gate.push(resolve);
+        });
+      }
+      return Promise.resolve(responseWith("second"));
+    }) as typeof fetch;
+    const runtime = makeRuntime();
+    try {
+      const first = runtime.healthCheck();
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(runtime.serverGitSha).toBe("second");
+      gate[0]!(responseWith("first"));
+      expect(await first).toBe(true);
+      // The stale response arrived last but belongs to a superseded call.
+      expect(runtime.serverGitSha).toBe("second");
     } finally {
       globalThis.fetch = realFetch;
       await runtime.dispose();

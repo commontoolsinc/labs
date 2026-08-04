@@ -2210,15 +2210,17 @@ export class Runtime {
 
   /**
    * The default host's self-reported git commit, captured from its
-   * `/_health` response body by the most recent `healthCheck()` call.
-   * Null before any check, when the host omits the field (older
-   * servers), or when the body is not JSON. Rides the health round
-   * trip so learning it costs no extra request.
+   * `/_health` response's `x-cf-git-sha` header by the most recent
+   * `healthCheck()` call. Null before any check or when the host omits
+   * the header (older servers). Read from the headers — never the body
+   * — so the capture completes exactly when the health probe does; a
+   * stalled or truncated body cannot delay it.
    */
   get serverGitSha(): string | null {
     return this.#serverGitSha;
   }
   #serverGitSha: string | null = null;
+  #healthCheckGeneration = 0;
 
   /**
    * True iff the default host AND every distinct mapped host are
@@ -2226,6 +2228,10 @@ export class Runtime {
    * conjunction over all of them.
    */
   async healthCheck(): Promise<boolean> {
+    // Overlapping calls each capture into their own generation; only the
+    // newest call's capture publishes, so a slow earlier response cannot
+    // overwrite a newer one after the fact.
+    const generation = ++this.#healthCheckGeneration;
     this.#serverGitSha = null;
     const defaultHost = this.apiUrl.toString();
     const hosts = new Set([defaultHost]);
@@ -2244,8 +2250,11 @@ export class Runtime {
     const checks = [...hosts].map(async (host) => {
       try {
         const res = await fetch(new URL("/_health", host));
-        if (host === defaultHost) {
-          this.#serverGitSha = await gitShaFromHealthBody(res);
+        if (
+          host === defaultHost && generation === this.#healthCheckGeneration
+        ) {
+          const sha = res.headers.get("x-cf-git-sha")?.trim();
+          this.#serverGitSha = sha ? sha : null;
         }
         return res.ok;
       } catch (_) {
@@ -2253,18 +2262,5 @@ export class Runtime {
       }
     });
     return (await Promise.all(checks)).every(Boolean);
-  }
-}
-
-/** The trimmed `gitSha` out of a `/_health` response body, or null when the
- * body is not JSON or the field is absent/empty (older servers). */
-async function gitShaFromHealthBody(res: Response): Promise<string | null> {
-  try {
-    const body = await res.json();
-    if (typeof body !== "object" || body === null) return null;
-    const sha = (body as { gitSha?: unknown }).gitSha;
-    return typeof sha === "string" && sha.trim() ? sha.trim() : null;
-  } catch {
-    return null;
   }
 }

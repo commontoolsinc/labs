@@ -18,7 +18,10 @@ Deno.test("health routes", async (t) => {
     const json = await response.json();
     assertEquals(json.status, "OK");
     assertEquals(typeof json.timestamp, "number");
-    // Test env: no baked metadata and no COMMIT_SHA, so the commit is unknown.
+    // Test env: no baked metadata and no COMMIT_SHA, so the commit is
+    // unknown — null in the body, and the header (the CLI's capture
+    // channel) is omitted rather than sent empty.
     assertEquals(json.gitSha, null);
+    assertEquals(response.headers.get("x-cf-git-sha"), null);
   });
 });

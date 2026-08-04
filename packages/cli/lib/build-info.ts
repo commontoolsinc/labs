@@ -141,11 +141,35 @@ async function countBehind(
   }
 }
 
+/** Whether the visible graph proves a common base for two commits. False
+ * ancestry probes alone cannot distinguish true siblings from a history
+ * whose connecting commits were never fetched (shallow clones, disjoint
+ * shallow roots) — only a successful merge-base does. */
+async function haveCommonBase(
+  dir: string,
+  a: string,
+  b: string,
+): Promise<boolean> {
+  try {
+    const { code } = await new Deno.Command("git", {
+      args: ["merge-base", a, b],
+      cwd: dir,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    return code === 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Order a (cf, server) commit pair using `dir`'s git history. Only called on
- * a proven mismatch, so at most three local git invocations, and only for
- * source runs — the callers of a compiled binary pass no checkout and get
- * `unknown`.
+ * a proven mismatch, so at most a handful of local git invocations, and only
+ * for source runs — the callers of a compiled binary pass no checkout and
+ * get `unknown`. `diverged` is only reported when the graph proves a common
+ * base; an unprovable pair degrades to `unknown` rather than asserting a
+ * divergence the history cannot show.
  */
 export async function relateShasIn(
   dir: string,
@@ -162,5 +186,8 @@ export async function relateShasIn(
   }
   const cliIsAncestor = await isAncestor(dir, cliSha, serverSha);
   if (cliIsAncestor === null) return { kind: "unknown" };
-  return cliIsAncestor ? { kind: "cli-behind" } : { kind: "diverged" };
+  if (cliIsAncestor) return { kind: "cli-behind" };
+  return await haveCommonBase(dir, cliSha, serverSha)
+    ? { kind: "diverged" }
+    : { kind: "unknown" };
 }
