@@ -5355,40 +5355,16 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    // Keyed on a HASH of the pattern's encodable form, rather than on a
-    // stringification of the pattern.
-    //
-    // Not a bug fix: the value here is always a factory, which carries a
-    // serializer, so `JSON.stringify` of it was always a string. It is a
-    // better key. A content hash is canonical where `JSON.stringify` is
-    // sensitive to key order, and it cannot answer `undefined` -- which
-    // matters because `undefined` is also what a cache MISS looks like, so a
-    // stringification that ever failed to produce one would read as "seen
-    // this, unchanged" for a pattern never seen at all. Three sites in this
-    // tree already guard that shape by hand; keying on a hash removes the
-    // need to.
-    //
-    // Taken through the artifact walk, so an artifact reached by any route --
+    // The change key is a content hash of the pattern's encodable form, taken
+    // through the artifact walk so an artifact reached by any route --
     // including a sub-graph under a node's `inputs` -- is serialized before it
-    // is hashed. `hashOf` refuses a live function where `JSON.stringify`
-    // silently dropped one, so an unflattened value would throw here.
+    // is hashed. A hash is canonical, so a difference in member order is not a
+    // difference in the key.
     //
-    // That refusal is a NEW failure mode on this path, stated rather than
-    // buried: a value the data model rejects used to degrade to a cache miss
-    // (a redundant re-setup) and now throws. This is the SECOND line of
-    // defence, not the first -- `normalizeSandboxResult`, called on every
-    // route to this function, already refuses a bare function at any depth
-    // and says so better than a hash would. That gate lives in another file,
-    // so it is named here: the two are coupled, and weakening it would make
-    // this line the one that reports the problem.
-    //
-    // The keys also differ in kind, not just in reliability: a content hash
-    // is insensitive to key order where `JSON.stringify` is not, so
-    // same-content-different-order now reads as unchanged. That direction is
-    // right (a skipped redundant setup, never a missed one), and no case is
-    // known where the order actually varies -- `patternToJSON` builds from a
-    // fixed literal and `...rest` inherits a module's own stable order. So:
-    // robustness, not a live fix.
+    // `hashOf` throws on anything the data model refuses. That is a second
+    // line of defence rather than the first: `normalizeSandboxResult` runs on
+    // every route here and already rejects a bare function at any depth, with
+    // a better message than a hash could give.
     const resultPatternKey = hashStringOf(
       flattenBuilderArtifacts(resultPattern),
     );

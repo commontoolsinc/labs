@@ -602,10 +602,9 @@ export function patternToJSON(pattern: Pattern) {
   // serializes its full graph: nothing could ever resolve its ref. That graph
   // holds LIVE modules -- `withAliasBindings` builds a node by copying
   // its module member by member -- so the artifacts in it are replaced here,
-  // by the same walk the storage boundary uses. Enumerating the positions a
-  // module can occupy was tried and was wrong twice: a module reached through
-  // a node's `inputs` (an op, which nests inside itself) is not somewhere a
-  // hand-written traversal thinks to look.
+  // by the same walk the storage boundary uses. The walk looks for the
+  // artifact rather than for the positions one may occupy, because an op nests
+  // inside itself: a module can sit under a node's `inputs`, at any depth.
   //
   // Serializing HERE rather than at conversion time moves when a module reads
   // ambient state: `moduleToEncodableForm` consults `getTopFrame()` to decide
