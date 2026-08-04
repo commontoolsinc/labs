@@ -1337,7 +1337,14 @@ export const parseCfHarnessCliArgs = async (
     }
     compactThreshold = parsedThreshold;
   } else if (args["compact-threshold"] !== undefined) {
-    throw new Error("--compact-threshold requires a non-empty value");
+    // A bare flag lands here, and so does a value the parser read as another
+    // flag: `--compact-threshold -5` leaves the option set with no string.
+    // Name the requirement, and point at the form that survives parsing.
+    throw new Error(
+      "--compact-threshold requires a non-negative integer token count; " +
+        "pass values the parser would read as a flag as " +
+        "--compact-threshold=<n>",
+    );
   }
   const promptCacheMode = optionalStringValue(
     typeof args["prompt-cache-mode"] === "string"

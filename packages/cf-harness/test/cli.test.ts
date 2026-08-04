@@ -4418,3 +4418,44 @@ Deno.test("resume rejects manifest provider and credential-owner switches", asyn
     "resume credential owner mismatch: requested owner does not match the recorded run\n",
   ]);
 });
+
+Deno.test("parseCfHarnessCliArgs validates --compact-threshold", async () => {
+  const parse = (args: string[], env: Record<string, string> = {}) =>
+    parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env });
+
+  const ok = await parse(["--compact-threshold", "12000", "hi"]);
+  if ("help" in ok) throw new Error("expected config result");
+  assertEquals(ok.compactThreshold, 12_000);
+
+  // 0 is meaningful — it disables compaction — so it must not read as absent.
+  const zero = await parse(["--compact-threshold", "0", "hi"]);
+  if ("help" in zero) throw new Error("expected config result");
+  assertEquals(zero.compactThreshold, 0);
+
+  const omitted = await parse(["hi"]);
+  if ("help" in omitted) throw new Error("expected config result");
+  assertEquals(omitted.compactThreshold, undefined);
+
+  const fromEnv = await parse(["hi"], { CF_HARNESS_COMPACT_THRESHOLD: "9000" });
+  if ("help" in fromEnv) throw new Error("expected config result");
+  assertEquals(fromEnv.compactThreshold, 9_000);
+
+  // Every rejection names the requirement. `--compact-threshold -5` is the
+  // subtle one: the parser reads `-5` as a separate flag, so the option
+  // arrives with no string value and must not report merely "non-empty".
+  for (
+    const args of [
+      ["--compact-threshold", "abc", "hi"],
+      ["--compact-threshold", "1.5", "hi"],
+      ["--compact-threshold=-5", "hi"],
+      ["--compact-threshold", "-5", "hi"],
+      ["--compact-threshold", "hi"],
+    ]
+  ) {
+    await assertRejects(
+      () => parse(args),
+      Error,
+      "--compact-threshold requires a non-negative integer token count",
+    );
+  }
+});
