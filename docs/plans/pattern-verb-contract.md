@@ -42,8 +42,9 @@ supplied rather than only when a caller passes `--invocation`;
 off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
 on a receipt-exists collision, where the original handling's outcome settles
 the retry. The plain-JSON-return-into-the-receipt change exists behind the
-default-off `plainResultReceipts` option. What remains open is that flag's
-default and all of Part 1.
+`plainResultReceipts` option — default-on since the three-topic integration
+proof (#5244) satisfied governing decision 2's gate (the flip's staging is
+recorded in the implementation plan). What remains open is all of Part 1.
 
 ## Goal
 
@@ -137,9 +138,13 @@ callable layer predates:
   from `generateHandlerSchema` (`packages/runner/src/schema.ts`). So the
   address folds in the handler's binding, not the id alone. A return value
   **containing reactives or cells** is run as a result pattern into that cell
-  (`navigateTo` is the existing UI consumer); a **plain JSON return is
-  discarded** — the receipt-only branch writes `{}` unless the default-off
-  `plainResultReceipts` experimental option is set.
+  (`navigateTo` is the existing UI consumer); a **plain JSON return projects
+  into the receipt** under the `plainResultReceipts` experimental option
+  (default on — an explicit `false` restores the discard, where the
+  receipt-only branch writes `{}`). The receipt write uses the standard
+  cell-write conversion, so a bare cell return that launches nothing — e.g.
+  the chained return of an expression-body `action(() => cell.set(...))` —
+  records as a link to that cell.
 - That result cell doubles as the **exactly-once receipt**: its create is
   create-only, so a second handling of the same id — including from another
   replica against a shared server — collides, and its commit is rejected as
@@ -896,9 +901,10 @@ client retry needs.
    return into the receipt instead of `{}`, or a contract rule that results
    carry at least one reactive. The first looks right; it is the one place this
    design asks the runtime for new behaviour rather than exposure. That change
-   now exists in the same branch behind the default-off `plainResultReceipts`
-   experimental option (WS-C), so what remains open is flipping the default,
-   not the mechanism.
+   now exists behind the `plainResultReceipts` experimental option (WS-C),
+   default-on since the three-topic integration proof (#5244), so neither the
+   mechanism nor the default remains open — an explicit `false` stays the
+   rollback override while the flag exists.
 
 ## Design decisions worth recording
 

@@ -197,6 +197,16 @@ export type QueuedEvent = {
   handler: EventHandler;
   event: any;
   /**
+   * Payload keys the RUNTIME itself injected into `event`'s value (send's
+   * internal `runtimeInjectedEventKeys` option — the LLM tool-call path's
+   * `result` cell). Dispatch stamps this onto the handling transaction
+   * (`tx.dispatchedRuntimeInjectedEventKeys`), where the closed-world gate
+   * exempts exactly these keys. Mutable for the same last-wins reason as
+   * `time`: the backlog-cap collapse rewrites the surviving entry with the
+   * newest event's payload, and the marker must describe THAT payload.
+   */
+  runtimeInjectedEventKeys?: readonly string[];
+  /**
    * The FIFO slot was reserved before its handler's piece finished loading.
    * A loading head parks the whole event queue so later, already-registered
    * handlers cannot overtake it.

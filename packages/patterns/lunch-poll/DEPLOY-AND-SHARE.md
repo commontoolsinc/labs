@@ -5,8 +5,9 @@ verify it actually worked, and recover it when it breaks. Written for someone
 (human or agent) operating the poll for the first time — read top to bottom
 once.
 
-> **Status (2026-07-17): live-deployable** (re-verified via a fresh local
-> deploy). The visit history + per-visit vote snapshots live in a plain
+> **Status (2026-08-03): live-deployable** (re-verified by a fresh deploy to
+> `rapids` plus the smoke test below — `joinAs`, `addOption`, `logVisit` all
+> land). The visit history + per-visit vote snapshots live in a plain
 > **`PerSpace<HistoryEntry[]>` array** (`visits`), each entry embedding its own
 > vote snapshot. (History was briefly on the SQLite builtin, #4144/#4145; that's
 > been reverted — see `LUNCH-COORDINATOR-TODO.md` for the history. There is no
@@ -28,22 +29,52 @@ All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
 (Option B).
 
-## The canonical piece
+## The live pieces
 
-One shared instance everyone iterates on. **This is a deployment pointer, not a
-stable identifier — current as of 2026-06-22.** A piece is tied to one
-space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
+Two hosts run the poll, at different paces. **These are deployment pointers, not
+stable identifiers — current as of 2026-08-03.** A piece is tied to one
+space/server and can be reset, wedged, or lost; if one 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
 
-The poll lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
-successor to `toolshed`.
+### `rapids` — the fast-moving instance
+
+`rapids.saga-castor.ts.net` is redeployed often and tracks this checkout's
+pattern source. Iterate here.
 
 ```
 space:  team-lunch
-piece:  fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
-url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+piece:  fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
 ```
+
+### `estuary` — the stately instance, holding the real poll
+
+`estuary.saga-castor.ts.net` moves at a slower pace and carries the team's
+**populated** poll — real participants, options and votes. Treat its state as
+production data.
+
+```
+space:  team-lunch
+piece:  fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
+url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
+```
+
+Two things make this piece unlike the `rapids` one:
+
+- **Its deployed source is a different lineage from this checkout.** It defines
+  `checkRestaurantHours`, `availabilityRefresh`, `availabilityLastRequestedAt`
+  and `restaurantSearchContext` inputs that the source here does not, and it
+  lacks `participantProfiles`. Deploying this checkout's `main.tsx` over it
+  would strand that restaurant-hours feature. Combined with the populated space,
+  that makes any update here rehearsal-grade — see
+  [`docs/development/space-clone-rehearsal.md`](../../../docs/development/space-clone-rehearsal.md).
+- **Its space cannot be enumerated from a current checkout.** The stored
+  home/registry pattern imports `safeDateNow`, which this API no longer exports,
+  so `cf piece ls -s team-lunch` fails to compile it and exits non-zero with an
+  empty listing. Address the piece by id instead — `piece inspect` and
+  `piece get` do not load the home pattern — or run the CLI from a checkout old
+  enough to still export that symbol.
 
 ### Historical: the `toolshed` piece
 
@@ -60,9 +91,9 @@ url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6C
 ## Environment setup
 
 ```bash
-export CF_API_URL=https://rapids.saga-castor.ts.net/   # current prod; toolshed.saga-castor.ts.net is the predecessor; http://localhost:8000 for local dev
+export CF_API_URL=https://rapids.saga-castor.ts.net/   # fast-moving instance; estuary.saga-castor.ts.net holds the populated poll; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0    # rapids; current as of 2026-06-22
+PIECE=fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ    # rapids; current as of 2026-08-03
 SPACE=team-lunch
 ```
 
@@ -99,6 +130,15 @@ SPACE=team-lunch
 > **Option B** (or a fresh `cf piece new`), neither of which routes through
 > `setsrc`.
 
+> **Precondition:** `setsrc` loads the piece's _currently deployed_ source
+> before it compares schemas, so a piece whose deployed generation no longer
+> compiles against today's API cannot be updated in place at all. It fails in
+> `#loadCurrentPattern` with whatever the stale source imports, e.g.
+> `Module '"./commonfabric.js"' has no exported member '<name>'`.
+> `--dangerously-allow-incompatible-schema` does **not** help: it only skips the
+> compatibility proof, which runs _after_ the load. Recover with `cf piece new`
+> (see "Recovering the piece").
+
 To push code changes **and keep all accumulated state**, update the source of
 the existing piece. Do **not** run `cf piece new` — that mints a fresh, empty
 instance.
@@ -131,7 +171,7 @@ without touching the shared poll):
 MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
-# 2. Copy each PerSpace field from the canonical piece into yours.
+# 2. Copy each PerSpace field from the shared piece into yours.
 #    `--input` reads/writes the input cell where these live.
 for field in question users options votes participantProfiles adminName visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
@@ -238,7 +278,7 @@ everyone sees, and direct `set` races anyone's live browser session.**
 
 ```bash
 deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE"
-# → prints a new fid1:… — update the "canonical piece" block above.
+# → prints a new fid1:… — update the "live pieces" block above.
 ```
 
 You need `WRITE`/`OWNER` on the space (ACL-gated); a denied write changes
@@ -261,7 +301,7 @@ NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 #    since `visits` is now a PerSpace cell). Tip: leave users/adminName empty so
 #    the first joiner becomes host, or copy them and use Become host.
 
-# 3. Make the fresh piece canonical: update the "canonical piece" block above.
+# 3. Make the fresh piece the shared one: update the "live pieces" block above.
 ```
 
 ### Home space won't load (profile setup, `main`-style builds)
@@ -279,13 +319,18 @@ load — you just don't get your profile name and avatar pre-filled.
 
 ## Performance notes
 
-The poll no longer does any per-option AI work. The generated cuisine-image
-(#4325) and web-search homepage-enrichment (#4326) features were removed on
-2026-06-23, and with them the per-option image generation, web search, and
-`generateText` homepage-verification call — plus the 30s mutex that serialized
-them. That work, not graph/runtime cost, was what made cold loads of a
-many-option poll take **minutes**. What remains is graph/runtime cost, which
-instantiation measured at ~linear, ~12ms/option.
+Cold-load cost is dominated by graph/runtime instantiation, which measures
+~linear at ~12ms/option. The poll does no web-search or homepage-verification
+work.
+
+Per-option cuisine art is generated in the browser, and only on the **host's**
+client: `generated-art.tsx` requests `/api/ai/img` via `fetchBinary` under a 30s
+mutex, and skips the request entirely for any option that already carries a
+stored image. The host keeps a thumbnail with the card's keep action, which
+fires `setOptionImage` to persist the data URL onto that option's `imageUrl`;
+every other viewer reads the stored value rather than generating its own. Art
+therefore costs at most one request per option across the whole poll, not one
+per option per viewer.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in

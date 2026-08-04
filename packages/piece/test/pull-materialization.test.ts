@@ -4,6 +4,7 @@ import type { FabricValue } from "@commonfabric/data-model/interface";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   type Cell,
+  ContextualFlowControl,
   getPatternIdentityRef,
   getPatternRepository,
   getPieceSourceRevisions,
@@ -7434,7 +7435,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
 
       const inputCell = await readerPiece.input.getCell();
       expect(
-        readerRuntime.cfc.schemaAtPath(inputCell.schema!, [
+        ContextualFlowControl.schemaAtPath(inputCell.schema!, [
           "handle",
           "secret",
         ]),

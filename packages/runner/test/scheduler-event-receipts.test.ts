@@ -13,10 +13,12 @@ import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import type {
   Cell,
   IExtendedStorageTransaction,
+  JSONSchema,
   RuntimeTelemetryMarker,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
 import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
@@ -1234,7 +1236,12 @@ describe("scheduler event receipts", () => {
     expect(emptyReceipt.get()).toEqual({});
   });
 
-  it("discards a plain JSON return while plainResultReceipts is off (default)", async () => {
+  it("discards a plain JSON return while plainResultReceipts is explicitly off", async () => {
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { experimental: { plainResultReceipts: false } },
+    ));
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
@@ -1393,10 +1400,13 @@ describe("scheduler event receipts", () => {
     await runtime.scheduler.idleWithPendingCommits();
 
     // `generateHandlerSchema` requires only `$ctx`, so a payload that misses
-    // the event schema does not make the argument invalid — `$event` simply
-    // reads back undefined. The body runs with no event and its receipt spends
-    // the id, which is why a mismatched payload has to be refused before it is
-    // ever dispatched rather than caught here.
+    // an OPEN event schema does not make the argument invalid — `$event`
+    // simply reads back undefined. The body runs with no event and its
+    // receipt spends the id, which is why a mismatched payload against an
+    // open schema still has to be refused before it is ever dispatched. A
+    // schema that declares `additionalProperties: false` opts into the
+    // dispatch-side gate instead — see "closed-world event schemas at
+    // dispatch" below.
     expect(handlerInvocations).toBe(1);
     expect(seenEvents).toEqual([undefined]);
     const receipt = receiptCellForEvent<Record<string, unknown>>(
@@ -1405,6 +1415,422 @@ describe("scheduler event receipts", () => {
     );
     await receipt.pull();
     expect(receipt.get()).toEqual({});
+  });
+
+  // The dispatch-side closed-world gate (verb contract WS-C, C5): an event
+  // schema that declares `additionalProperties: false` makes an undeclared
+  // field a rejection, never ignored. Characterized before the gate existed
+  // (2026-07-31, this file's harness, unmodified code): the extra field was
+  // silently STRIPPED — the handler ran, saw only the declared fields, and
+  // the receipt spent the event id. The gate replaces that with the existing
+  // thrown-handler outcome; an OPEN schema keeps the stripped delivery.
+  describe("closed-world event schemas at dispatch", () => {
+    function snapshotEvent(event: unknown): unknown {
+      if (event === undefined) return undefined;
+      if (event === null || typeof event !== "object") return event;
+      return Object.fromEntries(
+        Object.entries(event as Record<string, unknown>),
+      );
+    }
+
+    function runClosedVerbRoot(rootName: string, eventSchema: JSONSchema) {
+      const { commonfabric } = createTrustedBuilder(runtime);
+      const { handler, pattern } = commonfabric;
+      const observed = {
+        invocations: 0,
+        events: [] as unknown[],
+      };
+      const verb = handler(
+        eventSchema,
+        { type: "object", properties: {} },
+        (event: unknown) => {
+          observed.invocations++;
+          observed.events.push(snapshotEvent(event));
+        },
+      );
+      const rootPattern = pattern(() => ({ stream: verb({}) }));
+      const rootCell = runtime.getCell<{ stream: unknown }>(
+        space,
+        rootName,
+        undefined,
+        tx,
+      );
+      const root = runtime.run(tx, rootPattern, {}, rootCell);
+      return { root, observed };
+    }
+
+    it("rejects an undeclared extra field the way a thrown handler error fails", async () => {
+      const { root, observed } = runClosedVerbRoot("closed extra-field root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const errors: string[] = [];
+      runtime.scheduler.onError((error) => {
+        errors.push(error.message);
+      });
+
+      const eventId = "evt:closed-extra:0:closed-extra-field-root";
+      const commitStatus = new Promise<string>((resolve) => {
+        runtime.scheduler.queueEvent(
+          resolvedStreamLink(root.key("stream"), runtime),
+          { value: 5, extra: 1 },
+          undefined,
+          (commitTx) => resolve(commitTx.status().status),
+          false,
+          { eventId },
+        );
+      });
+
+      // The rejection is the handling's final outcome, delivered through the
+      // existing thrown-handler path: the body never runs, the transaction
+      // aborts, onError fires, and the commit callback settles errored.
+      expect(await commitStatus).toBe("error");
+      await runtime.idle();
+      expect(observed.invocations).toBe(0);
+      expect(errors.length).toBe(1);
+      expect(errors[0]).toContain("additional property extra");
+
+      // No receipt was created, so the event id is NOT spent — a corrected
+      // retry under the same id can still commit (unlike the pre-gate
+      // behavior, where the stripped delivery receipted and spent it).
+      const receipt = receiptCellForEvent<Record<string, unknown>>(
+        runtime,
+        eventId,
+      );
+      await receipt.pull();
+      expect(receipt.get()).toBeUndefined();
+    });
+
+    it("delivers a valid payload against a closed event schema", async () => {
+      const { root, observed } = runClosedVerbRoot("closed valid root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:closed-valid:0:closed-valid-root";
+      runtime.scheduler.queueEvent(
+        resolvedStreamLink(root.key("stream"), runtime),
+        { value: 7 },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await runtime.scheduler.idleWithPendingCommits();
+
+      expect(observed.invocations).toBe(1);
+      expect(observed.events).toEqual([{ value: 7 }]);
+      const receipt = receiptCellForEvent<Record<string, unknown>>(
+        runtime,
+        eventId,
+      );
+      await receipt.pull();
+      expect(receipt.get()).toEqual({});
+    });
+
+    it("still fills defaults for a partial payload against a closed schema", async () => {
+      // The measured table (#5147) must stay true under closure: a PRESENT
+      // partial object is completed from defaults before `required` is
+      // checked, which is why the gate judges the RELAXED schema — the
+      // unrelaxed one would refuse a payload the runtime completes.
+      const { root, observed } = runClosedVerbRoot("closed defaulted root", {
+        type: "object",
+        properties: {
+          a: { type: "string", default: "fallback" },
+          b: { type: "number", default: 7 },
+        },
+        required: ["a", "b"],
+        additionalProperties: false,
+      });
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:closed-defaulted:0:closed-defaulted-root";
+      runtime.scheduler.queueEvent(
+        resolvedStreamLink(root.key("stream"), runtime),
+        { a: "supplied" },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await runtime.scheduler.idleWithPendingCommits();
+
+      expect(observed.invocations).toBe(1);
+      expect(observed.events).toEqual([{ a: "supplied", b: 7 }]);
+      const receipt = receiptCellForEvent<Record<string, unknown>>(
+        runtime,
+        eventId,
+      );
+      await receipt.pull();
+      expect(receipt.get()).toEqual({});
+    });
+
+    it("keeps an absent payload deliverable against a closed schema", async () => {
+      // Absence is the CLI gate's question (D5); server-side the measured
+      // behavior is unchanged by closure: the handler runs with `undefined`
+      // (defaults never materialize for an absent event) and the receipt
+      // spends the id.
+      const { root, observed } = runClosedVerbRoot("closed absent root", {
+        type: "object",
+        properties: { value: { type: "number", default: 3 } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:closed-absent:0:closed-absent-root";
+      runtime.scheduler.queueEvent(
+        resolvedStreamLink(root.key("stream"), runtime),
+        undefined,
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await runtime.scheduler.idleWithPendingCommits();
+
+      expect(observed.invocations).toBe(1);
+      expect(observed.events).toEqual([undefined]);
+      const receipt = receiptCellForEvent<Record<string, unknown>>(
+        runtime,
+        eventId,
+      );
+      await receipt.pull();
+      expect(receipt.get()).toEqual({});
+    });
+
+    it("exempts a runtime-injected key named by the send's provenance marker", async () => {
+      // The LLM tool-call path sends `{ ...input, result: <cell> }` to a
+      // handler tool and deliberately hides the slot from the advertised
+      // schema (llm-dialog `stripInjectedResult`, CLI
+      // `cloneWithoutBoundToolKeys`), so a closed schema that does not
+      // declare `result` still receives it. The injection site names its key
+      // through the send's internal options (`runtimeInjectedEventKeys`),
+      // which travel out-of-band to the dispatch transaction — provenance,
+      // not shape. The gate exempts exactly the marked keys; the handler
+      // never sees the slot either way — the schema read path only delivers
+      // declared fields.
+      const { root, observed } = runClosedVerbRoot("closed injected root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      const resultHolder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed injected result holder",
+        undefined,
+        tx,
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:closed-injected:0:closed-injected-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
+      const commitStatus = new Promise<string>((resolve) => {
+        // Through cell.send so the payload takes the real dispatch shape
+        // (convertCellsToLinks turns the cell into a link) and the marker
+        // takes the real injection route (minted send option → queued event
+        // → dispatch transaction).
+        streamCell.send(
+          { value: 7, result: resultHolder },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
+          {
+            eventId,
+            runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
+          },
+        );
+      });
+
+      expect(await commitStatus).toBe("done");
+      expect(observed.invocations).toBe(1);
+      expect(observed.events).toEqual([{ value: 7 }]);
+    });
+
+    it("ignores an UNMINTED provenance marker — the option is a capability", async () => {
+      // The marker's value must come from markRuntimeInjectedEventKeys
+      // (runner-internal; no pattern compartment can import it — the sandbox
+      // module map exposes only the commonfabric surface). A plain array —
+      // exactly what any in-process or sandboxed caller could pass through
+      // send options — is dropped at the stream-send chokepoint, so the
+      // undeclared key is judged like any other and the send is refused.
+      const { root, observed } = runClosedVerbRoot("closed unminted root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      const holder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed unminted holder",
+        undefined,
+        tx,
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const errors: string[] = [];
+      runtime.scheduler.onError((error) => {
+        errors.push(error.message);
+      });
+
+      const eventId = "evt:closed-unminted:0:closed-unminted-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
+      const commitStatus = new Promise<string>((resolve) => {
+        streamCell.send(
+          { value: 7, result: holder },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
+          { eventId, runtimeInjectedEventKeys: ["result"] },
+        );
+      });
+
+      expect(await commitStatus).toBe("error");
+      await runtime.idle();
+      expect(observed.invocations).toBe(0);
+      expect(errors.length).toBe(1);
+      expect(errors[0]).toContain("additional property result");
+    });
+
+    it("delivers a marked key the schema DECLARES — the schema governs", async () => {
+      // A handler that declares the injected slot asked for it: the marked
+      // key is not stripped, the injected value is validated like any field
+      // (the link is accepted opaquely), and the handler receives it.
+      const { root, observed } = runClosedVerbRoot("closed declared root", {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+          result: { asCell: ["cell"] },
+        },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      const declaredHolder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed declared holder",
+        undefined,
+        tx,
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:closed-declared:0:closed-declared-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
+      const commitStatus = new Promise<string>((resolve) => {
+        streamCell.send(
+          { value: 7, result: declaredHolder },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
+          {
+            eventId,
+            runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
+          },
+        );
+      });
+
+      expect(await commitStatus).toBe("done");
+      expect(observed.invocations).toBe(1);
+      const delivered = observed.events[0] as Record<string, unknown>;
+      expect(delivered.value).toBe(7);
+      expect(Object.hasOwn(delivered, "result")).toBe(true);
+    });
+
+    it("rejects an UNMARKED result slot even when it carries a cell link", async () => {
+      // Shape is not provenance: a caller cannot smuggle an undeclared key
+      // past closed-world by supplying a link-valued `result` — only the
+      // runtime's own injection site can mark the key, through the internal
+      // send options that payload data can never express. Unmarked, the slot
+      // is an undeclared field like any other.
+      const { root, observed } = runClosedVerbRoot("closed forged root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      });
+      const smuggled = runtime.getCell<Record<string, unknown>>(
+        space,
+        "closed forged smuggled holder",
+        undefined,
+        tx,
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const errors: string[] = [];
+      runtime.scheduler.onError((error) => {
+        errors.push(error.message);
+      });
+
+      const eventId = "evt:closed-forged:0:closed-forged-root";
+      const streamCell = root.key("stream") as Cell<unknown>;
+      const commitStatus = new Promise<string>((resolve) => {
+        streamCell.send(
+          { value: 7, result: smuggled },
+          (t: IExtendedStorageTransaction) => resolve(t.status().status),
+          { eventId },
+        );
+      });
+
+      expect(await commitStatus).toBe("error");
+      await runtime.idle();
+      expect(observed.invocations).toBe(0);
+      expect(errors.length).toBe(1);
+      expect(errors[0]).toContain("additional property result");
+    });
+
+    it("keeps stripping an extra field against an OPEN event schema", async () => {
+      // The gate triggers only on a schema that DECLARES the closure.
+      // Everything else keeps the characterized behavior: the schema read
+      // path delivers the declared fields, ignores the rest, and receipts.
+      // Generated event schemas are still open (the closed-world emission is
+      // blocked on a pattern-update-gate migration — plan WS-C), so this is
+      // the fleet-wide behavior until that lands.
+      const { root, observed } = runClosedVerbRoot("open extra-field root", {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      });
+      await tx.commit();
+      tx = runtime.edit();
+      await root.pull();
+
+      const eventId = "evt:open-extra:0:open-extra-field-root";
+      runtime.scheduler.queueEvent(
+        resolvedStreamLink(root.key("stream"), runtime),
+        { value: 5, extra: 1 },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await runtime.scheduler.idleWithPendingCommits();
+
+      expect(observed.invocations).toBe(1);
+      expect(observed.events).toEqual([{ value: 5 }]);
+      const receipt = receiptCellForEvent<Record<string, unknown>>(
+        runtime,
+        eventId,
+      );
+      await receipt.pull();
+      expect(receipt.get()).toEqual({});
+    });
   });
 
   it("withholds the receipt address while receipts are disabled", async () => {

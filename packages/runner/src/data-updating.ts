@@ -51,6 +51,7 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
@@ -841,9 +842,10 @@ export function normalizeAndDiff(
   // deliberately does not carry over: inlined content in an array slot stores
   // inline, exactly as the annotation scheme (which never looked behind
   // links) stored it.
-  if (
-    isCellLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")
-  ) {
+  const newValueLinkId = isCellLink(newValue)
+    ? parseLink(newValue, link).id
+    : undefined;
+  if (newValueLinkId !== undefined && hasDataUriScheme(newValueLinkId)) {
     return normalizeAndDiff(
       runtime,
       tx,
@@ -1222,7 +1224,7 @@ export function normalizeAndDiff(
       Array.isArray(currentValue) && newValue.length > currentValue.length
     ) {
       const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema)
+        ? ContextualFlowControl.lubSchema(link.schema)
         : undefined;
       const lengthSchema = (lub !== undefined)
         ? { type: "number", ifc: { confidentiality: lub } } as JSONSchema
@@ -1250,7 +1252,9 @@ export function normalizeAndDiff(
           location: {
             ...link,
             path: [...link.path, i.toString()],
-            schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
+            schema: ContextualFlowControl.getSchemaAtPath(link.schema, [
+              i.toString(),
+            ]),
           },
           value: undefined,
           delete: true,
@@ -1259,7 +1263,7 @@ export function normalizeAndDiff(
       }
 
       // hole→value or value→value: recurse normally
-      const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [
+      const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
         i.toString(),
       ]);
 
@@ -1302,7 +1306,7 @@ export function normalizeAndDiff(
     if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema)
+        ? ContextualFlowControl.lubSchema(link.schema)
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
@@ -1322,7 +1326,9 @@ export function normalizeAndDiff(
           location: {
             ...link,
             path: [...link.path, i.toString()],
-            schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
+            schema: ContextualFlowControl.getSchemaAtPath(link.schema, [
+              i.toString(),
+            ]),
           },
           value: undefined,
           delete: true,
@@ -1452,7 +1458,9 @@ export function normalizeAndDiff(
         return `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`;
       });
 
-      const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+      const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
+        key,
+      ]);
 
       // An explicit `undefined` for a key the current object doesn't have is
       // a real change — the slot becomes present-but-undefined — but the
@@ -1499,7 +1507,9 @@ export function normalizeAndDiff(
     if (isRecord(schemaProperties)) {
       for (const key in schemaProperties) {
         if (key in newValue) continue;
-        const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+        const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
+          key,
+        ]);
         const childScope = declaredCellScope(childSchema);
         if (
           childScope === undefined ||

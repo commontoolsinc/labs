@@ -144,11 +144,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   open(space: MemorySpace): IStorageProviderWithReplica;
 
   /**
-   * Record a runtime-learned host hint for a space (federation site
-   * table). Optional: managers without remote, per-space resolution
+   * Record a runtime-learned HTTP or HTTPS host hint for a space
+   * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the
-   * hint is in effect; false when refused (seeded differently, or the
-   * space's connection is already open to another host).
+   * hint is accepted or confirms a configured or accepted route. The first
+   * hint can replace an unseeded provider's provisional default route before
+   * that route issues a stateful operation. Returns false on a conflict with a
+   * seed or accepted hint, or after a stateful operation has been issued
+   * through the provisional route.
    */
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
@@ -785,6 +788,13 @@ export interface IStorageTransaction {
    */
   enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
   /**
+   * Confirm that every replica supplying this transaction's read basis is
+   * still the active replica for its space. Storage calls this immediately
+   * before issuing a mutation so a route replacement cannot carry a result
+   * computed from the old replica into another space.
+   */
+  validateReplicaRoutes?(): Result<Unit, IStorageTransactionInconsistent>;
+  /**
    * Optional read-only mode hook used by runtime-generated fallback read
    * transactions.
    */
@@ -1055,6 +1065,18 @@ export interface IExtendedStorageTransaction
    * runner to derive the handler result cell's cause (spec §7.6).
    */
   dispatchedEventId?: string;
+
+  /**
+   * Payload keys the RUNTIME itself injected into the dispatched event's
+   * value (e.g. the LLM tool-call path's `result` cell). Set by the
+   * scheduler's event dispatch from the send's internal options; consumed by
+   * the runner's closed-world gate to exempt exactly these keys from an
+   * `additionalProperties: false` event schema. Provenance, not shape: the
+   * marker travels out-of-band from the injection site, so payload DATA can
+   * never claim it — a caller-supplied `result` field, link-valued or not,
+   * arrives unmarked and is judged like any other undeclared field.
+   */
+  dispatchedRuntimeInjectedEventKeys?: readonly string[];
 
   /**
    * The durable address of this handling's result/receipt cell (spec §7.6:
@@ -1593,6 +1615,7 @@ export type StorageTransactionFailed =
   | StorageTransactionRejected;
 
 export type StorageTransactionRejected =
+  | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
   | IStoreError
@@ -1756,6 +1779,7 @@ export type PushError =
   | IQueryError
   | IStoreError
   | IConnectionError
+  | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
   | TransactionError

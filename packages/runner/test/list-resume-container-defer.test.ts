@@ -11,6 +11,7 @@ import {
 } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { ENTITY_URI_SCHEMES } from "../src/entity-kind.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -900,7 +901,7 @@ describe("list builtin resume container defer", () => {
       // the server stores.
       for (const id of elementLinkIds) {
         expect(id).not.toBe(created.containerId);
-        if (id.startsWith("data:")) continue;
+        if (hasDataUriScheme(id)) continue;
         expect(
           [...persisted.values()].some((entry) => entry.id === id),
         ).toBe(true);

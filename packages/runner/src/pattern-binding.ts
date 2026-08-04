@@ -1,7 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { FabricPrimitive } from "@commonfabric/data-model/interface";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/interface";
 import {
   type FabricExecValue,
   isPattern,
@@ -93,7 +96,6 @@ type UnwrapOneLevelOptions = {
  * they keep inheriting the reader's schema during link resolution.
  */
 const foldDeclaredScopeIntoLinkSchema = (
-  cfc: ContextualFlowControl,
   link: NormalizedFullLink,
   authoredRootSchema: JSONSchema | undefined,
   path: readonly string[],
@@ -103,7 +105,7 @@ const foldDeclaredScopeIntoLinkSchema = (
     return link;
   }
   const authoredSlotSchema = path.length > 0
-    ? cfc.getSchemaAtPath(authoredRootSchema, [...path])
+    ? ContextualFlowControl.getSchemaAtPath(authoredRootSchema, [...path])
     : authoredRootSchema;
   const declaredCap = ContextualFlowControl.getSchemaScopeCap(
     authoredSlotSchema,
@@ -118,7 +120,6 @@ const foldDeclaredScopeIntoLinkSchema = (
 };
 
 const scopedLinkForPath = (
-  cfc: ContextualFlowControl,
   link: NormalizedFullLink,
   path: readonly string[],
   schemaOverride?: JSONSchema,
@@ -128,7 +129,7 @@ const scopedLinkForPath = (
   let childSchema: JSONSchema | undefined;
 
   for (const key of path) {
-    childSchema = cfc.getSchemaAtPath(schema, [key]);
+    childSchema = ContextualFlowControl.getSchemaAtPath(schema, [key]);
     if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
       scope = childSchema.scope;
     }
@@ -239,7 +240,6 @@ function sendValueToBindingInner<T>(
         )!;
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(
-            cell.runtime.cfc,
             getDerivedInternalCellLink(cell as any, descriptor),
             alias.path,
             alias.schema,
@@ -262,7 +262,7 @@ function sendValueToBindingInner<T>(
         }
         const path = alias.path;
         binding = createSigilLinkFromParsedLink(
-          scopedLinkForPath(cell.runtime.cfc, link, path, alias.schema),
+          scopedLinkForPath(link, path, alias.schema),
           { includeSchema: true, overwrite: "redirect" },
         );
       }
@@ -405,7 +405,6 @@ function sendValueToBindingInner<T>(
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
-  cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
   resultCell: AnyCell<unknown>,
@@ -422,13 +421,17 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * would yield a bare `{}`. Returning it as-is preserves it, and skips an
    * `Object.entries()` call that can only ever come back empty.
    *
-   * TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a container
-   * holding other `FabricValue`s, so it does need descending into, but by its
-   * codec contents rather than by property name. It currently falls through to
-   * the record branch, where its zero enumerable own properties mean nothing
-   * rebinds and the original is handed back — preserved rather than decomposed,
-   * but never descended, so a bound alias nested inside one is missed. The two
-   * sibling walks in this file carry the same marker.
+   * A `FabricInstance` leaves next, by throwing. It is NOT a leaf: it is a
+   * container holding other `FabricValue`s, so it does need descending into,
+   * but by its codec contents rather than by property name — which this walk
+   * has no way to do. The alternative to throwing is to hand one back whole,
+   * which reads as success while leaving any bound alias in its contents
+   * silently unbound. Neither disposition is correct, so this one takes the
+   * one that reports itself, and names the class and the work it needs.
+   *
+   * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+   * point the throw becomes a rebind. The two sibling walks in this file carry
+   * `Latent` markers for the same hazard.
    *
    * The container branches then hand back the original when nothing under one
    * rebound, without checking whether a rebuild would have reproduced it. For
@@ -492,10 +495,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const sourceSchema = alias.schema !== undefined
           ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
-          ? cfc.schemaAtPath(link.schema, path)
+          ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
         return createSigilLinkFromParsedLink(
-          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+          scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
           { includeSchema: true, overwrite: "redirect" },
         );
       } else {
@@ -515,15 +518,14 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const sourceSchema = alias.schema !== undefined
           ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
-          ? cfc.schemaAtPath(link.schema, path)
+          ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
         const authoredRootSchema = alias.cell === "argument"
           ? options?.sourceSchemas?.argument
           : undefined;
         return createSigilLinkFromParsedLink(
           foldDeclaredScopeIntoLinkSchema(
-            cfc,
-            scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+            scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
           ),
@@ -532,6 +534,11 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       }
     } else if (binding instanceof FabricPrimitive) {
       return binding;
+    } else if (binding instanceof FabricInstance) {
+      throw new Error(
+        `Cannot yet handle \`${binding.constructor.name}\` (a ` +
+          "`FabricInstance`) as a pattern binding.",
+      );
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
       // else, so the shared path allocates nothing.
@@ -548,7 +555,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const value = binding[i];
         const next = convert(
           value,
-          cfc.getSchemaAtPath(targetSchema, [String(i)]),
+          ContextualFlowControl.getSchemaAtPath(targetSchema, [String(i)]),
         );
         if (next === value) continue;
         // First change: copy the whole array, not just the prefix. `slice()`
@@ -569,7 +576,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       let converted: Record<string, FabricExecValue> | undefined;
       for (const key of Object.keys(binding)) {
         const value = binding[key];
-        const next = convert(value, cfc.getSchemaAtPath(targetSchema, [key]));
+        const next = convert(
+          value,
+          ContextualFlowControl.getSchemaAtPath(targetSchema, [key]),
+        );
         if (next === value) continue;
         converted ??= { ...binding };
         converted[key] = next;
@@ -688,11 +698,16 @@ export function findAllWriteRedirectCells<T>(
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
-      // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
-      // path today, but will in the not-too-distant future; at that point this
-      // guard-less `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a
-      // `FabricInstance` is walked by internal slots rather than codec
-      // contents). Mark ahead of that.
+      // A `FabricPrimitive` reaches the `isRecord` branch below, and is
+      // harmless there. This walk collects write-redirect links, and a
+      // primitive is an opaque scalar: it can contain no redirect, and its
+      // state lives in private fields, so `Object.values()` yields nothing and
+      // the recursion ends immediately. Decomposition would matter to a walk
+      // that REBUILT its input; this one only reads.
+      //
+      // TODO(danfuzz): Latent — a `FabricInstance` is not harmless in the same
+      // way. It is a container reached by its codec contents rather than by
+      // property name, so a write redirect nested inside one is missed here.
     } else if (isRecord(binding) && !isCellLink(binding)) {
       // If the binding is an object, recurse into each value.
       for (const value of Object.values(binding)) find(value, baseCell);

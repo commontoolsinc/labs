@@ -111,7 +111,7 @@ export function selectPieceReadCell<T>(
   const selected = root.key(...path) as Cell<unknown>;
   const rootSchema = root.schema;
   if (rootSchema === undefined || path.length === 0) return selected;
-  const declaredSchema = root.runtime.cfc.schemaAtPath(
+  const declaredSchema = ContextualFlowControl.schemaAtPath(
     rootSchema,
     path.map(String),
   );
@@ -348,7 +348,10 @@ export function getResultCellWithSourceSchema<T = unknown>(
   if (link.schema === undefined) {
     const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
     if (resultSchema !== undefined) {
-      const schema = cell.runtime.cfc.schemaAtPath(resultSchema, link.path);
+      const schema = ContextualFlowControl.schemaAtPath(
+        resultSchema,
+        link.path,
+      );
       return cell.asSchema<T>(schema);
     }
   }

@@ -1895,7 +1895,10 @@ export class Session {
         this.expandAllFiles();
         return;
       case "T":
-        this.collapseTestFiles();
+        this.toggleFileCategory((file) => file.isTest, "test");
+        return;
+      case "M":
+        this.toggleFileCategory((file) => file.isMarkdown, "Markdown");
         return;
       case "escape": {
         const anchor = this.wrapLines ? this.viewportAnchor() : null;
@@ -2058,21 +2061,33 @@ export class Session {
     this.message = "Showing all files.";
   }
 
-  /** Hide every test / test-support file, leaving the rest shown. */
-  private collapseTestFiles(): void {
+  /** Toggle one kind of file as a group. A mixed group is made fully hidden. */
+  private toggleFileCategory(
+    matches: (file: DiffFileRange) => boolean,
+    label: string,
+  ): void {
     if (!this.ensureDiffForFolding()) return;
+    const files = this.foldFiles().filter(matches);
+    if (files.length === 0) {
+      this.message = `No ${label} files.`;
+      return;
+    }
     const anchor = this.foldAnchor();
-    let n = 0;
-    for (const f of this.foldFiles()) {
-      if (f.isTest && !this.collapsed.has(f.index)) {
+    const expand = files.every((file) => this.collapsed.has(file.index));
+    let changed = 0;
+    for (const f of files) {
+      if (expand) {
+        this.collapsed.delete(f.index);
+        changed++;
+      } else if (!this.collapsed.has(f.index)) {
         this.collapsed.add(f.index);
-        n++;
+        changed++;
       }
     }
-    if (n > 0) this.applyFoldChange(anchor);
-    this.message = n > 0
-      ? `Hid ${n} test file${n === 1 ? "" : "s"}.`
-      : "No shown test files to hide.";
+    this.applyFoldChange(anchor);
+    this.message = `${expand ? "Showing" : "Hid"} ${changed} ${label} file${
+      changed === 1 ? "" : "s"
+    }.`;
   }
 
   // --- editing ---------------------------------------------------------------
@@ -4043,7 +4058,7 @@ export class Session {
     for (const file of this.foldFiles()) {
       entries.push({
         line: file.headerLine,
-        display: file.summary,
+        display: fileJumpLine(file, this.collapsed.has(file.index)),
         filterText: file.path.toLowerCase(),
         name: file.path,
       });
@@ -4264,6 +4279,26 @@ function commitJumpLine(shortSha: string, subject: string): Line {
   return { text, spans };
 }
 
+/** Add the category keys that affect a file to its jump-list row. Collapsed
+ * rows use the dialog's muted style. */
+function fileJumpLine(file: DiffFileRange, collapsed: boolean): Line {
+  const flags = `${file.isMarkdown ? "M" : " "}${file.isTest ? "T" : " "}`;
+  const prefix = `${flags} `;
+  const spans: Span[] = [
+    { col: 0, text: prefix, cls: "builderCall" },
+    ...file.summary.spans.map((span) => ({
+      ...span,
+      col: span.col + 3,
+    })),
+  ];
+  return {
+    text: prefix + file.summary.text,
+    spans: collapsed
+      ? spans.map((span) => ({ ...span, cls: "comment" }))
+      : spans,
+  };
+}
+
 export function helpOverlay(): {
   title: string;
   info: Line[];
@@ -4289,7 +4324,8 @@ export function helpOverlay(): {
     ["Diff files", ""],
     ["  f", "hide / show the file under the cursor (collapse to a summary)"],
     ["  F / E", "hide all files / show all files"],
-    ["  T", "hide test and test-support files"],
+    ["  T", "hide / show test and test-support files"],
+    ["  M", "hide / show Markdown files"],
     ["  i", "list the diff's files and commits, jump to one"],
     ["", ""],
     ["Structure tree", ""],

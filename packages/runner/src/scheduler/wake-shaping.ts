@@ -264,6 +264,11 @@ export interface DeliverOpts {
   eventId?: string;
   originTx?: IExtendedStorageTransaction;
   time?: number;
+  /** Runtime-injection provenance, carried through a held delivery unchanged
+   * so shaping can never strip the closed-world gate's exemption. Renderer
+   * events (the only shapable class) are never injection sites, so this is
+   * defensive plumbing, not a live path. */
+  runtimeInjectedEventKeys?: readonly string[];
 }
 
 export type DeliverFn = (
@@ -391,6 +396,9 @@ export function holdShapedEvent(
   // hold, so a shaped (delayed) delivery still stamps the instant the user
   // acted rather than the instant the shaper released it.
   const time = opts.time;
+  // Injection provenance rides the hold unchanged, so a shaped delivery
+  // cannot silently strip the closed-world gate's exemption.
+  const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
   shaper.hold({
     groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink)),
     deliver: () =>
@@ -398,6 +406,7 @@ export function holdShapedEvent(
         eventId,
         originTx,
         time,
+        runtimeInjectedEventKeys,
       }),
   });
 }

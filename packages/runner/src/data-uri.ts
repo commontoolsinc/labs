@@ -26,6 +26,7 @@
 import {
   FabricInstance,
   FabricPrimitive,
+  FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
@@ -37,6 +38,7 @@ import {
   KeepAsCell,
   parseLink,
 } from "./link-utils.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
 import {
@@ -134,15 +136,12 @@ export function dataUriFromValueWithResolvedLinks(
 /**
  * Find any data: URI links and inline them.
  *
- * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
- * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
- * falls into the `Object.entries` descent, which walks it by enumerable own
- * props instead of treating it as a leaf. An instance with no enumerable
- * props happens to pass through by reference, but the copy-on-write branch
- * (`{ ...value }`) silently flattens any instance whose entry inlines
- * differently into a plain object. The payload walk
- * (`dataValue[path.shift()]`) indexes into decoded content with the same
- * blindness.
+ * A `FabricSpecialObject` is a leaf, matching the treatment
+ * {@link dataUriFromValueWithResolvedLinks} gives it on the way in: the walk
+ * hands one back by reference rather than descending into its enumerable own
+ * properties, and a link path that continues into one resolves to
+ * `undefined`. The link check runs ahead of that leaf check, so a link
+ * carried as a fabric instance still inlines.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -151,7 +150,7 @@ export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
-    if (dataLink.id?.startsWith("data:")) {
+    if (dataLink.id !== undefined && hasDataUriScheme(dataLink.id)) {
       let dataValue: any = valueFromDataUri(dataLink.id);
       const path = [...dataLink.path];
 
@@ -164,8 +163,7 @@ export function findAndInlineDataUriLinks(value: any): any {
           const newLink = parseLink(dataValue);
           let schema = newLink.schema;
           if (schema !== undefined && path.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path);
+            schema = ContextualFlowControl.getSchemaAtPath(schema, path);
           }
           // Create new link by merging dataLink with remaining path
           const newSigilLink = createSigilLinkFromParsedLink({
@@ -186,17 +184,20 @@ export function findAndInlineDataUriLinks(value: any): any {
           });
           return findAndInlineDataUriLinks(newSigilLink);
         }
-        if (path.length > 0) {
-          dataValue = dataValue[path.shift()!];
-        } else {
-          break;
+        if (path.length === 0) break;
+        if (dataValue instanceof FabricSpecialObject) {
+          // The remaining path names nothing inside a leaf.
+          return undefined;
         }
+        dataValue = dataValue[path.shift()!];
       }
 
       return dataValue;
     } else {
       return value;
     }
+  } else if (value instanceof FabricSpecialObject) {
+    return value;
   } else if (Array.isArray(value)) {
     let next: any[] | undefined;
     for (let index = 0; index < value.length; index++) {

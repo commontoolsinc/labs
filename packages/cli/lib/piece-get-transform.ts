@@ -686,18 +686,18 @@ function schemaIsArray(schema: JSONSchema | undefined): boolean {
 }
 
 function schemaAtArrayItem(
-  cfc: ContextualFlowControl,
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
-  const item = declaredSchemaAtArrayItem(cfc, schema);
+  const item = declaredSchemaAtArrayItem(schema);
   return item === false ? undefined : item;
 }
 
 function declaredSchemaAtArrayItem(
-  cfc: ContextualFlowControl,
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
-  return schema === undefined ? undefined : cfc.schemaAtPath(schema, ["0"]);
+  return schema === undefined
+    ? undefined
+    : ContextualFlowControl.schemaAtPath(schema, ["0"]);
 }
 
 function dereferencedElementSchema(
@@ -773,14 +773,13 @@ function undeclaredPathError(
 }
 
 function assertFilterPathsDeclared(
-  cfc: ContextualFlowControl,
   sourceItemSchema: JSONSchema | undefined,
   paths: Array<Array<string | number>>,
 ): void {
   for (const path of paths) {
     if (path.length === 0) continue;
     if (
-      !schemaDeclaresTransformPath(cfc, sourceItemSchema, path, {
+      !schemaDeclaresTransformPath(sourceItemSchema, path, {
         allowArrayLength: true,
         implicitArrayTraversal: false,
       })
@@ -796,7 +795,6 @@ interface TransformPathOptions {
 }
 
 function schemaDeclaresTransformPath(
-  cfc: ContextualFlowControl,
   source: JSONSchema | undefined,
   path: Array<string | number>,
   options: TransformPathOptions,
@@ -812,7 +810,6 @@ function schemaDeclaresTransformPath(
       documentRoot ?? source,
     );
     return schemaDeclaresTransformPath(
-      cfc,
       resolved,
       path,
       options,
@@ -825,7 +822,7 @@ function schemaDeclaresTransformPath(
     if (
       source.allOf !== undefined &&
       !source.allOf.every((branch) =>
-        schemaDeclaresTransformPath(cfc, branch, path, options, nextRoot)
+        schemaDeclaresTransformPath(branch, path, options, nextRoot)
       )
     ) {
       return false;
@@ -833,7 +830,7 @@ function schemaDeclaresTransformPath(
     if (
       source.anyOf !== undefined &&
       !source.anyOf.some((branch) =>
-        schemaDeclaresTransformPath(cfc, branch, path, options, nextRoot)
+        schemaDeclaresTransformPath(branch, path, options, nextRoot)
       )
     ) {
       return false;
@@ -841,7 +838,7 @@ function schemaDeclaresTransformPath(
     if (
       source.oneOf !== undefined &&
       !source.oneOf.some((branch) =>
-        schemaDeclaresTransformPath(cfc, branch, path, options, nextRoot)
+        schemaDeclaresTransformPath(branch, path, options, nextRoot)
       )
     ) {
       return false;
@@ -859,10 +856,9 @@ function schemaDeclaresTransformPath(
     if (options.allowArrayLength && head === "length") {
       return tail.length === 0;
     }
-    const sourceItem = declaredSchemaAtArrayItem(cfc, source);
+    const sourceItem = declaredSchemaAtArrayItem(source);
     if (typeof head === "number") {
       return schemaDeclaresTransformPath(
-        cfc,
         sourceItem,
         tail,
         options,
@@ -871,7 +867,6 @@ function schemaDeclaresTransformPath(
     }
     if (options.implicitArrayTraversal) {
       return schemaDeclaresTransformPath(
-        cfc,
         sourceItem,
         path,
         options,
@@ -880,9 +875,8 @@ function schemaDeclaresTransformPath(
     }
   }
 
-  const child = cfc.schemaAtPath(source, [String(head)]);
+  const child = ContextualFlowControl.schemaAtPath(source, [String(head)]);
   return child !== false && schemaDeclaresTransformPath(
-    cfc,
     child,
     tail,
     options,
@@ -904,14 +898,13 @@ function projectionMaskPaths(
 }
 
 function assertProjectionMaskDeclared(
-  cfc: ContextualFlowControl,
   source: JSONSchema | undefined,
   mask: ProjectionMask,
   implicitArrayTraversal = false,
 ): void {
   for (const path of projectionMaskPaths(mask)) {
     if (
-      !schemaDeclaresTransformPath(cfc, source, path, {
+      !schemaDeclaresTransformPath(source, path, {
         allowArrayLength: false,
         implicitArrayTraversal,
       })
@@ -1014,17 +1007,16 @@ export function schemaMayBeArray(
 }
 
 function alignConciseProjectionMask(
-  cfc: ContextualFlowControl,
   source: JSONSchema | undefined,
   mask: ProjectionMask,
 ): ProjectionMask {
   if (mask === true || source === undefined || source === true) return mask;
 
   if (schemaMayBeArray(source)) {
-    const sourceItem = schemaAtArrayItem(cfc, source);
+    const sourceItem = schemaAtArrayItem(source);
     return {
       type: "array",
-      items: alignConciseProjectionMask(cfc, sourceItem, mask),
+      items: alignConciseProjectionMask(sourceItem, mask),
     };
   }
 
@@ -1033,11 +1025,10 @@ function alignConciseProjectionMask(
     ...objectMask,
     properties: Object.fromEntries(
       Object.entries(objectMask.properties).map(([key, childMask]) => {
-        const child = cfc.schemaAtPath(source, [key]);
+        const child = ContextualFlowControl.schemaAtPath(source, [key]);
         return [
           key,
           alignConciseProjectionMask(
-            cfc,
             child === false ? undefined : child,
             childMask,
           ),
@@ -1152,7 +1143,6 @@ export function mergeMasks(
 
 /** @internal Exported for focused source-schema selection tests. */
 export function selectSourceSchema(
-  cfc: ContextualFlowControl,
   source: JSONSchema | undefined,
   mask: ProjectionMask,
   purpose: "source-read" | "projected-output" = "source-read",
@@ -1185,7 +1175,7 @@ export function selectSourceSchema(
       return source;
     }
     const projectOptions = (options: readonly JSONSchema[] | undefined) =>
-      options?.map((option) => selectSourceSchema(cfc, option, mask, purpose));
+      options?.map((option) => selectSourceSchema(option, mask, purpose));
     const projectedAnyOf = projectOptions(anyOf);
     const projectedOneOf = projectOptions(oneOf);
     const projectedAllOf = projectOptions(allOf);
@@ -1202,11 +1192,11 @@ export function selectSourceSchema(
 
   if (mask.type === "array") {
     if (!schemaIsArray(source)) return source;
-    const sourceItem = schemaAtArrayItem(cfc, source);
+    const sourceItem = schemaAtArrayItem(source);
     const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
     return {
       ...metadata,
-      items: selectSourceSchema(cfc, sourceItem, mask.items, purpose),
+      items: selectSourceSchema(sourceItem, mask.items, purpose),
     };
   }
 
@@ -1225,13 +1215,12 @@ export function selectSourceSchema(
   } = source;
   const properties: Record<string, JSONSchema> = {};
   for (const [key, childMask] of Object.entries(mask.properties)) {
-    const child = cfc.schemaAtPath(source, [key]);
+    const child = ContextualFlowControl.schemaAtPath(source, [key]);
     // Requested `false` paths are rejected before graph construction. Keep the
     // omission here as defence-in-depth: `false` is an authoritative exclusion
     // from a closed source schema, not the same thing as no source schema.
     if (child === false) continue;
     properties[key] = selectSourceSchema(
-      cfc,
       child,
       childMask,
       purpose,
@@ -1258,7 +1247,6 @@ interface ResolvedProjection {
 }
 
 function resolveProjection(
-  cfc: ContextualFlowControl,
   projection: PieceGetProjection | undefined,
   sourceSchema: JSONSchema | undefined,
   sourceIsArray: boolean,
@@ -1267,25 +1255,22 @@ function resolveProjection(
   if (projection.kind === "concise") {
     const projectsArrayItems = sourceIsArray;
     const declaredSource = projectsArrayItems
-      ? declaredSchemaAtArrayItem(cfc, sourceSchema)
+      ? declaredSchemaAtArrayItem(sourceSchema)
       : sourceSchema;
     const requestedMask = projectionMask(projection.schema);
     assertProjectionMaskDeclared(
-      cfc,
       declaredSource,
       requestedMask,
       true,
     );
     const source = declaredSource === false ? undefined : declaredSource;
     const mask = alignConciseProjectionMask(
-      cfc,
       source,
       requestedMask,
     );
     const projectionSchema = schemaFromProjectionMask(mask);
     const outputSchema = sanitizeSchemaForLinks(
       selectSourceSchema(
-        cfc,
         dereferencedElementSchema(source),
         mask,
         "projected-output",
@@ -1327,7 +1312,7 @@ function resolveProjection(
     );
   }
   const mask = projectionMask(projection.schema);
-  assertProjectionMaskDeclared(cfc, sourceSchema, mask);
+  assertProjectionMaskDeclared(sourceSchema, mask);
   const itemSchema = projectsArrayItems
     ? (projection.schema as Exclude<JSONSchema, boolean>).items ?? true
     : undefined;
@@ -1377,22 +1362,19 @@ export async function derivePieceGetValue(
     return sourceValue;
   }
 
-  const cfc = new ContextualFlowControl();
   if (transform.filter !== undefined && !Array.isArray(sourceValue)) {
     throw new PieceGetTransformError(
       "--filter can only be applied to an array",
     );
   }
   const projection = resolveProjection(
-    cfc,
     transform.projection,
     sourceSchema,
     Array.isArray(sourceValue),
   );
-  const declaredSourceItemSchema = declaredSchemaAtArrayItem(cfc, sourceSchema);
+  const declaredSourceItemSchema = declaredSchemaAtArrayItem(sourceSchema);
   if (transform.filter !== undefined) {
     assertFilterPathsDeclared(
-      cfc,
       declaredSourceItemSchema,
       transform.filter.paths,
     );
@@ -1423,7 +1405,7 @@ export async function derivePieceGetValue(
   } else if (projectionMaskSchema !== undefined) {
     sourceMask = projectionMaskSchema;
   }
-  const sourceReadSchema = selectSourceSchema(cfc, sourceSchema, sourceMask);
+  const sourceReadSchema = selectSourceSchema(sourceSchema, sourceMask);
 
   const { commonfabric } = createBuilder({
     unsafeHostTrust: runtime.createUnsafeHostTrust({
@@ -1439,7 +1421,6 @@ export async function derivePieceGetValue(
   let predicatePattern: ReturnType<typeof pattern> | undefined;
   if (transform.filter !== undefined) {
     const elementSchema = selectSourceSchema(
-      cfc,
       sourceItemSchema,
       predicateItemMask!,
     );
@@ -1475,7 +1456,6 @@ export async function derivePieceGetValue(
     const itemOutputSchema = projection.itemOutputSchema!;
     const itemProjectionSchema = projection.itemProjectionSchema!;
     const elementSchema = selectSourceSchema(
-      cfc,
       sourceItemSchema,
       projectionItemMask!,
     );

@@ -24,12 +24,9 @@
 //                        deno run  -A packages/runner/test/pattern-binding.bench.ts 2000   # custom size
 
 import { unwrapOneLevelAndBindToDoc } from "../src/pattern-binding.ts";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import type { AnyCell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import type { FabricExecValue, JSONSchema } from "../src/builder/types.ts";
-
-const cfc = new ContextualFlowControl();
 
 // A notebook-ish argument schema: notes[] of records with a few fields. Real
 // UI bindings alias into argument.notes[i].<field>, so scopedLinkForPath walks
@@ -195,7 +192,6 @@ type Links = typeof withSchema;
 
 function op(binding: FabricExecValue, links: Links = withSchema): void {
   unwrapOneLevelAndBindToDoc(
-    cfc,
     binding,
     links.arg,
     links.result,

@@ -4,20 +4,24 @@ import {
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   getPersistentSchedulerStateConfig,
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
 import type { EntityKind } from "./entity-kind.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
   type CellScope,
+  type FabricExecValue,
   type Frame,
   isModule,
   isPattern,
@@ -109,7 +113,11 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
 } from "./cfc/types.ts";
-import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
+import {
+  localRefTarget,
+  relaxDefaultedRequired,
+  validateSchemaValue,
+} from "./cfc/schema-sanitization.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
@@ -148,6 +156,13 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   level: "warn",
   logCountEvery: 0,
 });
+
+/**
+ * How many prepared/stopped result shortcuts one runner keeps. Sized well
+ * above any plausible number of simultaneously live pieces, so the bound is
+ * reached only by a pattern churning through results it will not revisit.
+ */
+const RESULT_SHORTCUT_LIMIT = 4096;
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -279,7 +294,7 @@ const recordOutputSchemaPolicyInputs = (
     );
     const schema = schemaPath.length === 0
       ? resultSchema
-      : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+      : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
     if (schema === undefined) {
       return;
     }
@@ -554,7 +569,7 @@ const recordSetupProjectionPolicyInputs = (
 
   const schema = schemaPath.length === 0
     ? resultSchema
-    : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+    : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
   if (schema === undefined) {
     return;
   }
@@ -708,8 +723,8 @@ type DeferredStartResult<R> = {
 };
 
 type BoundNodeIO = {
-  inputs: FabricValue;
-  outputs: FabricValue;
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
 };
@@ -808,6 +823,146 @@ const acceptsOpaqueCellOrUnresolvedLink = (
 ): boolean =>
   value === UNRESOLVED_LINK_PLACEHOLDER ||
   schemaAcceptsOpaqueCellValue(value, schema);
+
+// The relaxed copy of a handler's argument schema, built once per schema
+// rather than once per dispatched event: `generateHandlerSchema` interns its
+// result (interned schemas are deep-frozen), so every dispatch of the same
+// handler shares one entry by identity. Only deep-frozen schemas are cached —
+// a mutable schema edited after its first dispatch must not keep serving a
+// stale relaxed copy (the same rule the cfc resolvedRefsCache applies).
+const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
+
+/**
+ * The dispatch-side closed-world gate (verb contract WS-C, C5 — design rule
+ * 1: an undeclared field is a rejection, never ignored).
+ *
+ * Returns the rejection message when a PRESENT event payload cannot satisfy
+ * an event schema that declares `additionalProperties: false` — read off the
+ * handler's `$event` schema itself, or off the definition a top-level local
+ * `$ref` names (`generateHandlerSchema` hoists the event schema's `$defs`
+ * onto the handler schema, so that schema is the root local refs resolve
+ * against). Closure inside a combinator root (`allOf`/`anyOf`/`oneOf`) is
+ * deliberately NOT detected — the same recorded boundary as the CLI gate's
+ * absence rule (plan, D5 bullet: combinator roots are out of scope without a
+ * test proving each case; conservative and documented beats clever and
+ * silent). Generated event schemas never emit combinator roots, and the miss
+ * direction is safe: an undetected closure keeps today's open-schema
+ * delivery, never a false rejection. Everything else returns `undefined` and
+ * keeps the measured delivery behavior (recorded on #5147):
+ *
+ * - An OPEN event schema stays exactly as measured: the schema read path
+ *   delivers the declared fields and ignores the rest, and a payload that
+ *   misses the schema reads back as an absent event. Closure is the schema's
+ *   opt-in — generated event schemas do not carry it yet (the emission is
+ *   blocked on a pattern-update-gate migration; see the plan's WS-C bullet).
+ * - An ABSENT payload stays deliverable as `undefined` regardless of
+ *   closure: absence is the CLI gate's question (D5), and the measured table
+ *   holds — defaults never materialize for an absent event.
+ *
+ * Validation is the same composition the CLI's pre-dispatch gate applies
+ * (`verbInputSchemaError`, packages/cli/lib/callable.ts) — which is why D6
+ * moved the helpers beside the validator: `required` lists are relaxed for
+ * defaulted properties first (the runtime fills a present object's missing
+ * defaulted properties before checking `required`, so judging the unrelaxed
+ * schema would refuse payloads the verb accepts), then `validateSchemaValue`
+ * judges the payload. Cell links inside the payload are accepted opaquely: a
+ * link's target cannot be read here, and its schema check belongs to the
+ * handler's own reactive reads — the same deferral the pattern-argument
+ * validator applies to unresolvable links. A link VALUE passes unjudged; an
+ * undeclared KEY still rejects.
+ *
+ * On rejection the handler wrapper throws, which fails the handling exactly
+ * the way a thrown handler error already fails — no new receipt shape, error
+ * class, or wire format (WS-E owns codes later).
+ */
+function closedWorldEventRejection(
+  argumentSchema: JSONSchema | undefined,
+  event: unknown,
+  runtimeInjectedEventKeys?: readonly string[],
+): string | undefined {
+  if (event === undefined) return undefined;
+  if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+    return undefined;
+  }
+  const eventSchema = argumentSchema.properties.$event;
+  if (!isRecord(eventSchema)) return undefined;
+  const refTarget = localRefTarget(eventSchema, argumentSchema);
+  const closed = eventSchema.additionalProperties === false ||
+    (isRecord(refTarget) && refTarget.additionalProperties === false);
+  if (!closed) return undefined;
+
+  // The runtime itself merges keys into some payloads — the LLM tool-call
+  // path injects a `result` cell (`builtins/llm-dialog.ts`:
+  // `handler.send({ ...input, result })`, hidden from the advertised schema
+  // by `stripInjectedResult` there and `cloneWithoutBoundToolKeys` in the
+  // CLI) — and the gate must not refuse a field the runtime injected. The
+  // exemption is PROVENANCE, not shape: the injection site names its keys
+  // through the send's internal options (mint-gated — see
+  // `markRuntimeInjectedEventKeys`, cell.ts), which travel out-of-band to
+  // `tx.dispatchedRuntimeInjectedEventKeys`, so payload DATA can never claim
+  // it — a caller-supplied `result`, cell-link-valued or not, arrives
+  // unmarked and is judged like any other undeclared field. (A shape rule —
+  // "any link-valued `result` passes" — would let every caller smuggle an
+  // undeclared key past closed-world by supplying a link, recreating the
+  // accepted-and-ignored behavior this gate exists to kill.)
+  //
+  // A marked key the schema DECLARES is not stripped: the schema governs —
+  // the handler asked for the slot, so the injected value is validated like
+  // any field and delivered intact (stripping it would fail a required
+  // declared `result` as missing). Only UNDECLARED marked keys are the
+  // runtime's invisible side-channel, excluded from judgment entirely; the
+  // handler never sees an undeclared one either way — the schema read path
+  // only delivers declared fields.
+  let payload: unknown = event;
+  if (
+    runtimeInjectedEventKeys !== undefined &&
+    runtimeInjectedEventKeys.length > 0 &&
+    isRecord(event)
+  ) {
+    const declaredProperties =
+      isRecord(refTarget) && isRecord(refTarget.properties)
+        ? refTarget.properties
+        : undefined;
+    const rest = { ...(event as Record<string, unknown>) };
+    let strippedAny = false;
+    for (const key of runtimeInjectedEventKeys) {
+      if (
+        declaredProperties !== undefined &&
+        Object.hasOwn(declaredProperties, key)
+      ) {
+        continue;
+      }
+      delete rest[key];
+      strippedAny = true;
+    }
+    if (strippedAny) payload = rest;
+  }
+
+  const cacheable = isDeepFrozen(argumentSchema);
+  let relaxedRoot = cacheable
+    ? relaxedHandlerSchemaCache.get(argumentSchema)
+    : undefined;
+  if (relaxedRoot === undefined) {
+    relaxedRoot = relaxDefaultedRequired(
+      argumentSchema,
+      argumentSchema,
+      new Map(),
+    );
+    if (cacheable) relaxedHandlerSchemaCache.set(argumentSchema, relaxedRoot);
+  }
+  const relaxedEvent = isRecord(relaxedRoot) && isRecord(relaxedRoot.properties)
+    ? relaxedRoot.properties.$event
+    : undefined;
+  if (relaxedEvent === undefined) return undefined;
+
+  const failure = validateSchemaValue(relaxedEvent, payload, relaxedRoot, {
+    acceptOpaqueValue: (value) => isCellLink(value),
+  });
+  if (failure === undefined) return undefined;
+  return "Event payload rejected by the verb's closed event schema " +
+    "(additionalProperties: false — an undeclared field is a rejection, " +
+    `never ignored): ${failure}`;
+}
 
 /**
  * Rebuild `materialized` so every slot whose counterpart in `raw` is a link
@@ -989,14 +1144,20 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
-  private locallyPreparedResults = new Map<
+  // Both maps record that this runner prepared or stopped a result, so a later
+  // start of the same result can reuse the cells it already assembled instead
+  // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
+  // a missing entry costs a slower start, never a wrong one. They are bounded
+  // for that reason — a result key names one result document, and a pattern
+  // that keeps starting and stopping children adds keys it will never revisit.
+  private locallyPreparedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
-  private locallyStoppedResults = new Map<
+  >(RESULT_SHORTCUT_LIMIT);
+  private locallyStoppedResults = new BoundedKeyMap<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
+  >(RESULT_SHORTCUT_LIMIT);
   // Successful event-result starts that are still live in this runner. This is
   // intentionally local and bounded by live starts: it lets a sequential
   // redelivery avoid re-materializing an already-won result before the
@@ -1479,7 +1640,6 @@ export class Runner {
     // that actual execution value here, then restore its association with
     // `Cell<R>`.
     let result = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       pattern.result,
       argumentCellLink,
       resultCell,
@@ -1495,11 +1655,18 @@ export class Runner {
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
-    // TODO(danfuzz): This compares a runtime result value with `deepEqual`,
-    // which mishandles `FabricValue` (same-class `FabricPrimitive`s, with state
-    // in private `#fields` and zero own-props, compare equal regardless of
-    // value). Use a Fabric-aware equality for value comparison.
-    if (!deepEqual(result, previousResult)) {
+    // Convert-and-freeze (default): a deep-frozen value lets the storage write
+    // boundary's `cloneIfNecessary` identity-pass instead of
+    // deep-cloning-to-freeze.
+    //
+    // The conversion MUST precede the no-op gate. A raw result is not
+    // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
+    // here — and `valueEqual` hashes its operands, so comparing a raw result
+    // throws `hashOf: unsupported object type` instead of deciding anything.
+    // Converting first also makes the gate compare what a write would actually
+    // store, since the stored side is already a `FabricValue`.
+    const fabricResult = fabricFromNativeValue(result);
+    if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
         this.runtime,
@@ -1507,15 +1674,9 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
-      // Convert-and-freeze (default): a deep-frozen value lets the storage
-      // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze. The result root marks the whole result
-      // document as generated: setup rewrites the complete projection.
-      writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result),
-        false,
-        "output",
-      );
+      // The result root marks the whole result document as generated: setup
+      // rewrites the complete projection.
+      writableResultCell.setRawUntyped(fabricResult, false, "output");
     }
   }
 
@@ -3559,7 +3720,6 @@ export class Runner {
         try {
           inputs = findAllWriteRedirectCells(
             unwrapOneLevelAndBindToDoc(
-              this.runtime.cfc,
               node.inputs,
               argumentMetaLink,
               resultCell,
@@ -3569,7 +3729,6 @@ export class Runner {
           );
           outputs = findAllWriteRedirectCells(
             unwrapOneLevelAndBindToDoc(
-              this.runtime.cfc,
               node.outputs,
               argumentMetaLink,
               resultCell,
@@ -3788,7 +3947,6 @@ export class Runner {
       let spotLink: NormalizedFullLink | undefined;
       try {
         const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
-          this.runtime.cfc,
           node.outputs,
           argumentLink,
           resultCell,
@@ -4033,8 +4191,8 @@ export class Runner {
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -4124,21 +4282,19 @@ export class Runner {
   }
 
   private bindNodeIO(
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -4664,7 +4820,7 @@ export class Runner {
    * @returns
    */
   private resolveJavaScriptStreamLink(
-    inputs: FabricValue,
+    inputs: FabricExecValue,
     base: NormalizedFullLink,
     tx: IExtendedStorageTransaction,
   ): {
@@ -4676,7 +4832,10 @@ export class Runner {
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
     // binding, which must not be followed at this level.
-    let value: FabricValue = inputs.$event;
+    // Narrowing, not papering over: `$event` is a sigil link, which IS a
+    // `FabricValue`. Only the exec-typed container widens it here, and the
+    // sigil-only invariant above is what licenses the assertion.
+    let value = inputs.$event as FabricValue;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
@@ -4857,16 +5016,26 @@ export class Runner {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
         // launched, but the result cell is still created — its create is the
         // exactly-once witness for this event id. Under plainResultReceipts
-        // the witness also carries the handler's (already-normalized) plain
-        // JSON return, so a caller — or a same-id retry colliding on the
-        // receipt — reads the verb's result back by receipt address (verb
-        // contract Part 2). `{}` remains the value-less shape either way.
+        // the witness also carries the handler's (already-normalized) return,
+        // so a caller — or a same-id retry colliding on the receipt — reads
+        // the verb's result back by receipt address (verb contract Part 2).
+        // `{}` remains the value-less shape either way.
+        //
+        // The value goes through the receipt cell's STANDARD write flow
+        // (`set` → diffAndUpdate), the same conversion any cell write gets:
+        // plain JSON persists as-is and a live Cell handle converts to a
+        // link. That matters because incidental cell returns are a sanctioned
+        // idiom — `set()` returns its cell for chaining, so an
+        // expression-body `action(() => cell.set(...))` returns the mutated
+        // cell — and a raw write here fails the whole handling on such a
+        // value with an uncloneable-live-object storage error instead of
+        // recording what was returned.
         const receiptValue =
           this.runtime.experimental.plainResultReceipts === true &&
             result !== undefined
             ? result
             : {};
-        receiptCell.withTx(tx).setRaw(receiptValue);
+        receiptCell.withTx(tx).set(receiptValue);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;
@@ -5105,9 +5274,13 @@ export class Runner {
     resultHasReactives: boolean,
     frame: Frame,
     resultCell: Cell<any>,
-    outputs: FabricValue,
+    outputs: FabricExecValue,
     addCancel: AddCancel,
-    _resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
+    _resultFor: {
+      inputs: FabricExecValue;
+      outputs: FabricExecValue;
+      fn: string;
+    },
     previousResultCellRef: JavaScriptActionResultCells,
     narrowestReadScope?: CellScope,
   ): any {
@@ -5229,6 +5402,21 @@ export class Runner {
   ): void {
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
+
+      // The dispatch-side closed-world gate (verb contract WS-C, C5). A
+      // present payload that cannot satisfy a closed event schema fails the
+      // handling exactly the way a thrown handler error already fails: the
+      // body never runs, the transaction aborts (no receipt is created, the
+      // event id is not spent), scheduler onError fires, and the commit
+      // callback settles with the errored transaction.
+      const closedWorldRejection = closedWorldEventRejection(
+        module.argumentSchema,
+        event,
+        tx.dispatchedRuntimeInjectedEventKeys,
+      );
+      if (closedWorldRejection !== undefined) {
+        throw new Error(closedWorldRejection);
+      }
 
       const eventInputs = {
         ...(inputs as Record<string, any>),
@@ -5830,8 +6018,8 @@ export class Runner {
   private instantiateJavaScriptNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6000,7 +6188,7 @@ export class Runner {
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
-    inputBindings: FabricValue,
+    inputBindings: FabricExecValue,
   ): void {
     if (
       moduleRefName !== "map" && moduleRefName !== "filter" &&
@@ -6032,8 +6220,8 @@ export class Runner {
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6052,14 +6240,12 @@ export class Runner {
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6326,22 +6512,20 @@ export class Runner {
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
     _module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     _addCancel: AddCancel,
     pattern: Pattern,
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6361,8 +6545,8 @@ export class Runner {
   private instantiatePatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricValue,
-    outputBindings: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -6372,14 +6556,12 @@ export class Runner {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
@@ -6404,7 +6586,6 @@ export class Runner {
     // lives — at a DIFFERENT entity from the identity bind's only when the
     // descriptor carries a kind. See the identity bind for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6465,7 +6646,6 @@ export class Runner {
       // must use the id the VALUE bind minted: where the descriptor was
       // computed, reading the `of:` one returns undefined for a healthy piece.
       const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-        this.runtime.cfc,
         outputBindings,
         argumentCellLink,
         resultCell,

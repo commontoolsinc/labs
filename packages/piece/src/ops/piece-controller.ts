@@ -1031,9 +1031,8 @@ export function assertWritablePiecePath(
       // ordinary write validator below still handles parent correlations, so
       // use CFC's conservative path projection when exact link localization
       // deliberately fails closed for a correlated schema.
-      const cfc = new ContextualFlowControl();
       contracts = localizedContracts.map((contract) => {
-        const child = cfc.schemaAtPath(contract.schema, [
+        const child = ContextualFlowControl.schemaAtPath(contract.schema, [
           String(path[index]!),
         ]);
         return {
@@ -2487,7 +2486,7 @@ class PiecePropIo implements PieceCellIo {
         const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
         const writeSchema = writePath.length === 0
           ? schema
-          : manager.runtime.cfc.schemaAtPath(
+          : ContextualFlowControl.schemaAtPath(
             schema,
             writePath.map((segment) => String(segment)),
           );
