@@ -3,8 +3,6 @@
 // contexts to visualize or log events inside the runtime.
 
 import { IMemoryChange } from "./storage/interface.ts";
-import { StorageTelemetry } from "./storage/telemetry.ts";
-import type * as Inspector from "./storage/inspector.ts";
 
 /**
  * Statistics tracked for each action's execution performance.
@@ -247,19 +245,6 @@ export type RuntimeTelemetryMarker = {
   id: string;
   error: string;
 } | {
-  type: "storage.connection.update";
-  status: "pending" | "ok" | "error";
-  attempt: number;
-  error?: string;
-} | {
-  type: "storage.subscription.add";
-  id: string;
-  error?: string;
-} | {
-  type: "storage.subscription.remove";
-  id: string;
-  error?: string;
-} | {
   type: "scheduler.graph.snapshot";
   graph: SchedulerGraphSnapshot;
 } | {
@@ -297,18 +282,7 @@ export class RuntimeTelemetryEvent
 }
 
 export class RuntimeTelemetry extends EventTarget {
-  #storageTelemetry: StorageTelemetry;
-
-  constructor() {
-    super();
-    this.#storageTelemetry = new StorageTelemetry(this);
-  }
-
   submit(marker: RuntimeTelemetryMarker) {
     this.dispatchEvent(new RuntimeTelemetryEvent(marker));
-  }
-
-  processInspectorCommand(command: Inspector.BroadcastCommand) {
-    this.#storageTelemetry.processCommand(command);
   }
 }

@@ -13,7 +13,6 @@ import {
   type MemorySpace,
   type MIME,
   type Signer,
-  type Transaction,
   type TransactionError,
   type URI,
 } from "@commonfabric/memory/interface";
@@ -4154,7 +4153,7 @@ class SpaceReplica implements ISpaceReplica {
       name: "ConflictError",
       message:
         `commit preempted: read set stale until caughtUpLocalSeq>=${threshold}`,
-      transaction: commit as unknown as Transaction,
+      transaction: commit,
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
@@ -4190,7 +4189,7 @@ class SpaceReplica implements ISpaceReplica {
     return {
       name: "ConflictError",
       message,
-      transaction: commit as unknown as Transaction,
+      transaction: commit,
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
@@ -4601,7 +4600,7 @@ const authorizationErrorToThrow = (error: IAuthorizationError): Error =>
 
 const toRejectedError = (
   error: unknown,
-  commit: unknown,
+  commit: ClientCommit,
   space: MemorySpace,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
@@ -4637,12 +4636,14 @@ const toRejectedError = (
     // memory/v2/engine.ts's ConflictError construction).
     const staleReadOf = (error as { of?: unknown })?.of ??
       message.match(/stale confirmed read: (\S+) at seq/)?.[1];
-    const firstOperation = (commit as Partial<NativeStorageCommit>)
-      .operations?.[0];
+    const firstOperation = commit.operations?.[0];
+    const firstOperationId = firstOperation && "id" in firstOperation
+      ? firstOperation.id
+      : undefined;
     const rejected: IConflictError = {
       name: "ConflictError",
       message,
-      transaction: commit as Transaction,
+      transaction: commit,
       // Conflict descriptor: for stale-read conflicts `of` is authoritative
       // (the memory engine names the conflicted entity structurally), so a
       // retrier can pull exactly that doc before re-running (CT-1824).
@@ -4651,7 +4652,7 @@ const toRejectedError = (
         space,
         the: DOCUMENT_MIME,
         of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperation?.id ?? "of:unknown") as Entity,
+          firstOperationId ?? "of:unknown") as Entity,
         expected: null,
         actual: null,
         existsInHistory: false,
@@ -4681,7 +4682,7 @@ const toRejectedError = (
       name,
       message,
       cause: { name: "SystemError", message, code: 500 },
-      transaction: commit as Transaction,
+      transaction: commit,
     } as unknown as TransactionError;
   }
 
@@ -4693,6 +4694,6 @@ const toRejectedError = (
       message,
       code: 500,
     },
-    transaction: commit as Transaction,
+    transaction: commit,
   } as unknown as TransactionError;
 };
