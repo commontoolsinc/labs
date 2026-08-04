@@ -286,9 +286,10 @@ export const recordRelevantSchemaWritePolicyInput = (
  * these — from an `additionalProperties: false` event schema. The marker is
  * PROVENANCE, not shape, and must stay unforgeable: it rides this
  * in-process options argument, never the event value, so no remote or CLI
- * caller can express it — payloads are plain data, and the CLI's send
- * surface (`CallableCellLike.send`, packages/cli/lib/callable.ts) forwards
- * only `eventId`. In-process callers are gated too: the value must be an
+ * caller can express it — payloads are plain data, and the CLI's invocation
+ * engine (`executeResolvedCallable`, packages/cli/lib/callable.ts) builds the
+ * send options itself and puts only `eventId` in them. In-process callers are
+ * gated too: the value must be an
  * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
  * path drops any other value — and the mint lives in runner internals no
  * pattern compartment can import, so sandboxed pattern code holding a real
