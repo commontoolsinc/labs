@@ -64,8 +64,13 @@ tests assert counters, not logs:
   `memo.hits/misses` sane on restart tests.
 - idempotency: `events.skippedIdempotent` == replayed-event count in the
   kill-restart test, and effect results unduplicated (store query).
-- session attribution (Phase 2 gate): a store query grouping commits by
-  `class` + session shows zero client `derived` commits in the ON arm.
+- single-deriver envelope (Phase 2 gate; reworded for the
+  transaction identity model — a `derived` commit's envelope carries
+  no session, so there is no commit-level session to group by): a
+  store query over `derived` commits shows every envelope principal
+  == the lease-holding SpaceServer's service identity and NONE from
+  a client session; equivalently, zero `derived`-class commits
+  admitted from any client connection in the ON arm.
 
 ## 5. Phase gates → concrete tests
 

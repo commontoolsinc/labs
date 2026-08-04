@@ -214,7 +214,12 @@ Rules:
 
 - **One derived commit per wave.** If the wave's changes exceed a
   transaction-size bound, split by piece: every split carries the same
-  final `derivedThrough` metadata, the watermark DOC write rides ONLY
+  final `derivedThrough` metadata AND the same full `consequenceOf`
+  list (bounded by wave input, so repetition is cheap — and
+  required: push is per-recipient filtered by `scope_key`, so the
+  split a client happens to receive must itself carry the eventIds
+  its overlay reconciliation matches — speculation.md §4), the
+  watermark DOC write rides ONLY
   the last split, and all splits land before the loop takes new input.
   The amplification budget (README §3.3) is enforced here as ONE
   metric: `derivedCommits / (authoredSeen − effect-channel acks)` MUST

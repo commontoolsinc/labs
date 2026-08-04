@@ -39,7 +39,9 @@ Nothing about the event says or implies "I ran something."
 
 The "authored append" definition covers CLIENT-fired and DELEGATED
 (cross-space) events. A server-emitted SAME-SPACE event has the
-identical shape and fields but different carriage: it rides as a
+identical shape — minus `clientSeq`, which is client-minted only
+and absent on every server-originated event (§2, LT7) — but
+different carriage: it rides as a
 stream-entry WRITE within the wave's own derived commit — §2's
 same-space carriage rule (LT1, RULED 2026-08-03).
 

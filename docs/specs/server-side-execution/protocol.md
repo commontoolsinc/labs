@@ -172,7 +172,13 @@ prevent:
   derivation before any narrowing — carries none, like the
   SpaceServer's own writes above.
 
-Attributed, not signed, today. The considered alternative — N
+Attributed, not signed, today — and RECORDED, not read, today
+(stated after the 2026-08-03 provenance audit asked): no
+enforcement path consumes the attribution annotation — CFC labels
+are the load-bearing enforcement — so its present consumers are
+audit/forensics and the anticipated signature graduation below; a
+mechanism that starts DECIDING from attribution needs a spec edit
+here first. The considered alternative — N
 commits per wave, one per session, each attributed at its
 envelope — is recorded and rejected as the other extreme of the
 same axis: the wave stays ONE
@@ -415,7 +421,8 @@ the target's `eventWatermark` makes processing exactly-once.
   dirty-unmaterialized without holding W back).
 - Carried: in every `derived` commit's metadata (`derivedThrough: W`) and
   in one well-known doc per space (updated in the same transaction; never
-  its own commit).
+  its own commit). The watermark doc is a SPACE-scoped instance —
+  `scope_key = "space"` — stated explicitly so no one infers it.
 - Client use: "settled" for a client = `W ≥ seq(my last authored
   commit)`. Integration tests MUST wait on this instead of text-polling
   (testing.md §3). Sync indicators read the same signal.
@@ -536,6 +543,13 @@ disabled (README §3.5).
   nothing about them crosses the wire (§3 excludes them from push),
   admission never reads them, and the closed list above is not
   breached by them.
+- The OUTBOX's identity carriage (serving-loop.md §4–§5: the
+  result-cell address with its `scope_key`, plus the acting
+  identity, captured at the original run's seal) is likewise
+  sanctioned NON-WIRE carriage: process-local, never a commit and
+  never metadata — it exists so the completion commit can carry
+  §1's annotations without re-deriving them, and it does not
+  breach the closed list.
 - All metadata is small and fixed-shape, with one bounded carve-out:
   `consequenceOf` scales with the wave's INPUT (the events drained that
   wave), never with graph size. The v1 failure mode — 130 KB of

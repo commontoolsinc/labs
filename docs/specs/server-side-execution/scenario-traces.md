@@ -390,7 +390,7 @@ these.
   redacted); basis rows never push to anyone. [protocol §3]
 - Q8: settled when `W ≥ seq(the hop-1 append)`. [protocol §4]
 
-### T2 (FLAGS(1))
+### T2 (FLAGS(1) — resolved by LT8; Q6 carries the resolution)
 - Q1: the one well-known effects doc id at `scope_key =
   session:U1:S1`; the SpaceServer names the key, session identity
   consumed from stamped `firedAt`. [protocol §5; builtins §4]

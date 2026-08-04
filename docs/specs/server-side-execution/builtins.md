@@ -82,7 +82,8 @@ child arrives.
 
 Split contract (protocol.md §5): the SERVED half computes the target
 (existing `navigate-to.ts` logic minus any client assumption) and writes
-`{ nonce, kind: "navigate", args: { target } }` into the firing
+the §5 entry — `{ nonce, kind: "navigate", args: { target },
+issuedIn }`; protocol.md §5 is normative for the shape — into the firing
 session's effects INSTANCE — the effects doc addressed by that
 session's `scope_key` (protocol.md §5, T9) — as part of the wave's
 derived commit. The CLIENT half
