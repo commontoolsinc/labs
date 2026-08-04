@@ -223,8 +223,11 @@ commit whose acceptance is still possible without confirming its fate.
 
 Checked by: currently only example-based tests (reconnect-race,
 pending-commit-durability). The TLA+ model treats verdict delivery as atomic
-with admission and therefore does NOT cover this invariant; extending it
-with delayed verdict delivery is the natural next step if this area churns.
+with admission and therefore does NOT cover this invariant. That area has
+churned — under CT-1927 the client parks an accept's promotion until a
+frame's `caughtUpLocalSeq` marker covers it, a decided-but-not-yet-applied
+window — so extending the model with delayed verdict delivery is the
+standing refinement that would bring this invariant into scope.
 
 ### INV-7 — Committed writes are never silently dropped
 
@@ -292,9 +295,8 @@ Layer: client (sync-frame buffering while a transaction builds).
 Soundness direction: MAY buffer integration longer than necessary; MUST NOT
 let a transaction observe two prefixes.
 
-Checked by: chronicle re-validation tests; no dedicated checker (the
-durable-history oracle would surface a resulting incoherent acceptance as an
-INV-1 hit).
+Checked by: no dedicated checker (the durable-history oracle would surface a
+resulting incoherent acceptance as an INV-1 hit).
 
 ### INV-11 — Idempotent replay
 

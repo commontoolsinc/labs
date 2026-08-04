@@ -14,6 +14,7 @@ import {
   isCellResult,
   isReadableCell,
   isSlugAddress,
+  type MemorySpace,
   NAME,
   Runtime,
   runtimePresets,
@@ -1342,7 +1343,7 @@ function getCallableValue(rootValue: unknown, callableName: string): unknown {
 async function tryResolvePieceCallableAt(
   piece: any,
   manager: any,
-  space: string,
+  space: MemorySpace,
   callableName: string,
   cellProp: "input" | "result",
 ): Promise<ResolvedPieceCallable | null> {
@@ -1360,10 +1361,8 @@ async function tryResolvePieceCallableAt(
     callableCell,
     callableKind,
     cellKey: callableName,
-    cellProp,
     commandSpec: callableCommandSpec(callableCell, callableKind),
     manager,
-    piece,
     space,
   };
 }
@@ -1400,7 +1399,7 @@ function probeForcedStreamCell(cell: any, name: string): any | null {
 async function tryResolvePieceHandler(
   piece: any,
   manager: any,
-  space: string,
+  space: MemorySpace,
   callableName: string,
 ): Promise<ResolvedPieceCallable | null> {
   const pieceCell = piece.getCell?.();
@@ -1427,13 +1426,11 @@ async function tryResolvePieceHandler(
     callableCell: streamCell,
     callableKind: "handler",
     cellKey: callableName,
-    cellProp: "result",
     // The link-derived cell still carries whatever payload schema the piece
     // does publish, which the forced stream cast does not; keep using it for
     // the command spec so `--help` and input validation are unaffected.
     commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
     manager,
-    piece,
     space,
   };
 }
@@ -1441,7 +1438,7 @@ async function tryResolvePieceHandler(
 async function tryResolveLivePieceToolCallable(
   piece: any,
   manager: any,
-  space: string,
+  space: MemorySpace,
   callableName: string,
   pieceScope?: PieceConfig["pieceScope"],
 ): Promise<any | null> {
@@ -1484,7 +1481,7 @@ async function loadPieceForCallables(
 ): Promise<{
   manager: any;
   piece: any;
-  space: string;
+  space: MemorySpace;
   resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
 }> {
   const manager = await (deps.loadManager ?? loadManager)(config);

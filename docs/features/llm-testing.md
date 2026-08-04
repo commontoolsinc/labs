@@ -65,6 +65,49 @@ addMockObjectResponse(
 
 Mock responses are **one-time use** — they're consumed when matched.
 
+## Testing the toolshed route against a mock model
+
+The mock mode above intercepts the client's `fetch`, so it never reaches the
+route handler. To exercise the route's own handling of a response — an empty
+answer, a provider that turns the request down, a stream that stops early —
+drive `generateText` with a stand-in language model instead.
+
+`findModel` reads the exported `MODELS` registry in
+`packages/toolshed/routes/ai/llm/models.ts`, and that registry is a plain
+mutable object. A test registers a model under a name of its own, runs the
+generation, and takes the entry back out afterwards:
+
+```ts
+// Shown for illustration only.
+MODELS["mock:test-model"] = {
+  model: new MockLanguageModelV4({ doStream: { stream } }),
+  name: "mock:test-model",
+  capabilities: { /* the fields the route reads */ },
+  aliases: [],
+};
+try {
+  await generateText({ model: "mock:test-model", messages });
+} finally {
+  delete MODELS["mock:test-model"];
+}
+```
+
+Two properties of the AI SDK shape what these tests can assert.
+
+A request that fails **after it has started** does not reject. The SDK reports
+it as an `{ type: "error", error }` part carried inside the response stream and
+passes it to the `onError` callback. Reading only `textStream` therefore yields
+an empty response and no sign of the failure, so a test that wants to see the
+provider's complaint has to look at what the route does with `onError`, not at
+whether `streamText` threw.
+
+The SDK retries a failure it considers retryable — a 408, 409, 429, or any 5xx
+— sleeping between attempts, and reports the exhausted attempts wrapped in a
+`RetryError` that carries no status of its own. Both routes ask for a single
+attempt with `maxRetries: 0`, so a mock can fail with any status and the
+failure comes straight back. A test that sets its own `maxRetries` gets the
+sleeps and the wrapper too.
+
 ## Conversation Fixtures
 
 For multi-turn or complex LLM interactions, use **conversation fixtures** —
@@ -165,8 +208,10 @@ in `beforeEach` to reset between tests.
 | File | What it tests |
 |------|--------------|
 | `packages/llm/src/client.test.ts` | Guard behavior, mock mode API, fixture loading |
-| `packages/toolshed/routes/ai/llm/generateText.test.ts` | JSON mode config, response cleaning |
+| `packages/toolshed/routes/ai/llm/generateText.test.ts` | JSON mode config, response cleaning, failure reporting against a mock model |
 | `packages/toolshed/routes/ai/llm/generateObject.test.ts` | Model resolution, error paths |
+| `packages/toolshed/routes/ai/llm/llm.status.test.ts` | The HTTP status a failed generation answers with, through the real router |
+| `packages/toolshed/routes/ai/llm/errors.test.ts` | Sorting a failure into a status, including shapes the routes cannot produce |
 | `packages/runner/test/llm-pattern-smoke.test.ts` | generateText, generateObject, and tool-calling through runtime |
 | `packages/runner/test/llm-conversation-fixture.test.ts` | Multi-turn conversations and tool chains via fixtures |
 

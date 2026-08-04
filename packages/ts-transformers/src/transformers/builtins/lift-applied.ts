@@ -219,7 +219,7 @@ export function createLiftAppliedCall(
     factory,
     tsContext,
     context.checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
   );
 
   // Callback arrow: source-map-range only (emit-safe position carry). See
@@ -292,15 +292,13 @@ export function createLiftAppliedCall(
   // Register the type of the call expression itself in the typeRegistry
   // so that type inference works correctly for synthetic nodes. The
   // result type is the value the callback returns.
-  if (context.options.state?.typeRegistry && context.checker) {
-    registerLiftAppliedCallType(
-      liftAppliedCall,
-      resultTypeNode,
-      undefined, // resultType not available in this code path
-      context.checker,
-      context.options.state?.typeRegistry,
-    );
-  }
+  registerLiftAppliedCallType(
+    liftAppliedCall,
+    resultTypeNode,
+    undefined, // resultType not available in this code path
+    context.checker,
+    context.state.typeRegistry,
+  );
 
   // Maintain parent chains and compute-wrapper ownership for later passes that
   // revisit synthetic lift-applied callbacks after post-closure lowering.
@@ -342,7 +340,7 @@ function buildInputTypeNode(
     {
       factory,
       checker: context.checker,
-      typeRegistry: context.options.state?.typeRegistry,
+      typeRegistry: context.state.typeRegistry,
     },
   );
 }
@@ -359,7 +357,7 @@ function buildResultTypeNode(
   const resultType = getTypeAtLocationWithFallback(
     expression,
     checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
   );
 
   // If we couldn't get a type, fallback to unknown
@@ -379,6 +377,6 @@ function buildResultTypeNode(
       factory,
       sourceFile: context.sourceFile,
     },
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
   );
 }

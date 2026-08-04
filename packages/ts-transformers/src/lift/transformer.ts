@@ -131,17 +131,15 @@ function finalizeLoweredCall(
     originalNode,
   );
 
-  if (context.options.state?.typeRegistry) {
-    const originalType = context.options.state?.typeRegistry.get(originalNode);
-    if (originalType) {
-      registerLiftAppliedCallType(
-        preservedVisitedCall,
-        undefined,
-        originalType,
-        checker,
-        context.options.state?.typeRegistry,
-      );
-    }
+  const originalType = context.state.typeRegistry.get(originalNode);
+  if (originalType) {
+    registerLiftAppliedCallType(
+      preservedVisitedCall,
+      undefined,
+      originalType,
+      checker,
+      context.state.typeRegistry,
+    );
   }
 
   setParentPointers(preservedVisitedCall, originalNode.parent);

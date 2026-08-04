@@ -122,6 +122,10 @@ export interface TransformationOptions {
    * Single owner of the pipeline's cross-transformer communication registries
    * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
    * separate registry fields. See `CrossStageState`.
+   *
+   * This is the injection point for a caller that wants several runs to share
+   * one set of registries. A `TransformationContext` built without one creates
+   * its own and stores it back here, so `context.state` is always present.
    */
   readonly state?: CrossStageState;
   /**

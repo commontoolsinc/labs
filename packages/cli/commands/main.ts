@@ -136,46 +136,32 @@ export const main = new Command()
       .description(
         "Internal: supervise a background FUSE child process.",
       )
-      .arguments("<mountpoint:string>")
-      .option("--api-url <url:string>", "URL of the fabric instance.")
-      .option("--identity <path:string>", "Path to an identity keyfile.")
-      .option("--exec-cli <path:string>", "Path to the cf exec shim.")
-      .option("--log-file <path:string>", "Path to the FUSE child log file.")
-      .option("--debug", "Enable FUSE debug output.")
-      .option("--allow-other", "Pass allow_other through to the FUSE child.")
-      .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
-      .option(
-        "--attrcache-timeout <seconds:string>",
-        "Pass attrcache-timeout through to the FUSE child.",
-      )
-      .option("--cfc-mode <mode:string>", "FUSE-side CFC mode.")
-      .option("--cfc-annotations", "Publish CFC annotation xattrs.")
-      .option(
-        "--cfc-xattr-namespace <namespace:string>",
-        "CFC xattr namespace.",
-      )
-      .option("--cfc-writeback-xattrs", "Enable CFC writeback xattrs.")
-      .option(
-        "--cfc-writeback-state <path:string>",
-        "CFC writeback state path.",
-      )
-      .option(
-        "--dangerously-allow-incompatible-schema",
-        "Allow incompatible source schema updates.",
-      )
-      .option("--state-path <path:string>", "Mount state file to update.")
-      .option(
-        "--supervisor-status <path:string>",
-        "Child readiness and heartbeat status file.",
-      )
-      .option("-s, --space <name:string>", "Space(s) to connect.", {
-        collect: true,
-      })
-      .action(async (options, mountpoint) => {
-        const { fuseSupervisorOptions, runFuseSupervisor } = await import(
+      .usage("<mountpoint> [options]")
+      // The supervisor argv is parsed once, by the same parser the deno
+      // entrypoint uses, so the compiled binary and `deno run` accept exactly
+      // the same flags.
+      .useRawArgs()
+      .action(async (_options: unknown, ...rawArgs: unknown[]) => {
+        const supervisorArgs = rawArgs.map((arg) => String(arg));
+        const { parseSupervisorArgs, supervisorHelp } = await import(
+          "../lib/fuse-mount-flags.ts"
+        );
+        let parsed;
+        try {
+          parsed = parseSupervisorArgs(supervisorArgs);
+        } catch (error) {
+          throw new ValidationError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        if (parsed.help) {
+          console.log(supervisorHelp());
+          return;
+        }
+        const { runFuseSupervisor } = await import(
           "../lib/fuse-supervisor.ts"
         );
-        await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
+        await runFuseSupervisor(parsed.options);
       }),
   )
   .command("completion", completion)

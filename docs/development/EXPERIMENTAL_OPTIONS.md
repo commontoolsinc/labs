@@ -28,7 +28,7 @@ was last checked against the code.
 | Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
-| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
+| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | on | Mike Salisbury (verb contract WS-C) | fold into receipt semantics and delete flag after a bake period | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
@@ -662,10 +662,6 @@ the per-epic implementation notes).
 > Two neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
 >
-> - **`syncSchemaTable`** is the older, index-keyed predecessor of
->   `syncSchemaTableV2`. It is hardwired to `false` in `getMemoryProtocolFlags`
->   and has no config function; it is effectively dead and can be deleted from
->   the protocol types once no peer negotiates it.
 > - **`sqliteCommitRowLabelEval`** is a build-inherent capability, hardwired to
 >   `true`, advertising that this build's engine evaluates row-label rules at
 >   commit time. It is not configuration: an older server that lacks the
@@ -673,6 +669,15 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`verdictCatchUpMarkers`** is a build-inherent capability, hardwired to
+>   `true`, advertising that the server stages a `caughtUpLocalSeq` catch-up
+>   obligation for every accept and conflict rejection, delivered on the
+>   batched fan-out (CT-1927; `04-protocol.md` §4.11.2). It is not
+>   configuration: the CLIENT keys verdict parking on it — an accepted
+>   commit's promotion waits for the marker only when the server advertises
+>   the capability AND a sync consumer is live; against an older server (or
+>   with no watch view) verdicts apply immediately, the historical behavior.
+>   Added by Robin McCollum (CT-1927). It is permanent.
 > - **`pendingReadStacks`** is a build-inherent capability, hardwired to `true`,
 >   advertising that this build's engine resolves array-`localSeq` pending reads
 >   (the full-stack dependency sets of CT-1872 1c; `resolvePendingReads` in
@@ -1092,7 +1097,8 @@ sweep does not mistake them for missing experimental flags:
   (forward the web worker's console to the main thread), `telemetryEnabled`
   (browser OpenTelemetry), `showDebuggerView`, `themePreference`.
 - **Runner diagnostics** (environment): `CF_TRAVERSE_CAPTURE`,
-  `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`.
+  `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`. What each one does is in
+  [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
 - **Operational and build toggles**: `MEMORY_ACL_MODE` (`off` / `observe` /

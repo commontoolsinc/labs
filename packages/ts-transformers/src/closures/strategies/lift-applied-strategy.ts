@@ -405,7 +405,7 @@ export function transformLiftAppliedCall(
     return undefined;
   }
   const inputCall = node;
-  const { factory, checker, options } = context;
+  const { factory, checker, state } = context;
 
   // Extract callback
   const liftAppliedArgs = getLiftAppliedInputAndCallback(inputCall, checker);
@@ -431,7 +431,7 @@ export function transformLiftAppliedCall(
     callback.body,
     captureExpressions,
     checker,
-    options.state?.typeRegistry,
+    state.typeRegistry,
   );
 
   // Recursively transform the callback body first
@@ -476,7 +476,7 @@ export function transformLiftAppliedCall(
     captureExpressions,
     factory,
     checker,
-    options.state?.typeRegistry,
+    state.typeRegistry,
   );
 
   // Initialize PatternBuilder
@@ -511,8 +511,8 @@ export function transformLiftAppliedCall(
     // bare refs and carries the registry association onto the rewritten node.
     resultTypeNode = qualifyCommonFabricTypeRefs(
       callback.type,
-      options.state?.typeRegistry?.get(callback.type),
-      { checker, factory, typeRegistry: options.state?.typeRegistry },
+      state.typeRegistry.get(callback.type),
+      { checker, factory, typeRegistry: state.typeRegistry },
     );
   } else if (signature) {
     // Infer from callback signature
@@ -537,7 +537,7 @@ export function transformLiftAppliedCall(
           factory,
           sourceFile: context.sourceFile,
         },
-        options.state?.typeRegistry,
+        state.typeRegistry,
       );
     }
   }
@@ -582,7 +582,7 @@ export function transformLiftAppliedCall(
   const capabilityAnalysis = getCapabilityAnalysis(
     newCallback,
     checker,
-    options.state?.typeRegistry,
+    state.typeRegistry,
   );
   const inputParamSummary = capabilityAnalysis.firstParameter;
   if (inputParamSummary) {
@@ -592,7 +592,7 @@ export function transformLiftAppliedCall(
       getTypeFromTypeNodeWithFallback(
         inputTypeNode,
         checker,
-        options.state?.typeRegistry,
+        state.typeRegistry,
       ),
       false,
       checker,
@@ -633,15 +633,13 @@ export function transformLiftAppliedCall(
   );
 
   // Register the type of the call expression itself
-  if (options.state?.typeRegistry) {
-    registerLiftAppliedCallType(
-      rebuiltCall,
-      resultTypeNode,
-      resultType,
-      checker,
-      options.state?.typeRegistry,
-    );
-  }
+  registerLiftAppliedCallType(
+    rebuiltCall,
+    resultTypeNode,
+    resultType,
+    checker,
+    state.typeRegistry,
+  );
 
   return rebuiltCall;
 }

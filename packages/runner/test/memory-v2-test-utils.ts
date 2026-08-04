@@ -158,9 +158,13 @@ export abstract class ScriptedSessionTransport
   protected onHello(_helloCount: number): void {}
 
   /** Flags advertised on hello.ok — override to script an older server
-   * (e.g. one without `pendingReadStacks`). */
+   * (e.g. one without `pendingReadStacks`) or a newer one. Scripted
+   * transports do NOT advertise `verdictCatchUpMarkers` by default: a
+   * client that believed it would park every accept's promotion on markers
+   * a hand-rolled script never emits. Tests that script markers
+   * (pushSync with caughtUpLocalSeq) opt in by overriding this. */
   protected helloFlags(): ReturnType<typeof getMemoryProtocolFlags> {
-    return getMemoryProtocolFlags();
+    return { ...getMemoryProtocolFlags(), verdictCatchUpMarkers: false };
   }
 
   /** Wire codec seams — override together when a harness needs a specific
@@ -258,10 +262,22 @@ export abstract class ScriptedSessionTransport
       effect: sync,
     });
   }
+
+  /** Revoke the session from the server side: the client terminates it and
+   * closes its watch view — the sync/marker channel dies with it. */
+  emitRevoked(reason: "taken-over" | "unauthorized" = "taken-over"): void {
+    this.respond({
+      type: "session/revoked",
+      space: this.script.space,
+      sessionId: this.script.sessionId,
+      reason,
+    });
+  }
 }
 
 export class SingleSessionFactory implements SessionFactory {
   client: MemoryV2Client.Client | null = null;
+  session: MemoryV2Client.SpaceSession | null = null;
 
   constructor(private readonly transport: MemoryV2Client.Transport) {}
 
@@ -274,6 +290,7 @@ export class SingleSessionFactory implements SessionFactory {
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     this.client = client;
+    this.session = session;
     return { client, session };
   }
 }

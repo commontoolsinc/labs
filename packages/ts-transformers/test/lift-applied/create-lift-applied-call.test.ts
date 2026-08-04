@@ -57,9 +57,8 @@ Deno.test("createLiftAppliedCall keeps fallback refs synced when names collide",
       checker,
       sourceFile: source,
       cfHelpers,
-      options: {
-        state: new CrossStageState(),
-      },
+      options: {},
+      state: new CrossStageState(),
     } as any;
 
     const rootIdentifier = factory.createIdentifier("_v1");

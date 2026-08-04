@@ -163,8 +163,9 @@ interface PendingRead {
   // space: the seq of the last accepted write to the document that the
   // client's confirmed view reflected at build time (0 for a document its
   // subscriptions never covered). When present, the staleness check scans
-  // the FULL interval from this basis, excluding the session's own accepted
-  // commits (§3.6.3) — the CT-1910 repair. When absent (a legacy client),
+  // the FULL interval from this basis, excluding only the session's TRUE
+  // PREDECESSOR commits — localSeq below the reader's — per §3.6.3 (the
+  // CT-1910 repair). When absent (a legacy client),
   // staleness is based at the resolution of the HIGHEST localSeq element —
   // the document's top-of-stack layer below the reader, which the array
   // MUST include (§3.5). Servers ignore unknown fields, so clients attach

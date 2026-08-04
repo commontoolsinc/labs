@@ -8,12 +8,18 @@ import {
   createResumeRepublisher,
   type ElementContribution,
 } from "../src/builtins/resume-republish.ts";
+import { flatMapContribution } from "../src/builtins/flatmap.ts";
 
 // Focused coverage for the shared resume-republish machinery
 // (src/builtins/resume-republish.ts), driving the straggler and guard arms that
 // the end-to-end resume tests (list-resume-preserve.test.ts and friends) cannot
 // reach deterministically: the still-pending re-defer, the input/result guards,
 // the editWithRetry error arm, and the rejected-sync catch.
+//
+// The same harness drives each builtin's own contribution through the real
+// republisher, so every arm of a contribution is covered by a plain unit test
+// rather than by whichever end-to-end resume happens to produce that shape of
+// per-element result on a given run.
 //
 // The republisher's only real collaborators are the cells it reads and writes,
 // the runtime's editWithRetry, and the storage manager's trackUntilSettled. Each
@@ -339,6 +345,59 @@ describe("resume-republish unit", () => {
     await drain(tracked);
     // The rejected sync skips the rebuild entirely; the container is untouched.
     expect(result.setValues.length).toBe(0);
+  });
+});
+
+describe("flatMap contribution", () => {
+  it("spreads an array result one level deep and densifies its holes", async () => {
+    const inputs = [new FakeCell("e0", null), new FakeCell("e1", null)];
+    // A sparse per-element result: index 1 is a hole, which forEach steps over.
+    const sparse: unknown[] = [];
+    sparse[0] = "a";
+    sparse[2] = "c";
+    const results = [
+      new FakeCell("r0", ["x", ["y"]]),
+      new FakeCell("r1", sparse),
+    ];
+    const result = new FakeCell("container", [0, 1]);
+    const { runtime, tracked } = makeRuntime();
+    const rr = makeRepublisher({
+      result,
+      inputsList: inputs,
+      elementRuns: runsFor(inputs, results),
+      runtime,
+      contribute: flatMapContribution,
+    });
+
+    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+    await drain(tracked);
+
+    // One level of spreading: the nested array survives as a single element,
+    // and the hole contributes nothing, so the output is dense.
+    expect(result.setValues.length).toBe(1);
+    expect(result.setValues[0]).toEqual(["x", ["y"], "a", "c"]);
+  });
+
+  it("pushes a defined scalar result and skips a settled-undefined one", async () => {
+    const inputs = [new FakeCell("e0", null), new FakeCell("e1", null)];
+    // Element 1 reads undefined, but it is in the awaited set, so it has
+    // settled: flatMap skips it rather than holding the aggregate for it.
+    const results = [new FakeCell("r0", 7), new FakeCell("r1", undefined)];
+    const result = new FakeCell("container", [0, 1]);
+    const { runtime, tracked } = makeRuntime();
+    const rr = makeRepublisher({
+      result,
+      inputsList: inputs,
+      elementRuns: runsFor(inputs, results),
+      runtime,
+      contribute: flatMapContribution,
+    });
+
+    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+    await drain(tracked);
+
+    expect(result.setValues.length).toBe(1);
+    expect(result.setValues[0]).toEqual([7]);
   });
 });
 
