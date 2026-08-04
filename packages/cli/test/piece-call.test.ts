@@ -2,8 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
+import type { Cell, NormalizedFullLink } from "@commonfabric/runner";
 import {
-  type CallableCellLike,
   CF_RUNTIME_ERROR_LOG,
   collectInvocationResultLinks,
   normalizeAbsentVerbPayload,
@@ -1074,11 +1074,7 @@ function createPieceCallableHarness(options: {
   neverCommit?: boolean;
   /** Replace the readback receipt cell wholesale — for --show-links tests,
    * whose receipt must support key()/resolveAsCell link traversal. */
-  receiptCell?: CallableCellLike;
-  /** Omit the stream cell's `send`: the dispatch falls back to a plain data
-   * write, the path with no per-handling commit acknowledgement and no
-   * receipt — the shape --no-wait must refuse. */
-  withoutSend?: boolean;
+  receiptCell?: Cell<any>;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -1122,14 +1118,14 @@ function createPieceCallableHarness(options: {
     callableSchema,
     {
       scope: options.callableScope,
-      ...(options.callableKind === "handler" && !options.withoutSend
+      ...(options.callableKind === "handler"
         ? {
           send: (
             value: unknown,
             onCommit?: (
               tx: {
                 status: () => { status: string; error?: Error };
-                handlingReceiptLink?: { id: string; space: string };
+                handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
             sendOptions?: { eventId?: string },
@@ -1160,10 +1156,10 @@ function createPieceCallableHarness(options: {
                     ),
                   }
                   : { status: "done" },
-              handlingReceiptLink: {
+              handlingReceiptLink: mockLink({
                 id: "of:receipt-1",
                 space: "did:key:test-home",
-              },
+              }),
             });
           },
         }
@@ -1246,6 +1242,8 @@ function createPieceCallableHarness(options: {
       edit: () => ({
         commit: async () => {},
       }),
+      prepareTxForCommit: () => {},
+      settled: () => Promise.resolve(),
       getCell: (
         _space: string,
         _id: string,
@@ -2336,35 +2334,6 @@ describe("piece call wait control", () => {
     expect(harness.tracker.toolRunPattern).toBeUndefined();
   });
 
-  it("refuses --no-wait for a handler that dispatches without a receipt", async () => {
-    const harness = createPieceCallableHarness({
-      callableKind: "handler",
-      cellKey: "recordMessage",
-      inputSchema: {
-        type: "object",
-        properties: {
-          message: { type: "string" },
-        },
-      },
-      withoutSend: true,
-    });
-
-    await expect(
-      executePieceCallable(config, "recordMessage", ["--message", "hi"], {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-set-fallback-no-wait",
-        skipReadback: true,
-      }),
-    ).rejects.toThrow(
-      /--no-wait is not available for "recordMessage": this callable dispatches without an invocation receipt/,
-    );
-
-    // Refused before the data write: the set-fallback dispatch would leave
-    // nothing a later same-id call could read an outcome back from.
-    expect(harness.tracker.handlerWrites).toEqual([]);
-  });
-
   it("carries the furthest phase as status for an unsettled invocation", () => {
     expect(invocationJson({ id: "inv-1", status: "dispatched" })).toEqual({
       invocation: "inv-1",
@@ -2419,6 +2388,28 @@ interface MockLinkedNode {
   children?: Record<string, MockLinkedNode>;
 }
 
+/** The full normalized link a real cell reports for a mock document: the
+ * space scope and a root path are what a runner-minted link carries when the
+ * fixture leaves them out. */
+function mockLink(
+  doc: MockLinkedDoc,
+  path: (string | number)[] = doc.path ?? [],
+): NormalizedFullLink {
+  return {
+    id: doc.id,
+    space: doc.space,
+    scope: doc.scope ?? "space",
+    path,
+  } as unknown as NormalizedFullLink;
+}
+
+/** A partial cell double, cast at the seam where the invocation engine takes
+ * it. Every member the engine reaches for is present; the rest of `Cell` is
+ * not. */
+function mockCell(members: Record<string, unknown>): Cell<any> {
+  return members as unknown as Cell<any>;
+}
+
 /**
  * A receipt cell whose key()/resolveAsCell traversal mirrors the runner's:
  * `key(segment)` reports the ENCLOSING doc's address extended by the segment
@@ -2431,67 +2422,56 @@ interface MockLinkedNode {
  * Unresolved wrappers refuse traversal outright (`key()` hands back a
  * barren cell), pinning that the collector reads descendants from RESOLVED
  * cells only — a same-document link can redirect elsewhere, and children
- * live under its target.
+ * live under its target. The barren cell reports the receipt's own address,
+ * so descending through one by mistake shows up as a missing entry rather
+ * than a foreign document.
  */
 function linkedReceiptCell(
   receiptDoc: MockLinkedDoc,
   value: unknown,
   root: MockLinkedNode = {},
-): CallableCellLike {
-  const barren: CallableCellLike = {
+): Cell<any> {
+  const barren: Cell<any> = mockCell({
     get: () => undefined,
+    resolveAsCell: () => barren,
+    getAsNormalizedFullLink: () => mockLink(receiptDoc),
     key: () => barren,
-  };
+  });
   const build = (
     node: MockLinkedNode,
     doc: MockLinkedDoc,
     pathInDoc: (string | number)[],
-  ): CallableCellLike => {
-    const cell: CallableCellLike = {
+  ): Cell<any> => {
+    const cell: Cell<any> = mockCell({
       get: () => value,
       pull: () => Promise.resolve(value),
       resolveAsCell: () => cell,
-      getAsNormalizedFullLink: () => ({
-        id: doc.id,
-        space: doc.space,
-        scope: doc.scope,
-        path: pathInDoc,
-      }),
+      getAsNormalizedFullLink: () => mockLink(doc, pathInDoc),
       key: (segment: string) => {
         const childNode = node.children?.[segment] ?? {};
         const resolved = childNode.doc
           ? build(childNode, childNode.doc, childNode.doc.path ?? [])
           : build(childNode, doc, [...pathInDoc, segment]);
-        return {
+        return mockCell({
           get: () => undefined,
           key: () => barren,
           resolveAsCell: () => resolved,
-          getAsNormalizedFullLink: () => ({
-            id: doc.id,
-            space: doc.space,
-            scope: doc.scope,
-            path: [...pathInDoc, segment],
-          }),
-        };
+          getAsNormalizedFullLink: () => mockLink(doc, [...pathInDoc, segment]),
+        });
       },
-    };
+    });
     return cell;
   };
   const resolvedRoot = root.doc
     ? build(root, root.doc, root.doc.path ?? [])
     : build(root, receiptDoc, receiptDoc.path ?? []);
-  return {
+  return mockCell({
     get: () => value,
     pull: () => Promise.resolve(value),
     key: () => barren,
     resolveAsCell: () => resolvedRoot,
-    getAsNormalizedFullLink: () => ({
-      id: receiptDoc.id,
-      space: receiptDoc.space,
-      scope: receiptDoc.scope,
-      path: receiptDoc.path ?? [],
-    }),
-  };
+    getAsNormalizedFullLink: () => mockLink(receiptDoc),
+  });
 }
 
 /**
@@ -2506,15 +2486,11 @@ function recordingReceiptCell(
   doc: MockLinkedDoc,
   requested: string[],
   path: string[] = [],
-): CallableCellLike {
-  const cell: CallableCellLike = {
+): Cell<any> {
+  const cell: Cell<any> = mockCell({
     get: () => undefined,
     resolveAsCell: () => cell,
-    getAsNormalizedFullLink: () => ({
-      id: doc.id,
-      space: doc.space,
-      path,
-    }),
+    getAsNormalizedFullLink: () => mockLink(doc, path),
     key: (segment: string) => {
       if (requested.length >= 32) {
         throw new Error("fake cell budget exhausted");
@@ -2523,12 +2499,13 @@ function recordingReceiptCell(
       requested.push(next.join("/"));
       return recordingReceiptCell(doc, requested, next);
     },
-  };
+  });
   return cell;
 }
 
 describe("collectInvocationResultLinks", () => {
-  const receiptLink = { id: "of:receipt-1", space: "did:key:test-home" };
+  const receiptDoc = { id: "of:receipt-1", space: "did:key:test-home" };
+  const receiptLink = mockLink(receiptDoc);
   const receiptRef = {
     space: "did:key:test-home",
     id: "of:receipt-1",
@@ -2537,7 +2514,7 @@ describe("collectInvocationResultLinks", () => {
 
   it("yields just the receipt for a plain-JSON-only result", () => {
     const value = { total: 3, tags: ["a", "b"], nested: { deep: true } };
-    const cell = linkedReceiptCell(receiptLink, value);
+    const cell = linkedReceiptCell(receiptDoc, value);
     expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
       "/": receiptRef,
     });
@@ -2548,7 +2525,7 @@ describe("collectInvocationResultLinks", () => {
     // address as a child (key() throws) contributes no link and must not
     // abort the walk — its addressable siblings still annotate.
     const value = { weird: { x: 1 }, comment: { body: "hi" } };
-    const inner = linkedReceiptCell(receiptLink, value, {
+    const inner = linkedReceiptCell(receiptDoc, value, {
       children: {
         comment: { doc: { id: "of:comment-1", space: "did:key:test-home" } },
       },
@@ -2556,15 +2533,15 @@ describe("collectInvocationResultLinks", () => {
     // Wrap the RESOLVED root: the outer wrapper is deliberately unresolved
     // (its own key() refuses traversal), so the throwing key must shadow the
     // cell the walk actually descends through.
-    const innerRoot = inner.resolveAsCell!();
-    const cell: CallableCellLike = {
+    const innerRoot = inner.resolveAsCell();
+    const cell: Cell<any> = mockCell({
       ...innerRoot,
       resolveAsCell: () => cell,
       key: (segment: string) => {
         if (segment === "weird") throw new Error("not addressable");
-        return innerRoot.key!(segment);
+        return innerRoot.key(segment);
       },
-    };
+    });
     expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
       "/": receiptRef,
       "/comment": {
@@ -2580,7 +2557,7 @@ describe("collectInvocationResultLinks", () => {
       comment: { body: "hi", author: { name: "b" } },
       count: 1,
     };
-    const cell = linkedReceiptCell(receiptLink, value, {
+    const cell = linkedReceiptCell(receiptDoc, value, {
       children: {
         comment: {
           doc: { id: "of:comment-1", space: "did:key:test-home" },
@@ -2618,7 +2595,7 @@ describe("collectInvocationResultLinks", () => {
 
   it("addresses an array element reference by its index", () => {
     const value = { items: [{ t: "inline" }, { t: "linked" }] };
-    const cell = linkedReceiptCell(receiptLink, value, {
+    const cell = linkedReceiptCell(receiptDoc, value, {
       children: {
         items: {
           children: {
@@ -2639,7 +2616,7 @@ describe("collectInvocationResultLinks", () => {
 
   it("keeps the sub-document path of a link below a doc's root", () => {
     const value = { pick: { t: "third entry" } };
-    const cell = linkedReceiptCell(receiptLink, value, {
+    const cell = linkedReceiptCell(receiptDoc, value, {
       children: {
         pick: {
           doc: {
@@ -2665,7 +2642,7 @@ describe("collectInvocationResultLinks", () => {
 
   it("escapes pointer-special characters in path keys (RFC 6901)", () => {
     const value = { "a/b": { linked: true } };
-    const cell = linkedReceiptCell(receiptLink, value, {
+    const cell = linkedReceiptCell(receiptDoc, value, {
       children: {
         "a/b": { doc: { id: "of:odd-key", space: "did:key:test-home" } },
       },
@@ -2687,7 +2664,7 @@ describe("collectInvocationResultLinks", () => {
     // receipt it was read through — and the receipt address stays available
     // under the reserved bare key (pointer keys always start with "/", so
     // no result path can collide with it).
-    const cell = linkedReceiptCell(receiptLink, 42, {
+    const cell = linkedReceiptCell(receiptDoc, 42, {
       doc: { id: "of:answer-1", space: "did:key:test-home" },
     });
     expect(collectInvocationResultLinks(receiptLink, cell, 42)).toEqual({
@@ -2698,7 +2675,7 @@ describe("collectInvocationResultLinks", () => {
 
   it("rebases children of a reference-backed root onto its document", () => {
     const value = { body: "hi", author: { name: "b" } };
-    const cell = linkedReceiptCell(receiptLink, value, {
+    const cell = linkedReceiptCell(receiptDoc, value, {
       doc: { id: "of:comment-1", space: "did:key:test-home" },
       children: {
         author: { doc: { id: "of:author-1", space: "did:key:test-home" } },
@@ -2728,16 +2705,14 @@ describe("collectInvocationResultLinks", () => {
       scope: "session" as const,
     };
     expect(
-      collectInvocationResultLinks(scoped, linkedReceiptCell(scoped, {}), {}),
+      collectInvocationResultLinks(
+        mockLink(scoped),
+        linkedReceiptCell(scoped, {}),
+        {},
+      ),
     ).toEqual({
       "/": { space: "did:key:test-home", id: "of:receipt-2", scope: "session" },
     });
-  });
-
-  it("degrades to the root entry alone without a receipt cell to walk", () => {
-    expect(
-      collectInvocationResultLinks(receiptLink, undefined, { a: { b: 1 } }),
-    ).toEqual({ "/": receiptRef });
   });
 
   it("addresses no path inside a live (non-plain) object in the result", () => {
@@ -2771,7 +2746,7 @@ describe("collectInvocationResultLinks", () => {
     const requested: string[] = [];
     const links = collectInvocationResultLinks(
       receiptLink,
-      recordingReceiptCell(receiptLink, requested),
+      recordingReceiptCell(receiptDoc, requested),
       value,
     );
     // The stream itself is addressed — it is a property of the result and
@@ -2797,7 +2772,7 @@ describe("collectInvocationResultLinks", () => {
     const requested: string[] = [];
     const links = collectInvocationResultLinks(
       receiptLink,
-      recordingReceiptCell(receiptLink, requested),
+      recordingReceiptCell(receiptDoc, requested),
       new FakeRuntime(),
     );
     expect(requested).toEqual([]);
