@@ -7,44 +7,22 @@
  */
 
 /**
- * Interface for transforming diagnostic error messages.
- */
-export interface DiagnosticMessageTransformer {
-  /**
-   * Transform a diagnostic message.
-   * @param message The original TypeScript diagnostic message
-   * @returns Transformed message, or null if no transformation applies
-   */
-  transform(message: string): string | null;
-}
-
-/**
- * Options for the Reactive error transformer.
- */
-export interface ReactiveErrorTransformerOptions {
-  /**
-   * When true, appends the original TypeScript error to the transformed message.
-   * Useful for debugging.
-   */
-  verbose?: boolean;
-}
-
-/**
- * Transforms confusing Reactive-related TypeScript errors into clear, actionable messages.
+ * Builds a transform for confusing Reactive-related TypeScript errors, turning
+ * them into clear, actionable messages.
  *
  * For example, transforms:
  *   "Property 'get' does not exist on type 'OpaqueCell<number> & number'"
  * Into:
  *   "Unnecessary .get() call on a reactive value. This value can be accessed directly..."
+ *
+ * The returned transform yields null for a message it does not rewrite. Under
+ * `verbose` a rewritten message also carries the original TypeScript error,
+ * which helps when debugging.
  */
-export class ReactiveErrorTransformer implements DiagnosticMessageTransformer {
-  private verbose: boolean;
-
-  constructor(options: ReactiveErrorTransformerOptions = {}) {
-    this.verbose = options.verbose ?? false;
-  }
-
-  transform(message: string): string | null {
+export function createReactiveErrorTransformer(
+  verbose = false,
+): (message: string) => string | null {
+  return (message: string) => {
     // Detect .get() called on OpaqueCell/Reactive types
     // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
     const match = message.match(
@@ -58,35 +36,12 @@ export class ReactiveErrorTransformer implements DiagnosticMessageTransformer {
         `and results from computed() and lift() don't need .get(). ` +
         `Only Writable<T> requires .get() to read values.`;
 
-      if (this.verbose) {
+      if (verbose) {
         return `${clarification}\n\nOriginal TypeScript error: ${message}`;
       }
       return clarification;
     }
 
     return null; // No transformation applies
-  }
-}
-
-/**
- * Combines multiple diagnostic message transformers.
- * Returns the first successful transformation, or null if none apply.
- */
-export class CompositeDiagnosticTransformer
-  implements DiagnosticMessageTransformer {
-  private transformers: DiagnosticMessageTransformer[];
-
-  constructor(transformers: DiagnosticMessageTransformer[]) {
-    this.transformers = transformers;
-  }
-
-  transform(message: string): string | null {
-    for (const transformer of this.transformers) {
-      const result = transformer.transform(message);
-      if (result !== null) {
-        return result;
-      }
-    }
-    return null;
-  }
+  };
 }

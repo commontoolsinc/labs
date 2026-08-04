@@ -71,6 +71,29 @@ describe("pattern-binding", () => {
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
     });
 
+    it("resolves the argument cell from the result cell's meta link when argumentCellLink is undefined", () => {
+      const testCell = runtime.getCell<{ value: number }>(
+        space,
+        "argument meta link fallback 1",
+        undefined,
+        tx,
+      );
+      testCell.set({ value: 0 });
+
+      const argumentCell = getMetaCell(testCell, "argument", tx);
+      argumentCell.set({ input: 0 });
+      testCell.setMetaRaw(
+        "argument",
+        argumentCell.getAsWriteRedirectLink({ base: testCell }),
+      );
+
+      sendValueToBinding(tx, testCell, undefined, {
+        $alias: { cell: "argument", path: ["input"] },
+      }, 42);
+
+      expect(argumentCell.getAsQueryResult()).toEqual({ input: 42 });
+    });
+
     it("should handle array bindings", () => {
       const testCell = runtime.getCell<{ arr: number[] }>(
         space,
