@@ -662,10 +662,6 @@ the per-epic implementation notes).
 > Two neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
 >
-> - **`syncSchemaTable`** is the older, index-keyed predecessor of
->   `syncSchemaTableV2`. It is hardwired to `false` in `getMemoryProtocolFlags`
->   and has no config function; it is effectively dead and can be deleted from
->   the protocol types once no peer negotiates it.
 > - **`sqliteCommitRowLabelEval`** is a build-inherent capability, hardwired to
 >   `true`, advertising that this build's engine evaluates row-label rules at
 >   commit time. It is not configuration: an older server that lacks the

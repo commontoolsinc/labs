@@ -141,8 +141,7 @@ connection.
 in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
 when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
-shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
-and does not enable the v2 encoding.
+shape.
 
 `entityIdListing` advertises support for `entity-id.list`. It defaults to
 `false` when absent. A client must not send the request unless the server
