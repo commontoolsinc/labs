@@ -1613,17 +1613,56 @@ export interface PieceCallableListing {
   inputSchema: JSONSchema | true;
   /** Tools only, until handlers gain declared results (verb contract WS-C). */
   outputSchema?: JSONSchema;
+  /** Listing mark: a UI affordance outside the headless contract (inferred
+   * from session-scoped handler bindings at compile time). Hidden from the
+   * default listing; always callable. */
+  tier?: "wrapper";
+  /** Listing mark: `@deprecated` JSDoc on the verb, lowered to the standard
+   * schema annotation. Hidden from the default listing; always callable. */
+  deprecated?: boolean;
+}
+
+/** The default listing's partition: what shows, and what each mark hid.
+ * Marked rows keep their marks either way, so `--all` output is
+ * self-describing. */
+export function partitionVerbListing(
+  verbs: readonly PieceCallableListing[],
+): { shown: PieceCallableListing[]; wrapper: number; deprecated: number } {
+  const shown: PieceCallableListing[] = [];
+  let wrapper = 0;
+  let deprecated = 0;
+  for (const verb of verbs) {
+    if (verb.tier === "wrapper") wrapper++;
+    else if (verb.deprecated === true) deprecated++;
+    else shown.push(verb);
+  }
+  return { shown, wrapper, deprecated };
 }
 
 /**
  * Enumerate every callable a piece exposes (verb contract: Verb discovery,
  * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
- * listed — hiding is a display default that arrives with the wrapper-tier
- * marker, never a capability boundary; until the marker exists, the list IS
- * the full surface. Walks result then input with the same classification
+ * listed — hiding is a display default driven by the listing marks
+ * (`tier: "wrapper"`, `deprecated: true`), never a capability boundary: the
+ * rows carry the marks, `partitionVerbListing` decides the default view, and
+ * `--all` shows the full surface. Walks result then input with the same classification
  * `cf piece call` resolves through, so the listing and the dispatcher can
  * never disagree about what is callable.
  */
+/** The listing marks as they appear on the durable schema's property. */
+function listingMarks(
+  rootSchema: unknown,
+  name: string,
+): { tier?: "wrapper"; deprecated?: boolean } {
+  if (!isRecord(rootSchema) || !isRecord(rootSchema.properties)) return {};
+  const property = (rootSchema.properties as Record<string, unknown>)[name];
+  if (!isRecord(property)) return {};
+  return {
+    ...(property.tier === "wrapper" ? { tier: "wrapper" as const } : {}),
+    ...(property.deprecated === true ? { deprecated: true } : {}),
+  };
+}
+
 export async function listPieceCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
@@ -1665,6 +1704,7 @@ export async function listPieceCallables(
       }
       rejected.delete(name);
       const spec = callableCommandSpec(callableCell, kind);
+      const marks = listingMarks(schema, name);
       listings.set(name, {
         name,
         kind,
@@ -1673,6 +1713,7 @@ export async function listPieceCallables(
         ...(spec.outputSchemaSummary !== undefined
           ? { outputSchema: spec.outputSchemaSummary }
           : {}),
+        ...marks,
       });
     }
   }
