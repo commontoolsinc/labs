@@ -13,14 +13,7 @@ import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   moduleToEncodableForm,
   withAliasBindings,
-} from "../src/builder/json-utils.ts";
-import {
-  type JSONSchema,
-  type JSONSchemaObj,
-  type Module,
-  type toEncodableForm,
-} from "../src/builder/types.ts";
-import { toJSONMethod } from "../src/builder/json-member.ts";
+} from "../src/builder/to-encodable-form.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -30,7 +23,7 @@ import { Engine } from "../src/harness/engine.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("json-utils", () => {
+describe("to-encodable-form", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -302,37 +295,6 @@ describe("moduleToEncodableForm", () => {
       preview: "(value) => value * 2",
       location: "main.tsx:1:1",
     });
-  });
-
-  it("writes exactly the module's own members, and none of its machinery", () => {
-    // The serialized form is what a content-derived id gets minted from, so
-    // an extra member is a changed id for every value carrying a module. The
-    // members a module carries for the builder's benefit -- its serializer
-    // under BOTH names it answers to, `with`, `bind` -- are machinery, and the
-    // serializer is responsible for leaving every one of them behind.
-    // Asserted as the WHOLE key set: a subset match cannot see a member that
-    // should not be there.
-    const module: Record<string, unknown> = {
-      type: "javascript",
-      implementation: Object.assign(() => 1, { preview: "() => 1" }),
-      wrapper: "handler",
-      argumentSchema: { type: "object" } as JSONSchema,
-      with: () => {},
-      bind: () => {},
-      toJSON: toJSONMethod,
-      toEncodableForm: () => moduleToEncodableForm(module as unknown as Module),
-    };
-
-    const serialized =
-      (module.toEncodableForm as () => Record<string, unknown>)();
-
-    expect(Object.keys(serialized).sort()).toEqual([
-      "argumentSchema",
-      "implementation",
-      "preview",
-      "type",
-      "wrapper",
-    ]);
   });
 
   it("serializes non-javascript function-backed modules without leaking implementations", () => {

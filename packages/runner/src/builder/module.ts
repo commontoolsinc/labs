@@ -27,7 +27,7 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
-import { moduleToEncodableForm } from "./json-utils.ts";
+import { moduleToEncodableForm } from "./to-encodable-form.ts";
 import { toJSONMethod } from "./json-member.ts";
 import {
   brandTrustedBuilderArtifact,

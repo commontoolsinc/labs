@@ -141,7 +141,7 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Open a new connection to the storage provider associated with the given
    * space.
    */
-  open(space: MemorySpace): IStorageProviderWithReplica;
+  open(space: MemorySpace): IStorageProvider;
 
   /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
@@ -323,18 +323,6 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
 export interface IRemoteStorageProviderSettings {
   /**
-   * Number of subscriptions remote storage provider is allowed to have per
-   * space.
-   */
-  maxSubscriptionsPerSpace: number;
-
-  /**
-   * Amount of milliseconds we will spend waiting on WS connection before we
-   * abort.
-   */
-  connectionTimeout: number;
-
-  /**
    * EXPERIMENTAL (default off): allow more than one watch-refresh round trip
    * to be in flight per space at once, up to a bounded window
    * (`CONCURRENT_WATCH_REFRESH_WINDOW`). By default watch acquisition is strict
@@ -347,12 +335,6 @@ export interface IRemoteStorageProviderSettings {
    * docs/development/EXPERIMENTAL_OPTIONS.md.
    */
   experimentalConcurrentWatchRefresh?: boolean;
-}
-
-export interface LocalStorageOptions {
-  as: Signer;
-  id?: string;
-  settings?: IRemoteStorageProviderSettings;
 }
 
 export interface IStorageProvider {
@@ -384,15 +366,7 @@ export interface IStorageProvider {
    */
   destroy(): Promise<void>;
 
-  /**
-   * Get the storage provider's replica.
-   *
-   * @returns The storage provider's replica.
-   */
-  getReplica(): string | undefined;
-}
-
-export interface IStorageProviderWithReplica extends IStorageProvider {
+  /** The replica holding this space's documents. */
   replica: ISpaceReplica;
 
   /** Establish the authenticated space session without reading entity values. */

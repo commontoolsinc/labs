@@ -73,7 +73,10 @@ starting an agent to remove them.
 For tests, `docs/development/waiting-in-tests.md` is the canonical guidance. It
 names the event-driven primitives to reach for instead of a poll, and the
 specific cases where a bounded poll is the honest tool — read it before removing
-one, so you don't strip a wait the repo keeps on purpose.
+one, so you don't strip a wait the repo keeps on purpose. Its companion,
+`docs/development/waiting-in-tests-rationale.md`, holds the analysis and case
+studies behind those rules; read it when you need to know why a rule is what it
+is, or before changing the wait machinery a rule describes.
 
 ### Pattern Development
 
@@ -146,7 +149,11 @@ If you are developing runtime code, read the following documentation:
 - `docs/development/TESTING.md` - Running the test suites and the general unit
   and integration test structure; hub that links the other testing docs
 - `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
-  polling: the primitives to use.
+  polling: the primitives to use
+- `docs/development/waiting-in-tests-rationale.md` - The analysis and case
+  studies behind the waiting guidance: why a bounded timeout is never a
+  guarantee, retired real-clock exemptions, the FUSE exec suite's design, and
+  the production waits that apply the same principle
 - `docs/development/fetch-request-deadlines.md` - Why the fetch builtins keep a
   wall-clock bound: it leases a claim held in durable state rather than bounding
   a request, and it decides when the replica holding that claim is presumed

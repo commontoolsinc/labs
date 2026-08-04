@@ -48,8 +48,6 @@ export type {
   ReactivityLog,
   SettleStats,
 } from "./scheduler.ts";
-export * as StorageInspector from "./storage/inspector.ts";
-export { StorageTelemetry } from "./storage/telemetry.ts";
 export type {
   ChangeGroup,
   IExtendedStorageTransaction,

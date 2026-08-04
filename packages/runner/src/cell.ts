@@ -3340,7 +3340,7 @@ export function convertCellsToLinks(
     // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
     // container reached by its codec contents rather than by property name, so
     // it still falls to the object branch and is rebuilt from zero enumerable
-    // own properties. Same marker as the sibling walk in `builder/json-utils.ts`.
+    // own properties. Same marker as the sibling walk in `builder/to-encodable-form.ts`.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

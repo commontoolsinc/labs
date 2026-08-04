@@ -47,7 +47,7 @@ import {
   moduleToEncodableForm,
   patternToEncodableForm,
   withAliasBindings,
-} from "./json-utils.ts";
+} from "./to-encodable-form.ts";
 import { toJSONMethod } from "./json-member.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {

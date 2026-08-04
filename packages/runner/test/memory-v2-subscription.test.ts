@@ -131,11 +131,9 @@ const syntheticConflict = (
   name: "ConflictError",
   message: "synthetic conflict",
   transaction: {
-    iss: space,
-    cmd: "/memory/transact",
-    sub: space,
-    args: { changes: {} },
-    prf: [],
+    localSeq: 0,
+    reads: { confirmed: [], pending: [] },
+    operations: [],
   },
   conflict: {
     space,

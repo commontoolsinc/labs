@@ -8,10 +8,11 @@ the first two siblings got styles applied. Siblings 3+ rendered without styling
 
 ## Why it happened
 
-The `withAliasBindings` function in `packages/runner/src/builder/json-utils.ts`
-used a `WeakSet` to guard against circular object references during pattern
-serialization. However, this guard also triggered on shared (non-circular)
-references, returning `{}` instead of re-serializing the value.
+The `withAliasBindings` function in
+`packages/runner/src/builder/to-encodable-form.ts` used a `WeakSet` to guard
+against circular object references during pattern serialization. However, this
+guard also triggered on shared (non-circular) references, returning `{}` instead
+of re-serializing the value.
 
 The reason 2 siblings worked (not just 1) is that `traverseValue` upstream
 creates one copy of the shared object and returns the original for subsequent

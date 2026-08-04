@@ -50,7 +50,16 @@ const { pattern, pushFrame, popFrame } = await import(
   `${R}/builder/pattern.ts`
 );
 const { lift } = await import(`${R}/builder/module.ts`);
-const ju: any = await import(`${R}/builder/json-utils.ts`);
+// The encodable-form builders, under whichever PATH the tree spells them. The
+// two checkouts this runs against may disagree, and naming one would make the
+// harness unable to measure the very rename it is checking.
+const ju: any = await (async () => {
+  try {
+    return await import(`${R}/builder/to-encodable-form.ts`);
+  } catch {
+    return await import(`${R}/builder/json-utils.ts`);
+  }
+})();
 const md: any = await import(`${R}/builder/pattern-metadata.ts`);
 const { fabricFromNativeValue } = await import(
   "@commonfabric/data-model/fabric-value"

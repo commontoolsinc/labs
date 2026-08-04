@@ -897,7 +897,7 @@ An initial prototype may connect through the `loopback` transport
 cannot transfer through a raw `Engine` shortcut.
 
 The production design is an **executor-grade provider** implementing
-`IStorageProviderWithReplica` (`packages/runner/src/storage/interface.ts`)
+`IStorageProvider` (`packages/runner/src/storage/interface.ts`)
 that (a) reads through the engine's read pool directly (the request
 dispatch in `packages/memory/v2/server.ts`) with MessageChannel batching, (b)
 commits through the server's canonical validated apply path, and (c) receives

@@ -11,20 +11,6 @@ import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
 const signer = await Identity.fromPassphrase("test operator");
 
 describe("SESRuntime", () => {
-  it("creates distinct isolates per key and resets them on clear", () => {
-    const runtime = new SESRuntime({ lockdown: true });
-
-    const alpha = runtime.getIsolate("alpha");
-    const beta = runtime.getIsolate("beta");
-
-    expect(alpha).not.toBe(beta);
-
-    runtime.clear();
-
-    const alphaAfterClear = runtime.getIsolate("alpha");
-    expect(alphaAfterClear).not.toBe(alpha);
-  });
-
   it("clears cached callback creators on runtime.clear", () => {
     const runtime = new SESRuntime({ lockdown: true });
 

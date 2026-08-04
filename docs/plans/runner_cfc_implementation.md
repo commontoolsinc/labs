@@ -745,7 +745,7 @@ Primary files:
 
 - `packages/runner/src/runner.ts`
 - `packages/runner/src/builder/module.ts`
-- `packages/runner/src/builder/json-utils.ts`
+- `packages/runner/src/builder/to-encodable-form.ts`
 - `packages/runner/src/harness/executable-registry.ts`
 - `packages/runner/src/storage/interface.ts`
 - `packages/memory/v2.ts`

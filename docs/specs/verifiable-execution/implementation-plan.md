@@ -136,7 +136,7 @@ interface CommitData {
 
 **Files to modify:**
 
-- `packages/memory/interface.ts` - extend `CommitData` type
+- `packages/memory/v2.ts` - extend the committed shape carried over the wire
 - `packages/memory/commit.ts` - serialize activity in `create()`
 - `packages/runner/src/storage/interface.ts` - activity export
 - `packages/runner/src/storage/transaction/journal.ts` - activity serialization
@@ -224,7 +224,7 @@ interface Receipt {
 **Files to modify:**
 
 - `packages/memory/receipt.ts` - full receipt implementation (currently minimal)
-- `packages/memory/interface.ts` - Receipt type definition
+- `packages/memory/v2.ts` - receipt type definition
 
 ### 2.5 Client State & Commit Validation
 
@@ -277,7 +277,7 @@ interface CommitLogEntry {
 
 **Files to modify:**
 
-- `packages/memory/interface.ts` - `ClientCommit`, `CommitLogEntry` types
+- `packages/memory/v2.ts` - `ClientCommit`, `CommitLogEntry` types
 - `packages/memory/commit.ts` - commit processing with validation
 - `packages/memory/space.ts` - commit log storage with original + resolution
 - `packages/runner/src/storage/transaction.ts` - client-side commit building
@@ -433,7 +433,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 | Area | Primary Files |
 |------|---------------|
-| Fact/Receipt types | `packages/memory/interface.ts` |
+| Fact types | `packages/memory/interface.ts` |
 | Commit creation | `packages/memory/commit.ts` |
 | Fact operations | `packages/memory/fact.ts` |
 | Merkle hashing | `packages/data-model/value-hash.ts` |

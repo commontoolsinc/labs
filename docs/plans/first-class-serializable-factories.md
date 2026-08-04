@@ -300,7 +300,7 @@ Focused tests:
   supplies alias mapping and derived-callable construction but does not define
   a second state view.
 - [ ] Integrate it into `packages/runner/src/builder/traverse-utils.ts` and
-  `packages/runner/src/builder/json-utils.ts` before generic function handling.
+  `packages/runner/src/builder/to-encodable-form.ts` before generic function handling.
 - [ ] Preserve live, pre-ref factory state during internal graph serialization;
   sealing belongs at a later durable Fabric boundary, after artifact indexing.
 - [ ] Convert captured Cells/Reactives to aliases inside factory state.

@@ -148,10 +148,14 @@ const viewSettledReady = (): boolean =>
     commonfabric?: { viewSettled?: () => Promise<void> };
   }).commonfabric?.viewSettled === "function";
 
-// Fill the input behind `selector`, then report whether the value took. Mirrors
-// the prior poll predicate: a not-yet-ready field (absent, hidden, disabled,
-// read-only) reports false without dispatching anything, so a re-check on the
-// next DOM mutation retries the fill; a ready field is filled once and verified.
+// Settle the view, then fill the input behind `selector` and report whether the
+// value took. The settle drives the page rather than watching it: asking the
+// worker whether it is idle queues runnable pull work that nothing else would
+// start, so a field that only the page's own pending work renders arrives on a
+// settling check and not on one that reads the DOM alone. A not-yet-ready field
+// (absent, hidden, disabled, read-only) reports false without dispatching
+// anything, so a re-check on the next DOM mutation retries the fill; a ready
+// field is filled once and verified.
 //
 // Each invocation keeps a progress ledger on `globalThis.__cfFillDiag`
 // (per selector): which phase it reached and when. waitForCondition never
@@ -177,7 +181,7 @@ const fillAndVerify = async (
   }).__cfFillDiag ??= {});
   const diag: FillDiag = {
     attempts: (registry[selector]?.attempts ?? 0) + 1,
-    phase: "collecting",
+    phase: "settling",
     phaseAt: Date.now(),
     startedAt: Date.now(),
   };
@@ -186,6 +190,18 @@ const fillAndVerify = async (
     diag.phase = name;
     diag.phaseAt = Date.now();
   };
+
+  // The ledger is written above this point so that a page which never exposes
+  // `viewSettled` names that in the failure probe.
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) {
+    phase("no-settle");
+    return false;
+  }
+  await settle();
+  phase("settled");
 
   const element = probe.collect(selector)[0];
   if (!element) {
@@ -245,7 +261,23 @@ const fillAndVerify = async (
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
 
-  diag.lastInputValue = input.value;
+  // A commit that re-renders the host replaces the control. The input this fill
+  // typed into is then detached and still holds the typed text, so resolve the
+  // selector again and require the same nodes before reading the value off it.
+  // A replaced control reports false, and the next page pulse fills the control
+  // that took its place.
+  const liveElement = probe.collect(selector)[0];
+  const liveInput = liveElement instanceof HTMLInputElement
+    ? liveElement
+    : liveElement?.shadowRoot?.querySelector("input");
+  diag.lastInputValue = liveInput instanceof HTMLInputElement
+    ? liveInput.value
+    : undefined;
+  if (liveElement !== element || liveInput !== input) {
+    phase("target-replaced");
+    return false;
+  }
+
   const verified = input.value === nextValue;
   phase(verified ? "verified" : "value-mismatch");
   return verified;
