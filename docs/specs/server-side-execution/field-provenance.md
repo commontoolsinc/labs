@@ -245,10 +245,12 @@ FP1 and FP2 are the heavyweights.
   metadata have no stated retention/compaction anywhere. If the
   posture is "engine-v3 unchanged, permanent, out of v2 scope,"
   one sentence in protocol §7 closes it for every future audit.
-- **FP15 — who writes `class: "authored"` (D).** Client-set +
-  server-enforced, or server-stamped? Behavior is identical under
-  current admission; state it for symmetry with `firedAt`'s
-  spelled-out mechanics.
+- **FP15 — who writes `class: "authored"` (D) — CLOSED 2026-08-03
+  (by derivation, stage A dry-run):** `class` is SERVER-DETERMINED
+  at admission, assigned by which admission row processed the
+  commit — protocol §1's no-client-path-to-`derived` FORBIDDEN
+  clause holds only if no client-supplied value can influence it.
+  Stated in protocol.md §1.
 - **FP16 — client-side memo-key comparison (E).** speculation §2's
   "if inputs changed so the memo key differs" implies a
   client-local hash comparison; does the client read the committed

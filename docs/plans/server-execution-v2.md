@@ -113,9 +113,12 @@ Tasks:
       chains closure-checked across six path families — targets
       the destroyed-in-transit defect class the trace run showed
       dominant; same protocol, same re-run cadence.
-- [ ] Audit what server-execution surface, if any, exists on main
+- [x] Audit what server-execution surface, if any, exists on main
       (executor remnants, stats routes, doc references) and record it in
-      this plan.
+      this plan — RECORDED: runtime-mapping.md IS that audit (its
+      N59–N61 note says so in terms); no executor exists on main,
+      and the certificate/observation surface is measured in this
+      plan's preamble (~25 files, five packages, ~110 goldens).
 
 Success criteria:
 
@@ -227,6 +230,11 @@ Stages, one PR each except C, which is a three-PR train (below):
       graph, and the basis index from scope NAME to scope INSTANCE
       at every site in
       [key-vocabulary.md](../specs/server-side-execution/key-vocabulary.md).
+      (Scope note, 2026-08-03 dry-run: the basis index's key SHAPE
+      is stage C.2's DDL — E feeds it instance VALUES through the
+      engine-side writer, an engine identity consumer, not a tenth
+      runner-side site; key-vocabulary.md §4's nine-site closure
+      stands.)
       Neutrality is structural, not a hope: in the OFF arm scoped
       cardinality is 1 per runtime, so the instance dimension is
       derivable from the authenticated session and the re-keyed form
@@ -250,7 +258,11 @@ Stages, one PR each except C, which is a three-PR train (below):
       demand supplies the identity, handlers take the event's
       server-stamped actor, and reads name their
       `entity_scope_key` explicitly under the lease (scopes.md §5,
-      §7 M1; protocol.md §2); **M4 — push keyed by `scope_key`**:
+      §7 M1; protocol.md §2); narrowing-redirect writes gain the
+      EAGER VIA-USER HOP (scopes.md §2's MUST — differs from
+      main's one-hop-per-event; assigned here by the 2026-08-03
+      dry-run, which found the requirement owner-less), flag-gated
+      so the OFF arm keeps today's behavior; **M4 — push keyed by `scope_key`**:
       dirtiness and delivery both key by `scope_key`, and a
       subscriber receives only its applicable set (protocol.md §3);
       pattern-source watcher +

@@ -381,15 +381,14 @@ owner 2026-08-03 (ledger LD5; the transaction identity model,
 protocol.md §1): the
 READ side — reads may name an explicit `entity_scope_key`, lease
 holder only (§7 M1, protocol.md §2) — and run identity for
-non-handler runs (§5). Still open:
+non-handler runs (§5). Still open (numbering stable — external
+citations use it):
 
-1. **Basis-index DDL authoring.** Per-instance keying is the
-   settled shape — the §7 closures lean on it (the index shares
-   nothing across principals) — so serving-loop.md §3b's
-   `(action, entity, seq)` rows key by INSTANCE (id + scope_key),
-   overwritten in place per (action, instance). What remains is
-   authoring the engine-v3 DDL that Phase 1 stage C reduces the
-   observation tables to (M2 names the re-keying cost).
+1. **Basis-index DDL authoring — CLOSED.** serving-loop.md §3b now
+   carries the authored engine-v3 DDL, keyed per INSTANCE
+   (id + scope_key), overwritten in place per (action, instance),
+   exactly as the §7 closures assumed. The slot stays so item 2's
+   citations elsewhere keep resolving.
 2. **Session-data GC (M5).** The mechanism that actually retires a
    retired session's scoped instances — none exists today, so §3's
    ONE retirement rule needs it designed, not assumed. It MUST also

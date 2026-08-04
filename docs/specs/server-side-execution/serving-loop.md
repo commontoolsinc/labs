@@ -475,14 +475,20 @@ silently, since no product test exercises them:
   `docs/specs/persistent-scheduler-state.md` and
   `docs/specs/scheduler-v2/per-doc-rehydration.md`.
 
-The stage-C PR that carries this migration also deletes the
-certificate surface it ships beside (`completeSchedulerScopeSummary`
+The stage-C TRAIN carries both halves (the plan cuts it as three
+PRs): C.2 carries this migration; C.1 deletes the certificate
+surface it ships beside (`completeSchedulerScopeSummary`
 / `completeActionScopeSummary` — README §5), and that half is NOT a
 hand edit: ~110 fixture files under
 `packages/ts-transformers/test/fixtures/` embed the emitted marker,
 so the GOLDEN-REGENERATION procedure is a required step of the
 change, not a follow-up. Plan Phase 1 stage C sizes the full
-surface.
+surface. (C.1's unconditional consumer deletion is safe for the
+OFF-arm adoption path runtime-mapping.md N62 keeps: the one
+certificate consumer in `facade.ts` —
+`observationMinimumContextRank`, `facade.ts:213` — already
+degrades to the most-restrictive rank on an ABSENT summary, and
+`adoptRemoteObservations` never reads it; verified 2026-08-03.)
 
 ## 3c. CFC: the enforcement boundary is the action run
 
