@@ -142,6 +142,10 @@ export class BuildConfig {
     return this.path("packages", "toolshed", "COMPILED");
   }
 
+  cliEnvPath() {
+    return this.path("packages", "cli", "COMPILED");
+  }
+
   staticAssetsPath() {
     return this.path("packages", "static", "assets");
   }
@@ -395,6 +399,9 @@ async function buildCli(config: BuildConfig): Promise<void> {
       // followed by compile's static analysis, so include it explicitly.
       "--include",
       config.cliMultiUserTestWorkerPath(),
+      // Build metadata marker read by packages/cli/lib/build-info.ts.
+      "--include",
+      config.cliEnvPath(),
       config.cliEntryPath(),
     ],
     cwd: config.root,
@@ -448,17 +455,17 @@ export async function prepareWorkspace(
     denoJsonPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-  // Write build metadata into the COMPILED file. Included via `--include`
-  // when the toolshed binary is compiled, so the values travel with the
-  // artifact and can be read at runtime (see packages/toolshed/lib/build-info.ts).
+  // Write build metadata into the COMPILED files. Included via `--include`
+  // when the toolshed and cf binaries are compiled, so the values travel with
+  // each artifact and can be read at runtime (see
+  // packages/toolshed/lib/build-info.ts and packages/cli/lib/build-info.ts).
   const buildInfo = {
     commitSha: Deno.env.get("COMMIT_SHA") ?? "",
     builtAt: new Date().toISOString(),
   };
-  await Deno.writeTextFile(
-    config.toolshedEnvPath(),
-    JSON.stringify(buildInfo, null, 2) + "\n",
-  );
+  const serialized = JSON.stringify(buildInfo, null, 2) + "\n";
+  await Deno.writeTextFile(config.toolshedEnvPath(), serialized);
+  await Deno.writeTextFile(config.cliEnvPath(), serialized);
 }
 
 export async function revertWorkspace(config: BuildConfig): Promise<void> {
@@ -475,9 +482,11 @@ export async function revertWorkspace(config: BuildConfig): Promise<void> {
     config.compileCacheVersionOriginal(),
   );
 
-  // Remove the COMPILED env file
-  if ((await exists(toolshedEnvPath))) {
-    await Deno.remove(toolshedEnvPath);
+  // Remove the COMPILED env files
+  for (const path of [toolshedEnvPath, config.cliEnvPath()]) {
+    if ((await exists(path))) {
+      await Deno.remove(path);
+    }
   }
 }
 

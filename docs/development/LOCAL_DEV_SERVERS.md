@@ -19,11 +19,12 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
-To make source-run build metadata describe the checkout the same way compiled
-binaries do, pass the current revision into the start script:
+Source-run build metadata describes the checkout the same way compiled
+binaries do: `start-local-dev.sh` defaults `COMMIT_SHA` to the checkout's
+current HEAD, and an explicit value in the environment overrides that default:
 
 ```bash
-COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+COMMIT_SHA="<some-other-sha>" ./scripts/start-local-dev.sh --bg-updater
 ```
 
 The script's children inherit the value: toolshed uses it as the source-run
@@ -33,6 +34,24 @@ deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
 descriptive metadata, not a system-pattern update gate. The updater instead
 compiles the downloaded source/import closure and requires its entry identity
 to equal `?identity` before changing the persisted root.
+
+The cf CLI resolves its own commit the same way (baked build metadata for
+compiled binaries, the checkout's HEAD for source runs) and compares it
+against the server's self-reported commit on every server-touching command,
+warning on stderr when the two differ. The server side rides the `/_health`
+response the CLI's health check already fetches (the same value `/api/meta`
+reports), so the check adds no request of its own.
+
+The warning is graded, because the two directions are different problems. A
+cf newer than its server is the normal local-dev state (the checkout moved
+on; the server kept running) and gets a compact heads-up naming how far
+behind the server is. A cf **older** than its server is the dangerous
+direction — the server speaks a protocol this cf predates — and gets a loud
+OUTDATED warning. Direction is proven by git ancestry in the checkout's
+history, so it is available to source runs whose history contains the
+server's commit; diverged or unorderable pairs (including compiled binaries)
+get the undirected wording. Set `CF_SKIP_VERSION_CHECK=1` to skip the check
+when running mismatched versions on purpose.
 
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use
