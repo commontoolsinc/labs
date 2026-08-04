@@ -498,7 +498,6 @@ Primary files:
 
 - `packages/runner/src/storage/interface.ts`
 - `packages/runner/src/storage/extended-storage-transaction.ts`
-- `packages/runner/src/storage/transaction.ts`
 - `packages/runner/src/storage/v2-transaction.ts`
 
 Tasks:

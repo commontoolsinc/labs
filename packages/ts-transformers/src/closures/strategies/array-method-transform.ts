@@ -202,20 +202,18 @@ function createPatternCallWithParams(
   );
 
   const { checker } = context;
-  const typeRegistry = context.options.state?.typeRegistry;
+  const typeRegistry = context.state.typeRegistry;
   let resultTypeNode: ts.TypeNode | undefined;
 
   if (callback.type) {
     resultTypeNode = callback.type;
-    if (typeRegistry) {
-      const type = getTypeAtLocationWithFallback(
-        callback.type,
-        checker,
-        typeRegistry,
-      );
-      if (type) {
-        typeRegistry.set(callback.type, type);
-      }
+    const type = getTypeAtLocationWithFallback(
+      callback.type,
+      checker,
+      typeRegistry,
+    );
+    if (type) {
+      typeRegistry.set(callback.type, type);
     }
   } else {
     const signature = checker.getSignatureFromDeclaration(callback);
@@ -304,10 +302,8 @@ function createPatternCallWithParams(
     methodCall,
   );
 
-  if (typeRegistry) {
-    const mapResultType = context.checker.getTypeAtLocation(methodCall);
-    registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
-  }
+  const mapResultType = context.checker.getTypeAtLocation(methodCall);
+  registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
 
   return mapWithPatternCall;
 }

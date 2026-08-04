@@ -42,6 +42,9 @@ describe("data-uri-codec", () => {
       expect(hasDataUriScheme("of:xyz")).toBe(false);
       expect(hasDataUriScheme("computed:fid1:xyz")).toBe(false);
       expect(hasDataUriScheme("")).toBe(false);
+      // The scheme has to be at the start and has to end at the colon.
+      expect(hasDataUriScheme("user:data:123")).toBe(false);
+      expect(hasDataUriScheme("data-user:1")).toBe(false);
     });
   });
 

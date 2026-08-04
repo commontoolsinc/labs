@@ -293,6 +293,9 @@ jobs:
           # module, the same as the package test task; without it the global
           # `clock` the converted tests use is undefined. See
           # test/clock-preload.ts.
+          # These permissions mirror the `test` task in
+          # packages/runner/deno.jsonc; a test that needs a new one needs it
+          # in both places, because this shard runs deno test directly.
           ENV=test deno test \
             --no-check \
             --preload=test/clock-preload.ts \
@@ -300,7 +303,7 @@ jobs:
             --allow-env \
             --allow-read \
             --allow-write=/tmp,/var/folders \
-            --allow-run=git \
+            --allow-run=git,deno \
             $TEST_FILES
 
       - name: 🧾 Write coverage report

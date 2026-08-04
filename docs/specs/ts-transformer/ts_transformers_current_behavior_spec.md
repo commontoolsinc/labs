@@ -81,12 +81,19 @@ Opt-out note:
 ### 2.2 Pipeline object and cross-stage state
 
 `CommonFabricTransformerPipeline` (`src/cf-pipeline.ts`) constructs one ordered
-pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
+pipeline from `CFC_TRANSFORMER_STAGES`. Every stage shares:
 
 - a single `diagnosticsCollector: TransformationDiagnostic[]`
 - a single `CrossStageState` instance (`src/core/cross-stage-state.ts`), which
   is the sole owner of cross-transformer communication. It replaced the
   formerly-separate registry fields on `TransformationOptions`.
+
+A stage reaches that instance as `context.state`. `TransformationContext`
+resolves it once in its constructor — taking the caller's `options.state` when
+one is supplied and creating a fresh instance otherwise — and stores the result
+back into its own `options`, so a nested context built from those options joins
+the same run. Every registry a stage reads through `context.state` is therefore
+present; no stage handles a missing one.
 
 `CrossStageState` organizes its registries into three deliberate families
 (mirroring the TypeScript compiler's `NodeLinks` pattern):
@@ -119,7 +126,7 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
 ## 3. Pipeline Order (Normative)
 
-The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
+The authoritative ordering lives in `CFC_TRANSFORMER_STAGES` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
 in this order (24 stages):
 
@@ -2968,7 +2975,7 @@ re-listing it. The enforced sources of truth:
 
 | Spec content | Canonical source | Guard / note |
 | --- | --- | --- |
-| Pipeline stage set + order (§3) | `CFC_TRANSFORMER_STAGE_SPECS` / `CFC_TRANSFORMER_STAGE_NAMES` (`src/cf-pipeline.ts`) | the array literal is the order |
+| Pipeline stage set + order (§3) | `CFC_TRANSFORMER_STAGES` / `CFC_TRANSFORMER_STAGE_NAMES` (`src/cf-pipeline.ts`) | the array literal is the order; the names are the class names |
 | Cross-stage registries (§2.2) | `CrossStageState` (`src/core/cross-stage-state.ts`) | NodeLinks-shaped families |
 | Recognized runtime exports + which are reactive origins (§5, §6.3) | `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY` (`src/core/commonfabric-runtime-registry.ts`) | `test/core/commonfabric-runtime-registry.test.ts` asserts coverage of the runner builder factory |
 | SES self-contained callback boundaries (§6.5) | `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES` (`src/transformers/pattern-context-validation.ts`) | excludes `sqlite-row-label-rule` by design |

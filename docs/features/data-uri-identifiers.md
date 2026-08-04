@@ -176,11 +176,6 @@ narrowly, a foreign media type is simply an ordinary link: a write stores it
 as one, and a read through it reports the media type as the loader's
 `UnsupportedMediaTypeError`.
 
-`Address.isInline(address)` in
-`packages/runner/src/storage/transaction/address.ts` is the broad test applied
-to a memory address; `Chronicle` in the neighbouring `chronicle.ts` uses it to
-route both reads and writes.
-
 As a rule of thumb: the broad test belongs anywhere the question is about
 documents — fetching, syncing, writing, recording a read, stating a commit
 precondition. The narrow test belongs at the point where a payload is about to
@@ -188,13 +183,12 @@ be decoded.
 
 ## `data:` addresses are read-only
 
-Writing to a `data:` address fails with `ReadOnlyAddressError`.
-`writeWithinBranch` in `packages/runner/src/storage/v2-transaction.ts` returns
-that error before doing anything else, and `Chronicle.write` in
-`packages/runner/src/storage/transaction/chronicle.ts` returns the same error
-through `Address.isInline`. Every write on a `data:` address funnels through
-one of those two. There is no way to change what such an identifier denotes:
-a different value is a different identifier.
+Writing to a `data:` address fails with `ReadOnlyAddressError` (defined in
+`packages/runner/src/storage/transaction-errors.ts`). `writeWithinBranch` in
+`packages/runner/src/storage/v2-transaction.ts` returns that error before doing
+anything else, and every write on a `data:` address funnels through it. There
+is no way to change what such an identifier denotes: a different value is a
+different identifier.
 
 ## No document, no sync, no precondition
 

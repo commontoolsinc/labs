@@ -599,6 +599,12 @@ export class SpaceSession {
   #readyOnConnection = true;
   #restoring = false;
   #caughtUpLocalSeq = 0;
+
+  /** Invoked when a restore REPLACES the session (a new session id, or the
+   * same id re-opened without resume): the marker epoch reset, so
+   * marker-keyed client state (parked accepted promotions) must be
+   * reconciled immediately (CT-1927). */
+  onSessionReplaced: (() => void) | undefined;
   // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
   // or a synthetic forward). Subscribers such as runner storage only advance
   // their own caught-up seq from emitted syncs, so a resume that promotes
@@ -1313,6 +1319,12 @@ export class SpaceSession {
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
+      // The marker epoch died with the old session: obligations it staged
+      // are gone, and the fresh session's markers know nothing of the old
+      // localSeqs. Consumers holding marker-keyed state (the runner's
+      // parked accepted promotions, CT-1927) must reconcile now rather
+      // than wait for markers that can never arrive.
+      this.onSessionReplaced?.();
     }
     this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 

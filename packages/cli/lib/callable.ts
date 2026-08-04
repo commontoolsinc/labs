@@ -1,5 +1,12 @@
-import type { CellScope, JSONSchema } from "@commonfabric/api";
-import { encodeJsonPointer } from "@commonfabric/runner";
+import type { CellScope, JSONSchema, Pattern } from "@commonfabric/api";
+import type { PieceManager } from "@commonfabric/piece";
+import {
+  type Cell,
+  encodeJsonPointer,
+  type IExtendedStorageTransaction,
+  type MemorySpace,
+  type NormalizedFullLink,
+} from "@commonfabric/runner";
 import { isInstance } from "@commonfabric/utils/types";
 import {
   localRefTarget,
@@ -23,108 +30,12 @@ export interface CliRuntimeErrorRecord {
   space?: string;
 }
 
-export interface CallableTransactionStatus {
-  status: string;
-  error?: Error;
-}
-
-export interface CallableTransactionLike {
-  status?: () => CallableTransactionStatus;
-  commit?: () => Promise<unknown>;
-  /** The handling's receipt address (runner: tx.handlingReceiptLink) — on
-   * success this handling's outcome, on a receipt-exists collision the
-   * winner's original (verb contract WS-D). */
-  handlingReceiptLink?: {
-    id: string;
-    space: string;
-    scope?: CellScope;
-    path?: readonly (string | number)[];
-  };
-}
-
-export interface CallableCellLike {
-  schema?: JSONSchema;
-  get: () => unknown;
-  getRaw?: () => unknown;
-  asSchemaFromLinks?: () => CallableCellLike;
-  key: (segment: string) => CallableCellLike;
-  pull?: () => Promise<unknown>;
-  getAsNormalizedFullLink?: () => {
-    scope?: CellScope;
-    id?: string;
-    space?: string;
-    path?: readonly (string | number)[];
-  };
-  /** Resolve through stored links to the concrete backing cell (runner:
-   * Cell.resolveAsCell). `getAsNormalizedFullLink` alone reports the cell's
-   * own address — receipt id plus path — even where the stored value is a
-   * link into another document; resolving first is what tells the two
-   * apart. */
-  resolveAsCell?: () => CallableCellLike;
-  send?: (
-    value: unknown,
-    onCommit?: (tx: CallableTransactionLike) => void,
-    sendOptions?: { eventId?: string },
-  ) => void;
-}
-
-export interface CallablePieceIoLike {
-  getCell: () => Promise<CallableCellLike>;
-  set: (value: unknown, path?: (string | number)[]) => Promise<void>;
-}
-
-export interface CallableRuntimeLike {
-  [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[];
-  storageManager?: { synced: () => Promise<void> };
-  idle: () => Promise<void>;
-  // Drain to full quiescence: scheduler idle, storage synced, and every
-  // in-flight async builtin (an LLM call, a fetch) finished. This is how a tool
-  // whose result arrives asynchronously is awaited without polling or a
-  // deadline. Optional so lightweight test doubles can omit it.
-  settled?: () => Promise<void>;
-  edit: () => CallableTransactionLike;
-  getCell: (
-    space: string,
-    id: string,
-    schema: JSONSchema | undefined,
-    tx: CallableTransactionLike,
-    scope?: CellScope,
-  ) => CallableCellLike;
-  run: (
-    tx: CallableTransactionLike,
-    pattern: unknown,
-    input: unknown,
-    resultCell: CallableCellLike,
-  ) => { sink?: (fn: (value: unknown) => void) => (() => void) | void } | void;
-  prepareTxForCommit?: (tx: CallableTransactionLike) => void;
-  /** Open a cell at a normalized link — the receipt readback path. */
-  getCellFromLink?: (
-    link: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
-    schema?: JSONSchema,
-    tx?: CallableTransactionLike,
-  ) => CallableCellLike;
-}
-
-export interface CallableManagerLike {
-  runtime: CallableRuntimeLike;
-  synced: () => Promise<void>;
-  getSpace?: () => string;
-}
-
-export interface CallablePieceLike {
-  input: CallablePieceIoLike;
-  result: CallablePieceIoLike;
-  getCell?: () => { pull?: () => Promise<unknown> };
-}
-
 export interface CallableResolution {
-  callableCell: CallableCellLike;
+  callableCell: Cell<any>;
   callableKind: CallableKind;
   cellKey: string;
-  cellProp: "input" | "result";
-  manager: CallableManagerLike;
-  piece: CallablePieceLike;
-  space: string;
+  manager: PieceManager;
+  space: MemorySpace;
 }
 
 /** The phases a handler invocation passes through, reported on early exit so
@@ -217,24 +128,23 @@ export interface ExecutedCallable {
   outputText?: string;
   /** Present for handler sends carrying a caller-supplied invocation id. */
   invocation?: InvocationOutcome;
-  /** The tool result cell's address, when the runtime exposes it — the handle
-   * a caller can revisit later instead of re-running the tool (verb contract
-   * Part 2, docs/plans/pattern-verb-contract.md). Handlers gain their
-   * equivalent with the invocation protocol's caller-supplied ids. */
+  /** The tool result cell's address — the handle a caller can revisit later
+   * instead of re-running the tool (verb contract Part 2,
+   * docs/plans/pattern-verb-contract.md). Handlers gain their equivalent with
+   * the invocation protocol's caller-supplied ids. */
   resultRef?: CallableResultRef;
-}
-
-interface CallablePatternLike extends Record<string, unknown> {
-  argumentSchema?: JSONSchema;
-  resultSchema?: JSONSchema;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function asCallablePattern(value: unknown): CallablePatternLike | undefined {
+/** Read a tool callable's stored `pattern` slot as the pattern the runner
+ * will run. Only the record shape is checked here; a record missing the
+ * schemas reaches `runtime.run` the same way any malformed stored pattern
+ * does. */
+function asCallablePattern(value: unknown): Pattern | undefined {
   if (!isRecord(value)) return undefined;
-  return value as CallablePatternLike;
+  return value as Pattern;
 }
 
 function asExtraParams(value: unknown): Record<string, unknown> {
@@ -464,28 +374,28 @@ function mergeToolInput(
 
 export function detectCallableKind(
   callableValue: unknown,
-  callableCell: CallableCellLike,
+  callableCell: Cell<any>,
 ): CallableKind | null {
   let resolvedValue = callableValue;
   try {
-    resolvedValue = callableCell?.getRaw?.() ?? callableCell?.get?.() ??
+    resolvedValue = callableCell.getRaw() ?? callableCell.get() ??
       callableValue;
   } catch {
     resolvedValue = callableValue;
   }
 
   const callableKind =
-    classifyCallableEntry(callableValue, callableCell?.schema) ??
-      classifyCallableEntry(resolvedValue, callableCell?.schema) ??
-      classifyCallableEntry(callableCell, callableCell?.schema);
+    classifyCallableEntry(callableValue, callableCell.schema) ??
+      classifyCallableEntry(resolvedValue, callableCell.schema) ??
+      classifyCallableEntry(callableCell, callableCell.schema);
   if (callableKind) {
     return callableKind;
   }
 
   try {
-    const pattern = callableCell.key("pattern").getRaw?.() ??
-      callableCell.key("pattern").get?.();
-    const extraParams = callableCell.key("extraParams").get?.();
+    const pattern = callableCell.key("pattern").getRaw() ??
+      callableCell.key("pattern").get();
+    const extraParams = callableCell.key("extraParams").get();
     if (pattern !== undefined && extraParams !== undefined) {
       return "tool";
     }
@@ -497,7 +407,7 @@ export function detectCallableKind(
 }
 
 export function callableCommandSpec(
-  callableCell: CallableCellLike,
+  callableCell: Cell<any>,
   callableKind: CallableKind,
 ): ExecCommandSpec {
   if (callableKind === "handler") {
@@ -509,11 +419,11 @@ export function callableCommandSpec(
   }
 
   const pattern = asCallablePattern(
-    callableCell.key("pattern").getRaw?.() ??
+    callableCell.key("pattern").getRaw() ??
       callableCell.key("pattern").get(),
   );
   const extraParams = asExtraParams(
-    callableCell.key("extraParams").get?.(),
+    callableCell.key("extraParams").get(),
   );
 
   return {
@@ -528,43 +438,28 @@ export function callableCommandSpec(
 }
 
 /** Normalize a receipt/backing link into the `links` dictionary's value
- * shape. Absent scope on a normalized link means the space scope (the same
- * rule `resultRef` applies); the path rides along only when the link points
- * below the backing document's root. */
-function toInvocationResultLink(link: {
-  id: string;
-  space: string;
-  scope?: CellScope;
-  path?: readonly (string | number)[];
-}): InvocationResultLink {
+ * shape. The path rides along only when the link points below the backing
+ * document's root. */
+function toInvocationResultLink(
+  link: NormalizedFullLink,
+): InvocationResultLink {
   return {
     space: link.space,
     id: link.id,
-    scope: link.scope ?? "space",
-    ...(link.path !== undefined && link.path.length > 0
-      ? { path: [...link.path] }
-      : {}),
+    scope: link.scope,
+    ...(link.path.length > 0 ? { path: [...link.path] } : {}),
   };
 }
 
 /** Two normalized links address the same backing document iff id, space,
- * and scope (absent = space) all agree; a differing path alone is just a
- * position inside the same doc, which needs no link of its own. */
+ * and scope all agree; a differing path alone is just a position inside the
+ * same doc, which needs no link of its own. */
 function sameBackingDocument(
-  a: { id: string; space: string; scope?: CellScope },
-  b: { id: string; space: string; scope?: CellScope },
+  a: NormalizedFullLink,
+  b: NormalizedFullLink,
 ): boolean {
-  return a.id === b.id && a.space === b.space &&
-    (a.scope ?? "space") === (b.scope ?? "space");
+  return a.id === b.id && a.space === b.space && a.scope === b.scope;
 }
-
-/** The shape a backing address takes on its way into the dictionary. */
-type BackingLink = {
-  id: string;
-  space: string;
-  scope?: CellScope;
-  path?: readonly (string | number)[];
-};
 
 /**
  * Walk a settled result's backing links into the `{ "/path": <link> }`
@@ -600,26 +495,14 @@ type BackingLink = {
  * owns verbs is the case that proves the point — the stream on that piece is
  * a live object whose `runtime`/`scheduler` graph refers back to itself, and
  * walking into it exhausted the stack.
- *
- * A receipt cell that cannot resolve links (no `resolveAsCell` /
- * `getAsNormalizedFullLink`) degrades to the receipt-root entry alone rather
- * than guessing.
  */
 export function collectInvocationResultLinks(
-  receiptLink: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
-  receiptCell: CallableCellLike | undefined,
+  receiptLink: NormalizedFullLink,
+  receiptCell: Cell<any>,
   value: unknown,
 ): Record<string, InvocationResultLink> {
-  if (receiptCell === undefined) {
-    return { "/": toInvocationResultLink(receiptLink) };
-  }
-
-  const resolvedRoot = receiptCell.resolveAsCell?.() ?? receiptCell;
-  const rootLink = resolvedRoot.getAsNormalizedFullLink?.();
-  const rootBacking: BackingLink =
-    rootLink?.id !== undefined && rootLink.space !== undefined
-      ? rootLink as BackingLink
-      : receiptLink;
+  const resolvedRoot = receiptCell.resolveAsCell();
+  const rootBacking = resolvedRoot.getAsNormalizedFullLink();
   const links: Record<string, InvocationResultLink> = {
     "/": toInvocationResultLink(rootBacking),
   };
@@ -628,10 +511,10 @@ export function collectInvocationResultLinks(
   }
 
   const walk = (
-    cell: CallableCellLike,
+    cell: Cell<any>,
     val: unknown,
     pathSegments: string[],
-    base: { id: string; space: string; scope?: CellScope },
+    base: NormalizedFullLink,
   ): void => {
     // A non-plain object is not part of the result's JSON: it is a live
     // runtime object the readback surfaced (a stream on a returned piece,
@@ -645,23 +528,20 @@ export function collectInvocationResultLinks(
       : Object.keys(val);
     for (const key of keys) {
       const childValue = (val as Record<string, unknown>)[key];
-      let child: CallableCellLike;
+      let child: Cell<any>;
       try {
         child = cell.key(key);
       } catch {
         continue; // Not addressable as a cell — nothing to annotate.
       }
-      const resolved = child.resolveAsCell?.() ?? child;
-      const childLink = resolved.getAsNormalizedFullLink?.();
+      const resolved = child.resolveAsCell();
+      const childLink = resolved.getAsNormalizedFullLink();
       const segments = [...pathSegments, key];
-      if (
-        childLink?.id !== undefined && childLink.space !== undefined &&
-        !sameBackingDocument(childLink as BackingLink, base)
-      ) {
+      if (!sameBackingDocument(childLink, base)) {
         links[encodeJsonPointer(["", ...segments])] = toInvocationResultLink(
-          childLink as BackingLink,
+          childLink,
         );
-        walk(resolved, childValue, segments, childLink as BackingLink);
+        walk(resolved, childValue, segments, childLink);
       } else {
         // Same backing document — no entry — but descendants are still read
         // from the RESOLVED cell: a same-doc link can redirect to another
@@ -681,133 +561,110 @@ export async function executeResolvedCallable(
   deps: CallableExecutionDeps = {},
 ): Promise<ExecutedCallable> {
   if (resolved.callableKind === "handler") {
-    const send = resolved.callableCell.send;
-    if (typeof send === "function") {
-      // Before anything is dispatched, and so before the invocation id can be
-      // spent on a handling that would run with no event. An absent payload
-      // is normalized to `{}` against an object schema (D5), so what goes out
-      // is what the gate judged.
-      const dispatchInput = assertVerbInputSatisfiesSchema(
-        resolved.cellKey,
-        input,
-        resolved.callableCell.schema,
-      );
-      const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
-      const errorCountBefore = runtimeErrors.length;
-      const invocationId = deps.invocationId;
-      if (deps.skipReadback && invocationId === undefined) {
-        // Refused before dispatch: skipping the readback is only sound when
-        // a later same-id call can fetch the outcome, and that needs the id.
-        throw new Error("--no-wait requires an invocation id");
-      }
-      deps.onPhase?.("dispatched");
-      const tx = await new Promise<CallableTransactionLike>(
-        (resolve, reject) => {
-          try {
-            send.call(
-              resolved.callableCell,
-              dispatchInput,
-              resolve,
-              invocationId !== undefined
-                ? { eventId: invocationId }
-                : undefined,
-            );
-          } catch (error) {
-            reject(error);
+    // Before anything is dispatched, and so before the invocation id can be
+    // spent on a handling that would run with no event. An absent payload
+    // is normalized to `{}` against an object schema (D5), so what goes out
+    // is what the gate judged.
+    const dispatchInput = assertVerbInputSatisfiesSchema(
+      resolved.cellKey,
+      input,
+      resolved.callableCell.schema,
+    );
+    const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
+    const errorCountBefore = runtimeErrors.length;
+    const invocationId = deps.invocationId;
+    if (deps.skipReadback && invocationId === undefined) {
+      // Refused before dispatch: skipping the readback is only sound when
+      // a later same-id call can fetch the outcome, and that needs the id.
+      throw new Error("--no-wait requires an invocation id");
+    }
+    deps.onPhase?.("dispatched");
+    const tx = await new Promise<IExtendedStorageTransaction>(
+      (resolve, reject) => {
+        try {
+          if (invocationId !== undefined) {
+            resolved.callableCell.send(dispatchInput, resolve, {
+              eventId: invocationId,
+            });
+          } else {
+            resolved.callableCell.send(dispatchInput, resolve);
           }
-        },
+        } catch (error) {
+          reject(error);
+        }
+      },
+    );
+    // Acknowledgment is transaction-local (verb contract, Settlement): the
+    // commit callback above fires on THIS handling's final commit. Awaiting
+    // runtime.idle()/manager.synced() here instead would hold an
+    // already-committed write hostage to every derived recomputation it
+    // triggered elsewhere in the graph.
+    deps.onPhase?.("committed");
+
+    const txStatus = tx.status();
+    const deduplicated = txStatus.status === "error" &&
+      "precondition" in txStatus.error &&
+      txStatus.error.precondition === "receipt-exists";
+    if (txStatus.status === "error" && !deduplicated) {
+      const latestRuntimeError = runtimeErrors.slice(errorCountBefore).at(-1)
+        ?.message;
+      throw new Error(
+        `Handler "${resolved.cellKey}" failed: ${
+          latestRuntimeError ?? errorMessage(txStatus.error)
+        }`,
       );
-      // Acknowledgment is transaction-local (verb contract, Settlement): the
-      // commit callback above fires on THIS handling's final commit. Awaiting
-      // runtime.idle()/manager.synced() here instead would hold an
-      // already-committed write hostage to every derived recomputation it
-      // triggered elsewhere in the graph.
-      deps.onPhase?.("committed");
+    }
 
-      const txStatus = tx?.status?.();
-      const deduplicated = txStatus?.status === "error" &&
-        (txStatus.error as { precondition?: string } | undefined)
-            ?.precondition === "receipt-exists";
-      if (txStatus?.status === "error" && !deduplicated) {
-        const latestRuntimeError = runtimeErrors.slice(errorCountBefore).at(-1)
-          ?.message;
-        throw new Error(
-          `Handler "${resolved.cellKey}" failed: ${
-            latestRuntimeError ?? errorMessage(txStatus.error)
-          }`,
-        );
-      }
+    if (invocationId === undefined) return {};
 
-      if (invocationId === undefined) return {};
-
-      if (deps.skipReadback) {
-        // --no-wait's exit point: the commit is acknowledged, so the
-        // handling — and on a collision, the original one — is durable on
-        // the server and survives this process. Only the readback
-        // (sync + read of the outcome) is skipped; a later same-id call
-        // retrieves it by deduplicating against the create-only receipt.
-        return {
-          invocation: {
-            id: invocationId,
-            status: "committed",
-            ...(deduplicated ? { deduplicated: true } : {}),
-          },
-        };
-      }
-
-      // Read the handling's outcome back off its receipt. On a receipt-exists
-      // collision this is the ORIGINAL handling's receipt — same id, same
-      // outcome, no re-execution — so a retry settles as a success.
-      deps.onPhase?.("readback");
-      let result: unknown;
-      let links: Record<string, InvocationResultLink> | undefined;
-      const link = tx?.handlingReceiptLink;
-      const getCellFromLink = resolved.manager.runtime.getCellFromLink;
-      if (link && typeof getCellFromLink === "function") {
-        const receipt = getCellFromLink.call(resolved.manager.runtime, link);
-        const value = typeof receipt.pull === "function"
-          ? await receipt.pull()
-          : receipt.get();
-        // A value-less verb's receipt is an empty record — existence-only.
-        if (
-          value !== undefined &&
-          !(isRecord(value) && Object.keys(value).length === 0)
-        ) {
-          result = value;
-        }
-        if (deps.showLinks) {
-          // After readback, off the same receipt the result came from: the
-          // links annotate exactly the value the caller is holding.
-          links = collectInvocationResultLinks(link, receipt, result);
-        }
-      }
-
+    if (deps.skipReadback) {
+      // --no-wait's exit point: the commit is acknowledged, so the
+      // handling — and on a collision, the original one — is durable on
+      // the server and survives this process. Only the readback
+      // (sync + read of the outcome) is skipped; a later same-id call
+      // retrieves it by deduplicating against the create-only receipt.
       return {
         invocation: {
           id: invocationId,
-          status: "settled",
+          status: "committed",
           ...(deduplicated ? { deduplicated: true } : {}),
-          ...(result !== undefined ? { result } : {}),
-          ...(links !== undefined ? { links } : {}),
         },
       };
     }
 
-    if (deps.skipReadback) {
-      // This handler dispatches through a plain data write, outside the
-      // invocation receipt protocol — there is no per-handling commit
-      // acknowledgement to wait for and no receipt a later same-id call
-      // could read the outcome back from.
-      throw new Error(
-        `--no-wait is not available for "${resolved.cellKey}": ` +
-          "this callable dispatches without an invocation receipt",
-      );
+    // Read the handling's outcome back off its receipt. On a receipt-exists
+    // collision this is the ORIGINAL handling's receipt — same id, same
+    // outcome, no re-execution — so a retry settles as a success.
+    deps.onPhase?.("readback");
+    let result: unknown;
+    let links: Record<string, InvocationResultLink> | undefined;
+    const link = tx.handlingReceiptLink;
+    if (link) {
+      const receipt = resolved.manager.runtime.getCellFromLink<any>(link);
+      const value = await receipt.pull();
+      // A value-less verb's receipt is an empty record — existence-only.
+      if (
+        value !== undefined &&
+        !(isRecord(value) && Object.keys(value).length === 0)
+      ) {
+        result = value;
+      }
+      if (deps.showLinks) {
+        // After readback, off the same receipt the result came from: the
+        // links annotate exactly the value the caller is holding.
+        links = collectInvocationResultLinks(link, receipt, result);
+      }
     }
-    await resolved.piece[resolved.cellProp].set(input, [resolved.cellKey]);
-    await resolved.manager.runtime.idle();
-    await resolved.manager.synced();
 
-    return {};
+    return {
+      invocation: {
+        id: invocationId,
+        status: "settled",
+        ...(deduplicated ? { deduplicated: true } : {}),
+        ...(result !== undefined ? { result } : {}),
+        ...(links !== undefined ? { links } : {}),
+      },
+    };
   }
 
   if (deps.skipReadback) {
@@ -821,18 +678,18 @@ export async function executeResolvedCallable(
   }
 
   const pattern = asCallablePattern(
-    resolved.callableCell.key("pattern").getRaw?.() ??
+    resolved.callableCell.key("pattern").getRaw() ??
       resolved.callableCell.key("pattern").get(),
   );
   const extraParams = asExtraParams(
-    resolved.callableCell.key("extraParams").get?.(),
+    resolved.callableCell.key("extraParams").get(),
   );
   const runtime = resolved.manager.runtime;
   const runtimeErrors = runtimeErrorLog(runtime);
   const errorCountBefore = runtimeErrors.length;
   const tx = runtime.edit();
-  const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
-  const resultCell = runtime.getCell(
+  const resultScope = resolved.callableCell.getAsNormalizedFullLink().scope;
+  const resultCell = runtime.getCell<unknown>(
     resolved.space,
     deps.uuid?.() ?? crypto.randomUUID(),
     pattern?.resultSchema,
@@ -850,22 +707,17 @@ export async function executeResolvedCallable(
   // change, including the server-pushed writeback of an async tool's result.
   let sinkValue: unknown;
   let hasSinkValue = false;
-  const cancelSink = typeof running?.sink === "function"
-    ? running.sink((value) => {
-      if (value !== undefined) {
-        sinkValue = value;
-        hasSinkValue = true;
-      }
-    })
-    : undefined;
+  const cancelSink = running.sink((value) => {
+    if (value !== undefined) {
+      sinkValue = value;
+      hasSinkValue = true;
+    }
+  });
 
   let outputValue: unknown;
   try {
     await runtime.idle();
-    runtime.prepareTxForCommit?.(tx);
-    if (typeof tx.commit !== "function") {
-      throw new Error("Callable runtime transaction is not committable");
-    }
+    runtime.prepareTxForCommit(tx);
     await tx.commit();
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
@@ -874,22 +726,14 @@ export async function executeResolvedCallable(
     // async tool's LLM/fetch call is awaited to completion here, with no poll
     // interval under it and no deadline over it. `settled()` normalizes a failed
     // builtin to "settled", so a broken tool converges here rather than hanging.
-    if (typeof runtime.settled === "function") {
-      await runtime.settled();
-    } else {
-      await runtime.idle();
-      await resolved.manager.synced();
-      await runtime.storageManager?.synced();
-    }
+    await runtime.settled();
 
     if (hasSinkValue) {
       outputValue = sinkValue;
     } else {
       // Fully settled with nothing on the sink: read once (a server-pushed value
       // can land without re-triggering the local effect).
-      outputValue = typeof resultCell.pull === "function"
-        ? await resultCell.pull()
-        : resultCell.get();
+      outputValue = await resultCell.pull();
       if (outputValue === undefined) {
         // The tool ran to a fully settled state without producing a result.
         // Keep the caller's contract of a defined result or an explicit
@@ -905,25 +749,20 @@ export async function executeResolvedCallable(
       }
     }
   } finally {
-    cancelSink?.();
+    cancelSink();
   }
 
-  // The result cell's durable address rides along when the runtime exposes
-  // it: today the cell is otherwise unlinked — reachable by nobody once this
-  // process exits (a named defect in the verb-contract design). Handing the
-  // address back is the smallest honest handle.
-  const resultLink = resultCell.getAsNormalizedFullLink?.();
+  // The result cell's durable address rides along: today the cell is
+  // otherwise unlinked — reachable by nobody once this process exits (a named
+  // defect in the verb-contract design). Handing the address back is the
+  // smallest honest handle.
+  const resultLink = resultCell.getAsNormalizedFullLink();
   return {
     outputText: JSON.stringify(outputValue, null, 2),
-    ...(resultLink?.id && resultLink?.space
-      ? {
-        resultRef: {
-          space: resultLink.space,
-          id: resultLink.id,
-          // Absent scope on a normalized link means the space scope.
-          scope: resultLink.scope ?? "space",
-        },
-      }
-      : {}),
+    resultRef: {
+      space: resultLink.space,
+      id: resultLink.id,
+      scope: resultLink.scope,
+    },
   };
 }

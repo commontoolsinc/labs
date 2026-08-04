@@ -2145,6 +2145,19 @@ class SpaceReplica implements ISpaceReplica {
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
   #caughtUpLocalSeq = 0;
+  // Accepted verdicts PARKED until marker coverage (CT-1927): the server
+  // stages a `caughtUpLocalSeq` obligation for every accept, and the client
+  // holds the commit's promotion — pending overlay to confirmed mirror —
+  // until a frame's marker covers it, so promotion extrapolates over a base
+  // that reflects the foreign novelty the accept was applied on top of
+  // instead of minting a confirmed state from a stale mirror. Verdicts
+  // return inline (the fan-out stays batched); only their state application
+  // waits. Applied in ascending localSeq order by noteCaughtUpLocalSeq;
+  // cleared on reset (the re-pull re-derives the durable state).
+  #parkedAccepts = new Map<number, {
+    operations: NativeCommitOperation[];
+    applied: AppliedCommit;
+  }>();
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -2534,6 +2547,10 @@ class SpaceReplica implements ISpaceReplica {
   private resetConflictAdmissionState(): void {
     this.#caughtUpLocalSeq = 0;
     this.#staleFloor.clear();
+    // Parked accepts die with the marker space: on reset the re-pull
+    // re-derives durable state (which contains the accepted writes), and on
+    // close there is nothing left to promote into.
+    this.#parkedAccepts.clear();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -2541,6 +2558,19 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
     this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
+    // Apply parked accepts the marker now covers, ascending, BEFORE waking
+    // marker waiters: gated code (readyToRetry retries) resumes against a
+    // replica whose decided promotions are already settled.
+    if (this.#parkedAccepts.size > 0) {
+      const due = [...this.#parkedAccepts.keys()]
+        .filter((parked) => parked <= this.#caughtUpLocalSeq)
+        .sort((left, right) => left - right);
+      for (const parked of due) {
+        const entry = this.#parkedAccepts.get(parked)!;
+        this.#parkedAccepts.delete(parked);
+        this.confirmPending(parked, entry.operations, entry.applied);
+      }
+    }
     const ready: PromiseWithResolvers<void>[] = [];
     this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
       (waiter) => {
@@ -2889,6 +2919,7 @@ class SpaceReplica implements ISpaceReplica {
             this.#updatePromises.delete(updates);
             if (this.#subscribedWatchView === view) {
               this.#subscribedWatchView = null;
+              this.applyParkedAcceptsNow();
             }
           });
         this.#updatePromises.add(updates);
@@ -3593,7 +3624,7 @@ class SpaceReplica implements ISpaceReplica {
             wireCommit,
             () => this.markRouteWriteIssued(routeSources),
           );
-          this.confirmPending(localSeq, operations, applied);
+          this.settleAccept(localSeq, operations, applied);
           telemetry?.submit({
             type: "storage.push.complete",
             id: pushOpId,
@@ -3630,7 +3661,7 @@ class SpaceReplica implements ISpaceReplica {
             outcome.rejection,
           );
         }
-        this.confirmPending(localSeq, operations, outcome.applied);
+        this.settleAccept(localSeq, operations, outcome.applied);
         telemetry?.submit({
           type: "storage.push.complete",
           id: pushOpId,
@@ -4046,6 +4077,14 @@ class SpaceReplica implements ISpaceReplica {
       this.#watchedIds.delete(docKey(id, remove.scope));
     }
 
+    // Parked accepts apply BEFORE the differential compare: when the frame
+    // authoritatively covers a doc the session itself wrote (mixed
+    // provenance), the integrated base already CONTAINS the parked write,
+    // and the notification must reflect the post-promotion view — not a
+    // transient double-apply of a still-standing overlay that the parked
+    // application then silently removes.
+    this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
+
     if (before !== undefined) {
       const changes = before.compare(this);
       if (type === "pull" || [...changes].length > 0) {
@@ -4077,7 +4116,6 @@ class SpaceReplica implements ISpaceReplica {
           this.schedulerHasPendingWriteOverlapping(addresses),
       } as StorageNotification);
     }
-    this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
   }
 
   // Mark every id this conflicted commit touched (reads + writes) stale until
@@ -4314,6 +4352,48 @@ class SpaceReplica implements ISpaceReplica {
     record.pending.push(pendingVersion(localSeq, pending));
   }
 
+  // CT-1927 client half: an accept's promotion waits for marker coverage.
+  // Immediate application remains for markers already observed (the frame
+  // can outrun the verdict handler on the same socket) and for servers that
+  // predate per-verdict markers (verdictCatchUpMarkers absent: an older
+  // server stamps markers only for conflicts, so parking would hang).
+  private settleAccept(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    applied: AppliedCommit,
+  ): void {
+    // Parking requires a live marker channel: a server that stages
+    // per-verdict markers AND an active sync consumer to deliver them. With
+    // no subscribed watch view, no frames arrive at all — there is no
+    // novelty stream to order the promotion against, and verdict-time
+    // extrapolation is exactly as current as this replica can be.
+    const parkable =
+      this.#sessionClient?.serverFlags?.verdictCatchUpMarkers === true &&
+      this.#subscribedWatchView !== null;
+    if (!parkable || this.#caughtUpLocalSeq >= localSeq) {
+      this.confirmPending(localSeq, operations, applied);
+      return;
+    }
+    this.#parkedAccepts.set(localSeq, { operations, applied });
+  }
+
+  // The marker channel died (the subscribed view closed): apply everything
+  // parked immediately — the legacy verdict-time semantics — so promotions
+  // never wait on frames that can no longer arrive.
+  private applyParkedAcceptsNow(): void {
+    if (this.#parkedAccepts.size === 0) {
+      return;
+    }
+    const due = [...this.#parkedAccepts.keys()].sort((left, right) =>
+      left - right
+    );
+    for (const parked of due) {
+      const entry = this.#parkedAccepts.get(parked)!;
+      this.#parkedAccepts.delete(parked);
+      this.confirmPending(parked, entry.operations, entry.applied);
+    }
+  }
+
   private confirmPending(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -4531,6 +4611,15 @@ class SpaceReplica implements ISpaceReplica {
           }
           this.#sessionClient = resolved.client;
           this.#sessionSession = resolved.session;
+          // Session replacement resets the marker epoch: markers for the
+          // parked accepts' localSeqs can never arrive from the fresh
+          // session, so apply them immediately (the same rule as consumer
+          // teardown). Promotion consumes the pending overlays, so the
+          // authoritative reinstall sync that follows replaces — never
+          // double-applies — their contribution.
+          resolved.session.onSessionReplaced = () => {
+            this.applyParkedAcceptsNow();
+          };
           return resolved;
         },
       ).catch((error) => {

@@ -958,8 +958,8 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   commit is durable on the server, and a later same-id call deduplicates
   against the create-only receipt and returns the original outcome, so the
   readback's confirmation can be fetched at any time. Handler sends only: a
-  tool's result is delivered by this process, and the receipt-less
-  set-fallback dispatch leaves nothing to read back — both refuse the flag.
+  tool's result is delivered by this process rather than read back from a
+  receipt, so a tool run refuses the flag.
   `--wait <seconds>` is a caller-chosen patience bound on the default wait,
   not a correctness timeout: one clearable deadline racing the outermost
   await (no polling, no bound anywhere inside the settlement path), and on

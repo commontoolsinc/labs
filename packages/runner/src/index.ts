@@ -32,7 +32,7 @@ export type {
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
-export type { NormalizedLink } from "./link-types.ts";
+export type { NormalizedFullLink, NormalizedLink } from "./link-types.ts";
 export { encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export {

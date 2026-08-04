@@ -22,13 +22,10 @@ import type {
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
-  type Assertion,
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
   type DID,
-  type Fact,
-  type Invariant as IClaim,
   type MemorySpace,
   type QueryError as IQueryError,
   type Result,
@@ -65,19 +62,7 @@ import type {
 } from "../cfc/mod.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 
-export type {
-  Assertion,
-  DID,
-  Fact,
-  IClaim,
-  MediaType,
-  MemorySpace,
-  Result,
-  Signer,
-  State,
-  Unit,
-  URI,
-};
+export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
 
 /**
@@ -918,13 +903,42 @@ export interface IStorageTransaction {
   status(): StorageTransactionStatus;
 
   /**
-   * Helper that is the same as `reader().read()` but more convenient, as it
-   * combines error capturing in one call.
-   *
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the transaction invariants. If value was written in read memory
    * address in this transaction read will return value that was written as
    * opposed to value stored.
+   *
+   * Read will fail with `InactiveTransactionError` if transaction is no longer
+   * active.
+   *
+   * A slot that does not exist reads as a successful result holding
+   * `undefined`. Reading *through* something that cannot hold the rest of the
+   * path is an error instead: `INotFoundError` when an intermediate is absent,
+   * `ITypeMismatchError` when one is a primitive. The read is recorded either
+   * way, so the assumption about non-existence is upheld at commit.
+   *
+   * A document that does not exist at all is the one case where a first path
+   * segment already counts as reading through something absent: the root
+   * (`path: []`) reads as `undefined`, while any deeper path fails with
+   * `INotFoundError` naming the document.
+   *
+   * ```ts
+   *  const w = tx.write({ space, type, id, path: [] }, {
+   *    title: "Hello world",
+   *    content: [
+   *       { text: "Beautiful day", format: "bold" }
+   *    ]
+   *  })
+   *  assert(w.ok)
+   *
+   *  assert(tx.read({ space, type, id, path: ['title'] }).ok?.value === "Hello world")
+   *  // A missing slot is a successful read of `undefined`
+   *  assert(tx.read({ space, type, id, path: ['author'] }).ok?.value === undefined)
+   *  // Reaching through the missing `author` is not
+   *  assert(tx.read({ space, type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  // An array's `length` reads as its length
+   *  assert(tx.read({ space, type, id, path: ['content', 'length'] }).ok?.value === 1)
+   * ```
    *
    * @param address - Memory address to read from.
    * @param options - Optional read options including metadata
@@ -948,17 +962,6 @@ export interface IStorageTransaction {
   ): Result<Unit, ReadError>;
 
   /**
-   * Creates a memory space writer for this transaction. Fails if transaction is
-   * no longer in progress or if writer for the different space was already open
-   * on this transaction. Requesting a writer for the same memory space will
-   * return same writer instance.
-   */
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError>;
-
-  /**
-   * Helper that is the same as `writer().write()` but more convenient, as it
-   * combines error capturing in one call.
-   *
    * Writes a value into a storage at a given address & captures it in the
    * transaction invariants.
    *
@@ -980,15 +983,6 @@ export interface IStorageTransaction {
   writeBatch?(
     writes: Iterable<ITransactionWriteRequest>,
   ): Result<Unit, WriterError | WriteError>;
-
-  /**
-   * Creates a memory space reader for inside this transaction. Fails if
-   * transaction is no longer in progress. Requesting a reader for the same
-   * memory space will return same reader instance.
-   */
-  reader(
-    space: MemorySpace,
-  ): Result<ITransactionReader, ReaderError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
@@ -1029,8 +1023,7 @@ export interface IStorageTransaction {
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
-export interface IExtendedStorageTransaction
-  extends Omit<IStorageTransaction, "reader" | "writer"> {
+export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
 
   /**
@@ -1337,19 +1330,27 @@ export interface IExtendedStorageTransaction
   hasPendingPostCommitEffects(): boolean;
 
   /**
-   * Add a callback to be called when the transaction commit completes.
-   * The callback receives the transaction as a parameter and is called
-   * regardless of whether the commit succeeded or failed.
+   * Add a callback to be called when the transaction settles. The callback
+   * receives the transaction as a parameter and is called regardless of
+   * whether the commit succeeded or failed. `abort()` settles the transaction
+   * too, and delivers a `StorageTransactionAborted` error to the callback: the
+   * writes it staged are discarded either way, so a callback that compensates
+   * a failed commit describes the rollback an abort performs as well.
    *
    * Internal-only hook. Callbacks may run after failed commits and therefore
    * must not perform external side effects or release external requests. Use
    * the CFC post-commit outbox for effectful work that should happen only after
    * a successful commit.
    *
-   * Note: Callbacks are called synchronously after commit completes.
+   * A callback that undoes in-memory state must check that the state it is
+   * about to undo is still the state this transaction established. Another
+   * transaction can reach the same deterministic address and take ownership
+   * before this one settles.
+   *
+   * Note: Callbacks are called synchronously after the transaction settles.
    * If a callback throws, the error is logged but doesn't affect other callbacks.
    *
-   * @param callback - Function to call after commit
+   * @param callback - Function to call when the transaction settles
    */
   addCommitCallback(
     callback: (
@@ -1483,62 +1484,6 @@ export interface IExtendedStorageTransaction
   };
 }
 
-export interface ITransactionReader {
-  did(): MemorySpace;
-  /**
-   * Reads a value from a (local) memory address and captures corresponding
-   * `Read` in the the transaction invariants. If value was written in read
-   * memory address in this transaction read will return value that was written
-   * as opposed to value stored.
-   *
-   * Read will fail with `InactiveTransactionError` if transaction is no longer
-   * active.
-   *
-   * Read will fail with `INotFoundError` when reading inside a memory address
-   * that does not exist in local replica. The `Read` invariant is still
-   * captured however to ensure that assumption about non existence is upheld.
-   *
-   * ```ts
-   *  const w = tx.write({ type, id, path: [] }, {
-   *    title: "Hello world",
-   *    content: [
-   *       { text: "Beautiful day", format: "bold" }
-   *    ]
-   *  })
-   *  assert(w.ok)
-   *
-   *  assert(tx.read({ type, id, path: ['author'] }).ok === undefined)
-   *  assert(tx.read({ type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
-   *  // JS specific getters are not supported
-   *  assert(tx.read({ type, id, path: ['content', 'length'] }).ok?.value === undefined)
-   *  assert(tx.read({ type, id, path: ['title'] }).ok?.value === "Hello world")
-   *  // Referencing non-existing facts produces errors
-   *  assert(tx.read({ type: 'bad/mime', id, path: ['author'] }).error.name === 'NotFoundError')
-   * ```
-   *
-   * @param address - Memory address to read from
-   * @param options - Optional read options including metadata
-   */
-  read(
-    address: IMemoryAddress,
-    options?: IReadOptions,
-  ): Result<IAttestation, ReadError>;
-}
-
-export interface ITransactionWriter extends ITransactionReader {
-  /**
-   * Write a value into a storage at a given address & captures it in the
-   * transaction invariants. Write will fail with `IStorageTransactionError`
-   * if transaction has an error state. Write will fail with
-   * `IStorageTransactionClosed` if transaction is done.
-   */
-  write(
-    address: IMemoryAddress,
-    value?: FabricValue,
-    options?: IWriteOptions,
-  ): Result<IAttestation, WriteError>;
-}
-
 /**
  * Error that is produced when transaction is being updated after it was already
  * aborted.
@@ -1660,8 +1605,6 @@ export type WriteError =
   | IReadOnlyAddressError
   | ITypeMismatchError;
 
-export type ReaderError = InactiveTransactionError;
-
 export type WriterError =
   | InactiveTransactionError
   | IStorageTransactionWriteIsolationError
@@ -1738,11 +1681,6 @@ export interface ISpaceReplica extends ISpace {
 
   getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
 
-  commit?(
-    transaction: ITransaction,
-    source?: IStorageTransaction,
-  ): Promise<Result<Unit, StorageTransactionRejected>>;
-
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
@@ -1769,13 +1707,6 @@ export interface IStoreError extends IStorageError {
   readonly name: "StoreError";
   readonly cause: IStorageError;
 }
-
-/**
- * Archive of the journal keyed by memory space. Each read attestation
- * are represented as `claims` and write attestation are represented as
- * `facts`.
- */
-export type JournalArchive = Map<MemorySpace, ITransaction>;
 
 export interface ITransactionJournal {
   activity(): Iterable<Activity>;
@@ -1843,16 +1774,6 @@ export interface NativeStorageCommit {
    * doc-pending / touched / notify machinery.
    */
   sqliteOps?: readonly SqliteOperation[];
-}
-
-export interface ITransaction {
-  claims: IClaim[];
-
-  facts: Fact[];
-}
-
-export interface IStorageEdit {
-  for(space: MemorySpace): ITransaction;
 }
 
 export type Activity = Variant<{

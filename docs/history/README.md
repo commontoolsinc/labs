@@ -275,6 +275,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
+  — why a rename-only pull request owed coverage debt: a wall-clock-guarded
+  diagnostic and a shard re-partition each moved the `packages/runner`
+  uncovered-line count with no change to that package, July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)
@@ -307,6 +311,12 @@ One line per archived document; each document's header carries the fuller
 - [09-remediation-direction.md](specs/scheduler-v2/addenda/09-remediation-direction.md)
   — scheduler-v2 addendum: remediation direction — coalesce/dedup, not
   version-skip.
+- [server-side-execution/](specs/server-side-execution/README.md) — the v1
+  server-primary execution learning run (2026-07-07 → 2026-08-02): original
+  design, implementation plan, context-lattice claims, client-passivity
+  design, claim-deletion scoping, and the orchestration log carrying the
+  full lesson record. Superseded by the live
+  [server-primary execution v2 spec](../specs/server-side-execution/README.md).
 - [OPTIMIZATION-JOURNAL.md](packages/runner/test/traverse-replay/OPTIMIZATION-JOURNAL.md)
   — traverse optimization log.
 - [SCHEMA_INJECTION_NOTES.md](packages/ts-transformers/SCHEMA_INJECTION_NOTES.md),

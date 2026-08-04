@@ -48,10 +48,9 @@ function testContext(checker: ts.TypeChecker): TransformationContext {
     checker,
     factory: ts.factory,
     tsContext: { factory: ts.factory } as ts.TransformationContext,
-    options: {
-      state: {
-        typeRegistry: new WeakMap<ts.Node, ts.Type>(),
-      },
+    options: {},
+    state: {
+      typeRegistry: new WeakMap<ts.Node, ts.Type>(),
     },
     markAsSyntheticComputeCallback: () => {},
     cfHelpers: {

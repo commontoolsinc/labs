@@ -32,6 +32,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   optional CI adoption and further fixture hardening.
 - [Inverting the physics of trust](inverting-the-physics-of-trust.md) explains
   the runtime's trust model and the work that follows from it.
+- [Server-primary execution v2](server-execution-v2.md) sequences the
+  greenfield rebuild that executes the server-side-execution v2 spec, with
+  per-phase task and success-criteria checkboxes.
 - [Pattern verb contract implementation](pattern-verb-contract-implementation.md)
   sequences the implementation of the
   [pattern verb contract](pattern-verb-contract.md).
