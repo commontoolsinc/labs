@@ -34,7 +34,6 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
-import { ContextualFlowControl } from "@commonfabric/runner";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
@@ -685,9 +684,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -748,9 +746,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -812,9 +809,8 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -887,9 +883,8 @@ describe("getAtPath array index validation", () => {
       FabricValue,
       JSONSchema | undefined
     >();
-    const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSetStringToPathSelectors(true);
-    const context = createTraversalContext(tracker, cfc, schemaTracker);
+    const context = createTraversalContext(tracker, schemaTracker);
 
     const doc: IMemorySpaceValueAttestation = {
       address: {

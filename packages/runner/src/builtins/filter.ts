@@ -193,13 +193,13 @@ export function filter(
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
+        const slotLink = listElementLink(listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const argumentUsage = inferListOpArgumentUsage(opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
       ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),

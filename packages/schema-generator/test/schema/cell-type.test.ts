@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Cell types", () => {
@@ -9,7 +9,7 @@ describe("Schema: Cell types", () => {
       interface X { name: Cell<string>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const name = result.properties?.name as Record<string, unknown>;
     expect(name).toBeDefined();
@@ -23,7 +23,7 @@ describe("Schema: Cell types", () => {
       interface X { users: Cell<Array<{ id: string }>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const users = result.properties?.users as Record<string, any>;
     expect(users).toBeDefined();
@@ -40,7 +40,7 @@ describe("Schema: Cell types", () => {
       interface X { db: SqliteDb; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const db = result.properties?.db as Record<string, unknown>;
     expect(db).toBeDefined();
@@ -53,7 +53,7 @@ describe("Schema: Cell types", () => {
       interface X { value: Stream<Cell<number>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const prop = result.properties?.value as Record<string, unknown>;
     expect(prop).toBeDefined();
@@ -67,7 +67,7 @@ describe("Schema: Cell types", () => {
       interface X { invalid: Cell<Stream<number>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     expect(() => gen.generateSchema(type, checker)).toThrow(
       "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>",
     );

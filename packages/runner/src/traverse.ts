@@ -228,7 +228,6 @@ function narrowAndCombineSelectorForLink(
   selector: SchemaPathSelector,
   targetPath: readonly string[],
   linkSchema: JSONSchema | undefined,
-  cfc: ContextualFlowControl,
 ): SchemaPathSelector {
   const key = isMemoizableSchemaInput(selector.schema) &&
       isMemoizableSchemaInput(linkSchema)
@@ -240,7 +239,7 @@ function narrowAndCombineSelectorForLink(
     const cached = _linkHopSelectorCache.get(key);
     if (cached !== undefined) return cached;
   }
-  const narrowed = narrowSchema(docPath, selector, targetPath, cfc);
+  const narrowed = narrowSchema(docPath, selector, targetPath);
   // A link schema describes the value at the link's target path. If the
   // selector continues below the source link, narrow the link schema by that
   // source-relative suffix before combining it with the selector schema.
@@ -255,7 +254,7 @@ function narrowAndCombineSelectorForLink(
     // Match resolveLink(): if the link schema does not describe the remaining
     // path (for example, an array's synthetic `length` property), the link
     // stops contributing a schema rather than rejecting the traversal.
-    ? cfc.getSchemaAtPath(linkSchema, linkSchemaPath)
+    ? ContextualFlowControl.getSchemaAtPath(linkSchema, linkSchemaPath)
     : linkSchema;
   narrowed.schema = combineOptionalSchema(
     narrowed.schema,
@@ -272,7 +271,7 @@ function narrowAndCombineSelectorForLink(
 }
 
 /**
- * Memoized, canonicalizing wrapper around `cfc.schemaAtPath()` for the hot
+ * Memoized, canonicalizing wrapper around `ContextualFlowControl.schemaAtPath()` for the hot
  * traversal seams (object properties, array items). The core method now
  * symbolically memoizes its common boolean-default derivations; this seam also
  * covers the marker-object variant used below, which is intentionally outside
@@ -301,21 +300,20 @@ const _schemaAtPathCache = new WeakMap<
 >();
 
 function schemaAtPathCanonical(
-  cfc: ContextualFlowControl,
   schema: JSONSchema,
   path: readonly string[],
   markers = false,
 ): JSONSchema {
   const compute = () =>
     markers
-      ? cfc.schemaAtPath(
+      ? ContextualFlowControl.schemaAtPath(
         schema,
         path,
         undefined,
         EMPTY_PROPERTIES_MARKER,
         MISSING_PROPERTY_MARKER,
       )
-      : cfc.schemaAtPath(schema, path);
+      : ContextualFlowControl.schemaAtPath(schema, path);
   if (typeof schema === "boolean" || !isMemoizableSchemaInput(schema)) {
     return compute();
   }
@@ -1065,7 +1063,6 @@ export type PointerCycleTracker = CompoundCycleTracker<
 
 export type TraversalContext = {
   tracker: PointerCycleTracker;
-  cfc: ContextualFlowControl;
   schemaTracker: MapSet<string, SchemaPathSelector>;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
@@ -1086,7 +1083,6 @@ export type TraversalContext = {
 
 export function createTraversalContext(
   tracker: PointerCycleTracker,
-  cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
@@ -1097,7 +1093,6 @@ export function createTraversalContext(
 ): TraversalContext {
   return {
     tracker,
-    cfc,
     schemaTracker,
     includeMeta,
     metaDocsVisited,
@@ -1120,7 +1115,6 @@ export function createDefaultTraversalContext(
       FabricValue,
       JSONSchema | undefined
     >(),
-    new ContextualFlowControl(),
     schemaTracker,
     includeMeta,
     metaDocsVisited,
@@ -1405,10 +1399,6 @@ export abstract class BaseObjectTraverser {
     return this.context.schemaTracker;
   }
 
-  protected get cfc(): ContextualFlowControl {
-    return this.context.cfc;
-  }
-
   protected get traverseCells(): boolean {
     return this.context.includeMeta;
   }
@@ -1685,7 +1675,6 @@ export abstract class BaseObjectTraverser {
       selector,
       ["value", ...(link.path as readonly string[])],
       link.schema,
-      this.cfc,
     );
 
     return schemaTrackerCoversSelector(
@@ -2056,7 +2045,6 @@ function followPointer(
       selector,
       target.path,
       link.schema,
-      context.cfc,
     );
   }
   // Check to see if we've already included this link with this schema context
@@ -2338,7 +2326,6 @@ function traverseMetaLinkedDoc(
       FabricValue,
       JSONSchema | undefined
     >(),
-    context.cfc,
     context.schemaTracker,
     context.includeMeta,
     context.metaDocsVisited,
@@ -2766,7 +2753,6 @@ function narrowSchema(
   docPath: readonly string[],
   selector: SchemaPathSelector,
   targetPath: readonly string[],
-  cfc: ContextualFlowControl,
 ): SchemaPathSelector {
   let pathIndex = 0;
   while (pathIndex < docPath.length && pathIndex < selector.path.length) {
@@ -2784,7 +2770,10 @@ function narrowSchema(
     // we've reached the end of our selector path, but still have parts in our doc path, so narrow the schema
     // Some of the schema may have been applicable to other parts of the doc, but we only want to use the
     // portion that will apply to the next doc.
-    const schema = cfc.schemaAtPath(selector.schema!, docPath.slice(pathIndex));
+    const schema = ContextualFlowControl.schemaAtPath(
+      selector.schema!,
+      docPath.slice(pathIndex),
+    );
     return { path: [...targetPath], schema };
   } else {
     // We've reached the end of the doc path, but may still have stuff in our
@@ -3970,7 +3959,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     let valid = true;
     docArray.forEach((item, index) => {
       const itemSchema = directItems ??
-        schemaAtPathCanonical(this.cfc, schema, [index.toString()]);
+        schemaAtPathCanonical(schema, [index.toString()]);
       const batchIndex = preparedPlainLinkIndex++;
       const preparedSourceAddress = preparedPlainLinks
         ?.sourceAddresses[batchIndex];
@@ -4230,7 +4219,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // We'll use marker schemas to detect some places where we want special
       // schema behavior
       const propSchema = directProperties?.[propKey] ??
-        schemaAtPathCanonical(this.cfc, schema, [propKey], true);
+        schemaAtPathCanonical(schema, [propKey], true);
       // Normally, if additionalProperties is not specified, it would
       // default to true. However, if we provided the `properties` field, we
       // treat this specially, and don't invalidate the object, but also don't
@@ -4297,7 +4286,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         if (propKey in filteredObj) {
           continue;
         }
-        const subSchema = this.cfc.getSchemaAtPath(schema, [propKey]);
+        const subSchema = ContextualFlowControl.getSchemaAtPath(schema, [
+          propKey,
+        ]);
         if (!isRecord(subSchema)) {
           continue;
         }

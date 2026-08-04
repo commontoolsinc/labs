@@ -16,7 +16,6 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
 
@@ -72,7 +71,6 @@ describe("$defs propagation in array item schema extraction", () => {
       path: [],
     };
     const promises: Promise<any>[] = [];
-    const cfc = new ContextualFlowControl();
     const seen = new Set<any>();
 
     // Array value containing a cell link — this triggers the sync path
@@ -84,7 +82,7 @@ describe("$defs propagation in array item schema extraction", () => {
     //   → { $ref: "#/$defs/Item" } with no $defs
     //   → sync → pull → joinSchema → resolveSchemaRefsOrThrow throws!
     //
-    // After the fix: cfc.getSchemaAtPath(schema, [index]) resolves the
+    // After the fix: ContextualFlowControl.getSchemaAtPath(schema, [index]) resolves the
     //   $ref using the parent's $defs, returning the resolved item schema.
     //
     // The sync call itself won't find data (fake ID), but it will
@@ -94,7 +92,6 @@ describe("$defs propagation in array item schema extraction", () => {
       value,
       base,
       arraySchema,
-      cfc,
       promises,
       seen,
     );
@@ -145,7 +142,6 @@ describe("$defs propagation in array item schema extraction", () => {
       [cellLink],
       base,
       arraySchema,
-      new ContextualFlowControl(),
       [],
       new Set(),
     );

@@ -165,8 +165,7 @@ export function findAndInlineDataUriLinks(value: any): any {
           const newLink = parseLink(dataValue);
           let schema = newLink.schema;
           if (schema !== undefined && path.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path);
+            schema = ContextualFlowControl.getSchemaAtPath(schema, path);
           }
           // Create new link by merging dataLink with remaining path
           const newSigilLink = createSigilLinkFromParsedLink({
