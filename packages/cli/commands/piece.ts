@@ -1041,22 +1041,16 @@ export const piece = new Command()
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
     if (options.check) {
-      const { config, report } = await checkPieceSourceFromCommand(
+      // A refusal throws out of here with a non-zero exit, so `--check` gates
+      // a deploy script as well as informing a person.
+      const { config, summary } = await checkPieceSourceFromCommand(
         options,
         mainPath,
       );
-      if (report.compatible) {
-        render(`${mainPath} can replace the source for piece ${config.piece}`);
-        hint(cliText(`NEXT STEPS:
+      render(summary);
+      hint(cliText(`NEXT STEPS:
   → Apply it: cf piece setsrc --piece ${config.piece} ${mainPath} ...`));
-        return;
-      }
-      // Non-zero exit: `--check` is meant to gate a deploy script, so the
-      // verdict has to be readable by `if` as well as by a person.
-      throw new ValidationError(
-        `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
-        { exitCode: 1 },
-      );
+      return;
     }
     const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
@@ -1931,18 +1925,36 @@ export interface CheckPieceSourceCommandDependencies {
  * Deliberately parses the same options `setsrc` does, so the check is aimed at
  * the piece and entry the apply would have used — a preflight against a
  * different target is worse than none.
+ *
+ * The refusal is raised here rather than in the command's action so that the
+ * decision — including the non-zero exit that lets `--check` gate a deploy
+ * script — is reachable by a test. The action only renders what it returns.
  */
 export async function checkPieceSourceFromCommand(
   options: PieceCLIOptions,
   mainPath: string,
   deps: CheckPieceSourceCommandDependencies = {},
-): Promise<{ config: PieceConfig; report: PatternCompatibilityReport }> {
+): Promise<{
+  config: PieceConfig;
+  report: PatternCompatibilityReport;
+  summary: string;
+}> {
   const config = parsePieceOptions(options);
   const report = await (deps.checkPiecePattern ?? checkPiecePattern)(
     config,
     localPatternEntry(mainPath, options),
   );
-  return { config, report };
+  if (!report.compatible) {
+    throw new ValidationError(
+      `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
+      { exitCode: 1 },
+    );
+  }
+  return {
+    config,
+    report,
+    summary: `${mainPath} can replace the source for piece ${config.piece}`,
+  };
 }
 
 /** Apply the parsed `piece setsrc` command while preserving its safety flag. */

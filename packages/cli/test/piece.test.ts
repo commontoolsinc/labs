@@ -19,6 +19,7 @@ import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
+  checkPiecePattern,
   getCellValue,
   inspectPiece,
   listPieces,
@@ -34,6 +35,7 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
+import { ValidationError } from "@cliffy/command";
 import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import { toCell } from "../../runner/src/back-to-cell.ts";
@@ -1447,7 +1449,7 @@ describe("cli piece parsing", () => {
     // than none, so the check parses the same options and hands the same entry
     // down. It must also apply nothing — no `setPiecePattern` here at all.
     let checked: unknown;
-    const { config, report } = await checkPieceSourceFromCommand(
+    const { config, report, summary } = await checkPieceSourceFromCommand(
       {
         apiUrl: API_URL,
         space: SPACE,
@@ -1471,6 +1473,7 @@ describe("cli piece parsing", () => {
     );
 
     expect(report.compatible).toBe(true);
+    expect(summary).toContain("can replace the source");
     expect(checked).toEqual({
       config,
       entry: {
@@ -1480,6 +1483,35 @@ describe("cli piece parsing", () => {
         rootPath: "/repo",
       },
     });
+  });
+
+  it("fails the setsrc preflight loudly enough to gate a script", async () => {
+    // `--check` is meant to sit in front of a deploy, so a refusal has to be a
+    // non-zero exit and not just prose on stdout — and it has to carry the
+    // rules' own reason so the operator knows what to fix.
+    const failure = await checkPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        checkPiecePattern: () =>
+          Promise.resolve({
+            compatible: false,
+            issues: { schema: "result narrowed: label" },
+            message: "result narrowed: label",
+            candidate: { identity: "D".repeat(43), symbol: "default" },
+          }),
+      },
+    ).then(() => undefined, (error: unknown) => error as ValidationError);
+
+    expect(failure).toBeInstanceOf(ValidationError);
+    expect(failure!.message).toContain("cannot replace the source");
+    expect(failure!.message).toContain("result narrowed: label");
+    expect((failure as { exitCode?: number }).exitCode).toBe(1);
   });
 
   it("lists pattern provenance and isolates unreadable pieces", async () => {
@@ -3122,6 +3154,51 @@ describe("cli piece parsing", () => {
       repository,
       dangerouslyAllowIncompatibleSchema: true,
     });
+  });
+
+  it("resolves the piece and pinned program before checking compatibility", async () => {
+    // The preflight has to reach the SAME piece the apply would, through the
+    // same address resolution and the same pinned program — a check against a
+    // different target, or against source with different imports resolved, is
+    // worse than no check at all.
+    const entry = { mainPath: "/repo/main.tsx" };
+    const program = {} as any;
+    const manager = { add: () => Promise.resolve() };
+    let resolvedPiece: unknown;
+    let checkedProgram: unknown;
+    const report = {
+      compatible: false,
+      issues: { schema: "output narrowed" },
+      message: "output narrowed",
+      candidate: { identity: "C".repeat(43), symbol: "default" },
+    };
+
+    const result = await checkPiecePattern(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
+      entry,
+      {
+        loadManager: () => Promise.resolve(manager as any),
+        resolvePieceAddress: () => Promise.resolve(PIECE),
+        createController: () => ({
+          get: (id: string) => {
+            resolvedPiece = id;
+            return Promise.resolve({
+              checkPattern: (candidate: unknown) => {
+                checkedProgram = candidate;
+                return Promise.resolve(report);
+              },
+            });
+          },
+        } as any),
+        getPinnedProgramFromFile: () => Promise.resolve(program),
+      },
+    );
+
+    expect(resolvedPiece).toBe(PIECE);
+    expect(checkedProgram).toBe(program);
+    // The verdict is passed through verbatim: the CLI reports the rules'
+    // finding, it does not re-interpret it.
+    expect(result).toEqual(report);
   });
 
   it("returns pattern provenance from piece inspection", async () => {
