@@ -1436,15 +1436,16 @@ source-map bytes — which the compile cache stores and syncs — by roughly 65%
 
 **What exists today.** The shipped surface is `SESRuntime`
 (`packages/runner/src/sandbox/ses-runtime.ts`) over `SourceMapParser`
-(`packages/js-compiler/source-map.ts`): `loadSourceMap` / `loadSourceMapLazy`
-register maps by filename, `mapPosition` resolves one coordinate, `parseStack`
-rewrites a whole stack, and `mapThrownError` does that once per error —
-`materializeHostVisibleStack`, then `parseStack`, then a `markErrorStackMapped`
-marker, because `parseStack` is **not idempotent**: per-module maps are
-registered under the same module path that mapped frames carry as their source,
-so re-parsing an already-mapped stack would look the now-authored coordinates up
-again and corrupt them. `Engine` re-exports `parseStack` / `mapPosition`, and the
-scheduler's diagnostics share the same marker helpers.
+(`packages/js-compiler/source-map.ts`): `loadSourceMapLazy` registers a map by
+filename as a provider that runs on first lookup, `mapPosition` resolves one
+coordinate, `parseStack` rewrites a whole stack, and `mapThrownError` does that
+once per error — `materializeHostVisibleStack`, then `parseStack`, then a
+`markErrorStackMapped` marker, because `parseStack` is **not idempotent**:
+per-module maps are registered under the same module path that mapped frames
+carry as their source, so re-parsing an already-mapped stack would look the
+now-authored coordinates up again and corrupt them. `Engine` re-exports
+`parseStack` / `mapPosition`, and the scheduler's diagnostics share the same
+marker helpers.
 
 §8.4.1 describes the interface shape that surface already satisfies. The
 `ErrorMappingOptions` / `MappedError` / execution-wrapper designs in §8.4.2–§8.4.3
@@ -1465,7 +1466,10 @@ The existing shared surface is the right baseline:
 ```typescript
 // Shown at module scope.
 interface StackMapper {
-  loadSourceMap(filename: string, sourceMap: SourceMap): void;
+  loadSourceMapLazy(
+    filename: string,
+    provider: () => SourceMap | undefined,
+  ): void;
   mapPosition(
     filename: string,
     line: number,
@@ -1513,8 +1517,8 @@ interface MappedError {
 
 Required behavior:
 
-- if `filename` and `sourceMap` are present, the shared mapper loads that map
-  before parsing the stack
+- if `filename` and `sourceMap` are present, the shared mapper registers that
+  map under `filename` before parsing the stack
 - `mappedStack` is the formatted post-classification stack shown to users or
   logs
 - `patternLocation` comes from the first `pattern` frame after classification
@@ -1532,7 +1536,7 @@ function mapError(
   options: ErrorMappingOptions = {},
 ): MappedError {
   if (options.filename && options.sourceMap) {
-    mapper.loadSourceMap(options.filename, options.sourceMap);
+    mapper.loadSourceMapLazy(options.filename, () => options.sourceMap);
   }
 
   return classifyAndFormatMappedError(mapper, error, options);
@@ -2620,8 +2624,9 @@ in review or incident work should be added here with a class and a status.
   build exposes no `ModuleSource`/`StaticModuleRecord` constructor
 - **Import hooks**: `resolveHook` and `importNowHook`, the callbacks a
   Compartment uses to resolve a specifier and fetch its record
-- **SESIsolate**: Runtime component that creates and manages Compartments with globals injection
-- **SESRuntime**: Runtime harness that integrates SESIsolate into the pattern execution pipeline
+- **SESRuntime**: Runtime harness that owns the shared source-map state,
+  evaluates callbacks in the shared callback Compartment, and maps the stacks of
+  errors thrown by the pattern execution pipeline
 
 ---
 
