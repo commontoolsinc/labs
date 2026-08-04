@@ -119,7 +119,7 @@ SPACE=team-lunch
   one user. Do NOT derive the shared `"implicit trust"` passphrase for deploys —
   that fixed, publicly-derivable DID is reserved for acting as the local
   server's own operator identity, and it collapses you into the server
-  principal. See `docs/development/SHARED_IDENTITY.md`.
+  principal. See `docs/features/shared-identity.md`.
 - **Prod** — deploy with your own identity, or mint a fresh one
   (`deno run -A packages/cli/mod.ts id new > prod.key`) and share that key with
   whoever should be able to update the piece. Whoever deployed owns it; the
@@ -253,7 +253,7 @@ the `users` directory are `PerSpace`. Consequences that bite:
    (a different DID), the browser's `myName` is empty and it won't treat you as
    host. To act as the same person in both, import your CLI key in the browser
    via **Import CLI Key**; see
-   [`docs/development/SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
+   [`docs/features/shared-identity.md`](../../../docs/features/shared-identity.md).
    Verify with `cf id did "$CF_IDENTITY"`.
 
 3. **Names are unique.** `joinAs` rejects a name already in `users`. If a

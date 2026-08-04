@@ -9,8 +9,9 @@ Two mechanisms keep it honest, and they are complementary, not alternatives:
 
 - **Tripwire (deterministic floor).** `deno task check-skill-facts`
   (`tasks/check-skill-facts.ts`) — a cheap, instant, zero-token CI gate over
-  every markdown file under `skills/`, which fails if an import specifier or repo
-  path a skill cites stops _resolving_: a bare import of a package with no root
+  every markdown file under `skills/`, every `AGENTS.md`, and every rule under
+  `.claude/rules/`, which fails if an import specifier or repo path one of them
+  cites stops _resolving_: a bare import of a package with no root
   export, a missing subpath, or a vanished path. Runs on every PR (the `check`
   job). Catches resolvability rot only, and deliberately hardcodes no fact list —
   every fact it checks is derived from the skill text itself, so a skill gains
@@ -25,6 +26,19 @@ Two mechanisms keep it honest, and they are complementary, not alternatives:
 The auditor is **cf-review itself** — do not build a parallel reviewer. cf-review
 already verifies a skill's facts against the tree (it did so unprompted when it
 reviewed its own PR). The audit is just cf-review pointed at a skill.
+
+## The same pair covers the guides and the rules
+
+The `AGENTS.md` guides and the path-scoped rules under `.claude/rules/` are the
+same kind of document as a skill: a summary handed to an agent, whose value
+comes from naming a path or a symbol rather than restating what is there. The
+tripwire already scans all three. Point the audit at them on the same terms —
+what a rule says about a gate is as capable of quietly becoming untrue as what
+a skill says about a canonical home, and neither shows up as a broken citation.
+
+A rule has one defence a skill does not: it should be short enough to re-read
+in full while you are changing the thing it describes. A rule that has grown
+past that is drifting whether or not anyone has noticed yet.
 
 ## What the tripwire treats as a citation
 

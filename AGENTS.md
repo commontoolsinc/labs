@@ -21,9 +21,8 @@ Common Fabric product.
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
 
-Support and test packages (utils, test-support, deno-web-test, integration,
-generated-patterns, content-hash, leb128, felt, static, fs-sync-example) sit
-outside the layer stack.
+Anything under `packages/` not named above — utilities, build tooling, test
+support, internal dashboards, example code — sits outside the layer stack.
 
 ## Documentation Lifecycle
 
@@ -85,144 +84,73 @@ If you are developing patterns, use the repo-local `pattern-dev` skill at
 discovers the repo-local skill mirror through `.agents/skills/`, and Claude
 compatibility continues to use `.claude/skills/`.
 
+`docs/common/README.md` indexes the pattern documentation; follow links from
+there to what your task needs.
+
 When authoring or reviewing a skill itself, read
-`docs/development/skill-authoring.md` — what belongs in a skill (non-derivable
-map & values) versus what just constrains the agent (procedure a capable model
-already does). `docs/development/skill-audit.md` covers what keeps those facts
-honest, including the `deno task check-skill-facts` tripwire that fails CI when
-a path or import a skill cites stops resolving.
+`docs/development/skill-authoring.md` and `docs/development/skill-audit.md`.
 
 For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
-
-#### Useful Pattern documentation
-
-**Start here:**
-
-- `docs/common/README.md` - Overview of the pattern system and index of all
-  pattern documentation
-- `packages/patterns/catalog/catalog.tsx` - Authoritative, type-checked
-  component catalog; story files in `packages/patterns/catalog/stories/` show
-  live usage for each component
-- `docs/common/components/COMPONENTS.md` - UI component narrative reference with
-  bidirectional binding and event handling
-
-**Core concepts:**
-
-- `docs/common/concepts/reactivity.md` - Cell system, reactivity mental models
-- `docs/common/concepts/computed/` - computed(), lift(), derived values
-- `docs/common/concepts/types-and-schemas/` - Type system, Writable<>, Default<>
-- `docs/common/patterns/` - Common patterns (conditionals, composition, binding)
-
-**Workflow:**
-
-- `docs/development/debugging/` - Error reference, debugging workflows,
-  troubleshooting
-- `docs/common/capabilities/llm.md` - Using generateText and generateObject for
-  LLM integration
-- `docs/common/conventions/adding-pieces.md` - How to add pieces (use addPiece
-  handler, not pieceRegistry.push)
-
-**Reference:**
-
-- `packages/patterns/index.md` - Catalog of all pattern examples with summaries,
-  data types, and keywords. Check its "Status tiers" section before imitating
-  any pattern — only `exemplar` entries are style references.
 
 **Important:** Ignore the `packages/patterns/deprecated` folder - it is defunct.
 
 ### Runtime Development
 
-If you are developing runtime code, read the following documentation:
+If you are developing runtime code, start with:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
-- `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
-  version pins, and dependency troubleshooting
-- `docs/development/space-clone-rehearsal.md` - Rehearsing a pattern update on a
-  clone of a real space before touching a populated one: when a rehearsal is
-  required, how to get a snapshot, the clone/verify/reset loop (`cf space`), and
-  the reads that will mislead you (~20 s cold loads, unstepped result reads,
-  fresh-replica reads). Read it before any `setsrc` against a space with real
-  data
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
   and integration test structure; hub that links the other testing docs
 - `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
-  polling: the primitives to use
-- `docs/development/waiting-in-tests-rationale.md` - The analysis and case
-  studies behind the waiting guidance: why a bounded timeout is never a
-  guarantee, retired real-clock exemptions, the FUSE exec suite's design, and
-  the production waits that apply the same principle
-- `docs/development/fetch-request-deadlines.md` - Why the fetch builtins keep a
-  wall-clock bound: it leases a claim held in durable state rather than bounding
-  a request, and it decides when the replica holding that claim is presumed
-  gone. Read it before changing how `fetch.ts` or `fetch-program.ts` decide to
-  start a request
-- `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
-  splitting/rebalancing work
-- `docs/development/deploying.md` - How a commit reaches a host: which CI jobs
-  deploy where, and the contract the bastion's deploy wrapper enforces on what
-  they pass it. That wrapper belongs to the infra repository, and the staging
-  deploy jobs run only on `main`, so read this before editing a deploy step
+  polling: the primitives to reach for, and the specific cases where a bounded
+  poll is the honest tool
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime
   coverage and transformer-based pattern coverage), which CI job collects which,
   and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
-- `docs/development/LLM_TESTING.md` - Testing patterns and server routes that
-  call the LLM (test-environment guard, mocks, conversation fixtures)
-- `docs/development/patch-operations.md` - The patch-operation family (the
-  single logical changes a commit carries), the registries that define each op
-  once, and how to add a new one across the memory / runner / api / transformer
-  layers. Its neighbour `mergeable-collection-writes.md` covers why the
-  mergeable ops exist and what they do to conflict detection; read it before
-  changing how a handler writes to a list
-- `docs/development/data-uri-identifiers.md` - `data:` cell identifiers, which
-  carry their own frozen value instead of naming a document in a space: how one
-  is minted and read, why there are two tests for them (a broad one asking
-  whether a document exists at all, and a narrow one asking whether a payload is
-  this codebase's to decode), and why such an address is read-only. Read it
-  before touching a branch that tests for a `data:` identifier
-- `docs/development/UI_TESTING.md` - How to work with shadow dom in our
-  integration tests
-- `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every
-  experimental flag (runtime experimental options, CFC enforcement dials,
-  storage and memory-protocol capability flags, shell dogfood toggles): what
-  each gates, its default, its planned end state, and its removal path. Read it
-  before adding, changing, or removing any experimental flag, and update it in
-  the same change.
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
-- `docs/specs/ts-transformer/README.md` - **CTS transformer specs**: map of the
-  pattern-language spec, lowering contract, and behavior spec (schema mapping:
-  `docs/specs/schema-generator/ts_to_json_schema_mapping.md`). Working in those
-  packages? Start at `packages/ts-transformers/AGENTS.md` /
-  `packages/schema-generator/AGENTS.md`
+- `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
+  version pins, and dependency troubleshooting
 
-When investigating transformer behavior, inspect the emitted output directly
-before inferring from source code alone:
+Everything else is indexed rather than listed here. `docs/README.md` maps the
+whole documentation tree. `docs/development/README.md` indexes the rest of the
+development documentation: configuration, benchmarks, deploying, the
+continuous-integration policies, and so on. `docs/features/README.md` indexes
+one document per feature or per aspect of the runtime — collection writes,
+identity, ingest, host embedding, and the rest. Read the relevant one before you
+change a subsystem you have not worked on before.
 
-```bash
-deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
-```
+Three obligations that are easy to miss:
+
+- `docs/README.md` governs everything this repository writes down. It says how
+  to write a comment in code, how to write documentation, and where a new
+  document belongs. Read it before you write either.
+- `docs/development/EXPERIMENTAL_OPTIONS.md` is the central registry of every
+  experimental flag. Read it before adding, changing, or removing a flag, and
+  update it in the same change.
+- `docs/development/space-clone-rehearsal.md` is the procedure for rehearsing a
+  pattern update against a writable copy of a real space. Read it before any
+  `setsrc` against a space that holds real data.
+
+Working in `packages/ts-transformers` or `packages/schema-generator`? Start at
+that package's own `AGENTS.md`.
 
 #### Adding New Packages
 
-When adding a new workspace package:
+A new workspace package needs two edits, and the second one bites hard when it
+is missed:
 
-1. Add the package path (e.g., `./packages/my-package`) to the root `deno.jsonc`
-   `"workspace"` array.
-2. The package's `deno.jsonc` **must** include a `"tasks"` object with a
-   `"test"` entry. Use `"deno test"` if the package has tests, or
-   `"echo 'No tests defined.'"` as a stub for packages without tests yet.
+1. Its path added to the `"workspace"` array in the root `deno.jsonc`.
+2. A `"tasks"` object in its own `deno.jsonc` carrying a `"test"` entry — either
+   `"deno test"`, or `"echo 'No tests defined.'"` when it has no tests yet.
+   Without one, `deno task test` falls through to the root workspace's task and
+   re-runs the whole suite inside itself, spawning processes exponentially until
+   CI times out. `packages/utils/deno.jsonc` is a correct example.
 
-This is required because the root test runner (`tasks/test.ts`) iterates all
-workspace packages and runs `deno task test` in each. If a package has no test
-task, Deno falls back to the root workspace's test task, which re-runs the
-entire suite recursively — causing exponential process spawning and CI timeouts.
-
-See `packages/utils/deno.jsonc` for an example of a correctly configured
-package. When the package needs a dependency, follow
-`docs/development/DEPENDENCIES.md`.
+When the package needs a dependency, follow `docs/development/DEPENDENCIES.md`.
 
 ## Instructions for committing to this repository
 
@@ -233,3 +161,33 @@ all relevant tests.
 When babysitting a PR through CI, look for codex review comments in addition to
 failed CI jobs. When facing difficulties getting coverage checks to pass,
 consider the information in `docs/development/COVERAGE.md`.
+
+### Automated gates
+
+`deno task check` type-checks a hand-maintained list of paths in
+`tasks/check.sh`. Several workspace packages are absent from that list — `fuse`,
+`lib-shell`, `schema-generator`, `data-model` and `state-inspector` among them —
+so a green `deno task check` is not evidence that the tree type-checks. Run
+`deno task test` in every package you touched.
+
+Each of these gates fails CI on its own, and none of them run as part of
+`deno task check`:
+
+- `deno task check-no-waitfor` — a test that polls instead of waiting on a real
+  event
+- `deno task check-docs` — a TypeScript block under `docs/` that stopped
+  compiling
+- `deno task check-conflict-markers` — an unresolved merge-conflict marker left
+  in a file, which `docs/` has no other mechanical gate against
+- `deno task check-skill-facts` — a path or import cited by a skill, an
+  `AGENTS.md`, or a rule that stopped resolving
+- `deno task check-single-copy-deps`, `check-unused-deps`, `check-deno-pins` —
+  dependency declarations across the workspace
+- `deno task check-baselines-append-only` — a pattern baseline that was deleted
+  rather than added to
+
+The detail behind each of these lives in `.claude/rules/`, one file per kind of
+file it governs. Claude Code loads the matching rule on its own when it reads a
+file the rule names. An agent without that mechanism can read the rule directly
+— they are ordinary Markdown, and `.claude/rules/README.md` says which covers
+what.

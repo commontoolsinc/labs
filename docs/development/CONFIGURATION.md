@@ -154,7 +154,7 @@ export CF_IDENTITY=./claude.key
 `"implicit trust"` is a shared, publicly-derivable identity — never use it
 against a shared or remote server (everyone who derives it becomes the same
 principal). For a personal or unique identity, use `id new`. See
-[`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
+[`docs/features/shared-identity.md`](../features/shared-identity.md) for the
 browser-import flow.
 
 ---

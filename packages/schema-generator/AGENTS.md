@@ -9,13 +9,13 @@ subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
 
 ## Where answers live
 
-| Question                                                                 | Read                                                                                                       |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Full type→schema mapping rules                                           | `docs/specs/schema-generator/ts_to_json_schema_mapping.md` (sources-of-truth table first)                  |
-| The runtime schema dialect (asCell, ifc, additionalProperties tri-state) | `docs/specs/json_schema.md` + the `JSONSchema` type in `packages/api/index.ts` (the type is authoritative) |
-| Wrapper vocabulary (spelling vs resolved kind)                           | `src/typescript/wrapper-names.ts` (header comment) + `src/typescript/cell-brand.ts`                        |
-| Cross-package contract with ts-transformers                              | bare WeakMaps `typeRegistry` / `schemaHints` — see ts-transformers `src/core/cross-stage-state.ts` header  |
-| How the generator is structured                                          | `src/schema-generator.ts` (formatter chain) + `src/interface.ts` (GenerationContext)                       |
+| Question                                                                 | Read                                                                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Full type→schema mapping rules                                           | `docs/specs/schema-generator/ts_to_json_schema_mapping.md` (sources-of-truth table first)                          |
+| The runtime schema dialect (asCell, ifc, additionalProperties tri-state) | `docs/specs/json_schema.md` + the `JSONSchema` type in `packages/api/index.ts` (the type is authoritative)         |
+| Wrapper vocabulary (spelling vs resolved kind)                           | `src/typescript/wrapper-names.ts` (header comment) + `src/typescript/cell-brand.ts`                                |
+| Cross-package contract with ts-transformers                              | bare WeakMaps `typeRegistry` / `schemaHints` — see `packages/ts-transformers/src/core/cross-stage-state.ts` header |
+| How the generator is structured                                          | `src/schema-generator.ts` (formatter chain) + `src/interface.ts` (GenerationContext)                               |
 
 ## Facts that will bite you
 

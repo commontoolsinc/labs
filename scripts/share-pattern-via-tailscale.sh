@@ -128,7 +128,7 @@ cd "$REPO_ROOT" || exit 1   # cf.key is minted/resolved relative to here
 # Deploy as a unique per-user key, NOT the shared "implicit trust" operator key.
 # This piece is your work, and the toolshed accepts any identity; deploying as
 # the operator key collapses you into the local server principal (and into one
-# identity for user counting). See docs/development/SHARED_IDENTITY.md.
+# identity for user counting). See docs/features/shared-identity.md.
 cf_cli() { deno run -A packages/cli/mod.ts "$@"; }
 
 # Mint via a temp file and move into place only on success — a failed keygen

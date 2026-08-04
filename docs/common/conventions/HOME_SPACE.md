@@ -27,7 +27,7 @@ provides.
 Work that counts people — daily active users, for example — rests on that
 assumption. What the assumption costs, and what the server records about the
 identity behind a session, are covered in
-[`docs/development/active-user-counting.md`](../../development/active-user-counting.md).
+[`docs/features/active-user-counting.md`](../../features/active-user-counting.md).
 
 ## Purpose
 
@@ -164,7 +164,7 @@ public under the temporary compatibility rule.
 For local development, prefer one shared PKCS8/PEM key imported into the browser
 and exported through `CF_IDENTITY` for CLI commands. The browser login screen has
 an `Import CLI Key` option for this workflow. See
-[`docs/development/SHARED_IDENTITY.md`](../../development/SHARED_IDENTITY.md).
+[`docs/features/shared-identity.md`](../../features/shared-identity.md).
 
 The browser shell derives identity from a mnemonic via
 `Identity.fromMnemonic()`, while `cf id derive` uses
@@ -230,4 +230,4 @@ Both the home pattern and the default app pattern follow the same mechanism:
 
 
 Runtime internals (ACL initialization, PieceManager home-space detection) are
-documented in [docs/development/home-space-internals.md](../../development/home-space-internals.md).
+documented in [docs/features/home-space-internals.md](../../features/home-space-internals.md).

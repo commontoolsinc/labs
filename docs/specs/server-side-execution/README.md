@@ -121,7 +121,7 @@ Consequences, all previously measured:
   (the `abortController?.abort("Pattern stopped")` teardown in
   `packages/runner/src/builtins/fetch.ts`) and someone else may re-claim
   after a 5s–5min staleness bound
-  ([why that bound stays](../../development/fetch-request-deadlines.md)).
+  ([why that bound stays](../../features/fetch-request-deadlines.md)).
   Streaming LLM partials live in an in-memory `partial` cell and are lost on
   disconnect.
 - **Cold start.** A fresh client cannot paint pattern UI until it compiles

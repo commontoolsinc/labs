@@ -185,7 +185,7 @@ cd packages/runner && deno task test
 
 ## Related documentation
 
-- [TESTING.md](TESTING.md) — running the suites and the general unit and
+- [TESTING.md](../development/TESTING.md) — running the suites and the general unit and
   integration test structure.
-- [COVERAGE.md](COVERAGE.md) — how the runtime coverage these tests produce feeds
+- [COVERAGE.md](../development/COVERAGE.md) — how the runtime coverage these tests produce feeds
   the coverage-debt gate.

@@ -1,23 +1,17 @@
-# Vouched Ingest Channel — split-mint seam design notes
+# Vouched Ingest Channel — the split-mint seam
 
-**Status:** implementation note · **For:** Berni's review (companion to
-`vouched-ingest-channel.md` / loom PR #3330) · **Updated:** 2026-06-26
+How a runtime-minted `ExternalIngest` mark is attached to data that arrived
+from an outside source, so that the untrusted bytes and the trusted mark never
+share an authoring identity. The
+[ingest channels and journal sink plan](../plans/ingest-channels-journal-sink.md)
+builds on this seam.
 
-The [ingest channels and journal sink proposal](ingest-channels-journal-sink.md)
-builds on this split-mint seam.
+The obvious construction — push the mark into the builtin-authored flow join,
+the way `TransformedBy` is minted inline — is both unsafe and incorrect. The
+two sections below say why, and each gives the construction the runtime uses
+instead. The contract is the same in either case: same atom, same invariant.
 
-## Why this note exists
-
-The proposal says the `ExternalIngest` mark is minted by "a NEW builtin-authored
-seam in the commit pipeline, modeled on the inline `TransformedBy` mint at
-`prepare.ts:1378`." Grounding that sketch against the real runtime surfaced two
-problems that make the *literal* "piggyback on the flow-join" reading both
-**unsafe** and **incorrect**. The split-mint *contract* is unchanged (same atom,
-same invariant: untrusted bytes and the trusted mark never share an authoring
-identity). The *mechanism* below deviates from the sketch — flagged here per "do
-not silently diverge."
-
-## Finding 1 — an unconditional flow-join push is a forge oracle
+## An unconditional flow-join push would be a forge oracle
 
 `TransformedBy` is unforgeable because of a **two-part interplay**: (a)
 `gateRuntimeMintedIntegrity` (`prepare.ts:~2680`) strips runtime-minted atoms
@@ -44,7 +38,7 @@ helper, which runs in the operator runtime), via a runner-internal helper that
 pattern code cannot import or reach. The mint reads the stamp from the same
 module. No public surface ⇒ no forge oracle.
 
-## Finding 2 — piggybacking the flow join is broken for appends
+## Piggybacking the flow join is broken for appends
 
 `cell.set([...arr, x])` (the live webhook idiom, `webhooks.utils.ts`) diffs
 **element-wise** (`data-updating.ts` `normalizeAndDiff`): an append writes at
@@ -102,7 +96,7 @@ early-return moves.
 - `audience` is **recorded, not enforced** (federation PR5 dependency); no
   downstream policy may read it as a verified binding yet.
 
-## What stays exactly as the proposal says
+## What the seam shares with the ordinary atoms
 
 Same `ExternalIngest` atom + constructor + `provenance` class + gate
 registration; same split-mint invariant; the payload bytes authored under the

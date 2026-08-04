@@ -103,7 +103,7 @@ equivalent inline value.
 Note: `id derive` (passphrase) and `id from-mnemonic` (BIP-39 phrase) use
 different derivations and produce different DIDs from the same text. Use
 `from-mnemonic` to match browser mnemonic login; see
-`docs/development/SHARED_IDENTITY.md`.
+`docs/features/shared-identity.md`.
 
 Redirecting stdout (as above) is safe through any invocation path: the
 `deno task` echo and all Deno/CLI diagnostics go to stderr, so
@@ -121,7 +121,7 @@ piece should still load and unscoped/`PerSpace` data should remain visible, but
 `PerUser`, `PerSession`, favorites, drafts, and home-space state may look empty
 or default. For identity-sensitive local work, use one key everywhere — generate
 it with `id new` and import the CLI PKCS8/PEM key in the browser via
-`Import CLI Key`. See `docs/development/SHARED_IDENTITY.md`.
+`Import CLI Key`. See `docs/features/shared-identity.md`.
 
 **Experimental flags** must be set as env vars on both servers AND CLI commands.
 See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.

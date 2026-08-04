@@ -6,7 +6,7 @@
 
 Builds directly on the landed vouched-ingest primitive (labs #4392): the
 runtime-minted `ExternalIngest` mark + `custodyIngest`. See the
-[vouched-ingest channel mint design](vouched-ingest-channel-mint-design.md) for
+[vouched-ingest channel mint design](../features/vouched-ingest-channel-mint.md) for
 the split-mint seam this stands on.
 
 ---

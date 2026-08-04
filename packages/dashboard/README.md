@@ -429,7 +429,7 @@ it.
 `memory.transact` and `memory.subscriber.sync` spans of one named service, read from
 the same SigNoz the prod errors tile uses. `user.did` is the memory session principal,
 which is the signature-checked `session.open` issuer, so no new instrumentation is
-involved. `docs/development/active-user-counting.md` records what the number means.
+involved. `docs/features/active-user-counting.md` records what the number means.
 Four things bound it, and they are worth knowing before quoting it:
 
 - **It counts identities, not people.** An identity is a keypair. One person with a

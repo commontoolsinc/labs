@@ -32,7 +32,7 @@ import { scopedCell } from "./scope-policy.ts";
  * showing a spinner. A duplicated resolution is wasted work; a spinner that
  * never resolves is a dead end, so the trade goes to the lower value.
  *
- * `docs/development/fetch-request-deadlines.md` records why this bound stays
+ * `docs/features/fetch-request-deadlines.md` records why this bound stays
  * and what an early takeover costs.
  */
 const PROGRAM_CLAIM_STALE_AFTER = 1000 * 10;

@@ -5,7 +5,7 @@ across all packages. Loggers are tagged by module name, support severity
 levels, and track call counts, timing stats, and flags — all accessible at
 runtime. This page covers the TypeScript API for *writing* runtime code. For
 inspecting loggers interactively from the browser console, see
-[debugging/console-commands](debugging/console-commands.md).
+[debugging/console-commands](../development/debugging/console-commands.md).
 
 ## Creating a Logger
 
@@ -170,5 +170,5 @@ These operate across all registered loggers:
 
 All are importable from `@commonfabric/utils/logger` and also registered on
 `globalThis.commonfabric` for browser console access. See
-[debugging/console-commands](debugging/console-commands.md) for interactive
+[debugging/console-commands](../development/debugging/console-commands.md) for interactive
 usage.

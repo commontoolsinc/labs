@@ -246,7 +246,7 @@ Rules:
   challenge; a stale signed `exp`) and every transport-level disconnect still
   retry, so a transient blip or a fresh-challenge race heals. A permanent
   protocol-flag mismatch at `hello` ends the whole connection the same way. See
-  [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
+  [`../../features/authorization-failure-surfacing.md`](../../features/authorization-failure-surfacing.md)
   for how the client, the runner storage layer, and the CLI act on this
   classification end to end.
 

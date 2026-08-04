@@ -86,5 +86,5 @@ See [console-commands](./console-commands.md) for the full reference.
 ## See Also
 
 - [Console Commands](./console-commands.md) - Browser console reference
-- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code
+- [Logger Internals](../../features/logger-internals.md) - Creating loggers in runtime code
 - [cli-debugging](./cli-debugging.md) - CLI-based debugging and testing workflows
