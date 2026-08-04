@@ -188,6 +188,38 @@ function labelledProgram(label: string): RuntimeProgram {
 const labelledBase = () => labelledProgram("seed");
 const labelledNext = () => labelledProgram("`seen:${seed}`");
 
+/**
+ * A revision declaring a STRONGER label than the piece's stored envelope
+ * carries: the stored envelope no longer covers the candidate's, so the fast
+ * path is skipped and the real merge runs — and strengthening is exactly what
+ * a merge accepts.
+ */
+function strengthenedProgram(): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        ...CFC_PRELUDE,
+        "const EXTRA = {",
+        "  type: 'https://commonfabric.org/cfc/atom/Resource',",
+        "  class: 'SetsrcCompatibilityCheck',",
+        "  subject: 'did:example:extra',",
+        "} as const;",
+        "type Stronger = readonly [typeof ATOM, typeof EXTRA];",
+        "interface Args { seed: Confidential<string, Stronger>; }",
+        "export default pattern<Args, { label: string }>(",
+        "  ({ seed }) => ({",
+        "    [NAME]: 'Compatibility check',",
+        "    label: seed,",
+        "  }),",
+        ");",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
 describe("setsrc compatibility preflight", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -329,6 +361,29 @@ describe("setsrc compatibility preflight", () => {
     await runtime.idle();
     return piece;
   };
+
+  it("does not blame the envelope for a merge that actually succeeds", async () => {
+    // The stored envelope does not COVER a candidate that strengthens its
+    // label, so the fast path is skipped and the real merge runs. Strengthening
+    // is what a merge accepts, so the envelope must not appear as a reason.
+    //
+    // Worth pinning separately from the "still matches" control: that case
+    // returns early without ever consulting the merge, so it cannot tell a
+    // working merge from one that is never reached. Here the merge runs and
+    // has to come back clean.
+    const piece = await pieces.create(labelledBase(), {
+      input: { seed: "hello" },
+    });
+    await runtime.idle();
+
+    const report = await piece.checkPattern(strengthenedProgram());
+
+    expect(report.issues.cfc).toBe(undefined);
+    // The contract proof is entitled to object to the changed label — this is
+    // only asserting that the envelope check does not pile on a second,
+    // spurious reason for the same edit.
+    expect(report.issues.schema ?? "").not.toContain("envelope");
+  });
 
   it("clears a CFC-labelled piece whose stored envelope still matches", async () => {
     // The control for the two cases below. Carrying a CFC envelope at all must
