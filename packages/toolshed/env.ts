@@ -77,7 +77,7 @@ export const EnvSchema = z.object({
   // Trace-based distinct counts depend on full sampling: the active identity
   // count reads the user.did attribute on the memory spans, and a ratio sampler
   // drops identities from that count instead of thinning it proportionally.
-  // See docs/development/active-user-counting.md.
+  // See docs/features/active-user-counting.md.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
   // ===========================================================================
@@ -134,7 +134,7 @@ export const EnvSchema = z.object({
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
   //    (directory mode - default, backwards compatible)
   //  - DB_PATH is an optional absolute path to a single SQLite database file
-  //    (single-file mode - for clusterduck clustering)
+  //    holding every space (single-file mode - takes precedence over MEMORY_DIR)
   //  - MEMORY_URL is used by toolshed to connect to memory endpoint
   // ===========================================================================
   MEMORY_DIR: z.string().default(

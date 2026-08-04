@@ -29,9 +29,9 @@ import {
   SchemaObjectTraverser,
   type TraversalContext,
 } from "../../src/traverse.ts";
-import { ContextualFlowControl } from "../../src/cfc.ts";
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
 import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -152,7 +152,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
   constructor(private docs: Record<string, FabricValue>) {}
 
   load(address: BaseMemoryAddress): IAttestation | null {
-    if (address.id.startsWith("data:")) {
+    if (hasDataUriScheme(address.id)) {
       // Use the canonical data-URI attestation loader so replay matches live
       // semantics (decoded JSON rooted at path [], LRU-cached).
       const { ok } = loadDataURI(address);
@@ -171,7 +171,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // (decodeMemoryBoundary), so frozen corpus values are the faithful
       // replay shape — without this, frozen-identity fast paths in traverse
       // can never engage during replay even though they do in production.
-      value: deepFreeze(value) as FabricValue,
+      value: deepFreeze(value),
     };
     this.attestations.set(key, attestation);
     return attestation;
@@ -231,7 +231,6 @@ function wrapTxWithReadLog(
 function makeContext(includeMeta: boolean): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker(),
-    new ContextualFlowControl(),
     new MapSetStringToPathSelectors(true),
     includeMeta,
   );

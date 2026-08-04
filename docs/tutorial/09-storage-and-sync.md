@@ -56,10 +56,10 @@ diff-generated ops (`replace`, `add`, `remove`, `move`, `splice`) it
 carries the **mergeable** ops from Chapter 2 — `append`, `add-unique`,
 `remove-by-value`, `increment` — which record the *intent* of a collection
 write rather than its result. The whole family is defined in one registry;
-see `docs/development/patch-operations.md`,
-`docs/development/mergeable-collection-writes.md` (including the trade-off:
+see `docs/features/patch-operations.md`,
+`docs/features/mergeable-collection-writes.md` (including the trade-off:
 merging is add-wins, so a stale add landing after a remove resurrects the
-element), and `docs/development/keyed-collection-writes.md` (how
+element), and `docs/features/keyed-collection-writes.md` (how
 `elementById` gives a list element a deterministic address so per-element
 edits decompose into these ops).
 

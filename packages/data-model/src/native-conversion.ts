@@ -102,7 +102,7 @@ export function shallowCleanArray(
     Object.freeze(result);
   }
 
-  return result as FabricValueLayer;
+  return result;
 }
 
 /**
@@ -141,7 +141,7 @@ export function shallowCleanPlainObject(
     Object.freeze(result);
   }
 
-  return result as FabricValueLayer;
+  return result;
 }
 
 /**
@@ -273,7 +273,7 @@ export function shallowFabricFromNativeValue(
         false,
         false,
         null,
-      ) as FabricValueLayer;
+      );
     }
 
     case NATIVE_TAGS.Object: {
@@ -308,7 +308,7 @@ export function shallowFabricFromNativeValue(
         false,
         false,
         null,
-      ) as FabricValueLayer;
+      );
     }
 
     case NATIVE_TAGS.HasToJSON: {
@@ -328,7 +328,7 @@ export function shallowFabricFromNativeValue(
         false,
         false,
         null,
-      ) as FabricValueLayer;
+      );
     }
 
     case NATIVE_TAGS.FabricInstance: {
@@ -341,7 +341,7 @@ export function shallowFabricFromNativeValue(
         false,
         false,
         null,
-      ) as FabricValueLayer;
+      );
     }
 
     // deno-lint-ignore no-fallthrough

@@ -2391,7 +2391,7 @@ describe("CFC trusted UI event enforcement", () => {
   });
 });
 
-// Host-embedding contract seam 6 (docs/development/HOST_EMBEDDING.md §6): the
+// Host-embedding contract seam 6 (docs/features/host-embedding.md §6): the
 // trusted-event mark certifies that an event flow ORIGINATED FROM THE RENDERED
 // SURFACE — an anti-confused-deputy defense against in-runtime pattern code
 // exercising delegated authority it wasn't handed through the real UI. What it

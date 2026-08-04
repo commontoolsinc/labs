@@ -4,7 +4,6 @@ import {
   type CompiledModuleArtifact,
   type EvaluateResult,
   type Exports,
-  type Harness,
   type HarnessedFunction,
   type ResolvedFabricPin,
   type RuntimeProgram,
@@ -166,7 +165,7 @@ export interface EngineOptions {
   hideInternalStackFrames?: boolean;
 }
 
-export class Engine extends EventTarget implements Harness {
+export class Engine extends EventTarget {
   private runtimeInternals: RuntimeInternals | undefined;
   private compilerInternals: CompilerInternals | undefined;
   private ctRuntime: Runtime;
@@ -1127,7 +1126,7 @@ export class Engine extends EventTarget implements Harness {
           verify: false, // already verified at compile time
         });
       } catch (error) {
-        // Module evaluation runs outside an isolate `exec`, so errors thrown
+        // Module evaluation runs outside an `exec` call, so errors thrown
         // at module scope would otherwise surface with a censored (empty) or
         // raw-coordinate stack. Materialize + source-map it here (once),
         // matching how invoked-function errors are mapped.
@@ -1416,19 +1415,18 @@ export class Engine extends EventTarget implements Harness {
     });
   }
 
-  // Invokes a function that should've came from this isolate (unverifiable).
-  // We use this to hook into the isolate's source mapping functionality.
+  // Invokes a function that should've came from this SES runtime
+  // (unverifiable). We use this to hook into its source mapping functionality.
   invoke(fn: () => any): any {
     // Scheduler dictates this is a synchronous function,
     // and if we have functions from this source, this should already
     // be set up.
-    // Some tests invoke values outside of this isolate, so just
+    // Some tests invoke values outside of this SES runtime, so just
     // execute and return if runtime internals have not been initialized.
     if (!this.runtimeInternals && !this.sesRuntime) {
       return fn();
     }
-    return this.getSESRuntime().getIsolate("__engine-invoke__").value(fn)
-      .invoke().inner();
+    return this.getSESRuntime().exec(fn);
   }
 
   getInvocation(source: string): HarnessedFunction {

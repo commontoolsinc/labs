@@ -115,7 +115,8 @@ export function getTransactionReadDetails(
     return direct;
   }
 
-  // Chronicle-style transactions record read invariants as journal history.
+  // Fallback for a transaction that records read invariants only as journal
+  // history.
   return (function* () {
     for (const attestation of tx.journal.history(space)) {
       yield {

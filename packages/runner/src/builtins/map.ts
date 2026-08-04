@@ -186,7 +186,7 @@ export function map(
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
+        const slotLink = listElementLink(listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
@@ -195,7 +195,7 @@ export function map(
     // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
     // identity) or, on the legacy path, the embedded pattern graph itself.
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const argumentUsage = inferListOpArgumentUsage(opPattern);
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = listResultSchema(opPattern.resultSchema);

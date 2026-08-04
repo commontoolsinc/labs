@@ -37,6 +37,7 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernCellRep: false,
           commitPreconditions: false,
+          plainResultReceipts: false,
           computedCellIds: false,
         },
       });
@@ -44,6 +45,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        plainResultReceipts: false,
         computedCellIds: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
@@ -66,6 +68,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: true,
+        plainResultReceipts: true,
         computedCellIds: true,
         eagerSourceAnnotation: false,
       });
@@ -84,6 +87,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: true,
+        plainResultReceipts: true,
         computedCellIds: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).

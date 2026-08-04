@@ -1,7 +1,6 @@
 /**
- * Mutate-in-place write primitives shared between `v2-transaction.ts` and
- * `chronicle.ts`. Both layers want the same "shallow-thaw the spine,
- * create missing intermediates, mutate the leaf in place" behavior.
+ * Mutate-in-place write primitives for `v2-transaction.ts`: shallow-thaw the
+ * spine, create missing intermediates, mutate the leaf in place.
  *
  * The hot path is `applyMutablePathWrite()`. Sibling helpers
  * (`isContainerValue`, `getValueTypeName`, `applyArrayLengthWrite`) are
@@ -146,7 +145,7 @@ export const applyMutablePathWrite = (
       nextKeyAfterPath: leafKey,
       force: false,
     });
-    newRoot = result.value as FabricValue;
+    newRoot = result.value;
     parent = result.pathValue as
       | Record<string, FabricValue>
       | FabricValue[];
@@ -215,7 +214,7 @@ export const applyMutablePathWrite = (
   if (leafKey in obj && valueEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
-  obj[leafKey] = value as FabricValue;
+  obj[leafKey] = value;
   return { ok: { root: newRoot, previousValue, changed: true } };
 };
 

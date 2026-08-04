@@ -154,7 +154,7 @@ export CF_IDENTITY=./claude.key
 `"implicit trust"` is a shared, publicly-derivable identity — never use it
 against a shared or remote server (everyone who derives it becomes the same
 principal). For a personal or unique identity, use `id new`. See
-[`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
+[`docs/features/shared-identity.md`](../features/shared-identity.md) for the
 browser-import flow.
 
 ---
@@ -166,7 +166,7 @@ The toolshed-embedded memory service has two modes:
 | Var | Default | Notes |
 |---|---|---|
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
-| `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database. Used for clusterduck clustering. Validated as an absolute path. |
+| `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
@@ -224,7 +224,7 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 Set `COMMIT_SHA` to the Labs revision that describes a source checkout when you
 want source-run metadata to match compiled-binary metadata. A parent start
 script can export it once so toolshed and shell diagnostics describe the same
-checkout. It is descriptive metadata, not update authorization; only stamp a
+checkout; `scripts/start-local-dev.sh` defaults it to the checkout's HEAD. It is descriptive metadata, not update authorization; only stamp a
 revision that actually describes the launched sources. The explicit
 toolshed-only `TOOLSHED_GIT_SHA` override remains highest priority.
 
@@ -294,6 +294,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
+| `CF_SKIP_VERSION_CHECK` | _(unset)_ | Set to any non-empty value to skip the cf ↔ server version check. By default, server-touching commands compare this cf's commit (baked build metadata, or the checkout's HEAD for source runs) with the server's self-reported commit — the `gitSha` riding the `/_health` response the health check already fetches (same value as `/api/meta`) — and warn on stderr when they differ. Source runs grade the warning by git ancestry: cf newer than the server is the normal local-dev case and gets a compact heads-up; cf **older** than the server gets the loud OUTDATED warning; diverged or unorderable pairs (including all compiled binaries, which carry no history) get the undirected wording. |
 | `CF_CLI_INTEGRATION_USE_LOCAL` | _(unset)_ | Used by integration tests to dispatch through local source rather than a built binary. |
 | `CF_LABS_ROOT` | _(unset)_ | Read by `bin/cf` only. Selects which labs checkout answers, overriding the nearest one walking up from the cwd. Must be a checkout (a directory with `packages/cli/launcher.ts`) or `bin/cf` exits 2. Chooses the CLI, not the working directory. |
 
@@ -389,7 +390,6 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 |---|---|
 | `dev` | Build against the cloud toolshed at `toolshed.saga-castor.ts.net`. Use this for shell-only work. |
 | `dev-local` | Build against `http://localhost:$TOOLSHED_PORT`. **Use this for local dev** — `dev` points at the cloud backend. |
-| `dev-clusterduck` | Build against the clusterduck instance (`localhost:7001`). |
 | `build` / `production` | Optimized build (`production` sets `PRODUCTION=1`). |
 | `serve` | Serve pre-built `dist/` on `0.0.0.0:9099`. |
 | `test`, `integration` | Test suites. |

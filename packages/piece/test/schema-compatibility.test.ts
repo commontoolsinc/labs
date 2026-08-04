@@ -1402,7 +1402,7 @@ describe("piece schema compatibility", () => {
     ).toThrow(/argument/);
   });
 
-  it("preserves required result guarantees and defaults new required results", () => {
+  it("preserves required result guarantees and allows new required results", () => {
     const optionalized = pattern(
       oldPattern.argumentSchema,
       {
@@ -1446,7 +1446,7 @@ describe("piece schema compatibility", () => {
         oldPattern,
         newRequiredWithoutDefault,
       )
-    ).toThrow(/result\.summary: newly required result field has no default/);
+    ).not.toThrow();
     expect(() =>
       assertPatternSchemasBackwardCompatible(oldPattern, newRequiredWithDefault)
     ).not.toThrow();
@@ -1856,5 +1856,154 @@ describe("piece schema compatibility", () => {
       expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
         .toThrow(/invalid schema/i);
     }
+  });
+});
+
+describe("verb event closed-world transitions", () => {
+  // A verb node is `{$ref → event, asCell: ["stream"]}` in recorded
+  // contracts (or the event inline beside the marker). Below one, a boolean
+  // additionalProperties is an enforcement dial, not a data contract: the
+  // runtime schema-strips undeclared event fields before any handler runs,
+  // so open→closed surfaces silent loss as rule 1's typed rejection
+  // (accepted-and-STRIPPED was never contract, decided 2026-08-03), and
+  // closed→open must stay free for `never`-derived closure cleanup.
+  const verbPattern = (event: JSONSchema, viaRef = true): Pattern => {
+    const argument: JSONSchema = viaRef
+      ? {
+        type: "object",
+        properties: {
+          addComment: { $ref: "#/$defs/Ev", asCell: ["stream"] },
+        },
+        $defs: { Ev: event },
+      }
+      : {
+        type: "object",
+        properties: {
+          addComment: { ...(event as object), asCell: ["stream"] },
+        },
+      };
+    return pattern(argument, { type: "object", properties: {} });
+  };
+
+  const openEvent: JSONSchema = {
+    type: "object",
+    properties: { body: { type: "string" } },
+  };
+  const closedEvent: JSONSchema = {
+    ...openEvent,
+    additionalProperties: false,
+  };
+
+  it("lets a verb event close (ref-marked stream)", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(openEvent),
+        verbPattern(closedEvent),
+      )
+    ).not.toThrow();
+  });
+
+  it("lets a verb event close (inline-marked stream)", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(openEvent, false),
+        verbPattern(closedEvent, false),
+      )
+    ).not.toThrow();
+  });
+
+  it("lets a verb event reopen (never-derived closure cleanup)", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(closedEvent),
+        verbPattern(openEvent),
+      )
+    ).not.toThrow();
+  });
+
+  it("carries the exemption through the event's nested objects", () => {
+    const nested = (extra: Record<string, unknown>): JSONSchema => ({
+      type: "object",
+      properties: {
+        payload: {
+          type: "object",
+          properties: { note: { type: "string" } },
+          ...extra,
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(nested({})),
+        verbPattern(nested({ additionalProperties: false })),
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses closing a plain argument object", () => {
+    const settings = (extra: Record<string, unknown>): Pattern =>
+      pattern({
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            properties: { theme: { type: "string" } },
+            ...extra,
+          },
+        },
+      }, { type: "object", properties: {} });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        settings({}),
+        settings({ additionalProperties: false }),
+      )
+    ).toThrow(
+      /additional properties accepted previously would now be rejected/,
+    );
+  });
+
+  it("does not exempt a node only one contract marks as a stream", () => {
+    const demoted = pattern({
+      type: "object",
+      properties: { addComment: { ...(closedEvent as object) } },
+    }, { type: "object", properties: {} });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(verbPattern(openEvent), demoted)
+    ).toThrow(/asCell changed/);
+  });
+
+  it("still compares schema-valued additionalProperties on a verb event", () => {
+    const shaped: JSONSchema = {
+      ...openEvent,
+      additionalProperties: { type: "string" },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(shaped),
+        verbPattern(closedEvent),
+      )
+    ).toThrow(
+      /additional properties accepted previously would now be rejected/,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(openEvent),
+        verbPattern(shaped),
+      )
+    ).toThrow(/additional properties are now constrained/);
+  });
+
+  it("closed verb events still gain optional fields (evolution policy)", () => {
+    const widened: JSONSchema = {
+      type: "object",
+      properties: { body: { type: "string" }, tag: { type: "string" } },
+      additionalProperties: false,
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(closedEvent),
+        verbPattern(widened),
+      )
+    ).not.toThrow();
   });
 });

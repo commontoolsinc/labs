@@ -155,7 +155,7 @@ function mergeLlmDerivedIntoNode(
  *
  * A root-only merge is not enough: when a nested value redirects/splits into its
  * own document (an `asCell` field, an ID-anchored array item), the child write
- * descends via `runtime.cfc.getSchemaAtPath`, which carries ancestor
+ * descends via `ContextualFlowControl.getSchemaAtPath`, which carries ancestor
  * confidentiality but NOT `ifc.addIntegrity`. The child doc that stores the
  * model bytes would then persist as unstamped/ordinary output and the D1b
  * provenance guarantee would be lost for structured results (codex P1). Stamping

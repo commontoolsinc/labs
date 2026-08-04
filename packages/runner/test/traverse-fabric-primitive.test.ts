@@ -15,7 +15,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
   Revision,
@@ -201,7 +200,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     const value = {
       blob: new FabricBytes(
         new Uint8Array([4, 5, 6]),
-      ) as unknown as FabricValue,
+      ),
     };
     store.set(`${entity}/${type}`, {
       the: type,
@@ -244,7 +243,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     const uri = "of:fabric-dag-instance" as URI;
     const entity = uri as Entity;
     const failure = FabricError.fromNativeError(new Error("leaf me"));
-    const value = { failure: failure as unknown as FabricValue };
+    const value = { failure: failure };
     store.set(`${entity}/${type}`, {
       the: type,
       of: entity,

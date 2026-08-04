@@ -136,7 +136,7 @@ export class Writable<T = unknown> {
     if (!Array.isArray(this.#value)) {
       throw new Error("addUnique requires an array value");
     }
-    const current = this.#value as FabricValue[];
+    const current = this.#value;
     for (const value of values) {
       if (!current.some((item) => valueEqual(item, value as FabricValue))) {
         current.push(value as FabricValue);
@@ -146,7 +146,7 @@ export class Writable<T = unknown> {
 
   removeByValue(value: unknown): void {
     if (!Array.isArray(this.#value)) return;
-    this.#value = (this.#value as FabricValue[]).filter((item) =>
+    this.#value = this.#value.filter((item) =>
       !valueEqual(item, value as FabricValue)
     ) as T;
   }

@@ -41,6 +41,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
 import {
   dataUriFromValue,
+  isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
 
@@ -117,7 +118,7 @@ export function dataUriFromValueWithResolvedLinks(
             [key, value],
           ) => [
             key,
-            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+            traverseAndAddBaseIdToRelativeLinks(value, seen),
           ]),
         );
       }
@@ -133,6 +134,11 @@ export function dataUriFromValueWithResolvedLinks(
 
 /**
  * Find any data: URI links and inline them.
+ *
+ * Only this codec's media type is inlined, the one
+ * {@link dataUriFromValue} mints. A link naming a `data:` URI of any other
+ * media type is returned as it came in, on the same footing as a link
+ * naming a document in a space.
  *
  * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
  * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
@@ -151,7 +157,7 @@ export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
-    if (dataLink.id?.startsWith("data:")) {
+    if (dataLink.id !== undefined && isFabricDataUri(dataLink.id)) {
       let dataValue: any = valueFromDataUri(dataLink.id);
       const path = [...dataLink.path];
 
@@ -164,8 +170,7 @@ export function findAndInlineDataUriLinks(value: any): any {
           const newLink = parseLink(dataValue);
           let schema = newLink.schema;
           if (schema !== undefined && path.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path);
+            schema = ContextualFlowControl.getSchemaAtPath(schema, path);
           }
           // Create new link by merging dataLink with remaining path
           const newSigilLink = createSigilLinkFromParsedLink({

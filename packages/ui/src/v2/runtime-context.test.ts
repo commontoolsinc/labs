@@ -4,7 +4,7 @@ import type { RuntimeClient } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { runtimeContext, spaceContext } from "./runtime-context.ts";
 
-// Host-embedding contract seam 2 (docs/development/HOST_EMBEDDING.md §2):
+// Host-embedding contract seam 2 (docs/features/host-embedding.md §2):
 // `runtimeContext` and `spaceContext` are the ONLY two contexts a host must
 // provide; every other context degrades gracefully without a provider. A host
 // and the mounted components must agree on the context *identity* — with

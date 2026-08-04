@@ -7,7 +7,7 @@ import {
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
 import type {
-  IStorageProviderWithReplica,
+  IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import {
@@ -30,7 +30,7 @@ const foreignSpace = (await Identity.fromPassphrase(
 )).did();
 const DOCUMENT_MIME = "application/json" as const;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   sync(
     uri: URI,

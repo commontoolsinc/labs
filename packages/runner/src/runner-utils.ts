@@ -288,7 +288,7 @@ function extractDefaultValuesInternal(
         ) &&
         validateSchemaValue(canonical, candidate.value, resolvedRoot) ===
           undefined
-      ).map((candidate) => candidate.value as FabricValue);
+      ).map((candidate) => candidate.value);
       return validCandidates.length > 0 &&
           validCandidates.every((candidate) =>
             schemaDefaultValueEqual(candidate, validCandidates[0])
@@ -319,7 +319,7 @@ function extractDefaultValuesInternal(
       // children as inexpensive defense-in-depth against accidental deeper
       // mutation of the shared default.
       const obj = shallowMutableClone(
-        (isRecord(canonical.default) ? canonical.default : {}) as FabricValue,
+        isRecord(canonical.default) ? canonical.default : {},
       ) as Record<string, FabricValue>;
       for (
         const [propKey, propSchema] of Object.entries(canonical.properties)

@@ -50,10 +50,10 @@ function roundTrip(value: FabricValue): FabricOrConvertibleNativeValue {
 describe("native-conversion", () => {
   describe("nativeFromFabricValue()", () => {
     it("round-trips primitives", () => {
-      expect(roundTrip(42 as FabricValue)).toBe(42);
-      expect(roundTrip("hello" as FabricValue)).toBe("hello");
+      expect(roundTrip(42)).toBe(42);
+      expect(roundTrip("hello")).toBe("hello");
       expect(roundTrip(null)).toBe(null);
-      expect(roundTrip(true as FabricValue)).toBe(true);
+      expect(roundTrip(true)).toBe(true);
     });
 
     it("round-trips `undefined`", () => {
@@ -61,16 +61,16 @@ describe("native-conversion", () => {
     });
 
     it("round-trips `bigint`", () => {
-      expect(roundTrip(42n as FabricValue)).toBe(42n);
+      expect(roundTrip(42n)).toBe(42n);
     });
 
     it("round-trips plain objects", () => {
-      const value = { a: 1, b: "two" } as FabricValue;
+      const value = { a: 1, b: "two" };
       expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
     });
 
     it("round-trips arrays", () => {
-      const value = [1, "two", null] as FabricValue;
+      const value = [1, "two", null];
       expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
@@ -79,7 +79,7 @@ describe("native-conversion", () => {
         name: "test",
         count: 42n,
         missing: undefined,
-      } as FabricValue;
+      };
       const result = roundTrip(value) as Record<string, unknown>;
       expect(result.name).toBe("test");
       expect(result.count).toBe(42n);
@@ -88,7 +88,7 @@ describe("native-conversion", () => {
 
     it("unwraps a `FabricError` back to a native `Error`", () => {
       const error = new Error("test error");
-      const stored = fabricFromNativeValue(error as unknown as FabricValue);
+      const stored = fabricFromNativeValue(error);
       const restored = nativeFromFabricValue(stored);
       expect(restored).toBeInstanceOf(Error);
       expect((restored as Error).message).toBe("test error");
@@ -96,7 +96,7 @@ describe("native-conversion", () => {
 
     it("unwraps `FabricError` in nested object", () => {
       const se = FabricError.fromNativeError(new Error("deep"));
-      const obj = { error: se } as FabricValue;
+      const obj = { error: se };
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -109,7 +109,7 @@ describe("native-conversion", () => {
       const sm = new FabricMap(
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
-      const arr = [sm] as FabricValue;
+      const arr = [sm];
       const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenMap);
     });
@@ -118,14 +118,14 @@ describe("native-conversion", () => {
       const sm = new FabricMap(
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
-      const arr = [sm] as FabricValue;
+      const arr = [sm];
       const result = nativeFromFabricValue(arr, false) as unknown[];
       expect(result[0]).toBeInstanceOf(Map);
       expect(result[0]).not.toBeInstanceOf(FrozenMap);
     });
 
     it("passes through primitives at all levels", () => {
-      const obj = { a: 1, b: "two", c: null, d: true } as FabricValue;
+      const obj = { a: 1, b: "two", c: null, d: true };
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -139,7 +139,7 @@ describe("native-conversion", () => {
         outer: {
           inner: se,
         },
-      } as FabricValue;
+      };
       const result = nativeFromFabricValue(obj) as {
         outer: { inner: Error };
       };
@@ -153,7 +153,7 @@ describe("native-conversion", () => {
       const obj = {
         error: se,
         code: 500,
-      } as unknown as FabricValue;
+      };
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -170,7 +170,7 @@ describe("native-conversion", () => {
       err.name = "CustomName";
       const se = FabricError.fromNativeError(err);
       const result = nativeFromFabricValue(
-        se as unknown as FabricValue,
+        se,
       ) as Error;
 
       expect(result).toBeInstanceOf(TypeError);
@@ -181,7 +181,7 @@ describe("native-conversion", () => {
     it("leaves the class's own `name` in place when not overridden", () => {
       const se = FabricError.fromNativeError(new TypeError("plain"));
       const result = nativeFromFabricValue(
-        se as unknown as FabricValue,
+        se,
       ) as Error;
 
       expect(result).toBeInstanceOf(TypeError);
@@ -191,7 +191,7 @@ describe("native-conversion", () => {
     it("deeply unwraps `FabricError` in arrays (frozen)", () => {
       const err = new Error("array");
       const se = FabricError.fromNativeError(err);
-      const arr = [1, se, 3] as unknown as FabricValue;
+      const arr = [1, se, 3];
       const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(Error);
@@ -205,7 +205,7 @@ describe("native-conversion", () => {
       const obj = Object.freeze({
         a: 1,
         b: "two",
-      }) as unknown as FabricValue;
+      });
       const result = nativeFromFabricValue(obj, false) as Record<
         string,
         unknown
@@ -217,7 +217,7 @@ describe("native-conversion", () => {
     });
 
     it("freezes output when `frozen=true` (default)", () => {
-      const obj = { a: 1, b: "two" } as unknown as FabricValue;
+      const obj = { a: 1, b: "two" };
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -226,12 +226,12 @@ describe("native-conversion", () => {
     });
 
     it("preserves sparse holes", () => {
-      const arr = new Array(3) as FabricValue[];
+      const arr = new Array(3);
       arr[0] = 1;
       arr[2] = 3;
       Object.freeze(arr);
       const result = nativeFromFabricValue(
-        arr as FabricValue,
+        arr,
       ) as unknown[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
@@ -241,7 +241,7 @@ describe("native-conversion", () => {
 
     it("passes through non-native `FabricInstance`", () => {
       const us = new UnknownValue("Test@1", null);
-      const obj = { thing: us } as unknown as FabricValue;
+      const obj = { thing: us };
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -254,7 +254,7 @@ describe("native-conversion", () => {
         ["x", 10],
       ] as [FabricValue, FabricValue][]);
       const sm = new FabricMap(map);
-      const obj = { data: sm } as unknown as FabricValue;
+      const obj = { data: sm };
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -264,9 +264,9 @@ describe("native-conversion", () => {
     });
 
     it("deeply unwraps `FabricSet` to `FrozenSet`", () => {
-      const set = new Set<FabricValue>([42] as FabricValue[]);
+      const set = new Set<FabricValue>([42]);
       const ss = new FabricSet(set);
-      const arr = [ss] as unknown as FabricValue;
+      const arr = [ss];
       const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenSet);
       expect((result[0] as Set<number>).has(42)).toBe(true);
@@ -284,7 +284,7 @@ describe("native-conversion", () => {
       const outerSe = FabricError.fromNativeError(outerErr);
 
       const result = nativeFromFabricValue(
-        outerSe as FabricValue,
+        outerSe,
       ) as Error;
       expect(result).toBeInstanceOf(Error);
       expect(result.message).toBe("outer");
@@ -304,7 +304,7 @@ describe("native-conversion", () => {
       const outerSe = FabricError.fromNativeError(outerErr);
 
       const result = nativeFromFabricValue(
-        outerSe as FabricValue,
+        outerSe,
         false,
       ) as Error;
       expect(result).toBeInstanceOf(Error);
@@ -383,7 +383,7 @@ describe("native-conversion", () => {
         [DEEP_FREEZE](
           _subFreeze: (value: FabricValue) => FabricValue,
         ): FabricValue {
-          return this as unknown as FabricValue;
+          return this;
         }
         [IS_DEEP_FROZEN](
           _subIsDeepFrozen: (value: FabricValue) => boolean,
@@ -416,7 +416,7 @@ describe("native-conversion", () => {
         type: "Error",
         name: null,
         message: "boom",
-      } as unknown as FabricValue;
+      };
       const frozen = FabricError[CODEC].decode(
         CODEC_TYPE_TAGS.Error,
         state,
@@ -433,7 +433,7 @@ describe("native-conversion", () => {
 
     it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       // Tag travels separately; the bare inner state is the codec payload.
-      const state = { x: 1 } as unknown as FabricValue;
+      const state = { x: 1 };
       const frozen = ProblematicValue[CODEC].decode("Bad@1", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
       const mutable = ProblematicValue[CODEC].decode(
@@ -445,7 +445,7 @@ describe("native-conversion", () => {
     });
 
     it("`UnknownValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = { y: 2 } as unknown as FabricValue;
+      const state = { y: 2 };
       const frozen = UnknownValue[CODEC].decode("Fancy@3", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
       const mutable = UnknownValue[CODEC].decode("Fancy@3", state, mutableCtx);

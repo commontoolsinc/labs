@@ -16,7 +16,6 @@ import {
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
-import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { isObject } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
@@ -140,7 +139,7 @@ export class EngineObjectManager implements ObjectStorageManager {
         type: type as MIME,
         path: [],
       },
-      value: state.document as unknown as FabricValue,
+      value: state.document,
     };
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
@@ -314,10 +313,8 @@ export const trackGraph = (
     JSONSchema | undefined
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
-  const cfc = new ContextualFlowControl();
   const traversalContext = createTraversalContext(
     tracker,
-    cfc,
     schemaTracker,
     true,
   );
@@ -681,10 +678,8 @@ const evaluateTrackedDocument = (
     FabricValue,
     JSONSchema | undefined
   >();
-  const cfc = new ContextualFlowControl();
   const traversalContext = createTraversalContext(
     tracker,
-    cfc,
     schemaTracker,
     true,
   );

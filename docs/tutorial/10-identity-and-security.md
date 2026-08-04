@@ -35,7 +35,7 @@ footgun anywhere shared: derive or browser-import it against a server other
 people use and you all become the *same* principal — seeing and overwriting
 each other's `PerUser` data. Use a unique `id new` key for your own identity;
 reserve `implicit trust` for deliberately acting as a local dev server's
-operator. See `docs/development/SHARED_IDENTITY.md`.
+operator. See `docs/features/shared-identity.md`.
 
 ## Passkeys: the browser login
 

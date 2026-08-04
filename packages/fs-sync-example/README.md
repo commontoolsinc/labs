@@ -71,6 +71,6 @@ deno test packages/fs-sync-example/src/markdown.test.ts
 ## Documentation
 
 This example implements the patterns described in
-[docs/development/importers/bidirectional_sync.md](../../docs/development/importers/bidirectional_sync.md),
+[docs/features/bidirectional-sync.md](../../docs/features/bidirectional-sync.md),
 covering CAS retry loops, edit watermarks, Cell.for() for stable identity, and
 error classification.

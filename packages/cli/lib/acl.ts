@@ -14,6 +14,7 @@ import {
   isACLUser,
 } from "@commonfabric/memory/acl";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { startVersionCheck } from "./version-check.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -52,7 +53,14 @@ export async function createRuntime(
     experimental: experimentalOptionsFromEnv(Deno.env.get),
   }));
 
-  if (!(await runtime.healthCheck())) {
+  // The server's commit rides the health response the check below already
+  // fetches; only cf's own local resolution (baked metadata or git) runs
+  // concurrently here, and finish() settles it on both paths so no
+  // subprocess op outlives a thrown error.
+  const versionCheck = startVersionCheck();
+  const healthy = await runtime.healthCheck();
+  await versionCheck.finish(runtime.serverGitSha, config.apiUrl);
+  if (!healthy) {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
   }
 

@@ -157,6 +157,12 @@ run directory.
   the event-driven primitives, the `check-no-waitfor` CI guard that keeps new
   polling `waitFor` out of the integration suites, and the deliberate exceptions
   where a bounded poll is the honest observation — read it before adding a poll.
+- [waiting-in-tests-rationale.md](waiting-in-tests-rationale.md) — the analysis
+  and case studies behind that guidance: the full argument against bounded
+  timeouts, the sizing of the deno-web-test backstop, retired real-clock
+  exemptions, the FUSE exec suite's design, and the production waits that apply
+  the same principle. Not needed to write a test; read it before changing the
+  wait machinery itself.
 - [COVERAGE.md](COVERAGE.md) — how CI measures coverage. It explains the two
   mechanisms (Deno's V8 coverage for runtime code, and transformer-based
   coverage for authored patterns) and how both feed the coverage-debt gate.
@@ -165,8 +171,9 @@ run directory.
 - [BENCHMARKS.md](BENCHMARKS.md) — how `*.bench.ts` files run in CI, how the
   team ops dashboard charts their trends, and the naming and stdout
   constraints a bench file must satisfy.
-- [LLM_TESTING.md](LLM_TESTING.md) — testing patterns and server routes that
-  call the LLM, including the test-environment guard and conversation fixtures.
+- [llm-testing.md](../features/llm-testing.md) — testing patterns and server
+  routes that call the LLM, including the test-environment guard and
+  conversation fixtures.
 - [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser
   integration tests.
 - [../specs/pattern-update-testing.md](../specs/pattern-update-testing.md) —

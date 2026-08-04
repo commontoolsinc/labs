@@ -247,7 +247,7 @@ export class FabricError extends FabricNativeWrapper<Error>
     for (const value of this.#extras.values()) {
       subFreeze(value);
     }
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**
@@ -371,7 +371,7 @@ export class FabricError extends FabricNativeWrapper<Error>
         for (const [key, val] of value.extraEntries()) {
           state[key] = val;
         }
-        return state as FabricValue;
+        return state;
       }
 
       /** @inheritDoc */

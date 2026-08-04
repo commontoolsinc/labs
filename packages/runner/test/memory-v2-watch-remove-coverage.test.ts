@@ -13,7 +13,7 @@ import {
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
-import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
+import type { IStorageProvider } from "../src/storage/interface.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -24,7 +24,7 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-watch-remove-coverage");
 const space = signer.did();
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   sync(
     uri: URI,

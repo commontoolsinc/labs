@@ -59,7 +59,7 @@ agent-browser screenshot
 For Common Fabric tests that touch `PerUser`, `PerSession`, favorites,
 home-space data, drafts, or user-local UI state, the browser and CLI must use the
 same identity unless the test is explicitly about multi-user behavior. Use
-[`docs/development/SHARED_IDENTITY.md`](../../development/SHARED_IDENTITY.md) as
+[`docs/features/shared-identity.md`](../../features/shared-identity.md) as
 the canonical workflow.
 
 Before debugging "missing" data, compare the CLI DID:

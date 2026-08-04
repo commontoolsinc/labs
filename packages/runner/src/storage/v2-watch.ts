@@ -6,7 +6,6 @@ import {
 import type { MIME } from "@commonfabric/memory/interface";
 import type { CellScope } from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { ContextualFlowControl } from "../cfc.ts";
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
 import type { SchemaPathSelector } from "@commonfabric/api";
@@ -40,7 +39,6 @@ export const compactWatchEntries = (
   entries: [ScopedWatchAddress, SchemaPathSelector][],
 ): [ScopedWatchAddress, SchemaPathSelector][] => {
   const tracker = new SelectorTracker<Result<Unit, PullError>>();
-  const cfc = new ContextualFlowControl();
   const compacted: [ScopedWatchAddress, SchemaPathSelector][] = [];
 
   for (const entry of entries) {
@@ -54,7 +52,6 @@ export const compactWatchEntries = (
     const [superset] = tracker.getSupersetSelector(
       baseAddress,
       selector,
-      cfc,
     );
     if (superset !== undefined) {
       continue;

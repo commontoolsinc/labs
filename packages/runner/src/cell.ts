@@ -7,6 +7,7 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
+  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
@@ -204,6 +205,7 @@ const recordSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema) ??
     storedSchemaForWritePolicyInput(tx, link);
@@ -221,6 +223,7 @@ const recordSchemaWritePolicyInput = (
     },
     schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -243,7 +246,7 @@ const storedSchemaForWritePolicyInput = (
   if (!isRecord(stored) || stored.value === undefined) {
     return undefined;
   }
-  return new ContextualFlowControl().getSchemaAtPath(
+  return ContextualFlowControl.getSchemaAtPath(
     stored.value as JSONSchema,
     [...link.path],
   );
@@ -253,6 +256,7 @@ export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema);
   const cfcRelevant = schemaHasIfc(resolvedSchema) ||
@@ -265,8 +269,65 @@ export const recordRelevantSchemaWritePolicyInput = (
     tx,
     link,
     schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+    schemaRole,
   );
 };
+
+/**
+ * Internal-only stream-send options.
+ *
+ * `eventId` is a caller-supplied durable event id (verb contract WS-D): a
+ * same-id retry collides on the handling's create-only receipt.
+ *
+ * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
+ * into this send's event value (the LLM tool-call path injects a `result`
+ * cell: `builtins/llm-dialog.ts` sends `{ ...input, result }`). The
+ * dispatch-side closed-world gate exempts exactly these keys — and only
+ * these — from an `additionalProperties: false` event schema. The marker is
+ * PROVENANCE, not shape, and must stay unforgeable: it rides this
+ * in-process options argument, never the event value, so no remote or CLI
+ * caller can express it — payloads are plain data, and the CLI's send
+ * surface (`CallableCellLike.send`, packages/cli/lib/callable.ts) forwards
+ * only `eventId`. In-process callers are gated too: the value must be an
+ * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
+ * path drops any other value — and the mint lives in runner internals no
+ * pattern compartment can import, so sandboxed pattern code holding a real
+ * stream cell still cannot smuggle an undeclared key past closed-world by
+ * passing a plain array here. Adding any data-expressible way to set it
+ * would reopen the accepted-and-ignored hole C5 closes.
+ */
+export type StreamSendOptions = {
+  eventId?: string;
+  runtimeInjectedEventKeys?: readonly string[];
+};
+
+// The mint registry backing `runtimeInjectedEventKeys` (see
+// StreamSendOptions): membership here is the capability. Only code that can
+// call `markRuntimeInjectedEventKeys` — runner-internal modules and
+// same-package tests; never a pattern compartment, whose module graph cannot
+// import runner internals — can produce an array the send path accepts.
+const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
+
+/**
+ * Mint an injection-provenance marker for {@link StreamSendOptions}. The
+ * returned (frozen) array is the capability: `Cell.set`'s stream branch
+ * forwards `runtimeInjectedEventKeys` to dispatch only when it was minted
+ * here, so an unminted array — anything a spoofing caller can construct —
+ * is ignored and the closed-world gate judges the key like any other
+ * undeclared field.
+ */
+export function markRuntimeInjectedEventKeys(
+  keys: readonly string[],
+): readonly string[] {
+  const minted = Object.freeze([...keys]);
+  mintedRuntimeInjectedKeys.add(minted);
+  return minted;
+}
+
+const mintedRuntimeInjectedEventKeys = (
+  keys: readonly string[] | undefined,
+): readonly string[] | undefined =>
+  keys !== undefined && mintedRuntimeInjectedKeys.has(keys) ? keys : undefined;
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -281,14 +342,18 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
-      sendOptions?: { eventId?: string },
+      sendOptions?: {
+        eventId?: string;
+        runtimeInjectedEventKeys?: readonly string[];
+      },
     ): C;
   }
 
   /**
    * Augment Streamable to add onCommit callback and internal send-options
-   * support (`eventId` — caller-supplied durable event id, verb contract
-   * WS-D). Event is optional only when T is void (matching public API).
+   * support (see `StreamSendOptions` — `eventId` and the runtime-injected
+   * key marker). Event is optional only when T is void (matching public
+   * API).
    */
   interface IStreamable<T> {
     send(
@@ -298,7 +363,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string },
+          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
@@ -306,7 +371,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string },
+          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
         ]
     ): void;
   }
@@ -392,8 +457,16 @@ declare module "@commonfabric/api" {
      * the write is skipped entirely if it deep-equals the value that would be
      * written. The read is marked `ignoreReadForScheduling`, so it does not
      * register a dependency that could re-trigger the writing computation.
+     *
+     * `schemaRole` is runner-internal provenance. Result projection writes pass
+     * `"output"` so the schema record created by this write carries the role;
+     * ordinary callers must leave it absent.
      */
-    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
+    setRawUntyped(
+      value: FabricValue,
+      onlyIfDifferent?: boolean,
+      schemaRole?: "output",
+    ): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -1056,7 +1129,21 @@ export class CellImpl<T extends FabricValue>
    *          dependencies have been computed.
    */
   pull(): Promise<Readonly<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.synced) {
+      // Register the kicked first sync in the settled pool the convergence
+      // loop below drains. sync() resolves once the doc is confirmed —
+      // arrived or absent — and an UNREGISTERED kick is exactly the race
+      // sync()'s own doc comment warns about: over a low-latency link the
+      // doc lands before the scheduler goes idle, so the read sees it; over
+      // a real network it does not, and pull() resolved from held,
+      // not-yet-loaded state (measured: a same-id retry's receipt readback
+      // returned undefined against a remote host while identical calls
+      // passed against a local toolshed). Failures are swallowed like
+      // link-resolution's kicks: the read still resolves from the replica.
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     // Check if we need to traverse the result to register all dependencies.
     // This is needed when there's no schema or when the schema is TrueSchema ("any"),
@@ -1279,16 +1366,19 @@ export class CellImpl<T extends FabricValue>
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     /**
-     * Internal-only stream-send options. `eventId` supplies the durable event
-     * id (spec §7.5) instead of minting one: an ingress caller that owns a
-     * delivery id passes it through so a retry of the same id collides on the
-     * handling's create-only receipt (verb contract WS-D,
+     * Internal-only stream-send options (see {@link StreamSendOptions}).
+     * `eventId` supplies the durable event id (spec §7.5) instead of minting
+     * one: an ingress caller that owns a delivery id passes it through so a
+     * retry of the same id collides on the handling's create-only receipt
+     * (verb contract WS-D,
      * docs/plans/pattern-verb-contract-implementation.md). The receipt is a
      * COMMIT witness, not an execution witness — the redelivered event still
      * runs the handler body and then loses the race, so effects outside the
-     * transaction repeat. Ignored on the plain-cell write path.
+     * transaction repeat. `runtimeInjectedEventKeys` carries the
+     * runtime-injection provenance the closed-world gate consumes. Ignored on
+     * the plain-cell write path.
      */
-    sendOptions?: { eventId?: string },
+    sendOptions?: StreamSendOptions,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -1329,6 +1419,14 @@ export class CellImpl<T extends FabricValue>
             ? undefined
             : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
           originTx: this.tx ?? undefined,
+          // Forward injection provenance only when it carries the mint (see
+          // markRuntimeInjectedEventKeys): a plain array here — the shape any
+          // in-process or sandboxed caller could pass — is dropped, and the
+          // closed-world gate then judges the key like any other undeclared
+          // field.
+          runtimeInjectedEventKeys: mintedRuntimeInjectedEventKeys(
+            sendOptions?.runtimeInjectedEventKeys,
+          ),
         },
       );
 
@@ -1419,7 +1517,7 @@ export class CellImpl<T extends FabricValue>
       ] | [
         AnyCellWrapping<T>,
         ((tx: IExtendedStorageTransaction) => void) | undefined,
-        { eventId?: string },
+        StreamSendOptions,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
@@ -1434,13 +1532,14 @@ export class CellImpl<T extends FabricValue>
         AnyCellWrapping<T>,
         ((tx: IExtendedStorageTransaction) => void) | undefined,
         /**
-         * Internal-only stream-send options: `eventId` passes a
-         * caller-supplied durable event id through to the scheduler, so a
-         * same-id retry collides on the handling's create-only receipt and
-         * cannot commit twice — though the body does re-run (verb contract
-         * WS-D).
+         * Internal-only stream-send options (see {@link StreamSendOptions}):
+         * `eventId` passes a caller-supplied durable event id through to the
+         * scheduler, so a same-id retry collides on the handling's
+         * create-only receipt and cannot commit twice — though the body does
+         * re-run (verb contract WS-D). `runtimeInjectedEventKeys` carries
+         * runtime-injection provenance for the closed-world gate.
          */
-        { eventId?: string },
+        StreamSendOptions,
       ]
   ): void {
     const [event, onCommit, sendOptions] = args;
@@ -1537,23 +1636,22 @@ export class CellImpl<T extends FabricValue>
     );
     // Read marked as the op's own incidental read: dropped from the commit's
     // conflict set so the append merges, while a handler's explicit read is not.
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as unknown[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.push() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.push() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
 
-    // If there is no array yet, create it first. We have to do this as a
-    // separate operation, so that in the next steps each object element is
-    // properly anchored in the array.
-    if (array === undefined) {
+      // No array yet, so create it first. This has to be a separate operation,
+      // so that in the next steps each object element is properly anchored in
+      // the array.
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -1562,15 +1660,27 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // and assigning that back to `currentValue` would discard the narrowing
+      // this block exists to establish.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      // From here on `currentValue` is the array just created, not what the
+      // read returned.
+      currentValue = created;
     }
+
+    // Read-only: a value that came from storage is a `FabricArray`, which is a
+    // `ReadonlyArray`, and though a freshly created one is not, this method
+    // only ever reads what it finds -- the replacement is `combined`, below.
+    const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
     const combined = new Array(array.length + value.length);
@@ -1617,35 +1727,44 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       resolvedLink.schema ?? this.schema,
     );
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as FabricValue[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.addUnique() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
-    if (array === undefined) {
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.addUnique() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
+
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated for the same reason as in `push()`: `processDefaultValue()`
+      // answers `any`, which would discard the narrowing on assignment.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      // As in `push()`, `currentValue` is now the created array.
+      currentValue = created;
     }
+
+    // Read-only for the same reason as in `push()`: the comparisons below only
+    // read, and the replacement is built separately.
+    const array: readonly FabricValue[] = currentValue;
 
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
     // durable state, catching elements the local replica had not loaded.
-    const candidates = value as FabricValue[];
+    const candidates = value;
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
@@ -1684,7 +1803,7 @@ export class CellImpl<T extends FabricValue>
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
       const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(candidate) as FabricValue
+        ? fabricFromNativeValue(candidate)
         : candidate;
       return existing.some((element) => valueEqual(element, comparable));
     };
@@ -1774,7 +1893,7 @@ export class CellImpl<T extends FabricValue>
     const currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const array = currentValue as FabricValue[];
+    const array = currentValue;
     if (array === undefined) {
       return;
     }
@@ -1814,7 +1933,7 @@ export class CellImpl<T extends FabricValue>
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
         op: "remove-by-value",
-        value: element as FabricValue,
+        value: element,
       });
     }
   }
@@ -1976,7 +2095,9 @@ export class CellImpl<T extends FabricValue>
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
-        ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
+        ? ContextualFlowControl.getSchemaAtPath(currentLink.schema, [
+          key.toString(),
+        ])
         : undefined;
 
       // Create a child link with an extended path. schemaAtPath retains the
@@ -2299,7 +2420,11 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
+  setRawUntyped(
+    value: FabricValue,
+    onlyIfDifferent = false,
+    schemaRole?: "output",
+  ): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -2330,6 +2455,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       this.link,
       this.link.schema ?? this.schema,
+      schemaRole,
     );
     this.tx.writeValueOrThrow(this.link, inlined);
 
@@ -2377,7 +2503,7 @@ export class CellImpl<T extends FabricValue>
       path: [metaField],
       ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
-    this.tx.writeOrThrow(metaAddr, value as FabricValue);
+    this.tx.writeOrThrow(metaAddr, value);
   }
 
   /**
@@ -3201,6 +3327,20 @@ export function convertCellsToLinks(
   // throwing away the copy just made above. One copy could serve both.
   if (!isRecord(value)) {
     // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
+    return value;
+  } else if (value instanceof FabricPrimitive) {
+    // An opaque scalar whose state lives in private fields, so it has zero
+    // enumerable own properties and the object branch below would rebuild it
+    // from its (empty) entries as a bare `{}`. It leaves whole instead.
+    //
+    // This catches both forms that arrive here: one the caller already built,
+    // and one `shallowFabricFromNativeValue()` just minted from a native (a
+    // `Uint8Array`, a `Date`) immediately above.
+    //
+    // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
+    // container reached by its codec contents rather than by property name, so
+    // it still falls to the object branch and is rebuilt from zero enumerable
+    // own properties. Same marker as the sibling walk in `builder/to-encodable-form.ts`.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

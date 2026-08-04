@@ -22,6 +22,7 @@ import Topic, {
   fidPayload,
   rejectMutation,
   snippet,
+  type TopicAuthor,
   topicAuthorFromAgent,
   topicAuthorFromPerson,
   topicAuthorLabel,
@@ -36,9 +37,12 @@ import Topic, {
 // Re-export the shared types for consumers and tests.
 export type {
   AddCommentEvent,
+  AddCommentResult,
   AddLinkEvent,
+  AddLinkResult,
   AgentAuthoredEvent,
   SetBodyEvent,
+  SetBodyResult,
   TopicAuthor,
   TopicComment,
   TopicInput,
@@ -72,6 +76,16 @@ export interface AddTopicEvent {
   agentName?: string;
 }
 
+export interface AddTopicResult {
+  /** The topic this call created — the piece itself, not a manufactured
+   * identifier. It reaches the caller as a link to the child, which the CLI
+   * renders as an address (`cf piece call --show-links`); the pattern does
+   * not mint fid fields of its own. A caller therefore addresses the new
+   * topic straight from the create, instead of filing it and then searching
+   * the board's crossrefs for the topic it just made. */
+  topic: TopicPiece;
+}
+
 /** One topic's place in the prose reference graph. Derived at read time from
  * fids pasted in bodies, comments, and link URLs — never persisted, so a
  * partial-view replica can never destroy real edges (the failure class of
@@ -93,6 +107,35 @@ interface TopicCrossrefView extends TopicCrossref {
   referencedByLinks: TopicNavigationLink[];
 }
 
+/** A sibling topic as the index carries it: the piece reference itself
+ * (stored as a link to the child) declared through a title-only schema.
+ * The declared schema is the bound — schemas filter visibility, so a reader
+ * following an index edge through this type cannot expand the sibling's
+ * body, thread, or verbs. No pattern-authored fid fields: rendering a
+ * reference as an address is the CLI's job (decision 6, F2). */
+export interface TopicIndexRef {
+  title: string;
+}
+
+/** One row of the board's compact discovery index: the child reference plus
+ * scalar summaries and the prose reference edges as sibling references.
+ * The count/activity scalars are plain numbers — the computed coalesces a
+ * cold or older sibling's absent path to 0, so the row itself never carries
+ * the mixed-version undefined. `createdBy` keeps TopicReference's shaping:
+ * authorship has no honest zero, so absence stays declared. */
+export interface TopicIndexRow {
+  topic: TopicIndexRef;
+  title: string;
+  createdAt: number;
+  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+  commentCount: number;
+  lastActivityAt: number;
+  /** Sibling topics whose fids this topic's prose mentions. */
+  refsOut: TopicIndexRef[];
+  /** Sibling topics whose prose mentions this topic's fid. */
+  referencedBy: TopicIndexRef[];
+}
+
 /**
  * Topics — a tracker over #topic pieces: durable units of shared attention
  * (CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics
@@ -109,10 +152,17 @@ export interface TopicsOutput {
    * (non-null) entry of `topics`. Rows carry their topic, so consumers never
    * need to correlate by index — indices are not a stable address. */
   crossrefs: TopicCrossref[] | Default<[]>;
+  /** Compact discovery index — the documented full-board survey surface: one
+   * reference-plus-summary row per (non-null) entry of `topics`. Everything
+   * reference-valued in a row is declared through the title-only
+   * `TopicIndexRef`, so one bounded read surveys the whole board.
+   * `crossrefs` stays as the UI's reference graph; it is not compact — each
+   * row expands to full pieces — and is not the survey surface. */
+  index: TopicIndexRow[] | Default<[]>;
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
-  addTopic: Stream<AddTopicEvent>;
+  addTopic: Stream<AddTopicEvent, AddTopicResult>;
   /** @deprecated Compatibility view for callers of the previous board. */
   myName: string;
   /** @deprecated Compatibility mutation for callers of the previous board. */
@@ -175,7 +225,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     profileName.trim().length > 0 && profileWish.result !== undefined
   );
 
-  const addTopic = action(({ title, body, agentName }: AddTopicEvent) => {
+  const addTopic = action<AddTopicEvent, AddTopicResult>((
+    { title, body, agentName },
+  ) => {
     const trimmed = (title ?? "").trim();
     const author = topicAuthorFromAgent(agentName ?? "");
     if (agentName !== undefined && !author) {
@@ -204,6 +256,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);
     newTitle.set("");
+    return { topic: piece };
   });
 
   const setMyName = action(({ name }: { name: string }) => {
@@ -271,6 +324,25 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     crossrefView.map((row) => ({
       fid: row.fid,
       topic: row.topic,
+      refsOut: row.refsOut,
+      referencedBy: row.referencedBy,
+    }))
+  );
+
+  // The compact discovery surface. Rows reuse the crossref join, but every
+  // reference-valued field is DECLARED through the title-only TopicIndexRef,
+  // so the row schema — not reader discipline — is what keeps a full-board
+  // survey bounded (a live full-board read through `crossrefs` exceeded 300k
+  // tokens). The summary scalars are read into the row here so a survey needs
+  // no second hop to answer "what changed lately".
+  const index = computed(() =>
+    crossrefView.map((row) => ({
+      topic: row.topic,
+      title: row.topic?.title ?? "",
+      createdAt: row.topic?.createdAt ?? 0,
+      createdBy: row.topic?.createdBy,
+      commentCount: row.topic?.commentCount ?? 0,
+      lastActivityAt: row.topic?.lastActivityAt ?? 0,
       refsOut: row.refsOut,
       referencedBy: row.referencedBy,
     }))
@@ -390,6 +462,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     mentionable: topics,
     topicCount,
     crossrefs,
+    index,
     newTitle,
     addTopic,
     myName: myNameView,

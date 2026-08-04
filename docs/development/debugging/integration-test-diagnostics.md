@@ -9,8 +9,9 @@ What the failure probe contains, and where each piece lives:
 
 - **Fill phase ledger** (`__cfFillDiag`, in
   [`cfc-browser-helpers.ts`](../../../packages/patterns/integration/cfc-browser-helpers.ts))
-  — per-selector progress through the fill (found → visible → filled →
-  committed), naming the exact await that hung.
+  — per-selector progress through the fill (settled → found → visible → filled
+  → committed), naming the exact await that hung. A fill on a page that never
+  exposes `commonfabric.viewSettled` stops at the settle and says so.
 - **Host/bound-cell state** (`readCfInputProbe`, same file) — whether the
   `cf-input` host has a bound cell and a pending commit, alongside DOM
   value/visibility/disabled.

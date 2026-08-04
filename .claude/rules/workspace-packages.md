@@ -1,0 +1,41 @@
+---
+paths:
+  - "deno.jsonc"
+  - "packages/*/deno.jsonc"
+---
+
+# Workspace package configuration
+
+## Every package needs its own test task
+
+A package's `deno.jsonc` must contain a `"tasks"` object with a `"test"` entry.
+Use `"deno test"` when the package has tests, or `"echo 'No tests defined.'"`
+when it does not have them yet.
+
+This is not a tidiness rule. The root test runner (`tasks/test.ts`) walks every
+workspace member and runs `deno task test` in each. A member with no `test`
+task falls through to the root workspace's task, which is the whole suite —
+so the suite re-enters itself once per such package, spawning processes
+exponentially until CI times out. The symptom is a hung job, not an error
+message naming the package.
+
+`packages/utils/deno.jsonc` is a correct minimal example.
+
+## A new package is two edits
+
+Adding the directory is not enough. The package path also goes into the
+`"workspace"` array in the root `deno.jsonc`, or nothing in the repository
+knows it exists.
+
+## Declare dependencies at the narrowest scope
+
+A dependency belongs in the `deno.jsonc` of the package that imports it, not at
+the root. `docs/development/DEPENDENCIES.md` has the version-pin rules and the
+reasoning. Three gates enforce parts of it, and all three are cheap to run
+before you push:
+
+- `deno task check-single-copy-deps` — one version of a dependency across the
+  workspace.
+- `deno task check-unused-deps` — nothing declared that nothing imports.
+- `deno task check-deno-pins` — the accepted Deno range in `tasks/check.sh`
+  still contains the pin in `mise.toml`.

@@ -28,16 +28,15 @@ If this document conflicts with code or passing tests, code/tests win.
 Package exports (`deno.jsonc`): `.` → `src/index.ts` (no `mod.ts`), plus
 six subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
 `./type-traversal`, `./property-optionality`, `./property-name`.
-`src/index.ts` exports the `SchemaGenerator` class,
-`createSchemaTransformerV2`, the `ISchemaGenerator` type, and re-exports
-`MutableJSONSchemaObj`.
+`src/index.ts` exports the `SchemaGenerator` class, the `ISchemaGenerator`
+type, and re-exports `MutableJSONSchemaObj`.
 
 Consumers, as of this writing (verified by import grep): the only external
 consumer package is `@commonfabric/ts-transformers`, along two axes:
 
 1. **Schema generation proper** — `SchemaGeneratorTransformer`
-   (`packages/ts-transformers/src/transformers/schema-generator.ts`) calls
-   `createSchemaTransformerV2()` and feeds it the pipeline's bare cross-stage
+   (`packages/ts-transformers/src/transformers/schema-generator.ts`)
+   constructs a `SchemaGenerator` and feeds it the pipeline's bare cross-stage
    maps `typeRegistry` / `schemaHints`
    (`ts-transformers/src/core/cross-stage-state.ts`; its header notes
    this package reads only the bare `WeakMap`s, not `CrossStageState`).
@@ -61,13 +60,6 @@ type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
 typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
 passes `checker.getAnyType()` as the type, forcing the auto-detection
 below onto the node-based path.
-
-`createSchemaTransformerV2()` (`src/plugin.ts`) wraps one shared
-`SchemaGenerator` instance and exposes both methods. Type-level drift: the
-plugin's signatures narrow `schemaHints` to `WeakMap<ts.Node, { items?:
-unknown }>` (`plugin.ts`) while the class and `GenerationContext` accept
-the full `{ items?, cfcUiContract? }` shape (`interface.ts`) —
-runtime-compatible, type-level under-description.
 
 **Path selection** (`shouldUseNodeBasedAnalysis`,
 `src/schema-generator.ts`): node-based analysis is used iff a
@@ -214,14 +206,29 @@ same-named types emit `$ref`s to it.
 
 `NATIVE_TYPE_SCHEMAS` (`src/formatters/native-type-formatter.ts`), as of
 this writing: `VNode` →
-`{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date` →
-`{ type: "string", format: "date-time" }`; `URL` → `{ type: "string", format:
+`{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date`, `RegExp`,
+and `Uint8Array` → `{ type: "object" }`; `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
-`ArrayBufferView`, the eleven typed arrays (`Uint8Array` … `BigUint64Array`),
-and `JSONSchemaObj`/`JSONSchema` → `true`.
+`ArrayBufferView`, the remaining ten typed arrays
+(`Uint8ClampedArray` … `BigUint64Array`), and `JSONSchemaObj`/`JSONSchema` →
+`true`.
+
+The three mapped to `{ type: "object" }` are the ones with a canonical fabric
+form: a `Date` is stored as a `FabricEpochNsec`, a `RegExp` as a
+`FabricRegExp`, and a `Uint8Array` as a `FabricBytes`. There is no schema
+vocabulary for `Fabric*` types yet, and `"object"` is what they are called in
+the meantime — a value stored as one reads back intact through it, where
+`{ type: "string" }` projects the read to `undefined`. `URL` is the exception
+that stays a string, because it converts to a plain string rather than to a
+fabric object.
+
+The remaining typed arrays and the buffer types map to `true` (accept
+anything), which overclaims: none of them is representable as a `FabricValue`,
+so a value of one of those types is rejected at the storage boundary rather
+than stored. `true` is the status quo for them, not an endorsement.
 
 Guard: the lib-declared subset (`LIB_DECLARED_NATIVE_TYPES` — `Date`
-through `BigUint64Array`) is claimed only when declared in a default-lib or
+through `BigUint64Array`, and `RegExp`) is claimed only when declared in a default-lib or
 `@types/node` file (`hasLibraryDeclaration`), so a user-defined
 `interface Date {…}` is not swallowed. `VNode`/`JSONSchemaObj`/`JSONSchema`
 have **no** such guard (untested collision). Native resolution also pierces
@@ -378,6 +385,22 @@ the identity alias to the inner type object itself (no aliasSymbol), so inner
 named types still hoist, as the fixture shows. The ts-transformers behavior
 spec §12 uses the same single-`asCell` vocabulary. Any doc claiming `Reactive`
 emits `asCell: ["opaque"]` is wrong on this tree.
+
+### 6.5 Stream event schemas — deliberately open (C5)
+
+A stream property's schema object is the verb's **event** schema — what a
+caller sends, which `cf piece verbs` publishes and `piece call` validates
+payloads against. It carries no `additionalProperties` of its own — only
+what the event type itself demands (an index signature, a `Record` value
+type). The verb contract wants event schemas closed-world
+(`additionalProperties: false` — an undeclared field is a rejection, never
+ignored), but emitting that is blocked on a pattern-update-gate migration:
+the argument-role compatibility rule refuses the open→closed direction for
+verbs reachable through a piece's argument schema (plan
+`docs/plans/pattern-verb-contract-implementation.md`, WS-C and Risks). The
+open event side is pinned as a decision in `test/stream-result.test.ts`; a
+schema that declares the closure by hand is enforced at dispatch by the
+runner (C5).
 
 ## 7. `Default<T,V>` And `DeepDefault<V>`
 
@@ -629,12 +652,16 @@ as of this writing.
 
 ## 13. The Hints Channel (`schemaHints`)
 
-Hint shape (`src/interface.ts`): `WeakMap<ts.Node, { items?: unknown;
-cfcUiContract?: { helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-action?; surface?; role?; kind?; trustedPattern?; requiredEventIntegrity? } }>`.
-Lookups always try the node and `ts.getOriginalNode(node)`
-(`schema-generator.ts`; `object-formatter.ts`; the producer
-writes both — `cross-stage-state.ts`).
+Hint shape (`src/interface.ts`): `SchemaHints` is `WeakMap<ts.Node,
+SchemaHint>`, where `SchemaHint` is `{ items?: unknown; cfcUiContract?:
+UiContractHint }` and `UiContractHint` is `{ helper: "UiAction" |
+"UiPromptSlot" | "UiDisclosure"; action?; surface?; role?; kind?;
+trustedPattern?; requiredEventIntegrity? }`. Every member is read-only: the
+generator only reads hints, and copies the `requiredEventIntegrity` list on the
+way into the emitted schema. Lookups always try the node and
+`ts.getOriginalNode(node)` (`src/ui-contract.ts`, called from
+`schema-generator.ts` and `object-formatter.ts`; the producer writes both —
+`cross-stage-state.ts`).
 
 - **`items: false`** — array-typed wrapper contents collapse to
   `items: { type: "unknown", …element wrapper markers }` for property-only
@@ -647,8 +674,8 @@ writes both — `cross-stage-state.ts`).
   `array-formatter.ts` via `context.arrayItemsOverride`,
   `interface.ts`). Tested: capability-wrapper-types ×2.
 - **`cfcUiContract`** attaches `ifc.uiContract` at three layers: generation
-  root (`applyNodeSchemaHints`/`attachUiContract`,
-  `schema-generator.ts`), the `$UI` property inside objects
+  root (`applyNodeSchemaHints` calling the shared `attachUiContract`,
+  `schema-generator.ts` / `ui-contract.ts`), the `$UI` property inside objects
   (`object-formatter.ts`), and post-hoc in the transformer
   against the emitted literal
   (`ts-transformers/.../schema-generator.ts`, preferring an
@@ -801,7 +828,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 | CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts`) | — |
 | CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts`) | cfc-authoring tests |
 | `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts`) | — |
-| Hint shape (§13) | `GenerationContext["schemaHints"]` (`src/interface.ts`) | note plugin.ts drift (§2) |
+| Hint shape (§13) | `SchemaHint` / `UiContractHint` (`src/interface.ts`) | — |
 | Generation options (§14) | `GenerationContext["widenLiterals"]` (`src/interface.ts`) | sole option as of this writing |
 | Throw inventory (§15) | grep `throw new Error` under `src/` | messages quoted above verified this snapshot |
 | Fixture env knobs (§17) | `test/fixtures-runner.test.ts`; `packages/test-support/src/fixture-runner.ts` | — |

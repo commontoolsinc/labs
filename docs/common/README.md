@@ -87,6 +87,7 @@ on the Common Fabric runtime.
 - [workflows/development.md](workflows/development.md) — `cf` CLI loop: check, deploy, setsrc, inspect, link
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
+- [verbs-over-the-cli.md](verbs-over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
 
 [INTRODUCTION.md](INTRODUCTION.md) is a stub kept for older links; this README
 replaces it.

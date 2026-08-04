@@ -184,7 +184,7 @@ export function payloadHint(action: PieceAction): string | undefined {
  *
  * A host that wants a different menu for a piece cancels the
  * `cf-piece-context-menu` announcement and shows its own; see
- * `docs/development/HOST_EMBEDDING.md`.
+ * `docs/features/host-embedding.md`.
  */
 export class CFPieceMenu extends BaseElement {
   static override styles = css`

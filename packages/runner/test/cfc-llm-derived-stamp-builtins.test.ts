@@ -374,7 +374,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     // OWN document (here an `asCell` array item), the model-produced bytes land
     // in that separate child doc. The D1b stamp is merged only into the schema
     // ROOT (`withLlmDerivedStamp`); the child write descends via
-    // `runtime.cfc.getSchemaAtPath`, which carries ancestor confidentiality but
+    // `ContextualFlowControl.getSchemaAtPath`, which carries ancestor confidentiality but
     // NOT `ifc.addIntegrity`. So the child doc that actually stores the model
     // bytes must still carry `LlmDerived` in its persisted labelMap — otherwise
     // a later integrity check reading that child doc by its own id sees ordinary,

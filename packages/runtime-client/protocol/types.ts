@@ -330,18 +330,19 @@ export interface ResolveSpaceNameRequest extends BaseRequest {
 }
 
 /**
- * Record a runtime-learned host hint for a space (site-table v0).
+ * Record a runtime-learned HTTP or HTTPS host hint for a space (site-table v0).
  * The durable record is the home-space site table; this IPC lets an
  * embedder make a just-learned hint (e.g. from a share link) effective
  * on the live runtime without waiting for a sync round-trip. The
- * worker's refusal semantics apply: seed wins, opened spaces are never
- * re-pointed.
+ * worker returns whether it accepted or confirmed the hint. A seed, an
+ * accepted late hint fixes the route for the session. A read-only unseeded
+ * provider opened through the default host remains provisional.
  *
- * ORDERING CONTRACT: an embedder that will mount a space it just
- * learned the host for must send this BEFORE the first mount of that
- * space — once a space opens against the default host, the
- * opened-space rule pins it for the session. The table is the durable
- * record; this IPC is the ordering guarantee.
+ * ORDERING CONTRACT: an embedder sends a newly learned hint before it relies
+ * on the space and proceeds only when the worker returns true. The first hint
+ * replaces and reloads a read-only provisional default-host provider. An
+ * accepted site-table route can reject a conflicting IPC hint. The IPC does
+ * not override a seed or route already accepted for the session.
  */
 export interface RegisterSpaceHostRequest extends BaseRequest {
   type: RequestType.RegisterSpaceHost;

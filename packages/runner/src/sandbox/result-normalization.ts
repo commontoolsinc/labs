@@ -3,6 +3,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { hasEncodableForm } from "../encodable-form.ts";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -35,17 +36,13 @@ const regexpFlagsGetter = Object.getOwnPropertyDescriptor(
   "flags",
 )!.get!;
 
-const hasToJSON = (value: object): boolean =>
-  "toJSON" in value &&
-  typeof (value as { toJSON?: unknown }).toJSON === "function";
-
 /**
  * SES compartments share the host's hardened `Object.prototype` identity.
  * Deliberately do not infer a foreign `Object.prototype` from a null-rooted
  * parent: custom instance prototypes can be null-rooted too.
  */
 function isPlainResultObject(value: object): boolean {
-  if (hasToJSON(value)) return false;
+  if (hasEncodableForm(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === null || proto === Object.prototype;
 }

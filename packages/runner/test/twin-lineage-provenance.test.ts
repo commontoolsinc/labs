@@ -275,12 +275,14 @@ describe("twin-lineage provenance (helper-unlink regression)", () => {
 
       // And the wire shape is ref-carrying — never the silent body-only form
       // that bare-SES re-evaluates outside module scope on reload.
-      const json = (module as Module & { toJSON?: () => unknown }).toJSON
-        ? (module as Module & { toJSON: () => unknown }).toJSON() as Record<
-          string,
-          unknown
-        >
-        : JSON.parse(JSON.stringify(module));
+      const json =
+        (module as Module & { toEncodableForm?: () => unknown }).toEncodableForm
+          ? (module as Module & { toEncodableForm: () => unknown })
+            .toEncodableForm() as Record<
+              string,
+              unknown
+            >
+          : JSON.parse(JSON.stringify(module));
       expect(json.$implRef).toBeDefined();
       expect(typeof json.implementation).not.toBe("string");
     }

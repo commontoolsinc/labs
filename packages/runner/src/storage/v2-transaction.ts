@@ -35,8 +35,6 @@ import type {
   IStorageTransaction,
   IStorageTransactionInconsistent,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
   ITransactionWriteRequest,
   IWriteAttempt,
   IWriteOptions,
@@ -44,7 +42,6 @@ import type {
   MemorySpace,
   NativeStorageCommit,
   NativeStorageCommitOperation,
-  ReaderError,
   ReadError,
   Result,
   StorageTransactionFailed,
@@ -63,18 +60,19 @@ import {
   claim,
   load as loadInline,
   read as readAttestation,
+  StateInconsistency,
 } from "./transaction/attestation.ts";
 import {
   applyMutablePathWrite,
   getValueTypeName,
   isContainerValue,
 } from "./transaction/mutable-path-write.ts";
-import { ReadOnlyAddressError } from "./transaction/chronicle.ts";
 import {
+  ReadOnlyAddressError,
   TransactionAborted,
   TransactionCompleteError,
   WriteIsolationError,
-} from "./transaction.ts";
+} from "./transaction-errors.ts";
 import {
   ignoreReadForCommit,
   isMutableTransactionReadAllowed,
@@ -96,6 +94,7 @@ import {
 } from "./mergeable-ops.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type { CellScope } from "../builder/types.ts";
 
 type RootAttestation = IAttestation;
@@ -141,8 +140,6 @@ type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 type SpaceBranch = {
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
-  reader?: ITransactionReader;
-  writer?: ITransactionWriter;
 };
 
 type ReadyState = {
@@ -266,7 +263,7 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   // deep-clones-and-freezes -- isolating the result from later source
   // mutation. On the hot read path, repeated reads of the same stored
   // (deep-frozen) value collapse to a single cache lookup.
-  return cloneIfNecessary(value as FabricValue) as T;
+  return cloneIfNecessary(value) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -613,7 +610,7 @@ const buildArrayPatchCandidates = (
         path: encodePointer(path),
         index: before.length,
         remove: 0,
-        add: after.slice(before.length) as FabricValue[],
+        add: after.slice(before.length),
       },
       path,
       coversDescendants: false,
@@ -837,34 +834,6 @@ class V2TransactionJournal implements ITransactionJournal {
         };
       }
     })(this.tx);
-  }
-}
-
-class V2Reader implements ITransactionReader {
-  constructor(
-    protected readonly tx: V2StorageTransaction,
-    private readonly space: MemorySpace,
-  ) {}
-
-  did(): MemorySpace {
-    return this.space;
-  }
-
-  read(
-    address: IMemoryAddress,
-    options?: IReadOptions,
-  ): Result<IAttestation, ReadError> {
-    return this.tx.read({ ...address, space: this.space }, options);
-  }
-}
-
-class V2Writer extends V2Reader implements ITransactionWriter {
-  write(
-    address: IMemoryAddress,
-    value?: FabricValue,
-    options?: IWriteOptions,
-  ): Result<IAttestation, WriteError> {
-    return this.tx.writeWithinSpace(this.did(), address, value, options);
   }
 }
 
@@ -1304,31 +1273,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    const ready = this.editable();
-    if (ready.error) {
-      return { error: ready.error };
-    }
-    const branch = this.branch(space);
-    branch.reader ??= new V2Reader(this, space);
-    return { ok: branch.reader };
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    const ready = this.editable();
-    if (ready.error) {
-      return { error: ready.error };
-    }
-    const claim = this.claimWriteSpace(space);
-    if (claim.error) {
-      return { error: claim.error };
-    }
-    const branch = this.branch(space);
-    branch.writer ??= new V2Writer(this, space);
-    return { ok: branch.writer };
-  }
-
   /**
    * Records `space` as a write target. Without the multi-space opt-in, rejects a
    * second space with a write-isolation error (preserving the default
@@ -1381,7 +1325,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);
     const { space: _, ...memoryAddress } = address;
 
-    if (!address.id.startsWith("data:")) {
+    if (!hasDataUriScheme(address.id)) {
       const readActivity = {
         space: address.space,
         scope: normalizeCellScope(address.scope),
@@ -1397,7 +1341,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
-      if (!address.id.startsWith("data:") && !skipCommitPrecondition) {
+      if (!hasDataUriScheme(address.id) && !skipCommitPrecondition) {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
@@ -1405,7 +1349,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
-        !address.id.startsWith("data:") &&
+        !hasDataUriScheme(address.id) &&
         !doc.validated &&
         !skipCommitPrecondition
       ) {
@@ -1432,7 +1376,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const result = readAttestation(current, memoryAddress);
     if (
-      !address.id.startsWith("data:") &&
+      !hasDataUriScheme(address.id) &&
       !doc.validated &&
       !skipCommitPrecondition
     ) {
@@ -1463,7 +1407,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.branch(address.space);
     const { doc } = this.document(branch, address);
-    if (address.id.startsWith("data:")) return { ok: {} };
+    if (hasDataUriScheme(address.id)) return { ok: {} };
 
     const readMeta = options?.meta ?? EMPTY_META;
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);
@@ -1564,7 +1508,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return flushRun();
   }
 
-  writeWithinSpace(
+  private writeWithinSpace(
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
@@ -1606,7 +1550,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     value?: FabricValue,
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
-    if (address.id.startsWith("data:")) {
+    if (hasDataUriScheme(address.id)) {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
     const isDelete = options?.delete === true;
@@ -1631,7 +1575,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const isolatedValue = value === undefined
       ? undefined
-      : cloneIfNecessary(value) as FabricValue;
+      : cloneIfNecessary(value);
 
     // Compute the activity path and previous-value snapshots BEFORE the
     // write -- `applyMutablePathWrite()` mutates `current.value` in place
@@ -1653,7 +1597,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const previousActivityValue = cloneIfNecessary(
       readValueAtPath(current.value, activityPath, {
         allowArrayLength: true,
-      }) as FabricValue,
+      }),
     ) as FabricValue | undefined;
     // Pre-write slot presence (distinct from value: a slot holding
     // `undefined` is present) for the write details — also read BEFORE the
@@ -1720,7 +1664,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Result<Unit, WriteError> {
     if (
       writes.length <= 1 ||
-      writes.some(({ address }) => address.id.startsWith("data:"))
+      writes.some(({ address }) => hasDataUriScheme(address.id))
     ) {
       // Singleton-batch / data:URI fallback: route each write through the
       // unified single-write entry, which itself handles
@@ -1764,7 +1708,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : cloneIfNecessary(value) as FabricValue;
+        : cloneIfNecessary(value);
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1789,7 +1733,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }) as FabricValue,
+        }),
       ) as FabricValue | undefined;
       // Pre-write slot presence for the write details (see
       // `writeWithinBranch`; empty path = root definedness, since
@@ -2045,7 +1989,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
-    const replica = this.storage.open(writeSpace).replica;
+    const replica = this.replicaForCommit(writeSpace);
     if (!replica.commitNative) {
       throw new Error("memory v2 replica does not support commitNative()");
     }
@@ -2158,7 +2102,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
-      const replica = this.storage.open(space).replica;
+      const replica = this.replicaForCommit(space);
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
       }
@@ -2335,6 +2279,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     return branch;
   }
 
+  private replicaForCommit(
+    space: MemorySpace,
+  ): ReturnType<IStorageManager["open"]>["replica"] {
+    return this.#branches.get(space)?.replica ??
+      this.storage.open(space).replica;
+  }
+
   private document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
@@ -2374,7 +2325,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): RootAttestation {
     const type = address.type ?? DOCUMENT_MIME;
-    if (address.id.startsWith("data:")) {
+    if (hasDataUriScheme(address.id)) {
       const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
         throw loaded.error;
@@ -2397,7 +2348,35 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
+  validateReplicaRoutes(): Result<Unit, IStorageTransactionInconsistent> {
+    for (const [space, branch] of this.#branches) {
+      const currentReplica = this.storage.open(space).replica;
+      if (currentReplica !== branch.replica) {
+        const firstDocument = branch.docs.values().next().value;
+        if (firstDocument !== undefined) {
+          const { address, value: expected } = firstDocument.initial;
+          const actual = toTransactionDocumentValue(
+            currentReplica.getDocument(address.id as URI, address.scope),
+          );
+          return {
+            error: StateInconsistency({
+              address,
+              expected,
+              actual,
+              space,
+            }),
+          };
+        }
+      }
+    }
+    return { ok: {} };
+  }
+
   private validate(): Result<Unit, IStorageTransactionInconsistent> {
+    const routes = this.validateReplicaRoutes();
+    if (routes.error) {
+      return routes;
+    }
     for (const branch of this.#branches.values()) {
       for (const doc of branch.docs.values()) {
         if (!doc.validated) {
@@ -2704,9 +2683,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       })
     );
     return {
-      workingArray: Array.isArray(working)
-        ? working as FabricValue[]
-        : undefined,
+      workingArray: Array.isArray(working) ? working : undefined,
       hadInitialArray: Array.isArray(initial),
       // Presence, not definedness: an already-present slot (even holding
       // `undefined`) does not add a key to its parent, so the op does not

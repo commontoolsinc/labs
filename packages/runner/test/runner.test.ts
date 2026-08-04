@@ -1339,6 +1339,51 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
+  it("reports the start failure, not a failure of the cleanup it triggers", () => {
+    // A start that fails cancels what it already registered, and a cancel can
+    // itself throw -- a builtin winding down state it had not finished
+    // building, say. Were that allowed to escape it would REPLACE the error
+    // being handled, and what surfaced would describe the cleanup rather than
+    // the failure that caused it.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          // Registers a cancel that fails, then the node below fails the
+          // start, so the cancel runs against a half-built piece.
+          module: {
+            type: "raw",
+            implementation: (
+              _inputs: unknown,
+              _sendResult: unknown,
+              addCancel: (cancel: () => void) => void,
+            ) => {
+              addCancel(() => {
+                throw new Error("cleanup blew up");
+              });
+            },
+          } as unknown as Module,
+          inputs: {},
+          outputs: {},
+        },
+        {
+          // `instantiateRawNode` rejects a raw module with no implementation.
+          module: { type: "raw" } as unknown as Module,
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "start failure beats cleanup");
+
+    expect(() => runtime.run(undefined, pattern, {}, resultCell)).toThrow(
+      /Raw module is not a function/,
+    );
+  });
+
   it("reports a missing stream marker when a handler's $event reads undefined", async () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },

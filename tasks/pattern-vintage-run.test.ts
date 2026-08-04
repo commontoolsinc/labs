@@ -40,12 +40,7 @@ import {
 const signer = await Identity.fromPassphrase("pattern vintage gate test");
 const KEY = "vintage-gate-subject.tsx";
 
-/**
- * A CFC-labelled field is what makes the root store a CFC schema envelope, and
- * the envelope is what the additive-required guard merges against. Without one
- * the guard never runs and the "broken" case below would pass — the gate would
- * look green on exactly the change it exists to stop.
- */
+/** Keep the fixture representative of the CFC-labelled system roots it gates. */
 const PRELUDE = [
   "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
   "const ATOM = {",
@@ -79,28 +74,19 @@ const HEALTHY = [
   "",
 ].join("\n");
 
-/** The estuary shape: additive, required, no default. */
-const BREAKING = [
-  ...PRELUDE,
-  "export interface Output {",
-  "  owner: Confidential<Writable<string>, Label>;",
-  "  items: Writable<string[]>;",
-  "  touch: Stream<Record<string, never>>;",
-  "  addedLater: Writable<string[]>;",
-  "}",
-  "export default pattern<Record<string, never>, Output>(() => {",
-  "  const owner = new Writable<string>('v').for('owner');",
-  "  const items = new Writable<string[]>([]).for('items');",
-  "  const addedLater = new Writable<string[]>([]).for('addedLater');",
-  "  return { owner, items, touch: touch({ items }), addedLater };",
-  "});",
-  "",
-].join("\n");
+/** A new required input that the captured vintage cannot provide. */
+const BREAKING = HEALTHY.replace(
+  "export default pattern<Record<string, never>, Output>",
+  [
+    "interface Input { addedLater: string; }",
+    "export default pattern<Input, Output>",
+  ].join("\n"),
+);
 
-/** The fix: identical, but the new field carries a default. */
+/** The same input evolution made satisfiable by a default. */
 const COMPATIBLE = BREAKING.replace(
-  "  addedLater: Writable<string[]>;",
-  "  addedLater: Writable<string[] | Default<[]>>;",
+  "interface Input { addedLater: string; }",
+  "interface Input { addedLater: Default<string, 'ready'>; }",
 );
 
 /** Same contract, different backing cell — the class the gate cannot see. */
@@ -273,11 +259,9 @@ const undeclaredTest = [
  * either wrong and the read finds a fresh empty space, today's source
  * materializes onto it, and the entry counts as updated cleanly.
  *
- * `added` is the type of a field appended to the CHILD's output: `string[]` is
- * the estuary shape (additive, required, no default) and
- * `string[] | Default<[]>` is the same edit made compatible. The parent's
- * contract is identical either way, so any difference between the two runs is
- * attributable to the child's root — the one in the other space.
+ * `change` can remove an existing CHILD result (the incompatible control that
+ * proves replay reached the captured cross-space root), or add a generated
+ * required result without a default (the compatible output-evolution case).
  */
 const CROSS_KEY = "vintage-gate-crossspace.tsx";
 const CROSS_TEST_KEY = CROSS_KEY.replace(/\.tsx$/, ".test.tsx");
@@ -289,9 +273,11 @@ const CROSS_TEST_KEY = CROSS_KEY.replace(/\.tsx$/, ".test.tsx");
 const CHILD_SPACE = (await Identity.fromPassphrase("vintage gate child space"))
   .did();
 
-const crossSource = (added?: string) =>
+const crossSource = (
+  change?: "remove-existing-output" | "add-generated-output",
+) =>
   [
-    "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
+    "import { Confidential, Stream, Writable, handler, pattern } from 'commonfabric';",
     "const ATOM = {",
     "  type: 'https://commonfabric.org/cfc/atom/Resource',",
     "  class: 'VintageGateCross',",
@@ -308,18 +294,22 @@ const crossSource = (added?: string) =>
     ");",
     "export interface ChildOut {",
     "  owner: Confidential<Writable<string>, Label>;",
-    "  note: Writable<string>;",
+    ...(change === "remove-existing-output"
+      ? []
+      : ["  note: Writable<string>;"]),
     "  scribble: Stream<{ text: string }>;",
-    ...(added ? [`  addedLater: Writable<${added}>;`] : []),
+    ...(change === "add-generated-output"
+      ? ["  addedLater: Writable<string[]>;"]
+      : []),
     "}",
     "export const Child = pattern<Record<string, never>, ChildOut>(() => {",
     "  const owner = new Writable<string>('v').for('owner');",
     "  const note = new Writable<string>('captured').for('note');",
-    ...(added
+    ...(change === "add-generated-output"
       ? ["  const addedLater = new Writable<string[]>([]).for('addedLater');"]
       : []),
     `  return { owner, note, scribble: scribble({ note })${
-      added ? ", addedLater" : ""
+      change === "add-generated-output" ? ", addedLater" : ""
     } };`,
     "});",
     "export interface Output {",
@@ -421,6 +411,16 @@ const SUBJECT_TEST = [
   "",
 ].join("\n");
 
+/**
+ * The current-generation companion satisfies the new source's authored type.
+ * The pinned vintage still carries the old empty argument, which is what proves
+ * that the candidate schema can fill the required field from its default.
+ */
+const COMPATIBLE_SUBJECT_TEST = SUBJECT_TEST.replace(
+  "Subject({})",
+  "Subject({ addedLater: 'ready' })",
+);
+
 const TEST_KEY = KEY.replace(/\.tsx$/, ".test.tsx");
 
 /**
@@ -429,7 +429,7 @@ const TEST_KEY = KEY.replace(/\.tsx$/, ".test.tsx");
  * Its own tests rather than only end-to-end coverage, because the invariant it
  * carries is one prose already failed to enforce: a test pattern creates stores
  * and is NEVER an upgrade target. Applying today's test pattern at a store's top
- * measurably makes the gate WEAKER — the additive-required break exits 0 —
+ * measurably makes the gate WEAKER — the incompatible-input break exits 0 —
  * so this is the mechanical guard that keeps it from being merely written down.
  */
 describe("isUpgradeTarget", () => {
@@ -472,21 +472,6 @@ describe("isUpgradeTarget", () => {
   });
 });
 
-/** The identity a fixture's manifest recorded for its `Child` instantiation. */
-async function childRecordedIdentity(fixturePath: string): Promise<string> {
-  const dir = await Deno.makeTempDir({ prefix: "child-identity-" });
-  const vintage = await openFileBackedRuntime(signer, dir, fixturePath);
-  try {
-    const manifest = await readVintageManifest(vintage);
-    const child = manifest?.entries.find((e) => e.symbol === "Child");
-    if (child === undefined) throw new Error("no Child instantiation recorded");
-    return child.identity;
-  } finally {
-    await vintage.dispose().catch(() => {});
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
-  }
-}
-
 describe("the vintage gate, end to end", () => {
   let dir = "";
   let roots: GateRoots;
@@ -510,6 +495,8 @@ describe("the vintage gate, end to end", () => {
 
   const setSource = (source: string) =>
     Deno.writeTextFile(`${dir}/patterns/${KEY}`, source);
+  const setTestSource = (source: string) =>
+    Deno.writeTextFile(`${dir}/patterns/${TEST_KEY}`, source);
 
   it("captures a vintage for a required pattern that has none", async () => {
     const { captured, problems } = await captureMissing(
@@ -559,8 +546,11 @@ describe("the vintage gate, end to end", () => {
     expect(failures).toEqual([]);
   });
 
-  it("FAILS when today's source cannot read the vintage", async () => {
-    // The whole point. Everything else in this file is scaffolding for it.
+  it("FAILS when today's pattern requires an unbound new input", async () => {
+    // The Tier-1 input check is one real way an update can reject a vintage.
+    // CFC migration rejection is exercised through production wiring in
+    // cfc-additive-default-preserves-old-doc.test.ts; this gate also has the
+    // distinct job of finding state stranded by a schema-compatible update.
     await captureMissing(
       roots,
       [TEST_KEY],
@@ -576,14 +566,15 @@ describe("the vintage gate, end to end", () => {
     // pass if the fixture were missing, the source failed to compile, or the
     // runtime died — none of which is the break this gate exists to catch.
     expect(failures[0].detail).toContain(
-      "required field addedLater needs a default to preserve old documents",
+      "updated arguments do not match the candidate schema",
     );
+    expect(failures[0].detail).toContain("addedLater");
   });
 
-  it("passes again once the new field carries a default", async () => {
+  it("passes again once the new input carries a default", async () => {
     // The other half of the red/green pair: the two candidates differ by
-    // exactly `Default<[]>`, so the failure above is attributable to that and
-    // not to anything else about the change.
+    // exactly `Default<string, 'ready'>`, so the failure above is attributable
+    // to that and not to anything else about the change.
     await captureMissing(
       roots,
       [TEST_KEY],
@@ -1262,6 +1253,7 @@ describe("the vintage gate, end to end", () => {
     // Move the world on, compatibly — a change the update APPLIES rather than
     // one it refuses, because a generation records a world that worked.
     await setSource(COMPATIBLE);
+    await setTestSource(COMPATIBLE_SUBJECT_TEST);
 
     const moved = await replayAll(roots);
     expect(moved.failures).toEqual([]);
@@ -1404,6 +1396,7 @@ describe("the vintage gate, end to end", () => {
       );
     }
     await setSource(COMPATIBLE);
+    await setTestSource(COMPATIBLE_SUBJECT_TEST);
 
     const outcome = await captureChangedGenerations(
       roots,
@@ -1541,6 +1534,7 @@ describe("the vintage gate, end to end", () => {
       .toBe("needs-one-key");
 
     await setSource(COMPATIBLE);
+    await setTestSource(COMPATIBLE_SUBJECT_TEST);
     await captureChangedGenerations(
       roots,
       await replayAll(roots),
@@ -1884,23 +1878,17 @@ describe("the vintage gate, end to end", () => {
       // the replay reading `vintage.space` this exact break replays with zero
       // failures.
       await captureCross();
-      // The CHILD's recorded identity, from the manifest — not the fixture's
-      // name, which is the TEST's identity now that a fixture is keyed by the
-      // test that produced it and covers several patterns.
-      const [pinned] = await collectVintages(roots.vintagesRoot);
-      const childIdentity = await childRecordedIdentity(pinned.path);
-      await writeCross(crossSource("string[]"));
+      await writeCross(crossSource("remove-existing-output"));
 
       const { failures } = await replayAll(roots);
 
       const childFailure = failures.find((f) => f.detail.includes("(Child)"));
-      expect(childFailure?.detail).toContain("was REFUSED");
+      expect(childFailure?.detail).toContain("APPLIED CLEANLY but stranded");
       // The proof that the CAPTURED root was reached, and not some empty cell:
-      // the root still carries the identity the capture stamped on it. A cell
-      // in a space the fixture never wrote carries no marker at all — and would
-      // have taken the migration without complaint.
+      // the detail contains the value written by the capture's handler. A cell
+      // in a space the fixture never wrote would have no prior note to strand.
       expect(childFailure?.detail).toContain(
-        `the root carries ${childIdentity}#Child`,
+        'note (was "written", now undefined)',
       );
     });
 
@@ -1976,14 +1964,12 @@ describe("the vintage gate, end to end", () => {
       expect(stranded).toBe(0);
     });
 
-    it("passes once the child's added field carries a default", async () => {
-      // The green half of the pair. The two sources differ by exactly
-      // `Default<[]>` on a field of the CHILD's output, so the failure above is
-      // attributable to that and not to anything else about reaching another
-      // space — and this direction proves the cross-space root is genuinely
-      // migrated rather than merely reported on.
+    it("allows a generated required output on the cross-space child", async () => {
+      // The compatible direction proves the cross-space root is genuinely
+      // migrated rather than merely reported on. `addedLater` is required and
+      // has no schema default, but the candidate Child generates it.
       await captureCross();
-      await writeCross(crossSource("string[] | Default<[]>"));
+      await writeCross(crossSource("add-generated-output"));
 
       const { targets, changed, updated, failures } = await replayAll(roots);
 
@@ -2050,7 +2036,7 @@ describe("the vintage gate, end to end", () => {
       // restores, `restoredSpaces` lists it, and every space-level check passes
       // — while the recorded cell is absent, the candidate materializes onto
       // nothing, and the entry counts as updated cleanly. Measured: without the
-      // per-root control this replays the `string[]` break above with zero
+      // per-root control this replays the removed-output break above with zero
       // failures.
       await captureCross();
       const [pinned] = await collectVintages(roots.vintagesRoot);
@@ -2058,7 +2044,7 @@ describe("the vintage gate, end to end", () => {
         encodeURIComponent(CHILD_SPACE)
       }.sqlite`;
       await Deno.writeFile(companion, new Uint8Array());
-      await writeCross(crossSource("string[]"));
+      await writeCross(crossSource("remove-existing-output"));
 
       const { failures } = await replayAll(roots);
 

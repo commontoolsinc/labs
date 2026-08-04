@@ -2,6 +2,8 @@
  * Pure utility functions for checking the property-key shape of plain objects.
  */
 
+import type { ReadonlyRecord } from "./types.ts";
+
 /**
  * Indicates whether the given value is an *inert* plain object -- a direct
  * instance of `Object`, every own property an enumerable
@@ -30,10 +32,23 @@
  * throwing no matter what it is handed. A `Proxy` is the one exception, and
  * unavoidably so, since it can throw from its own traps.
  *
+ * Inertness is a property of the object at the moment of the check, not of its
+ * type: a property can be redefined as an accessor, or a symbol-keyed one
+ * added, at any later point. So this predicate narrows only to
+ * `ReadonlyRecord` -- true of the value forever after -- and never to anything
+ * asserting the inertness itself, and it narrows in one direction only. A
+ * `false` result means inertness was not established, which is weaker than its
+ * negation, and `false`-branch narrowing is subtraction, which cannot express
+ * that. Hence the overload pair, which keeps a caller already holding a record
+ * type out of the subtraction; the header of the `types` module gives the full
+ * account.
+ *
  * @param value The value to check.
  * @returns `true` if the value is a plain object all of whose own properties
  *   are enumerable string-keyed data properties, `false` otherwise.
  */
+export function isInertPlainObject(value: ReadonlyRecord): boolean;
+export function isInertPlainObject(value: unknown): value is ReadonlyRecord;
 export function isInertPlainObject(
   value: unknown,
 ): boolean {

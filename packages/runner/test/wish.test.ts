@@ -3668,7 +3668,7 @@ describe("wish built-in", () => {
       expect(pieceData).toHaveProperty("count");
     });
 
-    // Host-embedding contract seam 1 (docs/development/HOST_EMBEDDING.md §1):
+    // Host-embedding contract seam 1 (docs/features/host-embedding.md §1):
     // the well-known profile wish targets an embedder binds to, and the
     // zero-profile `result ?? fallback` idiom. This describe pins the
     // load-bearing embedder guarantees in one place; the broader profile suite
