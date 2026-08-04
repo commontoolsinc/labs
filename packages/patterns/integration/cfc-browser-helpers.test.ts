@@ -825,4 +825,65 @@ describe("CFC browser helpers", () => {
       await presentationPage.close();
     }
   });
+
+  it("waits for a marked target's shifting box to settle before clicking", async () => {
+    await page.evaluate((clickTargetAttr: string) => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const button = document.createElement("button");
+      button.id = "shifting-guest-button";
+      button.textContent = "Continue as guest";
+      root.append(button);
+      document.body.append(host);
+
+      let clicked = false;
+      button.addEventListener("click", () => {
+        clicked = true;
+      }, { once: true });
+
+      // The control is laid out when the helper marks it, but its surface then
+      // goes display:none for a spell as the join card's entrance settles — the
+      // way the real profile surface toggles display through its transition.
+      // While the marked control has no layout box, DOM.getBoxModel returns
+      // nothing, so a click that measures the box once throws "Unable to get
+      // stable box model to click on"; a click that waits for the box to settle
+      // clicks the control once its surface returns. The shift lands between the
+      // mark and the click, a window with no view settle to sequence against, so
+      // the fixture hides on the mark and restores on a timer that outlasts a
+      // single mark->click round trip. The restore states when the surface
+      // returns, not how long to wait for it: the helper's wait ends on the
+      // return, bounded only by the stuck-condition net.
+      const observer = new MutationObserver(() => {
+        if (!button.hasAttribute(clickTargetAttr)) return;
+        observer.disconnect();
+        button.style.display = "none";
+        setTimeout(() => {
+          button.style.display = "";
+        }, 1000);
+      });
+      observer.observe(button, {
+        attributes: true,
+        attributeFilter: [clickTargetAttr],
+      });
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __shiftingClicked: () => boolean;
+      }).__shiftingClicked = () => clicked;
+    }, { args: [CLICK_TARGET_ATTR] });
+
+    await clickCfButton(page, "#shifting-guest-button");
+
+    const clicked = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __shiftingClicked: () => boolean;
+      }).__shiftingClicked()
+    );
+    assert(
+      clicked,
+      "the click never reached the target after its hidden surface returned",
+    );
+  });
 });
