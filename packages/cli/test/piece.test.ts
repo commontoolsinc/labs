@@ -35,7 +35,6 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import { ValidationError } from "@cliffy/command";
 import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import { toCell } from "../../runner/src/back-to-cell.ts";
