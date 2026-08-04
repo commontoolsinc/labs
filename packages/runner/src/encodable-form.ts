@@ -1,25 +1,15 @@
 /**
- * Reads the method by which a value produces its encodable form.
+ * Reads the method by which a value produces its encodable form -- the form it
+ * takes on the way to being encoded, which reaches storage without ever being
+ * stringified.
  *
- * The name the runtime asks for is `toEncodableForm`, which claims only what
- * is true: this is the form a value takes on the way to being encoded, and
- * has nothing to do with JSON.
+ * The name is `toJSON`, because that is the data model's own duck-typed
+ * protocol and this asks the same question the conversion would. It is a poor
+ * name for what it does here and that is a separate change; this one is about
+ * asking the question in one place rather than four.
  *
- * `toJSON` is the other name a value may answer to, for two kinds of value
- * that keep it:
- *
- * - A builder artifact carries `toJSON` alongside `toEncodableForm`, for one
- *   consumer: `JSON.stringify()` of a pattern reaches each node's module
- *   through it, and a graph serialized without it loses every module's body
- *   and `$implRef`. Nothing in the runtime reads that spelling.
- * - A pattern factory and a `Cell` carry only `toJSON` -- a factory because
- *   `JSON.stringify(SomePattern)` is an idiom pattern source uses, a `Cell`
- *   because that is how it becomes a link.
- *
- * So this is the one place that knows both names, which keeps the remaining
- * `toJSON` findable and makes retiring it a change here rather than a sweep.
- * Retiring the factory's is a pattern-author migration whose failure mode is
- * a silent `undefined`, so it is deliberately not an internal rename.
+ * Answered by a builder module, by the factory that carries its members, and
+ * by a `Cell`, for which it is how the cell becomes a link.
  */
 function encodableFormMethod(value: unknown): (() => unknown) | undefined {
   if (
@@ -29,14 +19,10 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
     return undefined;
   }
 
-  const artifact = value as { toEncodableForm?: unknown; toJSON?: unknown };
-  if (typeof artifact.toEncodableForm === "function") {
-    return artifact.toEncodableForm as () => unknown;
-  }
-  if (typeof artifact.toJSON === "function") {
-    return artifact.toJSON as () => unknown;
-  }
-  return undefined;
+  const artifact = value as { toJSON?: unknown };
+  return typeof artifact.toJSON === "function"
+    ? artifact.toJSON as () => unknown
+    : undefined;
 }
 
 /** Checks whether a value can produce an encodable form of itself. */
