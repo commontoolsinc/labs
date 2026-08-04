@@ -5,86 +5,97 @@
  * enabling efficient diffing and reuse of DOM nodes.
  */
 
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isCell } from "@commonfabric/runner";
+
+/**
+ * Stands in for a member that has no value-level identity of its own, so that
+ * a node carrying one is still distinguishable from a node that does not. A
+ * record cannot collide with the string, number, or boolean members a render
+ * node otherwise holds.
+ */
+function marker(kind: string): Record<string, string> {
+  return { "@@vdom-key": kind };
+}
+
+/**
+ * Projects a render node onto a `FabricValue`, which is what
+ * `hashStringOf()` can key.
+ *
+ * A render node is not one already: it holds `Cell`s where reactive values go,
+ * and props whose values may be event handlers. Each is replaced by something
+ * that stands for it -- a cell by the link it names, a function by a marker,
+ * since one render's handler and the next render's are different objects
+ * carrying the same meaning.
+ *
+ * The projection is what makes the key `FabricValue`-aware rather than
+ * JSON-aware. `bigint`, `undefined`, `NaN`, and `-0` are all members the hash
+ * keeps distinct, where a JSON encoding of the same node either throws or
+ * quietly maps several of them together.
+ *
+ * @param node The render node to project.
+ * @param seen Ancestors of `node`, so a cycle is answered rather than followed.
+ */
+function keyProjection(node: unknown, seen: Set<object>): unknown {
+  if (node === null) return null;
+
+  switch (typeof node) {
+    case "undefined":
+    case "boolean":
+    case "string":
+    case "number":
+    case "bigint":
+      return node;
+    case "symbol":
+      // An interned symbol is a fabric value and keys as itself; a unique one
+      // has no portable identity, so every unique symbol keys alike.
+      return Symbol.keyFor(node) === undefined ? marker("symbol") : node;
+    case "function":
+      return marker("function");
+  }
+
+  if (isCell(node)) {
+    // The link a cell names, which is stable across renders where the cell
+    // object need not be. A cell with no link yet has nothing to name.
+    return node.toSigilLinkOrNull() ?? marker("unlinked-cell");
+  }
+
+  if (seen.has(node)) return marker("cycle");
+  seen.add(node);
+  try {
+    if (Array.isArray(node)) {
+      // Holes are not members; a hole and an `undefined` element are different
+      // nodes and key differently.
+      return node.map((element, i) =>
+        i in node ? keyProjection(element, seen) : marker("hole")
+      );
+    }
+    // Enumerable string keys only, which is the set a render node's members
+    // live in. A symbol-keyed member is machinery rather than content.
+    return Object.fromEntries(
+      Object.entries(node).map(([key, value]) => [
+        key,
+        keyProjection(value, seen),
+      ]),
+    );
+  } finally {
+    seen.delete(node);
+  }
+}
 
 /**
  * Generate a stable key for a render node.
  *
- * This uses JSON.stringify with a custom replacer that converts
- * Cell references to their normalized link format, ensuring the
- * same key is generated regardless of whether we're in the worker
- * or main thread.
+ * The key is a hash of the node's projection onto a `FabricValue` (see
+ * `keyProjection`), so two nodes key alike exactly when they carry the same
+ * content, and a member the hash can tell apart -- `1n` from `1`, `-0` from
+ * `0`, a present `undefined` from an absent member -- keys them apart.
  *
  * @param node - The render node to generate a key for
  * @returns A stable string key
  */
 export function generateKey(node: unknown): string {
-  try {
-    // Cell.toJSON() is called by JSON.stringify, producing a stable ID
-    // based on the cell's link (space/id/path), not its current data.
-    // The cellReplacer handles nested Cells that aren't top-level.
-    return JSON.stringify(node, cellReplacer);
-  } catch {
-    // Circular structure or other JSON error - use fallback
-    return generateFallbackKey(node);
-  }
-}
-
-/**
- * JSON replacer function that converts Cells to their link representation.
- * This ensures keys match between worker and main thread.
- */
-function cellReplacer(_key: string, value: unknown): unknown {
-  if (isCell(value)) {
-    // Use getAsNormalizedFullLink
-    return value.getAsNormalizedFullLink();
-  }
-  return value;
-}
-
-/**
- * Generate a fallback key for nodes that can't be JSON stringified.
- * Uses a simple type-based key that may result in more DOM recreation
- * but ensures the reconciler doesn't fail.
- */
-function generateFallbackKey(node: unknown): string {
-  if (node === null || node === undefined) {
-    return "__null__";
-  }
-
-  if (typeof node === "string") {
-    return `__text__${node.slice(0, 100)}`;
-  }
-
-  if (typeof node === "number") {
-    return `__num__${node}`;
-  }
-
-  if (typeof node === "boolean") {
-    return `__bool__${node}`;
-  }
-
-  if (Array.isArray(node)) {
-    return `__array__${node.length}`;
-  }
-
-  if (isCell(node)) {
-    try {
-      const link = node.getAsNormalizedFullLink();
-      return `__cell__${link.space}:${link.id}:${link.path.join("/")}`;
-    } catch {
-      return "__cell__unknown";
-    }
-  }
-
-  if (typeof node === "object" && node !== null && "type" in node) {
-    const vnode = node as { type: string; name?: string };
-    if (vnode.type === "vnode" && vnode.name) {
-      return `__vnode__${vnode.name}`;
-    }
-  }
-
-  return "__unknown__";
+  return hashStringOf(keyProjection(node, new Set()) as never);
 }
 
 /**

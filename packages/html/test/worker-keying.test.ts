@@ -11,22 +11,26 @@ import {
 
 Deno.test("keying - generateKey", async (t) => {
   await t.step("generates stable keys for strings", () => {
-    const key1 = generateKey("hello");
-    const key2 = generateKey("hello");
-    assertEquals(key1, key2);
-    assertEquals(key1, '"hello"');
+    assertEquals(generateKey("hello"), generateKey("hello"));
+    assertNotEquals(generateKey("hello"), generateKey("goodbye"));
   });
 
   await t.step("generates stable keys for numbers", () => {
-    const key1 = generateKey(42);
-    const key2 = generateKey(42);
-    assertEquals(key1, key2);
-    assertEquals(key1, "42");
+    assertEquals(generateKey(42), generateKey(42));
+    assertNotEquals(generateKey(42), generateKey(43));
   });
 
-  await t.step("generates stable keys for null/undefined", () => {
-    assertEquals(generateKey(null), "null");
-    assertEquals(generateKey(undefined), undefined); // JSON.stringify returns undefined for undefined
+  await t.step("keys a number apart from the string that spells it", () => {
+    assertNotEquals(generateKey(42), generateKey("42"));
+  });
+
+  await t.step("generates stable keys for null and undefined", () => {
+    assertEquals(generateKey(null), generateKey(null));
+    assertEquals(generateKey(undefined), generateKey(undefined));
+    assertNotEquals(generateKey(null), generateKey(undefined));
+    // Both are strings. A key is what a child is identified by, so a child
+    // that keys as nothing at all has no identity to be reused under.
+    assertEquals(typeof generateKey(undefined), "string");
   });
 
   await t.step("generates stable keys for objects", () => {
@@ -67,8 +71,38 @@ Deno.test("keying - generateKey", async (t) => {
   });
 
   await t.step("handles booleans", () => {
-    assertEquals(generateKey(true), "true");
-    assertEquals(generateKey(false), "false");
+    assertNotEquals(generateKey(true), generateKey(false));
+    assertEquals(generateKey(true), generateKey(true));
+  });
+
+  // Members a JSON encoding of the same node either refuses or quietly maps
+  // together. Each pair below keyed alike before, so two children that differ
+  // only in one of these were reused as though they were the same child.
+  await t.step("keys members JSON cannot tell apart", () => {
+    const key = (props: Record<string, unknown>) =>
+      generateKey({ type: "vnode", name: "div", props });
+
+    // A bigint anywhere used to throw, collapsing the whole node to a
+    // type-only fallback key shared by every `div`.
+    assertNotEquals(key({ n: 1n }), key({ n: 2n }));
+    assertNotEquals(key({ n: 1n }), key({ n: 1 }));
+
+    // A present-but-undefined member is not an absent one.
+    assertNotEquals(key({ n: undefined }), key({}));
+
+    assertNotEquals(key({ n: NaN }), key({ n: null }));
+    assertNotEquals(key({ n: -0 }), key({ n: 0 }));
+  });
+
+  await t.step("keys a hole apart from an undefined element", () => {
+    const hole = [1, , 3];
+    assertNotEquals(generateKey(hole), generateKey([1, undefined, 3]));
+  });
+
+  await t.step("answers a cyclic node instead of following it", () => {
+    const cyclic: Record<string, unknown> = { name: "div" };
+    cyclic.self = cyclic;
+    assertEquals(generateKey(cyclic), generateKey(cyclic));
   });
 });
 
@@ -80,10 +114,10 @@ Deno.test("keying - generateChildKeys", async (t) => {
     assertEquals(keys.length, 3);
     // Keys should all be different
     assertEquals(new Set(keys).size, 3);
-    // Keys should follow pattern with occurrence count
-    assertEquals(keys[0], '"a"-0');
-    assertEquals(keys[1], '"a"-1');
-    assertEquals(keys[2], '"a"-2');
+    // Identical children are told apart by their occurrence count alone.
+    assertEquals(keys[0], `${generateKey("a")}-0`);
+    assertEquals(keys[1], `${generateKey("a")}-1`);
+    assertEquals(keys[2], `${generateKey("a")}-2`);
   });
 
   await t.step("generates stable keys for different children", () => {
@@ -110,7 +144,7 @@ Deno.test("keying - generateChildKeys", async (t) => {
   await t.step("handles single child", () => {
     const keys = generateChildKeys(["only"]);
     assertEquals(keys.length, 1);
-    assertEquals(keys[0], '"only"-0');
+    assertEquals(keys[0], `${generateKey("only")}-0`);
   });
 });
 
