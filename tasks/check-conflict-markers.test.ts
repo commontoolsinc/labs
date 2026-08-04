@@ -125,6 +125,47 @@ describe("check-conflict-markers", () => {
         await Deno.remove(root, { recursive: true });
       }
     });
+
+    it("skips a tracked file that is absent from the working tree", async () => {
+      // A path can be tracked and yet not present -- a sparse checkout, an
+      // uninitialized submodule. That is not this check's business, and it
+      // must not take down the whole run.
+      const root = await fixtureRepo("harmless");
+      try {
+        await Deno.remove(join(root, "subject.md"));
+        expect(await scan(root)).toEqual([]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("skips a tracked file that is not valid UTF-8", async () => {
+      // A binary file is not text to scan. Reading one as text throws rather
+      // than returning replacement characters, so the skip is what keeps an
+      // image or a fixture blob from failing the run.
+      const root = await fixtureRepo("harmless");
+      try {
+        await Deno.writeFile(
+          join(root, "subject.md"),
+          new Uint8Array([0xff, 0xfe, 0x00, 0x80]),
+        );
+        expect(await scan(root)).toEqual([]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("throws when the directory is not a git repository", async () => {
+      // Every path here comes from `git ls-files`, so a failure to list means
+      // the check saw nothing rather than that there was nothing to see.
+      // Reporting success on that would be the worst possible answer.
+      const root = await Deno.makeTempDir({ prefix: "check-not-a-repo-" });
+      try {
+        await expect(scan(root)).rejects.toThrow(/git ls-files failed/);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
   });
 
   describe("main()", () => {
