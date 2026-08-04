@@ -532,7 +532,12 @@ action's public write. Therefore, normatively:
   provenance for label purposes (the `cfcFlowLabels` ladder applies
   unchanged), and protocol.md §1/§7 carries attribution at exactly
   this granularity. The commit is transport; enforcement already
-  happened per action run, in memory.
+  happened per action run, in memory. The carried provenance's
+  READER is main's existing read-time label derivation, unchanged
+  (FP6, RULED 2026-08-03): a later run reading the cell — same
+  wave or a later one — seeds its own ladder from the cell's
+  labels; the carriage is what makes that input available
+  server-side across waves, and no new enforcement point exists.
 - Handler runs are actions: a server-side handler run gets per-run CFC
   exactly as its client run did. D-v2-1 moves WHERE handlers run, never
   the enforcement unit.
@@ -655,12 +660,15 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **Miss rule**: enqueue the effect on the outbox with the key AND
   the run's identity carriage — the result-cell address including
   its instance `scope_key`, plus the run's acting identity where it
-  had one. The completion commit is derived-class, so it carries
+  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03).
+  The completion commit is derived-class, so it carries
   protocol.md §1's annotations like any other — but it never passes
   through §3d's sealing (the run is long over when the response
   arrives), and the memo key cannot supply them (the instance is
   hashed in, not recoverable), so the outbox entry is the only
-  carrier. On
+  carrier. The completion WRITE's labels derive from the carried
+  request basis — an external result inherits its request's
+  confidentiality; results are never default-unlabeled. On
   completion, commit result + key in one derived-class commit and
   inject the result-cell dirtiness IN-PROCESS, post-commit — the next
   wave consumes it directly. The subscription's copy of the completion
@@ -674,23 +682,47 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   new key), never timer-driven loops.
 
 FORBIDDEN: re-firing an effect whose stored key matches; effect retry
-timers inside the loop; a "pending effects" table (the outbox is
-process-local; on crash, missing results are re-missed from keys).
+timers inside the loop; a "pending effects" table (the EFFECT half of
+the outbox is
+process-local; on crash, missing results are re-missed from keys —
+the durable rows of §5 carry APPENDS, never effect state).
 
 ## 5. The outbox
 
-- Process-local queue of (space, memo key, request, authority
-  handle, identity carriage — §4's miss rule: the result-cell
-  address with its `scope_key`, plus the acting identity where the
-  run had one).
-- Cross-space event appends and `.inSpace` provisioning commits ride
-  the same outbox (protocol.md §2b); their entries carry the acting
+- EFFECT requests: a process-local queue of (space, memo key,
+  request, authority
+  handle, label basis + identity carriage — §4's miss rule: the
+  result-cell
+  address with its `scope_key`, the acting identity where the
+  run had one, and the run's CFC label basis (FP6, RULED
+  2026-08-03) so the completion write's labels derive from its
+  request's — an external result inherits its request's
+  confidentiality. Process-local is SOUND here: a crash re-misses
+  the effect from memo keys (§4, §6; at-least-once, already ruled).
+- **Cross-space event appends are DURABLE (FP1, RULED
+  2026-08-03).** Their entries are engine-table rows written INSIDE
+  the emitting wave's own store transaction — the basis-row
+  carriage pattern, sanctioned in protocol.md §7 — and DELETED on
+  delivery-ack: a queue that empties, never history, so the
+  no-per-run-persistence lesson holds. A row carries the event
+  (payload bounded by the event, never graph-scaled) plus the
+  acting
   identity (`actingPrincipal` + `actingSession`) + `capabilityRef`
   that the target's admission validates and stamps `firedAt` from —
   actor inheritance crosses spaces through exactly this carriage
-  (events.md §2).
+  (events.md §2). Activation re-sends pending rows (§6 step 5);
+  the target's `eventId` horizon keeps processing exactly-once.
+  This closes the crash window between wave commit and delivery
+  that a process-local append queue could not survive.
+- `.inSpace` provisioning rides NEITHER queue today: its foreign
+  commits are SEQUENCED at the wave commit step — foreign-first,
+  home-after-success, stop-at-first-failure (protocol.md §2b) — so
+  a crash between the halves leaves the event unconsequenced and
+  the deterministic replay converges. Outbox carriage is its
+  sharded-future form only (§2b's closing note).
 - At-least-once; idempotence comes from the memo hit rule (a duplicate
-  completion writes an identical key and is a CAS no-op).
+  completion writes an identical key and is a CAS no-op) for
+  effects, and from the `eventId` dedupe horizon for appends.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.
@@ -720,6 +752,10 @@ On activate after crash or deploy:
 4. Undelivered events — stream head past `eventWatermark`, the §1 boot
    check — reprocess (events.md §5); events at/below the watermark are
    skipped by the idempotency rule.
+5. Pending durable outbound-append rows (§5, FP1) RE-SEND; a
+   duplicate of an already-delivered append dedupes at the target's
+   `eventId` horizon. Nothing regenerates an EFFECT request from
+   here — those re-miss from memo keys in step 3, by design.
 
 There is NO replay log, NO persisted run observations, NO snapshot of
 scheduler state beyond W, `eventWatermark`, and the basis index's

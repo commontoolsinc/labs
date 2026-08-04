@@ -305,8 +305,11 @@ Phases 1–5 meet them wherever scoped state appears.
   RULED (S1; ledger LD5 ratified by the owner 2026-08-03 as the
   read half of the transaction identity model, protocol.md §1):
   reads may name an explicit
-  `entity_scope_key`, admissible ONLY for the space's live lease
-  holder (protocol.md §2's read row) — the same trust argument and
+  `entity_scope_key`, admissible only for a live lease holder on
+  the co-hosted memory server — its own space's lease; FP2 (RULED
+  2026-08-03) widened the original this-space-only condition so
+  cross-space scoped reads can name their foreign instance
+  (protocol.md §2's read row) — the same trust argument and
   the same one equality check as derived writes. Without it a
   SpaceServer read under its service envelope resolves
   `user:<serviceDID>` and returns an EMPTY instance silently:
