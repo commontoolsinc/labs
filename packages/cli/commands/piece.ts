@@ -1041,8 +1041,9 @@ export const piece = new Command()
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
     if (options.check) {
-      // A refusal throws out of here with a non-zero exit, so `--check` gates
-      // a deploy script as well as informing a person.
+      // A refusal exits 1 from inside the check (plain stderr, no usage
+      // dump), so `--check` gates a deploy script as well as informing a
+      // person.
       const { config, summary } = await checkPieceSourceFromCommand(
         options,
         mainPath,
@@ -1917,6 +1918,8 @@ export interface SetPieceSourceCommandDependencies {
 /** Injectable dependencies for testing `piece setsrc --check`. */
 export interface CheckPieceSourceCommandDependencies {
   checkPiecePattern?: typeof checkPiecePattern;
+  /** `exitWithDataError`'s seam, so a test can observe the refusal. */
+  exit?: Parameters<typeof exitWithDataError>[1];
 }
 
 /**
@@ -1945,10 +1948,15 @@ export async function checkPieceSourceFromCommand(
     localPatternEntry(mainPath, options),
   );
   if (!report.compatible) {
-    throw new ValidationError(
-      `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
-      { exitCode: 1 },
-    );
+    // A refusal is a data condition — this source and this piece's stored
+    // state don't fit — not an arg-parse failure, so it reports like the
+    // `piece get` / `piece link` data errors above: plain stderr and exit 1,
+    // never a Cliffy ValidationError, which would dump the usage screen over
+    // the verdict.
+    exitWithDataError({
+      message:
+        `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
+    }, deps.exit);
   }
   return {
     config,

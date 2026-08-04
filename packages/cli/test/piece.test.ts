@@ -1488,8 +1488,13 @@ describe("cli piece parsing", () => {
   it("fails the setsrc preflight loudly enough to gate a script", async () => {
     // `--check` is meant to sit in front of a deploy, so a refusal has to be a
     // non-zero exit and not just prose on stdout — and it has to carry the
-    // rules' own reason so the operator knows what to fix.
-    const failure = await checkPieceSourceFromCommand(
+    // rules' own reason so the operator knows what to fix. It reports as a
+    // data error (plain stderr + exit 1), not a Cliffy ValidationError, so
+    // the verdict is not buried under a usage screen.
+    const printed: string[] = [];
+    let exitCode: number | undefined;
+    class ExitSentinel extends Error {}
+    await expect(checkPieceSourceFromCommand(
       {
         apiUrl: API_URL,
         space: SPACE,
@@ -1505,13 +1510,19 @@ describe("cli piece parsing", () => {
             message: "result narrowed: label",
             candidate: { identity: "D".repeat(43), symbol: "default" },
           }),
+        exit: {
+          printError: (message) => printed.push(message),
+          exit: (code) => {
+            exitCode = code;
+            throw new ExitSentinel();
+          },
+        },
       },
-    ).then(() => undefined, (error: unknown) => error as ValidationError);
+    )).rejects.toThrow(ExitSentinel);
 
-    expect(failure).toBeInstanceOf(ValidationError);
-    expect(failure!.message).toContain("cannot replace the source");
-    expect(failure!.message).toContain("result narrowed: label");
-    expect((failure as { exitCode?: number }).exitCode).toBe(1);
+    expect(exitCode).toBe(1);
+    expect(printed.join("\n")).toContain("cannot replace the source");
+    expect(printed.join("\n")).toContain("result narrowed: label");
   });
 
   it("lists pattern provenance and isolates unreadable pieces", async () => {
