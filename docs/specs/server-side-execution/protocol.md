@@ -29,7 +29,13 @@ even construct one).
 
 **Both arms carry a class; only the ON arm enforces one.** `class`
 metadata is WRITTEN in every arm from stage A onward and ENFORCED
-(the §2 admission rows) only under the flag. In the OFF arm the
+(the §2 admission rows) only under the flag. `class` is
+SERVER-DETERMINED at admission — assigned by which admission
+row/endpoint processed the commit, never a client-supplied field
+the server trusts (FP15, closed 2026-08-03 by derivation: the
+FORBIDDEN clause below — no client code path can even construct
+`derived` — holds only if no client-supplied value can influence
+the class). In the OFF arm the
 client still commits derivation results (plan §Interim postures, OFF
 baseline) — those commits are `authored`, exactly like every other
 client commit today. `derived` names the single-deriver posture, so
