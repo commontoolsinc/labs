@@ -239,12 +239,16 @@ export function flatMap(
         resultSchema,
         tx,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
+      const boundResult = scopedCell(runtime, tx, baseResult, outputScope);
       // Link this cell to the parent cell
-      setResultCell(result, parentCell);
+      setResultCell(boundResult, parentCell);
       // Link the new result cells to the pattern cell too
-      setPatternCell(result, parentCell.key("pattern"));
-      sendResult(tx, result);
+      setPatternCell(boundResult, parentCell.key("pattern"));
+      sendResult(tx, boundResult);
+      // The container outlives this reconcile's transaction; a cell bound to
+      // it would pin the settled transaction and its journal for the life of
+      // the coordinator. Rebind per use instead.
+      result = boundResult.withTx();
     }
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
@@ -396,12 +400,17 @@ export function flatMap(
         existing.lastIndex = i;
         if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
       } else {
-        const resultCell = runtime.getCell(
+        const boundResultCell = runtime.getCell(
           parentCell.space,
           { flatMap: result, elementKey },
           undefined,
           tx,
         );
+        // The stored cell outlives this reconcile's transaction: it lives in
+        // `elementRuns` and in the cancel closure below, both of which last as
+        // long as the coordinator. A cell bound to the transaction would pin
+        // the settled transaction, its journal, and everything it read.
+        const resultCell = boundResultCell.withTx();
         runtime.runner.run(
           tx,
           opPattern,
@@ -413,7 +422,7 @@ export function flatMap(
           },
         );
         // Link the new result cells to the pattern cell too
-        setPatternCell(resultCell, parentCell.key("pattern"));
+        setPatternCell(boundResultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
         const entry = { resultCell, lastIndex: i };
         elementRuns.set(elementKey, entry);

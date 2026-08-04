@@ -1777,6 +1777,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         logger.error("storage-error", "Error in commit callback:", error);
       }
     }
+    // A settled transaction dispatches its callbacks exactly once. Holding
+    // them afterwards makes any reference to the transaction retain every
+    // callback's closure, and through those closures the cells and registries
+    // of the action that committed it.
+    this.commitCallbacks.clear();
   }
 
   private clearPostCommitOutbox(): void {
