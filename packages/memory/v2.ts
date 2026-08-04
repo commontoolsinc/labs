@@ -24,7 +24,6 @@ export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
 export type CellScope = "space" | "user" | "session";
-export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
@@ -261,19 +260,6 @@ export type ClientCommit = {
   };
 };
 
-export type SessionOpenArgs = {
-  sessionId?: SessionId;
-  seenSeq?: number;
-  sessionToken?: SessionToken;
-};
-
-export type SessionOpenCommand = {
-  cmd: "session.open";
-  id: JobId;
-  protocol: typeof MEMORY_PROTOCOL;
-  args: SessionOpenArgs;
-};
-
 export type SessionOpenResult = {
   sessionId: SessionId;
   sessionToken: SessionToken;
@@ -288,8 +274,6 @@ export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   commitPreconditions: boolean;
-  /** Legacy CT-1775 draft capability: index-keyed per-frame schema table. */
-  syncSchemaTable: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
   /**
@@ -330,7 +314,6 @@ export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
-  syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
@@ -836,15 +819,6 @@ export type V2Error = {
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 
-export type TaskReturn<Result> = {
-  the: "task/return";
-  of: JobId;
-  is: Result;
-};
-
-export type Receipt<Result> = TaskReturn<Result>;
-export type LegacyClientMessage = SessionOpenCommand;
-export type LegacyServerMessage = TaskReturn<V2Result<unknown>>;
 export type ClientMessage =
   | HelloMessage
   | SessionOpenRequest
@@ -931,7 +905,6 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
-  syncSchemaTable: false,
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -995,14 +968,6 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  const syncSchemaTable = value.syncSchemaTable;
-  if (
-    syncSchemaTable !== undefined &&
-    typeof syncSchemaTable !== "boolean"
-  ) {
-    return null;
-  }
-
   const syncSchemaTableV2 = value.syncSchemaTableV2;
   if (
     syncSchemaTableV2 !== undefined &&
@@ -1055,7 +1020,6 @@ export const parseMemoryProtocolFlags = (
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
-    syncSchemaTable: syncSchemaTable === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
@@ -1078,7 +1042,6 @@ export const wireMemoryProtocolFlags = (
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
-  syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
