@@ -5,38 +5,46 @@
  * enabling efficient diffing and reuse of DOM nodes.
  */
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isCell } from "@commonfabric/runner";
 
 /**
- * Stands in for a member that has no value-level identity of its own, so that
- * a node carrying one is still distinguishable from a node that does not. A
- * record cannot collide with the string, number, or boolean members a render
- * node otherwise holds.
+ * Tags a projected container, so that what a value WAS is part of what it keys
+ * as. Everything but a primitive is tagged, which also keeps the projection
+ * unambiguous: a record projects to a tagged pair list rather than to a record,
+ * so no member name of the caller's can collide with a tag, and no member name
+ * this runtime reserves (`__proto__`, `constructor`) can appear as a key at
+ * all.
  */
-function marker(kind: string): Record<string, string> {
-  return { "@@vdom-key": kind };
+function tagged(kind: string, ...parts: FabricValue[]): FabricValue {
+  return [`@@${kind}`, ...parts];
 }
 
 /**
- * Projects a render node onto a `FabricValue`, which is what
- * `hashStringOf()` can key.
+ * Projects a render node onto a `FabricValue`, which is what `hashStringOf()`
+ * keys.
  *
- * A render node is not one already: it holds `Cell`s where reactive values go,
- * and props whose values may be event handlers. Each is replaced by something
- * that stands for it -- a cell by the link it names, a function by a marker,
- * since one render's handler and the next render's are different objects
- * carrying the same meaning.
+ * A render node is not one: it holds `Cell`s where reactive values go, props
+ * whose values may be event handlers, and whatever else a pattern author put
+ * there. Each is replaced by something that stands for it -- a cell by the link
+ * it names, a function by a tag, since one render's handler and the next
+ * render's are different objects carrying the same meaning.
  *
- * The projection is what makes the key `FabricValue`-aware rather than
- * JSON-aware. `bigint`, `undefined`, `NaN`, and `-0` are all members the hash
- * keeps distinct, where a JSON encoding of the same node either throws or
- * quietly maps several of them together.
+ * Every input has an answer here, and every answer is a `FabricValue`. Both
+ * halves are load-bearing: a reconciler cannot survive a key that throws, and
+ * a value whose state the projection does not read keys the same as every
+ * other value it does not read.
+ *
+ * So a native type that is not a `FabricValue` -- a `Date`, a `Map`, a typed
+ * array -- is projected by reading the state that holds it, which its
+ * enumerable members do not.
  *
  * @param node The render node to project.
  * @param seen Ancestors of `node`, so a cycle is answered rather than followed.
  */
-function keyProjection(node: unknown, seen: Set<object>): unknown {
+function keyProjection(node: unknown, seen: Set<object>): FabricValue {
   if (node === null) return null;
 
   switch (typeof node) {
@@ -49,34 +57,69 @@ function keyProjection(node: unknown, seen: Set<object>): unknown {
     case "symbol":
       // An interned symbol is a fabric value and keys as itself; a unique one
       // has no portable identity, so every unique symbol keys alike.
-      return Symbol.keyFor(node) === undefined ? marker("symbol") : node;
+      return Symbol.keyFor(node) === undefined ? tagged("symbol") : node;
     case "function":
-      return marker("function");
+      return tagged("function");
   }
 
   if (isCell(node)) {
     // The link a cell names, which is stable across renders where the cell
     // object need not be. A cell with no link yet has nothing to name.
-    return node.toSigilLinkOrNull() ?? marker("unlinked-cell");
+    const link = node.toSigilLinkOrNull();
+    return link === null ? tagged("cell") : tagged("link", link as FabricValue);
   }
 
-  if (seen.has(node)) return marker("cycle");
+  if (seen.has(node)) return tagged("cycle");
   seen.add(node);
   try {
     if (Array.isArray(node)) {
-      // Holes are not members; a hole and an `undefined` element are different
-      // nodes and key differently.
-      return node.map((element, i) =>
-        i in node ? keyProjection(element, seen) : marker("hole")
+      // A hole holds nothing, and is not the `undefined` element that reading
+      // one would report.
+      return tagged(
+        "arr",
+        node.map((element, i) =>
+          i in node ? keyProjection(element, seen) : tagged("hole")
+        ),
       );
     }
-    // Enumerable string keys only, which is the set a render node's members
-    // live in. A symbol-keyed member is machinery rather than content.
-    return Object.fromEntries(
-      Object.entries(node).map(([key, value]) => [
-        key,
-        keyProjection(value, seen),
-      ]),
+
+    // Native types with state the enumeration below cannot see. Each keeps its
+    // own shape, so two that differ key differently.
+    if (node instanceof Date) return tagged("date", node.getTime());
+    if (node instanceof RegExp) {
+      return tagged("regexp", node.source, node.flags);
+    }
+    if (ArrayBuffer.isView(node)) {
+      const bytes = new Uint8Array(
+        node.buffer,
+        node.byteOffset,
+        node.byteLength,
+      );
+      return tagged("bytes", [...bytes]);
+    }
+    if (node instanceof Map) {
+      return tagged(
+        "map",
+        [...node].map((
+          [k, v],
+        ) => [keyProjection(k, seen), keyProjection(v, seen)]),
+      );
+    }
+    if (node instanceof Set) {
+      return tagged("set", [...node].map((v) => keyProjection(v, seen)));
+    }
+    if (isNativeError(node)) {
+      return tagged("error", node.name, node.message);
+    }
+
+    // Anything else, by its own enumerable string keys -- the set a render
+    // node's members live in. A symbol-keyed member is machinery rather than
+    // content. Pairs rather than a record: see `tagged`.
+    return tagged(
+      "rec",
+      Object.entries(node).map((
+        [key, value],
+      ) => [key, keyProjection(value, seen)]),
     );
   } finally {
     seen.delete(node);
@@ -95,7 +138,7 @@ function keyProjection(node: unknown, seen: Set<object>): unknown {
  * @returns A stable string key
  */
 export function generateKey(node: unknown): string {
-  return hashStringOf(keyProjection(node, new Set()) as never);
+  return hashStringOf(keyProjection(node, new Set()));
 }
 
 /**
