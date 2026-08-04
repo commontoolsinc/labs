@@ -340,7 +340,7 @@ function feedObjectValue(
 
     default: {
       // Nothing else is handled. As of this writing, specifically missing are
-      // `Map`, `Set`, `Error`, and `HasToJSON`.
+      // `Map`, `Set`, and `Error`.
       throw new Error(
         `hashOf: unsupported object type: ${
           value?.constructor?.name ?? typeof value
