@@ -59,6 +59,17 @@ settledness (T1/T4/T6, C4), the effect channel with LT8's window
 (T2, C1-LT8), cross-space carriage end to end (T4, cluster B,
 C2/C2-dedupe).
 
+Delta 2026-08-04 — the consequence-flush deadline (serving-loop
+§3): both new binding sentences are covered without a new
+instrument. The flush SEMANTICS (commit-early, W pinned,
+continuation completes, exactly-once across the boundary) are
+trigger-agnostic and C10-verified — the clockless model's count
+budget is the deadline's proxy — and the sealing-order MUST is the
+same property family (C1/C10's event-first processing). The
+`T_flush` VALUE is a Phase 6 implementation gate alongside the
+other budgets. The recorded write-class fallback is not built —
+no instrument owed unless it is ever adopted.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument

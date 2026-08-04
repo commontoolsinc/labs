@@ -355,8 +355,8 @@ export function moduleToEncodableForm(module: Module) {
 // Ambient context: true while serializing the runtime-INTERNAL graph
 // representation (builder-time node serialization via
 // `withAliasBindings`, and through it the `$opFallback` eviction
-// fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
-// JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
+// fallback graphs). The storage boundary (`Pattern.toEncodableForm()`, reached
+// by the runtime's artifact walk on the way into a cell write) adds
 // the content-addressed `$patternRef` on top of the graph; internal
 // serialization must NOT, or in-memory `Pattern.nodes` would grow refs for
 // any sub-pattern whose module is already indexed (e.g. builder calls inside

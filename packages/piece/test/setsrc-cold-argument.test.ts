@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
+import {
+  getPatternIdentityRef,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
+
+// CT-1917 at the `cf piece setsrc` boundary: a slot the piece cannot READ right
+// now is not a slot holding the wrong value.
+//
+// A piece's argument document is not always resident. A nested piece's argument
+// lives in its HOST's document, so while the host has not synced the whole
+// argument reads as nothing. Runner deliberately DEFERS that state rather than
+// failing it: `applySetupState` preserves the stored bytes and lets the swap
+// proceed, because refusing would make every such piece un-updatable for
+// reasons that have nothing to do with its stored value.
+// `packages/runner/test/pattern-update-argument-validation.test.ts` pins the
+// same deferral one layer down ("defers an argument doc that reads NOTHING on
+// the in-place path").
+//
+// `setPattern` has to inherit that deferral, and there is one specific way to
+// lose it: running the aggregate compatibility review BEFORE the swap. That
+// review materializes the stored argument and validates it against the
+// candidate's schema, and it cannot tell a cold document from a wrong one — over
+// a cold document it validates `undefined` and refuses. An earlier revision of
+// PR #5311 did exactly that, to name every incompatibility at once, and a
+// reviewer found it by execution: two revisions with IDENTICAL schemas carrying
+// a required field, which `main` swaps happily, were refused with "updated
+// arguments do not match the candidate schema: value does not match type
+// object".
+//
+// So enforcement stays where it was: `assertPatternSchemasBackwardCompatible`
+// plus the execute-time validators, all of which defer a cold read. Whatever
+// else `setPattern` does with the aggregate review, it must not be allowed to
+// decide ACCEPTANCE — and this case is the guard on that, failing the moment it
+// is put back in front of the swap.
+//
+// Every other case in this package supplies a WARM argument, which is why the
+// regression got through — a warm argument validates fine either way.
+
+const signer = await Identity.fromPassphrase("setsrc cold argument");
+
+/**
+ * Two revisions whose argument schemas are IDENTICAL, each carrying a REQUIRED
+ * object field. Identical schemas are what isolates the argument check: the
+ * contract proof (`assertPatternSchemasBackwardCompatible`) has nothing to
+ * complain about, so the only rule that can refuse this swap is one that reads
+ * the stored argument. `required` with no default is what makes the read
+ * decisive — validating `undefined` against it cannot pass.
+ *
+ * `marker` is the only difference, so a successful swap is observable in the
+ * piece's own output rather than inferred.
+ */
+function registryProgram(marker: string): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { NAME, pattern } from 'commonfabric';",
+        "interface Args { registry: { label: string } }",
+        "export default pattern<Args, { marker: string }>(",
+        "  () => ({",
+        "    [NAME]: 'Cold argument',",
+        `    marker: ${JSON.stringify(marker)},`,
+        "  }),",
+        ");",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
+describe("setsrc over a cold argument document", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let manager: PieceManager;
+  let pieces: PiecesController;
+
+  beforeEach(async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    manager = new PieceManager(
+      await createSession({
+        identity: signer,
+        spaceName: `setsrc-cold-argument-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await manager.synced();
+    pieces = new PiecesController(manager);
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("applies a candidate whose stored argument cannot be read right now", async () => {
+    const piece = await pieces.create(registryProgram("v1"), {
+      input: { registry: { label: "hello" } },
+    });
+    await runtime.idle();
+    const before = getPatternIdentityRef(piece.getCell());
+
+    // Repoint the piece's argument at a document nothing has ever written, the
+    // same way the runner's CT-1917 case does. The read succeeds and yields
+    // NOTHING — which is the state under test — rather than erroring, so the
+    // review downstream sees `undefined` where a live host would later supply
+    // the real argument.
+    const cold = runtime.getCell<Record<string, unknown>>(
+      piece.getCell().space,
+      "setsrc-cold-argument-doc",
+    );
+    const { error: retargetError } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw(
+        "argument",
+        cold.getAsWriteRedirectLink({ base: piece.getCell() }),
+      );
+    });
+    expect(
+      retargetError?.message,
+      "the fixture could not repoint the argument, so the case below would " +
+        "run against a WARM argument and pass without testing anything",
+    ).toBeUndefined();
+    await runtime.idle();
+
+    // Guard the fixture itself. If this ever reads a value, the case has gone
+    // warm and its verdict means nothing.
+    const argument = manager.getArgument(piece.getCell());
+    await argument.sync();
+    expect(
+      argument.asSchema(undefined).get(),
+      "the argument document is readable, so this is no longer the cold case",
+    ).toBeUndefined();
+
+    // The contract: the swap is ACCEPTED. A cold slot is deferred, not failed.
+    await piece.setPattern(registryProgram("v2"));
+    await runtime.idle();
+
+    expect(
+      getPatternIdentityRef(piece.getCell())?.identity,
+      "the pattern pointer did not move, so the swap was refused over an " +
+        "argument the piece merely could not read (CT-1917)",
+    ).not.toBe(before?.identity);
+    expect(
+      (piece.getCell().getAsQueryResult() as { marker?: string }).marker,
+    ).toBe("v2");
+  });
+});
