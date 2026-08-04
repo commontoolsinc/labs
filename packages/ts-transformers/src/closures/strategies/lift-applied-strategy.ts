@@ -4,7 +4,6 @@ import type {
   FunctionCapabilitySummary,
   TransformationContext,
 } from "../../core/mod.ts";
-import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
   getLiftAppliedInputAndCallback,
@@ -27,7 +26,7 @@ import {
 } from "../../utils/identifiers.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import { createLiftAppliedInputSchema } from "../utils/schema-factory.ts";
 
 /**
  * Pre-register unwrapped types for captured identifiers in a callback body.
@@ -87,34 +86,11 @@ function preRegisterCaptureTypes(
   visit(body);
 }
 
-export class LiftAppliedStrategy implements ClosureTransformationStrategy {
-  canTransform(
-    node: ts.Node,
-    context: TransformationContext,
-  ): boolean {
-    return ts.isCallExpression(node) && isLiftAppliedCall(node, context);
-  }
-
-  // Caller must pass a call expression.
-  transform(
-    node: ts.Node,
-    context: TransformationContext,
-    visitor: ts.Visitor,
-  ): ts.Node | undefined {
-    if (!ts.isCallExpression(node)) {
-      throw new Error(
-        "LiftAppliedStrategy.transform requires a call expression",
-      );
-    }
-    return transformLiftAppliedCall(node, context, visitor);
-  }
-}
-
 /**
  * Check if a call expression is a lift-applied call (the lowered form of a
  * user-source computed() call) from commonfabric.
  */
-export function isLiftAppliedCall(
+function isLiftAppliedCall(
   node: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
@@ -411,7 +387,8 @@ function rewriteCaptureReferences(
 }
 
 /**
- * Transform a lift-applied call that has closures in its callback.
+ * Transform a lift-applied call that has closures in its callback. Returns
+ * undefined for any other node.
  * Converts: lift((v) => v * multiplier.get())(value)
  * To: lift(
  *   ({ value: v, multiplier }) => v * multiplier,
@@ -420,10 +397,14 @@ function rewriteCaptureReferences(
  * )({ value, multiplier })
  */
 export function transformLiftAppliedCall(
-  inputCall: ts.CallExpression,
+  node: ts.Node,
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression | undefined {
+  if (!ts.isCallExpression(node) || !isLiftAppliedCall(node, context)) {
+    return undefined;
+  }
+  const inputCall = node;
   const { factory, checker, options } = context;
 
   // Extract callback
@@ -590,13 +571,13 @@ export function transformLiftAppliedCall(
   setParentPointers(newCallback);
 
   // Build TypeNodes for schema generation
-  const schemaFactory = new SchemaFactory(context);
-  let inputTypeNode = schemaFactory.createLiftAppliedInputSchema(
+  let inputTypeNode = createLiftAppliedInputSchema(
     originalInputParamName,
     originalInput,
     captureTree,
     captureNameMap,
     hadZeroParameters,
+    context,
   );
   const capabilityAnalysis = getCapabilityAnalysis(
     newCallback,

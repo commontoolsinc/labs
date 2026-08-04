@@ -5,8 +5,8 @@ import {
   TransformationContext,
 } from "../core/mod.ts";
 import {
-  createSchemaTransformerV2,
   type SchemaGenerationOptions,
+  SchemaGenerator,
 } from "@commonfabric/schema-generator";
 import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
 import {
@@ -20,7 +20,7 @@ import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
-    const schemaTransformer = createSchemaTransformerV2();
+    const schemaGenerator = new SchemaGenerator();
     const { sourceFile, tsContext: transformation, checker } = context;
     const { logger, state } = context.options;
     const typeRegistry = state?.typeRegistry;
@@ -126,7 +126,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             containsAnyOrUnknownTypeNode(typeArg))
         ) {
           // Synthetic TypeNode path - use new method that shares context properly
-          schema = schemaTransformer.generateSchemaFromSyntheticTypeNode(
+          schema = schemaGenerator.generateSchemaFromSyntheticTypeNode(
             schemaTypeArg,
             checker,
             typeRegistry,
@@ -136,7 +136,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         } else {
           // Normal Type path
-          schema = schemaTransformer.generateSchema(
+          schema = schemaGenerator.generateSchema(
             type,
             checker,
             schemaTypeArg,

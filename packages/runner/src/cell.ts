@@ -246,7 +246,7 @@ const storedSchemaForWritePolicyInput = (
   if (!isRecord(stored) || stored.value === undefined) {
     return undefined;
   }
-  return new ContextualFlowControl().getSchemaAtPath(
+  return ContextualFlowControl.getSchemaAtPath(
     stored.value as JSONSchema,
     [...link.path],
   );
@@ -2095,7 +2095,9 @@ export class CellImpl<T extends FabricValue>
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
-        ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
+        ? ContextualFlowControl.getSchemaAtPath(currentLink.schema, [
+          key.toString(),
+        ])
         : undefined;
 
       // Create a child link with an extended path. schemaAtPath retains the

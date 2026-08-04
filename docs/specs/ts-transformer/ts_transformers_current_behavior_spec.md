@@ -800,7 +800,7 @@ canonical lift-applied form:
 - **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
   single result type param, while `lift<T, R>` takes input `T` first, so
   forwarding `[R]` would place `R` in `lift`'s input slot. Type args are
-  recomputed downstream (LiftAppliedStrategy / SchemaInjection) from the
+  recomputed downstream (the lift-applied closure transform / SchemaInjection) from the
   callback's parameter and return types.
 - does not additionally validate callback shape in this pass
 - preserves type information through `typeRegistry` (the original call's type is
@@ -1392,7 +1392,7 @@ Behavior:
    survives. Why the checker recovers no constant value at this stage is not
    established here; treat only literal values as supported.
 3. extract `widenLiterals` generation option
-4. generate schema via `createSchemaTransformerV2`
+4. generate schema via a `SchemaGenerator` instance
 5. merge non-generation options into resulting schema object
 6. emit literal as:
    - `<schemaAst> as const satisfies __cfHelpers.JSONSchema`

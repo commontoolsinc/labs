@@ -314,8 +314,10 @@ export function resolveLink(
           const remainingPath = link.path.slice(lastValid.length);
           let { schema, ...restLink } = nextHop.link;
           if (schema !== undefined && remainingPath.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, remainingPath);
+            schema = ContextualFlowControl.getSchemaAtPath(
+              schema,
+              remainingPath,
+            );
           }
           nextHop = {
             ...nextHop,

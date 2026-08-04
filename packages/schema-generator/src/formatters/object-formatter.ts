@@ -20,6 +20,7 @@ import {
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { attachUiContract, getUiContractHint } from "../ui-contract.ts";
 import {
   attachDocTags,
   extractDocFromSymbolAndDecls,
@@ -411,52 +412,4 @@ export class ObjectFormatter implements TypeFormatter {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }
-}
-
-function getUiContractHint(
-  context: GenerationContext,
-  typeNode: ts.TypeNode | undefined = context.typeNode,
-): {
-  helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-  action?: string;
-  surface?: string;
-  role?: string;
-  kind?: string;
-  trustedPattern?: string;
-  requiredEventIntegrity?: string[];
-} | undefined {
-  if (!context.schemaHints || !typeNode) {
-    return undefined;
-  }
-
-  return context.schemaHints.get(typeNode)?.cfcUiContract ??
-    context.schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
-}
-
-function attachUiContract(
-  schema: MutableJSONSchema,
-  uiContract: {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-    trustedPattern?: string;
-    requiredEventIntegrity?: string[];
-  },
-): MutableJSONSchema {
-  if (typeof schema === "boolean") {
-    return schema === false ? { not: true, ifc: { uiContract } } : {
-      ifc: { uiContract },
-    };
-  }
-
-  const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
-  return {
-    ...schema,
-    ifc: {
-      ...existingIfc,
-      uiContract,
-    },
-  };
 }

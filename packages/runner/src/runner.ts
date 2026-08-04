@@ -10,6 +10,7 @@ import {
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
 import type { EntityKind } from "./entity-kind.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -293,7 +294,7 @@ const recordOutputSchemaPolicyInputs = (
     );
     const schema = schemaPath.length === 0
       ? resultSchema
-      : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+      : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
     if (schema === undefined) {
       return;
     }
@@ -568,7 +569,7 @@ const recordSetupProjectionPolicyInputs = (
 
   const schema = schemaPath.length === 0
     ? resultSchema
-    : runtime.cfc.getSchemaAtPath(resultSchema, [...schemaPath]);
+    : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
   if (schema === undefined) {
     return;
   }
@@ -1639,7 +1640,6 @@ export class Runner {
     // that actual execution value here, then restore its association with
     // `Cell<R>`.
     let result = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       pattern.result,
       argumentCellLink,
       resultCell,
@@ -3720,7 +3720,6 @@ export class Runner {
         try {
           inputs = findAllWriteRedirectCells(
             unwrapOneLevelAndBindToDoc(
-              this.runtime.cfc,
               node.inputs,
               argumentMetaLink,
               resultCell,
@@ -3730,7 +3729,6 @@ export class Runner {
           );
           outputs = findAllWriteRedirectCells(
             unwrapOneLevelAndBindToDoc(
-              this.runtime.cfc,
               node.outputs,
               argumentMetaLink,
               resultCell,
@@ -3949,7 +3947,6 @@ export class Runner {
       let spotLink: NormalizedFullLink | undefined;
       try {
         const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
-          this.runtime.cfc,
           node.outputs,
           argumentLink,
           resultCell,
@@ -4292,14 +4289,12 @@ export class Runner {
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6245,14 +6240,12 @@ export class Runner {
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6527,14 +6520,12 @@ export class Runner {
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6565,14 +6556,12 @@ export class Runner {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
     const inputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
@@ -6597,7 +6586,6 @@ export class Runner {
     // lives — at a DIFFERENT entity from the identity bind's only when the
     // descriptor carries a kind. See the identity bind for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
-      this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       resultCell,
@@ -6658,7 +6646,6 @@ export class Runner {
       // must use the id the VALUE bind minted: where the descriptor was
       // computed, reading the `of:` one returns undefined for a healthy piece.
       const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-        this.runtime.cfc,
         outputBindings,
         argumentCellLink,
         resultCell,

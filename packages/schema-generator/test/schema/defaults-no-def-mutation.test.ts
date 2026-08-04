@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Default<T,V> does not mutate shared definitions", () => {
@@ -14,7 +14,7 @@ describe("Schema: Default<T,V> does not mutate shared definitions", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const s = asObjectSchema(gen.generateSchema(type, checker));
 
     const a = s.properties?.a as any;

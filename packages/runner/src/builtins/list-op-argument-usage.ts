@@ -1,5 +1,5 @@
 import type { Pattern } from "../builder/types.ts";
-import type { ContextualFlowControl } from "../cfc.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 
 export type ListOpArgumentUsage = {
   usesElement: boolean;
@@ -11,15 +11,15 @@ export type ListOpArgumentUsage = {
 const usageCache = new WeakMap<object, ListOpArgumentUsage>();
 
 function hasArgumentSchema(
-  cfc: ContextualFlowControl,
   pattern: Pattern,
   path: readonly string[],
 ): boolean {
-  return cfc.getSchemaAtPath(pattern.argumentSchema, [...path]) !== undefined;
+  return ContextualFlowControl.getSchemaAtPath(pattern.argumentSchema, [
+    ...path,
+  ]) !== undefined;
 }
 
 export function inferListOpArgumentUsage(
-  cfc: ContextualFlowControl,
   pattern: Pattern,
 ): ListOpArgumentUsage {
   const cached = usageCache.get(pattern as object);
@@ -37,10 +37,10 @@ export function inferListOpArgumentUsage(
   }
 
   const usage = {
-    usesElement: hasArgumentSchema(cfc, pattern, ["element"]),
-    usesIndex: hasArgumentSchema(cfc, pattern, ["index"]),
-    usesArray: hasArgumentSchema(cfc, pattern, ["array"]),
-    usesParams: hasArgumentSchema(cfc, pattern, ["params"]),
+    usesElement: hasArgumentSchema(pattern, ["element"]),
+    usesIndex: hasArgumentSchema(pattern, ["index"]),
+    usesArray: hasArgumentSchema(pattern, ["array"]),
+    usesParams: hasArgumentSchema(pattern, ["params"]),
   } satisfies ListOpArgumentUsage;
 
   usageCache.set(pattern as object, usage);
