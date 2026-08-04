@@ -1424,7 +1424,23 @@ Behavior:
 3. extract `widenLiterals` generation option
 4. generate schema via a `SchemaGenerator` instance
 5. merge non-generation options into resulting schema object
-6. emit literal as:
+6. **verb event closure**: when the `toSchema` call is the FIRST argument of
+   a handler-family call — callee `__cfHelpers.handler`, or a call whose
+   detected kind is builder `handler` — the merged schema's root is closed
+   with `closeVerbEventRoot` (`@commonfabric/schema-generator`,
+   `src/event-closure.ts`): an object root (direct, or a `$ref` whose def in
+   the literal's own `$defs` is an object) gains
+   `additionalProperties: false`, stamped beside a `$ref` rather than into
+   the def. Roots that already declare `additionalProperties` (index
+   signatures — the author's organic opt-out), non-object roots (unions,
+   primitives, `never`), and booleans are untouched. Membership is the
+   provenance: only transformer-injected `toSchema` calls sit in that
+   argument position, so a hand-authored schema literal passed to `handler`
+   directly is never stamped. This is the schema C5's dispatch gate reads
+   (`module.argumentSchema.properties.$event`); the pattern-level `Stream`
+   property schema closes identically inside the schema-generator package
+   (mapping spec §6.5)
+7. emit literal as:
    - `<schemaAst> as const satisfies __cfHelpers.JSONSchema`
 
 Special path:

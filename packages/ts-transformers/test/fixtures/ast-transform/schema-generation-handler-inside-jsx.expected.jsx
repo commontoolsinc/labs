@@ -37,7 +37,8 @@ export const result = (<div>
                 type: "number"
             }
         },
-        required: ["x", "y"]
+        required: ["x", "y"],
+        additionalProperties: false
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {

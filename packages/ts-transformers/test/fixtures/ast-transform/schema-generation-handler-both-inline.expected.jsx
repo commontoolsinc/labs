@@ -29,7 +29,8 @@ export const incrementer = handler({
             type: "number"
         }
     },
-    required: ["amount"]
+    required: ["amount"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

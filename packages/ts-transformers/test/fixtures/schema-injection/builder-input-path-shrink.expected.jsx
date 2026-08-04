@@ -64,7 +64,8 @@ const handlerExplicit = handler({
             required: ["message"]
         }
     },
-    required: ["detail"]
+    required: ["detail"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

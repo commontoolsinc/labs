@@ -109,7 +109,7 @@ interface SchemaRoot {
     expect(JSON.stringify(schema)).not.toContain("TopicRef");
   });
 
-  it("leaves the event schema open — closed-world emission is blocked on the update gate (C5)", async () => {
+  it("closes the event schema root — closed-world emission (C5, unblocked by #5302)", async () => {
     const schema = await schemaFor(`
 interface SchemaRoot {
   verb: Stream<{ title: string }>;
@@ -120,22 +120,57 @@ interface SchemaRoot {
       (asObjectSchema(schema).properties as Record<string, unknown>).verb,
     );
 
-    // The verb contract's design rule 1 wants EVENT schemas closed-world
-    // (`additionalProperties: false` — an undeclared field is a rejection,
-    // never ignored). Emitting it is currently BLOCKED: the pattern-update
-    // gate judges a stream property under its enclosing role, and for a verb
-    // arriving through a piece's ARGUMENT schema the argument-role
-    // additionalProperties rule refuses the open→closed direction against
-    // every recorded baseline ("additional properties accepted previously
-    // would now be rejected" — measured on calendar/calendar.tsx,
-    // lunch-poll/poll-option-card.tsx, notes/note.tsx). Landing the emission
-    // needs that migration step first; the sequencing finding is recorded in
-    // docs/history/plans/pattern-verb-contract-implementation.md (WS-C and
-    // Risks).
-    // Until then this pin makes the open event side an explicit decision, not
-    // an omission — dispatch-side enforcement (runner, C5) already honors a
-    // schema that declares the closure by hand.
-    expect(Object.hasOwn(verb, "additionalProperties")).toBe(false);
+    // The verb contract's design rule 1: EVENT schemas are closed-world —
+    // an undeclared field is a typed rejection at dispatch, never silently
+    // stripped. Emission was blocked until the update gate grew the
+    // verb-event-role rule (#5302): a boolean additionalProperties
+    // transition below a stream marker is free in both directions, so the
+    // open→closed migration no longer trips the argument-role refusal.
+    // The stamp is position-scoped (a $ref root gains the keyword beside
+    // the reference; shared defs stay open at data-position use sites) and
+    // guarded — author index signatures, unions, and never-derived shapes
+    // are untouched (see closeVerbEventRoot).
+    expect(verb.additionalProperties).toBe(false);
     expect(verb.type).toBe("object");
+  });
+
+  it("stamps the closure beside a $ref event, leaving the shared def open", async () => {
+    const schema = await schemaFor(`
+interface AddTopic {
+  title: string;
+}
+
+interface SchemaRoot {
+  verb: Stream<AddTopic>;
+  // The same type in a DATA position must stay open there.
+  draft: AddTopic;
+}
+`);
+    const root = asObjectSchema(schema);
+    const properties = root.properties as Record<string, unknown>;
+    const verb = asObjectSchema(properties.verb);
+    expect(verb.$ref).toBe("#/$defs/AddTopic");
+    expect(verb.additionalProperties).toBe(false);
+    // Position-scoped: the def itself and the data-position reference are
+    // untouched.
+    const defs = root.$defs as Record<string, unknown>;
+    expect(Object.hasOwn(asObjectSchema(defs.AddTopic), "additionalProperties"))
+      .toBe(false);
+    expect(
+      Object.hasOwn(asObjectSchema(properties.draft), "additionalProperties"),
+    )
+      .toBe(false);
+  });
+
+  it("leaves an index-signature event open — the author's organic opt-out", async () => {
+    const schema = await schemaFor(`
+interface SchemaRoot {
+  verb: Stream<{ title: string; [key: string]: unknown }>;
+}
+`);
+    const verb = asObjectSchema(
+      (asObjectSchema(schema).properties as Record<string, unknown>).verb,
+    );
+    expect(verb.additionalProperties).not.toBe(false);
   });
 });

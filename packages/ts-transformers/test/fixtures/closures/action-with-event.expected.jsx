@@ -24,7 +24,8 @@ const __cfHandler_1 = __cfHelpers.handler({
             type: "string"
         }
     },
-    required: ["data"]
+    required: ["data"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -60,7 +61,8 @@ export default pattern((__cf_pattern_input) => {
     properties: {
         update: {
             $ref: "#/$defs/MyEvent",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            additionalProperties: false
         }
     },
     required: ["update"],

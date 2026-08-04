@@ -1,0 +1,103 @@
+{
+  "argumentSchema": {
+    "asCell": [
+      "opaque"
+    ]
+  },
+  "pattern": "system/default-app.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AnonymousType_3": {
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        },
+        "type": "array"
+      },
+      "MentionablePiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_3"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isMentionable": {
+            "type": "boolean"
+          },
+          "mentionable": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AnonymousType_3"
+              },
+              {
+                "properties": {},
+                "type": "object"
+              }
+            ]
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_3"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "additionalProperties": {
+      "type": "unknown"
+    },
+    "properties": {
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addPiece": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "piece": {
+            "$ref": "#/$defs/MentionablePiece"
+          }
+        },
+        "required": [
+          "piece"
+        ],
+        "type": "object"
+      },
+      "backlinksIndex": {
+        "properties": {
+          "mentionable": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/AnonymousType_3"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mentionable"
+        ],
+        "type": "object"
+      },
+      "pieceRegistry": {
+        "$ref": "#/$defs/AnonymousType_3"
+      },
+      "sidebarUI": {
+        "type": "unknown"
+      }
+    },
+    "required": [
+      "backlinksIndex",
+      "pieceRegistry",
+      "addPiece",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

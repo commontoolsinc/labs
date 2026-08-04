@@ -108,7 +108,8 @@ const MyHandler = handler({
             type: "object",
             properties: {}
         }
-    }
+    },
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -219,7 +220,8 @@ const MyHandler2 = handler({
             type: "object",
             properties: {}
         }
-    }
+    },
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

@@ -34,7 +34,8 @@ const castVote = handler({
             "enum": ["single", "double"]
         }
     },
-    required: ["id", "step"]
+    required: ["id", "step"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -109,6 +110,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     $ref: "#/$defs/VoteEvent",
     asCell: ["stream"],
+    additionalProperties: false,
     $defs: {
         VoteEvent: {
             type: "object",
@@ -138,7 +140,8 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
         },
         boundCastVote: {
             $ref: "#/$defs/VoteEvent",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            additionalProperties: false
         }
     },
     required: ["item", "boundCastVote"],
@@ -208,7 +211,8 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                 },
                 boundCastVote: {
                     $ref: "#/$defs/VoteEvent",
-                    asCell: ["stream"]
+                    asCell: ["stream"],
+                    additionalProperties: false
                 }
             },
             required: ["state", "boundCastVote"]

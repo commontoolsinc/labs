@@ -183,8 +183,9 @@ holds one that moves.
 anything reactive gets none, which is what item 1 decides.
 
 **9. Closed-world event schemas and listing marks.** #5307 and #5309, from the
-verb contract arc. Both unblocked; both wanted a courtesy review rather than a
-gate.
+verb contract arc. #5309 is unblocked and wants a courtesy review rather than a
+gate. #5307's emission is written and its update gate is clear; item 11 is the
+question it now waits behind.
 
 **10. Listing rows carry a handler's declared result.** *(S)* `cf piece verbs`
 already reports an `outputSchema` per row, and the type says why it is empty for
@@ -199,6 +200,38 @@ The two share the words and nothing else, which is why the listing work and the
 declared-result work read as coupled when they are independent. Only this item
 joins them.
 
+**11. A DOM event is a caller too.** *(M)* The dispatch gate reads the
+transformer-injected `$event` schema, and that is the schema a browser event
+arrives against: the renderer serializes a DOM event into the payload and sends
+it to the stream. Closing that root judges the whole envelope, and the envelope
+is nothing a pattern's event type describes — `type`, `provenance`, the
+allowlisted key/modifier/button properties, a `MouseEvent.detail` that is a
+click count rather than a `CustomEvent`'s payload, and a `target.value` whose
+type is the element's, not the author's. An open root lets the schema-shaped read
+deliver the declared subset and ignore the rest; a closed one makes each of those
+a rejection.
+
+The runtime already has the mechanism for exactly this: `runtimeInjectedEventKeys`
+(`packages/runner/src/cell.ts`), mint-gated by `markRuntimeInjectedEventKeys`, is
+how the LLM tool-call path hides its injected `result` from the gate. Only that
+one path mints today. The choices are to mint the renderer envelope the same way
+— which strips an undeclared envelope key and leaves a declared one to be judged,
+so it also wants the serializer to stop carrying a non-`CustomEvent` `detail` —
+or to close only the pattern-level `Stream` property schema that `cf piece verbs`
+publishes and `piece call` validates, and leave the dispatch surface open. The
+first keeps design rule 1 whole; the second is smaller and gives up dispatch
+enforcement for DOM-wired verbs.
+
+Closure also turns on full payload validation, not just the undeclared-key check:
+against a closed root, a payload missing a required field or carrying one of the
+wrong type is a rejection too. That reaches a probe.
+`packages/patterns/integration/time-capability-full.test.ts` fires `.send({})` at
+every result stream to make handler-context clock reads run, and tolerates the
+throw from a key that is not a stream. A dispatch-time rejection is not that
+throw — it arrives after the call returns — so the probe would report success
+while covering nothing. Whichever answer item 11 takes, that probe needs to fail
+loudly on a rejected send.
+
 ## Ordering
 
 | Item | After | Why |
@@ -206,7 +239,10 @@ joins them.
 | 6 (stack) | — | the stack merges bottom-up: #5458 → #5470 → #5497 → #5500 → {#5504, #5505} |
 | 6 (#5459) | — | not in the stack; entity-URI intake stands alone and merges whenever |
 | 7 | — | independent of 6; must precede 4 |
-| 8, 9 | — | independent |
+| 8 | — | independent |
+| 9 (#5309) | — | independent |
+| 11 | — | independent; decides what closure means at dispatch |
+| 9 (#5307) | 11 | emission is written, but what it enforces is 11's answer |
 | 2 | 6 | changes what the flags accept |
 | 3 | 6 | completes the suppression property |
 | 4 | 7 | publishes an address, so the address must have stopped moving |
