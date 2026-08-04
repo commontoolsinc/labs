@@ -118,7 +118,7 @@ Deno.test("prod errors: an empty result set -> unknown, and non-finite counts ar
   assertEquals(none.status, "unknown");
   assertEquals(none.value, "—");
   assertEquals(none.sub, "no toolshed-production spans");
-  assertEquals(none.href, "https://signoz.example/logs"); // still drills through
+  assertEquals(none.href, "https://signoz.example/logs/logs-explorer"); // still drills through
 
   // A bucket whose count is not a number is no bucket at all.
   const junk = await withFetch(
@@ -177,11 +177,11 @@ Deno.test("prod errors: the drill link prefers SIGNOZ_UI_URL over an in-cluster 
     withFetch(() => ok([]), () => prodErrors.collect(ctx(env)));
 
   const ui = await collect({ ...ENV, SIGNOZ_UI_URL: "https://ui.example/" });
-  assertEquals(ui.href, "https://ui.example/logs"); // trailing slash trimmed
+  assertEquals(ui.href, "https://ui.example/logs/logs-explorer"); // trailing slash trimmed
   assertEquals(ui.hint, "logs ↗");
 
   // No UI url, but the query url is public https -> the browser can use it too.
-  assertEquals((await collect(ENV)).href, "https://signoz.example/logs");
+  assertEquals((await collect(ENV)).href, "https://signoz.example/logs/logs-explorer");
 
   // An in-cluster url the browser can't reach, and no UI url -> no link at all.
   const inCluster = await collect({ SIGNOZ_URL: "http://signoz.svc:8080", SIGNOZ_API_KEY: "k" });
