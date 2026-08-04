@@ -183,20 +183,30 @@ function replaceInElements(
   seen: Map<object, unknown>,
   onCopy: OnCopy,
 ): readonly unknown[] {
-  let result: unknown[] | undefined;
+  // Read each element ONCE, and build any copy from what was read -- the
+  // array counterpart of the entries `replaceInEntries` materializes, for the
+  // same reason. Copying by re-reading (`slice()`, or an index-by-index pass
+  // over the original) runs an accessor-backed element a second time and
+  // keeps THAT answer, storing a value the array never held at any single
+  // moment and which the walk never inspected.
+  //
+  // So the result is built as it goes rather than cloned at the first change:
+  // every element is written here, changed or not, and the original is
+  // answered by identity unless something actually moved.
+  const replaced: unknown[] = [];
+  replaced.length = value.length;
+  let changed = false;
   for (let i = 0; i < value.length; i++) {
     // A hole holds nothing to flatten, and reading one would report the
-    // element as `undefined` and fill it in on the copy.
+    // element as `undefined` and fill it in on the copy. Skipped, so it stays
+    // a hole here too.
     if (!(i in value)) continue;
-    // Read ONCE. `slice()` would re-read every element, running an
-    // accessor-backed one a second time and keeping that second answer.
     const element = value[i];
     const flattened = replace(element, seen, onCopy);
-    if (flattened === element) continue;
-    result ??= copyPreservingHoles(value);
-    result[i] = flattened;
+    replaced[i] = flattened;
+    if (flattened !== element) changed = true;
   }
-  return result ?? value;
+  return changed ? replaced : value;
 }
 
 function replaceInEntries(
@@ -218,19 +228,6 @@ function replaceInEntries(
     result[key] = flattened;
   }
   return result ?? value;
-}
-
-/**
- * Copies an array member by member, preserving holes and reading each present
- * element exactly once.
- */
-function copyPreservingHoles(value: readonly unknown[]): unknown[] {
-  const result: unknown[] = [];
-  result.length = value.length;
-  for (let i = 0; i < value.length; i++) {
-    if (i in value) result[i] = value[i];
-  }
-  return result;
 }
 
 /**
