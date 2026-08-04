@@ -1,3 +1,5 @@
+import { isPlainObject } from "@commonfabric/utils/types";
+
 /**
  * Marks an object whose replacement is under way -- an ancestor in the walk --
  * so a cycle is recognized instead of followed forever.
@@ -23,7 +25,7 @@ export type OnCopy = (copy: unknown, original: unknown) => void;
  * node's `inputs` -- so finding one takes a walk.
  *
  * `toJSON` is the data model's own duck-typed protocol, so what counts as an
- * artifact here is exactly what the conversion would otherwise have honoured:
+ * artifact here is exactly what the conversion would otherwise have honored:
  * any plain object with an own one, builder-made or not. Deliberately so --
  * moving WHERE serialization happens must not change WHAT is serialized.
  *
@@ -82,14 +84,14 @@ function replace(
   // An array is answered by the array rule whatever it carries, so an array
   // is only ever descended into.
   const isArray = Array.isArray(value);
-  if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) {
+  if (!isArray && !isPlainObject(value, false)) {
     // Anything else -- a `Cell`, a `FabricInstance`, a `Date` -- is the
     // conversion's to interpret, and carries no builder artifact.
     //
-    // Deliberately NOT `isPlainObject()`, which also admits a null-prototype
-    // object. Such an object is not a fabric record, so descending into one
-    // would be looking for artifacts somewhere the conversion is going to
-    // refuse regardless. The question here is narrower than that predicate's.
+    // A null-prototype object is excluded too, hence `false`: it is not a
+    // fabric record, so it is not the walk's to rewrite. Whether the
+    // conversion accepts one is the conversion's question, asked of the value
+    // as it stands.
     return value;
   }
 
