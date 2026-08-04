@@ -338,7 +338,7 @@ export function map(
     if (list === undefined) {
       probeScoped(() => resultWithLog.set([]));
       for (const entry of elementRuns.values()) {
-        runtime.runner.stop(entry.resultCell);
+        runtime.runner.releaseChild(entry.resultCell, undefined);
       }
       elementRuns.clear();
       return;
@@ -406,7 +406,7 @@ export function map(
         setResultCell(boundResultCell, parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(boundResultCell, parentCell.key("pattern"));
-        addCancel(() => runtime.runner.stop(resultCell));
+        addCancel(() => runtime.runner.releaseChild(resultCell, undefined));
         const entry = { resultCell, lastIndex: i };
         elementRuns.set(elementKey, entry);
         rollback.created(elementKey, entry);

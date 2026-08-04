@@ -90,6 +90,10 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
+import {
+  isConflictRejection,
+  isStorageTransactionInconsistent,
+} from "./storage/rejection.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
   machineryRead,
@@ -196,6 +200,9 @@ type StartAttempt = {
   readonly schedulePatternUpdate: boolean;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
+  // The result this attempt resolved to, which a link start only learns by
+  // following the link.
+  targetKey?: `${MemorySpace}/${CellScope}/${URI}`;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -1167,6 +1174,19 @@ export class Runner {
   // for the system-wide commit precondition.
   private locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
+  >();
+  // Results started in their own right rather than as part of an enclosing
+  // pattern, which is what navigating to a nested result does. An enclosing
+  // pattern releasing such a result leaves it running; only stopping it
+  // directly ends it.
+  private independentlyStartedResults = new Set<
+    `${MemorySpace}/${CellScope}/${URI}`
+  >();
+  // Commit-gated starts that have not installed a registration yet, indexed by
+  // result so an explicit stop can tombstone them before installation.
+  private pendingDeferredStarts = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    Set<DeferredCancelOwnership>
   >();
   // Map whose key is the result cell's full key, and whose values are a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
@@ -2159,13 +2179,47 @@ export class Runner {
     this.activeStartAttempts.add(attempt);
     this.trackStartAttempt(attempt, startKey);
     try {
-      return this.doStart(resultCell, new Set(), attempt).finally(() => {
-        this.finishStartAttempt(attempt);
-      });
+      return this.doStart(resultCell, new Set(), attempt)
+        .then((started) => {
+          // This start gives the result a lifetime of its own, so an enclosing
+          // pattern releasing it later leaves it running.
+          const target = attempt.targetKey;
+          if (started && target !== undefined && this.cancels.has(target)) {
+            this.independentlyStartedResults.add(target);
+          }
+          return started;
+        })
+        .finally(() => {
+          this.finishStartAttempt(attempt);
+        });
     } catch (error) {
       this.finishStartAttempt(attempt);
       return Promise.reject(error);
     }
+  }
+
+  /**
+   * Releases a child an enclosing pattern is done with. Stops only the exact
+   * registration this invocation installed — a later attempt that replaced it
+   * owns itself — and leaves a result that has a lifetime of its own running.
+   */
+  releaseChild<T>(
+    resultCell: Cell<T>,
+    installedCancel: Cancel | undefined,
+  ): void {
+    const key = this.getDocKey(resultCell);
+    if (installedCancel !== undefined) {
+      if (this.cancels.get(key) !== installedCancel) return;
+    } else if (!this.cancels.has(key)) return;
+    if (this.independentlyStartedResults.has(key)) return;
+    // A start still resolving may be about to give this result a lifetime of
+    // its own, and it cannot say so until it finishes. Declining here keeps a
+    // page that is still opening from being closed by its parent. An attempt
+    // that then fails leaves the result registered until the runtime stops it,
+    // which is the same bound the scheduler already accepts for a start that
+    // exhausts its retries.
+    if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
+    this.stop(resultCell);
   }
 
   /**
@@ -2773,6 +2827,7 @@ export class Runner {
       : resultCell;
 
     const key = this.getDocKey(rootCell);
+    attempt.targetKey = key;
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
 
@@ -2997,13 +3052,51 @@ export class Runner {
     resultCell: Cell<T>,
   ): DeferredCancelOwnership {
     const key = this.getDocKey(resultCell);
-    return useDeferredCancelOwnership((installedCancel) => {
+    const base = useDeferredCancelOwnership((installedCancel) => {
       // A result key can be stopped and restarted while deferred startup is
       // re-entering runner code. Only stop if this attempt's exact cancel
       // registration is still current; a later replacement owns itself.
       if (this.cancels.get(key) !== installedCancel) return;
       this.stop(resultCell);
     });
+    // Ownership of a commit-gated start begins when the start is scheduled,
+    // not when its callback installs it, so a stop before that commit has to
+    // reach the pending start and tombstone it. The entry goes as soon as the
+    // start settles either way: it installed a registration, which owns itself
+    // from then on, or it was cancelled.
+    const ownership: DeferredCancelOwnership = {
+      cancel: () => {
+        unregister();
+        base.cancel();
+      },
+      isCancelled: base.isCancelled,
+      markInstalled: (registration) => {
+        unregister();
+        return base.markInstalled(registration);
+      },
+    };
+    const unregister = () => {
+      const pending = this.pendingDeferredStarts.get(key);
+      if (pending === undefined) return;
+      pending.delete(ownership);
+      if (pending.size === 0) this.pendingDeferredStarts.delete(key);
+    };
+    let pending = this.pendingDeferredStarts.get(key);
+    if (pending === undefined) {
+      pending = new Set();
+      this.pendingDeferredStarts.set(key, pending);
+    }
+    pending.add(ownership);
+    return ownership;
+  }
+
+  private cancelPendingDeferredStarts(
+    key: `${MemorySpace}/${CellScope}/${URI}`,
+  ): void {
+    const pending = this.pendingDeferredStarts.get(key);
+    if (pending === undefined) return;
+    this.pendingDeferredStarts.delete(key);
+    for (const ownership of pending) ownership.cancel();
   }
 
   private startAfterSuccessfulCommit<T = any>(
@@ -3258,6 +3351,24 @@ export class Runner {
           this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
         }
       }
+    }
+
+    // The setup writes are staged in this transaction; the registration is
+    // not, so a transaction that does not become durable would otherwise leave
+    // a piece running over writes that never landed. A stale basis is the
+    // exception: the re-run that follows reuses what is already there.
+    if (installedCancel !== undefined) {
+      const startedCancel = installedCancel;
+      tx.addCommitCallback((_settledTx, result) => {
+        if (!result.error) return;
+        if (
+          isConflictRejection(result.error) ||
+          isStorageTransactionInconsistent(result.error)
+        ) {
+          return;
+        }
+        this.releaseChild(resultCell, startedCancel);
+      });
     }
 
     if (!providedTx) {
@@ -4055,6 +4166,8 @@ export class Runner {
    */
   stop<T>(resultCell: Cell<T>): void {
     const key = this.getDocKey(resultCell);
+    this.independentlyStartedResults.delete(key);
+    this.cancelPendingDeferredStarts(key);
     if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) {
       this.startGenerationByDoc.set(
         key,
@@ -4180,6 +4293,11 @@ export class Runner {
     this.lifecycleEpoch++;
     this.resumeSnapshotsBySpace.clear();
     this.resumeSnapshotLoads.clear();
+    this.independentlyStartedResults.clear();
+    for (const key of [...this.pendingDeferredStarts.keys()]) {
+      this.cancelPendingDeferredStarts(key);
+    }
+    this.pendingDeferredStarts.clear();
     // Cancel all tracked operations
     for (const cancel of this.allCancels) {
       try {
@@ -5384,7 +5502,7 @@ export class Runner {
         undefined,
         resultCell,
       );
-      addCancel(() => this.stop(resultCell));
+      addCancel(() => this.releaseChild(resultCell, undefined));
 
       tx.addCommitCallback((_committedTx, result) => {
         if (!result.error) return;
@@ -6760,11 +6878,17 @@ export class Runner {
         parentResultCell.space,
       );
     }
-    this.run(tx, patternImpl, inputs, childResultCell, {
-      awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
-        schedulerRehydration,
-      ),
-    });
+    const childRun = this.runWithStartOwnership(
+      tx,
+      patternImpl,
+      inputs,
+      childResultCell,
+      {
+        awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
+          schedulerRehydration,
+        ),
+      },
+    );
 
     if (sendToBindings) {
       sendValueToBinding(
@@ -6777,10 +6901,9 @@ export class Runner {
       );
     }
 
-    // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
-    // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
-    // this as TODO.
-    addCancel(() => this.stop(childResultCell));
+    addCancel(() =>
+      this.releaseChild(childResultCell, childRun.installedCancel)
+    );
   }
 }
 
