@@ -814,13 +814,13 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       const { moduleToEncodableForm } = await import(
         "../src/builder/json-utils.ts"
       );
-      const json = moduleToEncodableForm(
+      const encodable = moduleToEncodableForm(
         dynModule as unknown as Module,
       ) as Record<
         string,
         unknown
       >;
-      expect(json.$implRef).toBeUndefined();
+      expect(encodable.$implRef).toBeUndefined();
     });
   });
 

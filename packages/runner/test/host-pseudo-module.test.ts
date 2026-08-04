@@ -59,20 +59,21 @@ describe("host-trusted values ride a pseudo-module", () => {
     const module = hostModule((value) => (value as number) + base);
     runtime.unsafeTrustModule(module, { reason: "host pseudo-module test" });
 
-    const json = (module as Module & toEncodableForm).toEncodableForm() as {
-      $implRef?: { identity: string; symbol: string };
-      implementation?: unknown;
-      implementationRef?: string;
-    };
-    expect(json.$implRef).toBeDefined();
-    expect(json.$implRef!.identity).toMatch(/^host:/);
-    expect("implementation" in json).toBe(false);
+    const encodable = (module as Module & toEncodableForm)
+      .toEncodableForm() as {
+        $implRef?: { identity: string; symbol: string };
+        implementation?: unknown;
+        implementationRef?: string;
+      };
+    expect(encodable.$implRef).toBeDefined();
+    expect(encodable.$implRef!.identity).toMatch(/^host:/);
+    expect("implementation" in encodable).toBe(false);
 
     // ...and the ref resolves to the LIVE function through the engine's
     // strong implementation index — the same arm every verified module uses.
     const resolved = runtime.harness.getVerifiedImplementation?.(
-      json.$implRef!.identity,
-      json.$implRef!.symbol,
+      encodable.$implRef!.identity,
+      encodable.$implRef!.symbol,
     );
     expect(typeof resolved).toBe("function");
     expect((resolved as (v: unknown) => number)(1)).toBe(42);
@@ -132,15 +133,15 @@ describe("host-trusted values ride a pseudo-module", () => {
       // serialization must keep the stringified body and emit no host
       // $implRef.
       const frame = pushFrame({ runtime } as never);
-      let json: { $implRef?: unknown; implementation?: unknown };
+      let encodable: { $implRef?: unknown; implementation?: unknown };
       try {
-        json = (module as Module & toEncodableForm)
-          .toEncodableForm() as typeof json;
+        encodable = (module as Module & toEncodableForm)
+          .toEncodableForm() as typeof encodable;
       } finally {
         popFrame(frame);
       }
-      expect(json.$implRef).toBeUndefined();
-      expect(typeof json.implementation).toBe("string");
+      expect(encodable.$implRef).toBeUndefined();
+      expect(typeof encodable.implementation).toBe("string");
     } finally {
       await other.dispose();
       await otherStorage.close();
