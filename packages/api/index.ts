@@ -1712,7 +1712,7 @@ export type toJSON = {
  * without being stringified on the way.
  *
  * Always a RECORD. An artifact's encodable form is built by
- * `moduleToEncodableForm` or `patternToJSON`, and both answer a record by
+ * `moduleToEncodableForm` or `patternToEncodableForm`, and both answer a record by
  * construction -- there is no artifact whose serialized form is a primitive,
  * an array, or `null`.
  *

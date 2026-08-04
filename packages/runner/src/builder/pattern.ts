@@ -45,7 +45,7 @@ import {
 import {
   type CellAliasResolver,
   moduleToEncodableForm,
-  patternToJSON,
+  patternToEncodableForm,
   withAliasBindings,
 } from "./json-utils.ts";
 import { toJSONMethod } from "./json-member.ts";
@@ -582,9 +582,9 @@ function factoryFromPattern<T, R>(
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
     // pattern afterwards (see factory.ts:exportsCallback)
-    toEncodableForm: () => patternToJSON(patternFactory),
+    toEncodableForm: () => patternToEncodableForm(patternFactory),
     // What `JSON.stringify(SomePattern)` answers, which pattern source uses.
-    toJSON: () => patternToJSON(patternFactory),
+    toJSON: () => patternToEncodableForm(patternFactory),
   };
 
   const makePatternFactory = (
@@ -627,8 +627,8 @@ function factoryFromPattern<T, R>(
       {
         ...pattern,
         ...(defaultScope !== undefined ? { defaultScope } : {}),
-        toEncodableForm: () => patternToJSON(factory),
-        toJSON: () => patternToJSON(factory),
+        toEncodableForm: () => patternToEncodableForm(factory),
+        toJSON: () => patternToEncodableForm(factory),
       } as Pattern & toEncodableForm & toJSON,
     ) as PatternFactory<T, R>;
 

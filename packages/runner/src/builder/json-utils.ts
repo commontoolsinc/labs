@@ -541,7 +541,7 @@ let internalGraphSerialization = false;
  * `$opFallback` graphs descend from) and debug tooling.
  *
  * Asks the pattern for its own encodable form rather than calling
- * `patternToJSON` directly: a factory's closure deliberately serializes the
+ * `patternToEncodableForm` directly: a factory's closure deliberately serializes the
  * ROOT factory (which carries `.program`, set after construction — see
  * builder/pattern.ts), so the indirection is load-bearing.
  */
@@ -553,13 +553,13 @@ export function serializePatternGraph(
   try {
     return (hasEncodableForm(pattern)
       ? encodableFormOf(pattern)
-      : patternToJSON(pattern)) as Record<string, unknown>;
+      : patternToEncodableForm(pattern)) as Record<string, unknown>;
   } finally {
     internalGraphSerialization = previous;
   }
 }
 
-export function patternToJSON(pattern: Pattern) {
+export function patternToEncodableForm(pattern: Pattern) {
   // Serialize only the STABLE program identity ({main, mainExport}), never the
   // authored `files`. The `files` array serializes non-canonically (two
   // encodings -> two content ids), so embedding it dragged a session-varying
