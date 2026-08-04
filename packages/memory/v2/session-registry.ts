@@ -1,9 +1,4 @@
-import type {
-  SessionDescriptor,
-  SessionEffectMessage,
-  SessionToken,
-  WatchSpec,
-} from "../v2.ts";
+import type { SessionDescriptor, SessionToken, WatchSpec } from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -20,12 +15,6 @@ export type SessionState = {
   trackedIds: Set<string>;
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
-  /** A computed sync effect whose delivery failed (the send threw, or the
-   * connection died between evaluation and send). Evaluation already
-   * advanced the session cache and watermarks past its content, so it
-   * cannot be recomputed from dirty state — it is retained verbatim and
-   * merged into the session's next sync (CT-1927 review, round 5). */
-  unsentEffect: SessionEffectMessage | null;
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
@@ -118,7 +107,6 @@ export class SessionRegistry {
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
-      unsentEffect: existing?.unsentEffect ?? null,
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,

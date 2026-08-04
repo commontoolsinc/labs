@@ -478,10 +478,10 @@ Deno.test("memory v2 server: a durable write is visible to a concurrent flush wh
   assertEquals(secondMessages.length, 0);
 });
 
-Deno.test("memory v2 server: a failed send retains the computed sync for the session's next flush", async () => {
+Deno.test("memory v2 server: a failed send rolls back delivery state; the next flush recomputes and delivers", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-retained-send",
+    store: "memory://verdict-catchup-send-rollback",
   });
   const { server, space, committer, committerMessages, committerSessionId } =
     context;
@@ -506,11 +506,13 @@ Deno.test("memory v2 server: a failed send retains the computed sync for the ses
     2,
   );
 
-  // The send boundary is the commit point for sync state: watch evaluation
-  // advances the session cache and consumes the pending marker BEFORE the
-  // effect reaches the wire, so a throwing send must retain the computed
-  // effect — a plain dirty-batch requeue could not reconstruct it (the
-  // advanced cache elides everything as sameSnapshot on recomputation).
+  // Evaluation advances the session cache and consumes the marker BEFORE
+  // the effect reaches the wire. A throwing send must ROLL that state back
+  // — forget the frame's docs from the cache, re-stage the marker,
+  // re-dirty the ids — so the next pass recomputes the same delivery from
+  // durable state. (No server-side buffering: a dying real socket loses
+  // "successfully sent" frames without throwing at all; reconnect
+  // hardening owns that case.)
   const originalPush = committerMessages.push.bind(committerMessages);
   let failNextEffect = true;
   committerMessages.push = ((message: ServerMessage) => {
@@ -520,15 +522,12 @@ Deno.test("memory v2 server: a failed send retains the computed sync for the ses
     }
     return originalPush(message);
   }) as typeof committerMessages.push;
-
-  // The flush survives the failed send (the effect is retained, not lost,
-  // and not treated as a fan-out failure that would requeue the batch).
   await server.flushSessions([space]);
   assertEquals(committerMessages.length, 0);
 
-  // The next flush delivers the RETAINED effect: the parked foreign write
-  // and the accept's marker — nothing about them is stranded or replayed
-  // from state the cache no longer reports as novel.
+  // Recomputation delivers the parked foreign write and the accept's
+  // marker — nothing the advanced cache would have elided as
+  // already-snapshotted.
   await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
@@ -538,12 +537,37 @@ Deno.test("memory v2 server: a failed send retains the computed sync for the ses
     [{ id: "of:doc:b", seq: 1 }],
   );
   assertEquals(committerMessages.length, 0);
+
+  // Guard edges: rolling back for a vanished session is a no-op (its cache
+  // died with it), and a lost frame's REMOVES re-dirty their ids — the
+  // cache entry is already gone, so re-dirtying is all a rollback can do
+  // for them (watch-shrink removes heal at full re-evaluation).
+  server.rollbackUndeliveredSync(space, "session:gone", {
+    type: "session/effect",
+    space,
+    sessionId: "session:gone",
+    effect: { type: "sync", fromSeq: 0, toSeq: 1, upserts: [], removes: [] },
+  });
+  server.rollbackUndeliveredSync(space, committerSessionId, {
+    type: "session/effect",
+    space,
+    sessionId: committerSessionId,
+    effect: {
+      type: "sync",
+      fromSeq: 1,
+      toSeq: 2,
+      upserts: [],
+      removes: [{ branch: "", id: "of:doc:zz", scope: "space" }],
+    },
+  });
+  await server.flushSessions([space]);
+  assertEquals(committerMessages.length, 0);
 });
 
-Deno.test("memory v2 server: a retained sync merges into the session's next computed sync", async () => {
+Deno.test("memory v2 server: a throwing evaluation restores the consumed marker obligation", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-retained-merge",
+    store: "memory://verdict-catchup-eval-rollback",
   });
   const { server, space, committer, committerMessages, committerSessionId } =
     context;
@@ -568,128 +592,42 @@ Deno.test("memory v2 server: a retained sync merges into the session's next comp
     2,
   );
 
-  const originalPush = committerMessages.push.bind(committerMessages);
-  let failNextEffect = true;
-  committerMessages.push = ((message: ServerMessage) => {
-    if (failNextEffect && message.type === "session/effect") {
-      failNextEffect = false;
-      throw new Error("synthetic send failure");
+  // Fail evaluation AFTER the marker was consumed into the frame
+  // (adoption attachment runs inside finishCatchUp, after the counters
+  // advance). The catch must roll the counters back or the marker is
+  // gone: a later successful pass would compute an empty sync, return
+  // null, and strand the client's parked promotion.
+  const serverInternals = server as unknown as {
+    attachAdoptionObservations: (...args: unknown[]) => Promise<void>;
+  };
+  const originalAttach = serverInternals.attachAdoptionObservations
+    .bind(server);
+  let failed = false;
+  serverInternals.attachAdoptionObservations = (...args) => {
+    if (!failed) {
+      failed = true;
+      return Promise.reject(new Error("synthetic evaluation failure"));
     }
-    return originalPush(message);
-  }) as typeof committerMessages.push;
-  await server.flushSessions([space]);
+    return originalAttach(...args);
+  };
+  let threw = false;
+  try {
+    await server.flushSessions([space]);
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
   assertEquals(committerMessages.length, 0);
 
-  // NEW novelty lands before the retry: the next sync COMPUTES a fresh
-  // frame, and the retained one must merge into it — per-doc latest-wins,
-  // bounds spanning both, the marker carried forward — rather than being
-  // dropped or delivered as a stale second frame.
-  await server.writeDocument(space, "of:doc:a", { from: "writer-2" });
+  // The requeued batch AND the restored obligation deliver together.
   await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(sync.caughtUpLocalSeq, 1);
   assertEquals(
-    sync.upserts
-      .map((upsert) => ({ id: upsert.id, seq: upsert.seq }))
-      .toSorted((left, right) => left.id < right.id ? -1 : 1),
-    [
-      { id: "of:doc:a", seq: 3 },
-      { id: "of:doc:b", seq: 1 },
-    ],
+    sync.upserts.map((upsert) => upsert.id),
+    ["of:doc:b"],
   );
-  assertEquals(sync.fromSeq, 0);
-  assertEquals(sync.toSeq, 3);
-  assertEquals(committerMessages.length, 0);
-});
-
-Deno.test("memory v2 server: retained-sync bookkeeping — remove/upsert cancellation, double retention, unknown sessions", async () => {
-  const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-retained-edges",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
-  void committer;
-
-  // Drain the fixture's parked doc:b so the final flush computes nothing
-  // and the merged retained frame is delivered as-is.
-  await server.flushSessions([space]);
-  assertEffect(shiftMessage(committerMessages));
-
-  // Retaining for a session the registry no longer knows is a no-op: its
-  // cache died with it, so nothing is stranded.
-  server.retainUnsentEffect(space, "session:gone", {
-    type: "session/effect",
-    space,
-    sessionId: "session:gone",
-    effect: { type: "sync", fromSeq: 0, toSeq: 1, upserts: [], removes: [] },
-  });
-
-  // Two retentions for one session merge: a doc REMOVED in the older frame
-  // and re-upserted in the newer keeps only the upsert (and the reverse
-  // cancellation for doc:c), the marker is the max, and the bounds span.
-  server.retainUnsentEffect(space, committerSessionId, {
-    type: "session/effect",
-    space,
-    sessionId: committerSessionId,
-    effect: {
-      type: "sync",
-      fromSeq: 0,
-      toSeq: 1,
-      caughtUpLocalSeq: 1,
-      upserts: [{
-        branch: "",
-        id: "of:doc:c",
-        scope: "space",
-        seq: 1,
-        doc: { value: { stale: true } },
-      }],
-      removes: [{ branch: "", id: "of:doc:b", scope: "space" }],
-    },
-  });
-  server.retainUnsentEffect(space, committerSessionId, {
-    type: "session/effect",
-    space,
-    sessionId: committerSessionId,
-    effect: {
-      type: "sync",
-      fromSeq: 1,
-      toSeq: 2,
-      caughtUpLocalSeq: 2,
-      upserts: [{
-        branch: "",
-        id: "of:doc:b",
-        scope: "space",
-        seq: 2,
-        doc: { value: { fresh: true } },
-      }],
-      removes: [{ branch: "", id: "of:doc:c", scope: "space" }],
-      observations: [
-        { observedAtSeq: 2 } as unknown as NonNullable<
-          SessionSync["observations"]
-        >[number],
-      ],
-    },
-  });
-
-  // The next flush computes nothing new; the merged retained frame is
-  // delivered as-is.
-  await server.flushSessions([space]);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  const sync = effect.effect as SessionSync;
-  assertEquals(sync.caughtUpLocalSeq, 2);
-  assertEquals(sync.fromSeq, 0);
-  assertEquals(
-    sync.upserts.map((upsert) => ({ id: upsert.id, seq: upsert.seq })),
-    [{ id: "of:doc:b", seq: 2 }],
-  );
-  assertEquals(
-    sync.removes.map((remove) => remove.id),
-    ["of:doc:c"],
-  );
-  // Observation rows ride the merge too.
-  assertEquals(sync.observations?.length, 1);
 });
 
 Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {

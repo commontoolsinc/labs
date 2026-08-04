@@ -2673,23 +2673,61 @@ Deno.test("memory v2 stacked commits: session replacement applies parked accepts
       "seed promotion at its marker",
     );
 
-    harness.model.setOutcome(2, { kind: "accept" });
-    const b = beginSet(harness, DOCS.B, valueFor("optimistic"));
-    await assertResultOk(b.promise);
+    // A NON-idempotent parked accept: the risk under replacement is
+    // precisely a still-standing append layer double-applying over the
+    // authoritative reinstall base.
+    await seedAccepted(harness, DOCS.B, { items: ["a"] });
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "B seed promotion at its marker",
+    );
+    harness.model.setOutcome(3, { kind: "accept" });
+    const patch = beginPatch(
+      harness,
+      DOCS.B,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await assertResultOk(patch);
     assertEquals(hasPendingOverlay(harness, DOCS.B), true);
 
     // A restore against the scripted server comes back NON-resumed: the
     // session is replaced and the marker epoch resets. The old session's
     // staged obligations are gone — no marker for the parked accept can
     // ever arrive — so replacement must apply it immediately, consuming
-    // the pending overlay before the reinstall sync could land on top of a
-    // still-standing non-idempotent layer.
+    // the pending overlay.
     await harness.sessionFactory.session!.restore();
     await waitForCondition(
       () => !hasPendingOverlay(harness, DOCS.B),
       "parked application at session replacement",
     );
-    expectVisible(harness, { B: valueFor("optimistic") });
+    expectVisible(harness, { B: { items: ["a", "X"] } });
+
+    // The authoritative reinstall sync then delivers the server's document
+    // — which already CONTAINS the append. With the overlay consumed at
+    // replacement, the append lands exactly once; a surviving overlay
+    // would replay it over the delivered base (["a","X","X"]).
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.B, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({
+      upserts: [{ id: DOCS.B, seq: 3, value: { items: ["a", "X"] } }],
+    });
+    await waitForCondition(
+      () => {
+        const value = visibleValue(harness.provider, DOCS.B) as {
+          items?: string[];
+        };
+        return Array.isArray(value?.items);
+      },
+      "reinstall frame to integrate",
+    );
+    expectVisible(harness, { B: { items: ["a", "X"] } });
   } finally {
     await harness.close();
   }
