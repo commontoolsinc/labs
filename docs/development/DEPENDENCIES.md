@@ -456,9 +456,12 @@ boundary:
 | Start and acknowledge screencast frames | `packages/integration/page.ts` | Raw page protocol bindings |
 | Capture a Deno inspector CPU profile | `packages/cli/support/profiling/inspector-protocol-client.ts` | Chrome DevTools Protocol over the inspector WebSocket |
 
-The pierce strategy retains the repository's existing selector semantics. It
-searches elements inside open shadow roots and excludes matching elements in
-the light DOM. Immediate `$` and `$$` calls perform one query. A
+The pierce strategy searches the whole page: everything a native query matches
+in the light DOM, plus every element inside an open shadow root at any depth. It
+walks in document order and searches an element's shadow tree as soon as it
+reaches that element. One traversal definition is serialized into each in-page
+resolver, so an immediate query and a wait for the same selector settle on the
+same elements. Immediate `$` and `$$` calls perform one query. A
 `waitForSelector` call observes DOM, selector state, and shadow-root changes in
 the page and resolves when a match appears. The event-driven wait has no
 elapsed-time deadline. Protocol shadow-root notifications cover roots attached
@@ -482,7 +485,8 @@ deno fmt --check
 deno lint
 ```
 
-The focused integration test covers native and shadow-root selection, dynamic
+The focused integration test covers native, light-DOM, and shadow-root
+selection, agreement between the immediate queries and the wait, dynamic
 element and selector-state changes, shadow roots attached after a wait starts,
 browser lifecycle compatibility, interaction callbacks, transformed element
 coordinates, and the default typing delay.
