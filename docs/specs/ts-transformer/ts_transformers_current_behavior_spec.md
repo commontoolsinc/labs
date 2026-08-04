@@ -88,6 +88,13 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
   is the sole owner of cross-transformer communication. It replaced the
   formerly-separate registry fields on `TransformationOptions`.
 
+A stage reaches that instance as `context.state`. `TransformationContext`
+resolves it once in its constructor — taking the caller's `options.state` when
+one is supplied and creating a fresh instance otherwise — and stores the result
+back into its own `options`, so a nested context built from those options joins
+the same run. Every registry a stage reads through `context.state` is therefore
+present; no stage handles a missing one.
+
 `CrossStageState` organizes its registries into three deliberate families
 (mirroring the TypeScript compiler's `NodeLinks` pattern):
 

@@ -85,10 +85,10 @@ function hasSharedReactiveCollectionProvenance(
     context.checker,
     {
       ...options,
-      typeRegistry: context.options.state?.typeRegistry,
+      typeRegistry: context.state.typeRegistry,
       logger: context.options.logger,
-      syntheticReactiveCollectionRegistry: context.options.state
-        ?.syntheticReactiveCollectionRegistry,
+      syntheticReactiveCollectionRegistry: context.state
+        .syntheticReactiveCollectionRegistry,
     },
   );
 }
@@ -127,7 +127,7 @@ export function shouldTransformArrayMethod(
   const targetType = getTypeAtLocationWithFallback(
     mapTarget,
     context.checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
     context.options.logger,
   );
   const receiverKind = classifyReactiveReceiverKind(

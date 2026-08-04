@@ -22,9 +22,8 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const schemaGenerator = new SchemaGenerator();
     const { sourceFile, tsContext: transformation, checker } = context;
-    const { logger, state } = context.options;
-    const typeRegistry = state?.typeRegistry;
-    const schemaHints = state?.schemaHints;
+    const { logger } = context.options;
+    const { typeRegistry, schemaHints } = context.state;
     const writerIdentityForSourceFile = (fileName: string) => {
       const moduleIdentities = context.options.moduleIdentities;
       const moduleIdentity = moduleIdentities?.get(fileName);
@@ -77,7 +76,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         // below and inside the schema-generator package. The uses don't collide
         // because they key on different node-kinds; no split needed.
         let type: ts.Type;
-        if (typeRegistry && typeRegistry.has(node)) {
+        if (typeRegistry.has(node)) {
           type = typeRegistry.get(node)!;
         } else {
           // Use fallback to handle synthetic TypeNodes that may be in the registry
@@ -150,14 +149,12 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         let finalSchema: unknown = typeof schema === "boolean"
           ? schema
           : { ...(schema as Record<string, unknown>), ...optionsObj };
-        if (schemaHints) {
-          finalSchema = attachUiContractFromSchemaHints(
-            finalSchema,
-            node,
-            schemaTypeArg,
-            schemaHints,
-          );
-        }
+        finalSchema = attachUiContractFromSchemaHints(
+          finalSchema,
+          node,
+          schemaTypeArg,
+          schemaHints,
+        );
         if (writeAuthorizedByIdentity && typeof finalSchema !== "boolean") {
           finalSchema = attachWriteAuthorizedByMarker(
             finalSchema as Record<string, unknown>,
@@ -241,7 +238,7 @@ function resolvePolicyOfMarkers(
         : undefined);
     let manifests = sourceEntry === undefined
       ? undefined
-      : context.options.state?.getPolicyManifests().get(sourceEntry[0]);
+      : context.state.getPolicyManifests().get(sourceEntry[0]);
     if (sourceEntry !== undefined && manifests === undefined) {
       const definingSource = context.program.getSourceFile(sourceEntry[0]);
       if (definingSource !== undefined) {
@@ -250,7 +247,7 @@ function resolvePolicyOfMarkers(
             definingSource,
             sourceEntry[1],
           );
-          context.options.state?.recordPolicyManifests(
+          context.state.recordPolicyManifests(
             sourceEntry[0],
             manifests,
           );
