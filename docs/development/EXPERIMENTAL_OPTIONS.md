@@ -1088,7 +1088,8 @@ sweep does not mistake them for missing experimental flags:
   (forward the web worker's console to the main thread), `telemetryEnabled`
   (browser OpenTelemetry), `showDebuggerView`, `themePreference`.
 - **Runner diagnostics** (environment): `CF_TRAVERSE_CAPTURE`,
-  `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`.
+  `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`. What each one does is in
+  [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
 - **Operational and build toggles**: `MEMORY_ACL_MODE` (`off` / `observe` /
