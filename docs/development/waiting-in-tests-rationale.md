@@ -186,6 +186,29 @@ the test: the hold proves the recovery waits for the absence confirmation
 before writing, and it ends before any retry can accumulate against the
 withheld answer.
 
+## Sizing the auto-advance runaway ceiling
+
+Auto-advance turns a `src/` backoff into a hot loop whenever the condition it
+retries against cannot change — a withheld document, a commit that will be
+rejected the same way every round. Each round arms a fresh timer, the pump fires
+it on the next turn of the event loop, and the cycle allocates. Left to run it
+ends as a V8 out-of-memory abort, which names no test and leaves nothing to
+read.
+
+The ceiling therefore has to sit below the point where such a loop exhausts the
+heap, not at a round number far above it. Measured across the runner suite, the
+heaviest user of auto-advance, one test reaches 160 fires and every other one
+stays under a hundred, so a ceiling an order of magnitude above that separates a
+livelock from every healthy test while still tripping long before memory runs
+out. The error names the arming site that accounted for most of the fires, which
+is the frame worth having: in a stalled resume it is the storage layer's
+conflict repair or the memory server's refresh scheduler, and either one
+identifies the condition that cannot clear.
+
+A test that legitimately advances through many windows should say so with
+`clock.tick(ms)` rather than lean on the pump. One whose work logical time
+cannot pace at all belongs in `realClockFiles`.
+
 ## Why the runtime-client suite stays on the real clock
 
 `packages/runtime-client` keeps its unit tests on the real clock, and the

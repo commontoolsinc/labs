@@ -386,12 +386,18 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
 One file stays on the real clock, listed with its reason in the runner preload's
-`realClockFiles` list. It is a resume test whose reload holds each per-element
-child document back by a delay to open the resume window it observes; that delay
-is a frozen test-file timer, and the resuming runtime's pull/idle machinery
-blocks on the deliveries it gates, so the resume deadlocks. That is an honest
-exception: the clock it needs is the real one, and its own sleeps are the honest
-way to wait.
+`realClockFiles` list. It is a resume test that holds the per-element documents
+in its transport so the coordinator reconciles while they are absent, which is
+the state it exists to observe. A commit carrying a read of a withheld document
+is rejected as stale, and the catch-up the rejection waits on cannot arrive
+while the hold is on, so the retry cycle repeats until the test releases it.
+Real time paces that cycle; auto-advance fires each round's timer as soon as it
+is armed, and the loop allocates until the process runs out of heap. A hold that
+spans a reconcile therefore needs the real clock; a shorter one, that no retry
+outlives, does not. The test itself waits on transport edges, never on a delay.
+[The rationale
+document](waiting-in-tests-rationale.md#the-runner-clock-retired-exemptions-and-converted-waits)
+works that retry loop through in full.
 
 Other entries have been retired from that list as the deadlines and test
 designs behind them were fixed. [The rationale
@@ -405,6 +411,14 @@ positive-delay `setTimeout` written in test code freezes before and after the
 first `Runtime` exists. How the harness reads frames that lockdown's error
 taming would otherwise blank is in [the rationale
 document](waiting-in-tests-rationale.md#how-the-runner-clock-classifies-timers-across-ses-lockdown).
+
+When auto-advance runs away, the harness stops the test rather than letting the
+process die: past a fixed number of fires within one test it throws, naming the
+arming site that accounted for most of them. That is a runaway detector rather
+than a wait with a deadline — a healthy test never approaches the count, and
+what it reports is a livelock. Where the ceiling sits and why is in [the
+rationale
+document](waiting-in-tests-rationale.md#sizing-the-auto-advance-runaway-ceiling).
 
 One consequence is worth stating because it is easy to trip over. A test that
 guards a wait with its own wall-clock deadline — a `setTimeout(reject, ms)` — has
