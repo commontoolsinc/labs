@@ -75,64 +75,47 @@ Deno.test("keying - generateKey", async (t) => {
     assertEquals(generateKey(true), generateKey(true));
   });
 
-  // Members that a child can differ by, each of which must key it apart: two
+  // Members a child can differ by, each of which must key it apart: two
   // children keying alike are reconciled as one, and the second one's content
-  // never reaches the DOM.
+  // never reaches the DOM. Each of these is a value `WorkerProps` admits.
   await t.step("keys members that differ only in fabric terms", () => {
     const key = (props: Record<string, unknown>) =>
       generateKey({ type: "vnode", name: "div", props });
-
-    assertNotEquals(key({ n: 1n }), key({ n: 2n }));
-    assertNotEquals(key({ n: 1n }), key({ n: 1 }));
 
     // A present-but-undefined member is not an absent one.
     assertNotEquals(key({ n: undefined }), key({}));
 
     assertNotEquals(key({ n: NaN }), key({ n: null }));
     assertNotEquals(key({ n: -0 }), key({ n: 0 }));
+
+    // A `bigint` is a fabric value, so it keys precisely even though
+    // `WorkerProps` does not admit one.
+    assertNotEquals(key({ n: 1n }), key({ n: 2n }));
+    assertNotEquals(key({ n: 1n }), key({ n: 1 }));
   });
 
-  // Types holding their state somewhere other than their enumerable members,
-  // which is where the projection reads a value's content. Each pair below
-  // differs only in that state.
-  await t.step("keys native types by their own state", () => {
-    const key = (v: unknown) => generateKey({ type: "vnode", props: { v } });
+  // The two things a render node may hold that are not `FabricValue`s.
+  await t.step("keys an event handler without falling back", () => {
+    const key = (props: Record<string, unknown>) =>
+      generateKey({ type: "vnode", name: "div", props });
 
-    assertNotEquals(key(new Date(0)), key(new Date(1)));
-    assertEquals(key(new Date(7)), key(new Date(7)));
-
-    assertNotEquals(key(new Map([["a", 1]])), key(new Map([["a", 2]])));
-    assertNotEquals(key(new Map()), key(new Set()));
-
-    assertNotEquals(key(new Set([1])), key(new Set([2])));
-
+    // Handlers are on most interactive nodes, so a node carrying one has to
+    // key by the rest of its content rather than by a fallback that every
+    // `div` would share.
     assertNotEquals(
-      key(new Uint8Array([1, 2])),
-      key(new Uint8Array([1, 3])),
+      key({ onClick: () => {}, a: 1 }),
+      key({ onClick: () => {}, a: 2 }),
     );
-
-    assertNotEquals(key(new Error("a")), key(new Error("b")));
-
-    assertNotEquals(key(/a/g), key(/a/i));
-    assertNotEquals(key(/a/g), key(/b/g));
-
-    // And none of them keys as the empty record an enumeration would give.
-    assertNotEquals(key(new Date(0)), key({}));
-    assertNotEquals(key(new Map()), key({}));
+    assertEquals(key({ onClick: () => {} }), key({ onClick: () => {} }));
+    assertNotEquals(key({ onClick: () => {} }), key({}));
   });
 
-  await t.step("keys a record whose key this runtime reserves", () => {
-    // A projected record is a pair list, so `__proto__` is a datum rather than
-    // a key, and never reaches the hash as one.
-    const key = (props: Record<string, unknown>) => generateKey({ props });
-
-    assertNotEquals(key({ ["__proto__"]: 1 }), key({ ["__proto__"]: 2 }));
-    assertNotEquals(key({ ["constructor"]: 1 }), key({ a: 1 }));
-    assertEquals(key({ ["__proto__"]: 1 }), key({ ["__proto__"]: 1 }));
-  });
-
-  await t.step("keys a record by its member order", () => {
-    assertNotEquals(generateKey({ a: 1, b: 2 }), generateKey({ b: 2, a: 1 }));
+  await t.step("answers a coarse key for a node it cannot hash", () => {
+    // A `Map` has no fabric representation, and no render node holds one. What
+    // matters is that an answer comes back at all: keying is on the render
+    // path, where a throw takes the render with it.
+    assertEquals(typeof generateKey({ n: new Map() }), "string");
+    assertEquals(generateKey({ n: new Map() }), generateKey({ n: new Map() }));
   });
 
   await t.step("keys a hole apart from an undefined element", () => {

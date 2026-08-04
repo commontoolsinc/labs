@@ -6,121 +6,63 @@
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isCell } from "@commonfabric/runner";
 
 /**
- * Tags a projected container, so that what a value WAS is part of what it keys
- * as. Everything but a primitive is tagged, which also keeps the projection
- * unambiguous: a record projects to a tagged pair list rather than to a record,
- * so no member name of the caller's can collide with a tag, and no member name
- * this runtime reserves (`__proto__`, `constructor`) can appear as a key at
- * all.
+ * Stands in for a value with no identity of its own to key by. A record cannot
+ * collide with the strings, numbers, and booleans a render node otherwise
+ * holds.
  */
-function tagged(kind: string, ...parts: FabricValue[]): FabricValue {
-  return [`@@${kind}`, ...parts];
-}
+const OPAQUE: FabricValue = { "@@vdom-key": "opaque" };
 
 /**
- * Projects a render node onto a `FabricValue`, which is what `hashStringOf()`
- * keys.
+ * Replaces, in a render node, the two things it can hold that are not
+ * `FabricValue`s: a `Cell`, by the link it names, and a function, by a
+ * stand-in.
  *
- * A render node is not one: it holds `Cell`s where reactive values go, props
- * whose values may be event handlers, and whatever else a pattern author put
- * there. Each is replaced by something that stands for it -- a cell by the link
- * it names, a function by a tag, since one render's handler and the next
- * render's are different objects carrying the same meaning.
+ * Everything else a render node may carry is a `JSONValue` (see `WorkerProps`),
+ * and every one of those is a `FabricValue` already, so it is answered by
+ * identity -- which also leaves a subtree carrying neither of the two shared
+ * rather than rebuilt.
  *
- * Every input has an answer here, and every answer is a `FabricValue`. Both
- * halves are load-bearing: a reconciler cannot survive a key that throws, and
- * a value whose state the projection does not read keys the same as every
- * other value it does not read.
- *
- * So a native type that is not a `FabricValue` -- a `Date`, a `Map`, a typed
- * array -- is projected by reading the state that holds it, which its
- * enumerable members do not.
+ * A function is an event handler, and one render's is not the next render's
+ * though they mean the same thing, so all of them stand alike. A cell answers
+ * with its link, which is what stays put while the payload behind it moves.
  *
  * @param node The render node to project.
- * @param seen Ancestors of `node`, so a cycle is answered rather than followed.
+ * @param seen Ancestors of `node`, so a cycle ends the walk rather than
+ *   running it forever.
  */
-function keyProjection(node: unknown, seen: Set<object>): FabricValue {
-  if (node === null) return null;
+function keyProjection(node: unknown, seen: Set<object>): unknown {
+  if (typeof node === "function") return OPAQUE;
+  if (node === null || typeof node !== "object") return node;
+  if (isCell(node)) return node.toSigilLinkOrNull() ?? OPAQUE;
 
-  switch (typeof node) {
-    case "undefined":
-    case "boolean":
-    case "string":
-    case "number":
-    case "bigint":
-      return node;
-    case "symbol":
-      // An interned symbol is a fabric value and keys as itself; a unique one
-      // has no portable identity, so every unique symbol keys alike.
-      return Symbol.keyFor(node) === undefined ? tagged("symbol") : node;
-    case "function":
-      return tagged("function");
-  }
-
-  if (isCell(node)) {
-    // The link a cell names, which is stable across renders where the cell
-    // object need not be. A cell with no link yet has nothing to name.
-    const link = node.toSigilLinkOrNull();
-    return link === null ? tagged("cell") : tagged("link", link as FabricValue);
-  }
-
-  if (seen.has(node)) return tagged("cycle");
+  if (seen.has(node)) return OPAQUE;
   seen.add(node);
   try {
     if (Array.isArray(node)) {
-      // A hole holds nothing, and is not the `undefined` element that reading
-      // one would report.
-      return tagged(
-        "arr",
-        node.map((element, i) =>
-          i in node ? keyProjection(element, seen) : tagged("hole")
-        ),
-      );
+      // `map()` skips a hole and leaves one in its place, which is what the
+      // hash wants: a hole is not the `undefined` that reading one reports.
+      let changed = false;
+      const projected = node.map((element) => {
+        const value = keyProjection(element, seen);
+        if (value !== element) changed = true;
+        return value;
+      });
+      return changed ? projected : node;
     }
 
-    // Native types with state the enumeration below cannot see. Each keeps its
-    // own shape, so two that differ key differently.
-    if (node instanceof Date) return tagged("date", node.getTime());
-    if (node instanceof RegExp) {
-      return tagged("regexp", node.source, node.flags);
+    const entries = Object.entries(node);
+    let changed = false;
+    for (const entry of entries) {
+      const value = keyProjection(entry[1], seen);
+      if (value === entry[1]) continue;
+      entry[1] = value;
+      changed = true;
     }
-    if (ArrayBuffer.isView(node)) {
-      const bytes = new Uint8Array(
-        node.buffer,
-        node.byteOffset,
-        node.byteLength,
-      );
-      return tagged("bytes", [...bytes]);
-    }
-    if (node instanceof Map) {
-      return tagged(
-        "map",
-        [...node].map((
-          [k, v],
-        ) => [keyProjection(k, seen), keyProjection(v, seen)]),
-      );
-    }
-    if (node instanceof Set) {
-      return tagged("set", [...node].map((v) => keyProjection(v, seen)));
-    }
-    if (isNativeError(node)) {
-      return tagged("error", node.name, node.message);
-    }
-
-    // Anything else, by its own enumerable string keys -- the set a render
-    // node's members live in. A symbol-keyed member is machinery rather than
-    // content. Pairs rather than a record: see `tagged`.
-    return tagged(
-      "rec",
-      Object.entries(node).map((
-        [key, value],
-      ) => [key, keyProjection(value, seen)]),
-    );
+    return changed ? Object.fromEntries(entries) : node;
   } finally {
     seen.delete(node);
   }
@@ -129,16 +71,37 @@ function keyProjection(node: unknown, seen: Set<object>): FabricValue {
 /**
  * Generate a stable key for a render node.
  *
- * The key is a hash of the node's projection onto a `FabricValue` (see
- * `keyProjection`), so two nodes key alike exactly when they carry the same
- * content, and a member the hash can tell apart -- `1n` from `1`, `-0` from
- * `0`, a present `undefined` from an absent member -- keys them apart.
+ * Two nodes key alike exactly when they carry the same content, so a member the
+ * hash tells apart -- a present `undefined` from an absent one, a hole from an
+ * `undefined` element, `NaN` from `null`, `-0` from `0` -- keys them apart too.
+ *
+ * A node holding something no render node may hold can have no such key, and
+ * answers a coarse one instead. Keying is on the render path, where an answer
+ * is needed more than a precise one is.
  *
  * @param node - The render node to generate a key for
  * @returns A stable string key
  */
 export function generateKey(node: unknown): string {
-  return hashStringOf(keyProjection(node, new Set()));
+  try {
+    return hashStringOf(keyProjection(node, new Set()) as FabricValue);
+  } catch {
+    return generateFallbackKey(node);
+  }
+}
+
+/**
+ * Helper for `generateKey()`, which keys a node the hash has no answer for.
+ * Nodes sharing a fallback key are told apart only by their position among
+ * their siblings, so what it costs is the reuse of a DOM node that moved.
+ */
+function generateFallbackKey(node: unknown): string {
+  if (node === null || node === undefined) return "@@null";
+  if (typeof node !== "object") return `@@${typeof node}:${String(node)}`;
+  if (Array.isArray(node)) return `@@array:${node.length}`;
+  if (isCell(node)) return "@@cell";
+  const name = (node as { name?: unknown }).name;
+  return typeof name === "string" ? `@@vnode:${name}` : "@@object";
 }
 
 /**
