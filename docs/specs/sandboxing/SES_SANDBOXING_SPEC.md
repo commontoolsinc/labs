@@ -2118,13 +2118,11 @@ Build a new sandbox subsystem that separates:
 - minimal ambient globals for Compartments
 - trusted runtime-module exports registered as `cf:runtime/` records
 
-Initial implementation can migrate logic from the current harness runtime-module
-surface, but the target module split should live under `packages/runner/src/sandbox/`.
+The target module split should live under `packages/runner/src/sandbox/`.
 
 **Likely files:**
 - new `packages/runner/src/sandbox/runtime-modules.ts`
 - new `packages/runner/src/sandbox/compartment-globals.ts`
-- `packages/runner/src/harness/runtime-modules.ts` (migration source)
 
 ### Phase 4: Runner Integration
 

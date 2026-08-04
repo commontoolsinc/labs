@@ -4,7 +4,6 @@ import {
   type CompiledModuleArtifact,
   type EvaluateResult,
   type Exports,
-  type Harness,
   type HarnessedFunction,
   type ResolvedFabricPin,
   type RuntimeProgram,
@@ -166,7 +165,7 @@ export interface EngineOptions {
   hideInternalStackFrames?: boolean;
 }
 
-export class Engine extends EventTarget implements Harness {
+export class Engine extends EventTarget {
   private runtimeInternals: RuntimeInternals | undefined;
   private compilerInternals: CompilerInternals | undefined;
   private ctRuntime: Runtime;

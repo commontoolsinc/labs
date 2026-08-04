@@ -28,7 +28,7 @@ Phase 3 shipped in two PRs:
   `writeAuthorizedBy` claims keep verifying without a `verifiedLoadId`.
 - **E2 (legacy machinery deletion)**: every loadId surface is gone — frame
   threading, side tables, `seedVerifiedLoadIds`, per-load registry
-  partitions and capture walks, the loadId-scoped `Harness` methods, the
+  partitions and capture walks, the loadId-scoped `Engine` methods, the
   CFC `implementationRef`×`verifiedLoadId` arm (provenance is the only
   source of `kind: "verified"`), `FunctionCache`, and the prewarm walk. New
   `writeAuthorizedBy` claims are stamped with `moduleIdentity` only. What
@@ -555,7 +555,7 @@ canary test compiling+resolving with `$implRef` stripped.
 - `harness/executable-registry.ts`: ~everything string-keyed (§4);
   `function-cache.ts` re-keyed or deleted.
 - `cfc/implementation-identity.ts`: loadId/ref plumbing → provenance WeakMap;
-  `Harness` interface loses `getVerifiedLoadId`, `getVerifiedFunctionInLoad`,
+  `Engine` loses `getVerifiedLoadId`, `getVerifiedFunctionInLoad`,
   `isVerifiedSourceInLoad`, `getVerifiedBundleId`, `getVerifiedBindingMetadata`,
   `registerVerifiedFunction`, `getExecutableFunction`, `associatePattern`.
 - `runner.ts`: `resolveJavaScriptFunction` ref path, `discoverAndCacheFunctions`,
@@ -614,7 +614,7 @@ canary test compiling+resolving with `$implRef` stripped.
    session-lifetime, per-engine content-addressed implementation index
    (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
    `Engine.recordModuleProvenance`, surfaced as
-   `Harness.getVerifiedImplementation`, consulted by `resolveByImplRef` after
+   `Engine.getVerifiedImplementation`, consulted by `resolveByImplRef` after
    the bounded artifact index misses). Chosen over refcount pinning (piece
    lifecycle is fuzzy; high complexity) and a WeakRef shadow (fails exactly in
    the post-eviction-GC scenario it must cover). Memory is bounded by the set
