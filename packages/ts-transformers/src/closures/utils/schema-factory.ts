@@ -28,7 +28,7 @@ export function createArrayMethodCallbackSchema(
   context: TransformationContext,
 ): ts.TypeNode {
   const { checker, factory } = context;
-  const typeRegistry = context.options.state?.typeRegistry;
+  const typeRegistry = context.state.typeRegistry;
 
   // 1. Determine element type
   let elemTypeNode: ts.TypeNode;
@@ -123,7 +123,7 @@ export function createHandlerStateSchema(
   context: TransformationContext,
 ): ts.TypeNode {
   const { checker, factory } = context;
-  const typeRegistry = context.options.state?.typeRegistry;
+  const typeRegistry = context.state.typeRegistry;
 
   // Try explicit annotation first
   if (stateParam) {
@@ -202,7 +202,7 @@ export function createLiftAppliedInputSchema(
     {
       factory,
       checker,
-      typeRegistry: context.options.state?.typeRegistry,
+      typeRegistry: context.state.typeRegistry,
     },
   );
 }
@@ -227,7 +227,7 @@ export function createHandlerEventSchema(
   context: TransformationContext,
 ): ts.TypeNode {
   const { factory, checker } = context;
-  const typeRegistry = context.options.state?.typeRegistry;
+  const typeRegistry = context.state.typeRegistry;
   const eventParam = callback.parameters[0];
 
   // If no event parameter exists, use never type (will generate false schema)

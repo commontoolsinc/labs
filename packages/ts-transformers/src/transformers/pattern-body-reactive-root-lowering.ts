@@ -126,9 +126,7 @@ function registerReplacementType(
   original: ts.Node,
   context: TransformationContext,
 ): void {
-  const typeRegistry = context.options.state?.typeRegistry;
-  if (!typeRegistry) return;
-
+  const typeRegistry = context.state.typeRegistry;
   const originalType = getTypeAtLocationWithFallback(
     original,
     context.checker,

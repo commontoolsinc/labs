@@ -451,9 +451,9 @@ export function expressionToTypeNode(
     // type arguments (`Default<string, .ts";`).
     const clonedTypeNode = cloneTypeNodeDeepForEmission(
       declaredTypeNode,
-      context.options.state?.typeRegistry,
+      context.state.typeRegistry,
     );
-    context.options.state?.typeRegistry?.set(clonedTypeNode, type);
+    context.state.typeRegistry.set(clonedTypeNode, type);
     return clonedTypeNode;
   }
 
@@ -462,12 +462,12 @@ export function expressionToTypeNode(
   const type = inferWidenedTypeFromExpression(
     expr,
     context.checker,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
   );
   return typeToTypeNodeWithRegistry(
     type,
     context,
-    context.options.state?.typeRegistry,
+    context.state.typeRegistry,
   );
 }
 
@@ -750,7 +750,7 @@ export function buildTypeElementsFromCaptureTree(
         inferWidenedTypeFromExpression(
           childNode.expression,
           checker,
-          context.options.state?.typeRegistry,
+          context.state.typeRegistry,
         ),
         propName,
       );
@@ -877,7 +877,7 @@ export function buildTypeElementsFromCaptureTree(
         {
           factory,
           checker,
-          typeRegistry: context.options.state?.typeRegistry,
+          typeRegistry: context.state.typeRegistry,
         },
       );
     }

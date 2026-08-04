@@ -149,10 +149,9 @@ function createContext(sourceFile: ts.SourceFile): {
   const context = {
     sourceFile,
     factory: ts.factory,
-    options: {
-      state: {
-        typeRegistry: new WeakMap<ts.Node, ts.Type>(),
-      },
+    options: {},
+    state: {
+      typeRegistry: new WeakMap<ts.Node, ts.Type>(),
     },
     reportDiagnostic: (d: CollectedDiagnostic) => {
       diagnostics.push({

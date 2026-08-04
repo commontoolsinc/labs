@@ -184,14 +184,12 @@ export const emitConditionalExpression: Emitter = ({
     },
   });
 
-  if (context.options.state?.typeRegistry) {
-    const resultType = context.checker.getTypeAtLocation(expression);
-    registerSyntheticCallType(
-      ifElseCall,
-      resultType,
-      context.options.state?.typeRegistry,
-    );
-  }
+  const resultType = context.checker.getTypeAtLocation(expression);
+  registerSyntheticCallType(
+    ifElseCall,
+    resultType,
+    context.state.typeRegistry,
+  );
 
   return ifElseCall;
 };

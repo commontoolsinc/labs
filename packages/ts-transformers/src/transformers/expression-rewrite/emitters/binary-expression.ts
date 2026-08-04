@@ -152,14 +152,12 @@ export const emitBinaryExpression: Emitter = ({
         cfHelpers: context.cfHelpers,
       });
 
-      if (context.options.state?.typeRegistry) {
-        const resultType = context.checker.getTypeAtLocation(expression);
-        registerSyntheticCallType(
-          whenCall,
-          resultType,
-          context.options.state?.typeRegistry,
-        );
-      }
+      const resultType = context.checker.getTypeAtLocation(expression);
+      registerSyntheticCallType(
+        whenCall,
+        resultType,
+        context.state.typeRegistry,
+      );
 
       return whenCall;
     }
@@ -202,14 +200,12 @@ export const emitBinaryExpression: Emitter = ({
         cfHelpers: context.cfHelpers,
       });
 
-      if (context.options.state?.typeRegistry) {
-        const resultType = context.checker.getTypeAtLocation(expression);
-        registerSyntheticCallType(
-          unlessCall,
-          resultType,
-          context.options.state?.typeRegistry,
-        );
-      }
+      const resultType = context.checker.getTypeAtLocation(expression);
+      registerSyntheticCallType(
+        unlessCall,
+        resultType,
+        context.state.typeRegistry,
+      );
 
       return unlessCall;
     }
