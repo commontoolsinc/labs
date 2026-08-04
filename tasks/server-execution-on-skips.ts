@@ -93,10 +93,14 @@ export const serverExecutionOnSkipReport = (
 /** Every listed file must exist; a vanished file is a stale entry. */
 export const validateServerExecutionOnSkips = async (
   repoRoot: URL,
+  skipLists: Record<
+    ServerExecutionSuite,
+    ServerExecutionOnSkip[]
+  > = SERVER_EXECUTION_ON_SKIPS,
 ): Promise<string[]> => {
   const problems: string[] = [];
   for (
-    const [suite, skips] of Object.entries(SERVER_EXECUTION_ON_SKIPS) as [
+    const [suite, skips] of Object.entries(skipLists) as [
       ServerExecutionSuite,
       ServerExecutionOnSkip[],
     ][]
@@ -123,25 +127,40 @@ export const validateServerExecutionOnSkips = async (
   return problems;
 };
 
-if (import.meta.main) {
-  const suite = Deno.args[0] ?? "";
+/**
+ * CLI body, split from the `import.meta.main` wrapper so tests can drive it
+ * in-process (the same coverage-driven split as `tasks/test.ts`). The skip
+ * report goes to `io.error` (stderr) so an `$( )` capture in a CI step picks
+ * up only the `--ignore` flag from `io.log` (stdout); the step shows both.
+ */
+export const main = async (
+  args: string[],
+  io: { log: (line: string) => void; error: (line: string) => void } = {
+    log: console.log,
+    error: console.error,
+  },
+  repoRoot: URL = new URL("../", import.meta.url),
+): Promise<number> => {
+  const suite = args[0] ?? "";
   if (!isServerExecutionSuite(suite)) {
-    console.error(
+    io.error(
       `Unknown suite ${JSON.stringify(suite)}; expected one of: ${
         Object.keys(SUITE_PACKAGE_DIR).join(", ")
       }`,
     );
-    Deno.exit(1);
+    return 1;
   }
-  const repoRoot = new URL("../", import.meta.url);
   const problems = await validateServerExecutionOnSkips(repoRoot);
   if (problems.length > 0) {
-    console.error(problems.join("\n"));
-    Deno.exit(1);
+    io.error(problems.join("\n"));
+    return 1;
   }
-  // The report goes to stderr so the flag on stdout is the only thing a
-  // `$( )` capture picks up; the CI step shows both.
-  console.error(serverExecutionOnSkipReport(suite));
+  io.error(serverExecutionOnSkipReport(suite));
   const arg = serverExecutionOnIgnoreArg(suite);
-  if (arg !== "") console.log(arg);
+  if (arg !== "") io.log(arg);
+  return 0;
+};
+
+if (import.meta.main) {
+  Deno.exit(await main(Deno.args));
 }
