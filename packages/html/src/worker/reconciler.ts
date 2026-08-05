@@ -23,6 +23,7 @@ import {
   areLinksSame,
   type Cancel,
   type Cell,
+  type CellLinkInput,
   ContextualFlowControl,
   convertCellsToLinks,
   isCell,
@@ -3063,7 +3064,11 @@ export class WorkerReconciler {
     // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
     // Pass doNotConvertCellResults to prevent already-resolved values (from .sink())
     // from being converted back to links - we want the actual data for props.
-    return convertCellsToLinks(value, {
+    //
+    // A prop is whatever a pattern put on a render node, which is `unknown` at
+    // this seam and a `CellLinkInput` in fact; the conversion rejects what is
+    // neither fabric nor convertible.
+    return convertCellsToLinks(value as CellLinkInput, {
       doNotConvertCellResults: true,
       includeSchema: true,
       keepAsCell: KeepAsCell.OnlyStream,
