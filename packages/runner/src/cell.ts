@@ -2913,6 +2913,9 @@ export class CellImpl<T extends FabricValue>
   }
 
   toJSON(): SigilLink | null {
+    // TODO(danfuzz): Remove this method once `value-debug.ts` can correctly
+    // render cells without it.
+    //
     // The JSON protocol's name for the same link, honored by every renderer
     // that walks a value through it -- notably `toCompactDebugString()`, which
     // pattern-test assertion diagnostics render their operands with. Absent
