@@ -66,16 +66,22 @@ export function createRef(
   // Unwrap query result proxies and replace docs with their ids; functions are
   // stringified, since our data model doesn't support them as values.
   function traverse(obj: any): any {
-    // Avoid cycles — only track objects/arrays/functions (not primitives).
-    // Primitives use value equality in Set, so repeated strings like
-    // "primary" would be incorrectly deduplicated, causing hash collisions
-    // for patterns that differ only in the position of repeated values.
+    // A primitive is its own preimage. Nothing below applies to one -- it
+    // carries no members to serialize, is no kind of reference, and holds
+    // nothing to descend into -- and `obj` is `any`, so `null`, `undefined` and
+    // every scalar arrive here.
     if (
-      obj !== null && (typeof obj === "object" || typeof obj === "function")
+      obj === null || (typeof obj !== "object" && typeof obj !== "function")
     ) {
-      if (seen.has(obj)) return null;
-      seen.add(obj);
+      return obj;
     }
+
+    // Avoid cycles. Primitives are not tracked, and are gone by here: they use
+    // value equality in a Set, so repeated strings like "primary" would be
+    // deduplicated and collide the hashes of patterns differing only in the
+    // position of a repeated value.
+    if (seen.has(obj)) return null;
+    seen.add(obj);
 
     // Don't traverse into atomic values or already-serialized references. A
     // `FabricPrimitive` (a `FabricHash` id, `FabricBytes`, a date, …) is an
