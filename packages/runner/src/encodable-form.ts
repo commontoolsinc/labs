@@ -5,19 +5,19 @@ import { isPlainObject } from "@commonfabric/utils/types";
  * takes on the way to being encoded, which reaches storage without ever being
  * stringified.
  *
- * One name is asked for: `toEncodableForm`. Every builder artifact carries it -- a
- * module, a handler, a pattern, and the factory that carries a module's members
- * -- and so does a `Cell`, whose form is the link it names. A cell is what a
- * caller here is likeliest to hold that is not an artifact: a graph feeding a
- * content-derived id or a builder default can carry one, and neither has a
- * representation for the cell itself. The storage boundary is elsewhere and
- * asks differently, recognizing a cell by class rather than by member.
+ * One name is asked for: `toEncodableForm`. Every builder artifact carries it
+ * -- a module, a handler, a pattern, and the factory that carries a module's
+ * members -- and so does a `Cell`, whose form is the link it names. A cell is
+ * what a caller here is likeliest to hold that is not an artifact: a graph
+ * feeding a content-derived id or a builder default can carry one, and neither
+ * has a representation for the cell itself. The storage boundary is elsewhere
+ * and asks differently, recognizing a cell by class rather than by member.
  *
- * It is the runtime's OWN name, and that is the point. Asking by name rather
- * than by class is what lets this module stay a leaf -- naming `Cell` here
- * would mean importing the runtime's core, and the graph already runs the other
- * way. The name is not a public protocol, so no value acquires an encodable
- * form by carrying a member it defined for some other purpose.
+ * The name is the runtime's own, and asking by name is what keeps this module a
+ * leaf: it sits below the runtime's core in the import graph, so it cannot name
+ * `Cell` as a class. Being the runtime's own name is also what keeps the
+ * question narrow, since no value acquires an encodable form by carrying a
+ * member it defined for some other purpose.
  */
 function encodableFormMethod(value: unknown): (() => unknown) | undefined {
   if (
@@ -86,12 +86,12 @@ const IN_PROGRESS = Symbol("IN_PROGRESS");
 type OnCopy = (copy: unknown, original: unknown) => void;
 
 /**
- * Asked about each value the walk would otherwise pass through untouched,
- * and returns what should stand in its place -- the value itself to leave it
- * alone. This is how a caller says what ELSE has no fabric representation: a
- * `Cell`, whose encodable form is the link it stands for. Recognizing one takes
- * `isCell()`, and that lives in the runtime's core rather than here, so the
- * knowledge arrives as a function instead of as an import.
+ * Asked about each value the walk does not descend into, and returns what
+ * should stand in its place -- the value itself to leave it alone. This is how
+ * a caller says what ELSE has no fabric representation: a `Cell`, whose
+ * encodable form is the link it stands for. Recognizing one takes `isCell()`,
+ * which lives in the runtime's core, so the knowledge arrives as a function
+ * rather than an import.
  */
 type ReplaceOther = (value: object | AnyFunction) => unknown;
 
@@ -110,17 +110,9 @@ type AnyFunction = (...args: never[]) => unknown;
  * pattern author put it -- under a tool's `handler` key, in a result, inside a
  * node's `inputs` -- so finding one takes a walk.
  *
- * Keying on that name is what makes this walk's subject BUILDER ARTIFACTS
- * specifically, rather than everything the data model's duck-typed `toJSON`
- * protocol would honor. The narrower question is the intended one: a plain
- * object that answers `toJSON` and was not built here is the conversion's to
- * interpret, and is left to it.
- *
- * This looks for THE ARTIFACT rather than for the POSITIONS an artifact is
- * allowed to occupy. A traversal written the other way round has to be told
- * every shape a graph can take, and is wrong the moment a new one appears --
- * silently, since what it leaves behind is a live function in a value headed
- * for storage.
+ * The subject is BUILDER ARTIFACTS, and the `toEncodableForm` name is what
+ * bounds it there. A plain object carrying the data model's duck-typed `toJSON`
+ * is user data, and the conversion interprets it.
  *
  * An artifact is reached in two shapes and both are covered: a module is an
  * object, and a factory is a FUNCTION carrying its module's members (the
@@ -219,9 +211,8 @@ function replace(
  * Helper for `replace()`, which offers a value the walk does not descend into
  * to `replaceOther` and records whatever comes back.
  *
- * The replacement is NOT descended into. What the hook returns stands for the
- * value itself -- a link, say -- rather than being a container the walk has any
- * further claim on.
+ * The replacement is NOT descended into: what the hook returns stands for the
+ * value itself, a link say, and the walk has no further claim on it.
  */
 function replaced(
   value: object | AnyFunction,
@@ -238,12 +229,10 @@ function replaced(
  * Records a replacement: the single place a copy becomes the replacement for
  * its original.
  *
- * Every branch above returns through here, and that is deliberate. The
- * bookkeeping a copy needs -- telling the caller so identity-keyed facts can
- * follow, and remembering the replacement so a value reachable twice is replaced
- * once -- was previously written out at each branch, and was left off a new
- * branch three separate times. Routing every copy through one function is what
- * makes the fourth omission impossible rather than merely unlikely.
+ * Every branch that replaces a value returns through here, which is what makes
+ * a copy's bookkeeping unforgettable: the caller is told, so identity-keyed
+ * facts can follow the copy, and the replacement is remembered, so a value
+ * reachable twice is replaced once.
  *
  * A value that came back unchanged is not a copy and is not announced as one.
  */
