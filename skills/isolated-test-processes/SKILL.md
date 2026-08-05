@@ -59,6 +59,20 @@ command's `--lock` flag.
   explicit environment variable such as `UPDATE_GOLDENS=1`.
 - Treat `Deno.Command(Deno.execPath())` as a side-effect boundary. The child
   Deno process does not inherit the parent test runner's lockfile flags.
+- Spawn `Deno.execPath()`, never the program name `"deno"`. A name resolves
+  through `PATH`, which is a different Deno than the one running the test
+  whenever the shell's Deno is not the version pinned in `mise.toml`. The two
+  versions share one cache directory but read transpiled sources only from their
+  own part of it, so a coverage profile written by one and reported by the other
+  yields a report with every file missing. (In a `deno compile`d binary
+  `Deno.execPath()` is that binary rather than Deno, so code that has to run
+  both compiled and under Deno needs its own way to find a Deno.)
+- A `--allow-run=deno` grant does not permit spawning `Deno.execPath()`, because
+  Deno resolves the allowlist entry through `PATH` as well, and a task line
+  cannot name a path known only at run time. Either give the test task a plain
+  `--allow-run`, or run its tests through a script that computes the grant, as
+  `packages/dashboard/test/runner.ts` does with
+  `--allow-run=${Deno.execPath()},git`.
 
 ## Common Tells
 

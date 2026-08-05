@@ -26,6 +26,50 @@ file no test ever loaded and charges every one of its lines, so a well-tested
 file scores as entirely uncovered. This is why the `cf test` command lives in
 `commands/test-command.ts`.
 
+#### A file can also drop out of the report on its own
+
+`deno coverage` builds the report from each covered file's transpiled form in
+the Deno cache rather than from the source on disk. A file whose transpiled form
+is absent from the cache is left out of the report, with a warning on stderr and
+no change to the exit status. Because the debt metric charges every line of a
+file that has no report entry, such a drop reads downstream as a coverage
+regression that no change in the tree explains.
+
+`deno coverage` says which of two things happened, in two different messages,
+and `tasks/write-coverage-lcov.ts` acts on the difference:
+
+- `Missing transpiled source code for: "<url>"` — the source is on disk but the
+  cache holds no transpiled form of it. For a file in the repository that is a
+  file the report should have carried: the script names those files and exits
+  non-zero, after writing the report of what did convert so it can be read while
+  the cause is found. Two things cause it. The profiles were collected by one
+  Deno version and reported by another, which happens when a test starts the Deno
+  on `PATH` instead of the Deno running it. Or they were collected from a working
+  directory under a different Deno configuration, because the cache key covers
+  the configuration in scope where the file was compiled.
+- `Source not found for "<url>"` — the source is gone, so a test compiled the
+  file and then deleted it. No report could name it, so the script warns and
+  carries on.
+
+A file outside the repository is only ever warned about, whichever message it
+came with. The debt metric tracks `packages/` and `tasks/` and charges nothing
+for anything else, so its absence from the report costs nothing. This is what a
+test that copies a fixture project into a temporary directory and runs Deno there
+produces, and it is why the failure is not simply "any file was dropped".
+
+An empty report is not a failure by itself. `deno coverage` calls it an error
+when nothing survives its filters, which happens honestly whenever a profile set
+covers only test files, since those are excluded by design. With no repository
+file dropped, the script takes that emptiness at face value: it warns and exits
+zero. It also warns and exits zero when there was nothing to convert in the first
+place, which is what a job whose test step never ran produces — the profile
+directory is absent, or holds only empty files. Any other `deno coverage` failure
+is an error.
+
+Every one of those paths writes an output file, so the artifact upload always has
+one to collect and the outcome is read from the conversion step rather than from
+a missing file.
+
 ### Authored pattern code is measured by transformer instrumentation
 
 Patterns (the user programs under `packages/patterns`) are not loaded the way an

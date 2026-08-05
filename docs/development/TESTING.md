@@ -37,6 +37,22 @@ This boundary keeps a verification test independent of mutable registry
 metadata. It also makes an accidental dependency graph change fail as an
 out-of-date lockfile instead of silently resolving a different graph.
 
+Both helpers start the Deno that is running the test, found through
+`Deno.execPath()`. Starting the program named `deno` instead would find whatever
+copy comes first on `PATH`, which is a different version than the pin in
+`mise.toml` on any machine whose shell Deno is not that pin. The versions share
+one cache directory and each reads transpiled sources only from its own part of
+it, so a test that collects a coverage profile under one version and reports it
+under the other gets a report with every file missing.
+
+Deno resolves an allowlist entry of `deno` through `PATH` as well, so
+`--allow-run=deno` refuses the very binary the test is running under. A task line
+cannot name that binary, because its path is only known at run time. The test
+tasks that start Deno take a plain `--allow-run` for that reason. To keep the
+allowlist narrow instead, run the tests through a script that computes the grant,
+as `packages/dashboard/test/runner.ts` does with
+`--allow-run=${Deno.execPath()},git`.
+
 ### Test Structure
 
 - **Unit tests**: Use `@std/testing/bdd` (`describe`/`it`) with `@std/expect` for assertions
