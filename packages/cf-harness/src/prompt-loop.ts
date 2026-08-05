@@ -46,7 +46,6 @@ import {
 } from "./contracts/policy-trace.ts";
 import {
   createHarnessRunReport,
-  type HarnessGatewayAttempt,
   type HarnessModelAttempt,
   type HarnessModelTurnUsage,
   type HarnessRunTimelineEntryInput,
@@ -1851,7 +1850,6 @@ export class CfHarnessPromptLoop {
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
-    const gatewayAttempts: HarnessGatewayAttempt[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
     const modelUsage: HarnessModelTurnUsage[] = [];
     const descendantUsage: HarnessModelUsage[] = [];
@@ -1899,7 +1897,6 @@ export class CfHarnessPromptLoop {
           ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
           timeline: reportTimeline,
           toolActivity,
-          gatewayAttempts,
           modelAttempts,
           ...(modelUsage.length > 0
             ? {
@@ -1929,29 +1926,6 @@ export class CfHarnessPromptLoop {
         ...attempt,
         runId: this.engine.getRunState().runId,
         sequence: modelAttempts.length + 1,
-        modelTurn: modelTurns,
-      });
-      if (
-        attempt.providerId !== "openai-compatible-gateway" ||
-        (attempt.operation !== "chat.completions" &&
-          attempt.operation !== "responses")
-      ) {
-        return;
-      }
-      const {
-        providerId: _providerId,
-        type: _type,
-        operation,
-        ...rest
-      } = attempt;
-      gatewayAttempts.push({
-        ...rest,
-        type: "cf-harness.gateway.chat-completion-attempt",
-        // Preserve which API served the turn: gpt-* goes to the Responses API,
-        // provider-native tools and non-OpenAI models stay on chat completions.
-        operation,
-        runId: this.engine.getRunState().runId,
-        sequence: gatewayAttempts.length + 1,
         modelTurn: modelTurns,
       });
     };

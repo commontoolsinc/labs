@@ -646,35 +646,38 @@ Deno.test({
         },
         resultRef: result.runState.toolOutputs[0],
       });
-      assertEquals(persistedReport.gatewayAttempts?.length, 2);
       assertEquals(persistedReport.modelAttempts?.length, 2);
       assertEquals(
         persistedReport.modelAttempts?.map((attempt) => attempt.providerId),
         ["openai-compatible-gateway", "openai-compatible-gateway"],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.sequence),
+        persistedReport.modelAttempts?.map((attempt) => attempt.operation),
+        ["responses", "responses"],
+      );
+      assertEquals(
+        persistedReport.modelAttempts?.map((attempt) => attempt.sequence),
         [1, 2],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.modelTurn),
+        persistedReport.modelAttempts?.map((attempt) => attempt.modelTurn),
         [1, 2],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.runId),
+        persistedReport.modelAttempts?.map((attempt) => attempt.runId),
         ["run-loop-persisted", "run-loop-persisted"],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.[0].outcome,
+        persistedReport.modelAttempts?.[0].outcome,
         "http_response",
       );
-      assertEquals(persistedReport.gatewayAttempts?.[0].httpStatus, 200);
+      assertEquals(persistedReport.modelAttempts?.[0].httpStatus, 200);
       assertEquals(
         {
-          model: persistedReport.gatewayAttempts?.[0].request.model,
-          messageCount: persistedReport.gatewayAttempts?.[0].request
+          model: persistedReport.modelAttempts?.[0].request.model,
+          messageCount: persistedReport.modelAttempts?.[0].request
             .messageCount,
-          toolCount: persistedReport.gatewayAttempts?.[0].request.toolCount,
+          toolCount: persistedReport.modelAttempts?.[0].request.toolCount,
         },
         {
           model: "gpt-5.4",
@@ -683,15 +686,15 @@ Deno.test({
         },
       );
       assert(
-        (persistedReport.gatewayAttempts?.[0].request.serializedBytes ?? 0) >
+        (persistedReport.modelAttempts?.[0].request.serializedBytes ?? 0) >
           0,
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.[1].request.messageCount,
+        persistedReport.modelAttempts?.[1].request.messageCount,
         3,
       );
       assertEquals(
-        JSON.stringify(persistedReport.gatewayAttempts).includes(
+        JSON.stringify(persistedReport.modelAttempts).includes(
           "Summarize the todo file.",
         ),
         false,
