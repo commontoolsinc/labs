@@ -3295,7 +3295,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (branch.required !== undefined && valueIsRecord) {
             match = true;
             for (const req of branch.required) {
-              if (!(req in (doc.value as Record<string, unknown>))) {
+              // `Object.hasOwn`, not `in`: `req` is a schema-declared property
+              // NAME and the value is data. `in` walks the prototype chain, so
+              // a required property called `toString` was satisfied by every
+              // record whether or not it carried one.
+              if (
+                !Object.hasOwn(doc.value as Record<string, unknown>, req)
+              ) {
                 match = false;
                 break;
               }
@@ -4350,7 +4356,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
-          if (!(requiredProperty in filteredObj)) {
+          // `Object.hasOwn`, not `in` — see the sibling check above: a required
+          // name matching an `Object.prototype` member read as present on every
+          // object, so the value was accepted instead of rejected.
+          if (!Object.hasOwn(filteredObj, requiredProperty)) {
             logger.info("traverse", () => [
               "Missing required property",
               requiredProperty,
@@ -4646,7 +4655,9 @@ export function canBranchMatch(
       (Array.isArray(resolved.type) && resolved.type.includes("object"));
     if (typeIncludesObject && Array.isArray(resolved.required)) {
       for (const req of resolved.required) {
-        if (!(req as string in value)) return false;
+        // `Object.hasOwn`, not `in`: same own-presence question as the other
+        // two required-property checks in this file.
+        if (!Object.hasOwn(value, req as string)) return false;
       }
     }
   }

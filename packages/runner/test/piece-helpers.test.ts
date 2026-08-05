@@ -28,7 +28,14 @@ function makeCell(
       return value;
     },
     key(segment: string | number) {
-      return children[String(segment)] ?? makeCell(undefined);
+      // `Object.hasOwn`, not plain indexing: for a segment named after an
+      // `Object.prototype` member this stub would otherwise hand back the
+      // inherited function instead of "no such child" — the same defect the
+      // code under test has, quietly reproduced in the harness.
+      const name = String(segment);
+      return Object.hasOwn(children, name)
+        ? children[name]
+        : makeCell(undefined);
     },
   };
 }
@@ -62,6 +69,21 @@ describe("resolveCellPath", () => {
       () => resolveCellPath(cell as never, ["missing"]),
       Error,
       'property "missing" not found',
+    );
+  });
+
+  it("throws for a missing segment named after an Object.prototype member", () => {
+    // `toString` is ordinary data, but membership was tested with `in`, which
+    // walks the prototype chain — so an absent segment with that name looked
+    // present and this returned `undefined` instead of raising. The
+    // `availableKeys` hint in the same error already used `Object.keys`, so
+    // the two disagreed about what the record carries.
+    const cell = makeCell(undefined);
+
+    assertThrows(
+      () => resolveCellPath(cell as never, ["toString"]),
+      Error,
+      'property "toString" not found',
     );
   });
 

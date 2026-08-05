@@ -2805,7 +2805,9 @@ const valuesAtPatternPath = (
   if (value === null || value === undefined || typeof value !== "object") {
     return [];
   }
-  if (!(head in value)) {
+  // `Object.hasOwn`: `head` is a pattern-path segment naming data, so an
+  // absent segment named for a prototype member must not read as present.
+  if (!Object.hasOwn(value as object, head)) {
     return [];
   }
   return valuesAtPatternPath((value as Record<string, unknown>)[head], rest);
@@ -2836,12 +2838,16 @@ const changedValuesAtPatternPath = (
   if (value === null || value === undefined || typeof value !== "object") {
     return [];
   }
+  // Own-property reads on both sides: `head` names data, so an absent segment
+  // named for a prototype member must read as absent rather than yielding
+  // `Object.prototype`'s member as the previous/current child.
   const previousChild = previousValue !== null &&
       previousValue !== undefined &&
-      typeof previousValue === "object"
+      typeof previousValue === "object" &&
+      Object.hasOwn(previousValue as object, head)
     ? (previousValue as Record<string, unknown>)[head]
     : undefined;
-  if (!(head in value)) {
+  if (!Object.hasOwn(value as object, head)) {
     return [];
   }
   return changedValuesAtPatternPath(

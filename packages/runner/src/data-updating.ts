@@ -1575,8 +1575,13 @@ export function normalizeAndDiff(
 
     // Handle removed keys: explicit deletes, so a key the new value omits is
     // removed rather than left behind as present-but-undefined.
-    for (const key in currentRecord) {
-      if (!(key in newValue) && !eagerScopedKeys.has(key)) {
+    //
+    // `Object.keys` + `Object.hasOwn`, not `for...in` + `in`: both walk the
+    // prototype chain. A stored property named `toString` was never removed,
+    // because `"toString" in newValue` is true for every object — so setting
+    // `{ name }` over `{ name, toString }` left the `toString` behind.
+    for (const key of Object.keys(currentRecord)) {
+      if (!Object.hasOwn(newValue, key) && !eagerScopedKeys.has(key)) {
         changes.push({
           location: { ...link, path: [...link.path, key] },
           value: undefined,
@@ -1655,7 +1660,10 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
   }
 
   const obj = value as Record<string, unknown>;
-  if (!(first in obj)) return false;
+  // `Object.hasOwn`, not `in`: presence on a RECORD is an own-property
+  // question. The array branch above keeps `in` deliberately — there it is
+  // sparse-hole detection, and arrays do not inherit index properties.
+  if (!Object.hasOwn(obj, first)) return false;
   return hasPath(obj[first], rest);
 }
 

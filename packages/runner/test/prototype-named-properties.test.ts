@@ -26,6 +26,11 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  getValueAtPath,
+  hasValueAtPath,
+  setValueAtPath,
+} from "../src/path-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -173,5 +178,117 @@ describe("properties named after Object.prototype members", () => {
 
     const stored = c.get() as Record<string, unknown>;
     expect(stored.toLocaleString).toBe("written");
+  });
+
+  // Review of the first pass found four more public paths with the same
+  // predicate. Each is pinned here through the surface a caller actually uses.
+
+  it("removing such a property actually removes it", () => {
+    const c = runtime.getCell<Record<string, unknown>>(
+      space,
+      `proto-names-remove-${seq++}`,
+      undefined,
+      tx,
+    );
+    c.set({ name: "John", toString: "stored" });
+    // The new value omits `toString`, so it must be deleted. The removal pass
+    // asked `"toString" in newValue` — true through the prototype — and left
+    // the stored property behind.
+    c.set({ name: "John" });
+
+    const stored = c.get() as Record<string, unknown>;
+    expect(Object.hasOwn(stored, "toString")).toBe(false);
+  });
+
+  it("CONTROL: removing an ordinary property removes it", () => {
+    const c = runtime.getCell<Record<string, unknown>>(
+      space,
+      `proto-names-remove-control-${seq++}`,
+      undefined,
+      tx,
+    );
+    c.set({ name: "John", nickname: "Johnny" });
+    c.set({ name: "John" });
+
+    const stored = c.get() as Record<string, unknown>;
+    expect(Object.hasOwn(stored, "nickname")).toBe(false);
+  });
+
+  it("a missing REQUIRED property named for a prototype member is not accepted", () => {
+    const c = runtime.getCell<Record<string, unknown>>(
+      space,
+      `proto-names-required-${seq++}`,
+      undefined,
+      tx,
+    );
+    c.set({ name: "John" });
+
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        toString: { type: "number" },
+      },
+      required: ["toString"],
+    } as unknown as JSONSchema;
+
+    // An ordinary missing required property makes the read reject the value;
+    // a prototype-named one was silently satisfied by `Object.prototype`.
+    const ordinary = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        missingField: { type: "number" },
+      },
+      required: ["missingField"],
+    } as unknown as JSONSchema;
+
+    const protoResult = c.asSchema(schema).get();
+    const ordinaryResult = c.asSchema(ordinary).get();
+    // Whatever the runtime does for a missing required field, it must do the
+    // same for both — the property NAME cannot change the answer.
+    expect(protoResult).toEqual(ordinaryResult);
+  });
+});
+
+// `path-utils` and `piece-helpers` are exported surfaces, so they get direct
+// coverage rather than being exercised only through a cell.
+describe("path helpers and prototype-named segments", () => {
+  it("getValueAtPath does not hand back an inherited member", () => {
+    expect(getValueAtPath({}, ["toString"])).toBe(undefined);
+    expect(getValueAtPath({}, ["valueOf"])).toBe(undefined);
+    // A stored value at the same name still reads back.
+    expect(getValueAtPath({ toString: "stored" }, ["toString"])).toBe("stored");
+    // CONTROL: ordinary names are unaffected.
+    expect(getValueAtPath({ a: 1 }, ["a"])).toBe(1);
+    expect(getValueAtPath({}, ["a"])).toBe(undefined);
+  });
+
+  it("hasValueAtPath reports absence for an inherited member", () => {
+    expect(hasValueAtPath({}, ["toString"])).toBe(false);
+    expect(hasValueAtPath({ toString: "stored" }, ["toString"])).toBe(true);
+    // CONTROL
+    expect(hasValueAtPath({}, ["a"])).toBe(false);
+    expect(hasValueAtPath({ a: 1 }, ["a"])).toBe(true);
+  });
+
+  it("setValueAtPath writes such a name instead of throwing", () => {
+    const target: Record<string, unknown> = {};
+    // Threw "Cannot compare a function value": the current value was read
+    // through the prototype and handed to `valueEqual`.
+    expect(setValueAtPath(target, ["toString"], "stored")).toBe(true);
+    expect(target.toString).toBe("stored");
+    // Writing the same value again is still a no-op.
+    expect(setValueAtPath(target, ["toString"], "stored")).toBe(false);
+  });
+
+  it("setValueAtPath still creates intermediate containers", () => {
+    const target: Record<string, unknown> = {};
+    expect(setValueAtPath(target, ["toString", "nested"], 1)).toBe(true);
+    expect((target.toString as Record<string, unknown>).nested).toBe(1);
+    // CONTROL
+    const control: Record<string, unknown> = {};
+    expect(setValueAtPath(control, ["a", "b"], 1)).toBe(true);
+    expect((control.a as Record<string, unknown>).b).toBe(1);
   });
 });

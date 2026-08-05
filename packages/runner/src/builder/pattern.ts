@@ -924,9 +924,13 @@ function assignComputedCellKinds(
           ? schema.properties
           : undefined;
       for (const [key, child] of Object.entries(target)) {
-        const childSchema = properties !== undefined && key in properties
-          ? properties[key]
-          : schema.additionalProperties;
+        // `Object.hasOwn`: `key` is a DATA key and `properties` is the
+        // schema. `in` matched a data key named `toString` against every
+        // schema and then read `Object.prototype`'s function as its subschema.
+        const childSchema =
+          properties !== undefined && Object.hasOwn(properties, key)
+            ? properties[key]
+            : schema.additionalProperties;
         if (childSchema !== undefined) {
           collectWritablyBoundRoots(child, childSchema, out, seen);
         }
