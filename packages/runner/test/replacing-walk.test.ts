@@ -7,6 +7,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricExecValue } from "@commonfabric/api";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 import { type Replacer, replacingWalk } from "../src/replacing-walk.ts";
 
@@ -93,6 +95,36 @@ describe("replacing-walk", () => {
       expect(
         replacingWalk({ deep: { a: { b: shared } }, later: shared }, AT_NAMES),
       ).toEqual({ deep: { a: { b: { n: "A" } } }, later: { n: "A" } });
+    });
+  });
+
+  describe("fabric special objects", () => {
+    it("stands a `FabricPrimitive` whole", () => {
+      // Its state is in private fields, so a walk by property name would
+      // rebuild it from no members at all.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const out = replacingWalk({ held: bytes }, AT_NAMES) as {
+        held: unknown;
+      };
+
+      expect(out.held).toBeInstanceOf(FabricBytes);
+      expect(out.held).toBe(bytes);
+    });
+
+    it("stands a `FabricInstance` whole", () => {
+      const error = FabricError.fromNativeError(new Error("boom"));
+      const out = replacingWalk({ held: error }, AT_NAMES) as {
+        held: unknown;
+      };
+
+      expect(out.held).toBeInstanceOf(FabricError);
+      expect((out.held as FabricError).message).toBe("boom");
+    });
+
+    it("walks the members around a special object", () => {
+      const bytes = new FabricBytes(new Uint8Array([1]));
+      expect(replacingWalk({ a: "@a", held: bytes }, AT_NAMES))
+        .toEqual({ a: "A", held: bytes });
     });
   });
 

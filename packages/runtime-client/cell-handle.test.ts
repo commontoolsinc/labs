@@ -803,10 +803,14 @@ describe("CellHandle.serialize", () => {
       .toThrow("Unknown type");
   });
 
-  it("flattens a native object to its enumerable members", () => {
-    // A `Date` is an object, so it is descended into and comes back as the
-    // members it has, which are none. Pinned as what crosses the connection
-    // today rather than endorsed: the far end receives `{}`.
-    expect(CellHandle.serialize({ when: new Date(0) })).toEqual({ when: {} });
+  it("stands a native object whole rather than by its members", () => {
+    // A `Date` holds its state where property names cannot reach it, so
+    // descending would rebuild it from no members at all. Structured clone
+    // carries a `Date`, so standing it whole is what gets it to the far end.
+    const when = new Date(0);
+    const out = CellHandle.serialize({ when }) as { when: unknown };
+
+    expect(out.when).toBeInstanceOf(Date);
+    expect((out.when as Date).getTime()).toBe(0);
   });
 });

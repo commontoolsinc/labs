@@ -6,7 +6,6 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
-  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
@@ -3374,15 +3373,14 @@ function cellsToLinks(options: CellLinkOptions): Replacer {
       // so it still descends and is rebuilt from zero enumerable own
       // properties. Same marker as the sibling walk in
       // `builder/to-encodable-form.ts`.
-      // Both stand-in branches hold a `FabricExecValue` in fact -- a primitive
-      // or a `FabricPrimitive` -- but the type does not follow. `isRecord()`
-      // reports `value is Record<string, unknown>`, which an array is not a
-      // subtype of, so its false branch cannot rule `unknown[]` out of
-      // `FabricValueLayer`. The cast is that gap in the predicate, not a claim
-      // about the value.
-      return (!isRecord(converted) || converted instanceof FabricPrimitive)
-        ? { value: converted as FabricExecValue }
-        : { into: converted };
+      // What may be descended into is the walk's question, not this one's: it
+      // stands a value whole unless it is a plain object or an array, which
+      // covers the `FabricPrimitive` this conversion mints from a native.
+      //
+      // `FabricValueLayer` is looser than `FabricExecValue` -- its members are
+      // typed `unknown`, being unconverted until the recursion reaches them --
+      // so the cast is that gap rather than a claim about the value.
+      return { into: converted as FabricExecValue };
     },
   };
 }

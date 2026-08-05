@@ -503,6 +503,12 @@ export class CellHandle<T = unknown> {
  * ref that names it, a container is descended into, and anything else is a
  * value this side has no way to send, so it is refused rather than passed along
  * to be misread at the far end.
+ *
+ * TODO(danfuzz): a `FabricSpecialObject` gets past this and then does not
+ * survive the connection -- the protocol types a cell's value as `JSONValue`
+ * (see `IPCCellValue` in `protocol/types.ts`), and structured clone drops the
+ * private fields a `FabricPrimitive` keeps its state in. The walk no longer
+ * flattens one, which is as far as this side can carry it alone.
  */
 const CELL_HANDLE_REFS: Replacer = {
   replace: (value) => {

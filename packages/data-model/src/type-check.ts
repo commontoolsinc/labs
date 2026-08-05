@@ -1,3 +1,5 @@
+import type { FabricExecPlainObject, FabricExecValue } from "@commonfabric/api";
+
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
@@ -216,5 +218,23 @@ export function isFabricObjectOrArray(
 export function isFabricPlainObject(
   value: FabricValue,
 ): value is FabricPlainObject {
+  return isPlainObject(value);
+}
+
+/**
+ * Indicates whether the value is the plain-object arm of `FabricExecValue`,
+ * that is, a container whose members are reached by property name.
+ *
+ * The arms it excludes are the ones a name-driven walk must not descend into:
+ * an array has its own rule, a function is a leaf, and a `FabricSpecialObject`
+ * keeps its state where property names cannot reach it -- a `FabricPrimitive`
+ * in private fields, a `FabricInstance` in its codec contents. Rebuilding
+ * either from its (empty) enumerable members yields `{}`.
+ *
+ * This function is a TypeScript type guard for `FabricExecPlainObject`.
+ */
+export function isFabricExecPlainObject(
+  value: FabricExecValue,
+): value is FabricExecPlainObject {
   return isPlainObject(value);
 }

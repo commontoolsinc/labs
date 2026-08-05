@@ -1,4 +1,5 @@
 import type { FabricExecValue } from "@commonfabric/api";
+import { isFabricExecPlainObject } from "@commonfabric/data-model/fabric-value";
 import { isFunction, isRecord } from "@commonfabric/utils/types";
 
 /**
@@ -30,7 +31,7 @@ export type Replacer = {
    * descend into -- or `{ value }` to stop there and stand for it with that
    * instead. A walk that transforms containers on the way in does it here.
    */
-  enter?(value: object): { into: object } | { value: FabricExecValue };
+  enter?(value: object): { into: FabricExecValue } | { value: FabricExecValue };
 };
 
 /**
@@ -68,8 +69,9 @@ export function replacingWalk(
   const replaced = replacer.replace(value);
   if (replaced !== undefined) return replaced.value;
 
-  // Only a container has members to walk. A function is offered to `enter`
-  // alongside them, since a walk may have a replacement for one.
+  // Anything object-ish is offered to `enter`, since a caller may have a
+  // transformation for one -- a native `Date` becoming a `FabricEpochNsec`,
+  // say. What may be DESCENDED into is decided after that, below.
   if (!(isRecord(value) || isFunction(value))) return value;
 
   const original = value;
@@ -78,6 +80,20 @@ export function replacingWalk(
     const entered = replacer.enter?.(original) ?? { into: original };
     if ("value" in entered) return entered.value;
     const into = entered.into;
+
+    // Only a plain object or an array has members reached by NAME, which is
+    // the only way this descends. A `FabricSpecialObject` therefore stands as
+    // itself: a `FabricPrimitive` keeps its state in private fields and a
+    // `FabricInstance` in its codec contents, so rebuilding either from its
+    // enumerable members would yield `{}`. So does a native the caller left
+    // alone, a `Date` having nothing to find by name either.
+    //
+    // TODO(danfuzz): a `FabricInstance` is not really a leaf -- it is a
+    // container reached by its codec contents, and a cell inside one is missed
+    // by standing it whole. Descending one wants codec-mediated traversal,
+    // which is the same gap marked at the sibling walks (`traverseAndCellify`
+    // in `builtins/llm-dialog.ts`, `data-uri.ts`).
+    if (!isFabricExecPlainObject(into) && !Array.isArray(into)) return into;
 
     if (Array.isArray(into)) {
       return into.map((element, index) =>
