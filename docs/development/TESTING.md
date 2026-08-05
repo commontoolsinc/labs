@@ -46,16 +46,27 @@ out-of-date lockfile instead of silently resolving a different graph.
 **Unit test example:**
 
 ```typescript
-// Shown at module scope.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-describe("Feature", () => {
-  it("should do something", () => {
-    expect(result).toBe(expected);
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+
+describe("deep-freeze", () => {
+  describe("isDeepFrozen()", () => {
+    it("returns `false` for a plain unfrozen object", () => {
+      expect(isDeepFrozen({ a: 1 })).toBe(false);
+    });
   });
 });
 ```
+
+Note the shape: one top-level `describe()` named after the file under test, a
+nested `describe()` per function, and an `it()` reading as a verb phrase that
+completes the word "it".
+[Unit test coding style](unit-test-coding-style.md) covers that shape in full:
+where a test file goes, what it is called, how class and function tests nest,
+which assertions to reach for, and the matcher traps that produce a green test
+proving nothing.
 
 **Integration test example:**
 
@@ -152,6 +163,11 @@ run directory.
 
 ## Related documentation
 
+- [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
+  is shaped: where it lives and what it is called, the single top-level
+  `describe()` and the blocks nested under it, how an `it()` description is
+  worded, `expect()` over `assert*()`, and the matcher traps that yield a green
+  test which proves nothing. Read it before writing a new test file.
 - [waiting-in-tests.md](waiting-in-tests.md) — waiting in tests: prefer
   primitives that resolve on a real event over polling with a timeout. Covers
   the event-driven primitives, the `check-no-waitfor` CI guard that keeps new
