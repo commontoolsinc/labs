@@ -35,6 +35,10 @@ mapped in [`../README.md`](../README.md).
 
 ## Testing
 
+- [`unit-test-coding-style.md`](unit-test-coding-style.md) — how a unit test
+  file is shaped: where it goes and what it is named, how its `describe()` and
+  `it()` blocks nest, which assertions to reach for, and the matcher traps
+  that produce a test which cannot fail
 - [`UI_TESTING.md`](UI_TESTING.md) — reaching into shadow DOM from an
   integration test, and why accessibility locators are the preferred way
 - [`waiting-in-tests.md`](waiting-in-tests.md) — waiting on a real event
