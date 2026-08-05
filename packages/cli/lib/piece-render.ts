@@ -1,12 +1,11 @@
-import { render } from "@commonfabric/html/client";
-import { UI } from "@commonfabric/runner";
+import { renderInProcess } from "@commonfabric/html/in-process";
+import { MockDoc } from "@commonfabric/html/mock-doc";
+import { type Cell, UI } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { loadManager } from "./piece.ts";
 import { PiecesController } from "@commonfabric/piece/ops";
 import type { PieceConfig } from "./piece.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { MockDoc } from "../../html/src/mock-doc.ts";
-import { CellHandle, VNode } from "@commonfabric/runtime-client";
 
 const logger = getLogger("piece-render", { level: "info", enabled: false });
 
@@ -19,6 +18,10 @@ export interface RenderOptions {
 /**
  * Renders a piece's UI to HTML using htmlparser2.
  * Supports both static and reactive rendering with --watch mode.
+ *
+ * The reconciler and the DOM applicator both run here, in the CLI's own
+ * process, against a mock document. That is the same pair a browser uses, so
+ * the tree serialized below is the tree a browser would show.
  */
 export async function renderPiece(
   config: PieceConfig,
@@ -44,11 +47,10 @@ export async function renderPiece(
       [UI]: rendererVDOMSchema,
     },
     required: [UI],
-  });
+  }) as Cell<Record<string, unknown>>;
 
   // Check if piece has UI
-  const staticValue = cell.get();
-  if (!staticValue?.[UI]) {
+  if (!cell.get()?.[UI]) {
     throw new Error(`Piece ${config.piece} has no UI`);
   }
 
@@ -58,45 +60,57 @@ export async function renderPiece(
     throw new Error("Could not find root container");
   }
 
-  if (options.watch) {
-    // 4a. Reactive rendering - pass the Cell directly
-    const uiCell = cell.key(UI);
-    const cancel = render(
-      container,
-      uiCell as unknown as CellHandle<VNode>,
-      renderOptions,
-    ); // FIXME: types
+  // 4. Mount the piece's [UI]. In watch mode `report` takes over once the
+  // render exists; until then applied batches need no announcement.
+  let report = () => {};
+  const render = renderInProcess(container, cell.key(UI), {
+    document,
+    setProp: renderOptions.setProp,
+    onError: (error) => {
+      logger.info("piece-render", () => `render error: ${error.message}`);
+    },
+    onApplied: () => report(),
+  });
 
-    // 5a. Set up monitoring for changes
-    let updateCount = 0;
-    const unsubscribe = cell.sink((value) => {
-      if (value?.[UI]) {
-        updateCount++;
-        // Wait for all runtime computations to complete
-        manager.runtime.idle().then(() => {
-          const html = container.innerHTML;
-          logger.info(
-            "piece-render",
-            () => `[Update ${updateCount}] UI changed`,
-          );
-          if (options.onUpdate) {
-            options.onUpdate(html);
-          }
-        });
-      }
-    });
-
-    // Return cleanup function
-    return () => {
-      cancel();
-      unsubscribe();
-    };
-  } else {
-    // 4b. Static rendering - render once with current value
-    const vnode = staticValue[UI];
-    render(container, vnode as VNode, renderOptions); // FIXME: types
-
-    // 5b. Return the rendered HTML
+  // Apply everything the reconciler produced, then read the tree.
+  const flushAndRead = (): string => {
+    render.flush();
     return container.innerHTML;
+  };
+
+  if (options.watch) {
+    // Several batches can make up one update, and further batches can land
+    // while a read is still waiting for the runtime. Reading once per quiet
+    // runtime reports each settled tree exactly once. `reading` is cleared in
+    // the same synchronous stretch as the read, so no batch lands unreported
+    // between the two.
+    let reading = false;
+    let updateCount = 0;
+    report = () => {
+      if (reading) return;
+      reading = true;
+      manager.runtime.idle().then(() => {
+        let html: string;
+        try {
+          html = flushAndRead();
+        } finally {
+          reading = false;
+        }
+        updateCount++;
+        logger.info("piece-render", () => `[Update ${updateCount}] UI changed`);
+        options.onUpdate?.(html);
+      }).catch((error: unknown) => {
+        logger.info("piece-render", () => `watch read failed: ${error}`);
+      });
+    };
+    return () => render.cancel();
+  }
+
+  // 5. Static render: report the settled tree once.
+  try {
+    await manager.runtime.idle();
+    return flushAndRead();
+  } finally {
+    render.cancel();
   }
 }

@@ -611,10 +611,10 @@ const VNODE = Object.freeze({ "[vnode]": true });
  * Whether a value is a RENDERING rather than state.
  *
  * `type: "vnode"` is the whole test, and it is the runner's own definition of
- * one — `vnodeSchema` in `runner/src/schemas.ts` requires that tag. It is
- * deliberately NOT `html`'s `isVNodeish`, which also answers yes to any object
- * carrying a `$UI`: that shape is a piece with a rendering ON it, whose other
- * keys are exactly the state this comparison exists to check.
+ * one — `vnodeSchema` in `runner/src/schemas.ts` requires that tag. An object
+ * carrying a `$UI` is deliberately not counted: that shape is a piece with a
+ * rendering ON it, whose other keys are exactly the state this comparison
+ * exists to check.
  */
 function isVNode(value: object): boolean {
   return (value as { type?: unknown }).type === "vnode";
