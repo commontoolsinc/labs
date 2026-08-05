@@ -382,7 +382,7 @@ describe("encodable-form", () => {
       expect(encodableFormOf(value)).toEqual({ saw: "self" });
     });
 
-    it("invokes a member that only `Reflect.apply` can call", () => {
+    it("returns the result of a member only `Reflect.apply` can call", () => {
       // A `Reactive` is a proxy over a cell, and it answers a method name with
       // a PROXY over that method. Reading `.call` off that goes back through
       // the proxy as data navigation and comes out uncallable, so the invoke
@@ -391,8 +391,8 @@ describe("encodable-form", () => {
       const method = new Proxy(function () {
         return { invoked: true };
       }, {
-        get: (_target, prop) =>
-          prop === "call" ? { notAFunction: true } : undefined,
+        get: (target, prop) =>
+          prop === "call" ? { notAFunction: true } : Reflect.get(target, prop),
       });
       expect(encodableFormOf({ toEncodableForm: method }))
         .toEqual({ invoked: true });
@@ -444,9 +444,9 @@ describe("encodable-form", () => {
     });
 
     it("derive one id, whichever of the two a graph holds", () => {
-      // A `Reactive` answers its methods through a proxy, so the invoke has to
-      // hold for a proxied method too. When it does not, deriving an id over a
-      // graph carrying one fails outright rather than answering differently.
+      // An id is derived from a value's encodable form, and a `Reactive`
+      // answers its methods through a proxy -- so the two stand for one cell
+      // here exactly as they do at every other reader of that form.
       const { cell, reactive } = subjects();
       expect(createRef({ held: reactive }, "cause").toString())
         .toBe(createRef({ held: cell }, "cause").toString());
