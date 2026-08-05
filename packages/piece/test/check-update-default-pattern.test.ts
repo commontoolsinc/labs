@@ -1797,8 +1797,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     // an unloadable identity — a different failure than the one under test.
     const targetPattern = await runtime.patternManager.compilePattern(
       {
-        main: HOME_PATTERN_URL,
-        files: [{ name: HOME_PATTERN_URL, contents: SOURCE_V3_HANDLER }],
+        main: HOME_PATTERN_PATH,
+        files: [{ name: HOME_PATTERN_PATH, contents: SOURCE_V3_HANDLER }],
       },
       { space: manager.getSpace() },
     );
@@ -1808,7 +1808,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const targetId = await identityForSource(
       SOURCE_V3_HANDLER,
       {},
-      HOME_PATTERN_URL,
+      HOME_PATTERN_PATH,
     );
     expect(targetRef.identity).toBe(targetId);
     const { error } = await runtime.editWithRetry((tx) => {
