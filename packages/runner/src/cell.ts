@@ -3188,17 +3188,6 @@ function maybeConvertArrayPathToDataURILink(
 }
 
 /**
- * Validates that a value contains only static data (no cells or cell-like objects)
- * and has no circular references. Used by Cell.of() to ensure only serializable
- * static data is passed.
- *
- * Note: Shared references (same object at multiple paths) are allowed.
- * Only true cycles (object referencing an ancestor) are rejected.
- *
- * @param value - The value to validate
- * @throws Error if value contains cells or has circular references
- */
-/**
  * Whether `value` contains a reference cycle through plain containers.
  * Cells, links, and other non-plain objects are treated as leaves -- a cycle
  * through those resolves at read time and is not a structural cycle of the
@@ -3231,6 +3220,17 @@ function containsCycle(value: unknown): boolean {
   return walk(value);
 }
 
+/**
+ * Validates that a value contains only static data (no cells or cell-like objects)
+ * and has no circular references. Used by Cell.of() to ensure only serializable
+ * static data is passed.
+ *
+ * Note: Shared references (same object at multiple paths) are allowed.
+ * Only true cycles (object referencing an ancestor) are rejected.
+ *
+ * @param value - The value to validate
+ * @throws Error if value contains cells or has circular references
+ */
 function validateStaticData(value: unknown): void {
   // Track ancestors in current path (for cycle detection)
   // Shared references are fine - only cycles back to ancestors are errors
@@ -3322,6 +3322,14 @@ export function frameAnchorIds(
  * @param value - The value to convert.
  * @returns The converted value.
  */
+// TODO(danfuzz): name the two domains this converts between, the way
+// `ClientCellValue` and `WireCellValue` do for the connection. What arrives is
+// what a pattern produced -- a fabric value, or a native convertible to one,
+// plus the `Cell`s this exists to replace -- and what leaves is a `FabricValue`
+// carrying links in their place. The signature says `any` at both ends and for
+// `ancestors`, so nothing here can be checked, and a walk whose domain is
+// unwritten is one that cannot be told what it must do about a member of it:
+// the `FabricInstance` gap marked below is exactly that.
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   options: {
