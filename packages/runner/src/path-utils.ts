@@ -15,11 +15,21 @@ import { isRecord } from "@commonfabric/utils/types";
  * Arrays need no special case: an index or `length` is an own property, and a
  * hole is correctly absent — the same distinction the storage-v2 path helper
  * draws between record presence and sparse slots.
+ *
+ * Primitives need none either, and must not be excluded. `Object.hasOwn()`
+ * coerces with `ToObject`, so it answers `true` for a string's `length` and its
+ * indices — genuinely own — and `false` for `toUpperCase`/`toString`, which
+ * live on `String.prototype`. Bailing out on everything non-`isRecord` would
+ * lose `getValueAtPath("abc", ["length"])`, which callers rely on to
+ * reconstruct write details over primitive subtrees; indexing unconditionally,
+ * as this did before, would hand back the prototype methods. `Object.hasOwn`
+ * is the line both want.
  */
 // deno-lint-ignore no-explicit-any
 function ownSegment(container: unknown, key: PropertyKey): any {
-  if (!isRecord(container)) return undefined;
-  return Object.hasOwn(container, key as string)
+  // `Object.hasOwn` throws on these two and only these two.
+  if (container === null || container === undefined) return undefined;
+  return Object.hasOwn(container as object, key as string)
     ? (container as Record<PropertyKey, any>)[key]
     : undefined;
 }

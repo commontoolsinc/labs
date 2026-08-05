@@ -78,13 +78,28 @@ describe("resolveCellPath", () => {
     // present and this returned `undefined` instead of raising. The
     // `availableKeys` hint in the same error already used `Object.keys`, so
     // the two disagreed about what the record carries.
-    const cell = makeCell(undefined);
+    //
+    // The parent must hold a real object: with a parent of `undefined` the
+    // throw comes from the `resolvedValue === undefined` fall-through instead,
+    // the membership check is never reached, and this passes whichever
+    // operator the source uses.
+    const cell = makeCell({ name: "John" }, { name: makeCell("John") });
 
     assertThrows(
       () => resolveCellPath(cell as never, ["toString"]),
       Error,
       'property "toString" not found',
     );
+  });
+
+  it("resolves a segment the record genuinely owns at such a name", () => {
+    // The mirror of the above: narrowing membership must not have made a
+    // stored value at one of these names unreachable.
+    const cell = makeCell({ toString: "stored" }, {
+      toString: makeCell("stored"),
+    });
+
+    assertEquals(resolveCellPath(cell as never, ["toString"]), "stored");
   });
 
   it("throws when traversing through a non-object value", () => {
