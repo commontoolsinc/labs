@@ -26,7 +26,6 @@ import {
 import {
   ciCommitGanttProgressResponse,
   ciFetchProgressPanel,
-  type CiGanttInput,
   type CiGanttOptions,
   ciGanttOptions,
   ciGanttProgressResponse,
