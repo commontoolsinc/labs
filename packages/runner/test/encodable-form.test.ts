@@ -170,6 +170,33 @@ describe("encodable-form", () => {
         expect(reads).toBe(1);
       });
 
+      it("invokes a FUNCTION artifact's serializer once, on the artifact", () => {
+        // The object branch has the shared-artifact case below to pin its
+        // invoke count, and the pre-existing receiver case under
+        // `encodableFormOf()` pins the shared invoke. Neither reaches the
+        // function branch, which reads and invokes on its own.
+        let calls = 0;
+        const value = Object.assign(() => {}, {
+          marker: "factory",
+          toEncodableForm(this: { marker?: string }) {
+            calls++;
+            return { saw: this?.marker, nth: calls };
+          },
+        });
+        expect(flatten(value)).toEqual({ saw: "factory", nth: 1 });
+        expect(calls).toBe(1);
+      });
+
+      it("invokes an object artifact's serializer on the artifact", () => {
+        const value = {
+          marker: "module",
+          toEncodableForm(this: { marker?: string }) {
+            return { saw: this?.marker };
+          },
+        };
+        expect(flatten(value)).toEqual({ saw: "module" });
+      });
+
       it("descends into the serialized form", () => {
         const value = artifact({ inner: artifact({ deep: true }) });
         expect(flatten(value)).toEqual({ inner: { deep: true } });

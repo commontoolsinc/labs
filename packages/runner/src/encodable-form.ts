@@ -36,11 +36,12 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
 /**
  * Checks whether a value can produce an encodable form of itself.
  *
- * Deliberately BROADER than the walk's own test (`ownEncodableFormMethod`): this
- * accepts an inherited member, because its callers ask about a specific value
- * they already hold -- a pattern, a cell -- rather than sifting an arbitrary
- * graph. A cell satisfies this through an inherited member, that being where a
- * class puts its methods. The walk cannot afford that latitude; see there.
+ * Deliberately BROADER than the walk's own test (`ownEncodableFormMethod`):
+ * this accepts an inherited member, because its callers ask about a specific
+ * value they already hold -- a pattern, a cell -- rather than sifting an
+ * arbitrary graph. A cell satisfies this through an inherited member, that
+ * being where a class puts its methods. The walk cannot afford that latitude;
+ * see there.
  */
 export function hasEncodableForm(value: unknown): boolean {
   return encodableFormMethod(value) !== undefined;
@@ -193,28 +194,23 @@ function replace(
   }
 
   seen.set(value, IN_PROGRESS);
-  const method = isArray ? undefined : ownEncodableFormMethod(value);
   let flattened: unknown;
   if (isArray) {
     flattened = replaceInElements(value, seen, onCopy, replaceOther);
-  } else if (method !== undefined) {
-    // The artifact's OWN method is what gets called, rather than the
-    // serializer it delegates to: the method a copy carries is closed over the
-    // artifact the copy was made from, and that original is what the
-    // serialized form describes.
-    flattened = replace(
-      encodableFormFrom(method, value),
-      seen,
-      onCopy,
-      replaceOther,
-    );
   } else {
-    flattened = replaceInEntries(
-      value as Record<string, unknown>,
-      seen,
-      onCopy,
-      replaceOther,
-    );
+    // The artifact's OWN method is what gets read, rather than the serializer
+    // it delegates to: the method a copy carries is closed over the artifact
+    // the copy was made from, and that original is what the serialized form
+    // describes.
+    const method = ownEncodableFormMethod(value);
+    flattened = method === undefined
+      ? replaceInEntries(
+        value as Record<string, unknown>,
+        seen,
+        onCopy,
+        replaceOther,
+      )
+      : replace(encodableFormFrom(method, value), seen, onCopy, replaceOther);
   }
   return copied(flattened, value, seen, onCopy);
 }
@@ -321,12 +317,9 @@ function replaceInEntries(
  * has none -- the walk's test for "this is a builder artifact", and the method
  * it then invokes.
  *
- * Reading it ONCE is the point of returning it rather than reporting a boolean.
- * The member may be accessor-backed, and asking a second time to invoke what the
- * first answer only classified would run that accessor again and serialize
- * whatever it produced the second time. The walk holds the rest of this module
- * to reading each element and each member once; this is the same rule for the
- * serializer itself.
+ * Returns the method, so the function that was read is the function that gets
+ * invoked. The member may itself be accessor-backed, and the walk holds each of
+ * its readers to reading once.
  *
  * OWN, not inherited: an inherited member is not the value's own serializer, so
  * a single assignment to `Object.prototype.toEncodableForm` would otherwise
