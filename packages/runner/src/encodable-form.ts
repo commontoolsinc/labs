@@ -13,11 +13,11 @@ import { isPlainObject } from "@commonfabric/utils/types";
  * has a representation for the cell itself. The storage boundary is elsewhere
  * and asks differently, recognizing a cell by class rather than by member.
  *
- * The name is the runtime's own, and asking by name is what keeps this module a
- * leaf: it sits below the runtime's core in the import graph, so it cannot name
- * `Cell` as a class. Being the runtime's own name is also what keeps the
- * question narrow, since no value acquires an encodable form by carrying a
- * member it defined for some other purpose.
+ * Asking by name is what keeps this module below the runtime's core in the
+ * import graph, where it cannot name `Cell` as a class. The name being the
+ * runtime's own is what keeps the question narrow: nothing outside the runtime
+ * has reason to define a member spelled this way, so a value does not acquire
+ * an encodable form by carrying one it meant for something else.
  */
 function encodableFormMethod(value: unknown): (() => unknown) | undefined {
   if (
@@ -36,12 +36,10 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
 /**
  * Checks whether a value can produce an encodable form of itself.
  *
- * Deliberately BROADER than the walk's own test (`ownEncodableFormMethod`):
- * this accepts an inherited member, because its callers ask about a specific
- * value they already hold -- a pattern, a cell -- rather than sifting an
- * arbitrary graph. A cell satisfies this through an inherited member, that
- * being where a class puts its methods. The walk cannot afford that latitude;
- * see there.
+ * BROADER than the walk's own test (`ownEncodableFormMethod()`), and
+ * intentionally: this accepts an INHERITED member, which is how a cell
+ * satisfies it, a class putting its methods on the prototype. The walk requires
+ * an own member; see there for what that buys it.
  */
 export function hasEncodableForm(value: unknown): boolean {
   return encodableFormMethod(value) !== undefined;
@@ -86,12 +84,12 @@ const IN_PROGRESS = Symbol("IN_PROGRESS");
 type OnCopy = (copy: unknown, original: unknown) => void;
 
 /**
- * Asked about each value the walk does not descend into, and returns what
- * should stand in its place -- the value itself to leave it alone. This is how
- * a caller says what ELSE has no fabric representation: a `Cell`, whose
- * encodable form is the link it stands for. Recognizing one takes `isCell()`,
- * which lives in the runtime's core, so the knowledge arrives as a function
- * rather than an import.
+ * Asked about each value the walk neither descends into nor replaces itself,
+ * and returns what should stand in its place -- the value itself to leave it
+ * alone. This is how a caller says what ELSE has no fabric representation: a
+ * `Cell`, whose encodable form is the link it stands for. Recognizing one takes
+ * `isCell()`, which lives in the runtime's core, so the knowledge arrives as a
+ * function rather than an import.
  */
 type ReplaceOther = (value: object | AnyFunction) => unknown;
 
@@ -110,9 +108,12 @@ type AnyFunction = (...args: never[]) => unknown;
  * pattern author put it -- under a tool's `handler` key, in a result, inside a
  * node's `inputs` -- so finding one takes a walk.
  *
- * The subject is BUILDER ARTIFACTS, and the `toEncodableForm` name is what
- * bounds it there. A plain object carrying the data model's duck-typed `toJSON`
- * is user data, and the conversion interprets it.
+ * The `toEncodableForm` name is what bounds the subject to BUILDER ARTIFACTS.
+ * An artifact carries `toJSON` as well, delegating to the same serializer (see
+ * `builder/json-member.ts`), but that name belongs to `JSON.stringify` and the
+ * conversion gives it no standing: a plain object carrying a `toJSON` of its
+ * own is user data, and the conversion rejects it for the function-valued
+ * member it is.
  *
  * An artifact is reached in two shapes and both are covered: a module is an
  * object, and a factory is a FUNCTION carrying its module's members (the
@@ -135,6 +136,15 @@ export function replaceArtifacts<T>(
   return replace(value, new Map(), onCopy, replaceOther) as T;
 }
 
+/**
+ * Helper for `replaceArtifacts()`, which carries the walk over one value and
+ * returns what should stand in its place -- the value itself when nothing under
+ * it moved.
+ *
+ * `seen` doubles as the cycle guard and the record of what each value was
+ * replaced by, so a value reachable twice is replaced once and comes back the
+ * same object both times.
+ */
 function replace(
   value: unknown,
   seen: Map<object, unknown>,
@@ -212,7 +222,7 @@ function replace(
  * to `replaceOther` and records whatever comes back.
  *
  * The replacement is NOT descended into: what the hook returns stands for the
- * value itself, a link say, and the walk has no further claim on it.
+ * value itself -- a link, say -- and only a container gets descended into.
  */
 function replaced(
   value: object | AnyFunction,
@@ -247,6 +257,12 @@ function copied(
   return replacement;
 }
 
+/**
+ * Helper for `replace()`, which walks an array's elements and returns the array
+ * itself when none of them moved.
+ *
+ * Holes stay holes: an absent element is not read, so nothing fills it in.
+ */
 function replaceInElements(
   value: readonly unknown[],
   seen: Map<object, unknown>,
@@ -279,6 +295,10 @@ function replaceInElements(
   return changed ? replaced : value;
 }
 
+/**
+ * Helper for `replace()`, which walks a record's members and returns the record
+ * itself when none of them moved.
+ */
 function replaceInEntries(
   value: Record<string, unknown>,
   seen: Map<object, unknown>,

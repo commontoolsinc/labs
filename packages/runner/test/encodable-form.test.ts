@@ -325,6 +325,49 @@ describe("encodable-form", () => {
       });
     });
 
+    describe("the `replaceOther` hook", () => {
+      // The hook is how a caller names what ELSE has no fabric representation.
+      // Nothing else in this file passes a non-identity one, so this is the only
+      // place the hook's replacement is exercised at all.
+      const viaHook = (value: unknown, replace: (v: object) => unknown) => {
+        const seen: { copy: unknown; original: unknown }[] = [];
+        const result = replaceArtifacts(
+          value,
+          (copy, original) => seen.push({ copy, original }),
+          replace as (v: object | ((...args: never[]) => unknown)) => unknown,
+        );
+        return { result, seen };
+      };
+
+      it("returns what the hook puts in a value's place", () => {
+        const stood = new Date(0);
+        const { result } = viaHook(
+          { held: stood },
+          (v) => v === stood ? "stand-in" : v,
+        );
+        expect(result).toEqual({ held: "stand-in" });
+      });
+
+      it("tells the copy callback about a hook's replacement", () => {
+        // The hook's replacement is a copy like any other, and identity-keyed
+        // facts have to be able to follow it.
+        const stood = new Date(0);
+        const { seen } = viaHook(
+          { held: stood },
+          (v) => v === stood ? "stand-in" : v,
+        );
+        expect(seen).toContainEqual({ copy: "stand-in", original: stood });
+      });
+
+      it("returns a value the hook left alone by identity", () => {
+        const untouched = new Date(0);
+        const value = { held: untouched };
+        const { result, seen } = viaHook(value, (v) => v);
+        expect(result).toBe(value);
+        expect(seen).toEqual([]);
+      });
+    });
+
     describe("the copy callback", () => {
       // Identity-keyed facts -- trust, the content-addressed entry ref -- do not
       // travel with the bytes, so a caller is told about each copy in order to
