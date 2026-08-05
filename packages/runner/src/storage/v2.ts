@@ -96,6 +96,7 @@ import {
   getDirectTransactionReadActivities,
 } from "./transaction-inspection.ts";
 import {
+  isResolveOnVerdictTx,
   getBlindStructuralTarget,
   isMergeableOpRead,
   isReadExcludedFromConflict,
@@ -2157,6 +2158,10 @@ class SpaceReplica implements ISpaceReplica {
   #parkedAccepts = new Map<number, {
     operations: NativeCommitOperation[];
     applied: AppliedCommit;
+    /** Resolves when the parked application runs — the commit promise's
+     * resolution point (CT-1950): the caller may then act on its
+     * subscribed view as one reflecting the committed write. */
+    settled: PromiseWithResolvers<void>;
   }>();
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -2549,7 +2554,12 @@ class SpaceReplica implements ISpaceReplica {
     this.#staleFloor.clear();
     // Parked accepts die with the marker space: on reset the re-pull
     // re-derives durable state (which contains the accepted writes), and on
-    // close there is nothing left to promote into.
+    // close there is nothing left to promote into. Their promises RESOLVE —
+    // the commits succeeded durably; a caller must never see a durable
+    // success reported as failure (CT-1950).
+    for (const entry of this.#parkedAccepts.values()) {
+      entry.settled.resolve();
+    }
     this.#parkedAccepts.clear();
   }
 
@@ -2569,6 +2579,7 @@ class SpaceReplica implements ISpaceReplica {
         const entry = this.#parkedAccepts.get(parked)!;
         this.#parkedAccepts.delete(parked);
         this.confirmPending(parked, entry.operations, entry.applied);
+        entry.settled.resolve();
       }
     }
     const ready: PromiseWithResolvers<void>[] = [];
@@ -3624,7 +3635,10 @@ class SpaceReplica implements ISpaceReplica {
             wireCommit,
             () => this.markRouteWriteIssued(routeSources),
           );
-          this.settleAccept(localSeq, operations, applied);
+          const settled = this.settleAccept(localSeq, operations, applied);
+          if (source === undefined || !isResolveOnVerdictTx(source)) {
+            await settled;
+          }
           telemetry?.submit({
             type: "storage.push.complete",
             id: pushOpId,
@@ -3661,7 +3675,14 @@ class SpaceReplica implements ISpaceReplica {
             outcome.rejection,
           );
         }
-        this.settleAccept(localSeq, operations, outcome.applied);
+        const settledRace = this.settleAccept(
+          localSeq,
+          operations,
+          outcome.applied,
+        );
+        if (source === undefined || !isResolveOnVerdictTx(source)) {
+          await settledRace;
+        }
         telemetry?.submit({
           type: "storage.push.complete",
           id: pushOpId,
@@ -4361,7 +4382,7 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
-  ): void {
+  ): Promise<void> {
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no
@@ -4370,11 +4391,19 @@ class SpaceReplica implements ISpaceReplica {
     const parkable =
       this.#sessionClient?.serverFlags?.verdictCatchUpMarkers === true &&
       this.#subscribedWatchView !== null;
-    if (!parkable || this.#caughtUpLocalSeq >= localSeq) {
+    // Zero-operation commits (scheduler observation batches) carry no state
+    // to apply and no view consequences — parking them would only stall
+    // synced() on the batch window for nothing.
+    if (
+      !parkable || operations.length === 0 ||
+      this.#caughtUpLocalSeq >= localSeq
+    ) {
       this.confirmPending(localSeq, operations, applied);
-      return;
+      return Promise.resolve();
     }
-    this.#parkedAccepts.set(localSeq, { operations, applied });
+    const settled = Promise.withResolvers<void>();
+    this.#parkedAccepts.set(localSeq, { operations, applied, settled });
+    return settled.promise;
   }
 
   // The marker channel died (the subscribed view closed): apply everything
@@ -4391,6 +4420,7 @@ class SpaceReplica implements ISpaceReplica {
       const entry = this.#parkedAccepts.get(parked)!;
       this.#parkedAccepts.delete(parked);
       this.confirmPending(parked, entry.operations, entry.applied);
+      entry.settled.resolve();
     }
   }
 

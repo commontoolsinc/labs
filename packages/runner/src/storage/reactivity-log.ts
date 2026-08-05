@@ -116,6 +116,23 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
 // Both the wrapper and the inner storage transaction(s) are marked, since
 // read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
 // layers.
+// Transactions whose commit promise should resolve at VERDICT receipt
+// rather than marker coverage (CT-1950). For callers — controlled-staleness
+// test fixtures foremost — that need "durably accepted" without implying
+// "fan-out delivered": awaiting a coverage-resolving commit forces the
+// batch pass through, which destroys any premise built on peers not yet
+// having received it. State application still parks; only the promise
+// timing changes.
+const resolveOnVerdictTxs = new WeakSet<object>();
+
+export function markResolveOnVerdictTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) resolveOnVerdictTxs.add(layer);
+}
+
+export function isResolveOnVerdictTx(tx: object): boolean {
+  return resolveOnVerdictTxs.has(tx);
+}
+
 const uiInputBlindWriteTxs = new WeakSet<object>();
 
 function* blindWriteTxChain(tx: object): Generator<object> {
