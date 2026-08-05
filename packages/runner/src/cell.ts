@@ -3298,6 +3298,14 @@ export function frameAnchorIds(
 /**
  * Converts cells and objects that can be turned to cells to links.
  *
+ * `ancestors` holds the ancestors of the value being converted, so what it
+ * recognizes is a cycle. A value reachable twice by different paths is not one:
+ * it is shared, and each position gets its own conversion. Answering a shared
+ * reference with a back-link would rewrite one of its positions into a pointer
+ * at the other -- and a graph holds plenty of shared structure that is nobody's
+ * cycle, an empty `path: []` array reachable from every alias in it being the
+ * common case.
+ *
  * @param value - The value to convert.
  * @returns The converted value.
  */
@@ -3310,10 +3318,10 @@ export function convertCellsToLinks(
     keepAsCell?: KeepAsCell;
   } = {},
   path: string[] = [],
-  seen: Map<any, string[]> = new Map(),
+  ancestors: Map<any, string[]> = new Map(),
 ): any {
-  if (seen.has(value)) {
-    return linkRefFrom({ path: seen.get(value) });
+  if (ancestors.has(value)) {
+    return linkRefFrom({ path: ancestors.get(value) });
   }
 
   // Early-return cases
@@ -3342,60 +3350,75 @@ export function convertCellsToLinks(
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  seen.set(value, path); // ...which needs to be tracked for circularity.
+  // Held before the conversions below reassign `value`, since what `ancestors` is
+  // keyed on -- and cleared of on the way back out -- is the object as given.
+  const original = value;
+  ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
-  // A schema-bearing read hangs a non-enumerable `toCell` symbol on the arrays
-  // it returns. That symbol is machinery, not content, and an array carrying it
-  // is not a `FabricValue`, so drop it before the conversion below would reject
-  // it. Only annotated arrays are cleaned: an array carrying anything else
-  // non-index is genuinely unrepresentable and must still be rejected.
-  if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
-    // What these produce is a valid `FabricValueLayer` already, so it wants no
-    // further conversion. Objects need this as much as arrays do -- the
-    // annotation goes on either (see `schema.ts`) -- and before the object rule
-    // rejected non-string keys the object case was dropping it silently instead.
-    value = Array.isArray(value)
-      ? shallowCleanArray(value, false)
-      : shallowCleanPlainObject(value, false);
-  } else {
-    // Convert the (top level of) the value to fabric form (a valid
-    // `FabricValue`) if it isn't already, or throw if it's neither already
-    // valid nor convertible.
-    value = shallowFabricFromNativeValue(value);
-  }
+  // Everything past the line above runs inside this `try`, so that EVERY way
+  // out clears the ancestor just recorded -- the exits that answer a value
+  // without descending into it as much as the ones that recur. An exit that
+  // skipped the clearing would leave the value an ancestor of all the rest of
+  // the walk, and the next position holding it would be answered as a cycle.
+  try {
+    // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
+    // arrays it returns. That symbol is machinery, not content, and an array
+    // carrying it is not a `FabricValue`, so drop it before the conversion
+    // below would reject it. Only annotated arrays are cleaned: an array
+    // carrying anything else non-index is genuinely unrepresentable and must
+    // still be rejected.
+    if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
+      // What these produce is a valid `FabricValueLayer` already, so it wants
+      // no further conversion. Objects need this as much as arrays do -- the
+      // annotation goes on either (see `schema.ts`).
+      value = Array.isArray(value)
+        ? shallowCleanArray(value, false)
+        : shallowCleanPlainObject(value, false);
+    } else {
+      // Convert the (top level of) the value to fabric form (a valid
+      // `FabricValue`) if it isn't already, or throw if it's neither already
+      // valid nor convertible.
+      value = shallowFabricFromNativeValue(value);
+    }
 
-  // Recursively process arrays and objects, if we ended up with one of those.
-  //
-  // TODO(danfuzz): Both container branches below build a fresh container,
-  // throwing away the copy just made above. One copy could serve both.
-  if (!isRecord(value)) {
-    // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
-    return value;
-  } else if (value instanceof FabricPrimitive) {
-    // An opaque scalar whose state lives in private fields, so it has zero
-    // enumerable own properties and the object branch below would rebuild it
-    // from its (empty) entries as a bare `{}`. It leaves whole instead.
+    // Recursively process arrays and objects, if we ended up with one of those.
     //
-    // This catches both forms that arrive here: one the caller already built,
-    // and one `shallowFabricFromNativeValue()` just minted from a native (a
-    // `Uint8Array`, a `Date`) immediately above.
-    //
-    // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
-    // container reached by its codec contents rather than by property name, so
-    // it still falls to the object branch and is rebuilt from zero enumerable
-    // own properties. Same marker as the sibling walk in `builder/to-encodable-form.ts`.
-    return value;
-  } else if (Array.isArray(value)) {
-    return value.map((value, index) =>
-      convertCellsToLinks(value, options, [...path, String(index)], seen)
-    );
-  } else {
+    // TODO(danfuzz): Both container branches below build a fresh container,
+    // throwing away the copy just made above. One copy could serve both.
+    if (!isRecord(value)) {
+      // `shallowFabricFromNativeValue()` converted this into a primitive value
+      // of some sort.
+      return value;
+    } else if (value instanceof FabricPrimitive) {
+      // An opaque scalar whose state lives in private fields, so it has zero
+      // enumerable own properties and the object branch below would rebuild it
+      // from its (empty) entries as a bare `{}`. It leaves whole instead.
+      //
+      // This catches both forms that arrive here: one the caller already built,
+      // and one `shallowFabricFromNativeValue()` just minted from a native (a
+      // `Uint8Array`, a `Date`) immediately above.
+      //
+      // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
+      // container reached by its codec contents rather than by property name,
+      // so it still falls to the object branch and is rebuilt from zero
+      // enumerable own properties. Same marker as the sibling walk in
+      // `builder/to-encodable-form.ts`.
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((value, index) =>
+        convertCellsToLinks(value, options, [...path, String(index)], ancestors)
+      );
+    }
     return Object.fromEntries(
       Object.entries(value).map(([key, value]) => [
         key,
-        convertCellsToLinks(value, options, [...path, String(key)], seen),
+        convertCellsToLinks(value, options, [...path, String(key)], ancestors),
       ]),
     );
+  } finally {
+    ancestors.delete(original);
   }
 }
 
