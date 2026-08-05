@@ -3125,9 +3125,15 @@ export class Runner {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
-      if (result.error || ownership.isCancelled()) {
+      if (result.error) {
+        // The callback that would install this start is the one running now,
+        // so a failed transaction leaves nothing to reach the pending entry
+        // later. Settle it here, which also drops it from the index of starts
+        // pending under this result's key.
+        ownership.cancel();
         return;
       }
+      if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       const committedResultCell = this.runtime.getCellFromLink<T>(

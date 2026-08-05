@@ -337,6 +337,37 @@ describe("child run ownership", () => {
     runtime.runner.stop(result);
   });
 
+  it("stops tracking a commit-gated start when its transaction fails", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<Record<string, unknown>>(
+      space,
+      "deferred start whose transaction fails",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const pending = (runtime.runner as unknown as {
+      pendingDeferredStarts: Map<string, Set<unknown>>;
+    }).pendingDeferredStarts;
+    expect(pending.size).toBe(1);
+
+    expect(tx.abort("setup rejected").error).toBeUndefined();
+    await runtime.idle();
+
+    // The start will never install, so it settles as cancelled and leaves
+    // nothing behind for the result's key.
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    expect(pending.size).toBe(0);
+  });
+
   it("declines to release a result that has no registration", () => {
     const result = runtime.getCell<Record<string, unknown>>(
       space,
