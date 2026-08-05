@@ -524,8 +524,13 @@ disabled (README §3.5).
   the explicit `scope_key` on every scoped write (addressing) and
   the acting identity on every action RUN's writes, where the run
   has one — §1 (attribution,
-  `action × instance`). Anything further needs a spec edit here
-  first.
+  `action × instance`). The pair's CARRIAGE is server-internal
+  admission input (like `commitClass`/`holder`: `ClientCommit`
+  cannot express it), and its STORED form is a per-op-indexed
+  sidecar on the commit row — recorded, never wire, never pushed;
+  admission consumes only the addressing half, to key scoped rows
+  (§1's recorded-not-read attribution). Anything further needs a
+  spec edit here first.
 - **`scope_key` is thereby PROTOCOL vocabulary**, no longer
   engine-internal vocabulary: it appears inside derived commit
   bodies and on lease-holder reads, so its format is defined ONCE

@@ -31,6 +31,7 @@ import {
   selectDocHead,
   selectWritePathsSince,
   WaveCommitConflictError,
+  WavePreconditionError,
 } from "../v2/engine.ts";
 import {
   acquireExecutionLease,
@@ -130,7 +131,7 @@ Deno.test("wave carriage: a derived commit stores annotations and consequenceOf;
         },
       ],
       consequenceOf: ["e1", "e2"],
-      waveBasis: { basisSeq: 0, resolvedConflicts: [] },
+      waveBasis: { basisSeq: 0, rebasedHeads: [] },
     });
     assertEquals(applied.seq, 1);
     const row = commitRow(path, 1);
@@ -254,7 +255,7 @@ Deno.test("wave commit: re-verification throws NAMING docs whose head passed the
           commit: setCommit(1, [{ id: "of:x" }, { id: "of:y" }]),
           commitClass: "derived",
           holder,
-          waveBasis: { basisSeq: 0, resolvedConflicts: [] },
+          waveBasis: { basisSeq: 0, rebasedHeads: [] },
         }),
       WaveCommitConflictError,
     );
@@ -277,7 +278,7 @@ Deno.test("wave commit: re-verification throws NAMING docs whose head passed the
   }
 });
 
-Deno.test("wave commit: a doc the wave already resolved is excluded from re-verification", async () => {
+Deno.test("wave commit: a rebased doc re-verifies against the exact head its merge decision observed", async () => {
   const { engine } = await createEngine();
   setServerExecutionConfig(true);
   try {
@@ -287,18 +288,83 @@ Deno.test("wave commit: a doc the wave already resolved is excluded from re-veri
       principal: "user:rival",
       commit: setCommit(1, [{ id: "of:x", n: 99 }]),
     });
-    // The wave resolved of:x per write class (say a rebase) — the batch
-    // still writes it, and re-verification skips it.
+    // The wave rebased its write to of:x against head 1: the batch still
+    // writes it, and re-verification requires the head to EQUAL 1.
     const applied = applyWaveCommit(engine, {
       sessionId: "server:executor",
       space: SPACE,
       commit: setCommit(1, [{ id: "of:x" }, { id: "of:y" }]),
       commitClass: "derived",
       holder,
-      waveBasis: { basisSeq: 0, resolvedConflicts: ["of:x space"] },
+      waveBasis: {
+        basisSeq: 0,
+        rebasedHeads: [{ doc: "of:x space", head: 1 }],
+      },
     });
     assertEquals(applied.seq, 2);
     assertEquals(selectDocHead(engine, { id: "of:y", scopeKey: "space" }), 2);
+
+    // A head that moved PAST the decision invalidates the merge: the
+    // same rebased claim against the now-stale head 1 conflicts, named.
+    applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: setCommit(2, [{ id: "of:x", n: 100 }]),
+    });
+    const error = assertThrows(
+      () =>
+        applyWaveCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(3, [{ id: "of:x" }]),
+          commitClass: "derived",
+          holder,
+          waveBasis: {
+            basisSeq: 0,
+            rebasedHeads: [{ doc: "of:x space", head: 1 }],
+          },
+        }),
+      WaveCommitConflictError,
+    );
+    assertEquals(error.conflictedDocs, ["of:x space"]);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("wave commit: precondition failures are named BY INDEX, and nothing is applied", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    // of:taken exists, so its entity-absent precondition fails; of:free
+    // does not, so its precondition holds.
+    applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: setCommit(1, [{ id: "of:taken", n: 1 }]),
+    });
+    const error = assertThrows(
+      () =>
+        applyWaveCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: {
+            ...setCommit(1, [{ id: "of:out" }]),
+            preconditions: [
+              { kind: "entity-absent", id: "of:free" },
+              { kind: "entity-absent", id: "of:taken" },
+            ],
+          },
+          commitClass: "derived",
+          holder,
+          waveBasis: { basisSeq: 1, rebasedHeads: [] },
+        }),
+      WavePreconditionError,
+    );
+    assertEquals(error.failedPreconditions, [1]);
+    assertEquals(selectDocHead(engine, { id: "of:out", scopeKey: "space" }), 0);
   } finally {
     resetServerExecutionConfig();
     close(engine);
@@ -316,7 +382,7 @@ Deno.test("wave commit: basis rows land in the same transaction; in-wave reads s
       commit: setCommit(1, [{ id: "of:out" }]),
       commitClass: "derived",
       holder,
-      waveBasis: { basisSeq: 0, resolvedConflicts: [] },
+      waveBasis: { basisSeq: 0, rebasedHeads: [] },
       basisInstances: [{
         action: "action-a",
         actionScopeKey: "space",

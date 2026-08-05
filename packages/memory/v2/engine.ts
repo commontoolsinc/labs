@@ -1492,10 +1492,11 @@ export const applyCommit = (
 
 /**
  * A wave commit's per-doc CAS re-verification failed: some doc the batch
- * writes has a head past the wave's basis and outside the wave's already-
- * resolved set. The wave commit step folds `conflictedDocs` into its
- * conflict resolution and re-attempts — whole-wave CAS failure is
- * forbidden (serving-loop.md §3d), so this error NAMES what moved.
+ * writes has a head past the wave's basis, or a rebased doc's head moved
+ * past the head the rebase decision observed. The wave commit step folds
+ * `conflictedDocs` into its conflict resolution and re-attempts —
+ * whole-wave CAS failure is forbidden (serving-loop.md §3d), so this
+ * error NAMES what moved.
  */
 export class WaveCommitConflictError extends Error {
   override readonly name = "WaveCommitConflictError";
@@ -1506,6 +1507,26 @@ export class WaveCommitConflictError extends Error {
         `basis: ${conflictedDocs.join(", ")}`,
     );
     this.conflictedDocs = conflictedDocs;
+  }
+}
+
+/**
+ * A wave commit's precondition pre-check failed. Unlike the shared
+ * validator's first-failure throw, this NAMES every failing precondition
+ * by index into the batch's preconditions array, so the wave commit step
+ * can resolve each failure to its owning contribution per write class
+ * (serving-loop.md §3d — one contribution's violated create-only mark
+ * must not abort every other contribution's work).
+ */
+export class WavePreconditionError extends Error {
+  override readonly name = "WavePreconditionError";
+  readonly failedPreconditions: readonly number[];
+  constructor(failedPreconditions: readonly number[], detail: string) {
+    super(
+      `wave commit precondition(s) failed at index(es) ` +
+        `${failedPreconditions.join(", ")}: ${detail}`,
+    );
+    this.failedPreconditions = failedPreconditions;
   }
 }
 
@@ -1599,9 +1620,11 @@ export const applyWaveCommit = (
     waveBasis: {
       /** The wave's input snapshot seq (per-doc CAS basis). */
       basisSeq: number;
-      /** Doc-instance keys (`${id} ${scopeKey}`) the wave already
-       * resolved per write class; excluded from re-verification. */
-      resolvedConflicts: readonly string[];
+      /** Per doc-instance key (`${id} ${scopeKey}`): the head the wave's
+       * rebase decision observed. Re-verification requires these docs to
+       * sit at EXACTLY that head — §3d's re-CAS against the new head; a
+       * further move invalidates the field-level merge. */
+      rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
     };
     basisInstances?: readonly WaveBasisInstance[];
   },
@@ -1609,7 +1632,9 @@ export const applyWaveCommit = (
   return engine.database.transaction(
     (txEngine: Engine, txOptions: typeof options) => {
       const { waveBasis, basisInstances, ...applyOptions } = txOptions;
-      const resolved = new Set(waveBasis.resolvedConflicts);
+      const rebasedHeads = new Map(
+        waveBasis.rebasedHeads.map(({ doc, head }) => [doc, head]),
+      );
       const scopeKeyByOp = new Map<number, string>();
       for (const annotation of applyOptions.annotations ?? []) {
         if (annotation.scopeKey !== undefined) {
@@ -1617,6 +1642,7 @@ export const applyWaveCommit = (
         }
       }
       const conflicted = new Set<string>();
+      const checked = new Set<string>();
       for (
         const [opIndex, operation] of applyOptions.commit.operations.entries()
       ) {
@@ -1627,19 +1653,67 @@ export const applyWaveCommit = (
             sessionId: applyOptions.sessionId,
           });
         const key = `${operation.id} ${scopeKey}`;
-        if (resolved.has(key) || conflicted.has(key)) continue;
+        if (checked.has(key)) continue;
+        checked.add(key);
         const head = selectDocHead(txEngine, {
           branch: applyOptions.commit.branch,
           id: operation.id,
           scopeKey,
         });
-        if (head > waveBasis.basisSeq) conflicted.add(key);
+        const rebasedAt = rebasedHeads.get(key);
+        if (rebasedAt !== undefined) {
+          // A rebased write: sound only against the exact head its
+          // field-level merge was decided at.
+          if (head !== rebasedAt) conflicted.add(key);
+        } else if (head > waveBasis.basisSeq) {
+          conflicted.add(key);
+        }
       }
       if (conflicted.size > 0) {
         throw new WaveCommitConflictError([...conflicted]);
       }
-      const applied = applyCommitTransaction(txEngine, applyOptions);
+      // Preconditions pre-checked ONE BY ONE so a failure names its
+      // index: the shared validator throws on the first failure without
+      // saying which, and the wave commit step needs per-owner
+      // resolution (WavePreconditionError above). The synthetic
+      // single-precondition commit reuses the validator unchanged; the
+      // apply below re-runs the full set inside this same transaction,
+      // which — having passed here — cannot fail there.
+      const failedPreconditions: number[] = [];
+      let firstDetail = "";
+      const sessionKey = resolveCommitSessionKey(
+        applyOptions.sessionId,
+        applyOptions.principal,
+      );
       const branch = applyOptions.commit.branch ?? DEFAULT_BRANCH;
+      for (
+        const [index, precondition] of (
+          applyOptions.commit.preconditions ?? []
+        ).entries()
+      ) {
+        try {
+          validateCommitPreconditions(txEngine, sessionKey, branch, {
+            ...applyOptions.commit,
+            preconditions: [precondition],
+          }, {
+            principal: applyOptions.principal,
+            sessionId: applyOptions.sessionId,
+          });
+        } catch (error) {
+          if (error instanceof PreconditionFailedError) {
+            failedPreconditions.push(index);
+            if (firstDetail === "") {
+              firstDetail = error.message;
+            }
+          } else {
+            throw error;
+          }
+        }
+      }
+      if (failedPreconditions.length > 0) {
+        throw new WavePreconditionError(failedPreconditions, firstDetail);
+      }
+      const applied = applyCommitTransaction(txEngine, applyOptions);
       for (const instance of basisInstances ?? []) {
         replaceSchedulerBasisRows(txEngine, {
           branch,

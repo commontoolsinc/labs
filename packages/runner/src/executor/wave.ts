@@ -93,7 +93,7 @@ export interface WaveRunContext {
   eventId?: string;
   /** The same-wave parent event of a cascade-minted event: a requeued
    * parent folds this contribution into the requeue set (§3d; the
-   * model's C8b closure). */
+   * model's C8d rollback closure). */
   parentEventId?: string;
   /** The scope INSTANCE this run ran as, for basis rows' action_scope_key.
    * Defaults to `"space"` — the pre-narrowing instance. Stage E re-keys
@@ -148,6 +148,15 @@ export interface SchedulerBasisRow {
   seq: number | null;
 }
 
+/** One §3b overwrite unit of the wave's basis-index carriage: the LAST
+ * run of (action, actionScopeKey) in the wave, whose rows replace that
+ * instance's stored set. */
+export interface WaveBasisInstanceRows {
+  action: string;
+  actionScopeKey: string;
+  rows: SchedulerBasisRow[];
+}
+
 /** The batched commit the wave hands the sink, per space. */
 export interface WaveSpaceCommit {
   space: MemorySpace;
@@ -157,11 +166,12 @@ export interface WaveSpaceCommit {
   /** The wave's read basis: the store seq of the wave's input snapshot.
    * The sink's re-verification compares doc heads against it. */
   basisSeq: number;
-  /** Doc-instance keys (`${id} ${scopeKey}`) whose conflicts the wave
-   * already resolved per write class (dropped, rebased, or requeued
-   * away). The sink's re-verification MUST skip them — reporting one
-   * again would never make progress. */
-  resolvedConflicts: readonly string[];
+  /** Per doc-instance key (`${id} ${scopeKey}`): the head the wave's
+   * REBASE decision observed (§3d's "re-CAS against the new head"). The
+   * sink's re-verification MUST require these docs' heads to EQUAL the
+   * recorded value — a head that moved past the decision invalidates the
+   * field-level merge, and the wave re-decides against the new head. */
+  rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
   /** Surviving operations, in seal order — the commit step never reorders
    * (§3's sealing-order MUST binds the loop's processing order; this step
    * preserves what it was handed). */
@@ -174,8 +184,10 @@ export interface WaveSpaceCommit {
   /** Every eventId whose handler consequences ride this commit. */
   consequenceOf: string[];
   /** Basis rows to write INSIDE the same store transaction (§3b's
-   * carriage rule — never own commits, never commit metadata). */
-  basisRows: SchedulerBasisRow[];
+   * carriage rule — never own commits, never commit metadata), already
+   * grouped into overwrite units: per (action, instance), the LAST
+   * contributing run's set. */
+  basisInstances: WaveBasisInstanceRows[];
   /** The DR1 lease holder identity the derived-class admission checks. */
   holder: string | undefined;
 }
@@ -202,15 +214,19 @@ export interface WaveCommitRejection {
  *
  * - `commitWave` MUST apply the batch, its basis rows, and its
  *   consequence/annotation carriage in ONE store transaction;
- * - `commitWave` MUST re-verify, inside that transaction, that no doc the
- *   batch writes (outside `resolvedConflicts`) has a head past `basisSeq`,
- *   and report offenders in `conflictedDocs` — the batch itself carries no
- *   store-level read CAS, and §3d forbids blind derived writes, so this
- *   re-verification is the load-bearing concurrency check;
+ * - `commitWave` MUST re-verify, inside that transaction, every doc the
+ *   batch writes: a doc in `rebasedHeads` must sit at EXACTLY the head
+ *   the rebase decision observed, every other doc's head must not have
+ *   passed `basisSeq`, and offenders are reported in `conflictedDocs` —
+ *   the batch itself carries no store-level read CAS, and §3d forbids
+ *   blind derived writes, so this re-verification is the load-bearing
+ *   concurrency check;
  * - whole-wave CAS failure is FORBIDDEN (§3d): a rejection must name what
- *   conflicted so the wave resolves per doc, per write class, and
- *   re-attempts. The loop converges because the conflicted set only grows
- *   within one wave commit — monotone progress, not a timed retry.
+ *   conflicted (or which preconditions failed, by index) so the wave
+ *   resolves per doc, per write class, and re-attempts. The loop
+ *   converges without timers: drops and requeues are monotone, and a
+ *   rebase re-decision happens only when a named doc's head actually
+ *   advanced — each re-attempt observes strictly newer store state.
  */
 export interface WaveCommitSink {
   /** Current head seq per doc-instance key (`${id} ${scopeKey}`),
@@ -563,15 +579,12 @@ export class WaveAccumulator
           "lease lost mid-wave; the in-flight wave aborts " +
             "(serving-loop.md §2)",
         );
-        if (contribution.context.kind === "event-handler") {
-          outcome.dispositions[contribution.index] = { kind: "requeued" };
-          if (contribution.context.eventId !== undefined) {
-            outcome.requeuedEventIds.push(contribution.context.eventId);
-          }
-        } else {
-          outcome.dispositions[contribution.index] = { kind: "dropped" };
-        }
+        outcome.dispositions[contribution.index] =
+          contribution.context.kind === "event-handler"
+            ? { kind: "requeued" }
+            : { kind: "dropped" };
       }
+      this.#reportRequeuedEvents(outcome, () => true);
       outcome.aborted = "lease-lost";
       return outcome;
     }
@@ -605,11 +618,19 @@ export class WaveAccumulator
     const droppedWhole = new Set<number>();
     /** per contribution: home doc-instance keys whose ops are dropped */
     const droppedDocs: Set<string>[] = this.#contributions.map(() => new Set());
-    /** conflicted docs whose non-re-derivable ops rebase: ops kept, the
-     * doc resolved (its concurrent writes touched disjoint fields) */
-    const rebasedDocs = new Set<string>();
+    /** per contribution: conflicted docs whose non-re-derivable ops
+     * rebase — the disposition is PER (contribution, doc): one handler's
+     * commuting patches never absolve another contribution's writes to
+     * the same doc from their own drop/rebase/requeue check. */
+    const rebasedDocs: Set<string>[] = this.#contributions.map(() => new Set());
+    /** per rebased doc: the head every rebase decision on it observed
+     * (§3d's "re-CAS against the new head" — the sink re-verifies the
+     * doc still sits exactly there inside its store transaction). */
+    const rebasedHeads = new Map<string, number>();
 
-    const heads = await sink.currentHeads(this.#space, [...allDocs.values()]);
+    const heads = new Map(
+      await sink.currentHeads(this.#space, [...allDocs.values()]),
+    );
     for (const [key] of allDocs) {
       if ((heads.get(key) ?? 0) > this.#basisSeq) conflicted.add(key);
     }
@@ -627,7 +648,7 @@ export class WaveAccumulator
           if (
             !conflicted.has(key) ||
             droppedDocs[contribution.index].has(key) ||
-            rebasedDocs.has(key)
+            rebasedDocs[contribution.index].has(key)
           ) {
             continue;
           }
@@ -650,7 +671,8 @@ export class WaveAccumulator
               this.#basisSeq,
             );
             if (this.#rebases(contribution, doc, concurrent)) {
-              rebasedDocs.add(key);
+              rebasedDocs[contribution.index].add(key);
+              rebasedHeads.set(key, heads.get(key) ?? 0);
             } else {
               requeued.add(contribution.index);
               break;
@@ -729,12 +751,11 @@ export class WaveAccumulator
 
     // ---- the home commit, re-resolving on sink-reported races ----
     while (true) {
-      const resolved = [...conflicted];
       const batch = this.#buildHomeBatch(
         requeued,
         droppedWhole,
         droppedDocs,
-        resolved,
+        rebasedHeads,
       );
 
       if (batch.operations.length === 0 && batch.consequenceOf.length === 0) {
@@ -766,16 +787,30 @@ export class WaveAccumulator
       }
 
       // The sink re-verified inside its transaction and something moved
-      // after our head query (or a precondition failed). Fold the news in
-      // and resolve again; a rejection naming nothing is terminal. This
-      // converges without timers: `conflicted` and the withdrawn sets
-      // only grow, both bounded by the wave's own writes.
+      // after our head query (or a precondition failed). Fold the news
+      // in and resolve again; a rejection naming nothing is terminal.
+      // This converges without timers: drops and requeues are monotone,
+      // and a rebase re-decision runs only for a doc whose head actually
+      // advanced — each pass observes strictly newer store state.
       const rejection = result.error;
       let progressed = false;
+      const renamed: string[] = [];
       for (const key of rejection.conflictedDocs ?? []) {
-        if (!conflicted.has(key)) {
+        const wasRebased = rebasedHeads.has(key);
+        if (!conflicted.has(key) || wasRebased) {
           conflicted.add(key);
+          renamed.push(key);
           progressed = true;
+        }
+        if (wasRebased) {
+          // The head moved past the rebase decision: the field-level
+          // merge is void. Reset every contribution's rebase state for
+          // this doc so the next resolve pass re-decides against the
+          // new head (§3d's re-CAS).
+          rebasedHeads.delete(key);
+          for (const perContribution of rebasedDocs) {
+            perContribution.delete(key);
+          }
         }
       }
       for (const index of rejection.failedPreconditions ?? []) {
@@ -811,15 +846,19 @@ export class WaveAccumulator
             contribution.context.kind === "event-handler"
               ? { kind: "requeued" }
               : { kind: "dropped" };
-          if (
-            contribution.context.kind === "event-handler" &&
-            contribution.context.eventId !== undefined
-          ) {
-            outcome.requeuedEventIds.push(contribution.context.eventId);
-          }
         }
+        this.#reportRequeuedEvents(outcome, () => true);
         outcome.aborted = "rejected";
         return outcome;
+      }
+      if (renamed.length > 0) {
+        const fresh = await sink.currentHeads(
+          this.#space,
+          renamed.map((key) => allDocs.get(key)!).filter((doc) =>
+            doc !== undefined
+          ),
+        );
+        for (const [key, head] of fresh) heads.set(key, head);
       }
       await resolveConflicts();
     }
@@ -951,14 +990,18 @@ export class WaveAccumulator
     requeued: ReadonlySet<number>,
     droppedWhole: ReadonlySet<number>,
     droppedDocs: ReadonlyArray<ReadonlySet<string>>,
-    resolvedConflicts: readonly string[],
+    rebasedHeads: ReadonlyMap<string, number>,
   ): WaveSpaceCommit {
     const operations: Operation[] = [];
     const annotations: WaveWriteAnnotation[] = [];
     const preconditions: CommitPrecondition[] = [];
     const preconditionOwners: number[] = [];
     const consequenceOf: string[] = [];
-    const basisRows: SchedulerBasisRow[] = [];
+    // §3b's overwrite unit: when one wave holds several runs of the same
+    // (action, instance) — a later contribution re-ran the action against
+    // earlier sealed writes — the LAST run's rows replace the earlier
+    // run's as a set, exactly as they would across waves.
+    const basisInstances = new Map<string, WaveBasisInstanceRows>();
     for (const contribution of this.#survivors(requeued, droppedWhole)) {
       const home = this.#homeSealed(contribution);
       if (home === undefined) continue;
@@ -1002,20 +1045,30 @@ export class WaveAccumulator
         consequenceOf.push(context.eventId);
       }
       if (!contribution.anonymous) {
-        basisRows.push(...this.#basisRowsFor(contribution));
+        const actionScopeKey = context.actionScopeKey ?? "space";
+        basisInstances.set(`${context.actionId} ${actionScopeKey}`, {
+          action: context.actionId,
+          actionScopeKey,
+          rows: this.#basisRowsFor(contribution),
+        });
       }
     }
+    // The rebased ops stay in the batch; the sink re-verifies each
+    // rebased doc still sits at the head the merge decision observed.
     return {
       space: this.#space,
       home: true,
       basisSeq: this.#basisSeq,
-      resolvedConflicts,
+      rebasedHeads: [...rebasedHeads.entries()].map(([doc, head]) => ({
+        doc,
+        head,
+      })),
       operations,
       preconditions,
       preconditionOwners,
       annotations,
       consequenceOf,
-      basisRows,
+      basisInstances: [...basisInstances.values()],
       holder: this.#lease?.holder,
     };
   }
@@ -1033,12 +1086,12 @@ export class WaveAccumulator
             space: sealed.space,
             home: false,
             basisSeq: this.#basisSeq,
-            resolvedConflicts: [],
+            rebasedHeads: [],
             operations: [],
             preconditions: [],
             annotations: [],
             consequenceOf: [],
-            basisRows: [],
+            basisInstances: [],
             holder: this.#lease?.holder,
           };
           batches.set(sealed.space, batch);
@@ -1110,14 +1163,16 @@ export class WaveAccumulator
     homeSeq: number,
     foreignSeqs: ReadonlyMap<MemorySpace, number>,
   ): void {
+    this.#reportRequeuedEvents(outcome, (idx) => requeued.has(idx));
     for (const contribution of this.#contributions) {
       const idx = contribution.index;
       const context = contribution.context;
       if (requeued.has(idx)) {
         outcome.dispositions[idx] = { kind: "requeued" };
-        if (context.eventId !== undefined) {
-          outcome.requeuedEventIds.push(context.eventId);
-        }
+        // The withdraw rolls back every space's local overlay, foreign
+        // included — a foreign provisioning commit that already landed
+        // stays durable, and the requeued event's replay converges on
+        // the same deterministic ids (protocol.md §2b).
         this.#withdraw(
           contribution,
           "raced consequence requeued: rolled back to unconsequenced, " +
@@ -1174,19 +1229,45 @@ export class WaveAccumulator
   #abortAfterForeignFailure(outcome: WaveCommitOutcome): void {
     for (const contribution of this.#contributions) {
       const idx = contribution.index;
-      const context = contribution.context;
       this.#withdraw(
         contribution,
         "foreign provisioning commit failed; home commit withheld — the " +
           "event stays unconsequenced and replays (protocol.md §2b)",
       );
-      if (context.kind === "event-handler") {
-        outcome.dispositions[idx] = { kind: "requeued" };
-        if (context.eventId !== undefined) {
-          outcome.requeuedEventIds.push(context.eventId);
-        }
-      } else {
-        outcome.dispositions[idx] = { kind: "dropped" };
+      outcome.dispositions[idx] = contribution.context.kind === "event-handler"
+        ? { kind: "requeued" }
+        : { kind: "dropped" };
+    }
+    this.#reportRequeuedEvents(outcome, () => true);
+  }
+
+  /**
+   * Report requeued events for the serving loop to retry — SURVIVING
+   * requeues only, matching the model's C8d rollback closure: a
+   * same-wave cascade child of a requeued parent never got a durable
+   * stream entry, so it has nothing to retry — the parent's re-run
+   * re-mints it with a fresh id. Reporting it would make the loop retry
+   * an event that does not exist.
+   */
+  #reportRequeuedEvents(
+    outcome: WaveCommitOutcome,
+    isRequeued: (index: number) => boolean,
+  ): void {
+    for (const contribution of this.#contributions) {
+      const context = contribution.context;
+      if (
+        context.kind !== "event-handler" || context.eventId === undefined ||
+        !isRequeued(contribution.index)
+      ) {
+        continue;
+      }
+      const parentAlsoRequeued = context.parentEventId !== undefined &&
+        this.#contributions.some((c) =>
+          c.context.eventId === context.parentEventId &&
+          isRequeued(c.index)
+        );
+      if (!parentAlsoRequeued) {
+        outcome.requeuedEventIds.push(context.eventId);
       }
     }
   }

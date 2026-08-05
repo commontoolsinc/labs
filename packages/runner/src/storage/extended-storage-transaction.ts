@@ -1923,7 +1923,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // this action tx SEALS into the wave accumulator instead of committing
     // to the store. Everything above (the per-action-run CFC gates, §3c)
     // and below (commit callbacks, post-commit side effects) fires for both
-    // destinations: sealing fires everything commit fires today.
+    // destinations: sealing fires everything commit fires today. Sealed
+    // means accepted into the wave, not durable: a later withdrawal
+    // (superseded, requeued, lease lost) surfaces on the wave's verdict
+    // channel, AFTER the callbacks and side effects here observed "ok" —
+    // the serving loop (stage F) and the effect channel (stage G) must
+    // consume dispositions from the wave outcome, never from this result.
     const promise = this.#sealDestination !== undefined
       ? this.#sealDestination.seal(this)
       : this.tx.commit();

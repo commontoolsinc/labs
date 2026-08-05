@@ -591,6 +591,313 @@ describe("stage D seal-into-wave", () => {
     }
   });
 
+  it("disposes each contribution's writes to a conflicted doc independently: one handler's rebase never absolves a derivation's superseded write", async () => {
+    const lease = liveLease();
+
+    const doc = runtime.getCell<{ a: number; b: number }>(
+      space,
+      "wave-mixed",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    doc.withTx(seedTx).set({ a: 1, b: 1 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    // A handler patches /value/a — disjoint from the rival, so it
+    // legitimately rebases.
+    const handlerTx = runtime.edit();
+    stampWaveRunContext(handlerTx, {
+      actionId: "handle-a",
+      kind: "event-handler",
+      eventId: "e-mixed",
+      acting: { user: "did:key:alice" },
+    });
+    doc.withTx(handlerTx).key("a").set(2);
+    expect((await handlerTx.commit()).error).toBeUndefined();
+
+    // A pure derivation whole-doc-sets the SAME doc: its write must be
+    // judged on its own — superseded, dropped — not ride the handler's
+    // rebase.
+    const derivationTx = runtime.edit();
+    stampWaveRunContext(derivationTx, {
+      actionId: "derive-mixed",
+      kind: "derivation",
+    });
+    doc.withTx(derivationTx).set({ a: 5, b: 5 });
+    expect((await derivationTx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    const link = doc.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: link.id,
+          patches: [{ op: "replace", path: "/value/b", value: 50 }],
+        }],
+      },
+    });
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.committedEventIds).toEqual(["e-mixed"]);
+    expect(outcome.supersededWrites).toBe(1);
+    expect(outcome.dispositions[1]).toEqual({ kind: "dropped" });
+    // The authored b survives and the rebased a lands; the stale
+    // derivation clobbered nothing.
+    const stored = Engine.readState(engine, { id: link.id });
+    expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
+  });
+
+  it("requeues a second handler whose patch overlaps the concurrent write, while the first handler's disjoint patch rebases", async () => {
+    const lease = liveLease();
+
+    const doc = runtime.getCell<{ a: number; b: number }>(
+      space,
+      "wave-two-handlers",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    doc.withTx(seedTx).set({ a: 1, b: 1 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const firstTx = runtime.edit();
+    stampWaveRunContext(firstTx, {
+      actionId: "handle-a",
+      kind: "event-handler",
+      eventId: "e-first",
+      acting: { user: "did:key:alice" },
+    });
+    doc.withTx(firstTx).key("a").set(2);
+    expect((await firstTx.commit()).error).toBeUndefined();
+
+    // The second handler patches /value/b — the SAME field the rival
+    // writes — so its rebase conflicts semantically and it requeues.
+    const secondTx = runtime.edit();
+    stampWaveRunContext(secondTx, {
+      actionId: "handle-b",
+      kind: "event-handler",
+      eventId: "e-second",
+      acting: { user: "did:key:bob" },
+    });
+    doc.withTx(secondTx).key("b").set(7);
+    expect((await secondTx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    const link = doc.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: link.id,
+          patches: [{ op: "replace", path: "/value/b", value: 50 }],
+        }],
+      },
+    });
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.committedEventIds).toEqual(["e-first"]);
+    expect(outcome.requeuedEventIds).toEqual(["e-second"]);
+    // The rival's b stands; the raced consequence did not commit blind.
+    const stored = Engine.readState(engine, { id: link.id });
+    expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
+  });
+
+  it("re-resolves when the sink's in-transaction re-verification names a doc that moved after the head query", async () => {
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const x = runtime.getCell<{ value: number }>(space, "wave-race", undefined);
+    const keep = runtime.getCell<{ value: number }>(
+      space,
+      "wave-race-keep",
+      undefined,
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, { actionId: "derive-race", kind: "derivation" });
+    x.withTx(tx).set({ value: 1 });
+    keep.withTx(tx).set({ value: 2 });
+    expect((await tx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    // The rival lands BETWEEN the accumulator's head query and the store
+    // transaction: injected on the sink's first home commit attempt, so
+    // only the engine's in-transaction re-verification can catch it.
+    const xLink = x.getAsNormalizedFullLink();
+    const inner = newSink();
+    let homeAttempts = 0;
+    const racingSink: WaveCommitSink = {
+      currentHeads: (s, docs) => inner.currentHeads(s, docs),
+      concurrentWritePaths: (s, doc, since) =>
+        inner.concurrentWritePaths(s, doc, since),
+      commitWave: (batch) => {
+        homeAttempts += 1;
+        if (homeAttempts === 1) {
+          Engine.applyCommit(engine, {
+            sessionId: "rival-session",
+            principal: "user:rival",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "set",
+                id: xLink.id,
+                value: { value: { value: 99 } },
+              }],
+            },
+          });
+        }
+        return inner.commitWave(batch);
+      },
+    };
+
+    const outcome = await wave.commitWave(racingSink);
+    await wave.settled();
+
+    // Attempt 1 was rejected with the doc NAMED; the loop folded it in,
+    // dropped the superseded write, and attempt 2 committed the rest.
+    expect(homeAttempts).toBe(2);
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.supersededWrites).toBe(1);
+    expect(outcome.dispositions[0]).toEqual({
+      kind: "partially-dropped",
+      droppedOps: 1,
+    });
+    const stored = Engine.readState(engine, { id: xLink.id });
+    expect(stored?.document).toEqual({ value: { value: 99 } });
+    const keepLink = keep.getAsNormalizedFullLink();
+    expect(
+      Engine.selectDocHead(engine, { id: keepLink.id, scopeKey: "space" }),
+    ).toBe(outcome.seq);
+  });
+
+  it("attaches the explicit scope_key on a scoped write at seal time, and the engine keys the row by it", async () => {
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const scoped = runtime.getCell<{ value: number }>(
+      space,
+      "wave-scoped",
+      undefined,
+      undefined,
+      "user",
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "handle-scoped",
+      kind: "event-handler",
+      eventId: "e-scoped",
+      acting: { user: "did:key:alice", session: "sess-1" },
+    });
+    scoped.withTx(tx).set({ value: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+
+    const expectedKey = Engine.resolveScopeKey("user", {
+      principal: signer.did(),
+      sessionId: "wave-test-session",
+    });
+    const row = engine.database.prepare(
+      `SELECT annotations FROM "commit" WHERE seq = :seq`,
+    ).get({ seq: outcome.seq }) as { annotations: string };
+    const annotations = decodeMemoryBoundary(row.annotations) as Array<
+      Record<string, unknown>
+    >;
+    const scopedAnnotation = annotations.find((a) => a.scopeKey !== undefined);
+    expect(scopedAnnotation?.scopeKey).toBe(expectedKey);
+    expect(scopedAnnotation?.actingUser).toBe("did:key:alice");
+    const link = scoped.getAsNormalizedFullLink();
+    const revision = engine.database.prepare(
+      `SELECT scope_key FROM revision WHERE id = :id`,
+    ).get({ id: link.id }) as { scope_key: string };
+    expect(revision.scope_key).toBe(expectedKey);
+  });
+
+  it("replaces a same-instance action's basis rows with the LAST run's set within one wave", async () => {
+    const lease = liveLease();
+
+    const seedA = runtime.getCell<{ value: number }>(
+      space,
+      "wave-seed-a",
+      undefined,
+    );
+    const seedB = runtime.getCell<{ value: number }>(
+      space,
+      "wave-seed-b",
+      undefined,
+    );
+    const outA = runtime.getCell<{ value: number }>(
+      space,
+      "wave-out-a",
+      undefined,
+    );
+    const outB = runtime.getCell<{ value: number }>(
+      space,
+      "wave-out-b",
+      undefined,
+    );
+    for (const [cell, value] of [[seedA, 1], [seedB, 2]] as const) {
+      const tx = runtime.edit();
+      cell.withTx(tx).set({ value });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    // The same action instance runs twice in one wave (re-dirtied by a
+    // later input); §3b's overwrite unit: the LAST run's rows replace
+    // the first run's as a set — never a union.
+    const run1 = runtime.edit();
+    stampWaveRunContext(run1, { actionId: "recompute", kind: "derivation" });
+    outA.withTx(run1).set({ value: seedA.withTx(run1).get()!.value + 1 });
+    expect((await run1.commit()).error).toBeUndefined();
+    const run2 = runtime.edit();
+    stampWaveRunContext(run2, { actionId: "recompute", kind: "derivation" });
+    outB.withTx(run2).set({ value: seedB.withTx(run2).get()!.value + 1 });
+    expect((await run2.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+
+    const basis = selectSchedulerBasisRows(engine, {
+      branch: "",
+      action: "recompute",
+      actionScopeKey: "space",
+    });
+    const entities = basis.map((row) => row.entity);
+    const seedALink = seedA.getAsNormalizedFullLink();
+    const seedBLink = seedB.getAsNormalizedFullLink();
+    expect(entities).toContain(seedBLink.id);
+    expect(entities).not.toContain(seedALink.id);
+  });
+
   it("isolates a failed seal to its own action (an aborted tx discards only its own writes)", async () => {
     const lease = liveLease();
     const wave = newWave({ lease });
