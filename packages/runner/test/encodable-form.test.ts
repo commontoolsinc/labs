@@ -136,6 +136,67 @@ describe("encodable-form", () => {
         expect(result.accessor).toBe(1);
       });
 
+      it("reads an accessor-backed serializer once", () => {
+        // The member itself can be accessor-backed, and the walk classifies a
+        // value by reading it before invoking it. Reading a second time to
+        // invoke would run the accessor again and serialize whatever the second
+        // read produced -- the same hazard as the element and member cases
+        // above, one level up, on the serializer rather than on the data.
+        let reads = 0;
+        const value = {
+          get toEncodableForm() {
+            reads++;
+            const nth = reads;
+            return () => ({ fromRead: nth });
+          },
+        };
+        expect(flatten(value)).toEqual({ fromRead: 1 });
+        expect(reads).toBe(1);
+      });
+
+      it("reads an accessor-backed serializer on a FUNCTION once", () => {
+        // The function branch classifies and invokes separately too, and a
+        // factory is a function carrying its module's members.
+        let reads = 0;
+        const value = Object.defineProperty(() => {}, "toEncodableForm", {
+          configurable: true,
+          get() {
+            reads++;
+            const nth = reads;
+            return () => ({ fromRead: nth });
+          },
+        });
+        expect(flatten(value)).toEqual({ fromRead: 1 });
+        expect(reads).toBe(1);
+      });
+
+      it("invokes a FUNCTION artifact's serializer once, on the artifact", () => {
+        // The object branch has the shared-artifact case below to pin its
+        // invoke count, and the pre-existing receiver case under
+        // `encodableFormOf()` pins the shared invoke. Neither reaches the
+        // function branch, which reads and invokes on its own.
+        let calls = 0;
+        const value = Object.assign(() => {}, {
+          marker: "factory",
+          toEncodableForm(this: { marker?: string }) {
+            calls++;
+            return { saw: this?.marker, nth: calls };
+          },
+        });
+        expect(flatten(value)).toEqual({ saw: "factory", nth: 1 });
+        expect(calls).toBe(1);
+      });
+
+      it("invokes an object artifact's serializer on the artifact", () => {
+        const value = {
+          marker: "module",
+          toEncodableForm(this: { marker?: string }) {
+            return { saw: this?.marker };
+          },
+        };
+        expect(flatten(value)).toEqual({ saw: "module" });
+      });
+
       it("descends into the serialized form", () => {
         const value = artifact({ inner: artifact({ deep: true }) });
         expect(flatten(value)).toEqual({ inner: { deep: true } });
@@ -211,6 +272,15 @@ describe("encodable-form", () => {
           toEncodableForm: () => "replaced",
         });
         expect(flatten(value)).toBe(value);
+      });
+
+      it("leaves a plain object carrying a non-function `toEncodableForm` alone", () => {
+        // A query-result proxy reports an own property for any key its record
+        // holds, so the name alone does not make a value an artifact. A fabric
+        // record has no function-valued member, and that is what the walk keys
+        // on; without it this value would reach the invoke and throw.
+        const value = { toEncodableForm: 1 };
+        expect(flatten({ value }).value).toBe(value);
       });
 
       it("leaves a plain object carrying an own `toJSON` alone", () => {

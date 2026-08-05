@@ -12,6 +12,10 @@ mapped in [`../README.md`](../README.md).
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — coding standards, design principles,
   and the build and test workflow. Read this first
+- [`code-comment-style.md`](code-comment-style.md) — how a comment is written:
+  what earns one, the rule that a comment describes the system as it stands and
+  the shapes that break it, the Markdown markup comments and error messages
+  share, and what a doc comment carries
 - [`LOCAL_DEV_SERVERS.md`](LOCAL_DEV_SERVERS.md) — starting the local servers,
   and what to do when they misbehave. Use `dev-local` for the shell, not `dev`
 - [`TESTING.md`](TESTING.md) — running the test suites, and how unit and
