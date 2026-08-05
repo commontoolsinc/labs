@@ -154,39 +154,19 @@ link is not asking for the contents.
 place to `{"user": {"$link": true}}` — an annotation on the position, not a
 structural change.
 
-#### Why this spelling
+#### Why the marker sits at the position
 
-Two decisions, and they are separable.
-
-**The name is `$link`, not `$id`.** Cells do have ids at one layer, but
-addresses are many-to-one over cells: a holder of an address cannot tell a
-canonical id from an alias, and nothing in normal use requires them to. What a
-caller needs is a link it can read next, not a claim about canonical identity.
-The rendered output already returns a link object, and the request vocabulary
-should match the response vocabulary. `$id` would also teach something false —
-our documents carry no `id` field, because identity lives on the link.
-
-**The placement is the position, not a field inside the selection set.** The
-link is physically stored in the *parent* document, on the edge — which is
+The link is physically stored in the *parent* document, on the edge — which is
 exactly why a list of marked addresses costs one document read. `$link: true`
-beside `properties` annotates where the data actually is. The alternative,
-borrowed from GraphQL's selection sets, puts a synthetic member inside the
-*child's* selection set, claiming the address is data belonging to a target
-that is never touched. GraphQL carries that off because its objects genuinely
-have `id` fields; ours do not. There is an implementation asymmetry too: the
-rejecting selector takes a positional instruction, so `$link: true` maps onto it
-directly, while a field spelling has to infer "load nothing here" from the
-absence of real members — fetch-suppression by omission rather than by
-statement. And the shorthand suffix would have to convert a leaf into a
-container selecting a synthetic member, rather than annotating it in place.
+beside `properties` annotates the position where the data actually is, and the
+rejecting selector takes a positional instruction, so the marker maps onto it
+directly.
 
-**Two spellings were considered and rejected outright.** Deriving addresses from
-what a shape *omitted* cannot express the motivating case at all: projecting
-`topic.title` puts `topic` on the traversed path, so it renders as a value and
-no address is produced — address or field, never both. And a parallel path list
-alongside the shape is a second addressing language that cannot describe nested
-structure, reintroducing path enumeration precisely where the shape exists to
-avoid it.
+The name says what the caller gets. Addresses are many-to-one over cells: a
+holder of one cannot tell a canonical id from an alias, and nothing in normal
+use requires them to. What comes back is a link to read next, not a claim about
+canonical identity — and the rendered output is a link object, so the request
+vocabulary matches the response.
 
 #### Why not `asCell`
 

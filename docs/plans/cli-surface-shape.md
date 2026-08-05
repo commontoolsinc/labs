@@ -86,13 +86,13 @@ enough that nobody writes one to select two fields. It is modelled on
 worth recording so the next reader does not have to re-derive why it looks the
 way it does.
 
-`llm` keeps both syntaxes under one flag, so one flag is demonstrably livable
-and "the shorthand is not a schema" is not on its own a reason to split. The
-reason to split anyway is that **our shorthand is growing notation that is not
-schema syntax at all** — a suffix marking a path as an address, below — and a
-separate flag gives that room without every addition needing a justification as
-a schema dialect. A reader who sees `--schema title,createdBy.name@` and asks
-"how is that a schema?" is right, and will get righter.
+`llm` keeps both syntaxes under one flag, so one flag is livable on its own
+terms. What makes the split worth it here is that **our shorthand is growing
+notation that is not schema syntax at all** — a suffix marking a path as an
+address, below — and a separate flag gives that room without each addition
+needing a justification as a schema dialect. A reader who sees
+`--schema title,createdBy.name@` and asks "how is that a schema?" is right, and
+will get righter.
 
 **Give the shorthand its own flag and leave `--schema` for full schemas.** That
 resolves the ambiguity rather than papering over it, and it leaves room for the
