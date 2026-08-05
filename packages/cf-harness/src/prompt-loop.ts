@@ -129,6 +129,7 @@ export interface CreateHarnessPromptLoopOptions
   cacheAffinityKey?: string;
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+  compactThreshold?: number;
 }
 
 export interface RunHarnessPromptOptions {
@@ -1655,6 +1656,7 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
+  readonly #compactThreshold?: number;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -1735,6 +1737,7 @@ export class CfHarnessPromptLoop {
     this.#cacheAffinityKey = options.cacheAffinityKey;
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#compactThreshold = options.compactThreshold;
   }
 
   /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
@@ -1970,6 +1973,9 @@ export class CfHarnessPromptLoop {
             : {}),
           ...(this.#reasoningEffort !== undefined
             ? { reasoningEffort: this.#reasoningEffort }
+            : {}),
+          ...(this.#compactThreshold !== undefined
+            ? { compactThreshold: this.#compactThreshold }
             : {}),
           signal: options.signal,
           onAttempt: recordModelAttempt,
@@ -2810,6 +2816,15 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
+      // A positive threshold is calibrated to the parent model's input
+      // budget, so it follows only a child that inherits that model; a
+      // profile-overridden child keeps its own model's derived default (and a
+      // chat-routed override like web_search could not honour it at all).
+      // `0` is model-independent — the off-switch stays run-wide.
+      ...(this.#compactThreshold !== undefined &&
+          (this.#compactThreshold === 0 || childModel.source === "parent")
+        ? { compactThreshold: this.#compactThreshold }
+        : {}),
       ...(this.#promptCacheMode !== undefined
         ? { promptCacheMode: this.#promptCacheMode }
         : {}),

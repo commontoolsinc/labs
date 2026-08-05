@@ -130,6 +130,7 @@ const CLI_STRING_FLAGS = [
   "model",
   "model-provider",
   "reasoning-effort",
+  "compact-threshold",
   "prompt-cache-mode",
   "skills-root",
   "skill",
@@ -197,6 +198,7 @@ export interface CfHarnessCliConfig {
   model?: string;
   modelProvider?: HarnessModelProviderId;
   reasoningEffort?: string;
+  compactThreshold?: number;
   promptCacheMode?: "implicit" | "explicit";
   gatewayConfigurationExplicit: boolean;
   harnessHome: string;
@@ -260,6 +262,7 @@ export interface CfHarnessCliCapabilities {
     modelUsage: true;
     promptCacheControls: true;
     reasoningEffort: true;
+    compactThreshold: true;
   };
 }
 
@@ -398,6 +401,8 @@ Options:
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
   --reasoning-effort <effort>   Provider reasoning effort (for example low, medium, high)
+  --compact-threshold <n>       Token threshold for server-side compaction
+                                (default: 75% of the model input budget; 0 disables)
   --prompt-cache-mode <mode>    implicit | explicit (GPT-5.6 API gateway only)
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
@@ -433,6 +438,7 @@ Environment:
   CF_HARNESS_MODEL              Default value for --model (ignored on --resume-run)
   CF_HARNESS_MODEL_PROVIDER     Default value for --model-provider
   CF_HARNESS_REASONING_EFFORT   Default value for --reasoning-effort
+  CF_HARNESS_COMPACT_THRESHOLD  Default value for --compact-threshold
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
@@ -527,6 +533,7 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     modelUsage: true,
     promptCacheControls: true,
     reasoningEffort: true,
+    compactThreshold: true,
   },
 });
 
@@ -1269,6 +1276,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_PROMPT_CACHE_MODE: Deno.env.get(
         "CF_HARNESS_PROMPT_CACHE_MODE",
       ),
+      CF_HARNESS_COMPACT_THRESHOLD: Deno.env.get(
+        "CF_HARNESS_COMPACT_THRESHOLD",
+      ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
@@ -1315,6 +1325,29 @@ export const parseCfHarnessCliArgs = async (
     reasoningEffort === undefined
   ) {
     throw new Error("--reasoning-effort requires a non-empty value");
+  }
+  // 0 is meaningful (disables compaction), so an explicit 0 must survive.
+  const rawCompactThreshold = typeof args["compact-threshold"] === "string"
+    ? args["compact-threshold"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_COMPACT_THRESHOLD);
+  let compactThreshold: number | undefined;
+  if (rawCompactThreshold !== undefined && rawCompactThreshold !== "") {
+    const parsedThreshold = Number(rawCompactThreshold);
+    if (!Number.isSafeInteger(parsedThreshold) || parsedThreshold < 0) {
+      throw new Error(
+        "--compact-threshold requires a non-negative integer token count",
+      );
+    }
+    compactThreshold = parsedThreshold;
+  } else if (args["compact-threshold"] !== undefined) {
+    // A bare flag lands here, and so does a value the parser read as another
+    // flag: `--compact-threshold -5` leaves the option set with no string.
+    // Name the requirement, and point at the form that survives parsing.
+    throw new Error(
+      "--compact-threshold requires a non-negative integer token count; " +
+        "pass values the parser would read as a flag as " +
+        "--compact-threshold=<n>",
+    );
   }
   const promptCacheMode = optionalStringValue(
     typeof args["prompt-cache-mode"] === "string"
@@ -1449,6 +1482,7 @@ export const parseCfHarnessCliArgs = async (
       : {}),
     ...(modelProvider !== undefined ? { modelProvider } : {}),
     ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(compactThreshold !== undefined ? { compactThreshold } : {}),
     ...(promptCacheMode !== undefined ? { promptCacheMode } : {}),
     gatewayConfigurationExplicit,
     harnessHome,
@@ -2470,6 +2504,9 @@ export const runCfHarnessCli = async (
         ...(parsed.reasoningEffort !== undefined
           ? { reasoningEffort: parsed.reasoningEffort }
           : {}),
+        ...(parsed.compactThreshold !== undefined
+          ? { compactThreshold: parsed.compactThreshold }
+          : {}),
         ...(parsed.promptCacheMode !== undefined
           ? { promptCacheMode: parsed.promptCacheMode }
           : {}),
@@ -2599,6 +2636,9 @@ export const runCfHarnessCli = async (
         ...(modelClient !== undefined ? { modelClient } : {}),
         ...(parsed.reasoningEffort !== undefined
           ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.compactThreshold !== undefined
+          ? { compactThreshold: parsed.compactThreshold }
           : {}),
         ...(parsed.promptCacheMode !== undefined
           ? { promptCacheMode: parsed.promptCacheMode }
