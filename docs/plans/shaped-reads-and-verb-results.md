@@ -71,8 +71,22 @@ asymmetry is why.
 ```
 
 The concise form is sugar for the flat case; the full form is a JSON Schema
-object and is what expresses nested structure. `--filter` narrows array
-membership with a predicate and runs before projection.
+object and is what expresses nested structure.
+
+**`--filter` is the other axis.** A shape names paths; it cannot say "only the
+elements where `status == "open"`". That is `--filter`, a predicate over array
+elements. The two do not collapse into one, because **filtering runs before
+projection** — a predicate can inspect a field the result omits:
+
+```bash
+cf piece get ... topics --filter '.status == "open"' --shape 'title,id'
+```
+
+`status` decides membership and never appears in the output. A single mechanism
+would have to either leak the field or give up deciding on it. One constraint:
+combined with an inline schema rather than the concise form, `--filter` requires
+an array root, since the schema then describes the whole returned value rather
+than each item.
 
 There are two kinds of thing a caller's shape may **not** contain, for two
 different reasons (`FORBIDDEN_PROJECTION_KEYS` and
@@ -184,8 +198,13 @@ sites in `traverse.ts`; wiring it into the projection's path mask is the work.
 ### Collections are all or nothing
 
 A shape controls **depth** (how far in to go) and **width** (which fields to
-take), but not **cardinality** (how many elements of a list). A shape reaching a
-collection takes every element; there is no windowing or per-element limit.
+take). It does not control how many elements of a list come back: a shape
+reaching a collection takes every element that survives filtering.
+
+`--filter` is not an exception to this. It decides which elements are in the
+result at all, before any of the above applies; all-or-nothing governs how
+deeply each *surviving* element expands, not how many survive. What is missing
+is count-based windowing — "the first ten" — which no predicate expresses.
 
 Two things make that acceptable at the sizes this serves. Cost is roughly
 *things expanded × fields each × levels deep*, so cardinality only matters once
@@ -196,9 +215,11 @@ every address before deciding to ask for contents.
 
 The limit of that argument is the address list itself. Once a collection is
 large enough that rendering one address per element is the payload, seeing the
-count costs what the count was meant to protect against. Windowing becomes
-necessary there, and it has to window collections of **addresses**, not only
-expanded ones.
+count costs what the count was meant to protect against. A predicate covers much
+of this — filtering down is usually available, and is the answer whenever
+something discriminates the elements you want. Windowing is for when nothing
+does: ten thousand entries with no predicate that selects among them. It has to
+window collections of **addresses**, not only expanded ones.
 
 ### Pushing the shape into the fetch
 
