@@ -28,7 +28,7 @@ describe("replacing-walk", () => {
         .toEqual({ x: ["A", { y: "B" }], z: "plain" });
     });
 
-    it("does not descend into what a replacement answers", () => {
+    it("does not descend into what a replacement returns", () => {
       const replacements: Replacements = {
         ...AT_NAMES,
         replace: (value) =>
@@ -58,7 +58,7 @@ describe("replacing-walk", () => {
   });
 
   describe("cycles and sharing", () => {
-    it("answers a value it is already inside, with the path it sits at", () => {
+    it("returns the cycle stand-in for a value it is already inside", () => {
       const cyclic: Record<string, unknown> = { a: 1 };
       cyclic.self = cyclic;
       expect(replacingWalk(cyclic, AT_NAMES)).toEqual({
@@ -67,7 +67,7 @@ describe("replacing-walk", () => {
       });
     });
 
-    it("answers a cycle by the path of the value it points back to", () => {
+    it("returns a cycle stand-in naming the path it points back to", () => {
       const inner: Record<string, unknown> = { name: "inner" };
       inner.back = inner;
       expect(replacingWalk({ outer: { inner } }, AT_NAMES)).toEqual({
@@ -95,7 +95,7 @@ describe("replacing-walk", () => {
   });
 
   describe("entering a container", () => {
-    it("descends into what `enter` answers", () => {
+    it("descends into what `enter` returns", () => {
       const replacements: Replacements = {
         ...AT_NAMES,
         enter: (value) => ({ into: { ...value as object, added: "@b" } }),
@@ -104,7 +104,7 @@ describe("replacing-walk", () => {
         .toEqual({ kept: "A", added: "B" });
     });
 
-    it("stops at a container `enter` answers with a value", () => {
+    it("stops at a container `enter` returns a value for", () => {
       const replacements: Replacements = {
         ...AT_NAMES,
         enter: (value) =>
@@ -121,7 +121,7 @@ describe("replacing-walk", () => {
         enter: (value) =>
           Array.isArray(value) ? { value: "flattened" } : { into: value },
       };
-      // The second position must not be answered as a cycle.
+      // The second position must not be treated as a cycle.
       expect(replacingWalk({ x: shared, y: shared }, replacements))
         .toEqual({ x: "flattened", y: "flattened" });
     });

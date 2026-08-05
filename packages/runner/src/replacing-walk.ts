@@ -1,31 +1,31 @@
 import { isFunction, isRecord } from "@commonfabric/utils/types";
 
 /**
- * How a walk answers the values it meets. Each member is a question the walk
- * cannot answer for itself, because the answer is what distinguishes one walk
- * from another: which values stand for something else, what a container becomes
- * on the way in, and what a cycle looks like once found.
+ * What a walk does with the values it meets. Each member is a question the
+ * walk cannot decide for itself, because deciding it is what distinguishes one
+ * walk from another: which values stand for something else, what a container
+ * becomes on the way in, and what a cycle looks like once found.
  */
 export type Replacements = {
   /**
-   * Answers what stands in for `value`, or `undefined` to let the walk carry
-   * on with it. What this answers is never descended into.
+   * Returns what stands in for `value`, or `undefined` to let the walk carry
+   * on with it. What this returns is never descended into.
    *
    * This is where a walk names the type it exists to replace -- a cell by the
    * link that reaches it, say. It may also throw, which is how a walk refuses
-   * a value it has no answer for.
+   * a value it cannot represent.
    */
   replace(value: unknown): { value: unknown } | undefined;
 
   /**
-   * Answers what stands in for a value the walk is already inside, which is to
+   * Returns what stands in for a value the walk is already inside, which is to
    * say a cycle. `path` locates that value from the root of the walk, for a
-   * caller whose answer is a reference to it.
+   * caller that represents it with a reference.
    */
   cycle(value: object, path: readonly string[]): unknown;
 
   /**
-   * Answers the container to descend into, given one the walk is about to
+   * Returns the container to descend into, given one the walk is about to
    * descend into -- or `{ value }` to stop there and stand for it with that
    * instead. A walk that transforms containers on the way in does it here.
    */
@@ -38,14 +38,14 @@ export type Replacements = {
  *
  * The walk tracks the ANCESTORS of the value it is on, so what it recognizes is
  * a cycle. A value reachable twice by different paths is not one: it is shared,
- * and each position gets its own answer. Answering a shared reference as a
+ * and each position is converted on its own. Treating a shared reference as a
  * cycle would rewrite one of its positions into a reference to the other.
  *
  * A container carrying nothing replaced still comes back rebuilt rather than by
  * identity. A caller wanting identity preserved can compare and discard.
  *
  * @param value The value to walk.
- * @param replacements How to answer the values met along the way.
+ * @param replacements What to do with the values met along the way.
  * @param path Where `value` sits, from the root of the walk.
  * @param ancestors The values the walk is currently inside, by their paths.
  */
@@ -63,7 +63,7 @@ export function replacingWalk(
   if (replaced !== undefined) return replaced.value;
 
   // Only a container has members to walk. A function is offered to `enter`
-  // alongside them, since a walk may have an answer for one.
+  // alongside them, since a walk may have a replacement for one.
   if (!(isRecord(value) || isFunction(value))) return value;
 
   const original = value;

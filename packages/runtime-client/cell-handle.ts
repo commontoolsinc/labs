@@ -485,9 +485,9 @@ export class CellHandle<T = unknown> {
    * Recursively converts any CellHandle references in the object into CellRefs.
    *
    * This is the client-side counterpart of the runtime's
-   * `convertCellsToLinks`: the same walk, answering with a `CellRef` where that
-   * one answers with a link, since a `CellHandle` is what stands for a cell on
-   * this side of the connection.
+   * `convertCellsToLinks`: the same walk, returning a `CellRef` where that one
+   * returns a link, since a `CellHandle` is what stands for a cell on this
+   * side of the connection.
    */
   static serialize(
     value: readonly any[] | Record<string, any> | any,
@@ -497,7 +497,7 @@ export class CellHandle<T = unknown> {
 }
 
 /**
- * How `CellHandle.serialize()` answers the values it meets.
+ * What `CellHandle.serialize()` does with the values it meets.
  *
  * Only what the connection can carry is accepted: a `CellHandle` becomes the
  * ref that names it, a container is descended into, and anything else is a

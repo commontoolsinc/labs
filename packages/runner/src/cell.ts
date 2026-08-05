@@ -3311,7 +3311,7 @@ type CellLinkOptions = {
 };
 
 /**
- * Helper for `convertCellsToLinks()`, which answers the link that reaches a
+ * Helper for `convertCellsToLinks()`, which returns the link that reaches a
  * cell, carrying the cell's CFC label view onto it when asked.
  */
 function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
