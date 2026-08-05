@@ -60,15 +60,14 @@ export function encodableFormOf(value: unknown): unknown {
 /**
  * Invokes an already-read `toEncodableForm` on the value it was read from. The
  * one place either reader here calls what it found.
- *
- * `Reflect.apply`, and not the method's own `.call`. A proxy answers each
- * property read however it likes, so a proxied function can report `typeof
- * "function"` while what its `.call` yields is not callable at all.
- * `Reflect.apply` reaches a function's call behavior directly rather than
- * reading a property off it, which holds whether the method in hand arrived
- * plain or through a proxy.
  */
 function encodableFormFrom(method: () => unknown, value: unknown): unknown {
+  // `Reflect.apply`, and not the method's own `.call`. A proxy answers each
+  // property read however it likes, so a proxied function can report `typeof
+  // "function"` while what its `.call` yields is not callable at all.
+  // `Reflect.apply` reaches a function's call behavior directly rather than
+  // reading a property off it, which holds whether the method in hand arrived
+  // plain or through a proxy.
   return Reflect.apply(method, value, []);
 }
 
@@ -318,8 +317,7 @@ function replaceInEntries(
  * it then invokes.
  *
  * Returns the method, so the function that was read is the function that gets
- * invoked. The member may itself be accessor-backed, and the walk holds each of
- * its readers to reading once.
+ * invoked.
  *
  * OWN, not inherited: an inherited member is not the value's own serializer, so
  * a single assignment to `Object.prototype.toEncodableForm` would otherwise
@@ -345,6 +343,11 @@ function ownEncodableFormMethod(
   value: object | ((...args: unknown[]) => unknown),
 ): (() => unknown) | undefined {
   if (!Object.hasOwn(value, "toEncodableForm")) return undefined;
+
+  // Read once and hand back what was read. `Object.hasOwn` runs no accessor, so
+  // this is the only read; the member may itself be accessor-backed, and asking
+  // again at the invoke would run that accessor a second time and serialize
+  // whatever it produced then.
   const method = (value as { toEncodableForm: unknown }).toEncodableForm;
   return typeof method === "function" ? method as () => unknown : undefined;
 }
