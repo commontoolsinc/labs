@@ -61,6 +61,10 @@ export declare const FabricSpecialObject:
 
 /**
  * Abstract base class for values that participate in the fabric protocol.
+ *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no own properties at all. A structural view of
+ * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
  */
 export interface FabricInstance extends FabricSpecialObject {
   shallowClone(frozen: boolean): FabricInstance;
@@ -231,9 +235,9 @@ export type FabricErrorState = {
  * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
  * rather than a leaf.
  *
- * Like every `FabricInstance` it is mutable until frozen: the slots are plain
- * writable properties, and `setExtra()` / `deleteExtra()` are gated on the
- * frozen state.
+ * Like every `FabricInstance` it is mutable until frozen, and every mutator --
+ * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
+ * the instance is frozen.
  */
 export interface FabricError extends FabricInstance {
   type: string;
