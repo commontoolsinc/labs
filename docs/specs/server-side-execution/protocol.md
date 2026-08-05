@@ -21,11 +21,30 @@ Every commit carries a `class` in its metadata. Three values, closed set:
 | --- | --- | --- |
 | `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits — and, until Phase 3 lands, client handler writes: the plan's stated interim posture) or event appends (events.md §1) |
 | `derived` | the space's SpaceServer (lease holder) | derivation results, watermark advance, `consequenceOf` |
-| `system` | memory server itself | space bootstrap, authorization changes — pre-existing, unchanged |
+| `system` | memory server itself — its own direct writes, outside any session and outside the wave (PRODUCER-defined; note below) | e.g. space bootstrap, authorization changes, blob metadata — EXEMPLARY, not a closed list (RULED 2026-08-05) |
 
 FORBIDDEN: a fourth class; per-class subtypes that alter admission;
 clients producing `derived` (there must be no client code path that can
 even construct one).
+
+**The `system` class is PRODUCER-defined, its contents exemplary
+(RULED 2026-08-05).** The stamp rides the memory server's generic
+direct-write path (`Server.writeDocument`,
+`packages/memory/v2/server.ts` — envelope `server:<uuid>`): `system`
+means "the memory server's own direct write, outside any session and
+outside the wave", and the row's contents column is examples, not a
+closed set — beyond bootstrap and authorization changes, the one
+production caller today is the toolshed blob-upload route writing
+`cid:<hash>` metadata docs
+(`packages/toolshed/routes/blobs/blobs.index.ts`). Two consequences,
+stated so neither is inferred: (i) because the stamp rides the PATH,
+any NEW direct-write caller is a spec decision — this list is
+extended deliberately, never silently by pointing more code at the
+path. (ii) `system` commits carry no user attribution in the commit
+ledger — the envelope is the server's own session — which is
+deliberately accepted; per-user attribution for blob writes is a
+named future hardening, out of v2 scope, in the same family as §2's
+grant-scoped foreign reads.
 
 **Both arms carry a class; only the ON arm enforces one.** `class`
 metadata is WRITTEN in every arm from stage A onward and ENFORCED
@@ -212,6 +231,19 @@ reasoning, no read-set
 validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
+
+**Derived-envelope defense-in-depth (RULED 2026-08-05; the engine
+check lands with Phase 1 stage F).** At admission, a `derived`
+commit's producing SESSION must be the lease holder's own service
+session: a derived commit arriving under a user session — or any
+session other than the declared holder's — is REFUSED. This mirrors
+the executable model's `admitDerived`, which compares the envelope
+principal to `holderId`, and closes the "single honest internal
+caller" gap before stage F multiplies the callers of the co-hosted
+engine plane. Implementation is explicitly stage F work and the
+plan's stage F bullet carries the task: the operand shape — how the
+engine-side session identity maps to the holder identity — is
+stage F design, not stage D's.
 
 **`firedAt` is SERVER-STAMPED, never client-minted (T1 + S6).** It
 carries BOTH the acting user and the session —

@@ -1225,18 +1225,24 @@ ADD COLUMN holder TEXT;
 // stores and fresh stores agree on column order (class, holder, annotations,
 // consequence_of).
 const migrateCommitWaveCarriage = (database: Database): void => {
-  if (hasColumn(database, "commit", "annotations")) {
-    return;
-  }
-
-  database.exec(`
+  // One guard per column, matching the prior migrations' shape: ALTERs
+  // are not transactional as a pair, and migrations run on every store
+  // open — a single first-column guard would turn a crash between the
+  // two ALTERs into a store with `annotations` present and
+  // `consequence_of` missing FOREVER (the guard forever satisfied, the
+  // second ALTER forever skipped, every commit INSERT failing).
+  if (!hasColumn(database, "commit", "annotations")) {
+    database.exec(`
 ALTER TABLE "commit"
 ADD COLUMN annotations JSON;
 `);
-  database.exec(`
+  }
+  if (!hasColumn(database, "commit", "consequence_of")) {
+    database.exec(`
 ALTER TABLE "commit"
 ADD COLUMN consequence_of JSON;
 `);
+  }
 };
 
 // Server-execution v2 Phase 1 stage C.2: the observation-payload tables are
@@ -1647,7 +1653,14 @@ export const applyWaveCommit = (
         const [opIndex, operation] of applyOptions.commit.operations.entries()
       ) {
         if (operation.op === "sqlite") continue;
-        const scopeKey = scopeKeyByOp.get(opIndex) ??
+        // A space-declared op never takes an annotated key: the apply
+        // below refuses such an annotation as a ProtocolError, and keying
+        // this pre-check by the DECLARED scope keeps that refusal — not a
+        // phantom, resolvable-looking conflict — the error the wave sees.
+        const annotated = normalizeScope(operation.scope) === "space"
+          ? undefined
+          : scopeKeyByOp.get(opIndex);
+        const scopeKey = annotated ??
           resolveScopeKey(operation.scope, {
             principal: applyOptions.principal,
             sessionId: applyOptions.sessionId,
@@ -1803,8 +1816,24 @@ const applyCommitTransaction = (
     for (const [opIndex, operation] of commit.operations.entries()) {
       if (operation.op === "sqlite") continue;
       const declared = normalizeScope(operation.scope);
-      if (declared === "space") continue;
       const annotated = scopeKeyByOpIndex.get(opIndex);
+      if (declared === "space") {
+        // protocol.md §1's ADDRESSING is one per SCOPED write, and §7's
+        // closed list sanctions nothing else: an annotation aimed at a
+        // space-scoped op would otherwise be silently APPLIED as the
+        // row's key (writeOperation's scopeKeyOverride below), re-keying
+        // a space-visible doc into a scoped instance nothing declared.
+        // Fail closed, like the missing-annotation branch.
+        if (annotated !== undefined) {
+          throw new ProtocolError(
+            `derived-class commit rejected: scope_key annotation ` +
+              `"${annotated}" targets a space-scoped write ` +
+              `(op ${opIndex}); addressing is one per SCOPED write ` +
+              "(protocol.md §1, §7)",
+          );
+        }
+        continue;
+      }
       if (annotated === undefined) {
         throw new ProtocolError(
           `derived-class commit rejected: scoped write (op ${opIndex}, ` +
