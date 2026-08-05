@@ -246,10 +246,35 @@ export interface CellGetRequest extends BaseRequest {
   includeRef?: boolean;
 }
 
+/**
+ * A cell's value as this connection carries it: the data a cell holds, with a
+ * `CellRef` wherever a cell sits.
+ *
+ * Distinct from `JSONValue` in the two ways the traffic actually differs: a
+ * present `undefined` is a value a cell can hold, and the containers are
+ * readonly.
+ *
+ * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain -- a
+ * `FabricSpecialObject` has no representation here, though the transport is
+ * `postMessage` rather than JSON, so that is a gap rather than a limit.
+ * `JsonEncodingContext` (`@commonfabric/data-model/codec-json`) is the
+ * mechanism, already used for blob-upload bodies in
+ * `backends/runtime-processor.ts`.
+ */
+export type WireCellValue =
+  | null
+  | undefined
+  | boolean
+  | number
+  | string
+  | readonly WireCellValue[]
+  | { readonly [key: string]: WireCellValue }
+  | CellRef;
+
 export interface CellSetRequest extends BaseRequest {
   type: RequestType.CellSet;
   cell: CellRef;
-  value: JSONValue;
+  value: WireCellValue;
 }
 
 // A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
@@ -259,13 +284,13 @@ export interface CellSetRequest extends BaseRequest {
 export interface CellPushRequest extends BaseRequest {
   type: RequestType.CellPush;
   cell: CellRef;
-  value: JSONValue;
+  value: WireCellValue;
 }
 
 export interface CellSendRequest extends BaseRequest {
   type: RequestType.CellSend;
   cell: CellRef;
-  event: JSONValue;
+  event: WireCellValue;
 }
 
 export interface CellSubscribeRequest extends BaseRequest {
